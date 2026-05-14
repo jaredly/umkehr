@@ -249,8 +249,9 @@ export const createHistoryContext = <T, An, Tag extends string = 'type'>(
         function useStateContext() {
             const ctx = useContext(Ctx);
             if (ctx === null) {
-                console.log('got a got');
-                throw new Error(`Used a context but its not there`);
+                throw new Error(
+                    `createHistoryContext hook must be used within its matching Provider.`,
+                );
             }
 
             return useMemo(() => {
@@ -488,8 +489,9 @@ export const createStateContext = <T, Tag extends string = 'type'>(
         function useStateContext() {
             const ctx = useContext(Ctx);
             if (ctx === null) {
-                console.log('got a got');
-                throw new Error(`Used a context but its not there`);
+                throw new Error(
+                    `createStateContext hook must be used within its matching Provider.`,
+                );
             }
 
             return useMemo(() => {

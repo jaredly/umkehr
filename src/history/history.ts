@@ -1,27 +1,3 @@
-/*
-
-I want a way to keep track of history changes.
-
-IF you need to make a non-backwards-compatible change.
-make a clean break with history, idk. or figure out how to transmute everything yourself.
-or like come up with some way of representing a 'jsondiff migration'.
-but I won't concern myself with that right now.
-
-We need:
-- root
-- nodes have children
-- an "active tip"
-- nodes can have commentary (title, thumbnail, etc.)
-
-
-ok but like if I did want to do 'merge commits'. What would that even look like?
-yeah I think it would be something like "select this group of changes, show me a summary,
-let me modify anything or resolve conflicts, and then commit that as a new separate change onto the current stack".
-So we wouldn't actually do a merge. More like a cherry-pick.
-And you could have an annotation that's like "where did we get this from" if you wanted.
-
-*/
-
 import {splitPathToDestination} from './findHistoryJump';
 import type {Patch, DraftPatch} from '../types';
 import {resolveAndApply} from '../make';
@@ -83,8 +59,7 @@ function redo<T, An>(state: History<T, An>, equal: EqualFn) {
     if (!state.undoTrail.length) return state;
     const next = state.undoTrail[0];
     if (!next || !state.nodes[next]) {
-        console.log(state);
-        throw new Error(`weird state ${next}`);
+        throw new Error(`Cannot redo: undo trail references missing history node "${next}".`);
     }
     return {
         ...state,
@@ -95,7 +70,7 @@ function redo<T, An>(state: History<T, An>, equal: EqualFn) {
 }
 
 export const jump = <T, An>(state: History<T, An>, to: string, equal: EqualFn): History<T, An> => {
-    if (!state.nodes[to]) throw new Error(`invalid history node id ${to}`);
+    if (!state.nodes[to]) throw new Error(`Cannot jump: unknown history node "${to}".`);
     const split = splitPathToDestination(state, to);
     let current = split.up
         .flatMap((id) => state.nodes[id].changes.map(ops.invert).toReversed())

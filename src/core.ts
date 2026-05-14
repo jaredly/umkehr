@@ -3,7 +3,6 @@ export {
     pathToString,
     ApplyTiming,
     AddOp,
-    CopyOp,
     PatchBuilderInternal,
     DraftPatch,
     MoveOp,

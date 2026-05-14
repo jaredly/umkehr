@@ -90,7 +90,7 @@ export function createPatchDispatcher<T, Extra, Tag extends string = 'type', R =
                 }
 
                 if (prop === 'valueOf') {
-                    // weird react thing
+                    // React may coerce updater functions while rendering controlled inputs.
                     return null;
                 }
 

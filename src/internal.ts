@@ -2,34 +2,33 @@
 
 import {type PathSegment, pathToString} from './types';
 
+const describePath = (path: PathSegment[]) => pathToString(path) || '<root>';
+
 export function _get(base: any, at: PathSegment[]) {
-    const obase = base;
     for (let i = 0; i < at.length; i++) {
         const key = at[i];
         if (!base) {
-            console.log(obase);
-
             throw new Error(
-                `missing base\n${pathToString(at.slice(0, i))}\n${pathToString(at.slice(i))}`,
+                `Cannot read path "${describePath(at)}": missing value at "${describePath(at.slice(0, i))}".`,
             );
         }
         if (key.type === 'tag') {
             if (!(key.key in base)) {
-                throw new Error(`Not a tagged union with tag "${key.key}"`);
+                throw new Error(`Expected tagged union with tag "${key.key}" at "${describePath(at.slice(0, i))}".`);
             }
             if (base[key.key] !== key.value) {
                 throw new Error(
-                    `Tagged union has wrong tag "${key.key}"="${base[key.key]}", expected "${key.value}"`,
+                    `Tagged union at "${describePath(at.slice(0, i))}" has tag "${key.key}"="${base[key.key]}", expected "${key.value}".`,
                 );
             }
             continue;
         }
         if (Array.isArray(base)) {
             if (typeof key.key !== 'number') {
-                throw new Error(`invalid key for array: ${key.key}`);
+                throw new Error(`Expected numeric array index at "${describePath(at.slice(0, i))}", got "${key.key}".`);
             }
         } else if (typeof base !== 'object') {
-            throw new Error(`base is not object`);
+            throw new Error(`Cannot read key "${key.key}" at "${describePath(at.slice(0, i))}": value is not an object.`);
         }
         base = base[key.key];
     }
@@ -46,7 +45,7 @@ function _getCloned(root: any, at: PathSegment[]) {
             root = next;
         } else {
             if (parentKey.type !== 'key')
-                throw new Error(`invalid parent key type ${parentKey.type}`);
+                throw new Error(`Cannot clone path with final segment type "${parentKey.type}".`);
             parent[parentKey.key] = next;
         }
         base = next;
@@ -55,25 +54,27 @@ function _getCloned(root: any, at: PathSegment[]) {
     for (let i = 0; i < at.length; i++) {
         const key = at[i];
         if (!base) {
-            throw new Error(`missing base ${at.join(',')}`);
+            throw new Error(
+                `Cannot clone path "${describePath(at)}": missing value at "${describePath(at.slice(0, i))}".`,
+            );
         }
         if (key.type === 'tag') {
             if (!(key.key in base)) {
-                throw new Error(`Not a tagged union with tag "${key.key}"`);
+                throw new Error(`Expected tagged union with tag "${key.key}" at "${describePath(at.slice(0, i))}".`);
             }
             if (base[key.key] !== key.value) {
                 throw new Error(
-                    `Tagged union has wrong tag "${key.key}"="${base[key.key]}", expected "${key.value}"`,
+                    `Tagged union at "${describePath(at.slice(0, i))}" has tag "${key.key}"="${base[key.key]}", expected "${key.value}".`,
                 );
             }
             continue;
         }
         if (Array.isArray(base)) {
             if (typeof key.key !== 'number') {
-                throw new Error(`invalid key for array: ${key.key}`);
+                throw new Error(`Expected numeric array index at "${describePath(at.slice(0, i))}", got "${key.key}".`);
             }
         } else if (typeof base !== 'object') {
-            throw new Error(`base is not object`);
+            throw new Error(`Cannot clone key "${key.key}" at "${describePath(at.slice(0, i))}": value is not an object.`);
         }
         parent = base;
         parentKey = key;
@@ -88,7 +89,7 @@ export type EqualFn = (a: any, b: any) => boolean;
 export function _replace(base: any, at: PathSegment[], previous: any, value: any, equal: EqualFn) {
     if (!at.length) {
         if (!equal(previous, base)) {
-            throw new Error(`cannot apply, previous is different`);
+            throw new Error(`Cannot replace "<root>": previous value does not match current value.`);
         }
         return value;
     }
@@ -99,17 +100,18 @@ export function _replace(base: any, at: PathSegment[], previous: any, value: any
     let root: any;
     ({root, base} = _getCloned(base, at.slice(0, -1)));
     const key = at[at.length - 1];
-    if (key.type !== 'key') throw new Error(`weird final key type while replacing: ${key.type}`);
+    if (key.type !== 'key') {
+        throw new Error(`Cannot replace "${describePath(at)}": final path segment must be a key.`);
+    }
     if (Array.isArray(base)) {
         if (typeof key.key !== 'number') {
-            throw new Error(`invalid key for array: ${key.key}`);
+            throw new Error(`Expected numeric array index at "${describePath(at.slice(0, -1))}", got "${key.key}".`);
         }
     } else if (typeof base !== 'object') {
-        throw new Error(`base is not object`);
+        throw new Error(`Cannot replace "${describePath(at)}": parent value is not an object.`);
     }
     if (!equal(previous, base[key.key])) {
-        console.log(previous, base[key.key], key, base);
-        throw new Error(`cannot apply, previous is different from expected`);
+        throw new Error(`Cannot replace "${describePath(at)}": previous value does not match current value.`);
     }
     base[key.key] = value;
     return root;
@@ -119,16 +121,18 @@ export function _add(base: any, at: PathSegment[], value: any) {
     let root: any;
     ({root, base} = _getCloned(base, at.slice(0, -1)));
     const key = at[at.length - 1];
-    if (key.type !== 'key') throw new Error(`weird final key type while adding ${key.type}`);
+    if (key.type !== 'key') {
+        throw new Error(`Cannot add "${describePath(at)}": final path segment must be a key.`);
+    }
     if (Array.isArray(base)) {
         if (typeof key.key !== 'number') {
-            throw new Error(`invalid key for array: ${key.key}`);
+            throw new Error(`Expected numeric array index at "${describePath(at.slice(0, -1))}", got "${key.key}".`);
         }
         base.splice(key.key, 0, value);
     } else if (typeof base !== 'object') {
-        throw new Error(`base is not object`);
+        throw new Error(`Cannot add "${describePath(at)}": parent value is not an object.`);
     } else if (key.key in base && base[key.key] !== undefined) {
-        throw new Error(`key "${key.key}" already exists, cannot add, must replace`);
+        throw new Error(`Cannot add "${describePath(at)}": key already exists. Use replace instead.`);
     } else {
         base[key.key] = value;
     }
@@ -139,20 +143,21 @@ export function _remove(base: any, at: PathSegment[], value: any, equal: EqualFn
     let root: any;
     ({root, base} = _getCloned(base, at.slice(0, -1)));
     const key = at[at.length - 1];
-    if (key.type !== 'key') throw new Error(`weird final key type while removing ${key.type}`);
+    if (key.type !== 'key') {
+        throw new Error(`Cannot remove "${describePath(at)}": final path segment must be a key.`);
+    }
     if (!equal(value, base[key.key])) {
-        console.log(value, base[key.key]);
-        throw new Error(`remove, value not equal what's there`);
+        throw new Error(`Cannot remove "${describePath(at)}": expected value does not match current value.`);
     }
     if (Array.isArray(base)) {
         if (typeof key.key !== 'number') {
-            throw new Error(`invalid key for array: ${key.key}`);
+            throw new Error(`Expected numeric array index at "${describePath(at.slice(0, -1))}", got "${key.key}".`);
         }
         base.splice(key.key, 1);
     } else if (typeof base !== 'object') {
-        throw new Error(`base is not object`);
+        throw new Error(`Cannot remove "${describePath(at)}": parent value is not an object.`);
     } else if (!(key.key in base)) {
-        throw new Error(`key "${key}" doesn't exist in base`);
+        throw new Error(`Cannot remove "${describePath(at)}": key does not exist.`);
     } else {
         delete base[key.key];
     }

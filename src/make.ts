@@ -1,7 +1,9 @@
 import {_get, type EqualFn} from './internal';
 import {createPatchBuilder} from './helper';
-import type {Patch, DraftPatch} from './types';
+import {pathToString, type Patch, type DraftPatch} from './types';
 import {ops, rebase} from './ops';
+
+const describePath = (path: DraftPatch<unknown>['path']) => pathToString(path) || '<root>';
 
 export function realizeDraftPatch<T, V, Tag extends PropertyKey, Extra>(
     base: T,
@@ -11,7 +13,7 @@ export function realizeDraftPatch<T, V, Tag extends PropertyKey, Extra>(
         case 'add': {
             const prev = _get(base, draft.path);
             if (prev !== undefined) {
-                throw new Error(`cant add whats already there`);
+                throw new Error(`Cannot add "${describePath(draft.path)}": value already exists.`);
             }
             return draft;
         }
@@ -27,14 +29,14 @@ export function realizeDraftPatch<T, V, Tag extends PropertyKey, Extra>(
         case 'remove': {
             const prev = _get(base, draft.path);
             if (prev === undefined) {
-                throw new Error('nothing to remove');
+                throw new Error(`Cannot remove "${describePath(draft.path)}": value does not exist.`);
             }
             return {...draft, value: _get(base, draft.path)};
         }
         case 'push': {
             const arr = _get(base, draft.path);
             if (!Array.isArray(arr)) {
-                throw new Error('not an array');
+                throw new Error(`Cannot push to "${describePath(draft.path)}": value is not an array.`);
             }
             return {
                 op: 'add',
@@ -45,10 +47,12 @@ export function realizeDraftPatch<T, V, Tag extends PropertyKey, Extra>(
         case 'reorder': {
             const arr = _get(base, draft.path);
             if (!Array.isArray(arr)) {
-                throw new Error('not an array');
+                throw new Error(`Cannot reorder "${describePath(draft.path)}": value is not an array.`);
             }
             if (draft.indices.length !== arr.length) {
-                throw new Error('reorder indices must match array length');
+                throw new Error(
+                    `Cannot reorder "${describePath(draft.path)}": indices length must match array length.`,
+                );
             }
             const seen = new Set(draft.indices);
             if (
@@ -57,12 +61,14 @@ export function realizeDraftPatch<T, V, Tag extends PropertyKey, Extra>(
                     (index) => !Number.isInteger(index) || index < 0 || index >= arr.length,
                 )
             ) {
-                throw new Error('reorder indices must be a permutation of array indices');
+                throw new Error(
+                    `Cannot reorder "${describePath(draft.path)}": indices must be a permutation of array indices.`,
+                );
             }
             return draft;
         }
         case 'nested': {
-            throw new Error(`Nested needs to be resolved before calling realizeDraftPatch`);
+            throw new Error(`Cannot realize nested patch directly. Use resolveAndApply instead.`);
         }
     }
 }
@@ -93,15 +99,9 @@ export function resolveAndApply<T, Extra, Tag extends string = 'type'>(
             current = next.current;
             return next.changes;
         }
-        try {
-            const ready = realizeDraftPatch(current, op);
-            current = ops.apply(current, ready, equal);
-            return ready;
-        } catch (err) {
-            console.log('Tried to realizeDraftPatch, but failed');
-            console.log(current, op);
-            throw err;
-        }
+        const ready = realizeDraftPatch(current, op);
+        current = ops.apply(current, ready, equal);
+        return ready;
     });
     return {current, changes};
 }

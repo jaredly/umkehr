@@ -1,7 +1,5 @@
 import type {History} from './history';
 
-// AI generated
-
 type SplitPath = {
     ancestor: string; // shared ancestor (LCA)
     up: string[]; // parent ids to move upward toward ancestor (one per step)
@@ -17,7 +15,7 @@ export function splitPathToDestination<T, An>(
 
     const getNode = (id: string) => {
         const n = nodes[id];
-        if (!n) throw new Error(`Unknown node id: ${id}`);
+        if (!n) throw new Error(`Unknown history node "${id}".`);
         return n;
     };
 
@@ -56,7 +54,7 @@ export function splitPathToDestination<T, An>(
     }
 
     if (!lca) {
-        throw new Error(`No shared ancestor found (history might be disconnected).`);
+        throw new Error(`Cannot find a shared history ancestor. The history graph may be disconnected.`);
     }
 
     // 3) Build "up" from tip to lca:
@@ -68,7 +66,7 @@ export function splitPathToDestination<T, An>(
         for (let i = 0; i < stepsUp; i++) {
             up.push(cur);
             const p = parentOf(cur);
-            if (!p) throw new Error(`Expected parent while walking up from ${cur}`);
+            if (!p) throw new Error(`Missing parent while walking up from history node "${cur}".`);
             cur = p;
         }
     }

@@ -61,7 +61,7 @@ function fill<T>(draft: DraftPatch<T, 'type', null>, value: any): Patch<T> {
             } as Patch<T>;
         }
         case 'nested': {
-            throw new Error('cant fill a nested sry');
+            throw new Error('Test helper does not support nested patches.');
         }
     }
 }
