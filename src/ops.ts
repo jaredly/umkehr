@@ -1,5 +1,14 @@
-import {_add, _get, _remove, _replace, EqualFn} from './internal';
-import {AddOp, Patch, MoveOp, Path, DraftPatch, RemoveOp, ReplaceOp, ReorderOp} from './types';
+import { _add, _get, _remove, _replace, EqualFn } from "./internal";
+import {
+    AddOp,
+    Patch,
+    MoveOp,
+    Path,
+    DraftPatch,
+    RemoveOp,
+    ReplaceOp,
+    ReorderOp,
+} from "./types";
 
 function add<T, V>(base: T, op: AddOp<V>) {
     return _add(base, op.path, op.value);
@@ -18,17 +27,19 @@ function move<T>(base: T, op: MoveOp<T>, equal: EqualFn) {
 function reorder<T, V>(base: T, op: ReorderOp<V>, equal: EqualFn) {
     const value = _get(base, op.path);
     if (!Array.isArray(value)) {
-        throw new Error('not an array');
+        throw new Error("not an array");
     }
     if (op.indices.length !== value.length) {
-        throw new Error('reorder indices must match array length');
+        throw new Error("reorder indices must match array length");
     }
     const seen = new Set(op.indices);
     if (
         seen.size !== value.length ||
-        op.indices.some((index) => !Number.isInteger(index) || index < 0 || index >= value.length)
+        op.indices.some(
+            (index) => !Number.isInteger(index) || index < 0 || index >= value.length,
+        )
     ) {
-        throw new Error('reorder indices must be a permutation of array indices');
+        throw new Error("reorder indices must be a permutation of array indices");
     }
     return _replace(
         base,
@@ -44,61 +55,64 @@ export function rebase<T, A extends PropertyKey, B>(
     path: Path,
 ): DraftPatch<T, A, B> {
     switch (op.op) {
-        case 'move':
+        case "move":
             return {
                 ...op,
                 path: [...path, ...op.path],
                 from: [...path, ...op.from],
             };
-        case 'add':
-        case 'push':
-        case 'reorder':
-        case 'replace':
-        case 'remove':
-            return {...op, path: [...path, ...op.path]};
-        case 'nested':
-        case 'copy':
-            throw new Error('not supporting these');
+        case "add":
+        case "push":
+        case "reorder":
+        case "replace":
+        case "remove":
+            return { ...op, path: [...path, ...op.path] };
+        case "nested":
+            throw new Error(
+                "A nested patch's 'make()' function returned another nested patch, which is unsupported.",
+            );
+        case "copy":
+            throw new Error("not supporting these");
     }
 }
 
 function invert<T>(op: Patch<T>): Patch<T> {
     switch (op.op) {
-        case 'add':
-            return {op: 'remove', path: op.path, value: op.value} as Patch<T>;
-        case 'replace':
-            return {...op, value: op.previous, previous: op.value};
-        case 'remove':
-            return {op: 'add', path: op.path, value: op.value} as Patch<T>;
-        case 'move':
-            return {op: 'move', from: op.path, path: op.from} as Patch<T>;
-        case 'reorder': {
+        case "add":
+            return { op: "remove", path: op.path, value: op.value } as Patch<T>;
+        case "replace":
+            return { ...op, value: op.previous, previous: op.value };
+        case "remove":
+            return { op: "add", path: op.path, value: op.value } as Patch<T>;
+        case "move":
+            return { op: "move", from: op.path, path: op.from } as Patch<T>;
+        case "reorder": {
             const inverse: number[] = [];
             op.indices.forEach((originalIndex, newIndex) => {
                 inverse[originalIndex] = newIndex;
             });
-            return {...op, indices: inverse};
+            return { ...op, indices: inverse };
         }
-        case 'copy':
-            throw new Error('not supporting these');
+        case "copy":
+            throw new Error("not supporting these");
     }
 }
 
 function apply<T>(base: T, op: Patch<T>, equal: EqualFn) {
     switch (op.op) {
-        case 'add':
+        case "add":
             return add(base, op);
-        case 'replace':
+        case "replace":
             return replace(base, op, equal);
-        case 'remove':
+        case "remove":
             return remove(base, op, equal);
-        case 'move':
+        case "move":
             return move(base, op, equal);
-        case 'reorder':
+        case "reorder":
             return reorder(base, op, equal);
-        case 'copy':
-            throw new Error('not supporting these either');
+        case "copy":
+            throw new Error("not supporting these either");
     }
 }
 
-export const ops = {apply, invert};
+export const ops = { apply, invert };
