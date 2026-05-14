@@ -42,7 +42,7 @@ should use `resolveAndApply`, `createStateContext`, or `createHistoryContext`, w
 [
     {type: 'key', key: 'items'},
     {type: 'key', key: 0},
-]
+];
 ```
 
 The runtime does not use JSON Pointer strings like `"/items/0"`.
