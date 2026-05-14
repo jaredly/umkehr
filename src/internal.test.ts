@@ -1,4 +1,4 @@
-import {describe, it, expect} from 'bun:test';
+import {describe, it, expect} from 'vitest';
 import {_replace} from './internal';
 import equal from 'fast-deep-equal';
 

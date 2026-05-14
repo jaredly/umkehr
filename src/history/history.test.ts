@@ -1,4 +1,4 @@
-import {describe, it, expect} from 'bun:test';
+import {describe, it, expect} from 'vitest';
 import {dispatch, jump, type History} from './history';
 import {createPatchBuilder} from '../helper';
 import type {Patch, DraftPatch} from '../types';

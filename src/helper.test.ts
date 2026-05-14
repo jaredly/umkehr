@@ -1,4 +1,4 @@
-import {describe, expect, it} from 'bun:test';
+import {describe, expect, it} from 'vitest';
 import {createPatchBuilder, getExtra, getPath} from './helper';
 import {resolveAndApply} from './make';
 import {ops} from './ops';
