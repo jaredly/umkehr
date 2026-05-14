@@ -151,6 +151,47 @@ describe('undo/redo', () => {
         expect(redoSecond.undoTrail).toEqual([]);
         expect(redoSecond.current).toEqual(afterSecond.current);
     });
+
+    it('clears the redo trail when dispatching a new change after undo', () => {
+        const genId = idGenerator();
+        let history = makeHistory(initialArticle);
+
+        history = dispatch(history, [builder.title('Second')], null, 'type', cheapEqual, genId);
+        history = dispatch(history, [builder.title('Third')], null, 'type', cheapEqual, genId);
+
+        const undone = dispatch(history, {op: 'undo'}, null, 'type', cheapEqual);
+        expect(undone.tip).toBe('node-1');
+        expect(undone.undoTrail).toEqual(['node-2']);
+
+        const branched = dispatch(
+            undone,
+            [builder.meta.flags.archived(true)],
+            null,
+            'type',
+            cheapEqual,
+            genId,
+        );
+
+        expect(branched.tip).toBe('node-3');
+        expect(branched.undoTrail).toEqual([]);
+        expect(branched.nodes['node-1'].children).toEqual(['node-2', 'node-3']);
+        expect(branched.current.title).toBe('Second');
+        expect(branched.current.meta.flags.archived).toBe(true);
+
+        const redo = dispatch(branched, {op: 'redo'}, null, 'type', cheapEqual);
+        expect(redo).toBe(branched);
+    });
+
+    it('throws when the redo trail references a missing node', () => {
+        const history: History<Article, string> = {
+            ...makeHistory(initialArticle),
+            undoTrail: ['missing-node'],
+        };
+
+        expect(() => dispatch(history, {op: 'redo'}, null, 'type', cheapEqual)).toThrow(
+            'Cannot redo: undo trail references missing history node "missing-node".',
+        );
+    });
 });
 
 describe('jump', () => {
@@ -201,5 +242,31 @@ describe('jump', () => {
         expect(history.tip).toBe(mainlineTip);
         expect(history.undoTrail).toEqual([]);
         expect(history.current).toEqual(mainlineState);
+    });
+
+    it('throws when jumping to an unknown node', () => {
+        const history = makeHistory(initialArticle);
+
+        expect(() => jump(history, 'missing-node', cheapEqual)).toThrow(
+            'Cannot jump: unknown history node "missing-node".',
+        );
+    });
+
+    it('dispatches jump commands and clears redo history', () => {
+        const genId = idGenerator();
+        let history = makeHistory(initialArticle);
+
+        history = dispatch(history, [builder.title('Second')], null, 'type', cheapEqual, genId);
+        const firstTip = history.tip;
+        history = dispatch(history, [builder.title('Third')], null, 'type', cheapEqual, genId);
+
+        const backOne = dispatch(history, {op: 'undo'}, null, 'type', cheapEqual);
+        expect(backOne.undoTrail).toEqual(['node-2']);
+
+        const jumped = dispatch(backOne, {op: 'jump', id: firstTip}, null, 'type', cheapEqual);
+
+        expect(jumped.tip).toBe(firstTip);
+        expect(jumped.undoTrail).toEqual([]);
+        expect(jumped.current.title).toBe('Second');
     });
 });

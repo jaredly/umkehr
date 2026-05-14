@@ -137,4 +137,51 @@ describe('helper2 variant()', () => {
             },
         ]);
     });
+
+    it('rejects variant paths when the current union has a different tag', () => {
+        type Shape = {type: 'circle'; radius: number} | {type: 'rect'; width: number};
+        type State = {shape: Shape};
+        const builder = createPatchBuilder<State, null>('type', null);
+
+        expect(() =>
+            resolveAndApply<State, null>(
+                {shape: {type: 'rect', width: 4}},
+                builder.shape.$variant('circle').radius(2),
+                null,
+                'type',
+                cheapEqual,
+            ),
+        ).toThrow('Tagged union at "shape" has tag "type"="rect", expected "circle".');
+    });
+
+    it('rejects variant paths when the current value has no discriminant', () => {
+        type Shape = {type: 'circle'; radius: number} | {type: 'rect'; width: number};
+        type State = {shape: Shape};
+        const builder = createPatchBuilder<State, null>('type', null);
+
+        expect(() =>
+            resolveAndApply<State, null>(
+                {shape: {radius: 1} as Shape},
+                builder.shape.$variant('circle').radius(2),
+                null,
+                'type',
+                cheapEqual,
+            ),
+        ).toThrow('Expected tagged union with tag "type" at "shape".');
+    });
+
+    it('uses the callback form to select the active variant updater', () => {
+        type Shape = {type: 'circle'; radius: number} | {type: 'rect'; width: number};
+        type State = {shape: Shape};
+        const builder = createPatchBuilder<State, null>('type', null);
+        const state: State = {shape: {type: 'circle', radius: 1}};
+
+        const op = builder.shape.$variant(state.shape, {
+            circle: (shape, up) => up.radius(shape.radius + 1),
+            rect: (shape, up) => up.width(shape.width + 1),
+        });
+        const result = resolveAndApply<State, null>(state, op, null, 'type', cheapEqual);
+
+        expect(result.current).toEqual({shape: {type: 'circle', radius: 2}});
+    });
 });
