@@ -1,7 +1,7 @@
 import { describe, it, expect } from "bun:test";
-import { dispatch, jump, History } from "./history";
+import { dispatch, jump, type History } from "./history";
 import { createPatchBuilder } from "../helper";
-import { Patch, DraftPatch } from "../types";
+import type { Patch, DraftPatch } from "../types";
 
 const cheapEqual = (a: any, b: any) => JSON.stringify(a) === JSON.stringify(b);
 

@@ -23,10 +23,10 @@ And you could have an annotation that's like "where did we get this from" if you
 */
 
 import { splitPathToDestination } from "./findHistoryJump";
-import { Patch, DraftPatch } from "../types";
+import type { Patch, DraftPatch } from "../types";
 import { resolveAndApply } from "../make";
 import { ops } from "../ops";
-import { EqualFn } from "../internal";
+import type { EqualFn } from "../internal";
 
 type HistoryNode<T, An> = {
 	id: string;

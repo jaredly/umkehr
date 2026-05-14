@@ -1,5 +1,5 @@
-import { _add, _get, _remove, _replace, EqualFn } from "./internal";
-import {
+import { _add, _get, _remove, _replace, type EqualFn } from "./internal";
+import type {
     AddOp,
     Patch,
     MoveOp,

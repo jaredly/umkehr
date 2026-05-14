@@ -8,11 +8,11 @@ import {
 	useState,
 } from "react";
 import { createPatchDispatcher, getExtra, getPath } from "../helper";
-import { Annotations, dispatch, History } from "../history/history";
-import { _get, EqualFn } from "../internal";
-import { asFlat, MaybeNested, resolveAndApply } from "../make";
+import { type Annotations, dispatch, type History } from "../history/history";
+import { _get, type EqualFn } from "../internal";
+import { asFlat, type MaybeNested, resolveAndApply } from "../make";
 import type { Updater } from "../react/Updater";
-import {
+import type {
 	ApplyTiming,
 	DraftPatch,
 	Patch,
@@ -285,7 +285,7 @@ export const createHistoryContext = <T, An, Tag extends string = "type">(
 			return useMemo(() => {
 				const {
 					dispatch,
-					$: $,
+					$,
 					updateAnnotations,
 				} = makeHistoryDispatch(ctx, tag, equalFn);
 
@@ -538,7 +538,7 @@ export const createStateContext = <T, Tag extends string = "type">(
 			}
 
 			return useMemo(() => {
-				const { dispatch, $: $ } = makeDispatch(ctx, tag, equalFn);
+				const { dispatch, $ } = makeDispatch(ctx, tag, equalFn);
 
 				return {
 					latest() {

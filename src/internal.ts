@@ -1,6 +1,6 @@
 // biome-ignore-all lint/suspicious/noExplicitAny : this is internal and fine
 
-import { PathSegment, pathToString } from "./types";
+import { type PathSegment, pathToString } from "./types";
 
 export function _get(base: any, at: PathSegment[]) {
 	const obase = base;

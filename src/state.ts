@@ -1,6 +1,6 @@
-import { EqualFn } from "./internal";
+import type { EqualFn } from "./internal";
 import { ops } from "./ops";
-import { Patch } from "./types";
+import type { Patch } from "./types";
 
 export type History<T> = { ops: Patch<T>[]; ts: number };
 

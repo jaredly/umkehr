@@ -1,13 +1,13 @@
 // const TAG_KEY = 'kind' as const; // or "type" or make it a generic param
 import {
 	pathToString,
-	ApplyTiming,
-	PatchBuilderInternal,
-	DraftPatch,
+	type ApplyTiming,
+	type PatchBuilderInternal,
+	type DraftPatch,
 	getPathSymbol,
 	getExtraSymbol,
-	PathSegment,
-	OpMaker,
+	type PathSegment,
+	type OpMaker,
 } from "./types";
 
 export type PatchBuilder<

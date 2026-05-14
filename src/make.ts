@@ -1,4 +1,4 @@
-import { _get, EqualFn } from "./internal";
+import { _get, type EqualFn } from "./internal";
 import { createPatchBuilder } from "./helper";
 import type { Patch, DraftPatch } from "./types";
 import { ops, rebase } from "./ops";

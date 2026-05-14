@@ -1,4 +1,4 @@
-import { PatchBuilderInternal } from "../types";
+import type { PatchBuilderInternal } from "../types";
 import type { Extra } from "./react";
 
 export type Updater<
