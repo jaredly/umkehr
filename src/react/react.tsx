@@ -1,10 +1,12 @@
 import equal from 'fast-deep-equal';
 import {createContext, useContext, useEffect, useMemo, useRef, useState} from 'react';
 import {createPatchDispatcher, getExtra, getPath} from '../helper';
+import {splitPathToDestination} from '../history/findHistoryJump';
 import {type Annotations, dispatch, type History} from '../history/history';
 import {_get, type EqualFn} from '../internal';
 import {asFlat, type MaybeNested, resolveAndApply} from '../make';
 import type {Updater} from '../react/Updater';
+import {pathToString} from '../types';
 import type {
     ApplyTiming,
     DraftPatch,
@@ -29,6 +31,7 @@ type ContextBase<T, Change, Tag extends string> = {
     raf?: number;
     listenersByPath: PathListenerNode;
     queuedChanges: QueuedChanges<Change, Tag>;
+    previewPaths: Record<string, Path>;
 };
 
 type ContextHistory = {
@@ -138,6 +141,33 @@ const changedPaths = (changes: Patch<unknown>[]) => {
     return paths;
 };
 
+const recordPreviewPaths = (previewPaths: Record<string, Path>, paths: Path[]) => {
+    paths.forEach((path) => {
+        previewPaths[pathToString(path)] = path;
+    });
+};
+
+const changedPathsForHistoryCommand = <T, An>(
+    state: History<T, An>,
+    command: {op: 'undo' | 'redo'} | {op: 'jump'; id: string},
+) => {
+    switch (command.op) {
+        case 'undo':
+            return state.tip === state.root ? [] : changedPaths(state.nodes[state.tip].changes);
+        case 'redo': {
+            const next = state.undoTrail[0];
+            return next && state.nodes[next] ? changedPaths(state.nodes[next].changes) : [];
+        }
+        case 'jump': {
+            if (!state.nodes[command.id]) return [];
+            const split = splitPathToDestination(state, command.id);
+            return changedPaths(
+                [...split.up, ...split.down].flatMap((id) => state.nodes[id].changes),
+            );
+        }
+    }
+};
+
 export const useValue: (<Current, Return, Tag extends PropertyKey>(
     node: PatchBuilderInternal<unknown, Current, Tag, unknown, Extra>,
     mod: (v: Current) => Return,
@@ -193,6 +223,7 @@ const makeHistoryProvider = <T, An, Tag extends string = 'type'>(
             historyListeners: [],
             historyUp: [],
             queuedChanges: [],
+            previewPaths: {},
         });
         useEffect(() => {
             if (initial !== value.current.state) {
@@ -225,6 +256,7 @@ const makeProvider = <T, Tag extends string = 'type'>(
             previewState: null,
             listenersByPath: makePathListenerNode(),
             queuedChanges: [],
+            previewPaths: {},
         });
         useEffect(() => {
             if (initial !== value.current.state) {
@@ -285,6 +317,9 @@ export const createHistoryContext = <T, An, Tag extends string = 'type'>(
                     },
                     clearHistory() {
                         ctx.state = clearHistory(ctx.state);
+                        ctx.save(ctx.state);
+                        ctx.historyListeners.forEach((f) => f());
+                        ctx.historyUp.forEach((f) => f());
                     },
                     canRedo() {
                         return ctx.state.undoTrail.length > 0;
@@ -343,6 +378,7 @@ const makeDispatch = <T, Tag extends string = 'type'>(
                     if (next === (ctx.previewState ?? ctx.state)) return;
                     const paths = changedPaths(changes);
                     ctx.previewState = next;
+                    recordPreviewPaths(ctx.previewPaths, paths);
                     ctx.listeners.forEach((f) => f());
                     notifyPaths(ctx.listenersByPath, paths);
                 });
@@ -350,7 +386,10 @@ const makeDispatch = <T, Tag extends string = 'type'>(
             return;
         }
 
+        const previewPaths = Object.values(ctx.previewPaths);
+        const hadPreview = previewPaths.length > 0;
         ctx.previewState = null;
+        ctx.previewPaths = {};
         if (ctx.raf != null) {
             cancelAnimationFrame(ctx.raf);
             ctx.raf = undefined;
@@ -363,7 +402,11 @@ const makeDispatch = <T, Tag extends string = 'type'>(
         ctx.save(ctx.state);
 
         ctx.listeners.forEach((f) => f());
-        notifyPaths(ctx.listenersByPath, pathTargets);
+        if (hadPreview) {
+            notifyPaths(ctx.listenersByPath, [...previewPaths, ...pathTargets]);
+        } else {
+            notifyPaths(ctx.listenersByPath, pathTargets);
+        }
     };
 
     return {
@@ -416,6 +459,7 @@ const makeHistoryDispatch = <T, An, Tag extends string = 'type'>(
                     if (next === ctx.state) return;
                     const paths = changedPaths(next.nodes[next.tip].changes);
                     ctx.previewState = next;
+                    recordPreviewPaths(ctx.previewPaths, paths);
                     ctx.listeners.forEach((f) => f());
                     notifyPaths(ctx.listenersByPath, paths);
                 });
@@ -423,11 +467,18 @@ const makeHistoryDispatch = <T, An, Tag extends string = 'type'>(
             return;
         }
 
+        const previewPaths = Object.values(ctx.previewPaths);
+        const hadPreview = previewPaths.length > 0;
         ctx.previewState = null;
+        ctx.previewPaths = {};
         if (ctx.raf != null) {
             cancelAnimationFrame(ctx.raf);
             ctx.raf = undefined;
         }
+
+        const isNavigation =
+            !Array.isArray(v) && (v.op === 'undo' || v.op === 'redo' || v.op === 'jump');
+        const navigationPaths = isNavigation ? changedPathsForHistoryCommand(ctx.state, v) : [];
 
         const next = dispatch(ctx.state, v, extra, tag, equalFn);
         if (next === ctx.state) return;
@@ -437,7 +488,13 @@ const makeHistoryDispatch = <T, An, Tag extends string = 'type'>(
         ctx.save(ctx.state);
 
         ctx.listeners.forEach((f) => f());
-        notifyPaths(ctx.listenersByPath, pathTargets);
+        if (hadPreview) {
+            notifyPaths(ctx.listenersByPath, [...previewPaths, ...pathTargets]);
+        } else if (isNavigation) {
+            notifyPaths(ctx.listenersByPath, navigationPaths);
+        } else {
+            notifyPaths(ctx.listenersByPath, pathTargets);
+        }
 
         if (hChanged) {
             ctx.historyListeners.forEach((f) => f());
