@@ -1,5 +1,5 @@
 import {describe, it, expect} from 'vitest';
-import {dispatch, jump, type History} from './history';
+import {dispatch, dispatchWithChangedPaths, jump, jumpWithChangedPaths, type History} from './history';
 import {createPatchBuilder} from '../helper';
 import type {Patch, DraftPatch} from '../types';
 
@@ -192,6 +192,24 @@ describe('undo/redo', () => {
             'Cannot redo: undo trail references missing history node "missing-node".',
         );
     });
+
+    it('reports changed paths for undo and redo commands', () => {
+        const genId = idGenerator();
+        let history = makeHistory(initialArticle);
+
+        history = dispatch(history, [builder.title('Second')], null, 'type', cheapEqual, genId);
+        history = dispatch(history, [builder.meta.flags.archived(true)], null, 'type', cheapEqual, genId);
+
+        const undone = dispatchWithChangedPaths(history, {op: 'undo'}, null, 'type', cheapEqual);
+        expect(undone.changedPaths).toEqual([path('meta', 'flags', 'archived')]);
+        expect(undone.changedHistory).toBe(false);
+        expect(undone.history.current.meta.flags.archived).toBe(false);
+
+        const redone = dispatchWithChangedPaths(undone.history, {op: 'redo'}, null, 'type', cheapEqual);
+        expect(redone.changedPaths).toEqual([path('meta', 'flags', 'archived')]);
+        expect(redone.changedHistory).toBe(false);
+        expect(redone.history.current.meta.flags.archived).toBe(true);
+    });
 });
 
 describe('jump', () => {
@@ -268,5 +286,28 @@ describe('jump', () => {
         expect(jumped.tip).toBe(firstTip);
         expect(jumped.undoTrail).toEqual([]);
         expect(jumped.current.title).toBe('Second');
+    });
+
+    it('computes changed paths for jump commands while applying the jump once', () => {
+        const genId = idGenerator();
+        let history = makeHistory(initialArticle);
+
+        history = dispatch(history, [builder.title('Second')], null, 'type', cheapEqual, genId);
+        const branchPoint = history.tip;
+        history = dispatch(history, [builder.meta.flags.featured(true)], null, 'type', cheapEqual, genId);
+        const mainlineTip = history.tip;
+        history = jump(history, branchPoint, cheapEqual);
+        history = dispatch(history, [builder.sections.$push({heading: 'Branch', paragraphs: []})], null, 'type', cheapEqual, genId);
+
+        const jumped = jumpWithChangedPaths(history, mainlineTip, cheapEqual);
+
+        expect(jumped.history.tip).toBe(mainlineTip);
+        expect(jumped.history.current.meta.flags.featured).toBe(true);
+        expect(jumped.history.current.sections).toEqual(initialArticle.sections);
+        expect(jumped.changedPaths).toEqual([
+            path('sections', 1),
+            path('meta', 'flags', 'featured'),
+        ]);
+        expect(jumped.changedHistory).toBe(false);
     });
 });
