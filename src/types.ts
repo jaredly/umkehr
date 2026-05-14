@@ -45,22 +45,20 @@ type ValueOfUnion<T, K extends PropertyKey> = T extends any
 
 export type Path = PathSegment[];
 
-export type AddOp<T> = { op: "add"; path: Path; value: unknown };
+export type AddOp<_T> = { op: "add"; path: Path; value: unknown };
 
-export type ReplaceOp<T> = {
+export type ReplaceOp<_T> = {
 	op: "replace";
 	path: Path;
 	value: unknown;
 	previous: unknown;
 };
 
-export type RemoveOp<T> = { op: "remove"; path: Path; value: unknown };
+export type RemoveOp<_T> = { op: "remove"; path: Path; value: unknown };
 
-export type MoveOp<T> = { op: "move"; from: Path; path: Path };
+export type MoveOp<_T> = { op: "move"; from: Path; path: Path };
 
-export type CopyOp<T> = { op: "copy"; from: Path; path: Path };
-
-export type ReorderOp<T> = {
+export type ReorderOp<_T> = {
 	op: "reorder";
 	path: Path;
 	indices: number[];
@@ -71,24 +69,23 @@ export type Patch<T> =
 	| ReplaceOp<T>
 	| RemoveOp<T>
 	| MoveOp<T>
-	| CopyOp<T>
 	| ReorderOp<T>;
 
-export type DraftReplace<T> = {
+export type DraftReplace<_T> = {
 	op: "replace";
 	path: Path;
 	value: unknown;
 };
 
-export type DraftRemove<T> = { op: "remove"; path: Path };
+export type DraftRemove<_T> = { op: "remove"; path: Path };
 
-export type DraftPush<T> = {
+export type DraftPush<_T> = {
 	op: "push";
 	path: Path;
 	value: unknown;
 };
 
-export type DraftNested<T, Inner, Tag extends PropertyKey, Extra = unknown> = {
+export type DraftNested<_T, Inner, Tag extends PropertyKey, Extra = unknown> = {
 	op: "nested";
 	path: Path;
 	make: (
@@ -110,8 +107,7 @@ export type DraftPatch<T, Tag extends PropertyKey = "type", Extra = unknown> =
 	| ReorderOp<T>
 	| DraftRemove<T>
 	| DraftNested<T, unknown, Tag, Extra>
-	| MoveOp<T>
-	| CopyOp<T>;
+	| MoveOp<T>;
 
 /* ---------------- builder and stuff ---------------- */
 

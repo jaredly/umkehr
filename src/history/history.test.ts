@@ -48,7 +48,6 @@ function fill<T>(draft: DraftPatch<T, "type", null>, value: any): Patch<T> {
 	switch (draft.op) {
 		case "add":
 		case "move":
-		case "copy":
 		case "reorder":
 			return draft;
 		case "replace":

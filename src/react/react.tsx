@@ -283,11 +283,11 @@ export const createHistoryContext = <T, An, Tag extends string = "type">(
 			}
 
 			return useMemo(() => {
-				const {
-					dispatch,
-					$,
-					updateAnnotations,
-				} = makeHistoryDispatch(ctx, tag, equalFn);
+				const { dispatch, $, updateAnnotations } = makeHistoryDispatch(
+					ctx,
+					tag,
+					equalFn,
+				);
 
 				return {
 					onHistoryChange(f: () => void) {
