@@ -1,12 +1,14 @@
 export {createPatchBuilder, createPatchBuilderWithContext, createPatchDispatcher} from './helper';
 export {
     pathToString,
-    ApplyTiming,
+} from './types';
+export type {
     AddOp,
-    PatchBuilderInternal,
+    ApplyTiming,
     DraftPatch,
     MoveOp,
     Patch,
+    PatchBuilderInternal,
     Path,
     PathSegment,
     RemoveOp,
@@ -16,3 +18,4 @@ export {
 export type {PatchBuilder} from './helper';
 export {realizeDraftPatch, resolveAndApply} from './make';
 export type {MaybeNested} from './make';
+export {applyPatch, invertPatch} from './ops';

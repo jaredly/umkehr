@@ -31,6 +31,17 @@ bun add umkehr
 
 React is an optional peer dependency. Non-React users should import from `umkehr`.
 
+## Examples
+
+Small runnable examples live in [`examples`](./examples):
+
+| Example | Shows |
+| --- | --- |
+| [`examples/basic`](./examples/basic) | Draft patches, realized changes, applying and inverting patches |
+| [`examples/history`](./examples/history) | Dispatch, undo, redo, branching, and jump |
+| [`examples/react`](./examples/react) | React context setup, `useValue`, preview updates, undo, and redo |
+| [`examples/tagged-union`](./examples/tagged-union) | `$variant` with direct and callback forms |
+
 ## Quick Start
 
 ```ts
@@ -156,16 +167,16 @@ const $ = createPatchDispatcher<State, undefined, 'type'>(
 
 | Method | Available on | Result |
 | --- | --- | --- |
-| `$(value)` | Any path | Draft `replace` shorthand |
-| `$replace(value)` | Any path | Draft `replace` |
-| `$update((value, up) => draft)` | Any path | Nested draft update based on current value |
-| `$add(value)` | Any path | Draft `add` |
-| `$remove()` | Any path | Draft `remove` |
-| `$push(value)` | Arrays | Draft `push`, realized as an `add` at the current array length |
-| `$move(from, to)` | Arrays and objects | Draft `move` within the current path |
-| `$reorder(indices)` | Arrays | Realized `reorder` using old indices in their new order |
-| `$variant(tag)` | Tagged unions | Refines the updater to one union arm |
-| `$variant(value, handlers)` | Tagged unions | Runs the handler for the active union arm |
+| `some.path.$replace(value)` | Any path | Draft `replace` |
+| `some.path(value)` | Any path | Alias for `.$replace` |
+| `some.path.$update((value, up) => draft)` | Any path | Nested draft update based on current value |
+| `some.path.$add(value)` | Any path | Draft `add` |
+| `some.path.$remove()` | Any path | Draft `remove` |
+| `some.path.$push(value)` | Arrays | Draft `push`, realized as an `add` at the current array length |
+| `some.path.$move(from, to)` | Arrays and objects | Draft `move` within the current path |
+| `some.path.$reorder(indices)` | Arrays | Realized `reorder` using old indices in their new order |
+| `some.path.$variant(tag)` | Tagged unions | Refines the updater to one union arm |
+| `some.path.$variant(value, handlers)` | Tagged unions | Runs the handler for the active union arm |
 
 `$reorder([2, 0, 1])` changes `['a', 'b', 'c']` into `['c', 'a', 'b']`.
 
@@ -251,7 +262,7 @@ The history context exposes:
 
 | API | Use |
 | --- | --- |
-| `ctx.$` | Typed updater for the current state |
+| `ctx.$` | Root patch builder for the current state |
 | `ctx.latest()` | Current state value |
 | `ctx.undo()` / `ctx.redo()` | History navigation |
 | `ctx.canUndo()` / `ctx.canRedo()` | History availability |
@@ -301,6 +312,10 @@ ctx.$.title('Committed title');
 
 Preview changes are applied to temporary state and notify path subscribers, but they are cleared
 before the next committed update.
+
+This is to enable interactions such as "scrubbing through a color picker" where you want the update the UI with the currently-hovered-value, but you don't want to spam history with these temporary updates or persist them. The next "non-preview" update is based on the state before any preview updates were processed, and clears all preview updates.
+
+Note that preview updates are queued via requestAnimationFrame, whereas non-preview updates are processed immediately.
 
 ## Tagged Unions
 

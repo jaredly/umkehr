@@ -169,7 +169,7 @@ export const dispatchWithChangedPaths = <T, An, Extra, Tag extends string = 'typ
 
 export function dispatch<T, An>(
     state: History<T, An>,
-    nested: HistoryCommand | MaybeNested<DraftPatch<T>>,
+    nested: HistoryCommand | MaybeNested<DraftPatch<T, 'type', undefined>>,
     equalFn?: EqualFn,
     genId?: () => string,
 ): History<T, An>;

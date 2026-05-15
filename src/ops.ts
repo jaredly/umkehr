@@ -63,7 +63,7 @@ export function rebase<T, A extends PropertyKey, B>(
     }
 }
 
-function invert<T>(op: Patch<T>): Patch<T> {
+export function invertPatch<T>(op: Patch<T>): Patch<T> {
     switch (op.op) {
         case 'add':
             return {op: 'remove', path: op.path, value: op.value} as Patch<T>;
@@ -83,7 +83,7 @@ function invert<T>(op: Patch<T>): Patch<T> {
     }
 }
 
-function apply<T>(base: T, op: Patch<T>, equal: EqualFn) {
+export function applyPatch<T>(base: T, op: Patch<T>, equal: EqualFn) {
     switch (op.op) {
         case 'add':
             return add(base, op);
@@ -98,4 +98,4 @@ function apply<T>(base: T, op: Patch<T>, equal: EqualFn) {
     }
 }
 
-export const ops = {apply, invert};
+export const ops = {apply: applyPatch, invert: invertPatch};
