@@ -45,12 +45,15 @@ function TodoApp() {
                 onSubmit={(event) => {
                     event.preventDefault();
                     if (!draftTitle.trim()) return;
-                    ctx.$.todos.$push({
-                        id: crypto.randomUUID(),
-                        title: draftTitle.trim(),
-                        done: false,
-                    });
-                    ctx.$.draftTitle('');
+                    // This makes them part of the same "history item"
+                    ctx.$((_, up) => [
+                        up.todos.$push({
+                            id: crypto.randomUUID(),
+                            title: draftTitle.trim(),
+                            done: false,
+                        }),
+                        up.draftTitle(''),
+                    ]);
                 }}
             >
                 <input

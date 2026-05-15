@@ -1,7 +1,12 @@
 {
     "extends": "../../tsconfig.json",
     "compilerOptions": {
-        "noEmit": true
+        "baseUrl": ".",
+        "noEmit": true,
+        "paths": {
+            "umkehr": ["../../dist/src/index.d.ts"],
+            "umkehr/react": ["../../dist/src/react/react.d.ts"]
+        }
     },
     "include": ["src/**/*.ts", "src/**/*.tsx"]
 }
