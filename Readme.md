@@ -1,12 +1,12 @@
 # Umkehr
 
-Small typed updates for JSON-like state, with realized patch operations and undo/redo history.
+The no-nonsense undo/redo library for json state.
 
-Umkehr is built around a proxy updater. You write a typed update against plain state, Umkehr turns it
-into a draft patch, then the draft can be realized against the current state, applied, inverted, and
-stored in history.
+Pronounced "oom-care". from the german for "a turning back", "changing one's ways", or "repentance".
 
-It is not a CRDT, and it does not infer a diff between two arbitrary states.
+What does it do? It allows you to make surgical edits to a large state document, handles undo/redo and arbitrary jumps around the history tree, with extremely handy type-safe update builders.
+
+Inspired by the JSON Patch standard and CRDTs, though different from both.
 
 ## Install
 
@@ -16,6 +16,10 @@ npm install umkehr
 
 ```sh
 pnpm add umkehr
+```
+
+```sh
+bun add umkehr
 ```
 
 ## Entry Points
