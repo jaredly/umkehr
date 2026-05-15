@@ -258,6 +258,28 @@ The history context exposes:
 | `ctx.useHistory()` | React hook for subscribing to history changes |
 | `ctx.dispatch(...)` | Lower-level dispatch for draft ops or history commands |
 
+Use `useValue(ctx.$.path)` to read and subscribe to a specific path. Components re-render when that
+path, an ancestor, or a descendant is notified:
+
+```tsx
+const title = useValue(ctx.$.title);
+const firstTag = useValue(ctx.$.tags[0]);
+```
+
+`useValue` also accepts a selector and equality function for derived values:
+
+```tsx
+const parity = useValue(
+    ctx.$.count,
+    (count) => ({parity: count % 2}),
+    true,
+    (a, b) => a.parity === b.parity,
+);
+```
+
+The default selector returns the path value itself, and the default equality function is
+`fast-deep-equal`.
+
 For state without undo/redo, use `createStateContext`:
 
 ```tsx
