@@ -12,7 +12,6 @@ type Todo = {
 
 type State = {
     bgcolor: string;
-    draftTitle: string;
     todos: Todo[];
 };
 
@@ -20,7 +19,6 @@ const pastelColors = ['#fff', '#fce7f3', '#dbeafe', '#dcfce7', '#fef3c7', '#ede9
 
 const initialState: State = {
     bgcolor: pastelColors[0],
-    draftTitle: '',
     todos: [
         {id: 'one', title: 'Write README', done: true},
         {id: 'two', title: 'Add examples', done: false},
@@ -68,10 +66,8 @@ function UndoRedo() {
 function TodoApp() {
     const ctx = useTodos();
     const bgcolor = useValue(ctx.$.bgcolor);
-    const draftTitle = useValue(ctx.$.draftTitle);
     const todos = useValue(ctx.$.todos);
-
-    const previewTitle = draftTitle || 'Untitled todo';
+    const [draftTitle, setDraftTitle] = useState('');
 
     return (
         <main>
@@ -90,9 +86,7 @@ function TodoApp() {
                         title={color}
                         aria-label={`Use ${color}`}
                         onClick={() => ctx.$.bgcolor(color)}
-                        onFocus={() => ctx.$.bgcolor(color, 'preview')}
                         onMouseEnter={() => ctx.$.bgcolor(color, 'preview')}
-                        onBlur={() => ctx.clearPreview()}
                     />
                 ))}
             </section>
@@ -100,26 +94,21 @@ function TodoApp() {
                 onSubmit={(event) => {
                     event.preventDefault();
                     if (!draftTitle.trim()) return;
-                    // This makes them part of the same "history item"
-                    ctx.$((_, up) => [
-                        up.todos.$push({
-                            id: crypto.randomUUID(),
-                            title: draftTitle.trim(),
-                            done: false,
-                        }),
-                        up.draftTitle(''),
-                    ]);
+                    ctx.$.todos.$push({
+                        id: crypto.randomUUID(),
+                        title: draftTitle.trim(),
+                        done: false,
+                    });
+                    setDraftTitle('');
                 }}
             >
                 <input
                     value={draftTitle}
                     placeholder="New todo"
-                    onChange={(event) => ctx.$.draftTitle(event.target.value, 'preview')}
-                    onBlur={(event) => ctx.$.draftTitle(event.target.value)}
+                    onChange={(event) => setDraftTitle(event.target.value)}
                 />
                 <button type="submit">Add</button>
             </form>
-            <p className="preview">Preview: {previewTitle}</p>
             <div style={{overflow: 'auto', height: 300}}>
                 <ul style={{'--task-bg': bgcolor} as React.CSSProperties}>
                     {todos.map((todo, index) => (
