@@ -158,6 +158,18 @@ describe('core failure behavior', () => {
         ).toThrow('Cannot reorder "items": indices must be a permutation of array indices.');
     });
 
+    it('rejects reorder operations whose length does not match the array', () => {
+        expect(() =>
+            resolveAndApply(initialState, builder.items.$reorder([1, 0]), null, 'type', cheapEqual),
+        ).toThrow('Cannot reorder "items": indices length must match array length.');
+    });
+
+    it('rejects moves from missing paths', () => {
+        expect(() =>
+            resolveAndApply(initialState, builder.items.$move(8, 0), null, 'type', cheapEqual),
+        ).toThrow('Cannot remove "items/8": key does not exist.');
+    });
+
     it('rejects realized replace operations when the previous value does not match', () => {
         expect(() =>
             ops.apply(

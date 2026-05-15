@@ -1,6 +1,6 @@
 import './test-dom';
 
-import {cleanup, fireEvent, render, waitFor} from '@testing-library/react';
+import {act, cleanup, fireEvent, render, waitFor} from '@testing-library/react';
 import {afterEach, describe, expect, it} from 'vitest';
 import {blankHistory} from '../history/history';
 import {createHistoryContext, createStateContext, useValue} from './react';
@@ -203,6 +203,129 @@ describe('createStateContext', () => {
         await waitFor(() => expect(view.getByTestId('title').textContent).toBe('Draft'));
         expect(titleRenders).toBe(3);
     });
+
+    it('supports selectors with custom equality', () => {
+        const [Provider, useStateContext] = createStateContext<State>('type');
+        let parityRenders = 0;
+
+        function ParityView() {
+            const ctx = useStateContext();
+            const parity = useValue(
+                ctx.$.count,
+                (count) => ({parity: count % 2}),
+                true,
+                (a, b) => a.parity === b.parity,
+            );
+            parityRenders += 1;
+            return <span data-testid="parity">{parity.parity}</span>;
+        }
+
+        function Controls() {
+            const ctx = useStateContext();
+            return (
+                <>
+                    <button type="button" onClick={() => ctx.$.count(2)}>
+                        count two
+                    </button>
+                    <button type="button" onClick={() => ctx.$.count(3)}>
+                        count three
+                    </button>
+                </>
+            );
+        }
+
+        const view = render(
+            <Provider initial={{title: 'Draft', count: 0}}>
+                <>
+                    <ParityView />
+                    <Controls />
+                </>
+            </Provider>,
+        );
+
+        expect(view.getByTestId('parity').textContent).toBe('0');
+        expect(parityRenders).toBe(1);
+
+        fireEvent.click(view.getByText('count two'));
+        expect(view.getByTestId('parity').textContent).toBe('0');
+        expect(parityRenders).toBe(1);
+
+        fireEvent.click(view.getByText('count three'));
+        expect(view.getByTestId('parity').textContent).toBe('1');
+        expect(parityRenders).toBe(2);
+    });
+
+    it('updates subscribers when the provider receives a new initial value', () => {
+        const [Provider, useStateContext] = createStateContext<State>('type');
+
+        function TitleView() {
+            const ctx = useStateContext();
+            const title = useValue(ctx.$.title);
+            return <span data-testid="title">{title}</span>;
+        }
+
+        const view = render(
+            <Provider initial={{title: 'Draft', count: 0}}>
+                <TitleView />
+            </Provider>,
+        );
+
+        expect(view.getByTestId('title').textContent).toBe('Draft');
+
+        view.rerender(
+            <Provider initial={{title: 'External', count: 0}}>
+                <TitleView />
+            </Provider>,
+        );
+
+        expect(view.getByTestId('title').textContent).toBe('External');
+    });
+
+    it('removes path subscriptions when subscribed components unmount', () => {
+        const [Provider, useStateContext] = createStateContext<State>('type');
+        const errors: unknown[] = [];
+        const originalError = console.error;
+        console.error = (...args: unknown[]) => {
+            errors.push(args);
+        };
+
+        function TitleView() {
+            const ctx = useStateContext();
+            const title = useValue(ctx.$.title);
+            return <span data-testid="title">{title}</span>;
+        }
+
+        function Controls() {
+            const ctx = useStateContext();
+            return (
+                <button type="button" onClick={() => ctx.$.title('Published')}>
+                    rename
+                </button>
+            );
+        }
+
+        const view = render(
+            <Provider initial={{title: 'Draft', count: 0}}>
+                <>
+                    <TitleView />
+                    <Controls />
+                </>
+            </Provider>,
+        );
+
+        expect(view.getByTestId('title').textContent).toBe('Draft');
+
+        view.rerender(
+            <Provider initial={{title: 'Draft', count: 0}}>
+                <Controls />
+            </Provider>,
+        );
+
+        fireEvent.click(view.getByText('rename'));
+        console.error = originalError;
+
+        expect(errors).toEqual([]);
+    });
 });
 
 describe('createHistoryContext', () => {
@@ -402,5 +525,39 @@ describe('createHistoryContext', () => {
         expect(view.getByTestId('title').textContent).toBe('Published');
         expect(view.getByTestId('tip').textContent).toBe('root');
         expect(view.getByTestId('can-undo').textContent).toBe('false');
+    });
+
+    it('updates history subscribers when the provider receives a new initial history', () => {
+        const [Provider, useStateContext] = createHistoryContext<State, string>('type');
+
+        function TitleView() {
+            const ctx = useStateContext();
+            const title = useValue(ctx.$.title);
+            ctx.useHistory();
+            return (
+                <>
+                    <span data-testid="title">{title}</span>
+                    <span data-testid="tip">{ctx.tip()}</span>
+                </>
+            );
+        }
+
+        const view = render(
+            <Provider initial={blankHistory<State, string>({title: 'Draft', count: 0})}>
+                <TitleView />
+            </Provider>,
+        );
+
+        expect(view.getByTestId('title').textContent).toBe('Draft');
+        expect(view.getByTestId('tip').textContent).toBe('root');
+
+        view.rerender(
+            <Provider initial={blankHistory<State, string>({title: 'External', count: 1})}>
+                <TitleView />
+            </Provider>,
+        );
+
+        expect(view.getByTestId('title').textContent).toBe('External');
+        expect(view.getByTestId('tip').textContent).toBe('root');
     });
 });

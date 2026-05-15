@@ -146,12 +146,15 @@ export function _remove(base: any, at: PathSegment[], value: any, equal: EqualFn
     if (key.type !== 'key') {
         throw new Error(`Cannot remove "${describePath(at)}": final path segment must be a key.`);
     }
-    if (!equal(value, base[key.key])) {
-        throw new Error(`Cannot remove "${describePath(at)}": expected value does not match current value.`);
-    }
     if (Array.isArray(base)) {
         if (typeof key.key !== 'number') {
             throw new Error(`Expected numeric array index at "${describePath(at.slice(0, -1))}", got "${key.key}".`);
+        }
+        if (key.key < 0 || key.key >= base.length) {
+            throw new Error(`Cannot remove "${describePath(at)}": key does not exist.`);
+        }
+        if (!equal(value, base[key.key])) {
+            throw new Error(`Cannot remove "${describePath(at)}": expected value does not match current value.`);
         }
         base.splice(key.key, 1);
     } else if (typeof base !== 'object') {
@@ -159,6 +162,9 @@ export function _remove(base: any, at: PathSegment[], value: any, equal: EqualFn
     } else if (!(key.key in base)) {
         throw new Error(`Cannot remove "${describePath(at)}": key does not exist.`);
     } else {
+        if (!equal(value, base[key.key])) {
+            throw new Error(`Cannot remove "${describePath(at)}": expected value does not match current value.`);
+        }
         delete base[key.key];
     }
     return root;

@@ -1,11 +1,7 @@
 import equal from 'fast-deep-equal';
 import {createContext, useContext, useEffect, useMemo, useRef, useState} from 'react';
 import {createPatchDispatcher, getExtra, getPath} from '../helper';
-import {
-    type Annotations,
-    dispatchWithChangedPaths,
-    type History,
-} from '../history/history';
+import {type Annotations, dispatchWithChangedPaths, type History} from '../history/history';
 import {_get, type EqualFn} from '../internal';
 import {asFlat, type MaybeNested, resolveAndApply} from '../make';
 import type {Updater} from '../react/Updater';

@@ -3,7 +3,7 @@ import {describe, expect, it} from 'vitest';
 
 describe('package exports', () => {
     it('imports the built root entry point without pulling in React bindings', async () => {
-        if (!existsSync('dist/src/index.js')) return;
+        expect(existsSync('dist/src/index.js')).toBe(true);
 
         const pkg = await import('umkehr');
 
@@ -14,7 +14,7 @@ describe('package exports', () => {
     });
 
     it('imports the built React entry point separately', async () => {
-        if (!existsSync('dist/src/react/index.js')) return;
+        expect(existsSync('dist/src/react/index.js')).toBe(true);
 
         const reactPkg = await import('umkehr/react');
 
