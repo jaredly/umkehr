@@ -376,6 +376,63 @@ describe('createStateContext', () => {
 });
 
 describe('createHistoryContext', () => {
+    it('jumps to the initial history node after toggling a checkbox on and off', () => {
+        type TodoState = {
+            todos: Array<{id: string; title: string; done: boolean}>;
+        };
+
+        const [Provider, useStateContext] = createHistoryContext<TodoState, never>('type');
+
+        function TodoEditor() {
+            const ctx = useStateContext();
+            const todos = useValue(ctx.$.todos);
+            const history = ctx.useHistory();
+
+            return (
+                <>
+                    <input
+                        aria-label={todos[0].title}
+                        type="checkbox"
+                        checked={todos[0].done}
+                        onChange={(event) => ctx.$.todos[0].done(event.target.checked)}
+                    />
+                    <span data-testid="tip">{history.tip}</span>
+                    <button type="button" onClick={() => ctx.dispatch({op: 'jump', id: history.root})}>
+                        jump root
+                    </button>
+                </>
+            );
+        }
+
+        const view = render(
+            <Provider
+                initial={blankHistory<TodoState, never>({
+                    todos: [{id: 'one', title: 'Write README', done: false}],
+                })}
+            >
+                <TodoEditor />
+            </Provider>,
+        );
+
+        const checkbox = view.getByLabelText('Write README') as HTMLInputElement;
+        expect(checkbox.checked).toBe(false);
+        expect(view.getByTestId('tip').textContent).toBe('root');
+
+        fireEvent.click(checkbox);
+        expect(checkbox.checked).toBe(true);
+        const checkedTip = view.getByTestId('tip').textContent;
+        expect(checkedTip).not.toBe('root');
+
+        fireEvent.click(checkbox);
+        expect(checkbox.checked).toBe(false);
+        expect(view.getByTestId('tip').textContent).not.toBe(checkedTip);
+
+        fireEvent.click(view.getByText('jump root'));
+
+        expect(checkbox.checked).toBe(false);
+        expect(view.getByTestId('tip').textContent).toBe('root');
+    });
+
     it('dispatches committed updates and walks through undo and redo', () => {
         const [Provider, useStateContext] = createHistoryContext<State, string>('type');
         const savedTips: string[] = [];
