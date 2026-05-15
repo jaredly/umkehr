@@ -226,23 +226,28 @@ describe('undo/redo', () => {
 });
 
 describe('jump', () => {
+    type TodoState = {todos: Array<{id: string; title: string; done: boolean}>};
+    const todoBuilder = createPatchBuilder<TodoState>();
+    const initialTodos: TodoState = {
+        todos: [
+            {id: 'one', title: 'Write README', done: false},
+            {id: 'two', title: 'Add examples', done: false},
+        ],
+    };
+    const makeTodoHistory = (): History<TodoState, string> => ({
+        version: 2,
+        nodes: {root: {id: 'root', pid: 'root', changes: [], children: []}},
+        annotations: {},
+        root: 'root',
+        tip: 'root',
+        current: initialTodos,
+        initial: initialTodos,
+        undoTrail: [],
+    });
+
     it('jumps back to root after two opposite replacements at the same path', () => {
-        type TodoState = {todos: Array<{id: string; title: string; done: boolean}>};
-        const todoBuilder = createPatchBuilder<TodoState>();
         const genId = idGenerator();
-        const initial: TodoState = {
-            todos: [{id: 'one', title: 'Write README', done: false}],
-        };
-        let history: History<TodoState, string> = {
-            version: 2,
-            nodes: {root: {id: 'root', pid: 'root', changes: [], children: []}},
-            annotations: {},
-            root: 'root',
-            tip: 'root',
-            current: initial,
-            initial,
-            undoTrail: [],
-        };
+        let history = makeTodoHistory();
 
         history = dispatch(history, [todoBuilder.todos[0].done(true)], cheapEqual, genId);
         history = dispatch(history, [todoBuilder.todos[0].done(false)], cheapEqual, genId);
@@ -250,7 +255,79 @@ describe('jump', () => {
         const jumped = jump(history, 'root', cheapEqual);
 
         expect(jumped.tip).toBe('root');
-        expect(jumped.current).toEqual(initial);
+        expect(jumped.current).toEqual(initialTodos);
+    });
+
+    it('jumps upward through several same-path replacements', () => {
+        const genId = idGenerator();
+        let history = makeTodoHistory();
+
+        history = dispatch(history, [todoBuilder.todos[0].title('Draft')], cheapEqual, genId);
+        history = dispatch(history, [todoBuilder.todos[0].title('Review')], cheapEqual, genId);
+        const reviewTip = history.tip;
+        const reviewState = history.current;
+        history = dispatch(history, [todoBuilder.todos[0].title('Published')], cheapEqual, genId);
+        history = dispatch(history, [todoBuilder.todos[0].title('Archived')], cheapEqual, genId);
+
+        const jumpedToReview = jump(history, reviewTip, cheapEqual);
+        expect(jumpedToReview.current).toEqual(reviewState);
+
+        const jumpedToRoot = jump(history, 'root', cheapEqual);
+        expect(jumpedToRoot.current).toEqual(initialTodos);
+    });
+
+    it('jumps upward through a node with multiple dependent changes in reverse order', () => {
+        const genId = idGenerator();
+        let history = makeTodoHistory();
+
+        history = dispatch(
+            history,
+            [todoBuilder.todos[0].title('Draft'), todoBuilder.todos[0].title('Review')],
+            cheapEqual,
+            genId,
+        );
+        history = dispatch(history, [todoBuilder.todos[0].title('Published')], cheapEqual, genId);
+
+        const jumped = jump(history, 'root', cheapEqual);
+
+        expect(jumped.current).toEqual(initialTodos);
+    });
+
+    it('jumps between branches that both changed the same path', () => {
+        const genId = idGenerator();
+        let history = makeTodoHistory();
+
+        history = dispatch(history, [todoBuilder.todos[0].title('Draft')], cheapEqual, genId);
+        const branchPoint = history.tip;
+
+        history = dispatch(history, [todoBuilder.todos[0].title('Mainline')], cheapEqual, genId);
+        const mainlineTip = history.tip;
+        const mainlineState = history.current;
+
+        history = jump(history, branchPoint, cheapEqual);
+        history = dispatch(history, [todoBuilder.todos[0].title('Alternate')], cheapEqual, genId);
+        const alternateTip = history.tip;
+        const alternateState = history.current;
+
+        const jumpedToMainline = jump(history, mainlineTip, cheapEqual);
+        expect(jumpedToMainline.current).toEqual(mainlineState);
+
+        const jumpedToAlternate = jump(jumpedToMainline, alternateTip, cheapEqual);
+        expect(jumpedToAlternate.current).toEqual(alternateState);
+    });
+
+    it('reports changed paths when jumping through repeated same-path replacements', () => {
+        const genId = idGenerator();
+        let history = makeTodoHistory();
+
+        history = dispatch(history, [todoBuilder.todos[0].done(true)], cheapEqual, genId);
+        history = dispatch(history, [todoBuilder.todos[0].done(false)], cheapEqual, genId);
+
+        const jumped = jumpWithChangedPaths(history, 'root', cheapEqual);
+
+        expect(jumped.changedPaths).toEqual([path('todos', 0, 'done'), path('todos', 0, 'done')]);
+        expect(jumped.changedHistory).toBe(false);
+        expect(jumped.history.current).toEqual(initialTodos);
     });
 
     it('recomputes current when moving between branches', () => {
