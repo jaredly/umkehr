@@ -1,4 +1,4 @@
-import {useMemo} from 'react';
+import {useCallback, useMemo, useState} from 'react';
 import {History} from 'umkehr';
 
 const addToMap = <T,>(map: Record<string | number, T[]>, k: string | number, t: T) => {
@@ -10,9 +10,13 @@ type SizeInfo = {size: number; height: number; skipTo?: {id: string; count: numb
 export const HistoryView = ({
     history,
     jump,
+    previewJump,
+    clearPreview,
     collapseUnannotated,
 }: {
     jump(id: string): void;
+    previewJump(id: string): void;
+    clearPreview(): void;
     history: History<unknown, unknown>;
     collapseUnannotated?: boolean;
 }) => {
@@ -52,14 +56,28 @@ export const HistoryView = ({
         walk(history.root);
         return {byParent, sizes};
     }, [history]);
+    const [previewing, setPreviewing] = useState<null | string>(null);
+    const pj = useCallback(
+        (id: string) => {
+            previewJump(id);
+            setPreviewing(id);
+        },
+        [previewJump],
+    );
 
     const nctx = useMemo(
-        () => ({history, byParent, sizes, jump}),
-        [history, byParent, sizes, jump],
+        () => ({history, byParent, sizes, jump, previewJump: pj, previewing}),
+        [history, byParent, sizes, jump, pj, previewing],
     );
 
     return (
-        <div className="modal-box flex flex-col w-11/12 max-w-full">
+        <div
+            className="modal-box flex flex-col w-11/12 max-w-full"
+            onMouseLeave={() => {
+                clearPreview();
+                setPreviewing(null);
+            }}
+        >
             <h3 className="font-bold text-lg">History</h3>
             <div className="overflow-auto p-5">
                 <div style={{position: 'relative'}}>{renderNode(history.root, nctx)}</div>
@@ -73,11 +91,14 @@ type NCtx = {
     byParent: Record<string, string[]>;
     sizes: Record<string, SizeInfo>;
     jump: (id: string) => void;
+    previewJump: (id: string) => void;
+    // clearPreview: () => void;
+    previewing: null | string;
 };
 
 const renderNode = (id: string, ctx: NCtx) => {
     const oneHeight = 22;
-    const {history, byParent, sizes, jump} = ctx;
+    const {history, byParent, sizes, jump, previewJump} = ctx;
 
     const self = (
         <div style={{display: 'flex', flexDirection: 'row', alignItems: 'center'}} key={id}>
@@ -100,14 +121,16 @@ const renderNode = (id: string, ctx: NCtx) => {
                 onClick={() => {
                     jump(id);
                 }}
+                onMouseEnter={() => previewJump(id)}
                 style={{
                     zIndex: 5,
                     width: 20,
                     height: oneHeight - 4 * 2,
                     marginBlock: 4,
                     flexShrink: 0,
-                    background: id === history.tip ? 'blue' : '#333',
-                    border: '2px solid ' + (history.annotations[id] ? '#ff0' : '#aaa'),
+                    background:
+                        ctx.previewing === id ? '#aaf' : id === history.tip ? 'blue' : '#333',
+                    border: '2px solid ' + (ctx.previewing === id ? '#eee' : '#aaa'),
                     borderRadius: 10,
                 }}
             />

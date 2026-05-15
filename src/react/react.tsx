@@ -1,7 +1,12 @@
 import equal from 'fast-deep-equal';
 import {createContext, useContext, useEffect, useMemo, useRef, useState} from 'react';
 import {createPatchDispatcher, getExtra, getPath} from '../helper';
-import {type Annotations, dispatchWithChangedPaths, type History} from '../history/history';
+import {
+    type Annotations,
+    dispatchWithChangedPaths,
+    type History,
+    jumpWithChangedPaths,
+} from '../history/history';
 import {_get, type EqualFn} from '../internal';
 import {asFlat, type MaybeNested, resolveAndApply} from '../make';
 import type {Updater} from '../react/Updater';
@@ -163,6 +168,24 @@ const clearPreviewState = <T, Change, Tag extends string>(
         notifyPaths(ctx.listenersByPath, previewPaths);
     }
     return hadPreview;
+};
+
+const replacePreviewState = <T, Change, Tag extends string>(
+    ctx: ContextBase<T, Change, Tag>,
+    previewState: T,
+    paths: Path[],
+) => {
+    const previewPaths = Object.values(ctx.previewPaths);
+    ctx.previewState = previewState;
+    ctx.previewPaths = {};
+    ctx.queuedChanges = [];
+    if (ctx.raf != null) {
+        cancelAnimationFrame(ctx.raf);
+        ctx.raf = undefined;
+    }
+    recordPreviewPaths(ctx.previewPaths, paths);
+    ctx.listeners.forEach((f) => f());
+    notifyPaths(ctx.listenersByPath, [...previewPaths, ...paths]);
 };
 
 export const useValue: (<Current, Return, Tag extends PropertyKey>(
@@ -332,6 +355,14 @@ export const createHistoryContext = <T, An, Tag extends string = 'type'>(
                     },
                     clearPreview() {
                         clearPreviewState(ctx);
+                    },
+                    previewJump(id: string) {
+                        const {history: next, changedPaths} = jumpWithChangedPaths(
+                            ctx.state,
+                            id,
+                            equalFn,
+                        );
+                        replacePreviewState(ctx, next, changedPaths);
                     },
                     $,
                     updateAnnotations,

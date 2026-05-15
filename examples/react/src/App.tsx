@@ -42,6 +42,8 @@ function UndoRedo() {
     // Subscribe to changes in canUndo/canRedo
     const history = ctx.useHistory();
     const jump = useCallback((id: string) => ctx.dispatch({op: 'jump', id}), [ctx]);
+    const previewJump = useCallback((id: string) => ctx.previewJump(id), [ctx]);
+    const clearPreview = useCallback(() => ctx.clearPreview(), [ctx]);
 
     return (
         <div>
@@ -53,7 +55,12 @@ function UndoRedo() {
                     Redo
                 </button>
             </nav>
-            <HistoryView history={history} jump={jump} />
+            <HistoryView
+                history={history}
+                jump={jump}
+                previewJump={previewJump}
+                clearPreview={clearPreview}
+            />
         </div>
     );
 }
@@ -69,6 +76,26 @@ function TodoApp() {
     return (
         <main>
             <h1>Todos</h1>
+            <section
+                className="colorPicker"
+                aria-label="Task background color"
+                onMouseLeave={() => ctx.clearPreview()}
+            >
+                {pastelColors.map((color) => (
+                    <button
+                        key={color}
+                        type="button"
+                        className={color === bgcolor ? 'swatch selected' : 'swatch'}
+                        style={{backgroundColor: color}}
+                        title={color}
+                        aria-label={`Use ${color}`}
+                        onClick={() => ctx.$.bgcolor(color)}
+                        onFocus={() => ctx.$.bgcolor(color, 'preview')}
+                        onMouseEnter={() => ctx.$.bgcolor(color, 'preview')}
+                        onBlur={() => ctx.clearPreview()}
+                    />
+                ))}
+            </section>
             <form
                 onSubmit={(event) => {
                     event.preventDefault();
@@ -93,31 +120,13 @@ function TodoApp() {
                 <button type="submit">Add</button>
             </form>
             <p className="preview">Preview: {previewTitle}</p>
-            <section
-                className="colorPicker"
-                aria-label="Task background color"
-                onMouseLeave={() => ctx.clearPreview()}
-            >
-                {pastelColors.map((color) => (
-                    <button
-                        key={color}
-                        type="button"
-                        className={color === bgcolor ? 'swatch selected' : 'swatch'}
-                        style={{backgroundColor: color}}
-                        title={color}
-                        aria-label={`Use ${color}`}
-                        onClick={() => ctx.$.bgcolor(color)}
-                        onFocus={() => ctx.$.bgcolor(color, 'preview')}
-                        onMouseEnter={() => ctx.$.bgcolor(color, 'preview')}
-                        onBlur={() => ctx.clearPreview()}
-                    />
-                ))}
-            </section>
-            <ul style={{'--task-bg': bgcolor} as React.CSSProperties}>
-                {todos.map((todo, index) => (
-                    <TodoItem key={todo.id} todo={todo} index={index} />
-                ))}
-            </ul>
+            <div style={{overflow: 'auto', height: 300}}>
+                <ul style={{'--task-bg': bgcolor} as React.CSSProperties}>
+                    {todos.map((todo, index) => (
+                        <TodoItem key={todo.id} todo={todo} index={index} />
+                    ))}
+                </ul>
+            </div>
             <UndoRedo />
         </main>
     );

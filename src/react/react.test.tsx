@@ -433,6 +433,73 @@ describe('createHistoryContext', () => {
         expect(view.getByTestId('tip').textContent).toBe('root');
     });
 
+    it('previews a jump without changing the committed history tip', () => {
+        const [Provider, useStateContext] = createHistoryContext<State, string>('type');
+        const savedTips: string[] = [];
+
+        function HistoryPreviewEditor() {
+            const ctx = useStateContext();
+            const title = useValue(ctx.$.title);
+            const history = ctx.useHistory();
+            return (
+                <>
+                    <span data-testid="title">{title}</span>
+                    <span data-testid="tip">{history.tip}</span>
+                    <button type="button" onClick={() => ctx.$.title('First')}>
+                        first
+                    </button>
+                    <button type="button" onClick={() => ctx.$.title('Second')}>
+                        second
+                    </button>
+                    <button type="button" onMouseEnter={() => ctx.previewJump(history.root)}>
+                        preview root
+                    </button>
+                    <button type="button" onClick={() => ctx.clearPreview()}>
+                        clear preview
+                    </button>
+                    <button type="button" onClick={() => ctx.dispatch({op: 'jump', id: history.root})}>
+                        jump root
+                    </button>
+                </>
+            );
+        }
+
+        const view = render(
+            <Provider
+                initial={blankHistory<State, string>({title: 'Draft', count: 0})}
+                save={(history) => savedTips.push(history.tip)}
+            >
+                <HistoryPreviewEditor />
+            </Provider>,
+        );
+
+        fireEvent.click(view.getByText('first'));
+        const firstTip = view.getByTestId('tip').textContent;
+        fireEvent.click(view.getByText('second'));
+        const secondTip = view.getByTestId('tip').textContent;
+
+        expect(view.getByTestId('title').textContent).toBe('Second');
+        expect(secondTip).not.toBe(firstTip);
+        expect(savedTips).toEqual([firstTip, secondTip]);
+
+        fireEvent.mouseEnter(view.getByText('preview root'));
+
+        expect(view.getByTestId('title').textContent).toBe('Draft');
+        expect(view.getByTestId('tip').textContent).toBe(secondTip);
+        expect(savedTips).toEqual([firstTip, secondTip]);
+
+        fireEvent.click(view.getByText('clear preview'));
+
+        expect(view.getByTestId('title').textContent).toBe('Second');
+        expect(view.getByTestId('tip').textContent).toBe(secondTip);
+
+        fireEvent.click(view.getByText('jump root'));
+
+        expect(view.getByTestId('title').textContent).toBe('Draft');
+        expect(view.getByTestId('tip').textContent).toBe('root');
+        expect(savedTips).toEqual([firstTip, secondTip, 'root']);
+    });
+
     it('dispatches committed updates and walks through undo and redo', () => {
         const [Provider, useStateContext] = createHistoryContext<State, string>('type');
         const savedTips: string[] = [];

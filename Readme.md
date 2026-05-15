@@ -266,6 +266,7 @@ The history context exposes:
 | `ctx.latest()` | Current state value |
 | `ctx.undo()` / `ctx.redo()` | History navigation |
 | `ctx.canUndo()` / `ctx.canRedo()` | History availability |
+| `ctx.previewJump(id)` | Temporarily previews the state at another history node |
 | `ctx.clearPreview()` | Clears temporary preview state without committing it |
 | `ctx.useHistory()` | React hook for subscribing to history changes |
 | `ctx.dispatch(...)` | Lower-level dispatch for draft ops or history commands |
