@@ -109,9 +109,10 @@ export const jumpWithChangedPaths = <T, An>(
     const split = splitPathToDestination(state, to);
     const upChanges = split.up.flatMap((id) => state.nodes[id].changes);
     const downChanges = split.down.flatMap((id) => state.nodes[id].changes);
-    let current = upChanges
-        .map(ops.invert)
-        .toReversed()
+    const invertedUpChanges = split.up.flatMap((id) =>
+        state.nodes[id].changes.toReversed().map(ops.invert),
+    );
+    let current = invertedUpChanges
         .reduce((a, b) => ops.apply(a, b, equal), state.current);
     current = downChanges.reduce((a, b) => ops.apply(a, b, equal), current);
     return {

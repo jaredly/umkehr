@@ -226,6 +226,33 @@ describe('undo/redo', () => {
 });
 
 describe('jump', () => {
+    it('jumps back to root after two opposite replacements at the same path', () => {
+        type TodoState = {todos: Array<{id: string; title: string; done: boolean}>};
+        const todoBuilder = createPatchBuilder<TodoState>();
+        const genId = idGenerator();
+        const initial: TodoState = {
+            todos: [{id: 'one', title: 'Write README', done: false}],
+        };
+        let history: History<TodoState, string> = {
+            version: 2,
+            nodes: {root: {id: 'root', pid: 'root', changes: [], children: []}},
+            annotations: {},
+            root: 'root',
+            tip: 'root',
+            current: initial,
+            initial,
+            undoTrail: [],
+        };
+
+        history = dispatch(history, [todoBuilder.todos[0].done(true)], cheapEqual, genId);
+        history = dispatch(history, [todoBuilder.todos[0].done(false)], cheapEqual, genId);
+
+        const jumped = jump(history, 'root', cheapEqual);
+
+        expect(jumped.tip).toBe('root');
+        expect(jumped.current).toEqual(initial);
+    });
+
     it('recomputes current when moving between branches', () => {
         const genId = idGenerator();
         let history = makeHistory(initialArticle);
