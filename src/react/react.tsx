@@ -38,11 +38,11 @@ type ContextHistory = {
     historyUp: (() => void)[];
 };
 
-type QueuedChanges<T, Tag extends string = 'type'> = DraftPatch<T, Tag, Extra>[];
+type QueuedChanges<T, Tag extends string = 'type'> = DraftPatch<T, Tag, Context>[];
 
 type CH<T, An, Tag extends string = 'type'> = ContextBase<History<T, An>, T, Tag> & ContextHistory;
 
-export type Extra = {
+export type Context = {
     getForPath<T>(v: Path): T;
     listenToPath(v: Path, f: () => void): () => void;
 };
@@ -147,15 +147,15 @@ const recordPreviewPaths = (previewPaths: Record<string, Path>, paths: Path[]) =
 };
 
 export const useValue: (<Current, Return, Tag extends PropertyKey>(
-    node: PatchBuilderInternal<unknown, Current, Tag, unknown, Extra>,
+    node: PatchBuilderInternal<unknown, Current, Tag, unknown, Context>,
     mod: (v: Current) => Return,
     exact?: boolean,
     equalFn?: EqualFn,
 ) => Return) &
     (<Current, Tag extends PropertyKey>(
-        node: PatchBuilderInternal<unknown, Current, Tag, unknown, Extra>,
+        node: PatchBuilderInternal<unknown, Current, Tag, unknown, Context>,
     ) => Current) = <Current, Return, Tag extends PropertyKey>(
-    node: PatchBuilderInternal<unknown, Current, Tag, unknown, Extra>,
+    node: PatchBuilderInternal<unknown, Current, Tag, unknown, Context>,
     mod: (v: Current) => Return = (v) => v as any,
     exact = true,
     equalFn: EqualFn = equal,
@@ -326,7 +326,7 @@ const makeDispatch = <T, Tag extends string = 'type'>(
     equalFn: EqualFn = equal,
 ) => {
     // const inner = ctx;
-    const extra: Extra = {
+    const extra: Context = {
         getForPath(path) {
             return _get(ctx.previewState ?? ctx.state, path);
         },
@@ -335,9 +335,9 @@ const makeDispatch = <T, Tag extends string = 'type'>(
             return () => removePathListener(ctx.listenersByPath, v, f);
         },
     };
-    const go = (v: MaybeNested<DraftPatch<T, Tag, Extra>>, when?: ApplyTiming) => {
+    const go = (v: MaybeNested<DraftPatch<T, Tag, Context>>, when?: ApplyTiming) => {
         if (when === 'preview') {
-            ctx.queuedChanges.push(...(asFlat(v) as DraftPatch<T, Tag, Extra>[]));
+            ctx.queuedChanges.push(...(asFlat(v) as DraftPatch<T, Tag, Context>[]));
             if (ctx.raf == null) {
                 ctx.raf = requestAnimationFrame(() => {
                     ctx.raf = undefined;
@@ -389,7 +389,7 @@ const makeDispatch = <T, Tag extends string = 'type'>(
 
     return {
         dispatch: go,
-        $: createPatchDispatcher<T, Extra, Tag>(go, extra, tag),
+        $: createPatchDispatcher<T, Context, Tag>(go, extra, tag),
     };
 };
 
@@ -399,7 +399,7 @@ const makeHistoryDispatch = <T, An, Tag extends string = 'type'>(
     equalFn: EqualFn = equal,
 ) => {
     // const inner = ctx;
-    const extra: Extra = {
+    const extra: Context = {
         getForPath(path) {
             return _get(ctx.previewState?.current ?? ctx.state.current, path);
         },
@@ -412,7 +412,7 @@ const makeHistoryDispatch = <T, An, Tag extends string = 'type'>(
         v:
             | {op: 'undo' | 'redo'}
             | {op: 'jump'; id: string}
-            | MaybeNested<DraftPatch<T, Tag, Extra>>,
+            | MaybeNested<DraftPatch<T, Tag, Context>>,
         when?: ApplyTiming,
     ) => {
         let hChanged = false;
@@ -420,7 +420,7 @@ const makeHistoryDispatch = <T, An, Tag extends string = 'type'>(
             if (!Array.isArray(v) && (v.op === 'undo' || v.op === 'redo' || v.op === 'jump')) {
                 return; // not previewing those
             }
-            ctx.queuedChanges.push(...(asFlat(v) as DraftPatch<T, Tag, Extra>[]));
+            ctx.queuedChanges.push(...(asFlat(v) as DraftPatch<T, Tag, Context>[]));
             if (ctx.raf == null) {
                 ctx.raf = requestAnimationFrame(() => {
                     ctx.raf = undefined;
@@ -497,7 +497,7 @@ const makeHistoryDispatch = <T, An, Tag extends string = 'type'>(
 
     return {
         dispatch: go,
-        $: createPatchDispatcher<T, Extra, Tag>(go, extra, tag),
+        $: createPatchDispatcher<T, Context, Tag>(go, extra, tag),
         updateAnnotations,
     };
 };

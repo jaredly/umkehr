@@ -1,3 +1,4 @@
+import equal from 'fast-deep-equal';
 import {splitPathToDestination} from './findHistoryJump';
 import type {Patch, DraftPatch, Path} from '../types';
 import {resolveAndApply} from '../make';
@@ -166,12 +167,44 @@ export const dispatchWithChangedPaths = <T, An, Extra, Tag extends string = 'typ
     return {history, changedPaths: changedPaths(changes), changedHistory: true};
 };
 
-export const dispatch = <T, An, Extra, Tag extends string = 'type'>(
+export function dispatch<T, An>(
     state: History<T, An>,
-    nested: HistoryCommand | MaybeNested<DraftPatch<T, Tag, Extra>>,
-    extra: Extra,
+    nested: HistoryCommand | MaybeNested<DraftPatch<T>>,
+    equalFn?: EqualFn,
+    genId?: () => string,
+): History<T, An>;
+export function dispatch<T, An, Context, Tag extends string = 'type'>(
+    state: History<T, An>,
+    nested: HistoryCommand | MaybeNested<DraftPatch<T, Tag, Context>>,
+    context: Context,
     tag: Tag,
-    equal: EqualFn,
-    genId = randId,
-): History<T, An> =>
-    dispatchWithChangedPaths(state, nested, extra, tag, equal, genId).history;
+    equalFn: EqualFn,
+    genId?: () => string,
+): History<T, An>;
+export function dispatch<T, An, Context, Tag extends string = 'type'>(
+    state: History<T, An>,
+    nested: HistoryCommand | MaybeNested<DraftPatch<T, Tag, Context>>,
+    contextOrEqual?: Context | EqualFn,
+    tagOrGenId?: Tag | (() => string),
+    equalFn?: EqualFn,
+    genId?: () => string,
+): History<T, An> {
+    if (typeof tagOrGenId === 'string') {
+        return dispatchWithChangedPaths(
+            state,
+            nested,
+            contextOrEqual as Context,
+            tagOrGenId,
+            equalFn ?? equal,
+            genId,
+        ).history;
+    }
+    return dispatchWithChangedPaths(
+        state,
+        nested as HistoryCommand | MaybeNested<DraftPatch<T>>,
+        undefined,
+        'type',
+        (contextOrEqual as EqualFn | undefined) ?? equal,
+        tagOrGenId,
+    ).history;
+}

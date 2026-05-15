@@ -1,9 +1,12 @@
 import {describe, expect, it} from 'vitest';
-import {createPatchBuilder, getExtra, getPath} from './helper';
+import {createPatchBuilder, createPatchBuilderWithContext, getExtra, getPath} from './helper';
 import {resolveAndApply} from './make';
 import {ops} from './ops';
 
-const moveBuilder = createPatchBuilder<{items: string[]; map: Record<string, number>}, string>(
+const moveBuilder = createPatchBuilderWithContext<
+    {items: string[]; map: Record<string, number>},
+    string
+>(
     'type',
     'hello',
 );
@@ -113,7 +116,7 @@ describe('helper2 variant()', () => {
     it('replaces a whole tagged union value through a variant path', () => {
         type Shape = {type: 'circle'; radius: number} | {type: 'rect'; width: number};
         type State = {shape: Shape};
-        const builder = createPatchBuilder<State, null>('type', null);
+        const builder = createPatchBuilder<State>();
         const op = builder.shape.$variant('circle')({type: 'circle', radius: 2});
 
         const result = resolveAndApply<State, null>(
@@ -141,7 +144,7 @@ describe('helper2 variant()', () => {
     it('rejects variant paths when the current union has a different tag', () => {
         type Shape = {type: 'circle'; radius: number} | {type: 'rect'; width: number};
         type State = {shape: Shape};
-        const builder = createPatchBuilder<State, null>('type', null);
+        const builder = createPatchBuilder<State>();
 
         expect(() =>
             resolveAndApply<State, null>(
@@ -157,7 +160,7 @@ describe('helper2 variant()', () => {
     it('rejects variant paths when the current value has no discriminant', () => {
         type Shape = {type: 'circle'; radius: number} | {type: 'rect'; width: number};
         type State = {shape: Shape};
-        const builder = createPatchBuilder<State, null>('type', null);
+        const builder = createPatchBuilder<State>();
 
         expect(() =>
             resolveAndApply<State, null>(
@@ -173,7 +176,7 @@ describe('helper2 variant()', () => {
     it('uses the callback form to select the active variant updater', () => {
         type Shape = {type: 'circle'; radius: number} | {type: 'rect'; width: number};
         type State = {shape: Shape};
-        const builder = createPatchBuilder<State, null>('type', null);
+        const builder = createPatchBuilder<State>();
         const state: State = {shape: {type: 'circle', radius: 1}};
 
         const op = builder.shape.$variant(state.shape, {

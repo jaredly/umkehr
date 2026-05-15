@@ -41,7 +41,7 @@ const idGenerator = () => {
     return () => `node-${++count}`;
 };
 
-const builder = createPatchBuilder<Article, null>('type', null);
+const builder = createPatchBuilder<Article>();
 
 function fill<T>(draft: DraftPatch<T, 'type', null>, value: any): Patch<T> {
     switch (draft.op) {
@@ -97,6 +97,19 @@ describe('dispatch', () => {
             },
             sections: [{heading: 'Intro', paragraphs: ['hello world']}],
         });
+    });
+
+    it('supports the simple public overload with default tag/context arguments', () => {
+        const genId = idGenerator();
+        let history = makeHistory(initialArticle);
+
+        history = dispatch(history, [builder.title('Simple')], cheapEqual, genId);
+
+        expect(history.tip).toBe('node-1');
+        expect(history.current.title).toBe('Simple');
+        expect(history.nodes['node-1'].changes).toEqual([
+            fill(builder.title('Simple'), 'First Draft'),
+        ]);
     });
 });
 

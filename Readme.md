@@ -47,12 +47,16 @@ should use `resolveAndApply`, `createStateContext`, or `createHistoryContext`, w
 
 The runtime does not use JSON Pointer strings like `"/items/0"`.
 
+Umkehr patch objects are inspired by JSON Patch, but they are not JSON Patch compatible. Paths are
+structured arrays, tagged-union path segments are Umkehr-specific, and operation semantics include
+state-dependent draft realization for undo/redo.
+
 ## Building Draft Operations
 
 Use `createPatchBuilder<T>()` to create typed draft operations without applying them:
 
 ```ts
-import {createPatchBuilder, DraftPatch} from './umkehr/core';
+import {createPatchBuilder, DraftPatch} from 'umkehr';
 
 type State = {
     title: string;
@@ -62,7 +66,7 @@ type State = {
     };
 };
 
-const $ = createPatchBuilder<State, null>('type', null);
+const $ = createPatchBuilder<State>();
 
 const rename: DraftPatch<State> = $.title('New title');
 const addTag: DraftPatch<State> = $.tags.$push('featured');
@@ -103,7 +107,7 @@ Use `createPatchDispatcher` when you want the same builder API to immediately ca
 function:
 
 ```ts
-import {createPatchDispatcher} from './umkehr/core';
+import {createPatchDispatcher} from 'umkehr';
 
 const $ = createPatchDispatcher<State, null, 'type'>(
     (draft, timing) => dispatch(draft, timing),
@@ -112,13 +116,22 @@ const $ = createPatchDispatcher<State, null, 'type'>(
 );
 ```
 
+Use `createPatchBuilderWithContext` when nested `$update` callbacks need access to caller-provided
+context:
+
+```ts
+import {createPatchBuilderWithContext} from 'umkehr';
+
+const $ = createPatchBuilderWithContext<State, {source: string}>('type', {source: 'example'});
+```
+
 ## Applying Drafts
 
 `resolveAndApply` realizes one or more draft operations, applies them in order, and returns both the
 new state and the realized patch operations:
 
 ```ts
-import {resolveAndApply} from './umkehr/core';
+import {resolveAndApply} from 'umkehr';
 
 const {current, changes} = resolveAndApply(
     state,
@@ -136,15 +149,20 @@ they can be inverted.
 Use `blankHistory(initialState)` to create a history tree:
 
 ```ts
-import {blankHistory} from './umkehr/history';
+import {blankHistory, dispatch} from 'umkehr';
 
 const history = blankHistory(initialState);
+const nextHistory = dispatch(history, [$.title('New title')]);
 ```
+
+The simple `dispatch` overload uses the default `'type'` discriminant, no builder context, and
+`fast-deep-equal`. Use the lower-level overload when you need a custom context, tag key, equality
+function, or ID generator.
 
 The React history context wraps this for common app usage:
 
 ```ts
-import {createHistoryContext, useValue} from './umkehr/react';
+import {createHistoryContext, useValue} from 'umkehr/react';
 
 const [ProvideState, useStateContext] = createHistoryContext<State, Annotation>('type');
 ```

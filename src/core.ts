@@ -1,4 +1,4 @@
-export {createPatchBuilder, createPatchDispatcher} from './helper';
+export {createPatchBuilder, createPatchBuilderWithContext, createPatchDispatcher} from './helper';
 export {
     pathToString,
     ApplyTiming,

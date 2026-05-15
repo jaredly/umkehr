@@ -1,5 +1,5 @@
 import {_get, type EqualFn} from './internal';
-import {createPatchBuilder} from './helper';
+import {createPatchBuilderWithContext} from './helper';
 import {pathToString, type Patch, type DraftPatch} from './types';
 import {ops, rebase} from './ops';
 
@@ -88,7 +88,7 @@ export function resolveAndApply<T, Extra, Tag extends string = 'type'>(
     const changes = asFlat(draft).flatMap((op) => {
         if (op.op === 'nested') {
             const value = _get(current, op.path);
-            const inner = op.make(value, createPatchBuilder(tag, extra));
+            const inner = op.make(value, createPatchBuilderWithContext(tag, extra));
             const next = resolveAndApply<T, Extra, Tag>(
                 current,
                 asArray(inner).map((i) => rebase(i, op.path) as DraftPatch<T, Tag, Extra>),

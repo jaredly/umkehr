@@ -19,7 +19,7 @@ type State = {
     };
 };
 
-const builder = createPatchBuilder<State, null>('type', null);
+const builder = createPatchBuilder<State>();
 
 const initialState: State = {
     title: 'Draft',

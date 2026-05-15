@@ -14,11 +14,34 @@ export type PatchBuilder<
     T,
     Tag extends PropertyKey = 'type',
     R = void,
-    Extra = unknown,
-> = PatchBuilderInternal<T, T, Tag, R, Extra>;
+    Context = unknown,
+> = PatchBuilderInternal<T, T, Tag, R, Context>;
 
-export function createPatchBuilder<T, Extra, Tag extends string = 'type'>(tag: Tag, extra: Extra) {
-    return createPatchDispatcher<T, Extra, Tag, DraftPatch<T, Tag, Extra>>((x) => x, extra, tag);
+export function createPatchBuilder<T>(): PatchBuilder<
+    T,
+    'type',
+    DraftPatch<T, 'type', undefined>,
+    undefined
+>;
+export function createPatchBuilder<T, Tag extends string>(tag: Tag): PatchBuilder<
+    T,
+    Tag,
+    DraftPatch<T, Tag, undefined>,
+    undefined
+>;
+export function createPatchBuilder<T, Tag extends string = 'type'>(tag?: Tag) {
+    return createPatchBuilderWithContext<T, undefined, Tag>((tag ?? 'type') as Tag, undefined);
+}
+
+export function createPatchBuilderWithContext<T, Context, Tag extends string = 'type'>(
+    tag: Tag,
+    context: Context,
+) {
+    return createPatchDispatcher<T, Context, Tag, DraftPatch<T, Tag, Context>>(
+        (x) => x,
+        context,
+        tag,
+    );
 }
 
 export const getPath = <A, B, T extends PropertyKey, C, E>(

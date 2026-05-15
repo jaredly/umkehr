@@ -2,6 +2,7 @@ export {
     createPatchDispatcher,
     DraftPatch,
     createPatchBuilder,
+    createPatchBuilderWithContext,
     type ApplyTiming,
     type Patch,
     type Path,

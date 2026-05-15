@@ -16,20 +16,20 @@ type State = {
     customShape: CustomShape;
 };
 
-const builder = createPatchBuilder<State, null>('type', null);
-const customBuilder = createPatchBuilder<State, null, 'kind'>('kind', null);
+const builder = createPatchBuilder<State>();
+const customBuilder = createPatchBuilder<State, 'kind'>('kind');
 
-const rootBuilder: PatchBuilder<State, 'type', DraftPatch<State, 'type', null>, null> = builder;
-const titlePatch: DraftPatch<State, 'type', null> = builder.title('Published');
-const maybePatch: DraftPatch<State, 'type', null> = builder.maybe.$remove();
-const maybeNestedPatch: DraftPatch<State, 'type', null> = builder.maybeNested.label('Label');
-const pushPatch: DraftPatch<State, 'type', null> = builder.items.$push({id: 'a', done: false});
-const itemPatch: DraftPatch<State, 'type', null> = builder.items[0].done(true);
-const movePatch: DraftPatch<State, 'type', null> = builder.items.$move(0, 1);
-const reorderPatch: DraftPatch<State, 'type', null> = builder.items.$reorder([1, 0]);
-const recordPatch: DraftPatch<State, 'type', null> = builder.byId.someKey(1);
-const circlePatch: DraftPatch<State, 'type', null> = builder.shape.$variant('circle').radius(2);
-const customPatch: DraftPatch<State, 'kind', null> = customBuilder.customShape
+const rootBuilder: PatchBuilder<State, 'type', DraftPatch<State, 'type', undefined>, undefined> = builder;
+const titlePatch: DraftPatch<State, 'type', undefined> = builder.title('Published');
+const maybePatch: DraftPatch<State, 'type', undefined> = builder.maybe.$remove();
+const maybeNestedPatch: DraftPatch<State, 'type', undefined> = builder.maybeNested.label('Label');
+const pushPatch: DraftPatch<State, 'type', undefined> = builder.items.$push({id: 'a', done: false});
+const itemPatch: DraftPatch<State, 'type', undefined> = builder.items[0].done(true);
+const movePatch: DraftPatch<State, 'type', undefined> = builder.items.$move(0, 1);
+const reorderPatch: DraftPatch<State, 'type', undefined> = builder.items.$reorder([1, 0]);
+const recordPatch: DraftPatch<State, 'type', undefined> = builder.byId.someKey(1);
+const circlePatch: DraftPatch<State, 'type', undefined> = builder.shape.$variant('circle').radius(2);
+const customPatch: DraftPatch<State, 'kind', undefined> = customBuilder.customShape
     .$variant('rect')
     .width(4);
 
@@ -38,18 +38,18 @@ builder.shape.$variant({type: 'rect', width: 2}, {
     rect: (shape, up) => up.width(shape.width + 1),
 });
 
-type _TitlePatch = Expect<IsAssignable<typeof titlePatch, DraftPatch<State, 'type', null>>>;
-type _MaybePatch = Expect<IsAssignable<typeof maybePatch, DraftPatch<State, 'type', null>>>;
+type _TitlePatch = Expect<IsAssignable<typeof titlePatch, DraftPatch<State, 'type', undefined>>>;
+type _MaybePatch = Expect<IsAssignable<typeof maybePatch, DraftPatch<State, 'type', undefined>>>;
 type _MaybeNestedPatch = Expect<
-    IsAssignable<typeof maybeNestedPatch, DraftPatch<State, 'type', null>>
+    IsAssignable<typeof maybeNestedPatch, DraftPatch<State, 'type', undefined>>
 >;
-type _PushPatch = Expect<IsAssignable<typeof pushPatch, DraftPatch<State, 'type', null>>>;
-type _ItemPatch = Expect<IsAssignable<typeof itemPatch, DraftPatch<State, 'type', null>>>;
-type _MovePatch = Expect<IsAssignable<typeof movePatch, DraftPatch<State, 'type', null>>>;
-type _ReorderPatch = Expect<IsAssignable<typeof reorderPatch, DraftPatch<State, 'type', null>>>;
-type _RecordPatch = Expect<IsAssignable<typeof recordPatch, DraftPatch<State, 'type', null>>>;
-type _CirclePatch = Expect<IsAssignable<typeof circlePatch, DraftPatch<State, 'type', null>>>;
-type _CustomPatch = Expect<IsAssignable<typeof customPatch, DraftPatch<State, 'kind', null>>>;
+type _PushPatch = Expect<IsAssignable<typeof pushPatch, DraftPatch<State, 'type', undefined>>>;
+type _ItemPatch = Expect<IsAssignable<typeof itemPatch, DraftPatch<State, 'type', undefined>>>;
+type _MovePatch = Expect<IsAssignable<typeof movePatch, DraftPatch<State, 'type', undefined>>>;
+type _ReorderPatch = Expect<IsAssignable<typeof reorderPatch, DraftPatch<State, 'type', undefined>>>;
+type _RecordPatch = Expect<IsAssignable<typeof recordPatch, DraftPatch<State, 'type', undefined>>>;
+type _CirclePatch = Expect<IsAssignable<typeof circlePatch, DraftPatch<State, 'type', undefined>>>;
+type _CustomPatch = Expect<IsAssignable<typeof customPatch, DraftPatch<State, 'kind', undefined>>>;
 
 // @ts-expect-error title must be a string
 builder.title(123);

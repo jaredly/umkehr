@@ -93,7 +93,7 @@ export type DraftPatch<T, Tag extends PropertyKey = 'type', Extra = unknown> =
 
 /* ---------------- builder and stuff ---------------- */
 
-export type ApplyTiming = 'immediate' | 'preview' | undefined;
+export type ApplyTiming = 'preview' | undefined;
 
 export type PathSegment =
     | {type: 'key'; key: string | number}
