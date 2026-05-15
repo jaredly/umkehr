@@ -180,7 +180,7 @@ const $ = createPatchDispatcher<State, undefined, 'type'>(
 | --- | --- | --- |
 | `some.path.$replace(value)` | Any path | Draft `replace` |
 | `some.path(value)` | Any path | Alias for `.$replace` |
-| `some.path.$update((value, up) => draft | draft[])` | Any path | Nested draft update based on current value. Can be used to combine multiple changes into a single "history item" |
+| `some.path.$update((value, up) => draft / draft[])` | Any path | Nested draft update based on current value. Can be used to combine multiple changes into a single "history item" |
 | `some.path((value, up) => draft)` | Any path | Alias for `.$update` |
 | `some.path.$add(value)` | Any path | Draft `add` |
 | `some.path.$remove()` | Any path | Draft `remove` |
