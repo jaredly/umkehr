@@ -140,16 +140,16 @@ $.title('New title');
 $.settings.archived(true);
 ```
 
-When the value passed to a node is a function, it creates a nested update. The callback receives the
-current value at that path and an updater rooted at that value:
+When you pass a function instead of a value, Umkehr treats it as a nested update. The function gets
+the current value at that path and an `up` helper rooted at the same path:
 
 ```ts
 $.settings((settings, up) => up.archived(!settings?.archived));
 ```
 
-That `up` argument has the same shape as a patch builder, but it returns draft operations. It does
-not dispatch them immediately. Return one draft or an array of drafts; Umkehr rebases them onto the
-outer path and applies them as one update.
+`up` looks like the normal patch builder, but it only creates draft operations. It does not dispatch
+or apply them by itself. Return one draft or an array of drafts, and Umkehr will rebase them onto the
+outer path and apply them together as a single update (so that they "undo" and "redo" together).
 
 Use `createPatchBuilder('kind')` when your tagged unions use a discriminant other than `'type'`.
 
