@@ -88,6 +88,10 @@ ul {
 }
 
 li {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    justify-content: space-between;
     padding: 12px;
     border: 1px solid #d9e2ec;
     border-radius: 8px;
@@ -95,7 +99,35 @@ li {
 }
 
 label {
+    min-width: 0;
+    flex: 1;
     display: flex;
     gap: 10px;
     align-items: center;
+}
+
+.todoTitle {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.todoEditInput {
+    min-width: 0;
+    width: 100%;
+    border: 1px solid #9fb3c8;
+    border-radius: 6px;
+    padding: 6px 8px;
+    background: #fff;
+    font: inherit;
+}
+
+.editButton {
+    opacity: 0;
+    padding: 6px 10px;
+    transition: opacity 120ms ease;
+}
+
+li:hover .editButton,
+li:focus-within .editButton {
+    opacity: 1;
 }
