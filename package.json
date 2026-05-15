@@ -1,6 +1,6 @@
 {
     "name": "umkehr",
-    "version": "0.0.0",
+    "version": "0.1.0",
     "description": "Typed JSON patch updates with undo/redo history and optional React bindings.",
     "keywords": [
         "history",
