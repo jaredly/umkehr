@@ -8,7 +8,7 @@ import {
     getExtraSymbol,
     type PathSegment,
     type OpMaker,
-} from './types';
+} from './types.js';
 
 export type PatchBuilder<
     T,

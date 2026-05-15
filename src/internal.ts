@@ -1,6 +1,6 @@
 // biome-ignore-all lint/suspicious/noExplicitAny : this is internal and fine
 
-import {type PathSegment, pathToString} from './types';
+import {type PathSegment, pathToString} from './types.js';
 
 const describePath = (path: PathSegment[]) => pathToString(path) || '<root>';
 

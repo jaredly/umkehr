@@ -4,9 +4,9 @@ Run these examples from the repository root after building the package:
 
 ```sh
 pnpm run build
-bun examples/basic/index.ts
-bun examples/history/index.ts
-bun examples/tagged-union/index.ts
+node --experimental-strip-types examples/basic/index.ts
+node --experimental-strip-types examples/history/index.ts
+node --experimental-strip-types examples/tagged-union/index.ts
 ```
 
 The React example is a small Vite app:

@@ -1,16 +1,16 @@
 import equal from 'fast-deep-equal';
 import {createContext, useContext, useEffect, useMemo, useRef, useState} from 'react';
-import {createPatchDispatcher, getExtra, getPath} from '../helper';
+import {createPatchDispatcher, getExtra, getPath} from '../helper.js';
 import {
     type Annotations,
     dispatchWithChangedPaths,
     type History,
     jumpWithChangedPaths,
-} from '../history/history';
-import {_get, type EqualFn} from '../internal';
-import {asFlat, type MaybeNested, resolveAndApply} from '../make';
-import type {Updater} from '../react/Updater';
-import {pathToString} from '../types';
+} from '../history/history.js';
+import {_get, type EqualFn} from '../internal.js';
+import {asFlat, type MaybeNested, resolveAndApply} from '../make.js';
+import type {Updater} from '../react/Updater.js';
+import {pathToString} from '../types.js';
 import type {
     ApplyTiming,
     DraftPatch,
@@ -18,8 +18,8 @@ import type {
     PatchBuilderInternal,
     Path,
     PathSegment,
-} from '../types';
-import {useLatest} from './useLatest';
+} from '../types.js';
+import {useLatest} from './useLatest.js';
 
 type C<T> = {
     state: T;

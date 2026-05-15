@@ -1,5 +1,5 @@
-import type {PatchBuilderInternal} from '../types';
-import type {Context} from './react';
+import type {PatchBuilderInternal} from '../types.js';
+import type {Context} from './react.js';
 
 export type Updater<Current, Tag extends PropertyKey = 'type'> = PatchBuilderInternal<
     unknown,

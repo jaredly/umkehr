@@ -1,9 +1,9 @@
 import equal from 'fast-deep-equal';
-import {splitPathToDestination} from './findHistoryJump';
-import type {Patch, DraftPatch, Path} from '../types';
-import {resolveAndApply} from '../make';
-import {ops} from '../ops';
-import type {EqualFn} from '../internal';
+import {splitPathToDestination} from './findHistoryJump.js';
+import type {Patch, DraftPatch, Path} from '../types.js';
+import {resolveAndApply} from '../make.js';
+import {ops} from '../ops.js';
+import type {EqualFn} from '../internal.js';
 
 type HistoryNode<T, An> = {
     id: string;

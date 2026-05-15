@@ -1,7 +1,7 @@
-export {createPatchBuilder, createPatchBuilderWithContext, createPatchDispatcher} from './helper';
+export {createPatchBuilder, createPatchBuilderWithContext, createPatchDispatcher} from './helper.js';
 export {
     pathToString,
-} from './types';
+} from './types.js';
 export type {
     AddOp,
     ApplyTiming,
@@ -14,8 +14,8 @@ export type {
     RemoveOp,
     ReorderOp,
     ReplaceOp,
-} from './types';
-export type {PatchBuilder} from './helper';
-export {realizeDraftPatch, resolveAndApply} from './make';
-export type {MaybeNested} from './make';
-export {applyPatch, invertPatch} from './ops';
+} from './types.js';
+export type {PatchBuilder} from './helper.js';
+export {realizeDraftPatch, resolveAndApply} from './make.js';
+export type {MaybeNested} from './make.js';
+export {applyPatch, invertPatch} from './ops.js';

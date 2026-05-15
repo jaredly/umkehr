@@ -1,7 +1,7 @@
-import {_get, type EqualFn} from './internal';
-import {createPatchBuilderWithContext} from './helper';
-import {pathToString, type Patch, type DraftPatch} from './types';
-import {ops, rebase} from './ops';
+import {_get, type EqualFn} from './internal.js';
+import {createPatchBuilderWithContext} from './helper.js';
+import {pathToString, type Patch, type DraftPatch} from './types.js';
+import {ops, rebase} from './ops.js';
 
 const describePath = (path: DraftPatch<unknown>['path']) => pathToString(path) || '<root>';
 

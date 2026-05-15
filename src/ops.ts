@@ -1,5 +1,5 @@
-import {_add, _get, _remove, _replace, type EqualFn} from './internal';
-import type {AddOp, Patch, MoveOp, Path, DraftPatch, RemoveOp, ReplaceOp, ReorderOp} from './types';
+import {_add, _get, _remove, _replace, type EqualFn} from './internal.js';
+import type {AddOp, Patch, MoveOp, Path, DraftPatch, RemoveOp, ReplaceOp, ReorderOp} from './types.js';
 
 function add<T, V>(base: T, op: AddOp<V>) {
     return _add(base, op.path, op.value);

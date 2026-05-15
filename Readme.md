@@ -18,10 +18,6 @@ npm install umkehr
 pnpm add umkehr
 ```
 
-```sh
-bun add umkehr
-```
-
 ## Entry Points
 
 | Import | Use |

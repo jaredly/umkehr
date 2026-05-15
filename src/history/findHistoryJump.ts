@@ -1,4 +1,4 @@
-import type {History} from './history';
+import type {History} from './history.js';
 
 type SplitPath = {
     ancestor: string; // shared ancestor (LCA)

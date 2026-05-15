@@ -12,5 +12,5 @@ export {
     type Path,
     type PatchBuilder,
     type DraftPatch,
-} from './core';
-export {blankHistory, dispatch, jump, type Annotations, type History} from './history/history';
+} from './core.js';
+export {blankHistory, dispatch, jump, type Annotations, type History} from './history/history.js';
