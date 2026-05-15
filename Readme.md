@@ -1,38 +1,89 @@
 # Umkehr
 
-Small JSON state updates with undo/redo history.
+Small typed updates for JSON-like state, with realized patch operations and undo/redo history.
 
-This library is built around a proxy updater that produces patch operations for plain JSON-like
-state. It is not a CRDT, and it does not try to infer a diff between two arbitrary states. The
-usual flow is:
+Umkehr is built around a proxy updater. You write a typed update against plain state, Umkehr turns it
+into a draft patch, then the draft can be realized against the current state, applied, inverted, and
+stored in history.
 
-1. Build a draft operation from a typed updater.
-2. Realize the draft operation against the current state.
-3. Apply the realized operation and store it in history.
+It is not a CRDT, and it does not infer a diff between two arbitrary states.
+
+## Install
+
+```sh
+npm install umkehr
+```
+
+```sh
+pnpm add umkehr
+```
+
+```sh
+bun add umkehr
+```
+
+## Entry Points
+
+| Import | Use |
+| --- | --- |
+| `umkehr` | Core patch builders, patch application, and history helpers |
+| `umkehr/react` | React contexts, hooks, and updater types |
+
+React is an optional peer dependency. Non-React users should import from `umkehr`.
+
+## Quick Start
+
+```ts
+import {createPatchBuilder, resolveAndApply} from 'umkehr';
+
+type State = {
+    title: string;
+    tags: string[];
+};
+
+const state: State = {
+    title: 'Draft',
+    tags: ['local'],
+};
+
+const $ = createPatchBuilder<State>();
+
+const {current, changes} = resolveAndApply(
+    state,
+    [$.title('Published'), $.tags.$push('featured')],
+    undefined,
+    'type',
+    Object.is,
+);
+
+current.title; // "Published"
+current.tags; // ["local", "featured"]
+changes; // realized, invertible patch operations
+```
 
 ## Core Terms
 
 ### DraftPatch
 
-`DraftPatch<T>` is the authoring form of a patch operation. It records what the caller wants
-to do, but it may omit data that can only be known by reading the current state.
+`DraftPatch<T>` is the authoring form of a patch operation. It records what the caller wants to do,
+but it may omit data that can only be known by reading the current state.
 
 For example:
 
-- A draft `replace` has the new `value`, but not the old `previous` value.
-- A draft `remove` has the `path`, but not the value being removed.
-- A draft `push` targets an array path, but its final numeric insertion path depends on the current
-  array length.
-- `add`, `move`, and `copy` already contain the information needed to apply/invert them, so their
-  draft and realized forms are the same shape.
+| Draft operation | State-dependent realization |
+| --- | --- |
+| `replace` | Adds the previous value so the patch can be inverted |
+| `remove` | Adds the removed value so the patch can be inverted |
+| `push` | Resolves to an `add` at the current array length |
+| `add`, `move`, `reorder` | Already contain enough information to apply |
 
 ### Patch
 
-`Patch<T>` is the realized, invertible form of a patch operation. It contains the extra
-state-dependent data needed to apply the change safely and invert it later.
+`Patch<T>` is the realized, invertible form of a patch operation. These are the operations to store
+in history because they can be applied and inverted later.
 
-Use `realizeDraftPatch(base, draft)` when you need to convert one draft op yourself. Most callers
-should use `resolveAndApply`, `createStateContext`, or `createHistoryContext`, which realize drafts for you.
+Most callers should use `resolveAndApply`, `dispatch`, `createStateContext`, or
+`createHistoryContext`, which realize drafts for you.
 
 ### Path
 
@@ -45,18 +96,16 @@ should use `resolveAndApply`, `createStateContext`, or `createHistoryContext`, w
 ];
 ```
 
-The runtime does not use JSON Pointer strings like `"/items/0"`.
-
 Umkehr patch objects are inspired by JSON Patch, but they are not JSON Patch compatible. Paths are
-structured arrays, tagged-union path segments are Umkehr-specific, and operation semantics include
-state-dependent draft realization for undo/redo.
+structured arrays, not JSON Pointer strings like `"/items/0"`, and tagged-union path segments are
+Umkehr-specific.
 
 ## Building Draft Operations
 
 Use `createPatchBuilder<T>()` to create typed draft operations without applying them:
 
 ```ts
-import {createPatchBuilder, DraftPatch} from 'umkehr';
+import {createPatchBuilder, type DraftPatch} from 'umkehr';
 
 type State = {
     title: string;
@@ -80,44 +129,9 @@ $.title('New title');
 $.settings.archived(true);
 ```
 
-Explicit methods are also available:
+Use `createPatchBuilder('kind')` when your tagged unions use a discriminant other than `'type'`.
 
-```ts
-$.title.$replace('New title');
-$.tags.$push('featured');
-$.settings.$remove();
-$.tags.$move(0, 2);
-$.tags.$reorder([2, 0, 1]);
-```
-
-`$reorder` takes a list of old indices in their new order. For example, `[2, 0, 1]` changes
-`['a', 'b', 'c']` into `['c', 'a', 'b']`. It is also a realized patch operation; the permutation
-itself contains enough information to invert the change.
-
-Use `$update` when the next operation depends on the current value at that path:
-
-```ts
-$.title.$update((title, up) => up(`${title}!`));
-```
-
-The callback receives the current value and a nested updater rooted at that value. The nested draft
-is rebased onto the outer path before it is applied.
-
-Use `createPatchDispatcher` when you want the same builder API to immediately call an application
-function:
-
-```ts
-import {createPatchDispatcher} from 'umkehr';
-
-const $ = createPatchDispatcher<State, null, 'type'>(
-    (draft, timing) => dispatch(draft, timing),
-    null,
-    'type',
-);
-```
-
-Use `createPatchBuilderWithContext` when nested `$update` callbacks need access to caller-provided
-context:
+Use `createPatchBuilderWithContext` when nested `$update` callbacks need caller-provided context:
 
 ```ts
 import {createPatchBuilderWithContext} from 'umkehr';
@@ -125,78 +139,134 @@ import {createPatchBuilderWithContext} from 'umkehr';
 const $ = createPatchBuilderWithContext<State, {source: string}>('type', {source: 'example'});
 ```
 
-## Applying Drafts
-
-`resolveAndApply` realizes one or more draft operations, applies them in order, and returns both the
-new state and the realized patch operations:
+Use `createPatchDispatcher` when you want the same builder API to immediately call an application
+function:
 
 ```ts
-import {resolveAndApply} from 'umkehr';
+import {createPatchDispatcher} from 'umkehr';
 
-const {current, changes} = resolveAndApply(
-    state,
-    [$.title('New title'), $.tags.$push('featured')],
-    null,
+const $ = createPatchDispatcher<State, undefined, 'type'>(
+    (draft, timing) => dispatch(draft, timing),
+    undefined,
     'type',
 );
 ```
 
-`changes` is a `Patch<T>[]`. These are the durable operations to store in history because
-they can be inverted.
+## Builder Methods
+
+| Method | Available on | Result |
+| --- | --- | --- |
+| `$(value)` | Any path | Draft `replace` shorthand |
+| `$replace(value)` | Any path | Draft `replace` |
+| `$update((value, up) => draft)` | Any path | Nested draft update based on current value |
+| `$add(value)` | Any path | Draft `add` |
+| `$remove()` | Any path | Draft `remove` |
+| `$push(value)` | Arrays | Draft `push`, realized as an `add` at the current array length |
+| `$move(from, to)` | Arrays and objects | Draft `move` within the current path |
+| `$reorder(indices)` | Arrays | Realized `reorder` using old indices in their new order |
+| `$variant(tag)` | Tagged unions | Refines the updater to one union arm |
+| `$variant(value, handlers)` | Tagged unions | Runs the handler for the active union arm |
+
+`$reorder([2, 0, 1])` changes `['a', 'b', 'c']` into `['c', 'a', 'b']`.
+
+## Applying Drafts
+
+`resolveAndApply` realizes one or more draft operations, applies them in order, and returns the new
+state plus realized patch operations:
+
+```ts
+import {createPatchBuilder, resolveAndApply} from 'umkehr';
+
+const $ = createPatchBuilder<State>();
+
+const {current, changes} = resolveAndApply(
+    state,
+    [$.title('New title'), $.tags.$push('featured')],
+    undefined,
+    'type',
+    Object.is,
+);
+```
 
 ## History
 
 Use `blankHistory(initialState)` to create a history tree:
 
 ```ts
-import {blankHistory, dispatch} from 'umkehr';
+import {blankHistory, createPatchBuilder, dispatch} from 'umkehr';
 
+const $ = createPatchBuilder<State>();
 const history = blankHistory(initialState);
 const nextHistory = dispatch(history, [$.title('New title')]);
+const undone = dispatch(nextHistory, {op: 'undo'});
+const redone = dispatch(undone, {op: 'redo'});
 ```
 
 The simple `dispatch` overload uses the default `'type'` discriminant, no builder context, and
-`fast-deep-equal`. Use the lower-level overload when you need a custom context, tag key, equality
-function, or ID generator.
+`fast-deep-equal`. The lower-level overload accepts a context value, tag key, equality function, and
+ID generator.
 
-The React history context wraps this for common app usage:
+History is a tree. If you undo and then dispatch a new change, the new node becomes another child of
+the current history node rather than deleting the old branch.
 
-```ts
-import {createHistoryContext, useValue} from 'umkehr/react';
-
-const [ProvideState, useStateContext] = createHistoryContext<State, Annotation>('type');
-```
-
-Inside the provider:
+## React Quick Start
 
 ```tsx
+import {blankHistory} from 'umkehr';
+import {createHistoryContext, useValue} from 'umkehr/react';
+
+type State = {
+    title: string;
+};
+
+const [ProvideState, useStateContext] = createHistoryContext<State, never>('type');
+
+export function App() {
+    return (
+        <ProvideState initial={blankHistory<State>({title: 'Draft'})}>
+            <TitleEditor />
+        </ProvideState>
+    );
+}
+
 function TitleEditor() {
     const ctx = useStateContext();
     const title = useValue(ctx.$.title);
 
-    return <input value={title} onChange={(event) => ctx.$.title(event.target.value)} />;
+    return (
+        <>
+            <input value={title} onChange={(event) => ctx.$.title(event.target.value)} />
+            <button onClick={() => ctx.undo()} disabled={!ctx.canUndo()}>
+                Undo
+            </button>
+            <button onClick={() => ctx.redo()} disabled={!ctx.canRedo()}>
+                Redo
+            </button>
+        </>
+    );
 }
 ```
 
-The context exposes:
+The history context exposes:
 
-- `ctx.$`: typed updater for the current state.
-- `ctx.latest()`: current state value.
-- `ctx.undo()` / `ctx.redo()`: history navigation.
-- `ctx.canUndo()` / `ctx.canRedo()`: history availability.
-- `ctx.useHistory()`: React hook for subscribing to history changes.
-- `ctx.dispatch(...)`: lower-level dispatch for draft ops or history commands.
-
-## Non-History React State
+| API | Use |
+| --- | --- |
+| `ctx.$` | Typed updater for the current state |
+| `ctx.latest()` | Current state value |
+| `ctx.undo()` / `ctx.redo()` | History navigation |
+| `ctx.canUndo()` / `ctx.canRedo()` | History availability |
+| `ctx.useHistory()` | React hook for subscribing to history changes |
+| `ctx.dispatch(...)` | Lower-level dispatch for draft ops or history commands |
 
 For state without undo/redo, use `createStateContext`:
 
-```ts
+```tsx
+import {createStateContext, useValue} from 'umkehr/react';
+
 const [ProvideState, useStateContext] = createStateContext<State>('type');
 ```
 
-The returned context exposes `ctx.$`, `ctx.latest()`, and `ctx.dispatch(...)`, but no history
-commands.
+The non-history context exposes `ctx.$`, `ctx.latest()`, and `ctx.dispatch(...)`.
 
 ## Preview Updates
 
@@ -207,17 +277,17 @@ ctx.$.title('Preview title', 'preview');
 ctx.$.title('Committed title');
 ```
 
-Preview changes are applied to a temporary state and notify path subscribers, but they are cleared
+Preview changes are applied to temporary state and notify path subscribers, but they are cleared
 before the next committed update.
 
 ## Tagged Unions
 
-Pass the discriminant key to `createPatchBuilder`, `createStateContext`, or `createHistoryContext`. The default
-pattern in this codebase uses `'type'`.
-
-For tagged unions, use `$variant` to refine an updater to the active union arm:
+Pass the discriminant key to `createPatchBuilder`, `createStateContext`, or `createHistoryContext`.
+The default is `'type'`.
 
 ```ts
+type Item = {type: 'shape'; radius: number} | {type: 'text'; text: string};
+
 ctx.$.item.$variant('shape').radius(10);
 ```
 
@@ -229,3 +299,29 @@ ctx.$.item.$variant(item, {
     text: (value, up) => up.text(`${value.text}!`),
 });
 ```
+
+## Supported Data Model
+
+Umkehr is intended for plain JSON-like data:
+
+| Area | Support |
+| --- | --- |
+| Objects and arrays | Supported; changed ancestors are cloned |
+| Primitive values | Supported as leaves and root values |
+| `undefined` | Treated as absence by draft realization for add/remove decisions |
+| Equality | Defaults to `fast-deep-equal` in history and React helpers; lower-level APIs accept a custom equality function |
+| Paths | Structured `PathSegment[]`; no JSON Pointer strings |
+| Tagged unions | Supported through Umkehr-specific tag path segments |
+| CRDT behavior | Not supported |
+| Arbitrary object diffing | Not supported |
+
+## Limitations
+
+- Umkehr patches are not JSON Patch compatible.
+- `copy` is not part of the public patch operation set.
+- Preview updates are temporary React-context state; they are cleared before the next committed
+  update.
+- Array paths use numeric indices. Realized array operations are tied to the array state they were
+  realized against.
+- Persisted patch history assumes compatible application state shape. If your schema changes, you
+  need to migrate stored history or start a new history root.

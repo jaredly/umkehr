@@ -9,6 +9,7 @@ describe('package exports', () => {
 
         expect(typeof pkg.createPatchBuilder).toBe('function');
         expect(typeof pkg.createPatchBuilderWithContext).toBe('function');
+        expect(typeof pkg.resolveAndApply).toBe('function');
         expect(typeof pkg.blankHistory).toBe('function');
         expect('createStateContext' in pkg).toBe(false);
         expect('createHistoryContext' in pkg).toBe(false);
