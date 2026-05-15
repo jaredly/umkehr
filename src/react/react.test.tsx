@@ -204,6 +204,53 @@ describe('createStateContext', () => {
         expect(titleRenders).toBe(3);
     });
 
+    it('clears preview updates without committing them', async () => {
+        const [Provider, useStateContext] = createStateContext<State>('type');
+        const saved: State[] = [];
+        let titleRenders = 0;
+
+        function TitleView() {
+            const ctx = useStateContext();
+            const title = useValue(ctx.$.title);
+            titleRenders += 1;
+            return <span data-testid="title">{title}</span>;
+        }
+
+        function PreviewControls() {
+            const ctx = useStateContext();
+            return (
+                <>
+                    <button type="button" onClick={() => ctx.$.title('Preview', 'preview')}>
+                        preview
+                    </button>
+                    <button type="button" onClick={() => ctx.clearPreview()}>
+                        clear preview
+                    </button>
+                </>
+            );
+        }
+
+        const view = render(
+            <Provider initial={{title: 'Draft', count: 0}} save={(state) => saved.push(state)}>
+                <>
+                    <TitleView />
+                    <PreviewControls />
+                </>
+            </Provider>,
+        );
+
+        fireEvent.click(view.getByText('preview'));
+
+        await waitFor(() => expect(view.getByTestId('title').textContent).toBe('Preview'));
+        expect(titleRenders).toBe(2);
+
+        fireEvent.click(view.getByText('clear preview'));
+
+        await waitFor(() => expect(view.getByTestId('title').textContent).toBe('Draft'));
+        expect(titleRenders).toBe(3);
+        expect(saved).toEqual([]);
+    });
+
     it('supports selectors with custom equality', () => {
         const [Provider, useStateContext] = createStateContext<State>('type');
         let parityRenders = 0;

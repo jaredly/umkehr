@@ -8,15 +8,9 @@ importers:
 
   .:
     dependencies:
-      react:
-        specifier: ^19.2.0
-        version: 19.2.6
-      react-dom:
-        specifier: ^19.2.0
-        version: 19.2.6(react@19.2.6)
       umkehr:
-        specifier: file:../..
-        version: file:../..(react@19.2.6)
+        specifier: link:../..
+        version: link:../..
       vite:
         specifier: ^7.2.7
         version: 7.3.3
@@ -333,9 +327,6 @@ packages:
     engines: {node: '>=18'}
     hasBin: true
 
-  fast-deep-equal@3.1.3:
-    resolution: {integrity: sha512-f3qQ9oQy9j2AhBe/H9VC91wLmKBCCU/gDOnKNAYG5hswO7BLKj09Hc5HYNz9cGI++xlpDCIgDaitVs03ATR84Q==}
-
   fdir@6.5.0:
     resolution: {integrity: sha512-tIbYtZbucOs0BRGqPJkshJUYdL+SDH7dVM8gjy+ERp3WAUjLEFJE+02kanyHtwjWOnwrKYBiwAmM0p4kLJAnXg==}
     engines: {node: '>=12.0.0'}
@@ -366,22 +357,10 @@ packages:
     resolution: {integrity: sha512-SoSL4+OSEtR99LHFZQiJLkT59C5B1amGO1NzTwj7TT1qCUgUO6hxOvzkOYxD+vMrXBM3XJIKzokoERdqQq/Zmg==}
     engines: {node: ^10 || ^12 || >=14}
 
-  react-dom@19.2.6:
-    resolution: {integrity: sha512-0prMI+hvBbPjsWnxDLxlCGyM8PN6UuWjEUCYmZhO67xIV9Xasa/r/vDnq+Xyq4Lo27g8QSbO5YzARu0D1Sps3g==}
-    peerDependencies:
-      react: ^19.2.6
-
-  react@19.2.6:
-    resolution: {integrity: sha512-sfWGGfavi0xr8Pg0sVsyHMAOziVYKgPLNrS7ig+ivMNb3wbCBw3KxtflsGBAwD3gYQlE/AEZsTLgToRrSCjb0Q==}
-    engines: {node: '>=0.10.0'}
-
   rollup@4.60.4:
     resolution: {integrity: sha512-WHeFSbZYsPu3+bLoNRUuAO+wavNlocOPf3wSHTP7hcFKVnJeWsYlCDbr3mTS14FCizf9ccIxXA8sGL8zKeQN3g==}
     engines: {node: '>=18.0.0', npm: '>=8.0.0'}
     hasBin: true
-
-  scheduler@0.27.0:
-    resolution: {integrity: sha512-eNv+WrVbKu1f3vbYJT/xtiF5syA5HPIMtf9IgY/nKg0sWqzAUEvqY/xm7OcZc/qafLx/iO9FgOmeSAp4v5ti/Q==}
 
   source-map-js@1.2.1:
     resolution: {integrity: sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==}
@@ -395,14 +374,6 @@ packages:
     resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
     engines: {node: '>=14.17'}
     hasBin: true
-
-  umkehr@file:../..:
-    resolution: {directory: ../.., type: directory}
-    peerDependencies:
-      react: '>=18'
-    peerDependenciesMeta:
-      react:
-        optional: true
 
   vite@7.3.3:
     resolution: {integrity: sha512-/4XH147Ui7OGTjg3HbdWe5arnZQSbfuRzdr9Ec7TQi5I7R+ir0Rlc9GIvD4v0XZurELqA035KVXJXpR61xhiTA==}
@@ -640,8 +611,6 @@ snapshots:
       '@esbuild/win32-ia32': 0.27.7
       '@esbuild/win32-x64': 0.27.7
 
-  fast-deep-equal@3.1.3: {}
-
   fdir@6.5.0(picomatch@4.0.4):
     optionalDependencies:
       picomatch: 4.0.4
@@ -660,13 +629,6 @@ snapshots:
       nanoid: 3.3.12
       picocolors: 1.1.1
       source-map-js: 1.2.1
-
-  react-dom@19.2.6(react@19.2.6):
-    dependencies:
-      react: 19.2.6
-      scheduler: 0.27.0
-
-  react@19.2.6: {}
 
   rollup@4.60.4:
     dependencies:
@@ -699,8 +661,6 @@ snapshots:
       '@rollup/rollup-win32-x64-msvc': 4.60.4
       fsevents: 2.3.3
 
-  scheduler@0.27.0: {}
-
   source-map-js@1.2.1: {}
 
   tinyglobby@0.2.16:
@@ -709,12 +669,6 @@ snapshots:
       picomatch: 4.0.4
 
   typescript@5.9.3: {}
-
-  umkehr@file:../..(react@19.2.6):
-    dependencies:
-      fast-deep-equal: 3.1.3
-    optionalDependencies:
-      react: 19.2.6
 
   vite@7.3.3:
     dependencies:

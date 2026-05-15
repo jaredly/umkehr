@@ -146,6 +146,25 @@ const recordPreviewPaths = (previewPaths: Record<string, Path>, paths: Path[]) =
     });
 };
 
+const clearPreviewState = <T, Change, Tag extends string>(
+    ctx: ContextBase<T, Change, Tag>,
+): boolean => {
+    const previewPaths = Object.values(ctx.previewPaths);
+    const hadPreview = previewPaths.length > 0;
+    ctx.previewState = null;
+    ctx.previewPaths = {};
+    ctx.queuedChanges = [];
+    if (ctx.raf != null) {
+        cancelAnimationFrame(ctx.raf);
+        ctx.raf = undefined;
+    }
+    if (hadPreview) {
+        ctx.listeners.forEach((f) => f());
+        notifyPaths(ctx.listenersByPath, previewPaths);
+    }
+    return hadPreview;
+};
+
 export const useValue: (<Current, Return, Tag extends PropertyKey>(
     node: PatchBuilderInternal<unknown, Current, Tag, unknown, Context>,
     mod: (v: Current) => Return,
@@ -311,6 +330,9 @@ export const createHistoryContext = <T, An, Tag extends string = 'type'>(
                     redo() {
                         dispatch({op: 'redo'});
                     },
+                    clearPreview() {
+                        clearPreviewState(ctx);
+                    },
                     $,
                     updateAnnotations,
                     dispatch,
@@ -453,13 +475,11 @@ const makeHistoryDispatch = <T, An, Tag extends string = 'type'>(
             ctx.raf = undefined;
         }
 
-        const {history: next, changedPaths: pathTargets, changedHistory} = dispatchWithChangedPaths(
-            ctx.state,
-            v,
-            extra,
-            tag,
-            equalFn,
-        );
+        const {
+            history: next,
+            changedPaths: pathTargets,
+            changedHistory,
+        } = dispatchWithChangedPaths(ctx.state, v, extra, tag, equalFn);
         if (next === ctx.state) return;
         hChanged = changedHistory;
         ctx.state = next;
@@ -533,6 +553,9 @@ export const createStateContext = <T, Tag extends string = 'type'>(
                 return {
                     latest() {
                         return ctx.state;
+                    },
+                    clearPreview() {
+                        clearPreviewState(ctx);
                     },
                     $,
                     dispatch,

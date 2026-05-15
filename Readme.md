@@ -266,6 +266,7 @@ The history context exposes:
 | `ctx.latest()` | Current state value |
 | `ctx.undo()` / `ctx.redo()` | History navigation |
 | `ctx.canUndo()` / `ctx.canRedo()` | History availability |
+| `ctx.clearPreview()` | Clears temporary preview state without committing it |
 | `ctx.useHistory()` | React hook for subscribing to history changes |
 | `ctx.dispatch(...)` | Lower-level dispatch for draft ops or history commands |
 
@@ -299,7 +300,8 @@ import {createStateContext, useValue} from 'umkehr/react';
 const [ProvideState, useStateContext] = createStateContext<State>('type');
 ```
 
-The non-history context exposes `ctx.$`, `ctx.latest()`, and `ctx.dispatch(...)`.
+The non-history context exposes `ctx.$`, `ctx.latest()`, `ctx.clearPreview()`, and
+`ctx.dispatch(...)`.
 
 ## Preview Updates
 

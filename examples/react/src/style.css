@@ -56,6 +56,30 @@ button:disabled {
     color: #52606d;
 }
 
+.colorPicker {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin: 18px 0;
+}
+
+.swatch {
+    width: 32px;
+    height: 32px;
+    border: 2px solid #fff;
+    border-radius: 999px;
+    padding: 0;
+    box-shadow: 0 0 0 1px #bcccdc;
+}
+
+.swatch:hover,
+.swatch:focus-visible,
+.swatch.selected {
+    box-shadow:
+        0 0 0 1px #486581,
+        0 0 0 4px #d9e2ec;
+}
+
 ul {
     display: grid;
     gap: 8px;
@@ -67,7 +91,7 @@ li {
     padding: 12px;
     border: 1px solid #d9e2ec;
     border-radius: 8px;
-    background: #fff;
+    background: var(--task-bg, #fff);
 }
 
 label {

@@ -9,11 +9,15 @@ type Todo = {
 };
 
 type State = {
+    bgcolor: string;
     draftTitle: string;
     todos: Todo[];
 };
 
+const pastelColors = ['#fce7f3', '#dbeafe', '#dcfce7', '#fef3c7', '#ede9fe'] as const;
+
 const initialState: State = {
+    bgcolor: pastelColors[1],
     draftTitle: '',
     todos: [
         {id: 'one', title: 'Write README', done: true},
@@ -33,6 +37,8 @@ export function App() {
 
 function TodoApp() {
     const ctx = useTodos();
+    console.log(ctx);
+    const bgcolor = useValue(ctx.$.bgcolor);
     const draftTitle = useValue(ctx.$.draftTitle);
     const todos = useValue(ctx.$.todos);
 
@@ -65,7 +71,27 @@ function TodoApp() {
                 <button type="submit">Add</button>
             </form>
             <p className="preview">Preview: {previewTitle}</p>
-            <ul>
+            <section
+                className="colorPicker"
+                aria-label="Task background color"
+                onMouseLeave={() => ctx.clearPreview()}
+            >
+                {pastelColors.map((color) => (
+                    <button
+                        key={color}
+                        type="button"
+                        className={color === bgcolor ? 'swatch selected' : 'swatch'}
+                        style={{backgroundColor: color}}
+                        title={color}
+                        aria-label={`Use ${color}`}
+                        onClick={() => ctx.$.bgcolor(color)}
+                        onFocus={() => ctx.$.bgcolor(color, 'preview')}
+                        onMouseEnter={() => ctx.$.bgcolor(color, 'preview')}
+                        onBlur={() => ctx.clearPreview()}
+                    />
+                ))}
+            </section>
+            <ul style={{'--task-bg': bgcolor} as React.CSSProperties}>
                 {todos.map((todo, index) => (
                     <li key={todo.id}>
                         <label>
