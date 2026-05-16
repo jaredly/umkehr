@@ -4,103 +4,130 @@
 
 body {
     margin: 0;
-    color: #1f2933;
-    background: #f4f6f8;
+    color: #17202a;
+    background: #eef2f6;
     font-family:
-        Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        Inter,
+        ui-sans-serif,
+        system-ui,
+        -apple-system,
+        BlinkMacSystemFont,
+        'Segoe UI',
+        sans-serif;
 }
 
-main {
-    width: min(680px, calc(100vw - 32px));
-    margin: 48px auto;
-}
-
-h1 {
-    margin: 0 0 20px;
-    font-size: 32px;
-    line-height: 1.1;
-}
-
-form,
-nav {
-    display: flex;
-    gap: 8px;
-}
-
-input[type="text"],
-form input {
-    min-width: 0;
-    flex: 1;
-    border: 1px solid #cbd2d9;
-    border-radius: 6px;
-    padding: 10px 12px;
+button,
+input {
     font: inherit;
 }
 
 button {
-    border: 1px solid #9aa5b1;
+    border: 1px solid #9aa8b8;
     border-radius: 6px;
-    padding: 10px 14px;
-    color: #102a43;
+    padding: 8px 12px;
+    color: #17202a;
     background: #fff;
-    font: inherit;
     cursor: pointer;
 }
 
-button:disabled {
-    cursor: not-allowed;
-    opacity: 0.5;
+button:hover {
+    border-color: #52616f;
 }
 
-.preview {
-    color: #52606d;
+.collabShell {
+    width: min(1180px, calc(100vw - 32px));
+    min-height: 100vh;
+    margin: 0 auto;
+    padding: 32px 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 132px minmax(0, 1fr);
+    gap: 18px;
+    align-items: start;
 }
 
-.colorPicker {
+.todoPanel {
+    min-width: 0;
+    border: 1px solid #d4dde7;
+    border-radius: 8px;
+    background: #fdfefe;
+    box-shadow: 0 10px 24px rgb(25 42 62 / 8%);
+}
+
+.panelHeader {
     display: flex;
-    gap: 8px;
-    align-items: center;
-    margin: 18px 0;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 18px;
+    border-bottom: 1px solid #e1e8f0;
 }
 
-.swatch {
-    width: 32px;
-    height: 32px;
-    border: 2px solid #fff;
+h1 {
+    margin: 0;
+    font-size: 22px;
+    line-height: 1.15;
+}
+
+p {
+    margin: 6px 0 0;
+    color: #64748b;
+}
+
+.queuedBadge {
+    align-self: start;
+    white-space: nowrap;
     border-radius: 999px;
-    padding: 0;
-    box-shadow: 0 0 0 1px #bcccdc;
+    padding: 4px 10px;
+    color: #334155;
+    background: #e8eef5;
+    font-size: 13px;
 }
 
-.swatch:hover,
-.swatch:focus-visible,
-.swatch.selected {
-    box-shadow:
-        0 0 0 1px #486581,
-        0 0 0 4px #d9e2ec;
+.addForm {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    padding: 18px;
 }
 
-ul {
+.addForm input,
+.titleInput {
+    min-width: 0;
+    width: 100%;
+    border: 1px solid #c3cfdb;
+    border-radius: 6px;
+    padding: 9px 10px;
+    color: #17202a;
+    background: #fff;
+}
+
+.todoList {
     display: grid;
     gap: 8px;
-    padding: 0;
+    max-height: calc(100vh - 218px);
+    margin: 0;
+    padding: 0 18px 18px;
+    overflow: auto;
     list-style: none;
 }
 
-li {
-    display: flex;
-    gap: 12px;
+.todoItem {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
     align-items: center;
-    justify-content: space-between;
-    padding: 12px;
-    border: 1px solid #d9e2ec;
+    min-height: 54px;
+    border: 1px solid #dce4ed;
     border-radius: 8px;
-    background: var(--task-bg, #fff);
+    padding: 10px;
+    background: #fff;
 }
 
-label {
+.todoItem.done {
+    background: #f6f8fa;
+}
+
+.todoItem label {
     min-width: 0;
-    flex: 1;
     display: flex;
     gap: 10px;
     align-items: center;
@@ -111,23 +138,79 @@ label {
     overflow-wrap: anywhere;
 }
 
-.todoEditInput {
-    min-width: 0;
+.done .todoTitle {
+    color: #748094;
+    text-decoration: line-through;
+}
+
+.itemActions {
+    display: flex;
+    gap: 6px;
+}
+
+.itemActions button {
+    padding: 6px 9px;
+}
+
+.syncRail {
+    position: sticky;
+    top: 32px;
+    display: grid;
+    gap: 12px;
+    justify-items: center;
+    border: 1px solid #d4dde7;
+    border-radius: 8px;
+    padding: 18px 12px;
+    background: #fdfefe;
+}
+
+.syncIndicator {
+    width: 18px;
+    height: 18px;
+    border-radius: 999px;
+}
+
+.syncIndicator.on {
+    background: #20a464;
+    box-shadow: 0 0 0 5px #d8f3e5;
+}
+
+.syncIndicator.off {
+    background: #d14343;
+    box-shadow: 0 0 0 5px #fde2e2;
+}
+
+.syncButton {
     width: 100%;
-    border: 1px solid #9fb3c8;
+}
+
+.queueCounts {
+    width: 100%;
+    display: grid;
+    gap: 6px;
+    color: #64748b;
+    font-size: 13px;
+}
+
+.queueCounts span {
+    display: flex;
+    justify-content: space-between;
     border-radius: 6px;
-    padding: 6px 8px;
-    background: #fff;
-    font: inherit;
+    padding: 5px 7px;
+    background: #eef2f6;
 }
 
-.editButton {
-    opacity: 0;
-    padding: 6px 10px;
-    transition: opacity 120ms ease;
-}
+@media (max-width: 820px) {
+    .collabShell {
+        grid-template-columns: 1fr;
+    }
 
-li:hover .editButton,
-li:focus-within .editButton {
-    opacity: 1;
+    .syncRail {
+        position: static;
+        grid-row: 2;
+    }
+
+    .todoList {
+        max-height: none;
+    }
 }
