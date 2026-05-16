@@ -82,6 +82,18 @@ p {
     font-size: 13px;
 }
 
+.panelActions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    justify-content: flex-end;
+}
+
+.panelActions button {
+    padding: 5px 9px;
+    font-size: 13px;
+}
+
 .addForm {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;

@@ -1,12 +1,15 @@
 import {useMemo, useRef, useState} from 'react';
 import typia from 'typia';
-import {createPatchBuilder, resolveAndApply, type DraftPatch} from 'umkehr';
+import {createPatchBuilder, type DraftPatch} from 'umkehr';
 import {
-    applyCrdtUpdate,
+    applyLocalCommand,
+    applyRemoteUpdate,
     createCrdtDocument,
-    createCrdtUpdates,
+    createCrdtLocalHistory,
     hlc,
-    type CrdtDocument,
+    redoLocalCommand,
+    undoLocalCommand,
+    type CrdtLocalHistory,
     type CrdtUpdate,
 } from 'umkehr/crdt';
 import './style.css';
@@ -24,8 +27,8 @@ export type State = {
 type Side = 'left' | 'right';
 
 type CollaborationState = {
-    left: CrdtDocument<State>;
-    right: CrdtDocument<State>;
+    left: CrdtLocalHistory<State>;
+    right: CrdtLocalHistory<State>;
     leftOutbox: CrdtUpdate[];
     rightOutbox: CrdtUpdate[];
     syncEnabled: boolean;
@@ -42,16 +45,7 @@ const initialState: State = {
     ],
 };
 
-const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const initialTimestamp = hlc.pack(hlc.init('seed', 0));
-
-const latestUpdateTimestamp = (update: CrdtUpdate) => {
-    if (update.op !== 'setOrder') return update.ts;
-    return Object.values(update.orders)
-        .map(({ts}) => ts)
-        .sort()
-        .at(-1);
-};
 
 export function App() {
     const clock = useRef({
@@ -59,43 +53,34 @@ export function App() {
         right: hlc.init('right', Date.now()),
     });
     const [collab, setCollab] = useState<CollaborationState>(() => ({
-        left: createCrdtDocument(initialState, schema, {timestamp: initialTimestamp}),
-        right: createCrdtDocument(initialState, schema, {timestamp: initialTimestamp}),
+        left: createCrdtLocalHistory(
+            createCrdtDocument(initialState, schema, {timestamp: initialTimestamp}),
+        ),
+        right: createCrdtLocalHistory(
+            createCrdtDocument(initialState, schema, {timestamp: initialTimestamp}),
+        ),
         leftOutbox: [],
         rightOutbox: [],
         syncEnabled: true,
     }));
 
-    const nextTimestamp = (side: Side) => {
-        clock.current[side] = hlc.inc(clock.current[side], Date.now());
-        return hlc.pack(clock.current[side]);
-    };
-
-    const receiveUpdate = <T,>(side: Side, doc: CrdtDocument<T>, update: CrdtUpdate) => {
-        const ts = latestUpdateTimestamp(update);
-        if (ts) {
-            clock.current[side] = hlc.recv(clock.current[side], hlc.unpack(ts), Date.now());
-        }
-        return applyCrdtUpdate(doc, update);
+    const receiveUpdate = (side: Side, history: CrdtLocalHistory<State>, update: CrdtUpdate) => {
+        const next = applyRemoteUpdate(history, update, clock.current[side]);
+        clock.current[side] = next.clock;
+        return next.history;
     };
 
     const applyLocal = (side: Side, draft: TodoDraft) => {
         setCollab((current) => {
-            const source = current[side];
             const targetSide: Side = side === 'left' ? 'right' : 'left';
-            const {changes} = resolveAndApply(source.state, draft, undefined, 'type', equal);
-            let nextSource = source;
+            const local = applyLocalCommand(current[side], draft, clock.current[side]);
+            clock.current[side] = local.clock;
+            let nextSource = local.history;
             let nextTarget = current[targetSide];
-            const updates: CrdtUpdate[] = [];
 
-            for (const change of changes) {
-                const ts = nextTimestamp(side);
-                for (const update of createCrdtUpdates(nextSource, change, ts)) {
-                    nextSource = applyCrdtUpdate(nextSource, update);
-                    updates.push(update);
-                    if (current.syncEnabled) {
-                        nextTarget = receiveUpdate(targetSide, nextTarget, update);
-                    }
+            if (current.syncEnabled) {
+                for (const update of local.updates) {
+                    nextTarget = receiveUpdate(targetSide, nextTarget, update);
                 }
             }
 
@@ -106,7 +91,7 @@ export function App() {
                     right: nextTarget,
                     leftOutbox: current.syncEnabled
                         ? current.leftOutbox
-                        : [...current.leftOutbox, ...updates],
+                        : [...current.leftOutbox, ...local.updates],
                 };
             }
             return {
@@ -115,7 +100,46 @@ export function App() {
                 right: nextSource,
                 rightOutbox: current.syncEnabled
                     ? current.rightOutbox
-                    : [...current.rightOutbox, ...updates],
+                    : [...current.rightOutbox, ...local.updates],
+            };
+        });
+    };
+
+    const applyHistoryCommand = (side: Side, kind: 'undo' | 'redo') => {
+        setCollab((current) => {
+            const targetSide: Side = side === 'left' ? 'right' : 'left';
+            const result =
+                kind === 'undo'
+                    ? undoLocalCommand(current[side], clock.current[side])
+                    : redoLocalCommand(current[side], clock.current[side]);
+            clock.current[side] = result.clock;
+            if (!result.ok) return current;
+
+            let nextSource = result.history;
+            let nextTarget = current[targetSide];
+            if (current.syncEnabled) {
+                for (const update of result.updates) {
+                    nextTarget = receiveUpdate(targetSide, nextTarget, update);
+                }
+            }
+
+            if (side === 'left') {
+                return {
+                    ...current,
+                    left: nextSource,
+                    right: nextTarget,
+                    leftOutbox: current.syncEnabled
+                        ? current.leftOutbox
+                        : [...current.leftOutbox, ...result.updates],
+                };
+            }
+            return {
+                ...current,
+                left: nextTarget,
+                right: nextSource,
+                rightOutbox: current.syncEnabled
+                    ? current.rightOutbox
+                    : [...current.rightOutbox, ...result.updates],
             };
         });
     };
@@ -143,9 +167,10 @@ export function App() {
             <TodoPanel
                 title="Replica A"
                 side="left"
-                doc={collab.left}
+                history={collab.left}
                 queued={collab.leftOutbox.length}
                 applyLocal={applyLocal}
+                applyHistoryCommand={applyHistoryCommand}
             />
             <SyncControls
                 syncEnabled={collab.syncEnabled}
@@ -156,9 +181,10 @@ export function App() {
             <TodoPanel
                 title="Replica B"
                 side="right"
-                doc={collab.right}
+                history={collab.right}
                 queued={collab.rightOutbox.length}
                 applyLocal={applyLocal}
+                applyHistoryCommand={applyHistoryCommand}
             />
         </main>
     );
@@ -192,17 +218,20 @@ function SyncControls({
 function TodoPanel({
     title,
     side,
-    doc,
+    history,
     queued,
     applyLocal,
+    applyHistoryCommand,
 }: {
     title: string;
     side: Side;
-    doc: CrdtDocument<State>;
+    history: CrdtLocalHistory<State>;
     queued: number;
     applyLocal: (side: Side, draft: TodoDraft) => void;
+    applyHistoryCommand: (side: Side, kind: 'undo' | 'redo') => void;
 }) {
     const [draftTitle, setDraftTitle] = useState('');
+    const doc = history.doc;
     const completed = useMemo(
         () => doc.state.todos.filter((todo) => todo.done).length,
         [doc.state.todos],
@@ -217,7 +246,23 @@ function TodoPanel({
                         {completed}/{doc.state.todos.length} done
                     </p>
                 </div>
-                <span className="queuedBadge">{queued} queued</span>
+                <div className="panelActions">
+                    <button
+                        type="button"
+                        onClick={() => applyHistoryCommand(side, 'undo')}
+                        disabled={!history.undoStack.length}
+                    >
+                        Undo
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => applyHistoryCommand(side, 'redo')}
+                        disabled={!history.redoStack.length}
+                    >
+                        Redo
+                    </button>
+                    <span className="queuedBadge">{queued} queued</span>
+                </div>
             </header>
 
             <form

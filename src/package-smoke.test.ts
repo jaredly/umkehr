@@ -29,6 +29,19 @@ describe('package exports', () => {
         expect(typeof validationPkg.PatchValidationError).toBe('function');
     });
 
+    it('imports the built CRDT entry point separately', async () => {
+        expect(existsSync('dist/src/crdt/index.js')).toBe(true);
+
+        const crdtPkg = await import('umkehr/crdt');
+
+        expect(typeof crdtPkg.createCrdtDocument).toBe('function');
+        expect(typeof crdtPkg.createCrdtUpdates).toBe('function');
+        expect(typeof crdtPkg.applyCrdtUpdate).toBe('function');
+        expect(typeof crdtPkg.createCrdtUpdateValidator).toBe('function');
+        expect(typeof crdtPkg.validateCrdtUpdate).toBe('function');
+        expect(typeof crdtPkg.CrdtUpdateValidationError).toBe('function');
+    });
+
     it('imports the built React entry point separately', async () => {
         expect(existsSync('dist/src/react/index.js')).toBe(true);
 
