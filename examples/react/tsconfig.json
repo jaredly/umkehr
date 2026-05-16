@@ -5,6 +5,7 @@
         "noEmit": true,
         "paths": {
             "umkehr": ["../../dist/src/index.d.ts"],
+            "umkehr/validation": ["../../dist/src/validation/index.d.ts"],
             "umkehr/react": ["../../dist/src/react/react.d.ts"]
         }
     },
