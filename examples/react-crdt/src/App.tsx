@@ -5,6 +5,7 @@ import {
     applyCrdtUpdate,
     createCrdtDocument,
     createCrdtUpdates,
+    hlc,
     type CrdtDocument,
     type CrdtUpdate,
 } from 'umkehr/crdt';
@@ -42,20 +43,40 @@ const initialState: State = {
 };
 
 const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+const initialTimestamp = hlc.pack(hlc.init('seed', 0));
+
+const latestUpdateTimestamp = (update: CrdtUpdate) => {
+    if (update.op !== 'setOrder') return update.ts;
+    return Object.values(update.orders)
+        .map(({ts}) => ts)
+        .sort()
+        .at(-1);
+};
 
 export function App() {
-    const clock = useRef({left: 0, right: 0});
+    const clock = useRef({
+        left: hlc.init('left', Date.now()),
+        right: hlc.init('right', Date.now()),
+    });
     const [collab, setCollab] = useState<CollaborationState>(() => ({
-        left: createCrdtDocument(initialState, schema, {timestamp: '000000-seed'}),
-        right: createCrdtDocument(initialState, schema, {timestamp: '000000-seed'}),
+        left: createCrdtDocument(initialState, schema, {timestamp: initialTimestamp}),
+        right: createCrdtDocument(initialState, schema, {timestamp: initialTimestamp}),
         leftOutbox: [],
         rightOutbox: [],
         syncEnabled: true,
     }));
 
     const nextTimestamp = (side: Side) => {
-        clock.current[side] += 1;
-        return `${String(clock.current[side]).padStart(6, '0')}-${side}`;
+        clock.current[side] = hlc.inc(clock.current[side], Date.now());
+        return hlc.pack(clock.current[side]);
+    };
+
+    const receiveUpdate = <T,>(side: Side, doc: CrdtDocument<T>, update: CrdtUpdate) => {
+        const ts = latestUpdateTimestamp(update);
+        if (ts) {
+            clock.current[side] = hlc.recv(clock.current[side], hlc.unpack(ts), Date.now());
+        }
+        return applyCrdtUpdate(doc, update);
     };
 
     const applyLocal = (side: Side, draft: TodoDraft) => {
@@ -73,7 +94,7 @@ export function App() {
                     nextSource = applyCrdtUpdate(nextSource, update);
                     updates.push(update);
                     if (current.syncEnabled) {
-                        nextTarget = applyCrdtUpdate(nextTarget, update);
+                        nextTarget = receiveUpdate(targetSide, nextTarget, update);
                     }
                 }
             }
@@ -105,8 +126,8 @@ export function App() {
 
             let left = current.left;
             let right = current.right;
-            for (const update of current.leftOutbox) right = applyCrdtUpdate(right, update);
-            for (const update of current.rightOutbox) left = applyCrdtUpdate(left, update);
+            for (const update of current.leftOutbox) right = receiveUpdate('right', right, update);
+            for (const update of current.rightOutbox) left = receiveUpdate('left', left, update);
             return {
                 left,
                 right,
