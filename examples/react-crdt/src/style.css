@@ -34,6 +34,17 @@ button:hover {
     border-color: #52616f;
 }
 
+button:disabled {
+    border-color: #d5dde7;
+    color: #94a3b8;
+    background: #edf2f7;
+    cursor: not-allowed;
+}
+
+button:disabled:hover {
+    border-color: #d5dde7;
+}
+
 .collabShell {
     width: min(1180px, calc(100vw - 32px));
     min-height: 100vh;
@@ -92,6 +103,10 @@ p {
 .panelActions button {
     padding: 5px 9px;
     font-size: 13px;
+}
+
+.panelActions button:disabled {
+    opacity: 0.58;
 }
 
 .addForm {

@@ -4,6 +4,8 @@ import {createPatchBuilder, type DraftPatch} from 'umkehr';
 import {
     applyLocalCommand,
     applyRemoteUpdate,
+    canRedoLocalCommand,
+    canUndoLocalCommand,
     createCrdtDocument,
     createCrdtLocalHistory,
     hlc,
@@ -236,6 +238,8 @@ function TodoPanel({
         () => doc.state.todos.filter((todo) => todo.done).length,
         [doc.state.todos],
     );
+    const canUndo = useMemo(() => canUndoLocalCommand(history), [history]);
+    const canRedo = useMemo(() => canRedoLocalCommand(history), [history]);
 
     return (
         <section className="todoPanel">
@@ -250,14 +254,14 @@ function TodoPanel({
                     <button
                         type="button"
                         onClick={() => applyHistoryCommand(side, 'undo')}
-                        disabled={!history.undoStack.length}
+                        disabled={!canUndo}
                     >
                         Undo
                     </button>
                     <button
                         type="button"
                         onClick={() => applyHistoryCommand(side, 'redo')}
-                        disabled={!history.redoStack.length}
+                        disabled={!canRedo}
                     >
                         Redo
                     </button>

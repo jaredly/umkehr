@@ -4,6 +4,8 @@ export {createCrdtDocument} from './document.js';
 export {
     applyLocalCommand,
     applyRemoteUpdate,
+    canRedoLocalCommand,
+    canUndoLocalCommand,
     createCrdtLocalHistory,
     redoLocalCommand,
     undoLocalCommand,

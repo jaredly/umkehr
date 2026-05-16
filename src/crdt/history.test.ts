@@ -5,6 +5,8 @@ import {
     applyCrdtUpdate,
     applyLocalCommand,
     applyRemoteUpdate,
+    canRedoLocalCommand,
+    canUndoLocalCommand,
     createCrdtDocument,
     createCrdtLocalHistory,
     createCrdtUpdates,
@@ -116,10 +118,18 @@ describe('crdt local history', () => {
         if (!redone.ok) return;
         expect(redone.history.doc.state.title).toBe('Published');
         expect(redone.updates[0]).toMatchObject({op: 'set', value: 'Published'});
+        expect(canUndoLocalCommand(redone.history)).toBe(true);
+
+        const undoneAgain = undoLocalCommand(redone.history, redone.clock);
+
+        expect(undoneAgain.ok).toBe(true);
+        if (!undoneAgain.ok) return;
+        expect(undoneAgain.history.doc.state.title).toBe('Draft');
     });
 
     it('blocks undo when a newer remote update superseded the local set', () => {
         const applied = apply(blank(), $.title('Local'), clock('local'));
+        expect(canUndoLocalCommand(applied.history)).toBe(true);
         const remoteUpdate = createCrdtUpdates(
             applied.history.doc,
             {
@@ -136,6 +146,7 @@ describe('crdt local history', () => {
 
         expect(undone.ok).toBe(false);
         expect(undone.reason).toBe('blocked');
+        expect(canUndoLocalCommand(remote.history)).toBe(false);
         expect(undone.history.doc.state.title).toBe('Remote');
     });
 
@@ -342,6 +353,7 @@ describe('crdt local history', () => {
 
         expect(redone.ok).toBe(false);
         expect(redone.reason).toBe('blocked');
+        expect(canRedoLocalCommand(remote.history)).toBe(false);
         expect(redone.history.doc.state.title).toBe('Remote');
     });
 });

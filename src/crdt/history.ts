@@ -94,6 +94,19 @@ export function createCrdtLocalHistory<T>(doc: CrdtDocument<T>): CrdtLocalHistor
     return {doc, undoStack: [], redoStack: []};
 }
 
+export function canUndoLocalCommand<T>(history: CrdtLocalHistory<T>) {
+    const command = history.undoStack.at(-1);
+    if (!command) return false;
+    return checkEffects(history.doc, command, command.effects.toReversed()).length === 0;
+}
+
+export function canRedoLocalCommand<T>(history: CrdtLocalHistory<T>) {
+    const command = history.redoStack.at(-1);
+    if (!command) return false;
+    const guardEffects = command.undoEffects ?? command.effects;
+    return checkEffects(history.doc, command, guardEffects).length === 0;
+}
+
 export function applyLocalCommand<T>(
     history: CrdtLocalHistory<T>,
     draft: MaybeNested<DraftPatch<T, 'type', undefined>>,
@@ -173,7 +186,7 @@ export function redoLocalCommand<T>(
         createRedoUpdates(command, nextTs),
         nextTs.current(),
     );
-    const redone: LocalCommand = {...command, undoEffects: undefined};
+    const redone: LocalCommand = {...command, effects: generated.effects, undoEffects: undefined};
     return {
         ok: true,
         history: {
