@@ -413,11 +413,17 @@ Undo should restore previous order only for items whose order timestamp is still
 ## Open questions
 
 - Should skipped undo effects be surfaced to the caller for UI messaging?
+  -> instead of "skipping", we should just block undo if any of the changes would be skipped.
 - Should undo pop a command if all effects are skipped? I recommend yes for v1.
+  -> same answer -- undo is blocked if any effect is skipped
 - Should local commands store full `CrdtMeta` snapshots for `before`, or a compact materialized value plus schema path?
+  -> materialized value should be fine, as long as we're retaining array IDs and such. then again, just going with crdtmeta might be simpler
 - Do we need command labels for UI, or can that wait?
+  -> that can wait
 - Should redo preserve the original command grouping even if only some effects can currently apply? I recommend yes.
+  -> I'd say that redo should also be blocked if any part of it would be "skipped"
 - Should delete undo restore the entire deleted subtree exactly as it was, including internal timestamps, or create a new incarnation with one fresh timestamp? I recommend a new incarnation with a fresh timestamp, because undo is a new edit.
+  -> fresh timestamps
 
 ## Recommendation
 
