@@ -1,10 +1,7 @@
 # Umkehr React Example
 
-This is a Vite app showing two CRDT-backed TODO replicas side by side. Use the center control to
-pause sync, make independent edits on either side, then resume sync to exchange queued CRDT updates.
-
-This example intentionally ignores undo/redo so the collaborative editing behavior is easier to
-inspect.
+This is a minimal Vite app showing `createHistoryContext`, `useValue`, preview updates, undo, and
+redo.
 
 From this directory:
 
