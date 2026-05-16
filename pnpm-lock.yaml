@@ -14,9 +14,6 @@ importers:
       react:
         specifier: '>=18'
         version: 19.2.6
-      typia:
-        specifier: ^12.1.1
-        version: 12.1.1(typescript@5.9.3)
     devDependencies:
       '@testing-library/dom':
         specifier: ^10.4.1
@@ -39,6 +36,9 @@ importers:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
+      typia:
+        specifier: ^12.1.1
+        version: 12.1.1(typescript@5.9.3)
       vitest:
         specifier: ^4.1.6
         version: 4.1.6(jsdom@29.1.1)(vite@8.0.13)

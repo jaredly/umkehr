@@ -13,7 +13,8 @@ describe('package exports', () => {
         expect(typeof pkg.invertPatch).toBe('function');
         expect(typeof pkg.resolveAndApply).toBe('function');
         expect(typeof pkg.blankHistory).toBe('function');
-        expect(typeof pkg.createPatchValidator).toBe('function');
+        expect('createPatchValidator' in pkg).toBe(false);
+        expect('validatePatch' in pkg).toBe(false);
         expect('createStateContext' in pkg).toBe(false);
         expect('createHistoryContext' in pkg).toBe(false);
     });
