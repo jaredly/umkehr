@@ -13,8 +13,19 @@ describe('package exports', () => {
         expect(typeof pkg.invertPatch).toBe('function');
         expect(typeof pkg.resolveAndApply).toBe('function');
         expect(typeof pkg.blankHistory).toBe('function');
+        expect(typeof pkg.createPatchValidator).toBe('function');
         expect('createStateContext' in pkg).toBe(false);
         expect('createHistoryContext' in pkg).toBe(false);
+    });
+
+    it('imports the built validation entry point separately', async () => {
+        expect(existsSync('dist/src/validation/index.js')).toBe(true);
+
+        const validationPkg = await import('umkehr/validation');
+
+        expect(typeof validationPkg.createPatchValidator).toBe('function');
+        expect(typeof validationPkg.validatePatch).toBe('function');
+        expect(typeof validationPkg.PatchValidationError).toBe('function');
     });
 
     it('imports the built React entry point separately', async () => {
