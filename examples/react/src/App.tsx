@@ -3,14 +3,15 @@ import {createHistoryContext, useValue} from 'umkehr/react';
 import {useCallback, useEffect, useRef, useState} from 'react';
 import './style.css';
 import {HistoryView} from './HistoryView';
+import {loadPersistedHistory, savePersistedHistory} from './persistence';
 
-type Todo = {
+export type Todo = {
     id: string;
     title: string;
     done: boolean;
 };
 
-type State = {
+export type State = {
     bgcolor: string;
     todos: Todo[];
 };
@@ -28,8 +29,10 @@ const initialState: State = {
 const [ProvideTodos, useTodos] = createHistoryContext<State, never>('type');
 
 export function App() {
+    const [initialHistory] = useState(() => loadPersistedHistory() ?? blankHistory(initialState));
+
     return (
-        <ProvideTodos initial={blankHistory(initialState)}>
+        <ProvideTodos initial={initialHistory} save={savePersistedHistory}>
             <TodoApp />
         </ProvideTodos>
     );
