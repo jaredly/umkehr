@@ -1,6 +1,7 @@
 import {useCallback, useEffect, useMemo, useRef} from 'react';
 import Peer, {type DataConnection} from 'peerjs';
 import {
+    applyRemoteHistoryUpdate,
     createCrdtLocalHistory,
     hlc,
     type CrdtDocument,
@@ -670,6 +671,48 @@ export function useLocalFirstSync<TState>({
         await refreshCounts();
     }, [installSnapshot, refreshCounts]);
 
+    const replayLocalBatchesOnSnapshot = useCallback(async () => {
+        const pending = pendingSnapshotRef.current;
+        if (!pending) return;
+
+        const localBatches = (await listBatches(docId)).filter(
+            (batch) =>
+                batch.origin === identity.replicaId &&
+                !vectorDominates(pending.compactedThrough, vectorForUpdates(batch.updates)),
+        );
+        let history = createCrdtLocalHistory(pending.document);
+        let vector = {...pending.compactedThrough};
+        for (const batch of localBatches) {
+            for (const update of batch.updates) {
+                history = applyRemoteHistoryUpdate(history, update);
+            }
+            vector = advanceVector(vector, batch.updates);
+        }
+
+        await clearReplica(docId);
+        recentBatchesRef.current.clear();
+        pendingSnapshotRef.current = null;
+        historyRef.current = history;
+        vectorRef.current = vector;
+        compactedThroughRef.current = pending.compactedThrough;
+        sourceRef.current = 'loaded';
+        snapshotStatusRef.current = `Replayed ${localBatches.length} local batch${
+            localBatches.length === 1 ? '' : 'es'
+        } on snapshot from ${pending.actor}.`;
+        replaceHistory(history);
+        await persistReplica();
+        for (const batch of localBatches) {
+            await appendBatch(batch);
+            await markReceivedBatch({
+                docId,
+                origin: batch.origin,
+                batchId: batch.batchId,
+                receivedAt: new Date().toISOString(),
+            });
+        }
+        await refreshCounts();
+    }, [docId, identity.replicaId, persistReplica, refreshCounts, replaceHistory]);
+
     useEffect(() => {
         void refreshCounts();
     }, [refreshCounts]);
@@ -717,6 +760,7 @@ export function useLocalFirstSync<TState>({
             requestSync,
             compactRetainedLog,
             discardLocalAndAcceptSnapshot,
+            replayLocalBatchesOnSnapshot,
             saveHistory,
             resetLocalReplica,
         }),
@@ -729,6 +773,7 @@ export function useLocalFirstSync<TState>({
             identity,
             persistenceStore,
             requestSync,
+            replayLocalBatchesOnSnapshot,
             resetLocalReplica,
             saveHistory,
             stateStore,

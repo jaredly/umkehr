@@ -111,6 +111,13 @@ export function LocalFirstControls<TState>({
             >
                 Discard local and accept snapshot
             </button>
+            <button
+                type="button"
+                disabled={!stats.pendingSnapshot}
+                onClick={() => void replaySnapshot(sync)}
+            >
+                Replay local on snapshot
+            </button>
             <section className="connectionList">
                 {connections.map((connection) => (
                     <div className="connectionRow" key={connection.peerId}>
@@ -173,6 +180,17 @@ async function acceptSnapshot<TState>(sync: LocalFirstSync<TState>) {
         return;
     }
     await sync.discardLocalAndAcceptSnapshot();
+}
+
+async function replaySnapshot<TState>(sync: LocalFirstSync<TState>) {
+    if (
+        !window.confirm(
+            'Replace this document with the pending peer snapshot, then replay retained local batches on top?',
+        )
+    ) {
+        return;
+    }
+    await sync.replayLocalBatchesOnSnapshot();
 }
 
 function statusText(status: ReturnType<LocalFirstSync<unknown>['persistenceStore']['getSnapshot']>) {

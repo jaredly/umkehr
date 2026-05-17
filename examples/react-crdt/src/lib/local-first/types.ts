@@ -96,6 +96,7 @@ export type LocalFirstSync<TState> = {
     requestSync(peerId?: string): void;
     compactRetainedLog(): Promise<void>;
     discardLocalAndAcceptSnapshot(): Promise<void>;
+    replayLocalBatchesOnSnapshot(): Promise<void>;
     saveHistory(history: CrdtLocalHistory<TState>): void;
     resetLocalReplica(): Promise<void>;
 };
