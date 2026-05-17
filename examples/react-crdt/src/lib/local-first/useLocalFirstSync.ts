@@ -1,8 +1,14 @@
 import {useCallback, useEffect, useMemo, useRef} from 'react';
 import Peer, {type DataConnection} from 'peerjs';
-import {hlc, type CrdtLocalHistory, type CrdtUpdate} from 'umkehr/crdt';
+import {
+    createCrdtLocalHistory,
+    hlc,
+    type CrdtDocument,
+    type CrdtLocalHistory,
+    type CrdtUpdate,
+} from 'umkehr/crdt';
 import type {SyncedTransport} from 'umkehr/react-crdt';
-import type {IJsonSchemaCollection} from 'typia';
+import type {IJsonSchemaCollection, IValidation} from 'typia';
 import {createExternalStore} from '../store';
 import {
     appendBatch,
@@ -52,21 +58,27 @@ type ConnectionRecord<TState> = {
 export function useLocalFirstSync<TState>({
     docId,
     schema,
+    tagKey,
+    validateState,
     schemaFingerprint,
     identity,
     initialHistory,
     initialVector,
     source,
     initialPeerId,
+    replaceHistory,
 }: {
     docId: string;
     schema: IJsonSchemaCollection<'3.1', [TState]>;
+    tagKey: string;
+    validateState(input: unknown): IValidation<TState>;
     schemaFingerprint: string;
     identity: ReplicaIdentity;
     initialHistory: CrdtLocalHistory<TState>;
     initialVector: VersionVector;
     source: 'created' | 'loaded';
     initialPeerId?: string;
+    replaceHistory(history: CrdtLocalHistory<TState>): void;
 }): LocalFirstSync<TState> {
     const historyRef = useRef(initialHistory);
     const vectorRef = useRef(initialVector);
@@ -76,9 +88,15 @@ export function useLocalFirstSync<TState>({
     const peerRef = useRef<Peer | null>(null);
     const connectionsRef = useRef(new Map<string, ConnectionRecord<TState>>());
     const recentBatchesRef = useRef(createRecentBatchCache());
-    const protocolRef = useRef<LocalFirstProtocolConfig<TState>>({docId, schema});
+    const protocolRef = useRef<LocalFirstProtocolConfig<TState>>({
+        docId,
+        schema,
+        tagKey,
+        validateState,
+    });
+    const snapshotStatusRef = useRef<string | undefined>(undefined);
 
-    protocolRef.current = {docId, schema};
+    protocolRef.current = {docId, schema, tagKey, validateState};
 
     const stateStore = useMemo(
         () => createExternalStore<LocalFirstSyncState>({kind: 'offline', role: 'host'}),
@@ -100,6 +118,7 @@ export function useLocalFirstSync<TState>({
                 retainedBatches: 0,
                 receivedBatches: 0,
                 pendingUpdates: initialHistory.doc.pending.length,
+                snapshotStatus: undefined,
             }),
         [],
     );
@@ -132,6 +151,7 @@ export function useLocalFirstSync<TState>({
             retainedBatches,
             receivedBatches,
             pendingUpdates: historyRef.current.doc.pending.length,
+            snapshotStatus: snapshotStatusRef.current,
         });
     }, [docId, statsStore]);
 
@@ -254,10 +274,30 @@ export function useLocalFirstSync<TState>({
                 actor: identity.replicaId,
                 docId,
                 document: historyRef.current.doc,
-                compactedThrough: {},
+                compactedThrough: vectorRef.current,
             });
         },
         [docId, identity.replicaId, sendOrQueue],
+    );
+
+    const acceptSnapshot = useCallback(
+        async (document: CrdtDocument<TState>, compactedThrough: VersionVector) => {
+            const hasLocalKnowledge = Object.keys(vectorRef.current).length > 0;
+            if (hasLocalKnowledge) {
+                snapshotStatusRef.current = 'Skipped peer snapshot because this replica has local state.';
+                await refreshCounts();
+                return;
+            }
+
+            const history = createCrdtLocalHistory(document);
+            historyRef.current = history;
+            vectorRef.current = compactedThrough;
+            sourceRef.current = 'loaded';
+            snapshotStatusRef.current = 'Accepted peer snapshot.';
+            replaceHistory(history);
+            await persistReplica();
+        },
+        [persistReplica, refreshCounts, replaceHistory],
     );
 
     const sendMissingBatches = useCallback(
@@ -362,10 +402,16 @@ export function useLocalFirstSync<TState>({
                 void (async () => {
                     for (const batch of message.batches) await acceptBatch(batch, conn.peer);
                 })();
+                return;
+            }
+
+            if (message.kind === 'snapshot') {
+                void acceptSnapshot(message.document, message.compactedThrough);
             }
         },
         [
             acceptBatch,
+            acceptSnapshot,
             publishConnections,
             requestSync,
             sendMissingBatches,

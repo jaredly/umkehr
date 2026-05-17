@@ -109,12 +109,15 @@ function LocalFirstReadyApp<TState>({
     const sync = useLocalFirstSync({
         docId: runtime.docId,
         schema: app.schema,
+        tagKey: app.tagKey,
+        validateState: app.validateState,
         schemaFingerprint,
         identity: loaded.identity,
         initialHistory: currentHistory,
         initialVector: loaded.vector,
         source: loaded.source,
         initialPeerId,
+        replaceHistory: setCurrentHistory,
     });
     const {Provider} = runtime;
     const saveHistory = useCallback(

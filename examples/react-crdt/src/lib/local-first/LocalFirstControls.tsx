@@ -41,6 +41,8 @@ export function LocalFirstControls<TState>({
                 <dd>{stats.receivedBatches}</dd>
                 <dt>Pending</dt>
                 <dd>{stats.pendingUpdates}</dd>
+                <dt>Snapshot</dt>
+                <dd>{stats.snapshotStatus ?? 'none'}</dd>
                 <dt>Peers</dt>
                 <dd>{connections.length}</dd>
             </dl>

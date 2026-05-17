@@ -52,6 +52,7 @@ export type LocalFirstStats = {
     retainedBatches: number;
     receivedBatches: number;
     pendingUpdates: number;
+    snapshotStatus?: string;
 };
 
 export type LocalFirstConnectionInfo = {
