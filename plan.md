@@ -52,8 +52,7 @@ Provider:
 
 ```tsx
 <Provider
-    initial={initialState}
-    schema={typia.json.schemas<[State], '3.1'>()}
+    initial={createCrdtLocalHistory(createCrdtDocument(initialState, schema, {timestamp: seedTs}))}
     transport={transport}
     save={saveLocalHistory}
 >
@@ -168,31 +167,17 @@ Start with single update delivery because it composes with `applyRemoteHistoryUp
 ```ts
 type SyncedProviderProps<T> = {
     children: React.ReactElement;
-    initial: T | CrdtLocalHistory<T>;
-    schema: IJsonSchemaCollection<'3.1', [T]>;
+    initial: CrdtLocalHistory<T>;
     transport: SyncedTransport;
-    timestamp?: HlcTimestamp;
     save?(history: CrdtLocalHistory<T>): void;
 };
 ```
 
-`initial` should accept either plain materialized state or an existing `CrdtLocalHistory<T>`:
+The provider should not create CRDT documents. Callers must construct the initial
+`CrdtLocalHistory<T>` themselves with `createCrdtDocument` and `createCrdtLocalHistory`.
 
-- Plain `T` is the simple app path.
-- `CrdtLocalHistory<T>` enables persisted runtime restoration.
-
-If `initial` is plain state, create the CRDT document with:
-
-```ts
-createCrdtDocument(initial, schema, {
-    timestamp: timestamp ?? hlc.pack(transport.tick()),
-    tagKey: tag,
-});
-```
-
-Open detail: using `transport.tick()` for initial document metadata means two independently-created
-replicas can start with different initial metadata. For examples/tests using a shared seed timestamp
-is cleaner. The provider should allow `timestamp` for this reason.
+This keeps initial document metadata explicit and avoids hiding seed timestamp choices inside the
+React layer.
 
 ## Internal context shape
 
@@ -477,7 +462,7 @@ const [Provider, useTodos] = createSyncedContext<State>('type');
 
 function ReplicaHost({transport}) {
     return (
-        <Provider initial={initialState} schema={schema} transport={transport}>
+        <Provider initial={initialHistory} transport={transport}>
             <TodoPanel />
         </Provider>
     );
