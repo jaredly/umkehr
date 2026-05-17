@@ -1,9 +1,5 @@
 import {useState} from 'react';
-import {
-    createInitialHistory,
-    type AppDefinition,
-    type HistoryRuntime,
-} from '../crdtApp';
+import {createInitialHistory, type AppDefinition, type HistoryRuntime} from '../crdtApp';
 import {HistoryView} from './HistoryView';
 
 export function SoloApp<TState, TAnnotations = never>({
@@ -36,7 +32,7 @@ function SoloDocument<TState, TAnnotations>({
     const history = editor.useHistory();
 
     return (
-        <>
+        <div>
             <HistoryView
                 history={history}
                 jump={(id) => editor.dispatch({op: 'jump', id})}
@@ -48,6 +44,6 @@ function SoloDocument<TState, TAnnotations>({
                 editor,
                 title: app.title,
             })}
-        </>
+        </div>
     );
 }

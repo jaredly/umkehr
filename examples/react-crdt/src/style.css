@@ -81,6 +81,8 @@ button.active {
     min-height: calc(100vh - 72px);
     margin: 0 auto;
     padding: 32px 0;
+    display: grid;
+    gap: 18px;
 }
 
 .todoPanel {
@@ -391,6 +393,7 @@ p {
 .historyView {
     display: grid;
     gap: 12px;
+    margin-bottom: 16px;
 }
 
 .historyView h2 {
