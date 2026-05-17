@@ -212,20 +212,22 @@ export function usePeerJsSync({
     const trackConnection = useCallback(
         (conn: DataConnection): ConnectionRecord => {
             const existing = connectionsRef.current.get(conn.peer);
-            if (existing) return existing;
+            const record =
+                existing ??
+                ({
+                    conn,
+                    queued: [],
+                    gotSnapshot: roleRef.current === 'host',
+                } satisfies ConnectionRecord);
 
-            const record: ConnectionRecord = {
-                conn,
-                queued: [],
-                gotSnapshot: roleRef.current === 'host',
-            };
+            record.conn = conn;
+            record.error = undefined;
             connectionsRef.current.set(conn.peer, record);
-            publishConnections();
 
             conn.on('open', () => {
                 sendHello(record);
                 if (roleRef.current === 'host') sendSnapshot(record);
-                if (roleRef.current === 'client' && record.gotSnapshot) flushQueued(conn.peer);
+                if (record.gotSnapshot || roleRef.current === 'host') flushQueued(conn.peer);
                 publishConnections();
             });
             conn.on('data', (data) => handleMessage(conn, data));
@@ -235,6 +237,7 @@ export function usePeerJsSync({
                 publishConnections();
             });
 
+            publishConnections();
             return record;
         },
         [flushQueued, handleMessage, publishConnections, sendHello, sendSnapshot],
@@ -293,7 +296,6 @@ export function usePeerJsSync({
     const disconnect = useCallback(
         (peerId: string) => {
             connectionsRef.current.get(peerId)?.conn.close();
-            connectionsRef.current.delete(peerId);
             publishConnections();
         },
         [publishConnections],

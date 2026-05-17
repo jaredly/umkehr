@@ -114,9 +114,13 @@ export function PeerJsControls({
                                 </button>
                                 <button
                                     type="button"
-                                    onClick={() => sync.disconnect(connection.peerId)}
+                                    onClick={() =>
+                                        connection.open
+                                            ? sync.disconnect(connection.peerId)
+                                            : sync.connect(connection.peerId)
+                                    }
                                 >
-                                    Disconnect
+                                    {connection.open ? 'Disconnect' : 'Reconnect'}
                                 </button>
                             </div>
                         </div>
