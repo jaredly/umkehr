@@ -290,7 +290,19 @@ p {
     align-items: start;
 }
 
+.localFirstShell {
+    width: min(1180px, calc(100vw - 32px));
+    min-height: calc(100vh - 72px);
+    margin: 0 auto;
+    padding: 32px 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 320px;
+    gap: 18px;
+    align-items: start;
+}
+
 .peerControls,
+.localFirstControls,
 .waitingPanel {
     border: 1px solid #d4dde7;
     border-radius: 8px;
@@ -298,12 +310,38 @@ p {
     box-shadow: 0 10px 24px rgb(25 42 62 / 8%);
 }
 
-.peerControls {
+.peerControls,
+.localFirstControls {
     position: sticky;
     top: 24px;
     display: grid;
     gap: 16px;
     padding: 18px;
+}
+
+.localFirstControls h2 {
+    margin: 0;
+    font-size: 18px;
+    line-height: 1.2;
+}
+
+.localFirstStats {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 8px 12px;
+    margin: 0;
+}
+
+.localFirstStats dt {
+    color: #64748b;
+    font-size: 12px;
+    text-transform: uppercase;
+}
+
+.localFirstStats dd {
+    min-width: 0;
+    margin: 0;
+    overflow-wrap: anywhere;
 }
 
 .rolePicker {
@@ -528,11 +566,13 @@ p {
         max-height: none;
     }
 
-    .peerShell {
+    .peerShell,
+    .localFirstShell {
         grid-template-columns: 1fr;
     }
 
-    .peerControls {
+    .peerControls,
+    .localFirstControls {
         position: static;
     }
 }
