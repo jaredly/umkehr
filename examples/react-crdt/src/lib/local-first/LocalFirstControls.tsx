@@ -63,7 +63,12 @@ export function LocalFirstControls<TState>({
                 {stats.replayPreview ? (
                     <>
                         <dt>Preview</dt>
-                        <dd>{stats.replayPreview.localBatches} local batches</dd>
+                        <dd>
+                            {stats.replayPreview.localBatches} local batches
+                            {stats.replayPreview.skippedUpdates
+                                ? ` / ${stats.replayPreview.skippedUpdates} skipped`
+                                : ''}
+                        </dd>
                     </>
                 ) : null}
                 <dt>Compaction</dt>
@@ -90,6 +95,22 @@ export function LocalFirstControls<TState>({
                     </button>
                 </div>
             </section>
+            <div className="connectionActions" role="group" aria-label="Local-first role">
+                <button
+                    type="button"
+                    className={state.role === 'host' ? 'active' : ''}
+                    onClick={() => sync.setRole('host')}
+                >
+                    Host
+                </button>
+                <button
+                    type="button"
+                    className={state.role === 'client' ? 'active' : ''}
+                    onClick={() => sync.setRole('client')}
+                >
+                    Client
+                </button>
+            </div>
             <form
                 className="peerConnect"
                 onSubmit={(event) => {
@@ -161,6 +182,14 @@ export function LocalFirstControls<TState>({
             >
                 Apply preview
             </button>
+            <div className="connectionActions">
+                <button type="button" onClick={() => void exportState(sync)}>
+                    Export JSON
+                </button>
+                <button type="button" onClick={() => void importState(sync)}>
+                    Import JSON
+                </button>
+            </div>
             <section className="connectionList">
                 {connections.map((connection) => (
                     <div className="connectionRow" key={connection.peerId}>
@@ -256,6 +285,17 @@ async function replaySnapshot<TState>(sync: LocalFirstSync<TState>) {
     await sync.replayLocalBatchesOnSnapshot();
 }
 
+async function exportState<TState>(sync: LocalFirstSync<TState>) {
+    const json = await sync.exportLocalState();
+    await navigator.clipboard.writeText(json);
+}
+
+async function importState<TState>(sync: LocalFirstSync<TState>) {
+    const json = window.prompt('Paste exported local-first JSON');
+    if (!json) return;
+    await sync.importLocalState(json);
+}
+
 function statusText(status: ReturnType<LocalFirstSync<unknown>['persistenceStore']['getSnapshot']>) {
     switch (status.kind) {
         case 'loading':
@@ -278,6 +318,8 @@ function networkText(state: ReturnType<LocalFirstSync<unknown>['stateStore']['ge
             return `initializing ${state.role}`;
         case 'ready':
             return `${state.role} ${state.peerId}`;
+        case 'needs-rebase-or-discard':
+            return `${state.role} needs rebase/discard from ${state.actor}`;
         case 'error':
             return state.message;
     }

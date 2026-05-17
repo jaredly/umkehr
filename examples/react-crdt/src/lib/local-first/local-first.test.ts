@@ -203,6 +203,35 @@ describe('local-first protocol validation', () => {
         ).toBeNull();
     });
 
+    it('rejects malformed HLC timestamps in vectors and batches', () => {
+        expect(
+            parseLocalFirstMessage(
+                {
+                    kind: 'hello',
+                    version: LOCAL_FIRST_PROTOCOL_VERSION,
+                    actor: 'local',
+                    docId: 'todos',
+                    role: 'host',
+                    vector: {local: 'not-a-timestamp'},
+                },
+                config,
+            ),
+        ).toBeNull();
+
+        expect(
+            parseLocalFirstMessage(
+                {
+                    kind: 'updates',
+                    version: LOCAL_FIRST_PROTOCOL_VERSION,
+                    actor: 'local',
+                    docId: 'todos',
+                    batch: {...batch(), maxTs: 'not-a-timestamp'},
+                },
+                config,
+            ),
+        ).toBeNull();
+    });
+
     it('rejects malformed batches and member announcements', () => {
         const invalidBatch = {...batch(), updates: [{op: 'definitely-not-a-crdt-update'}]};
         expect(
@@ -317,6 +346,7 @@ describe('local-first snapshot replay preview', () => {
         });
 
         expect(preview.localBatches.map(({batchId}) => batchId)).toEqual(['batch-1']);
+        expect(preview.skippedUpdates).toBe(0);
         expect(preview.history.doc.state.title).toBe('Local over remote');
         expect(preview.vector).toEqual({remote: ts('remote', 1), local: ts('local', 10)});
     });
@@ -341,6 +371,35 @@ describe('local-first snapshot replay preview', () => {
         });
 
         expect(preview.localBatches).toEqual([]);
+        expect(preview.skippedUpdates).toBe(0);
+        expect(preview.history.doc.state.title).toBe('Remote');
+    });
+
+    it('reports retained local updates that cannot be replayed on the snapshot', () => {
+        const peerSnapshot = doc({title: 'Remote', todos: []}, ts('remote', 1));
+        const invalidLocalBatch = batch({
+            origin: 'local',
+            document: peerSnapshot,
+            timestamp: ts('local', 10),
+            title: 'Local over remote',
+        });
+        invalidLocalBatch.updates = invalidLocalBatch.updates.map((update) => ({
+            ...update,
+            path: [{type: 'objectField', key: 'missing', parentCreated: ts('seed', 1)}],
+        }));
+
+        const preview = buildSnapshotReplayPreview({
+            pending: {
+                actor: 'remote',
+                document: peerSnapshot,
+                compactedThrough: {remote: ts('remote', 1)},
+            },
+            localReplicaId: 'local',
+            batches: [invalidLocalBatch],
+        });
+
+        expect(preview.localBatches.map(({batchId}) => batchId)).toEqual(['batch-1']);
+        expect(preview.skippedUpdates).toBe(1);
         expect(preview.history.doc.state.title).toBe('Remote');
     });
 });

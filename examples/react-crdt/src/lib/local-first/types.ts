@@ -75,6 +75,7 @@ export type LocalFirstStats = {
     replayPreview?: {
         actor: string;
         localBatches: number;
+        skippedUpdates: number;
         state: unknown;
     };
     compactionStatus?: string;
@@ -101,6 +102,13 @@ export type LocalFirstSyncState =
     | {kind: 'offline'; role: LocalFirstRole}
     | {kind: 'initializing'; role: LocalFirstRole}
     | {kind: 'ready'; role: LocalFirstRole; peerId: string}
+    | {
+          kind: 'needs-rebase-or-discard';
+          role: LocalFirstRole;
+          peerId?: string;
+          actor: string;
+          message: string;
+      }
     | {kind: 'error'; role: LocalFirstRole; message: string};
 
 export type LocalFirstSync<TState> = {
@@ -112,11 +120,14 @@ export type LocalFirstSync<TState> = {
     connectionsStore: ExternalStore<LocalFirstConnectionInfo[]>;
     connect(peerId: string): void;
     disconnect(peerId: string): void;
+    setRole(role: LocalFirstRole): void;
     requestSync(peerId?: string): void;
     compactRetainedLog(): Promise<void>;
     discardLocalAndAcceptSnapshot(): Promise<void>;
     previewLocalBatchesOnSnapshot(): Promise<void>;
     replayLocalBatchesOnSnapshot(): Promise<void>;
+    exportLocalState(): Promise<string>;
+    importLocalState(json: string): Promise<void>;
     saveHistory(history: CrdtLocalHistory<TState>): void;
     resetLocalReplica(): Promise<void>;
 };

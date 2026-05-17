@@ -16,7 +16,9 @@ import {
     countBatches,
     countReceivedBatches,
     deleteBatch,
+    exportReplicaState,
     hasReceivedBatch,
+    importReplicaState,
     listBatches,
     markReceivedBatch,
     saveReplica,
@@ -36,6 +38,7 @@ import {
 import {type LocalFirstMessage, type LocalFirstProtocolConfig} from './protocol';
 import {
     createMembersMessage,
+    createHelloMessage,
     createSnapshotMessage,
     createSyncRequestMessage,
     createSyncResponseMessage,
@@ -105,6 +108,7 @@ export function useLocalFirstSync<TState>({
     const vectorRef = useRef(initialVector);
     const compactedThroughRef = useRef<VersionVector | undefined>(initialCompactedThrough);
     const sourceRef = useRef(source);
+    const roleRef = useRef<LocalFirstRole>(initialPeerId ? 'client' : 'host');
     const clockRef = useRef(initialClock(identity.replicaId, initialVector));
     const listenersRef = useRef(new Set<(update: CrdtUpdate) => void>());
     const peerRef = useRef<Peer | null>(null);
@@ -127,7 +131,7 @@ export function useLocalFirstSync<TState>({
     protocolRef.current = {docId, schema, tagKey, validateState};
 
     const stateStore = useMemo(
-        () => createExternalStore<LocalFirstSyncState>({kind: 'offline', role: 'host'}),
+        () => createExternalStore<LocalFirstSyncState>({kind: 'offline', role: roleRef.current}),
         [],
     );
     const persistenceStore = useMemo(
@@ -217,6 +221,7 @@ export function useLocalFirstSync<TState>({
                 ? {
                       actor: replayPreviewRef.current.actor,
                       localBatches: replayPreviewRef.current.localBatches.length,
+                      skippedUpdates: replayPreviewRef.current.skippedUpdates,
                       state: replayPreviewRef.current.history.doc.state,
                   }
                 : undefined,
@@ -287,7 +292,7 @@ export function useLocalFirstSync<TState>({
         (): LocalFirstSessionState<TState> => ({
             docId,
             replicaId: identity.replicaId,
-            role: 'host',
+            role: roleRef.current,
             selfPeerId: peerRef.current?.id,
             vector: vectorRef.current,
             document: historyRef.current.doc,
@@ -342,6 +347,12 @@ export function useLocalFirstSync<TState>({
         [sendOrQueue, sessionState],
     );
 
+    const publishNetworkState = useCallback(() => {
+        const role = roleRef.current;
+        const peerId = peerRef.current?.id;
+        stateStore.setSnapshot(peerId ? {kind: 'ready', role, peerId} : {kind: 'offline', role});
+    }, [stateStore]);
+
     const installSnapshot = useCallback(
         async (document: CrdtDocument<TState>, compactedThrough: VersionVector) => {
             await clearReplica(docId);
@@ -357,8 +368,9 @@ export function useLocalFirstSync<TState>({
             snapshotStatusRef.current = 'Accepted peer snapshot.';
             replaceHistory(history);
             await persistReplica();
+            publishNetworkState();
         },
-        [docId, persistReplica, replaceHistory],
+        [docId, persistReplica, publishNetworkState, replaceHistory],
     );
 
     const acceptSnapshot = useCallback(
@@ -373,6 +385,13 @@ export function useLocalFirstSync<TState>({
                 replayPreviewRef.current = null;
                 snapshotStatusRef.current =
                     'Peer snapshot is available, but this replica has local state.';
+                stateStore.setSnapshot({
+                    kind: 'needs-rebase-or-discard',
+                    role: roleRef.current,
+                    peerId: peerRef.current?.id,
+                    actor,
+                    message: 'Peer snapshot is available, but this replica has local state.',
+                });
                 await refreshCounts();
                 return;
             }
@@ -380,7 +399,7 @@ export function useLocalFirstSync<TState>({
             snapshotStatusRef.current = 'Accepted peer snapshot.';
             await installSnapshot(document, compactedThrough);
         },
-        [installSnapshot, refreshCounts],
+        [installSnapshot, refreshCounts, stateStore],
     );
 
     const buildReplayPreview = useCallback(async () => {
@@ -424,6 +443,18 @@ export function useLocalFirstSync<TState>({
         [sendOrQueue, sessionState],
     );
 
+    const setRole = useCallback(
+        (role: LocalFirstRole) => {
+            roleRef.current = role;
+            publishNetworkState();
+            for (const record of connectionsRef.current.values()) {
+                sendOrQueue(record, createHelloMessage(sessionState()));
+                sendOrQueue(record, createMembersMessage(sessionState()));
+            }
+        },
+        [publishNetworkState, sendOrQueue, sessionState],
+    );
+
     const acceptBatch = useCallback(
         async (batch: PersistedBatch, fromPeerId?: string) => {
             const key = batchKey(batch.docId, batch.origin, batch.batchId);
@@ -434,12 +465,6 @@ export function useLocalFirstSync<TState>({
             }
 
             recentBatchesRef.current.add(key);
-            await markReceivedBatch({
-                docId: batch.docId,
-                origin: batch.origin,
-                batchId: batch.batchId,
-                receivedAt: new Date().toISOString(),
-            });
             await appendBatch(batch);
             vectorRef.current = advanceVector(vectorRef.current, batch.updates);
             const ts = batch.maxTs;
@@ -448,9 +473,16 @@ export function useLocalFirstSync<TState>({
                 for (const listener of listenersRef.current) listener(update);
             }
             await persistReplica();
+            await markReceivedBatch({
+                docId: batch.docId,
+                origin: batch.origin,
+                batchId: batch.batchId,
+                receivedAt: new Date().toISOString(),
+            });
+            await refreshCounts();
             broadcastBatch(batch, fromPeerId);
         },
-        [broadcastBatch, persistReplica],
+        [broadcastBatch, persistReplica, refreshCounts],
     );
 
     const executeEffects = useCallback(
@@ -732,6 +764,19 @@ export function useLocalFirstSync<TState>({
         await refreshCounts();
     }, [buildReplayPreview, docId, persistReplica, refreshCounts, replaceHistory]);
 
+    const exportLocalState = useCallback(
+        () => exportReplicaState<TState>(docId),
+        [docId],
+    );
+
+    const importLocalState = useCallback(
+        async (json: string) => {
+            await importReplicaState<TState>({docId, schemaFingerprint, json});
+            window.location.reload();
+        },
+        [docId, schemaFingerprint],
+    );
+
     useEffect(() => {
         void refreshCounts();
     }, [refreshCounts]);
@@ -739,10 +784,10 @@ export function useLocalFirstSync<TState>({
     useEffect(() => {
         const peer = new Peer({debug: 1});
         peerRef.current = peer;
-        stateStore.setSnapshot({kind: 'initializing', role: 'host'});
+        stateStore.setSnapshot({kind: 'initializing', role: roleRef.current});
 
         peer.on('open', (peerId) => {
-            stateStore.setSnapshot({kind: 'ready', role: 'host', peerId});
+            stateStore.setSnapshot({kind: 'ready', role: roleRef.current, peerId});
             if (initialPeerId) connect(initialPeerId);
         });
         peer.on('connection', (conn) => {
@@ -751,7 +796,7 @@ export function useLocalFirstSync<TState>({
         peer.on('error', (error) => {
             stateStore.setSnapshot({
                 kind: 'error',
-                role: 'host',
+                role: roleRef.current,
                 message: error instanceof Error ? error.message : String(error),
             });
         });
@@ -761,7 +806,7 @@ export function useLocalFirstSync<TState>({
             connectionsRef.current.clear();
             peer.destroy();
             if (peerRef.current === peer) peerRef.current = null;
-            stateStore.setSnapshot({kind: 'offline', role: 'host'});
+            stateStore.setSnapshot({kind: 'offline', role: roleRef.current});
             publishConnections();
         };
     }, [connect, initialPeerId, publishConnections, stateStore, trackConnection]);
@@ -776,11 +821,14 @@ export function useLocalFirstSync<TState>({
             connectionsStore,
             connect,
             disconnect,
+            setRole,
             requestSync,
             compactRetainedLog,
             discardLocalAndAcceptSnapshot,
             previewLocalBatchesOnSnapshot,
             replayLocalBatchesOnSnapshot,
+            exportLocalState,
+            importLocalState,
             saveHistory,
             resetLocalReplica,
         }),
@@ -790,13 +838,16 @@ export function useLocalFirstSync<TState>({
             connectionsStore,
             discardLocalAndAcceptSnapshot,
             disconnect,
+            exportLocalState,
             identity,
+            importLocalState,
             persistenceStore,
             previewLocalBatchesOnSnapshot,
             requestSync,
             replayLocalBatchesOnSnapshot,
             resetLocalReplica,
             saveHistory,
+            setRole,
             stateStore,
             statsStore,
             transport,

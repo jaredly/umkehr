@@ -1,5 +1,6 @@
 import {
     createCrdtUpdateValidator,
+    hlc,
     type CrdtDocument,
     type CrdtMeta,
     type CrdtUpdate,
@@ -147,8 +148,8 @@ function validateBatch<TState>(
     if (typeof input.batchId !== 'string' || input.batchId.length === 0) return null;
     if (typeof input.origin !== 'string' || input.origin.length === 0) return null;
     if (!Array.isArray(input.updates) || input.updates.length === 0) return null;
-    if (input.minTs !== undefined && typeof input.minTs !== 'string') return null;
-    if (input.maxTs !== undefined && typeof input.maxTs !== 'string') return null;
+    if (input.minTs !== undefined && !isHlcTimestamp(input.minTs)) return null;
+    if (input.maxTs !== undefined && !isHlcTimestamp(input.maxTs)) return null;
     if (!isVersionVector(input.vectorAfter)) return null;
     if (typeof input.receivedAt !== 'string' || input.receivedAt.length === 0) return null;
 
@@ -163,7 +164,7 @@ function validateBatch<TState>(
 }
 
 function isVersionVector(input: unknown): input is VersionVector {
-    return isRecord(input) && Object.values(input).every((value) => typeof value === 'string');
+    return isRecord(input) && Object.values(input).every(isHlcTimestamp);
 }
 
 function validateSnapshot<TState>(
@@ -199,7 +200,7 @@ function validatePendingUpdate<TState>(
     ) {
         return false;
     }
-    if (typeof input.queuedAt !== 'string' || input.queuedAt.length === 0) return false;
+    if (!isHlcTimestamp(input.queuedAt)) return false;
     return createCrdtUpdateValidator<TState>(config.schema).is(input.update);
 }
 
@@ -207,24 +208,24 @@ function validateCrdtMeta(input: unknown): input is CrdtMeta {
     if (!isRecord(input)) return false;
     switch (input.kind) {
         case 'primitive':
-            return typeof input.ts === 'string' && isJsonPrimitive(input.value);
+            return isHlcTimestamp(input.ts) && isJsonPrimitive(input.value);
         case 'object':
-            return typeof input.created === 'string' && validateMetaRecord(input.fields);
+            return isHlcTimestamp(input.created) && validateMetaRecord(input.fields);
         case 'record':
-            return typeof input.created === 'string' && validateMetaRecord(input.entries);
+            return isHlcTimestamp(input.created) && validateMetaRecord(input.entries);
         case 'array':
-            if (typeof input.created !== 'string' || !isRecord(input.items)) return false;
+            if (!isHlcTimestamp(input.created) || !isRecord(input.items)) return false;
             return Object.values(input.items).every(validateArrayItemMeta);
         case 'tagged':
             return (
-                typeof input.created === 'string' &&
+                isHlcTimestamp(input.created) &&
                 typeof input.tagKey === 'string' &&
                 typeof input.tagValue === 'string' &&
-                typeof input.tagTs === 'string' &&
+                isHlcTimestamp(input.tagTs) &&
                 validateMetaRecord(input.fields)
             );
         case 'tombstone':
-            return typeof input.deleted === 'string';
+            return isHlcTimestamp(input.deleted);
         default:
             return false;
     }
@@ -235,7 +236,7 @@ function validateArrayItemMeta(input: unknown) {
         isRecord(input) &&
         isRecord(input.order) &&
         typeof input.order.value === 'string' &&
-        typeof input.order.ts === 'string' &&
+        isHlcTimestamp(input.order.ts) &&
         validateCrdtMeta(input.value)
     );
 }
@@ -263,6 +264,23 @@ function hasOnlyDocumentKeys(input: Record<string, unknown>) {
 
 function isJsonPrimitive(input: unknown) {
     return input === null || ['string', 'number', 'boolean'].includes(typeof input);
+}
+
+function isHlcTimestamp(input: unknown): input is string {
+    if (typeof input !== 'string' || input.length === 0) return false;
+    try {
+        const unpacked = hlc.unpack(input);
+        return (
+            Number.isSafeInteger(unpacked.ts) &&
+            unpacked.ts >= 0 &&
+            Number.isSafeInteger(unpacked.count) &&
+            unpacked.count >= 0 &&
+            unpacked.node.length > 0 &&
+            hlc.pack(unpacked) === input
+        );
+    } catch {
+        return false;
+    }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

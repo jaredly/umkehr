@@ -105,6 +105,56 @@ export async function markReceivedBatch(received: ReceivedBatch) {
     );
 }
 
+export async function exportReplicaState<TState>(docId: string) {
+    const [replica, batches] = await Promise.all([
+        loadReplica<TState>(docId),
+        listBatches(docId),
+    ]);
+    if (!replica) throw new Error('No persisted local-first replica exists for this document.');
+    return JSON.stringify({replica, batches}, null, 2);
+}
+
+export async function importReplicaState<TState>({
+    docId,
+    schemaFingerprint,
+    json,
+}: {
+    docId: string;
+    schemaFingerprint: string;
+    json: string;
+}) {
+    const parsed = JSON.parse(json) as {
+        replica?: PersistedReplica<TState>;
+        batches?: PersistedBatch[];
+    };
+    if (!parsed.replica || parsed.replica.docId !== docId) {
+        throw new Error('Imported state does not contain a replica for this document.');
+    }
+    if (parsed.replica.storageVersion !== 1 || parsed.replica.protocolVersion !== 1) {
+        throw new Error('Imported state uses an unsupported storage or protocol version.');
+    }
+    if (parsed.replica.schemaFingerprint !== schemaFingerprint) {
+        throw new Error('Imported state schema does not match this app version.');
+    }
+    if (!Array.isArray(parsed.batches)) {
+        throw new Error('Imported state does not contain a retained batch list.');
+    }
+    for (const batch of parsed.batches) {
+        if (batch.docId !== docId) throw new Error('Imported batch belongs to another document.');
+    }
+    await clearReplica(docId);
+    await saveReplica(parsed.replica);
+    for (const batch of parsed.batches) {
+        await appendBatch(batch);
+        await markReceivedBatch({
+            docId,
+            origin: batch.origin,
+            batchId: batch.batchId,
+            receivedAt: new Date().toISOString(),
+        });
+    }
+}
+
 let dbPromise: Promise<IDBPDatabase<LocalFirstDb>> | null = null;
 
 function openLocalFirstDb() {
