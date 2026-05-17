@@ -18,14 +18,17 @@ import {
 } from '../crdt/index.js';
 import {
     changedPaths,
+    cancelScheduledTask,
     makeContextForPath,
     makePathListenerNode,
     notifyAllPaths,
     notifyPaths,
     recordPreviewPaths,
+    scheduleTask,
     useValue,
     type Context,
     type PathListenerNode,
+    type ScheduledTask,
 } from '../react-core/index.js';
 import type {ApplyTiming, DraftPatch, Path} from '../types.js';
 import {useLatest} from '../react/useLatest.js';
@@ -60,7 +63,7 @@ type SyncedContextBase<T, Tag extends string> = {
     listeners: (() => void)[];
     localHistoryListeners: (() => void)[];
     previewState: null | T;
-    raf?: number;
+    scheduled?: ScheduledTask;
     listenersByPath: PathListenerNode;
     queuedChanges: QueuedChanges<T, Tag>;
     activePreviewChanges: QueuedChanges<T, Tag>;
@@ -210,9 +213,9 @@ function queuePreview<T, Tag extends string>(
     equalFn: EqualFn,
 ) {
     ctx.queuedChanges.push(...(asFlat(v) as DraftPatch<T, Tag, Context>[]));
-    if (ctx.raf != null) return;
-    ctx.raf = requestAnimationFrame(() => {
-        ctx.raf = undefined;
+    if (ctx.scheduled != null) return;
+    ctx.scheduled = scheduleTask(() => {
+        ctx.scheduled = undefined;
         ctx.activePreviewChanges.push(...ctx.queuedChanges);
         ctx.queuedChanges = [];
         recomputePreview(ctx, extra, tag, equalFn);
@@ -253,10 +256,8 @@ function clearSyncedPreview<T, Tag extends string>(ctx: SyncedContextBase<T, Tag
     ctx.previewPaths = {};
     ctx.queuedChanges = [];
     ctx.activePreviewChanges = [];
-    if (ctx.raf != null) {
-        cancelAnimationFrame(ctx.raf);
-        ctx.raf = undefined;
-    }
+    cancelScheduledTask(ctx.scheduled);
+    ctx.scheduled = undefined;
     if (hadPreview) {
         ctx.listeners.forEach((f) => f());
         notifyPaths(ctx.listenersByPath, previewPaths);
@@ -304,9 +305,9 @@ function receiveRemoteUpdate<T, Tag extends string>(
         ctx.listenersByPath,
     );
     if (ctx.activePreviewChanges.length || ctx.queuedChanges.length) {
-        if (ctx.raf != null) {
-            cancelAnimationFrame(ctx.raf);
-            ctx.raf = undefined;
+        if (ctx.scheduled != null) {
+            cancelScheduledTask(ctx.scheduled);
+            ctx.scheduled = undefined;
             ctx.activePreviewChanges.push(...ctx.queuedChanges);
             ctx.queuedChanges = [];
         }

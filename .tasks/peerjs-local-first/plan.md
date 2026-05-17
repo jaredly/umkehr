@@ -1,43 +1,107 @@
-# PeerJS local-first implementation plan
+# Local-first mode implementation plan
 
-This plan turns `examples/react-crdt` PeerJS mode into a real local-first example while keeping the reusable `umkehr` packages free of PeerJS, IndexedDB, and room-specific assumptions.
+This plan adds a new `local-first` mode to `examples/react-crdt`. It should live alongside the existing `solo`, `local`, and `peerjs` modes. Do not turn the current `peerjs` mode into the local-first implementation; keep `peerjs` as the simpler network transport demo.
 
-The immediate milestone is durable host-star sync with persisted replicas, retained update batches, and duplicate rejection. Version-vector catch-up, mesh, and compaction build on that foundation.
+The new mode should demonstrate a real local-first browser replica: durable identity, durable CRDT history, retained update batches, dedupe, reconnect catch-up, and eventually mesh sync and compaction.
+
+## Current refactor shape
+
+The example now has useful runtime boundaries:
+
+- `examples/react-crdt/src/lib/crdtApp.ts` defines `AppDefinition`, `CrdtRuntime`, and `HistoryRuntime`.
+- `examples/react-crdt/src/App.tsx` chooses between `SoloApp`, `LocalSimulatorApp`, and `PeerJsApp`.
+- `examples/react-crdt/src/lib/useHashMode.ts` owns hash routing.
+- `examples/react-crdt/src/lib/ModeTabs.tsx` renders the mode switch.
+- `examples/react-crdt/src/lib/solo/*` owns the non-CRDT history demo.
+- `examples/react-crdt/src/lib/local/*` owns the in-memory two-replica simulator.
+- `examples/react-crdt/src/lib/peerjs/*` owns the current simple PeerJS host/client demo.
+- `examples/react-crdt/src/apps/*` owns app-specific schema, validation, initial state, and panels.
+
+The local-first work should slot into that structure as a separate runtime shell:
+
+- `examples/react-crdt/src/lib/local-first/*`
+
+Use the existing `CrdtRuntime<TState>` and `AppDefinition<TState>` contracts so the mode remains app-generic.
+
+## Product scope
+
+Add a fourth mode:
+
+- hash: `#local-first`
+- tab label: `Local-first`
+- component: `LocalFirstApp`
+
+The current modes should keep their semantics:
+
+- `solo`: single-replica undo/history demo.
+- `local`: deterministic side-by-side in-memory CRDT simulator.
+- `peerjs`: simple host/client PeerJS snapshot and live-update demo.
+- `local-first`: persistent local-first replica with PeerJS connectivity and retained logs.
+
+The new mode can reuse PeerJS as a signaling/data-channel mechanism, but its sync protocol, storage, and UI should live under `lib/local-first`, not mutate the existing `lib/peerjs` protocol in place.
 
 ## Decisions from research
 
 - `CrdtLocalHistory` may be treated as a public serializable structure for this example.
 - HLC actor/counter parsing may be treated as stable enough for version-vector helpers.
-- CRDT update origin can be derived from update timestamps for now. Keep network batch `origin` too, because it is useful for dedupe, forwarding, and UI diagnostics.
+- CRDT update origin can be derived from update timestamps for now. Keep network batch `origin` too for dedupe, forwarding, and diagnostics.
 - Do not attempt schema migrations in this pass. Reject incompatible persisted documents and require reset/replacement.
 - If a peer reconnects after the room compacted beyond its retained log, do not replace state automatically. Let the user preview replaying local edits with new timestamps, then choose discard or rebase.
-- A tiny IndexedDB dependency is acceptable. Prefer `idb` unless the project already adopts another browser storage helper.
+- A tiny IndexedDB dependency is acceptable. Prefer `idb` unless the project adopts another browser storage helper first.
 
-## Target architecture
+## Routing and shell changes
 
-Keep this split:
+Update mode routing:
 
-- `examples/react-crdt/src/lib/peerjs/*`: generic PeerJS local-first sync infrastructure.
-- `examples/react-crdt/src/lib/crdtApp.ts`: generic app contract.
-- `examples/react-crdt/src/apps/*`: app-specific schema, validation, initial document, and panel rendering.
-- `src/crdt/*`: small generic CRDT helpers only when they are not PeerJS or IndexedDB specific.
+- `examples/react-crdt/src/lib/useHashMode.ts`
+  - change `AppMode` to `'solo' | 'local' | 'peerjs' | 'local-first'`;
+  - parse `#local-first`;
+  - keep unknown hashes falling back to `local`.
+- `examples/react-crdt/src/lib/ModeTabs.tsx`
+  - add a `Local-first` tab;
+  - keep `PeerJS` tab pointing to the current simple mode.
+- `examples/react-crdt/src/App.tsx`
+  - import `LocalFirstApp` from `./lib/local-first/LocalFirstApp`;
+  - render it when `mode === 'local-first'`;
+  - pass `defaultApp` and `defaultCrdtRuntime`, matching `PeerJsApp` and `LocalSimulatorApp`.
 
-The PeerJS layer should own:
+Acceptance criteria:
 
-- durable replica identity;
-- durable document state;
-- retained update batches;
-- received-batch dedupe;
-- version-vector sync;
-- snapshot/log catch-up;
-- PeerJS connection routing and forwarding;
-- local-first diagnostics in the example UI.
+- `#peerjs` still renders the existing `PeerJsApp`.
+- `#local-first` renders the new local-first shell.
+- The new tab does not affect `solo` or `local`.
 
-## New shared types
+## Local-first file map
 
-Add generic sync types under `examples/react-crdt/src/lib/peerjs/localFirstTypes.ts`:
+Create these files:
+
+- `examples/react-crdt/src/lib/local-first/LocalFirstApp.tsx`
+- `examples/react-crdt/src/lib/local-first/LocalFirstControls.tsx`
+- `examples/react-crdt/src/lib/local-first/useLocalFirstSync.ts`
+- `examples/react-crdt/src/lib/local-first/protocol.ts`
+- `examples/react-crdt/src/lib/local-first/types.ts`
+- `examples/react-crdt/src/lib/local-first/persistence.ts`
+- `examples/react-crdt/src/lib/local-first/vector.ts`
+- `examples/react-crdt/src/lib/local-first/schemaFingerprint.ts`
+- `examples/react-crdt/src/lib/local-first/recentBatchCache.ts`
+
+Keep `examples/react-crdt/src/lib/peerjs/*` as the existing toy/simple PeerJS mode. If useful, later extract tiny shared utilities into `examples/react-crdt/src/lib/network/*`, but do not start by coupling the two modes.
+
+Consider generic library helpers only for CRDT/HLC operations:
+
+- timestamp extraction from `CrdtUpdate`;
+- HLC actor extraction;
+- timestamp range helpers.
+
+Do not move IndexedDB, PeerJS, rooms, or local-first protocol envelopes into `src/crdt`.
+
+## Core local-first types
+
+Add these under `lib/local-first/types.ts`:
 
 ```ts
+export type LocalFirstRole = 'host' | 'client';
+
 export type VersionVector = Record<string, HlcTimestamp>;
 
 export type ReplicaIdentity = {
@@ -48,7 +112,7 @@ export type ReplicaIdentity = {
 export type PersistedReplica<TState> = {
     docId: string;
     storageVersion: 1;
-    protocolVersion: 2;
+    protocolVersion: 1;
     schemaFingerprint: string;
     replicaId: string;
     history: CrdtLocalHistory<TState>;
@@ -76,27 +140,23 @@ export type ReceivedBatch = {
 };
 ```
 
-Use `history`, not only `document`, because reload-stable undo/redo is part of the desired example behavior.
+Use `history`, not only `document`, so reload-stable undo/redo is part of the mode.
 
-## Phase 1: IndexedDB persistence and stable identity
+## Phase 1: persistent local replica
 
 Add dependency:
 
 - `examples/react-crdt/package.json`: add `idb`.
 
-Add storage module:
+Implement `lib/local-first/persistence.ts`:
 
-- `examples/react-crdt/src/lib/peerjs/persistence.ts`
-
-Responsibilities:
-
-- open an IndexedDB database such as `umkehr-react-crdt-peerjs-local-first`;
-- create object stores for `identity`, `replicas`, `batches`, and `receivedBatches`;
+- open an IndexedDB database such as `umkehr-react-crdt-local-first`;
+- create stores for `identity`, `replicas`, `batches`, and `receivedBatches`;
 - expose `loadOrCreateIdentity()`;
 - expose `loadReplica(docId)`, `saveReplica(replica)`, `clearReplica(docId)`;
 - expose `appendBatch(batch)`, `listBatches(docId)`, `countBatches(docId)`;
 - expose `hasReceivedBatch(docId, origin, batchId)` and `markReceivedBatch(...)`;
-- expose a reset helper for UI/testing.
+- expose reset/export/import helpers for UI/testing.
 
 Indexes:
 
@@ -105,205 +165,244 @@ Indexes:
 - `batches` indexed by `docId`;
 - `receivedBatches` keyed by `${docId}:${origin}:${batchId}`.
 
-Add schema fingerprinting:
+Implement `schemaFingerprint.ts`:
 
-- create a stable stringify helper for app schema and components;
-- compute `schemaFingerprint` from `app.schema.schemas[0]`, `app.schema.components`, and `app.tagKey`;
-- if persisted fingerprint does not match, surface an incompatible-state UI and require reset.
+- stable stringify the app schema root, components, and `tagKey`;
+- store fingerprint in `PersistedReplica`;
+- reject incompatible persisted documents and show a reset path.
 
-Change `PeerJsApp`:
+Implement `LocalFirstApp` first without networking:
 
-- stop generating `actor` from role;
-- load stable identity before mounting the provider;
-- use `identity.replicaId` as `actor`;
-- load persisted `CrdtLocalHistory` for the app `docId`;
-- if no persisted history exists and role is host, create initial history and persist it;
-- if no persisted history exists and role is client, keep the current "waiting for snapshot" flow;
-- pass a save callback into `Provider` so local history changes can be persisted.
+- load stable identity before mounting `runtime.Provider`;
+- use `identity.replicaId` as `transport.actor`;
+- load persisted `CrdtLocalHistory` for `runtime.docId`;
+- if none exists, create one with `createInitialCrdtHistory(app)` and persist it;
+- pass a `save(history)` callback to `runtime.Provider`;
+- render `app.renderPanel({actor, editor, title})`;
+- show persistence status in `LocalFirstControls`.
 
-Acceptance criteria:
+For this first slice, a no-op transport is acceptable except for HLC ticking:
 
-- Host reload keeps actor id, document, undo/redo stacks, and visible todos.
-- Client reload keeps actor id and its local document once it has joined.
-- Role changes do not change actor id.
-- Incompatible persisted schema blocks automatic load and offers reset.
-
-## Phase 2: retained batches and duplicate rejection
-
-Update the transport flow so every update batch has durable identity before network send.
-
-Protocol changes in `examples/react-crdt/src/lib/peerjs/protocol.ts`:
-
-- bump `PEER_PROTOCOL_VERSION` to `2`;
-- add `vector` to `hello`;
-- add `origin` and `vectorAfter` to `updates`;
-- validate `origin`, `batchId`, and `vectorAfter`;
-- keep `batchId` stable when forwarding.
-
-Transport changes in `usePeerJsSync.ts`:
-
-- replace `createUpdatesMessage(actor, docId, updates)` with a function that receives a durable `PersistedBatch`;
-- local `publish(updates)` should:
-  - compute batch timestamps and vector;
-  - append the batch to IndexedDB;
-  - persist the updated replica vector/history;
-  - send the persisted batch to connected peers;
-- inbound `updates` should:
-  - validate the message;
-  - reject if `{docId, origin, batchId}` was already received;
-  - apply updates locally;
-  - mark batch as received;
-  - append the batch to the retained log;
-  - persist replica state;
-  - forward the same batch if this peer is acting as host.
-
-Important forwarding rule:
-
-- do not create a new batch id when forwarding;
-- do not change `origin`;
-- do not forward back to the same connection.
-
-Add a small in-memory recent-batch LRU:
-
-- key: `${docId}:${origin}:${batchId}`;
-- purpose: avoid repeated IndexedDB reads under forwarding loops;
-- persisted `receivedBatches` remains authoritative across reload.
+- `publish(updates)` should append local batches and persist state;
+- `subscribe()` can register listeners for later remote delivery;
+- `tick()` should use a durable actor id.
 
 Acceptance criteria:
 
-- Delivering the same network batch twice does not append or apply it twice.
-- Host forwarding preserves the original client `origin` and `batchId`.
-- A reloaded peer does not re-accept already received batches.
+- `#local-first` opens a single editable replica.
+- Reload preserves actor id, document state, and undo/redo stacks.
+- Role and PeerJS concepts are not required for offline editing.
+- Incompatible schema blocks automatic load and offers reset.
 
-## Phase 3: CRDT/HLC vector helpers
+## Phase 2: retained batches and dedupe
 
-Add helpers in `src/crdt` only if they are generic:
+Still before full reconnect sync, make every local and remote batch durable.
 
-- parse packed HLC into actor/node id and comparable components;
-- derive origin actor from `CrdtUpdate`;
-- compute all timestamps in a `CrdtUpdate`;
-- compute `batchTimestampRange(updates)`;
-- merge and compare version vectors.
+Implement `vector.ts`:
 
-Suggested exports:
+- extract all timestamps from a `CrdtUpdate`;
+- derive actor from HLC timestamp actor segment;
+- compute batch `minTs` and `maxTs`;
+- advance a vector from all update timestamps in a batch;
+- compare vectors with `dominates`;
+- merge vectors.
+
+Implement `recentBatchCache.ts`:
+
+- small in-memory LRU keyed by `${docId}:${origin}:${batchId}`;
+- use it as a fast path before IndexedDB `receivedBatches`.
+
+Local publish path:
+
+- create a `PersistedBatch` with `origin = replicaId`;
+- compute timestamp range and `vectorAfter`;
+- append the batch to IndexedDB before network send;
+- persist the updated replica vector/history;
+- keep the batch id stable forever.
+
+Inbound batch path:
+
+- reject duplicate `{docId, origin, batchId}` using LRU plus IndexedDB;
+- apply updates through the synced provider listener path;
+- mark batch as received;
+- append the original batch to the retained log;
+- persist replica state and vector;
+- never re-origin a forwarded batch.
+
+Acceptance criteria:
+
+- Local edits create retained batches.
+- Duplicate batch delivery is ignored.
+- Reloaded replicas still reject already received batches.
+- Batch origin and batch id survive forwarding.
+
+## Phase 3: local-first PeerJS protocol
+
+Implement a separate protocol in `lib/local-first/protocol.ts`.
+
+Do not bump or replace `lib/peerjs/protocol.ts`.
+
+Messages:
 
 ```ts
-export function crdtUpdateTimestamps(update: CrdtUpdate): HlcTimestamp[];
-export function crdtUpdateActors(update: CrdtUpdate): string[];
-export function mergeVersionVector(a: VersionVector, b: VersionVector): VersionVector;
-export function vectorDominates(a: VersionVector, b: VersionVector): boolean;
+type LocalFirstMessage<TState> =
+    | {
+          kind: 'hello';
+          version: 1;
+          actor: string;
+          peerId?: string;
+          docId: string;
+          role: LocalFirstRole;
+          vector: VersionVector;
+      }
+    | {
+          kind: 'updates';
+          version: 1;
+          actor: string;
+          docId: string;
+          batch: PersistedBatch;
+      }
+    | {
+          kind: 'syncRequest';
+          version: 1;
+          actor: string;
+          docId: string;
+          vector: VersionVector;
+      }
+    | {
+          kind: 'syncResponse';
+          version: 1;
+          actor: string;
+          docId: string;
+          since: VersionVector;
+          batches: PersistedBatch[];
+          requiresSnapshot?: boolean;
+      }
+    | {
+          kind: 'snapshot';
+          version: 1;
+          actor: string;
+          docId: string;
+          document: CrdtDocument<TState>;
+          compactedThrough: VersionVector;
+      };
 ```
 
-If `VersionVector` stays example-only, keep vector merge/compare in `lib/peerjs/vector.ts` and export only timestamp extraction from `src/crdt`.
+Validation:
 
-Vector update policy:
-
-- inspect every timestamp in a batch, not just the max;
-- advance `vector[actor]` when the timestamp is newer;
-- derive actor from the HLC timestamp actor segment;
-- for a normal local command batch, all timestamps should belong to the local actor.
+- validate envelope version, doc id, actor, and vector shapes;
+- validate update batches with `createCrdtUpdateValidator(app.schema)`;
+- validate snapshots with the same CRDT metadata checks as the current `peerjs` protocol, adapted locally;
+- validate schema fingerprint at the persistence layer before accepting persisted state.
 
 Acceptance criteria:
 
-- Unit tests cover `set`, `delete`, and `setOrder` timestamp extraction.
-- Unit tests cover vector merge/dominance with multiple actors.
+- Protocol validation is independent from current PeerJS mode.
+- Invalid messages are rejected without changing local state.
 
-## Phase 4: reconnect catch-up over host-star
+## Phase 4: host/client connectivity in local-first mode
 
-Add messages:
+Implement `useLocalFirstSync.ts` with PeerJS internally.
+
+It should return:
 
 ```ts
-type SyncRequest = {
-    kind: 'syncRequest';
-    version: 2;
-    actor: string;
-    docId: string;
-    vector: VersionVector;
-};
-
-type SyncResponse = {
-    kind: 'syncResponse';
-    version: 2;
-    actor: string;
-    docId: string;
-    since: VersionVector;
-    batches: PersistedBatch[];
-    requiresSnapshot?: boolean;
+type LocalFirstSync<TState> = {
+    transport: SyncedTransport;
+    stateStore: ExternalStore<LocalFirstSyncState>;
+    connectionsStore: ExternalStore<LocalFirstConnectionInfo[]>;
+    persistenceStore: ExternalStore<LocalFirstPersistenceState>;
+    connect(peerId: string): void;
+    disconnect(peerId: string): void;
+    requestSync(peerId?: string): void;
+    resetLocalReplica(): Promise<void>;
 };
 ```
 
-Connection flow:
+Connection behavior:
+
+- role can remain `host`/`client` for invite UX, but both roles are durable replicas;
+- host does not own the only valid document state;
+- each peer sends `hello` with its vector on open;
+- each peer sends `syncRequest` after hello;
+- live updates are sent as persisted batches;
+- host may forward batches to other connected clients, preserving origin and batch id.
+
+Initial local-first UX:
+
+- if no invite is present, default to host role and show an invite PeerJS id;
+- if `?peer=...` is present, default to client role and auto-connect when ready;
+- unlike the current `peerjs` mode, a client with persisted state should mount immediately and sync when connected;
+- a client without persisted state may accept a snapshot from the connected peer.
+
+Acceptance criteria:
+
+- Host-star networking works in `#local-first`.
+- Both host and client can edit offline before connecting.
+- Reconnection exchanges missing retained batches rather than requiring a fresh snapshot.
+- Existing `#peerjs` behavior remains unchanged.
+
+## Phase 5: reconnect catch-up
+
+Sync flow:
 
 1. On `open`, both peers send `hello` with vector.
 2. On receiving `hello`, send `syncRequest` with local vector.
 3. On receiving `syncRequest`, query retained batches not dominated by the request vector.
-4. Send `syncResponse` with missing batches.
+4. If logs are available, send `syncResponse` with missing batches.
 5. Receiver applies each batch through the same dedupe path as live `updates`.
-6. After applying response batches, send a reciprocal `syncRequest` if local vector advanced.
+6. If applying response batches advances the local vector, optionally send another `syncRequest`.
 
-Keep the current host-star UX:
+Retained batch query:
 
-- clients still connect to a host PeerJS id;
-- host still forwards live batches;
-- clients do not need to discover each other yet.
-
-But make clients capable of answering sync requests on any direct connection. That lets Phase 5 mesh reuse the same protocol.
+- a batch is missing if the request vector does not dominate all actors/timestamps in that batch;
+- inspect every update timestamp, not only batch max;
+- if logs before `compactedThrough` are needed but missing, return `requiresSnapshot`.
 
 Acceptance criteria:
 
 - Peer A edits offline, reconnects, and Peer B catches up from retained batches.
 - Peer B edits offline, reconnects, and Peer A catches up from retained batches.
-- Reconnect does not require receiving a full snapshot if retained logs are sufficient.
+- Reconnect does not require a full snapshot when retained logs are sufficient.
 
-## Phase 5: snapshot policy for late join and compacted peers
+## Phase 6: snapshot and compacted-peer policy
 
-Extend snapshot messages:
+Snapshot rules:
 
-```ts
-type SnapshotMessage<TState> = {
-    kind: 'snapshot';
-    version: 2;
-    actor: string;
-    docId: string;
-    document: CrdtDocument<TState>;
-    compactedThrough: VersionVector;
-};
-```
+- If receiver has no local persisted replica, accept a validated snapshot.
+- If receiver has a local persisted replica with matching schema, prefer local state and request missing batches.
+- If sender cannot provide missing batches because compaction removed them, enter a recoverable state.
+- Never silently replace local state when local state has offline edits.
 
-Rules:
-
-- If the receiver has no local persisted replica, accept a validated snapshot.
-- If the receiver has a local persisted replica with matching schema, prefer local state and request missing batches.
-- If the sender cannot provide missing batches because compaction removed them, enter a recoverable state.
-- Do not automatically replace local state when local state has offline edits.
-
-Add recoverable UI state:
+Recoverable state:
 
 - `kind: 'needs-rebase-or-discard'`;
-- show local vector, remote compacted frontier, retained local batch count;
+- show local vector, remote compacted frontier, and retained local batch count;
 - actions:
   - discard local copy and accept remote snapshot;
-  - preview replay/rebase local edits.
+  - preview replay/rebase local edits with new timestamps.
 
-Rebase preview scope:
+Rebase preview:
 
-- Use retained local batches after the receiver's last shared/compacted frontier.
-- Recreate updates with fresh timestamps where possible.
-- Apply them to the remote snapshot in memory.
-- Show before/after document preview.
-- Only persist after user confirms.
+- use retained local batches after the receiver's last shared/compacted frontier;
+- recreate updates with fresh timestamps where possible;
+- apply them to the remote snapshot in memory;
+- show before/after preview;
+- persist only after user confirmation.
 
-For the first implementation, the preview can be limited to the todo app and displayed as current todos versus rebased todos. Keep the protocol generic, but the preview UI may use `app.renderPanel` or app-specific display.
+For the first implementation, the preview may be todo-specific in presentation, but the sync state should remain generic.
 
 Acceptance criteria:
 
-- New client can join from snapshot.
-- Existing persisted client does not silently overwrite local state.
-- If missing logs are unavailable, user must explicitly discard or rebase.
+- New replica can bootstrap from snapshot.
+- Existing persisted replica does not get overwritten by snapshot.
+- Missing-log situations require explicit discard or rebase.
 
-## Phase 6: UI diagnostics
+## Phase 7: UI diagnostics
 
-Update `PeerJsControls` and related state stores to show:
+Implement `LocalFirstControls.tsx`.
+
+Show:
 
 - stable replica id;
 - transient PeerJS id;
@@ -317,62 +416,58 @@ Update `PeerJsControls` and related state stores to show:
 - pending update count from `history.doc.pending.length`;
 - connected peers with PeerJS id, actor id, role, vector, open state, queued outgoing count, and last sync time.
 
-Add controls:
+Controls:
 
+- host/client role switch for invite UX;
+- connect to peer id;
+- copy invite URL for `#local-first?peer=...` or equivalent current URL shape;
+- manually request sync;
 - reset local replica;
 - export local state as JSON;
-- import local state from JSON with validation;
-- manually request sync from connected peers;
+- import local state as JSON with validation;
 - later: compact retained log.
 
 Acceptance criteria:
 
-- A developer can tell whether a peer is using persisted state or waiting for a snapshot.
+- A developer can tell whether the replica is loaded from persistence, waiting for snapshot, or syncing.
 - Duplicate rejection, retained batch count, and pending count are visible enough to debug protocol mistakes.
 
-## Phase 7: optional mesh
+## Phase 8: optional mesh
 
-Only start this after dedupe and reconnect catch-up are working.
+Only start after host-star local-first sync is stable.
 
 Add membership message:
 
 ```ts
-type PeerMember = {
-    peerId: string;
-    actor: string;
-    role: PeerRole;
-    vector: VersionVector;
-};
-
 type MembersMessage = {
     kind: 'members';
-    version: 2;
+    version: 1;
     actor: string;
     docId: string;
-    members: PeerMember[];
+    members: Array<{
+        peerId: string;
+        actor: string;
+        role: LocalFirstRole;
+        vector: VersionVector;
+    }>;
 };
 ```
 
 Behavior:
 
-- host sends membership updates to clients;
+- host shares connected member list;
 - clients optionally connect directly to other clients;
 - every direct connection runs the same `hello` and `syncRequest` flow;
-- live batches can be forwarded over mesh after dedupe;
+- live batches may be forwarded over mesh after dedupe;
 - preserve original `origin` and `batchId`;
 - never forward a batch back to the connection it arrived on.
-
-UI:
-
-- add "mesh enabled" toggle;
-- show direct versus host-routed connections.
 
 Acceptance criteria:
 
 - Three peers converge if the host leaves after direct connections are established.
 - Duplicate forwarding in mesh does not grow retained logs or reapply updates.
 
-## Phase 8: compaction
+## Phase 9: compaction
 
 Add manual sync-log compaction only after vectors and snapshot catch-up are stable.
 
@@ -404,53 +499,44 @@ Acceptance criteria:
 
 ## Tests
 
-Add focused tests around pure helpers first:
+Pure helper tests:
 
-- protocol v2 validation;
+- local-first protocol validation;
 - schema fingerprint stability;
 - HLC timestamp actor extraction;
 - version-vector merge/dominance;
 - batch range calculation;
 - duplicate batch key handling.
 
-Add browser/storage tests where feasible:
+Storage tests:
 
-- persisted identity survives reload;
-- persisted history survives reload;
-- retained batches survive reload;
-- duplicate received batch is ignored after reload.
+- persisted identity survives reload/open-close;
+- persisted `CrdtLocalHistory` survives reload/open-close;
+- retained batches survive reload/open-close;
+- duplicate received batch is ignored after reload/open-close;
+- incompatible schema fingerprint blocks load.
 
-Add PeerJS behavior tests if the example test setup supports it. If not, extract the sync state machine from `usePeerJsSync` enough to test without real PeerJS:
+Sync state tests:
 
 - local publish appends batch before send;
 - inbound batch applies, persists, and forwards once;
 - reconnect sync request returns missing batches;
 - compacted-missing-log path enters `needs-rebase-or-discard`.
 
-## Suggested file map
-
-- `examples/react-crdt/src/lib/peerjs/localFirstTypes.ts`: durable sync types.
-- `examples/react-crdt/src/lib/peerjs/persistence.ts`: IndexedDB wrapper.
-- `examples/react-crdt/src/lib/peerjs/vector.ts`: version-vector helpers if kept example-local.
-- `examples/react-crdt/src/lib/peerjs/schemaFingerprint.ts`: stable app schema fingerprinting.
-- `examples/react-crdt/src/lib/peerjs/recentBatchCache.ts`: in-memory dedupe LRU.
-- `examples/react-crdt/src/lib/peerjs/protocol.ts`: v2 message envelope and validators.
-- `examples/react-crdt/src/lib/peerjs/usePeerJsSync.ts`: persisted batch send/receive, sync requests, forwarding.
-- `examples/react-crdt/src/lib/peerjs/PeerJsApp.tsx`: loading persisted state and recoverable states.
-- `examples/react-crdt/src/lib/peerjs/PeerJsControls.tsx`: diagnostics and reset/export/import controls.
-- `src/crdt/history.ts` or a new `src/crdt/vector.ts`: generic timestamp extraction helpers if promoted.
+If real PeerJS tests are too heavy, extract a transport-independent local-first sync state machine and test it without WebRTC.
 
 ## First implementation slice
 
-Implement these together:
+Implement this first:
 
-1. Add `idb` and IndexedDB persistence.
-2. Persist stable replica identity and `CrdtLocalHistory`.
-3. Persist retained local and remote batches.
-4. Add protocol v2 `origin`, `vector`, and `vectorAfter`.
-5. Reject duplicate received batches.
-6. Preserve batch identity when forwarding.
-7. Show identity, persistence state, vector, retained batch count, and pending count in the UI.
-8. Add unit tests for vector helpers and duplicate handling.
+1. Add `local-first` hash mode and tab.
+2. Add `LocalFirstApp` as a single persistent CRDT replica.
+3. Add `idb` and IndexedDB persistence.
+4. Persist stable replica identity and `CrdtLocalHistory`.
+5. Persist retained local batches from local edits.
+6. Show identity, persistence state, vector, retained batch count, and pending count in `LocalFirstControls`.
+7. Add unit tests for schema fingerprinting and vector helpers.
 
-Stop there before mesh or compaction. That slice changes the example from "network demo" to "reload-safe local-first replica" while keeping the routing model understandable.
+Stop before PeerJS connectivity in the first slice if needed. The key architectural point is that `local-first` starts as its own durable mode, not as a mutation of the existing `peerjs` demo.
+
+The second slice should add local-first PeerJS connectivity, retained remote batches, duplicate rejection, and reconnect catch-up.

@@ -12,6 +12,7 @@ import {asFlat, type MaybeNested, resolveAndApply} from '../make.js';
 import type {Updater} from '../react/Updater.js';
 import type {ApplyTiming, DraftPatch, Path} from '../types.js';
 import {
+    cancelScheduledTask,
     changedPaths,
     clearPreviewState,
     makeContextForPath,
@@ -20,9 +21,11 @@ import {
     notifyPaths,
     recordPreviewPaths,
     replacePreviewState,
+    scheduleTask,
     useValue,
     type Context,
     type PathListenerNode,
+    type ScheduledTask,
 } from '../react-core/index.js';
 import {useLatest} from './useLatest.js';
 
@@ -40,7 +43,7 @@ type ContextBase<T, Change, Tag extends string> = {
     save: (v: T) => void;
     listeners: (() => void)[];
     previewState: null | T;
-    raf?: number;
+    scheduled?: ScheduledTask;
     listenersByPath: PathListenerNode;
     queuedChanges: QueuedChanges<Change, Tag>;
     previewPaths: Record<string, Path>;
@@ -217,9 +220,9 @@ const makeDispatch = <T, Tag extends string = 'type'>(
     const go = (v: MaybeNested<DraftPatch<T, Tag, Context>>, when?: ApplyTiming) => {
         if (when === 'preview') {
             ctx.queuedChanges.push(...(asFlat(v) as DraftPatch<T, Tag, Context>[]));
-            if (ctx.raf == null) {
-                ctx.raf = requestAnimationFrame(() => {
-                    ctx.raf = undefined;
+            if (ctx.scheduled == null) {
+                ctx.scheduled = scheduleTask(() => {
+                    ctx.scheduled = undefined;
                     // const base = inner.previewState ?? inner.state.current;
                     const queue = ctx.queuedChanges;
                     ctx.queuedChanges = [];
@@ -247,11 +250,9 @@ const makeDispatch = <T, Tag extends string = 'type'>(
         const hadPreview = previewPaths.length > 0;
         ctx.previewState = null;
         ctx.previewPaths = {};
-        if (ctx.raf != null) {
-            cancelAnimationFrame(ctx.raf);
-            ctx.raf = undefined;
-        }
-
+        ctx.queuedChanges = [];
+        cancelScheduledTask(ctx.scheduled);
+        ctx.scheduled = undefined;
         const {current: next, changes} = resolveAndApply(ctx.state, v, extra, tag, equalFn);
         if (next === ctx.state) return;
         const pathTargets = changedPaths(changes);
@@ -295,9 +296,9 @@ const makeHistoryDispatch = <T, An, Tag extends string = 'type'>(
                 return; // not previewing those
             }
             ctx.queuedChanges.push(...(asFlat(v) as DraftPatch<T, Tag, Context>[]));
-            if (ctx.raf == null) {
-                ctx.raf = requestAnimationFrame(() => {
-                    ctx.raf = undefined;
+            if (ctx.scheduled == null) {
+                ctx.scheduled = scheduleTask(() => {
+                    ctx.scheduled = undefined;
                     // const base = inner.previewState?.current ?? inner.state.current;
                     const queue = ctx.queuedChanges;
                     ctx.queuedChanges = [];
@@ -322,11 +323,9 @@ const makeHistoryDispatch = <T, An, Tag extends string = 'type'>(
         const hadPreview = previewPaths.length > 0;
         ctx.previewState = null;
         ctx.previewPaths = {};
-        if (ctx.raf != null) {
-            cancelAnimationFrame(ctx.raf);
-            ctx.raf = undefined;
-        }
-
+        ctx.queuedChanges = [];
+        cancelScheduledTask(ctx.scheduled);
+        ctx.scheduled = undefined;
         const {
             history: next,
             changedPaths: pathTargets,

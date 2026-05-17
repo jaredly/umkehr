@@ -127,6 +127,27 @@ describe('crdt local history', () => {
         expect(undoneAgain.history.doc.state.title).toBe('Draft');
     });
 
+    it('undoes repeated local edits to the same array item field', () => {
+        const first = apply(blank(), $.todos[0].title('One edited'), clock('local'));
+        const second = apply(first.history, $.todos[0].title('One edited again'), first.clock);
+
+        expect(second.history.doc.state.todos[0].title).toBe('One edited again');
+        expect(canUndoLocalCommand(second.history)).toBe(true);
+
+        const undoneSecond = undoLocalCommand(second.history, second.clock);
+
+        expect(undoneSecond.ok).toBe(true);
+        if (!undoneSecond.ok) return;
+        expect(undoneSecond.history.doc.state.todos[0].title).toBe('One edited');
+        expect(canUndoLocalCommand(undoneSecond.history)).toBe(true);
+
+        const undoneFirst = undoLocalCommand(undoneSecond.history, undoneSecond.clock);
+
+        expect(undoneFirst.ok).toBe(true);
+        if (!undoneFirst.ok) return;
+        expect(undoneFirst.history.doc.state.todos[0].title).toBe('One');
+    });
+
     it('blocks undo when a newer remote update superseded the local set', () => {
         const applied = apply(blank(), $.title('Local'), clock('local'));
         expect(canUndoLocalCommand(applied.history)).toBe(true);

@@ -61,4 +61,13 @@ describe('package exports', () => {
         expect(typeof reactCrdtPkg.createSyncedContext).toBe('function');
         expect(typeof reactCrdtPkg.useValue).toBe('function');
     });
+
+    it('imports the built Remix entry point separately', async () => {
+        expect(existsSync('dist/src/remix/index.js')).toBe(true);
+
+        const remixPkg = await import('umkehr/remix');
+
+        expect(typeof remixPkg.createStateContext).toBe('function');
+        expect(typeof remixPkg.createHistoryContext).toBe('function');
+    });
 });
