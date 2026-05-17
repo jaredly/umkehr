@@ -52,6 +52,7 @@ import type {
     LocalFirstStats,
     LocalFirstSync,
     LocalFirstSyncState,
+    LocalFirstMember,
     PersistedBatch,
     PersistedReplica,
     ReplicaIdentity,
@@ -62,9 +63,15 @@ type ConnectionRecord<TState> = {
     conn: DataConnection;
     actor?: string;
     role?: LocalFirstRole;
+    vector?: VersionVector;
     queued: LocalFirstMessage<TState>[];
     error?: string;
     lastSyncAt?: string;
+};
+
+type DiscoveredMember = LocalFirstMember & {
+    sourcePeerId: string;
+    lastSeenAt: string;
 };
 
 export function useLocalFirstSync<TState>({
@@ -102,6 +109,8 @@ export function useLocalFirstSync<TState>({
     const listenersRef = useRef(new Set<(update: CrdtUpdate) => void>());
     const peerRef = useRef<Peer | null>(null);
     const connectionsRef = useRef(new Map<string, ConnectionRecord<TState>>());
+    const discoveredMembersRef = useRef(new Map<string, DiscoveredMember>());
+    const lastMemberUpdateAtRef = useRef<string | undefined>(undefined);
     const connectRef = useRef<(peerId: string) => void>(() => {});
     const recentBatchesRef = useRef(createRecentBatchCache());
     const protocolRef = useRef<LocalFirstProtocolConfig<TState>>({
@@ -138,6 +147,13 @@ export function useLocalFirstSync<TState>({
                 retainedBatches: 0,
                 receivedBatches: 0,
                 pendingUpdates: initialHistory.doc.pending.length,
+                mesh: {
+                    discoveredMembers: 0,
+                    directConnections: 0,
+                    connectedPeers: 0,
+                    lastMemberUpdateAt: undefined,
+                    compactionRisks: [],
+                },
                 snapshotStatus: undefined,
                 pendingSnapshot: undefined,
                 replayPreview: undefined,
@@ -152,17 +168,31 @@ export function useLocalFirstSync<TState>({
 
     const publishConnections = useCallback(() => {
         connectionsStore.setSnapshot(
-            [...connectionsRef.current.values()].map(({conn, actor, role, queued, error, lastSyncAt}) => ({
-                peerId: conn.peer,
-                actor,
-                role,
-                open: conn.open,
-                queuedOutgoing: queued.length,
-                error,
-                lastSyncAt,
-            })),
+            [...connectionsRef.current.values()].map(
+                ({conn, actor, role, vector, queued, error, lastSyncAt}) => ({
+                    peerId: conn.peer,
+                    actor,
+                    role,
+                    vector,
+                    open: conn.open,
+                    queuedOutgoing: queued.length,
+                    error,
+                    lastSyncAt,
+                }),
+            ),
         );
     }, [connectionsStore]);
+
+    const meshStats = useCallback((): LocalFirstStats['mesh'] => {
+        const connections = [...connectionsRef.current.values()];
+        return {
+            discoveredMembers: discoveredMembersRef.current.size,
+            directConnections: connections.length,
+            connectedPeers: connections.filter(({conn}) => conn.open).length,
+            lastMemberUpdateAt: lastMemberUpdateAtRef.current,
+            compactionRisks: compactionRisksForFrontier(vectorRef.current, connections),
+        };
+    }, []);
 
     const refreshCounts = useCallback(async () => {
         const [retainedBatches, receivedBatches] = await Promise.all([
@@ -175,6 +205,7 @@ export function useLocalFirstSync<TState>({
             retainedBatches,
             receivedBatches,
             pendingUpdates: historyRef.current.doc.pending.length,
+            mesh: meshStats(),
             snapshotStatus: snapshotStatusRef.current,
             pendingSnapshot: pendingSnapshotRef.current
                 ? {
@@ -191,7 +222,7 @@ export function useLocalFirstSync<TState>({
                 : undefined,
             compactionStatus: compactionStatusRef.current,
         });
-    }, [docId, statsStore]);
+    }, [docId, meshStats, statsStore]);
 
     const persistReplica = useCallback(
         async (state: LocalFirstPersistenceState = persistenceStore.getSnapshot()) => {
@@ -260,10 +291,11 @@ export function useLocalFirstSync<TState>({
             selfPeerId: peerRef.current?.id,
             vector: vectorRef.current,
             document: historyRef.current.doc,
-            connections: [...connectionsRef.current.values()].map(({conn, actor, role}) => ({
+            connections: [...connectionsRef.current.values()].map(({conn, actor, role, vector}) => ({
                 peerId: conn.peer,
                 actor,
                 role,
+                vector,
                 open: conn.open,
             })),
         }),
@@ -429,8 +461,10 @@ export function useLocalFirstSync<TState>({
                     if (!record) continue;
                     record.actor = effect.actor;
                     if (effect.role) record.role = effect.role;
+                    if (effect.vector) record.vector = effect.vector;
                     record.lastSyncAt = new Date().toISOString();
                     publishConnections();
+                    void refreshCounts();
                     continue;
                 }
 
@@ -438,6 +472,26 @@ export function useLocalFirstSync<TState>({
                     const record = connectionsRef.current.get(effect.peerId);
                     if (record) record.error = effect.message;
                     publishConnections();
+                    continue;
+                }
+
+                if (effect.kind === 'recordMembers') {
+                    const seenAt = new Date().toISOString();
+                    lastMemberUpdateAtRef.current = seenAt;
+                    for (const member of effect.members) {
+                        if (
+                            member.peerId === peerRef.current?.id ||
+                            member.actor === identity.replicaId
+                        ) {
+                            continue;
+                        }
+                        discoveredMembersRef.current.set(member.peerId, {
+                            ...member,
+                            sourcePeerId: effect.peerId,
+                            lastSeenAt: seenAt,
+                        });
+                    }
+                    void refreshCounts();
                     continue;
                 }
 
@@ -478,7 +532,9 @@ export function useLocalFirstSync<TState>({
         [
             acceptBatch,
             acceptSnapshot,
+            identity.replicaId,
             publishConnections,
+            refreshCounts,
             sendMissingBatches,
             sendOrQueue,
             sessionState,
@@ -751,4 +807,17 @@ export function useLocalFirstSync<TState>({
 function initialClock(replicaId: string, vector: VersionVector) {
     const localTimestamp = vector[replicaId];
     return localTimestamp ? hlc.unpack(localTimestamp) : hlc.init(replicaId, Date.now());
+}
+
+function compactionRisksForFrontier<TState>(
+    frontier: VersionVector,
+    connections: ConnectionRecord<TState>[],
+): LocalFirstStats['mesh']['compactionRisks'] {
+    return connections
+        .filter(({conn}) => conn.open)
+        .flatMap<LocalFirstStats['mesh']['compactionRisks'][number]>(({conn, actor, vector}) => {
+            if (!vector) return [{peerId: conn.peer, actor, reason: 'unknown' as const}];
+            if (vectorDominates(vector, frontier)) return [];
+            return [{peerId: conn.peer, actor, reason: 'behind' as const}];
+        });
 }

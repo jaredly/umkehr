@@ -501,6 +501,7 @@ describe('local-first session planning', () => {
 
         expect(memberEffects).toMatchObject([
             {kind: 'markConnection', peerId: 'peer-remote', actor: 'remote'},
+            {kind: 'recordMembers', peerId: 'peer-remote'},
             {kind: 'connect', peerId: 'peer-third'},
         ]);
     });

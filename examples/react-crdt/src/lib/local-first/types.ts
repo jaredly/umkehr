@@ -60,6 +60,13 @@ export type LocalFirstStats = {
     retainedBatches: number;
     receivedBatches: number;
     pendingUpdates: number;
+    mesh: {
+        discoveredMembers: number;
+        directConnections: number;
+        connectedPeers: number;
+        lastMemberUpdateAt?: string;
+        compactionRisks: LocalFirstCompactionRisk[];
+    };
     snapshotStatus?: string;
     pendingSnapshot?: {
         actor: string;
@@ -73,10 +80,17 @@ export type LocalFirstStats = {
     compactionStatus?: string;
 };
 
+export type LocalFirstCompactionRisk = {
+    peerId: string;
+    actor?: string;
+    reason: 'behind' | 'unknown';
+};
+
 export type LocalFirstConnectionInfo = {
     peerId: string;
     actor?: string;
     role?: LocalFirstRole;
+    vector?: VersionVector;
     open: boolean;
     queuedOutgoing: number;
     error?: string;

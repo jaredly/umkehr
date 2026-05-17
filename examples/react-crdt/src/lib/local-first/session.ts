@@ -11,6 +11,7 @@ export type LocalFirstSessionPeer = {
     peerId: string;
     actor?: string;
     role?: LocalFirstRole;
+    vector?: VersionVector;
     open: boolean;
 };
 
@@ -25,8 +26,15 @@ export type LocalFirstSessionState<TState> = {
 };
 
 export type LocalFirstSessionEffect<TState> =
-    | {kind: 'markConnection'; peerId: string; actor: string; role?: LocalFirstRole}
+    | {
+          kind: 'markConnection';
+          peerId: string;
+          actor: string;
+          role?: LocalFirstRole;
+          vector?: VersionVector;
+      }
     | {kind: 'connectionError'; peerId: string; message: string}
+    | {kind: 'recordMembers'; peerId: string; members: LocalFirstMember[]}
     | {kind: 'send'; peerId: string; message: LocalFirstMessage<TState>}
     | {kind: 'broadcastMembers'; exceptPeerId?: string}
     | {kind: 'sendMissingBatches'; peerId: string; since: VersionVector}
@@ -158,6 +166,7 @@ export function planIncomingMessage<TState>({
             peerId,
             actor: message.actor,
             role: message.kind === 'hello' ? message.role : undefined,
+            vector: vectorForMessage(message),
         },
     ];
 
@@ -198,6 +207,7 @@ export function planIncomingMessage<TState>({
         return effects;
     }
 
+    effects.push({kind: 'recordMembers', peerId, members: message.members});
     for (const member of message.members) {
         if (member.peerId === state.selfPeerId || member.actor === state.replicaId) continue;
         const existing = state.connections.find((connection) => connection.peerId === member.peerId);
@@ -226,8 +236,14 @@ export function currentMembers<TState>(
             peerId: connection.peerId,
             actor: connection.actor,
             role: connection.role ?? 'host',
-            vector: {},
+            vector: connection.vector ?? {},
         });
     }
     return members;
+}
+
+function vectorForMessage<TState>(message: LocalFirstMessage<TState>): VersionVector | undefined {
+    if (message.kind === 'hello' || message.kind === 'syncRequest') return message.vector;
+    if (message.kind === 'snapshot') return message.compactedThrough;
+    return undefined;
 }

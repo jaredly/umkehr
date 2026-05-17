@@ -426,6 +426,11 @@ p {
     gap: 10px;
 }
 
+.compactionRiskList {
+    display: grid;
+    gap: 8px;
+}
+
 .connectionRow {
     display: grid;
     gap: 8px;

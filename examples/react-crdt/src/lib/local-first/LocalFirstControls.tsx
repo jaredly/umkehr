@@ -15,6 +15,7 @@ export function LocalFirstControls<TState>({
     const persistence = useStore(sync.persistenceStore);
     const stats = useStore(sync.statsStore);
     const connections = useStore(sync.connectionsStore);
+    const compactionRisks = stats.mesh.compactionRisks;
     const inviteUrl = state.kind === 'ready' ? createInviteUrl(state.peerId) : '';
     const [peerId, setPeerId] = useState('');
 
@@ -43,6 +44,14 @@ export function LocalFirstControls<TState>({
                 <dd>{stats.receivedBatches}</dd>
                 <dt>Pending</dt>
                 <dd>{stats.pendingUpdates}</dd>
+                <dt>Discovered</dt>
+                <dd>{stats.mesh.discoveredMembers}</dd>
+                <dt>Direct</dt>
+                <dd>{stats.mesh.directConnections}</dd>
+                <dt>Connected</dt>
+                <dd>{stats.mesh.connectedPeers}</dd>
+                <dt>Members</dt>
+                <dd>{stats.mesh.lastMemberUpdateAt ?? 'none'}</dd>
                 <dt>Snapshot</dt>
                 <dd>{stats.snapshotStatus ?? 'none'}</dd>
                 {stats.pendingSnapshot ? (
@@ -59,6 +68,8 @@ export function LocalFirstControls<TState>({
                 ) : null}
                 <dt>Compaction</dt>
                 <dd>{stats.compactionStatus ?? 'none'}</dd>
+                <dt>Behind</dt>
+                <dd>{compactionRisks.length || 'none'}</dd>
                 <dt>Peers</dt>
                 <dd>{connections.length}</dd>
             </dl>
@@ -106,10 +117,24 @@ export function LocalFirstControls<TState>({
             <button
                 type="button"
                 disabled={stats.retainedBatches === 0}
-                onClick={() => void compact(sync)}
+                onClick={() => void compact(sync, compactionRisks)}
             >
                 Compact retained log
             </button>
+            {compactionRisks.length ? (
+                <section className="compactionRiskList">
+                    {compactionRisks.map((risk) => (
+                        <div className="connectionRow" key={risk.peerId}>
+                            <strong>{risk.actor ?? risk.peerId}</strong>
+                            <span>
+                                {risk.reason === 'unknown'
+                                    ? 'vector unknown; request sync before compacting'
+                                    : 'behind this replica; will need a snapshot after compaction'}
+                            </span>
+                        </div>
+                    ))}
+                </section>
+            ) : null}
             <button
                 type="button"
                 disabled={!stats.pendingSnapshot}
@@ -143,6 +168,9 @@ export function LocalFirstControls<TState>({
                         <span>
                             {connection.open ? 'open' : 'closed'}
                             {connection.role ? ` / ${connection.role}` : ''}
+                            {connection.vector
+                                ? ` / vector ${Object.keys(connection.vector).length}`
+                                : ' / vector unknown'}
                             {connection.queuedOutgoing
                                 ? ` / ${connection.queuedOutgoing} queued`
                                 : ''}
@@ -178,10 +206,23 @@ async function reset<TState>(sync: LocalFirstSync<TState>) {
     await sync.resetLocalReplica();
 }
 
-async function compact<TState>(sync: LocalFirstSync<TState>) {
+async function compact<TState>(
+    sync: LocalFirstSync<TState>,
+    risks: ReturnType<LocalFirstSync<TState>['statsStore']['getSnapshot']>['mesh']['compactionRisks'],
+) {
+    const riskText = risks.length
+        ? `\n\nPeers affected:\n${risks
+              .map(
+                  (risk) =>
+                      `- ${risk.actor ?? risk.peerId}: ${
+                          risk.reason === 'unknown' ? 'vector unknown' : 'behind'
+                      }`,
+              )
+              .join('\n')}`
+        : '';
     if (
         !window.confirm(
-            'Compact retained batches for this replica? Peers behind this frontier will need a snapshot.',
+            `Compact retained batches for this replica? Peers behind this frontier will need a snapshot.${riskText}`,
         )
     ) {
         return;
