@@ -82,6 +82,7 @@ function LocalReplicaDocument<TState>({
     title: string;
 }) {
     const editor = runtime.useEditorContext();
+    editor.useLocalHistory();
 
     return app.renderPanel({
         actor,

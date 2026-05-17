@@ -151,6 +151,7 @@ function PeerClientPanel<TState>({
     runtime: CrdtRuntime<TState>;
 }) {
     const editor = runtime.useEditorContext();
+    editor.useLocalHistory();
 
     return app.renderPanel({
         actor,
