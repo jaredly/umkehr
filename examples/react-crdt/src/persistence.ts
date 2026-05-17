@@ -1,7 +1,7 @@
 import typia from 'typia';
 import {type History, type Patch} from 'umkehr';
 import {createPatchValidator} from 'umkehr/validation';
-import type {State} from './App';
+import type {State} from './model';
 
 const STORAGE_KEY = 'umkehr.react-example.history.v1';
 
