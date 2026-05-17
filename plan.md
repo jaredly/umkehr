@@ -1,355 +1,529 @@
-# CRDT local undo/redo implementation plan
+# React CRDT synced context implementation plan
 
-This plan implements local-only undo/redo for the CRDT layer.
+This plan implements a React API for CRDT-backed umkehr state.
 
-The core rule:
+The target is a new entry point, likely `umkehr/react-crdt`, that provides an API similar to
+`umkehr/react` while being explicit about the collaborative runtime differences.
 
-- Only local commands go into undo/redo history.
-- Remote updates apply to the CRDT document but do not enter local history.
-- Undo/redo creates fresh CRDT updates.
-- Undo/redo is blocked if any effect in the command can no longer be cleanly reversed/reapplied.
+## Goals
 
-This avoids partial undo and avoids overwriting remote edits.
+- Add a new `createSyncedContext` API for CRDT-backed React state.
+- Preserve the normal leaf-component editing style:
+
+```ts
+const ctx = useTodos();
+const title = useValue(ctx.$.todos[index].title);
+ctx.$.todos[index].title('Published');
+```
+
+- Keep CRDT collaboration responsibilities out of leaf UI components.
+- Put actor ID, HLC clock ownership, outbound update delivery, and inbound update subscription behind
+  a provider `transport` prop.
+- Keep remote update validation outside React. Validation belongs in transport/network code.
+- Reuse shared React primitives from `src/react` instead of copying the whole implementation.
+- Support local-only undo/redo through the existing CRDT history layer.
+- Support preview updates and recompute previews on top of remote updates.
+- Use efficient path notifications by translating CRDT paths back to normal umkehr paths. If that
+  proves unreliable, update path APIs rather than falling back permanently to broad notifications.
 
 ## Non-goals
 
-Do not implement these in this pass:
+- Do not implement CRDT `createHistoryContext` yet.
+- Do not implement branch/jump/history scrubber semantics.
+- Do not implement annotations in CRDT React.
+- Do not perform remote CRDT update validation inside React.
+- Do not expose blocked undo/redo effects in the first API.
 
-- collaborative/global undo;
-- history tree branching;
-- history scrubber UI;
-- accepting/rejecting old remote changes;
-- causal frontier / dotted version vectors;
-- branch merge semantics;
-- command labels.
+## Public API
 
-Those are important follow-up topics, but this pass should only build a reliable local command stack.
-
-## Target API
-
-Add a new CRDT history layer, probably under `src/crdt/history.ts`.
+Add:
 
 ```ts
-export type CrdtLocalHistory<T> = {
-    doc: CrdtDocument<T>;
-    undoStack: LocalCommand[];
-    redoStack: LocalCommand[];
-};
-
-export type ApplyLocalCommandResult<T> = {
-    history: CrdtLocalHistory<T>;
-    updates: CrdtUpdate[];
-    clock: HLC;
-};
-
-export type UndoRedoResult<T> =
-    | {
-          ok: true;
-          history: CrdtLocalHistory<T>;
-          updates: CrdtUpdate[];
-          clock: HLC;
-      }
-    | {
-          ok: false;
-          reason: 'empty' | 'blocked';
-          blocked?: BlockedEffect[];
-          history: CrdtLocalHistory<T>;
-          clock: HLC;
-      };
+import {createSyncedContext, useValue} from 'umkehr/react-crdt';
 ```
 
-Functions:
+`createSyncedContext` mirrors `createStateContext` where practical:
 
 ```ts
-export function createCrdtLocalHistory<T>(doc: CrdtDocument<T>): CrdtLocalHistory<T>;
+const [Provider, useTodos] = createSyncedContext<State>('type');
+```
 
-export function applyLocalCommand<T>(
-    history: CrdtLocalHistory<T>,
-    draft: MaybeNested<DraftPatch<T, 'type', undefined>>,
-    clock: HLC,
-): ApplyLocalCommandResult<T>;
+Provider:
 
-export function applyRemoteUpdate<T>(
+```tsx
+<Provider
+    initial={initialState}
+    schema={typia.json.schemas<[State], '3.1'>()}
+    transport={transport}
+    save={saveLocalHistory}
+>
+    <App />
+</Provider>
+```
+
+Hook result:
+
+```ts
+type SyncedContext<T, Tag extends string> = {
+    latest(): T;
+    clearPreview(): void;
+    canUndo(): boolean;
+    canRedo(): boolean;
+    undo(): void;
+    redo(): void;
+    useLocalHistory(): CrdtLocalHistory<T>;
+    $: PatchBuilder<T, Tag, void, Context>;
+    dispatch(v: MaybeNested<DraftPatch<T, Tag, Context>>, when?: ApplyTiming): void;
+};
+```
+
+No `receiveRemoteUpdate` should be returned from the hook. Remote updates enter through the
+transport object passed to the provider.
+
+## CRDT remote apply split
+
+Before building `react-crdt`, split the current CRDT remote history helper so React does not need to
+know anything about remote HLC receive behavior.
+
+Current helper:
+
+```ts
+applyRemoteUpdate(history, update, clock): {history, clock}
+```
+
+This combines two responsibilities:
+
+- applying a remote CRDT update to local CRDT history;
+- advancing a local HLC from the remote update timestamp.
+
+For `react-crdt`, the transport should own the second responsibility. Add a clock-free helper:
+
+```ts
+export function applyRemoteHistoryUpdate<T>(
     history: CrdtLocalHistory<T>,
     update: CrdtUpdate,
-    clock: HLC,
-): {history: CrdtLocalHistory<T>; clock: HLC};
-
-export function undoLocalCommand<T>(
-    history: CrdtLocalHistory<T>,
-    clock: HLC,
-): UndoRedoResult<T>;
-
-export function redoLocalCommand<T>(
-    history: CrdtLocalHistory<T>,
-    clock: HLC,
-): UndoRedoResult<T>;
+): CrdtLocalHistory<T>;
 ```
 
-If generic tag/context support is easy, add it. If not, start with the default `'type'` tag and `undefined` context to match current CRDT examples.
-
-## Data structures
-
-Store full `CrdtMeta` snapshots for before/after. This is simpler and preserves array IDs, container incarnations, and tombstones.
+Keep the existing clock-aware helper for lower-level callers that want this convenience:
 
 ```ts
-export type LocalCommand = {
-    id: string;
-    forward: CrdtUpdate[];
-    effects: LocalEffect[];
-};
+export function receiveRemoteUpdate<T>(
+    history: CrdtLocalHistory<T>,
+    update: CrdtUpdate,
+    clock: hlc.HLC,
+): {history: CrdtLocalHistory<T>; clock: hlc.HLC};
+```
 
-export type LocalEffect =
-    | {
-          kind: 'set';
-          path: CrdtPathSegment[];
-          localTs: HlcTimestamp;
-          before: CrdtMeta | undefined;
-          after: CrdtMeta;
-      }
-    | {
-          kind: 'delete';
-          path: CrdtPathSegment[];
-          localTs: HlcTimestamp;
-          before: CrdtMeta | undefined;
-      }
-    | {
-          kind: 'setOrder';
-          arrayPath: CrdtPathSegment[];
-          localTs: HlcTimestamp;
-          before: Record<ItemId, {value: FractionalIndex; ts: HlcTimestamp} | undefined>;
-          after: Record<ItemId, {value: FractionalIndex; ts: HlcTimestamp}>;
-      };
+Naming can be adjusted during implementation, but the API split should be clear:
 
-export type BlockedEffect = {
-    command: LocalCommand;
-    effect: LocalEffect;
-    reason: 'missing-target' | 'superseded' | 'wrong-incarnation' | 'deleted';
+- `applyRemoteHistoryUpdate` is pure history application and does not touch clocks.
+- `receiveRemoteUpdate` is clock-aware convenience and can delegate to `applyRemoteHistoryUpdate`.
+- `react-crdt` must use the clock-free function.
+- transports should call `hlc.recv` or equivalent before delivering remote updates to the provider.
+
+Existing tests that currently call `applyRemoteUpdate` should be updated to cover both paths:
+
+- clock-free remote application keeps remote updates out of local undo history;
+- clock-aware receive still advances the clock and preserves existing behavior.
+
+## Transport API
+
+The provider should receive a transport object that owns actor identity, clock, outbound update
+publication, and inbound update subscription.
+
+Initial shape:
+
+```ts
+type SyncedTransport = {
+    actor: string;
+    tick(): hlc.HLC;
+    publish(updates: CrdtUpdate[]): void;
+    subscribe(receive: (update: CrdtUpdate) => void): () => void;
 };
 ```
 
-Command IDs can be the packed HLC timestamp for the first update in the command.
+Notes:
 
-## Required internal helpers
+- `publish` is called only for local edits and local undo/redo.
+- `subscribe` delivers remote updates to the provider.
+- `tick` increments the local transport clock and returns the new local HLC for authoring local
+  updates.
+- Before `subscribe` calls `receive(update)`, the transport must already have incorporated the
+  remote update timestamp into its own clock.
+- The transport may validate remote updates before calling `receive`.
+- The transport may batch updates internally, but the provider can start with one-at-a-time receive.
+- The transport owns persistence of the clock if needed.
 
-Some existing CRDT internals are currently private but are needed for history.
-
-Export internally from module files, not necessarily from `umkehr/crdt` public API unless useful:
-
-- `getMetaAtPath`
-- `versionOf`
-- `buildMeta`
-- `materialize`
-- `schemaAtCrdtPath`
-- maybe `cloneMeta`
-
-Add helper functions:
+Optional follow-up shape if batches are more ergonomic:
 
 ```ts
-function cloneEffectMeta(meta: CrdtMeta | undefined): CrdtMeta | undefined;
-
-function getEffectTarget(doc: CrdtDocument<unknown>, effect: LocalEffect): CrdtMeta | undefined;
-
-function effectStillApplies(doc: CrdtDocument<unknown>, effect: LocalEffect): true | BlockedEffect;
-
-function createUndoUpdates(doc: CrdtDocument<unknown>, command: LocalCommand, ts: HlcTimestamp): CrdtUpdate[];
-
-function createRedoUpdates(doc: CrdtDocument<unknown>, command: LocalCommand, ts: HlcTimestamp): CrdtUpdate[];
+subscribe(receive: (updates: CrdtUpdate[]) => void): () => void;
 ```
 
-## Capturing local command effects
+Start with single update delivery because it composes with `applyRemoteHistoryUpdate`.
 
-Add a command creation helper:
+## Provider props
 
 ```ts
-function createLocalCrdtCommand<T>(
+type SyncedProviderProps<T> = {
+    children: React.ReactElement;
+    initial: T | CrdtLocalHistory<T>;
+    schema: IJsonSchemaCollection<'3.1', [T]>;
+    transport: SyncedTransport;
+    timestamp?: HlcTimestamp;
+    save?(history: CrdtLocalHistory<T>): void;
+};
+```
+
+`initial` should accept either plain materialized state or an existing `CrdtLocalHistory<T>`:
+
+- Plain `T` is the simple app path.
+- `CrdtLocalHistory<T>` enables persisted runtime restoration.
+
+If `initial` is plain state, create the CRDT document with:
+
+```ts
+createCrdtDocument(initial, schema, {
+    timestamp: timestamp ?? hlc.pack(transport.tick()),
+    tagKey: tag,
+});
+```
+
+Open detail: using `transport.tick()` for initial document metadata means two independently-created
+replicas can start with different initial metadata. For examples/tests using a shared seed timestamp
+is cleaner. The provider should allow `timestamp` for this reason.
+
+## Internal context shape
+
+The CRDT context should mirror the existing React context internals where possible:
+
+```ts
+type SyncedContextBase<T, Tag extends string> = {
+    history: CrdtLocalHistory<T>;
+    transport: SyncedTransport;
+    save: (history: CrdtLocalHistory<T>) => void;
+    previewState: T | null;
+    raf?: number;
+    listeners: (() => void)[];
+    localHistoryListeners: (() => void)[];
+    listenersByPath: PathListenerNode;
+    queuedChanges: DraftPatch<T, Tag, Context>[];
+    previewPaths: Record<string, Path>;
+};
+```
+
+`Context.getForPath` should read from:
+
+```ts
+ctx.previewState ?? ctx.history.doc.state
+```
+
+## Shared React primitives
+
+Before implementing `src/react-crdt`, extract shared code from `src/react/react.tsx` into reusable
+modules.
+
+Suggested layout:
+
+```txt
+src/react-core/
+  index.ts
+  listeners.ts
+  preview.ts
+  useValue.ts
+  types.ts
+```
+
+Move or expose:
+
+- `Context`
+- `PathListenerNode`
+- `makePathListenerNode`
+- `addPathListener`
+- `removePathListener`
+- `notifyPaths`
+- `notifyAllPaths`
+- `changedPaths`
+- `recordPreviewPaths`
+- `clearPreviewState`
+- `replacePreviewState`
+- `useValue`
+
+Keep public package exports unchanged for `umkehr/react`.
+
+After extraction:
+
+- `src/react/react.tsx` imports shared primitives.
+- `src/react/index.ts` still exports the same API.
+- Existing React tests should pass unchanged.
+
+## CRDT path to normal path translation
+
+Efficient remote notifications need to translate `CrdtPathSegment[]` to normal `Path`.
+
+Add a CRDT helper, probably in `src/crdt/path.ts`:
+
+```ts
+export function normalPathForCrdtPath<T>(
     doc: CrdtDocument<T>,
-    patches: Patch<T>[],
-    clock: HLC,
-): {
-    doc: CrdtDocument<T>;
-    command: LocalCommand;
-    updates: CrdtUpdate[];
-    clock: HLC;
-};
+    path: CrdtPathSegment[],
+): Path | undefined;
 ```
 
-Algorithm:
+Rules:
 
-1. Start with the current CRDT document.
-2. For each realized `Patch` in command order:
-   - increment HLC with `hlc.inc`;
-   - call `createCrdtUpdates(currentDoc, patch, hlc.pack(clock))`;
-   - for each generated update:
-     - read and clone the before target from `currentDoc`;
-     - apply the update to get `nextDoc`;
-     - read and clone the after target from `nextDoc`;
-     - append a `LocalEffect`;
-     - append the update to `forward`;
-     - set `currentDoc = nextDoc`.
-3. Return the final document, command, generated updates, and clock.
+- `objectField` -> `{type: 'key', key}`
+- `recordEntry` -> `{type: 'key', key}`
+- `taggedField` -> append `{type: 'tag', key: tagKey, value: tagValue}` if entering a tagged
+  branch, then append `{type: 'key', key}`
+- `arrayItem` -> find the current live index for the array item ID and append `{type: 'key', key:
+  index}`
 
-Effect capture details:
+For deleted or missing array items:
 
-- `set`: `before` is the current meta at `update.path`, `after` is the meta after apply.
-- `delete`: `before` is the current meta at `update.path`.
-- `setOrder`: `before` is each affected item's current order, `after` is the update's new order.
+- try translating against the pre-apply document for delete updates;
+- try translating against the post-apply document for set/add updates;
+- return `undefined` if no reliable normal path exists.
 
-If a patch creates multiple CRDT updates, all effects belong to the same `LocalCommand`.
+For `setOrder`, the changed normal path is the array path itself.
 
-## Applying local commands
+Add helper:
 
-`applyLocalCommand` should:
+```ts
+export function changedNormalPathsForCrdtUpdate<T>(
+    before: CrdtDocument<T>,
+    after: CrdtDocument<T>,
+    update: CrdtUpdate,
+): Path[] | null;
+```
 
-1. Use existing `resolveAndApply(history.doc.state, draft, undefined, 'type', equal)` to realize regular patches.
-2. Convert/apply them through `createLocalCrdtCommand`.
-3. Push the command onto `undoStack`.
-4. Clear `redoStack`.
-5. Return generated CRDT updates for broadcast.
+Return `null` when translation fails. The React layer should then notify all paths for that update.
 
-Do not store remote updates in this flow.
+## Local dispatch
 
-## Applying remote updates
+Committed local dispatch should:
 
-`applyRemoteUpdate` should:
+1. Clear any active preview, keeping its paths for notification.
+2. Resolve the draft patches against `ctx.history.doc.state` with `resolveAndApply`.
+3. If no materialized change occurred, return.
+4. Apply the realized patches with `applyLocalCommand(ctx.history, draft, transport.tick())`.
+5. Do not store returned clocks in React; transport owns clock persistence.
+6. Store `ctx.history = result.history`.
+7. Call `save(ctx.history)`.
+8. Notify root listeners.
+9. Notify path listeners for the realized normal patch paths plus any cleared preview paths.
+10. Notify local history listeners.
+11. Call `transport.publish(result.updates)`.
 
-1. Advance the local HLC with `hlc.recv`.
-2. Apply the update with `applyCrdtUpdate`.
-3. Return updated history with the same `undoStack` and `redoStack`.
+`dispatch(v, 'preview')` should not create CRDT updates. It should behave like `src/react` preview:
 
-Remote updates must not clear redo.
+1. Queue flat draft patches.
+2. On animation frame, apply them to `ctx.previewState ?? ctx.history.doc.state`.
+3. Store `ctx.previewState`.
+4. Record and notify preview paths.
 
-## Undo
+## Remote receive
 
-Undo is blocked if any effect in the top command cannot be reversed.
+Provider subscribes on mount:
 
-Algorithm:
+```ts
+useEffect(() => transport.subscribe((update) => receiveRemoteUpdate(ctx, update)), [transport]);
+```
 
-1. If `undoStack` is empty, return `{ok: false, reason: 'empty'}`.
-2. Let `command = undoStack.at(-1)`.
-3. Check every effect in reverse order.
-4. If any effect is blocked, return `{ok: false, reason: 'blocked', blocked}` with unchanged history and clock.
-5. Increment HLC once per emitted undo update.
-6. Generate fresh CRDT updates that compensate the effects.
-7. Apply those updates locally.
-8. Move the command from `undoStack` to `redoStack`.
-9. Return emitted updates for broadcast.
+Remote receive should:
 
-Blocking rules:
+1. Capture `before = ctx.history.doc`.
+2. Apply with `applyRemoteHistoryUpdate(ctx.history, update)`.
+3. Store `ctx.history = result`.
+4. Call `save(ctx.history)`.
+5. Recompute active preview on top of the new committed state.
+6. Notify root listeners.
+7. Notify translated changed paths, or all paths if translation fails.
+8. Notify local history listeners so `useLocalHistory`, `canUndo`, and `canRedo` update.
 
-- `set`: current target must exist and its winning timestamp must equal `effect.localTs`.
-- `delete`: current target must be a tombstone with `deleted === effect.localTs`.
-- `setOrder`: every affected live item must exist and its order timestamp must equal `effect.localTs`.
+Remote receive must not:
 
-Undo update generation:
+- call `transport.publish`;
+- enter local undo/redo stacks;
+- run through normal patch dispatch.
+- read or mutate HLC clocks.
 
-- `set` with `before === undefined` -> fresh `delete`.
-- `set` with `before.kind === 'tombstone'` -> fresh `delete`.
-- `set` with live `before` -> fresh `set` using `materialize(before)`.
-- `delete` with live `before` -> fresh `set` using `materialize(before)`.
-- `delete` with missing/tombstone `before` -> no-op, but this case should be rare.
-- `setOrder` -> fresh `setOrder` restoring all previous order values.
+## Preview plus remote updates
 
-Fresh timestamps:
+When remote updates arrive while preview is active:
 
-- Undo must not reuse the original command timestamps.
-- Use `hlc.inc` for every emitted CRDT update.
-- Deleted subtree restore should create a new incarnation with the fresh timestamp.
+1. Keep the queued preview patches.
+2. Recompute preview from the new committed state.
+3. Notify paths touched by the remote update and paths touched by the preview.
 
-## Redo
+Implementation detail:
 
-Redo is blocked if any effect cannot be reapplied.
+- Store preview draft patches, not only preview paths.
+- Current `src/react` stores `queuedChanges` and `previewPaths`, but after preview is applied the
+  queue is cleared. For recomputation, CRDT React needs a separate `previewChanges` list containing
+  the active preview patches.
 
-Algorithm:
+Suggested preview fields:
 
-1. If `redoStack` is empty, return `{ok: false, reason: 'empty'}`.
-2. Let `command = redoStack.at(-1)`.
-3. Check every effect in original order.
-4. If any effect is blocked, return `{ok: false, reason: 'blocked', blocked}`.
-5. Generate fresh CRDT updates from the stored `after` values.
-6. Apply locally.
-7. Move command from `redoStack` back to `undoStack`.
-8. Return emitted updates for broadcast.
+```ts
+queuedPreviewChanges: DraftPatch<T, Tag, Context>[];
+activePreviewChanges: DraftPatch<T, Tag, Context>[];
+previewState: T | null;
+previewPaths: Record<string, Path>;
+```
 
-Redo blocking rules:
+On preview frame:
 
-- Same all-or-nothing policy as undo.
-- Parent incarnation must still match the CRDT path.
-- For reapplying `set`, current target should still correspond to the value produced by the prior undo.
-- For reapplying `delete`, current target should still correspond to the restored pre-delete value.
-- For `setOrder`, every affected item must still be present and have the order timestamp from the undo step.
+- move queued changes into active changes;
+- apply all active changes to the committed base;
+- update preview paths.
 
-Implementation note: redo may be easier if undo records an additional "undo command" internally. However, avoid putting undo commands into the normal local command stack. A simpler v1 is to re-check against the stored original effects and emit `after` values if the target is compatible.
+On committed local edit:
 
-## All-or-nothing behavior
+- clear preview.
 
-Both undo and redo should be all-or-nothing.
+On remote update:
 
-If any effect would be skipped, block the whole command and return the blocking details. Do not partially apply.
+- recompute active preview changes against the updated committed base.
 
-This matches the answers in `research.md` and avoids confusing partial reverts.
+## Undo/redo
+
+Hook methods:
+
+```ts
+canUndo(): boolean;
+canRedo(): boolean;
+undo(): void;
+redo(): void;
+```
+
+Implementation:
+
+1. Clear/recompute preview policy: start by clearing preview before undo/redo.
+2. Call `undoLocalCommand` or `redoLocalCommand` with `transport.tick()`.
+3. Do not store returned clocks in React; transport owns clock persistence.
+4. If result is not ok, return.
+5. Compute changed paths from emitted CRDT updates, falling back to notify-all if needed.
+6. Store `ctx.history`.
+7. Call `save(ctx.history)`.
+8. Notify listeners and local history listeners.
+9. Call `transport.publish(result.updates)`.
+
+Blocked undo/redo should simply no-op for now. `canUndo` and `canRedo` should already return false
+when the top command is blocked.
+
+## Hook result and subscriptions
+
+`useLocalHistory()` should subscribe to `localHistoryListeners` and return `ctx.history`.
+
+`canUndo()` and `canRedo()` should call:
+
+```ts
+canUndoLocalCommand(ctx.history)
+canRedoLocalCommand(ctx.history)
+```
+
+Components that display `canUndo`/`canRedo` should call `useLocalHistory()` to re-render when remote
+updates or local stack changes affect the answer. This mirrors current `createHistoryContext`, where
+components call `ctx.useHistory()` when they need history-derived reactivity.
 
 ## Tests
 
-Add tests under `src/crdt/history.test.ts`.
+Create `src/react-crdt/react-crdt.test.tsx`.
 
-Required cases:
+Mirror key `src/react` state tests:
 
-1. Local primitive set undo restores previous value and broadcasts a fresh CRDT update.
-2. Local primitive set redo reapplies the value with a fresh timestamp.
-3. Remote primitive set with newer timestamp blocks undo of older local set.
-4. Remote update does not enter undo stack.
-5. Remote update does not clear redo stack.
-6. Local command after undo clears redo stack.
-7. Local array insert undo deletes the inserted item by CRDT item ID.
-8. Local array insert undo still works after remote reorder.
-9. Local array item edit undo targets the same item after remote reorder.
-10. Local delete undo restores the deleted value as a fresh incarnation.
-11. Remote recreate after local delete blocks undo.
-12. Local reorder undo restores previous order.
-13. Remote reorder of any affected item blocks reorder undo.
-14. Multi-patch local command undoes all effects together.
-15. Multi-patch undo is blocked if one effect is superseded, and no effects are applied.
-16. Redo is blocked if any effect cannot be reapplied.
+- renders subscribed values and dispatches committed updates;
+- notifies path subscribers for changed local paths only;
+- applies preview updates without publishing;
+- clears preview on committed local edit;
+- recomputes preview after remote update;
+- supports selector/modifier form of `useValue`;
+- updates subscribers when provider receives new initial value, if this behavior is kept.
 
-Also add a small React CRDT example update after the core tests pass:
+Add CRDT-specific tests:
 
-- Wrap each replica in `CrdtLocalHistory`.
-- Add local Undo/Redo buttons per replica.
-- Keep the existing sync pause/resume behavior.
-- Remote deliveries call `applyRemoteUpdate`.
+- local dispatch publishes CRDT updates through transport;
+- remote update received through transport updates subscribed values;
+- remote update does not call `publish`;
+- remote update calls `save`;
+- local undo emits CRDT updates and publishes them;
+- remote superseding update disables/no-ops undo;
+- redo works after undo and publishes updates;
+- `useLocalHistory()` re-renders on local, remote, undo, and redo;
+- multiple providers with a test transport converge on edits.
+
+Add package smoke coverage:
+
+- `umkehr/react-crdt` imports separately;
+- root `umkehr` does not export React CRDT APIs;
+- `umkehr/react` remains unchanged.
+
+## Example migration
+
+Update `examples/react-crdt` to use `umkehr/react-crdt`.
+
+The example should keep the current separation:
+
+- transport/router owns message routing and clocks;
+- provider owns CRDT React context for a replica;
+- panel components use `ctx.$`, `useValue`, `ctx.undo`, and `ctx.redo`.
+
+Expected structure:
+
+```tsx
+const [Provider, useTodos] = createSyncedContext<State>('type');
+
+function ReplicaHost({transport}) {
+    return (
+        <Provider initial={initialState} schema={schema} transport={transport}>
+            <TodoPanel />
+        </Provider>
+    );
+}
+```
+
+`TodoPanel` should become close to the normal React example and should not know about CRDT update
+objects.
+
+## Package changes
+
+Update `package.json` exports:
+
+```json
+"./react-crdt": {
+    "types": "./dist/src/react-crdt/index.d.ts",
+    "import": "./dist/src/react-crdt/index.js"
+}
+```
+
+Ensure `npm run pack:check` includes the new built files.
 
 ## Implementation order
 
-1. Add `src/crdt/history.ts` types and empty public functions.
-2. Add internal target-reading helpers for CRDT paths and order values.
-3. Implement `createLocalCrdtCommand` effect capture.
-4. Implement `applyLocalCommand`.
-5. Implement undo blocking checks.
-6. Implement undo update generation.
-7. Implement `undoLocalCommand`.
-8. Implement redo blocking checks.
-9. Implement redo update generation.
-10. Implement `redoLocalCommand`.
-11. Implement `applyRemoteUpdate`.
-12. Export history API from `src/crdt/index.ts`.
-13. Add unit tests incrementally.
-14. Update `examples/react-crdt`.
+1. Split the CRDT remote history API into clock-free apply and clock-aware receive helpers.
+2. Extract shared React primitives into `src/react-core`.
+3. Update `src/react/react.tsx` to import those primitives; keep behavior unchanged.
+4. Add CRDT path-to-normal-path translation helpers and tests.
+5. Add `src/react-crdt/index.ts` and `src/react-crdt/react-crdt.tsx`.
+6. Implement `createSyncedContext` provider and hook without preview first.
+7. Add local dispatch, clock-free remote receive, undo, redo, and transport integration.
+8. Add preview support, including preview recomputation after remote updates.
+9. Add React CRDT tests.
+10. Add package export and smoke tests.
+11. Migrate `examples/react-crdt`.
+12. Run `npm run typecheck`, `npm test`, example build, and `npm run pack:check`.
 
 ## Risks
 
-- `createCrdtUpdates` and `applyCrdtUpdate` currently hide some useful internals. Avoid duplicating path traversal logic if possible.
-- Redo compatibility checks may need refinement after undo implementation exists.
-- Restoring deleted containers with fresh timestamps means nested child timestamps change. That is intended, but tests should assert the visible state, not exact old metadata.
-- `materialize(before)` returns `undefined` for tombstones; callers must distinguish missing/tombstone from live values before generating updates.
-- A command with multiple CRDT updates may include dependent paths. Capture and undo in reverse order to avoid deleting a parent before reversing a child.
-
-## Acceptance criteria
-
-- Local undo/redo works without involving remote updates in history.
-- Undo/redo emits CRDT updates suitable for broadcast.
-- Undo/redo uses fresh HLC timestamps.
-- Undo/redo is blocked all-or-nothing when any effect has been superseded.
-- Array operations use item IDs, not numeric indices.
-- Remote updates do not clear redo.
-- Existing CRDT tests still pass.
+- CRDT path-to-normal-path translation may be tricky around deleted array items and reordered arrays.
+  If translation fails often, we may need to enrich CRDT updates with original normal paths for local
+  changes and a best-effort affected-parent path for remote changes.
+- Extracting `src/react-core` can accidentally change `umkehr/react` behavior. The first step should
+  be covered by the existing React test suite before adding CRDT behavior.
+- Preview recomputation requires storing active preview patches, which differs from current
+  `src/react` internals. Keep this contained to `react-crdt` unless/until the normal React preview
+  implementation needs the same behavior.
+- The transport API may need a batch receive form later, but single-update receive is enough for the
+  first pass.

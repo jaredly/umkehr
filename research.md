@@ -1,213 +1,92 @@
-# CRDT undo/redo research
+# React CRDT API research
 
-This document explores undo/redo for the CRDT version of umkehr.
+This document explores a React API for the CRDT layer that feels as close as possible to the
+current `src/react` API.
 
-The simplifying product rule is important:
-
-- Only local changes are undoable.
-- Remote changes are never placed on the local undo stack.
-- Undo/redo still produces normal CRDT updates, so other replicas see the result.
-- Undo does not remove or rewrite historical CRDT updates.
-
-That rule avoids the hardest collaborative editing semantics. The local user can walk back their own intent, while the shared document still behaves like an append-only CRDT update stream.
-
-## Current CRDT shape
-
-The CRDT layer currently has:
-
-- materialized user state;
-- parallel metadata;
-- HLC timestamps;
-- stable CRDT paths with parent incarnation timestamps;
-- arrays addressed by generated item IDs and fractional order strings;
-- records/arrays using tombstones;
-- `createCrdtUpdates(doc, patch, ts)` to translate realized local patches into replicated updates;
-- `applyCrdtUpdate(doc, update)` to merge local or remote updates.
-
-The regular umkehr history system stores realized `Patch` values and inverts them. That works for single-user state, but those inverses are not directly valid collaborative undo operations because the document may have changed since the original patch was applied.
-
-## What undo should mean
-
-For this project, undo should mean:
-
-> Generate a new local command that attempts to reverse the visible effect of one previous local command against the current CRDT document.
-
-So undo is not:
-
-- deleting an old CRDT update;
-- rewinding the replicated document clock;
-- restoring a full old snapshot;
-- undoing remote edits;
-- guaranteeing byte-for-byte restoration of what the local user saw at the time.
-
-Undo is a new edit. It gets a fresh HLC timestamp and merges like any other local edit.
-
-## Why local-only helps
-
-If remote changes are not undoable, the local undo stack does not need to explain global causality to the user. It only tracks commands authored by this replica.
-
-Example:
-
-1. Local user sets `title = "A"`.
-2. Remote user sets `title = "B"`.
-3. Local user presses undo.
-
-There are two plausible behaviors:
-
-- Strong restore: set `title` back to the local command's previous value.
-- Intent-aware undo: only undo if the local command is still the visible winner.
-
-Because remote changes are not undoable, intent-aware undo is usually the better default. In this example, undoing the local `"A"` command should not overwrite remote `"B"` unless the local `"A"` is still the winning visible value.
-
-## Option 1: Store realized patches and invert them later
-
-This is closest to existing umkehr history.
-
-For every local command:
+The goal is that an app using `umkehr/react` can switch to a CRDT-backed context with minimal
+component changes. In the best case, leaf components keep using:
 
 ```ts
-type LocalCommand<T> = {
-    id: string;
-    changes: Patch<T>[];
-    updates: CrdtUpdate[];
-};
+const [Provider, useStateContext] = createStateContext<State>('type');
+const ctx = useStateContext();
+const title = useValue(ctx.$.title);
+ctx.$.title('Published');
+ctx.undo();
+ctx.redo();
 ```
 
-Undo:
+The main differences should live at provider setup and network integration boundaries, not in every
+field editor.
 
-1. Invert the stored `Patch` values.
-2. Realize/translate those inverses against the current CRDT document.
-3. Apply and broadcast the resulting CRDT updates.
+## Current React API
 
-Pros:
+`src/react` exposes:
 
-- Simple to understand.
-- Reuses existing `invertPatch`.
-- Works well for isolated primitive edits.
+- `createStateContext<T, Tag>(tag, equalFn?)`
+- `createHistoryContext<T, An, Tag>(tag, equalFn?)`
+- `useValue(node, mod?, exact?, equalFn?)`
 
-Cons:
-
-- Stored patches are state-relative and array-index-relative.
-- An inverse patch may point at the wrong current array item after concurrent inserts/reorders.
-- The inverse may overwrite remote changes.
-- A stored `replace` inverse says "put previous value back", not "remove my contribution if it still wins".
-
-Verdict: useful as a prototype, but too blunt for collaborative undo.
-
-## Option 2: Store CRDT updates and generate inverse CRDT updates
-
-For every local command, store the generated CRDT updates:
+`createStateContext` returns:
 
 ```ts
-type LocalCommand = {
-    id: string;
-    forward: CrdtUpdate[];
-    inverse?: CrdtUpdate[];
-};
+const [Provider, useStateContext] = createStateContext<State>('type');
 ```
 
-Undo creates inverse updates from CRDT paths and timestamps, not from normal umkehr paths.
-
-Pros:
-
-- Stable array item IDs avoid index drift.
-- Parent incarnation timestamps avoid attaching undo to the wrong recreated object.
-- Undo can inspect whether the original local update is still relevant.
-
-Cons:
-
-- Current `CrdtUpdate` does not include enough previous-value information to construct inverses later.
-- For `set`, we need the previous CRDT value/meta at that path.
-- For `delete`, we need the deleted value/meta if undo should restore it.
-- For `setOrder`, we need previous order values.
-
-Verdict: good direction, but only if local command records capture undo metadata at command creation time.
-
-## Option 3: Store local command records with before/after CRDT effects
-
-This is the recommended model.
-
-When applying a local command, record enough CRDT-addressed information to compensate it later:
+The provider takes:
 
 ```ts
-type LocalCommand = {
-    id: string;
-    actor: string;
-    status: 'done' | 'undone';
-    forward: CrdtUpdate[];
-    effects: LocalEffect[];
-};
-
-type LocalEffect =
-    | {
-          kind: 'set';
-          path: CrdtPathSegment[];
-          localTs: HlcTimestamp;
-          before: CrdtMeta | undefined;
-          after: CrdtMeta;
-      }
-    | {
-          kind: 'delete';
-          path: CrdtPathSegment[];
-          localTs: HlcTimestamp;
-          before: CrdtMeta | undefined;
-      }
-    | {
-          kind: 'setOrder';
-          arrayPath: CrdtPathSegment[];
-          localTs: HlcTimestamp;
-          before: Record<ItemId, {value: FractionalIndex; ts: HlcTimestamp} | undefined>;
-          after: Record<ItemId, {value: FractionalIndex; ts: HlcTimestamp}>;
-      };
+<Provider initial={state} save={optionalSave}>
+    <App />
+</Provider>
 ```
 
-The exact shape can be smaller than this, but the idea is:
+The hook returns an object with:
 
-- paths are CRDT paths, not umkehr paths;
-- array items are item IDs, not indices;
-- each effect records the local timestamp that made the change;
-- each effect records the previous CRDT meta/order needed to compensate later.
+- `latest()`
+- `clearPreview()`
+- `$`
+- `dispatch`
 
-Undo then walks the command effects in reverse order and emits fresh CRDT updates.
+`createHistoryContext` has the same basic shape, but the provider receives a `History<T, An>` and
+the hook also exposes:
 
-Pros:
+- `onHistoryChange(f)`
+- `useHistory()`
+- `tip()`
+- `clearHistory()`
+- `canUndo()`
+- `canRedo()`
+- `undo()`
+- `redo()`
+- `previewJump(id)`
+- `updateAnnotations`
 
-- Stable under array reorder/index changes.
-- Can avoid overwriting remote winners.
-- Does not need to retain full snapshots.
-- Keeps local undo stack separate from replicated update log.
+Most app code depends on only a small subset:
 
-Cons:
+- `useValue(ctx.$.path)`
+- `ctx.$.path(value)`
+- `ctx.$.path(value, 'preview')`
+- `ctx.clearPreview()`
+- `ctx.canUndo()`
+- `ctx.canRedo()`
+- `ctx.undo()`
+- `ctx.redo()`
 
-- Requires capturing effect metadata during local update creation.
-- Requires a small helper layer below `createCrdtUpdates`, because current update creation only returns updates, not before/after effects.
-- Needs clear conflict policy when remote edits have superseded local edits.
+That subset is a good compatibility target.
 
-Verdict: best fit.
+## CRDT constraints
 
-## Option 4: Operation-level undo with authorship metadata
+The CRDT runtime needs information the current React API does not:
 
-Another route is to put author/command identity into every CRDT update and make values multi-value or operation-aware. Undo would mark one local operation as undone, and materialization would ignore undone operations.
+- a typia JSON schema collection;
+- an initial HLC timestamp for the CRDT document;
+- a local HLC clock or local actor ID;
+- a way to emit local CRDT updates to the network;
+- a way to receive remote CRDT updates;
+- optional validation of remote CRDT updates;
+- local-only undo/redo stacks, not `History<T, An>`.
 
-Pros:
-
-- Very principled for operation undo.
-- Can express "remove my contribution" exactly.
-
-Cons:
-
-- Significantly changes the CRDT model.
-- LWW registers stop being simple timestamps.
-- Tombstones/order updates need extra authorship layers.
-- More expensive metadata and more complicated materialization.
-
-Verdict: too much machinery for the current design.
-
-## Recommended design
-
-Use local command records with CRDT-addressed effects.
-
-Public-ish shape:
+The current CRDT state holder is:
 
 ```ts
 type CrdtLocalHistory<T> = {
@@ -215,220 +94,349 @@ type CrdtLocalHistory<T> = {
     undoStack: LocalCommand[];
     redoStack: LocalCommand[];
 };
-
-function applyLocalCommand<T>(
-    history: CrdtLocalHistory<T>,
-    draft: DraftPatch<T> | DraftPatch<T>[],
-    clock: HLC,
-): {
-    history: CrdtLocalHistory<T>;
-    updates: CrdtUpdate[];
-    clock: HLC;
-};
-
-function undoLocalCommand<T>(
-    history: CrdtLocalHistory<T>,
-    clock: HLC,
-): {
-    history: CrdtLocalHistory<T>;
-    updates: CrdtUpdate[];
-    clock: HLC;
-};
-
-function redoLocalCommand<T>(
-    history: CrdtLocalHistory<T>,
-    clock: HLC,
-): {
-    history: CrdtLocalHistory<T>;
-    updates: CrdtUpdate[];
-    clock: HLC;
-};
 ```
 
-Remote updates are applied directly to `history.doc` and do not touch `undoStack` or `redoStack`.
+This means CRDT React should probably not reuse `History<T, An>` internally. It should provide a
+similar UI-facing API while using `CrdtLocalHistory<T>` under the hood.
 
-## Undo conflict policy
+## Recommended public entry point
 
-Undo should be conservative. It should reverse local effects only when the original local effect is still the visible winner for that target.
+Add a new package export:
 
-For each effect:
+```json
+"./react-crdt": {
+    "types": "./dist/src/react-crdt/index.d.ts",
+    "import": "./dist/src/react-crdt/index.js"
+}
+```
 
-### Primitive or container `set`
-
-If the current target still has the command's `localTs`, undo can restore `before`.
-
-- If `before` is missing, emit a fresh `delete`.
-- If `before` is a tombstone, emit a fresh `delete`.
-- Otherwise emit a fresh `set` with the materialized `before` value.
-
-If the current target has a newer timestamp, skip this effect. A remote or later local command has already superseded it.
-
-### `delete`
-
-If the current target is still a tombstone with the command's `localTs`, undo can restore `before`.
-
-If the key/item has been recreated with a newer timestamp, skip. The recreate is already the visible state.
-
-### `setOrder`
-
-For each affected item, if the current item order timestamp is still the command's `localTs`, emit a fresh `setOrder` restoring the previous order.
-
-If the item has been deleted or reordered with a newer timestamp, skip that item.
-
-This may partially undo a reorder. That is acceptable for v1 and matches the per-item LWW reorder model.
-
-## Redo semantics
-
-Redo should reapply the same local intent as a new CRDT command, not replay the old timestamps.
-
-There are two options:
-
-### Redo from stored forward values
-
-Use the command's stored `after` values and emit fresh `set` / `delete` / `setOrder` updates.
-
-Pros:
-
-- Redo works even if original umkehr paths are no longer meaningful.
-- Stable for arrays because effects use CRDT paths/item IDs.
-
-Cons:
-
-- If the target was deleted/recreated, parent incarnation checks may cause redo effects to be skipped.
-
-### Redo by re-running the original draft callback
-
-Store the original draft patch or command function and run it against current state.
-
-Pros:
-
-- Redo behaves more like "do the command again".
-- Useful for semantic commands like "toggle done".
-
-Cons:
-
-- Harder to serialize.
-- Callback commands may not be deterministic.
-- Array indices can drift unless the command is re-bound to CRDT IDs.
-
-Recommendation: redo from stored forward effects for v1. It is simpler, serializable, and aligned with local-only history.
-
-## Grouping
-
-The unit of undo should be a local command, not an individual CRDT update.
-
-A single umkehr dispatch may create multiple realized patches, and each patch may create one or more CRDT updates. Those should undo together.
+Export names should initially mirror `umkehr/react`:
 
 ```ts
-type LocalCommand = {
-    id: string;
-    label?: string;
-    forward: CrdtUpdate[];
-    effects: LocalEffect[];
-};
+export {createStateContext, useValue} from 'umkehr/react-crdt';
 ```
 
-The existing `resolveAndApply` nested-update behavior already groups multiple draft patches into one user-facing update. The CRDT history layer should preserve that grouping.
+Open question: whether to also export `createHistoryContext`. Since CRDT undo/redo is not the same
+as the existing branching `History` tree, a `createHistoryContext` export may imply too much
+compatibility. There are two viable options:
 
-## Interaction with remote updates
+1. Export only `createStateContext` first, but include `undo`/`redo` on its hook result.
+2. Export `createHistoryContext` as an alias-like API for local CRDT history, but document that
+   `useHistory`, `tip`, `jump`, branch annotations, and history scrubber features are not the same.
 
-Remote updates:
+Recommendation: start with `createStateContext` in `umkehr/react-crdt`. It can still expose
+`canUndo`, `canRedo`, `undo`, and `redo`, because those are local command stack operations.
 
-- advance the local HLC through `recv`;
-- update the CRDT document;
-- may make old local commands no longer undoable;
-- do not clear the undo stack;
-- do not enter the redo stack.
-
-If a local command is skipped during undo because remote edits superseded every effect, it should still move to the redo stack as "undone" only if we consider the user action consumed. I lean yes: pressing undo should pop one local command even if it has no visible effect. The UI can expose a disabled/grey state later if we add command-effect availability checks.
-
-## Redo stack clearing
-
-Use normal local-history behavior:
-
-- local command after undo clears the redo stack;
-- remote update after undo does not clear the redo stack.
-
-Reasoning: remote updates are not user intent from this replica. Clearing redo on remote traffic would make redo feel random in collaborative sessions.
-
-## Capturing effects
-
-Current `createCrdtUpdates(doc, patch, ts)` returns only updates. Undo wants a richer local result:
+## Proposed API
 
 ```ts
-type CreatedCrdtCommand = {
-    updates: CrdtUpdate[];
-    effects: LocalEffect[];
-};
-
-function createLocalCrdtCommand<T>(
-    doc: CrdtDocument<T>,
-    patches: Patch<T>[],
-    ts: HlcTimestamp,
-): CreatedCrdtCommand;
+const [Provider, useStateContext] = createStateContext<State>('type');
 ```
 
-Implementation approach:
+The component API should stay close to the existing one:
 
-1. Convert each realized `Patch` to CRDT update(s), as now.
-2. Before applying each update locally, read the target meta/order from the current doc.
-3. Store the before state in `LocalEffect`.
-4. Apply the update to the local doc.
-5. Store the after state if useful for redo.
+```tsx
+function TitleEditor() {
+    const ctx = useStateContext();
+    const title = useValue(ctx.$.title);
 
-This helper can replace direct calls to `createCrdtUpdates` in local-authoring flows. Remote replication can continue using raw `applyCrdtUpdate`.
+    return (
+        <button type="button" onClick={() => ctx.$.title('Published')}>
+            {title}
+        </button>
+    );
+}
+```
 
-## Important edge cases
+The CRDT provider needs richer props:
 
-### Local set, remote set, local undo
+```tsx
+<Provider
+    initial={initialState}
+    schema={typia.json.schemas<[State], '3.1'>()}
+    actor="replica-a"
+    onLocalUpdates={(updates) => send(updates)}
+>
+    <App />
+</Provider>
+```
 
-Local `title = "A"` at `ts=10`.
-Remote `title = "B"` at `ts=20`.
-Undo local command should not emit `title = old` because the local command is no longer the winner.
+For explicit clock ownership:
 
-### Local set wins, local undo
+```tsx
+<Provider
+    initial={initialState}
+    schema={schemas}
+    clock={clock}
+    onClockChange={setClock}
+    onLocalUpdates={send}
+>
+    <App />
+</Provider>
+```
 
-Local `title = "A"` at `ts=20`.
-Remote older `title = "B"` at `ts=10`.
-Undo should restore the previous value with a fresh timestamp.
+The actor-based form is nicer for app authors. Internally the provider can initialize:
 
-### Local delete, remote child update
+```ts
+hlc.init(actor, Date.now())
+```
 
-If local delete wins and is still the current tombstone, undo can recreate the deleted value from `before`. Delayed older child updates that targeted the deleted incarnation should still be rejected by parent creation timestamps.
+The explicit clock form is useful for persistence and deterministic tests. We can support both:
 
-### Remote recreate before local undo
+```ts
+type CrdtProviderProps<T> = {
+    children: React.ReactElement;
+    initial: T;
+    schema: IJsonSchemaCollection<'3.1', [T]>;
+    tagKey?: string;
+    actor?: string;
+    clock?: hlc.HLC;
+    timestamp?: HlcTimestamp;
+    save?(snapshot: CrdtLocalHistory<T>): void;
+    onClockChange?(clock: hlc.HLC): void;
+    onLocalUpdates?(updates: CrdtUpdate[]): void;
+    validateRemoteUpdates?: boolean;
+};
+```
 
-Local deletes `items.one`.
-Remote recreates `items.one` with a newer timestamp.
-Undo local delete should skip, because the item already has a newer incarnation.
+Validation note: if `validateRemoteUpdates` is true, the provider can create a
+`createCrdtUpdateValidator(schema, {tagKey})` and reject malformed remote updates before applying
+them.
 
-### Local array insert, local undo
+## Hook result
 
-Undo should delete the inserted array item by item ID, not by current numeric index.
+The CRDT hook should return:
 
-### Local array reorder, remote reorder, local undo
+```ts
+type CrdtStateContext<T, Tag extends string> = {
+    latest(): T;
+    clearPreview(): void;
+    canUndo(): boolean;
+    canRedo(): boolean;
+    undo(): void;
+    redo(): void;
+    receiveRemoteUpdate(update: CrdtUpdate): void;
+    receiveRemoteUpdates(updates: CrdtUpdate[]): void;
+    useRuntime(): CrdtLocalHistory<T>;
+    $: PatchBuilder<T, Tag, void, Context>;
+    dispatch(v: MaybeNested<DraftPatch<T, Tag, Context>>, when?: ApplyTiming): void;
+};
+```
 
-Undo should restore previous order only for items whose order timestamp is still the local reorder timestamp.
+The most important compatibility pieces are `latest`, `clearPreview`, `$`, `dispatch`, `canUndo`,
+`canRedo`, `undo`, and `redo`.
+
+`receiveRemoteUpdate` is intentionally new. Components usually should not call it; the transport
+boundary should. But exposing it on the hook makes simple apps and demos easy without adding another
+context.
+
+`useRuntime()` is the CRDT equivalent of `useHistory()`. It should subscribe to runtime changes and
+return the current `CrdtLocalHistory<T>`. The name should not be `useHistory()` unless we are willing
+to make it look enough like `History<T, An>`.
+
+## Preview behavior
+
+The current React API supports preview updates:
+
+```ts
+ctx.$.title('Preview', 'preview');
+ctx.clearPreview();
+```
+
+This can remain local-only and not emit CRDT updates. The preview state should be computed with
+`resolveAndApply` against the materialized CRDT state:
+
+- committed base: `ctx.history.doc.state`;
+- preview base: `ctx.previewState ?? ctx.history.doc.state`;
+- preview changes: normal draft patches;
+- path notification: same path listener tree as `src/react`.
+
+On commit after preview, clear preview and apply the committed patch against the current CRDT
+history. This matches current `src/react` behavior closely enough.
+
+Remote updates arriving during preview need careful notification:
+
+1. Apply the remote CRDT update to the committed CRDT history.
+2. Keep or clear preview?
+
+Recommendation: keep preview if possible, but recompute preview on top of the new committed state on
+the next animation frame. If that is too much for the first pass, clear preview on any remote update.
+Clearing preview is less surprising than showing a preview based on stale state.
+
+## Dispatch behavior
+
+Committed local dispatch should:
+
+1. Resolve normal draft patches with `resolveAndApply`.
+2. Convert those patches to CRDT updates with `applyLocalCommand`.
+3. Update local `CrdtLocalHistory<T>` and HLC clock.
+4. Notify value/path listeners.
+5. Notify runtime/history listeners.
+6. Call `save`.
+7. Call `onLocalUpdates`.
+
+Undo/redo should:
+
+1. Call `undoLocalCommand` or `redoLocalCommand`.
+2. If blocked or empty, update the clock if needed and return.
+3. Update local runtime.
+4. Notify listeners for changed materialized paths.
+5. Call `save`.
+6. Call `onLocalUpdates`.
+
+The tricky part is changed paths. CRDT updates carry CRDT paths, not normal `Path` values. The React
+subscription tree currently listens on normal builder paths. Options:
+
+1. Conservative first pass: notify all path listeners after every CRDT commit/remote/undo/redo.
+2. Add CRDT-path-to-normal-path translation for updates whose current materialized path is known.
+3. Record changed normal paths when local changes originate from normal patches, but notify all for
+   remote updates.
+
+Recommendation: use option 3 initially. Local updates can preserve the efficient changed paths from
+`resolveAndApply`; remote updates can notify all. This keeps component edits efficient while avoiding
+fragile CRDT path reverse mapping.
+
+## Receiving remote updates
+
+Remote update application should:
+
+```ts
+const result = applyRemoteUpdate(ctx.history, update, ctx.clock);
+ctx.history = result.history;
+ctx.clock = result.clock;
+```
+
+Remote updates must not:
+
+- enter local undo/redo stacks;
+- call `onLocalUpdates`;
+- run through normal patch dispatch;
+- trigger `save` as if they were local user edits, unless `save` is explicitly defined as
+  "persist every runtime state".
+
+Open question: should `save` run for remote updates? Current `src/react` uses `save` for every local
+committed state. In CRDT apps, persistence usually needs both local and remote applied state. I would
+define `save` as "runtime snapshot changed" and call it for local, remote, undo, and redo.
+
+## Identical API feasibility
+
+Fully identical API is realistic for `createStateContext` consumers that use:
+
+- `Provider initial save`
+- `ctx.$`
+- `ctx.dispatch`
+- `ctx.latest`
+- `ctx.clearPreview`
+- `useValue`
+
+It is not fully identical at provider setup because CRDT needs a schema and actor/clock.
+
+`createHistoryContext` cannot be truly identical because:
+
+- `History<T, An>` is a branching tree;
+- CRDT local history is a flat undo/redo command stack;
+- remote changes are not undoable;
+- annotations and `updateAnnotations` do not currently have a CRDT design;
+- `jump` and `previewJump` do not map cleanly to CRDT state.
+
+The best migration path is:
+
+```diff
+- import {createHistoryContext, useValue} from 'umkehr/react';
++ import {createStateContext, useValue} from 'umkehr/react-crdt';
+
+- const [Provider, useTodos] = createHistoryContext<State, never>('type');
++ const [Provider, useTodos] = createStateContext<State>('type');
+```
+
+Then provider setup changes:
+
+```diff
+- <Provider initial={blankHistory(initial)} save={saveHistory}>
++ <Provider initial={initial} schema={schemas} actor={actor} onLocalUpdates={send}>
+```
+
+Most leaf components can stay the same if they only call `ctx.$`, `useValue`, `ctx.undo`, and
+`ctx.redo`.
+
+## Possible implementation layout
+
+```txt
+src/react-crdt/
+  index.ts
+  react-crdt.tsx
+  listeners.ts
+  preview.ts
+  runtime.ts
+```
+
+Reuse or move shared code from `src/react/react.tsx`:
+
+- path listener tree;
+- `useValue`;
+- preview queueing;
+- `Context` type;
+- `createPatchDispatcher` integration.
+
+Avoid copy/paste long-term by extracting shared React primitives:
+
+```txt
+src/react-core/
+  listeners.ts
+  preview.ts
+  useValue.ts
+```
+
+But for a first pass, duplicating a small amount may be acceptable if it avoids destabilizing
+`umkehr/react`.
+
+## Suggested first pass
+
+1. Add `src/react-crdt/index.ts`.
+2. Implement `createStateContext` with CRDT provider props.
+3. Export `useValue`, either reused directly or moved to a shared module.
+4. Support committed local dispatch.
+5. Support local-only `undo`/`redo`.
+6. Support `receiveRemoteUpdate(s)`.
+7. Support preview updates, clearing preview on remote updates.
+8. Notify exact changed paths for local draft commits and notify all paths for remote CRDT updates.
+9. Add a React CRDT test suite mirroring the current `createStateContext` tests plus remote update
+   and local undo/redo tests.
+10. Update `examples/react-crdt` to use `umkehr/react-crdt` instead of its custom runtime wrapper.
 
 ## Open questions
 
-- Should skipped undo effects be surfaced to the caller for UI messaging?
-  -> instead of "skipping", we should just block undo if any of the changes would be skipped.
-- Should undo pop a command if all effects are skipped? I recommend yes for v1.
-  -> same answer -- undo is blocked if any effect is skipped
-- Should local commands store full `CrdtMeta` snapshots for `before`, or a compact materialized value plus schema path?
-  -> materialized value should be fine, as long as we're retaining array IDs and such. then again, just going with crdtmeta might be simpler
-- Do we need command labels for UI, or can that wait?
-  -> that can wait
-- Should redo preserve the original command grouping even if only some effects can currently apply? I recommend yes.
-  -> I'd say that redo should also be blocked if any part of it would be "skipped"
-- Should delete undo restore the entire deleted subtree exactly as it was, including internal timestamps, or create a new incarnation with one fresh timestamp? I recommend a new incarnation with a fresh timestamp, because undo is a new edit.
-  -> fresh timestamps
+- Should the provider own HLC clocks via `actor`, or should apps pass `clock/onClockChange`? I think
+  support both, with `actor` as the common path.
+- Should `save` be called for remote updates? I think yes, because the runtime snapshot changed.
+- Should blocked undo/redo expose the blocked effects? Current UI only needs booleans, but debugging
+  may benefit from `lastUndoRedoFailure()` or an `onUndoRedoBlocked` callback.
+- Should remote validation be on by default? For app-controlled transports, default off is simpler;
+  for network payloads, default on is safer. I lean toward default on when `schema` is provided.
+- Should `createHistoryContext` exist in `react-crdt`? I would defer it until there is a concrete
+  CRDT story for history inspection, annotations, and scrubber UI.
 
-## Recommendation
+# Feedback
 
-Implement local-only CRDT undo/redo as a command stack layered above `CrdtDocument`.
 
-The stack should store local command effects addressed by CRDT paths and item IDs. Undo/redo should emit fresh CRDT updates and broadcast them normally. Remote updates should never enter local history and should not clear redo.
+let's have validation of remote CRDT updates live outside of the react-specific stuff. Seems like a transport layer thing.
 
-The key rule is conservative compensation: undo only reverses a local effect if that local effect is still the current winner for its target. This keeps undo from overwriting remote edits while still making local-only undo predictable and useful.
+let's call it `createSyncedContext` to be explicit about there being differences.
+
+I don't think I like having `recieveRemoteUpdate` being returned by the crdt hook. I think instead we should have some kind of a `Transport` object that gets passed into the Provider. This would also replace the proposed `onLocalUpdates` prop.
+
+instead of `useRuntime`, how about `useLocalHistory`.
+
+for preview + remote updates, yeah let's recompute the preview on top of remote udpate.
+
+for changed path notifications: let's try crdt-path-to-normal-path translation. If that fails, we should change the API of paths such that we can reliably compute efficient updates.
+
+for the question about `save` running for remote updates: yes it should.
+
+extracting shared stuff sounds great
+
+for the question about clocks -- the `transport` prop to the provider should also own the clock & actor id.
+
+blocked undo/redo doesn't need to expose effects.
+
+remote validation should be handled by the transport, not by the react infrastructure
