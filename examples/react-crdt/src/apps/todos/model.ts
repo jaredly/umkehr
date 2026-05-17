@@ -10,6 +10,7 @@ export type Todo = {
 };
 
 export type TodoState = {
+    bgcolor: string;
     todos: Todo[];
 };
 
@@ -22,6 +23,7 @@ export const [ProvideTodoHistory, useTodoHistory] = createHistoryContext<TodoSta
 export const [ProvideTodos, useTodos] = createSyncedContext<TodoState>('type');
 
 export const initialTodoState: TodoState = {
+    bgcolor: '#fff',
     todos: [
         {id: 'one', title: 'Write README', done: true},
         {id: 'two', title: 'Try CRDT sync', done: false},

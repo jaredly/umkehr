@@ -136,6 +136,30 @@ p {
     opacity: 0.58;
 }
 
+.colorPicker {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 18px 18px 0;
+}
+
+.swatch {
+    width: 32px;
+    height: 32px;
+    border: 2px solid #fff;
+    border-radius: 999px;
+    padding: 0;
+    box-shadow: 0 0 0 1px #bcccdc;
+}
+
+.swatch:hover,
+.swatch:focus-visible,
+.swatch.selected {
+    box-shadow:
+        0 0 0 1px #486581,
+        0 0 0 4px #d9e2ec;
+}
+
 .addForm {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
@@ -173,7 +197,7 @@ p {
     border: 1px solid #dce4ed;
     border-radius: 8px;
     padding: 10px;
-    background: #fff;
+    background: var(--task-bg, #fff);
 }
 
 .todoItem.done {

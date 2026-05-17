@@ -1,7 +1,9 @@
-import {useMemo, useState} from 'react';
+import {useMemo, useState, type CSSProperties} from 'react';
 import {useValue} from 'umkehr/react';
 import type {AppEditorContext, GridSlot} from '../../lib/crdtApp';
 import type {Todo, TodoState} from './model';
+
+const pastelColors = ['#fff', '#fce7f3', '#dbeafe', '#dcfce7', '#fef3c7', '#ede9fe'] as const;
 
 export function TodoPanel({
     editor,
@@ -14,6 +16,7 @@ export function TodoPanel({
     title: string;
     gridSlot?: GridSlot | 'full';
 }) {
+    const bgcolor = useValue(editor.$.bgcolor);
     const todos = useValue(editor.$.todos);
     const [draftTitle, setDraftTitle] = useState('');
     const completed = useMemo(() => todos.filter((todo) => todo.done).length, [todos]);
@@ -41,6 +44,25 @@ export function TodoPanel({
                 </div>
             </header>
 
+            <section
+                className="colorPicker"
+                aria-label="Task background color"
+                onMouseLeave={() => editor.clearPreview()}
+            >
+                {pastelColors.map((color) => (
+                    <button
+                        key={color}
+                        type="button"
+                        className={color === bgcolor ? 'swatch selected' : 'swatch'}
+                        style={{backgroundColor: color}}
+                        title={color}
+                        aria-label={`Use ${color}`}
+                        onClick={() => editor.$.bgcolor(color)}
+                        onMouseEnter={() => editor.$.bgcolor(color, 'preview')}
+                    />
+                ))}
+            </section>
+
             <form
                 className="addForm"
                 onSubmit={(event) => {
@@ -63,7 +85,7 @@ export function TodoPanel({
                 <button type="submit">Add</button>
             </form>
 
-            <ul className="todoList">
+            <ul className="todoList" style={{'--task-bg': bgcolor} as CSSProperties}>
                 {todos.map((todo, index) => (
                     <TodoItem key={todo.id} editor={editor} todo={todo} index={index} />
                 ))}
