@@ -1,4 +1,5 @@
 import equal from 'fast-deep-equal';
+import type {EqualFn} from '../internal.js';
 import type {DraftPatch, Patch} from '../types.js';
 import {resolveAndApply, type MaybeNested} from '../make.js';
 import {applyCrdtUpdate} from './apply.js';
@@ -107,12 +108,21 @@ export function canRedoLocalCommand<T>(history: CrdtLocalHistory<T>) {
     return checkEffects(history.doc, command, guardEffects).length === 0;
 }
 
-export function applyLocalCommand<T>(
+export function applyLocalCommand<T, Tag extends string = 'type', Context = undefined>(
     history: CrdtLocalHistory<T>,
-    draft: MaybeNested<DraftPatch<T, 'type', undefined>>,
+    draft: MaybeNested<DraftPatch<T, Tag, Context>>,
     clock: hlc.HLC,
+    extra?: Context,
+    tag?: Tag,
+    equalFn: EqualFn = equal,
 ): ApplyLocalCommandResult<T> {
-    const {changes} = resolveAndApply(history.doc.state, draft, undefined, 'type', equal);
+    const {changes} = resolveAndApply(
+        history.doc.state,
+        draft,
+        extra as Context,
+        tag ?? (history.doc.schema.tagKey as Tag),
+        equalFn,
+    );
     const created = createLocalCrdtCommand(history.doc, changes, clock);
     return {
         history: {
@@ -125,20 +135,29 @@ export function applyLocalCommand<T>(
     };
 }
 
-export function applyRemoteUpdate<T>(
+export function applyRemoteHistoryUpdate<T>(
+    history: CrdtLocalHistory<T>,
+    update: CrdtUpdate,
+): CrdtLocalHistory<T> {
+    return {
+        ...history,
+        doc: applyCrdtUpdate(history.doc, update),
+    };
+}
+
+export function receiveRemoteUpdate<T>(
     history: CrdtLocalHistory<T>,
     update: CrdtUpdate,
     clock: hlc.HLC,
 ): {history: CrdtLocalHistory<T>; clock: hlc.HLC} {
     const ts = latestUpdateTimestamp(update);
     return {
-        history: {
-            ...history,
-            doc: applyCrdtUpdate(history.doc, update),
-        },
+        history: applyRemoteHistoryUpdate(history, update),
         clock: ts ? hlc.recv(clock, hlc.unpack(ts), Date.now()) : clock,
     };
 }
+
+export const applyRemoteUpdate = receiveRemoteUpdate;
 
 export function undoLocalCommand<T>(
     history: CrdtLocalHistory<T>,

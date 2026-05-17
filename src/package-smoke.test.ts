@@ -17,6 +17,7 @@ describe('package exports', () => {
         expect('validatePatch' in pkg).toBe(false);
         expect('createStateContext' in pkg).toBe(false);
         expect('createHistoryContext' in pkg).toBe(false);
+        expect('createSyncedContext' in pkg).toBe(false);
     });
 
     it('imports the built validation entry point separately', async () => {
@@ -50,5 +51,14 @@ describe('package exports', () => {
         expect(typeof reactPkg.createStateContext).toBe('function');
         expect(typeof reactPkg.createHistoryContext).toBe('function');
         expect(typeof reactPkg.useValue).toBe('function');
+    });
+
+    it('imports the built React CRDT entry point separately', async () => {
+        expect(existsSync('dist/src/react-crdt/index.js')).toBe(true);
+
+        const reactCrdtPkg = await import('umkehr/react-crdt');
+
+        expect(typeof reactCrdtPkg.createSyncedContext).toBe('function');
+        expect(typeof reactCrdtPkg.useValue).toBe('function');
     });
 });

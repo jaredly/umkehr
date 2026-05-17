@@ -3,15 +3,18 @@ export {compareTimestamps} from './clock.js';
 export {createCrdtDocument} from './document.js';
 export {
     applyLocalCommand,
+    applyRemoteHistoryUpdate,
     applyRemoteUpdate,
     canRedoLocalCommand,
     canUndoLocalCommand,
     createCrdtLocalHistory,
     redoLocalCommand,
+    receiveRemoteUpdate,
     undoLocalCommand,
 } from './history.js';
 export * as hlc from './hlc.js';
 export {materialize} from './materialize.js';
+export {changedNormalPathsForCrdtUpdate, normalPathForCrdtPath} from './path.js';
 export {createCrdtUpdates} from './updates.js';
 export {
     CrdtUpdateValidationError,

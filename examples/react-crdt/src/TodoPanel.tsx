@@ -1,31 +1,24 @@
 import {useMemo, useState} from 'react';
-import {$, type GridSlot, type ReplicaId, type State, type Todo, type TodoDraft} from './model';
+import {useValue} from 'umkehr/react-crdt';
+import {type GridSlot, type ReplicaId, type Todo, useTodos} from './model';
 
 export function TodoPanel({
     replicaId,
     title,
-    state,
     queued,
-    canUndo,
-    canRedo,
-    applyLocal,
-    onUndo,
-    onRedo,
     gridSlot,
 }: {
     replicaId: ReplicaId;
     title: string;
-    state: State;
     queued: number;
-    canUndo: boolean;
-    canRedo: boolean;
-    applyLocal: (draft: TodoDraft) => void;
-    onUndo: () => void;
-    onRedo: () => void;
     gridSlot: GridSlot;
 }) {
+    const ctx = useTodos();
+    const todos = useValue(ctx.$.todos);
+    const history = ctx.useLocalHistory();
     const [draftTitle, setDraftTitle] = useState('');
-    const completed = useMemo(() => state.todos.filter((todo) => todo.done).length, [state.todos]);
+    const completed = useMemo(() => todos.filter((todo) => todo.done).length, [todos]);
+    history;
 
     return (
         <section className={`todoPanel ${gridSlot === 'left' ? 'leftPanel' : 'rightPanel'}`}>
@@ -33,14 +26,14 @@ export function TodoPanel({
                 <div>
                     <h1>{title}</h1>
                     <p>
-                        {completed}/{state.todos.length} done
+                        {completed}/{todos.length} done
                     </p>
                 </div>
                 <div className="panelActions">
-                    <button type="button" onClick={onUndo} disabled={!canUndo}>
+                    <button type="button" onClick={() => ctx.undo()} disabled={!ctx.canUndo()}>
                         Undo
                     </button>
-                    <button type="button" onClick={onRedo} disabled={!canRedo}>
+                    <button type="button" onClick={() => ctx.redo()} disabled={!ctx.canRedo()}>
                         Redo
                     </button>
                     <span className="queuedBadge">{queued} queued</span>
@@ -53,13 +46,11 @@ export function TodoPanel({
                     event.preventDefault();
                     const next = draftTitle.trim();
                     if (!next) return;
-                    applyLocal(
-                        $.todos.$push({
-                            id: `${replicaId}-${crypto.randomUUID()}`,
-                            title: next,
-                            done: false,
-                        }),
-                    );
+                    ctx.$.todos.$push({
+                        id: `${replicaId}-${crypto.randomUUID()}`,
+                        title: next,
+                        done: false,
+                    });
                     setDraftTitle('');
                 }}
             >
@@ -72,34 +63,16 @@ export function TodoPanel({
             </form>
 
             <ul className="todoList">
-                {state.todos.map((todo, index) => (
-                    <TodoItem
-                        key={todo.id}
-                        todo={todo}
-                        applyLocal={applyLocal}
-                        onToggleTodo={$.todos[index].done.$replace}
-                        onRenameTodo={$.todos[index].title.$replace}
-                        onDeleteTodo={$.todos[index].$remove}
-                    />
+                {todos.map((todo, index) => (
+                    <TodoItem key={todo.id} todo={todo} index={index} />
                 ))}
             </ul>
         </section>
     );
 }
 
-function TodoItem({
-    todo,
-    applyLocal,
-    onToggleTodo,
-    onRenameTodo,
-    onDeleteTodo,
-}: {
-    todo: Todo;
-    applyLocal: (draft: TodoDraft) => void;
-    onToggleTodo: (done: boolean) => TodoDraft;
-    onRenameTodo: (title: string) => TodoDraft;
-    onDeleteTodo: () => TodoDraft;
-}) {
+function TodoItem({todo, index}: {todo: Todo; index: number}) {
+    const ctx = useTodos();
     const [isEditing, setIsEditing] = useState(false);
     const [title, setTitle] = useState(todo.title);
 
@@ -110,7 +83,7 @@ function TodoItem({
             setTitle(todo.title);
             return;
         }
-        applyLocal(onRenameTodo(next));
+        ctx.$.todos[index].title(next);
     };
 
     return (
@@ -119,7 +92,7 @@ function TodoItem({
                 <input
                     type="checkbox"
                     checked={todo.done}
-                    onChange={(event) => applyLocal(onToggleTodo(event.target.checked))}
+                    onChange={(event) => ctx.$.todos[index].done(event.target.checked)}
                 />
                 {isEditing ? (
                     <input
@@ -144,7 +117,7 @@ function TodoItem({
                 <button type="button" onClick={() => setIsEditing(true)}>
                     Edit
                 </button>
-                <button type="button" onClick={() => applyLocal(onDeleteTodo())}>
+                <button type="button" onClick={() => ctx.$.todos[index].$remove()}>
                     Delete
                 </button>
             </div>

@@ -1,25 +1,33 @@
 import equal from 'fast-deep-equal';
 import {createContext, useContext, useEffect, useMemo, useRef, useState} from 'react';
-import {createPatchDispatcher, getExtra, getPath} from '../helper.js';
+import {createPatchDispatcher} from '../helper.js';
 import {
     type Annotations,
     dispatchWithChangedPaths,
     type History,
     jumpWithChangedPaths,
 } from '../history/history.js';
-import {_get, type EqualFn} from '../internal.js';
+import {type EqualFn} from '../internal.js';
 import {asFlat, type MaybeNested, resolveAndApply} from '../make.js';
 import type {Updater} from '../react/Updater.js';
-import {pathToString} from '../types.js';
-import type {
-    ApplyTiming,
-    DraftPatch,
-    Patch,
-    PatchBuilderInternal,
-    Path,
-    PathSegment,
-} from '../types.js';
+import type {ApplyTiming, DraftPatch, Path} from '../types.js';
+import {
+    changedPaths,
+    clearPreviewState,
+    makeContextForPath,
+    makePathListenerNode,
+    notifyAllPaths,
+    notifyPaths,
+    recordPreviewPaths,
+    replacePreviewState,
+    useValue,
+    type Context,
+    type PathListenerNode,
+} from '../react-core/index.js';
 import {useLatest} from './useLatest.js';
+
+export {useValue};
+export type {Context};
 
 type C<T> = {
     state: T;
@@ -46,180 +54,6 @@ type ContextHistory = {
 type QueuedChanges<T, Tag extends string = 'type'> = DraftPatch<T, Tag, Context>[];
 
 type CH<T, An, Tag extends string = 'type'> = ContextBase<History<T, An>, T, Tag> & ContextHistory;
-
-export type Context = {
-    getForPath<T>(v: Path): T;
-    listenToPath(v: Path, f: () => void): () => void;
-};
-
-type PathListener = () => void;
-
-type PathListenerNode = {
-    listeners: Set<PathListener>;
-    children: Map<string, PathListenerNode>;
-};
-
-const makePathListenerNode = (): PathListenerNode => ({
-    listeners: new Set(),
-    children: new Map(),
-});
-
-const segmentKey = (seg: PathSegment) => {
-    switch (seg.type) {
-        case 'key':
-            return `k:${typeof seg.key === 'number' ? `n:${seg.key}` : `s:${seg.key}`}`;
-        case 'tag':
-            return `t:${seg.key}=${seg.value}`;
-    }
-};
-
-const addPathListener = (root: PathListenerNode, path: Path, listener: PathListener) => {
-    let node = root;
-    for (const seg of path) {
-        const key = segmentKey(seg);
-        let child = node.children.get(key);
-        if (!child) {
-            child = makePathListenerNode();
-            node.children.set(key, child);
-        }
-        node = child;
-    }
-    node.listeners.add(listener);
-};
-
-const removePathListener = (root: PathListenerNode, path: Path, listener: PathListener) => {
-    const stack: Array<{node: PathListenerNode; key?: string}> = [{node: root}];
-    let node = root;
-    for (const seg of path) {
-        const key = segmentKey(seg);
-        const child = node.children.get(key);
-        if (!child) return;
-        stack.push({node: child, key});
-        node = child;
-    }
-    node.listeners.delete(listener);
-    for (let i = stack.length - 1; i > 0; i--) {
-        const {node: child, key} = stack[i];
-        const parent = stack[i - 1].node;
-        if (child.children.size === 0 && child.listeners.size === 0) {
-            parent.children.delete(key as string);
-        }
-    }
-};
-
-const collectAll = (node: PathListenerNode | undefined, out: Set<PathListener>) => {
-    if (!node) return;
-    node.listeners.forEach((l) => out.add(l));
-    node.children.forEach((child) => collectAll(child, out));
-};
-
-// ok here we are. we want to ... notify all items and children?
-const notifyPaths = (root: PathListenerNode, paths: Path[]) => {
-    if (!paths.length) return;
-    const listeners = new Set<PathListener>();
-    paths.forEach((p) => {
-        let node: PathListenerNode | undefined = root;
-        node.listeners.forEach((l) => listeners.add(l));
-        for (const seg of p) {
-            node = node?.children.get(segmentKey(seg));
-            if (!node) break;
-            node.listeners.forEach((l) => listeners.add(l));
-        }
-        collectAll(node, listeners);
-    });
-    listeners.forEach((l) => l());
-};
-
-const notifyAllPaths = (root: PathListenerNode) => {
-    const listeners = new Set<PathListener>();
-    collectAll(root, listeners);
-    listeners.forEach((l) => l());
-};
-
-const changedPaths = (changes: Patch<unknown>[]) => {
-    const paths: Path[] = [];
-    changes.forEach((op) => {
-        paths.push(op.path);
-        if (op.op === 'move') paths.push(op.from);
-    });
-    return paths;
-};
-
-const recordPreviewPaths = (previewPaths: Record<string, Path>, paths: Path[]) => {
-    paths.forEach((path) => {
-        previewPaths[pathToString(path)] = path;
-    });
-};
-
-const clearPreviewState = <T, Change, Tag extends string>(
-    ctx: ContextBase<T, Change, Tag>,
-): boolean => {
-    const previewPaths = Object.values(ctx.previewPaths);
-    const hadPreview = previewPaths.length > 0;
-    ctx.previewState = null;
-    ctx.previewPaths = {};
-    ctx.queuedChanges = [];
-    if (ctx.raf != null) {
-        cancelAnimationFrame(ctx.raf);
-        ctx.raf = undefined;
-    }
-    if (hadPreview) {
-        ctx.listeners.forEach((f) => f());
-        notifyPaths(ctx.listenersByPath, previewPaths);
-    }
-    return hadPreview;
-};
-
-const replacePreviewState = <T, Change, Tag extends string>(
-    ctx: ContextBase<T, Change, Tag>,
-    previewState: T,
-    paths: Path[],
-) => {
-    const previewPaths = Object.values(ctx.previewPaths);
-    ctx.previewState = previewState;
-    ctx.previewPaths = {};
-    ctx.queuedChanges = [];
-    if (ctx.raf != null) {
-        cancelAnimationFrame(ctx.raf);
-        ctx.raf = undefined;
-    }
-    recordPreviewPaths(ctx.previewPaths, paths);
-    ctx.listeners.forEach((f) => f());
-    notifyPaths(ctx.listenersByPath, [...previewPaths, ...paths]);
-};
-
-export const useValue: (<Current, Return, Tag extends PropertyKey>(
-    node: PatchBuilderInternal<unknown, Current, Tag, unknown, Context>,
-    mod: (v: Current) => Return,
-    exact?: boolean,
-    equalFn?: EqualFn,
-) => Return) &
-    (<Current, Tag extends PropertyKey>(
-        node: PatchBuilderInternal<unknown, Current, Tag, unknown, Context>,
-    ) => Current) = <Current, Return, Tag extends PropertyKey>(
-    node: PatchBuilderInternal<unknown, Current, Tag, unknown, Context>,
-    mod: (v: Current) => Return = (v) => v as any,
-    exact = true,
-    equalFn: EqualFn = equal,
-) => {
-    const path = getPath(node);
-    const extra = getExtra(node);
-    const [v, setV] = useState(() => mod(extra.getForPath<Current>(path)));
-    const lv = useLatest(v);
-    const lmod = useLatest(mod);
-    useEffect(
-        () =>
-            extra.listenToPath(path, () => {
-                const nw = lmod.current(extra.getForPath<Current>(path));
-                if (exact ? !equalFn(lv.current, nw) : lv.current !== nw) {
-                    lv.current = nw;
-                    setV(nw);
-                }
-            }),
-        [extra, path, lv, lmod, exact, equalFn],
-    );
-    return v;
-};
 
 const makeHistoryProvider = <T, An, Tag extends string = 'type'>(
     Ctx: React.Context<CH<T, An, Tag>>,
@@ -379,15 +213,7 @@ const makeDispatch = <T, Tag extends string = 'type'>(
     equalFn: EqualFn = equal,
 ) => {
     // const inner = ctx;
-    const extra: Context = {
-        getForPath(path) {
-            return _get(ctx.previewState ?? ctx.state, path);
-        },
-        listenToPath(v, f) {
-            addPathListener(ctx.listenersByPath, v, f);
-            return () => removePathListener(ctx.listenersByPath, v, f);
-        },
-    };
+    const extra = makeContextForPath(() => ctx.previewState ?? ctx.state, ctx.listenersByPath);
     const go = (v: MaybeNested<DraftPatch<T, Tag, Context>>, when?: ApplyTiming) => {
         if (when === 'preview') {
             ctx.queuedChanges.push(...(asFlat(v) as DraftPatch<T, Tag, Context>[]));
@@ -452,15 +278,10 @@ const makeHistoryDispatch = <T, An, Tag extends string = 'type'>(
     equalFn: EqualFn = equal,
 ) => {
     // const inner = ctx;
-    const extra: Context = {
-        getForPath(path) {
-            return _get(ctx.previewState?.current ?? ctx.state.current, path);
-        },
-        listenToPath(v, f) {
-            addPathListener(ctx.listenersByPath, v, f);
-            return () => removePathListener(ctx.listenersByPath, v, f);
-        },
-    };
+    const extra = makeContextForPath(
+        () => ctx.previewState?.current ?? ctx.state.current,
+        ctx.listenersByPath,
+    );
     const go = (
         v:
             | {op: 'undo' | 'redo'}

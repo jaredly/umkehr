@@ -1,6 +1,12 @@
 import {describe, expect, it} from 'vitest';
 import type {IJsonSchemaCollection} from 'typia';
-import {applyCrdtUpdate, createCrdtDocument, createCrdtUpdates} from './index';
+import {
+    applyCrdtUpdate,
+    changedNormalPathsForCrdtUpdate,
+    createCrdtDocument,
+    createCrdtUpdates,
+    normalPathForCrdtPath,
+} from './index';
 import type {Patch} from '../types';
 
 type Person = {name: string};
@@ -272,6 +278,87 @@ describe('crdt', () => {
         }
 
         expect(receiver.state.todos).toEqual([{title: 'First', done: false}]);
+    });
+
+    it('translates CRDT paths back to normal paths', () => {
+        let doc = createDoc();
+        const append = createCrdtUpdates(
+            doc,
+            add(
+                [
+                    {type: 'key', key: 'todos'},
+                    {type: 'key', key: 1},
+                ],
+                {title: 'Second', done: false},
+            ),
+            '010',
+        )[0];
+        doc = applyCrdtUpdate(doc, append);
+        const updateSecond = createCrdtUpdates(
+            doc,
+            replace(
+                [
+                    {type: 'key', key: 'todos'},
+                    {type: 'key', key: 1},
+                    {type: 'key', key: 'done'},
+                ],
+                true,
+                false,
+            ),
+            '020',
+        )[0];
+
+        expect(updateSecond.op).toBe('set');
+        if (updateSecond.op !== 'set') return;
+        expect(normalPathForCrdtPath(doc, updateSecond.path)).toEqual([
+            {type: 'key', key: 'todos'},
+            {type: 'key', key: 1},
+            {type: 'key', key: 'done'},
+        ]);
+    });
+
+    it('reports changed normal paths for deletes and reorders', () => {
+        let doc = createDoc();
+        const append = createCrdtUpdates(
+            doc,
+            add(
+                [
+                    {type: 'key', key: 'todos'},
+                    {type: 'key', key: 1},
+                ],
+                {title: 'Second', done: false},
+            ),
+            '010',
+        )[0];
+        doc = applyCrdtUpdate(doc, append);
+        const reorder = createCrdtUpdates(
+            doc,
+            {op: 'reorder', path: [{type: 'key', key: 'todos'}], indices: [1, 0]},
+            '020',
+        )[0];
+        const afterReorder = applyCrdtUpdate(doc, reorder);
+        expect(changedNormalPathsForCrdtUpdate(doc, afterReorder, reorder)).toEqual([
+            [{type: 'key', key: 'todos'}],
+        ]);
+
+        const deleteSecond = createCrdtUpdates(
+            doc,
+            remove(
+                [
+                    {type: 'key', key: 'todos'},
+                    {type: 'key', key: 1},
+                ],
+                {title: 'Second', done: false},
+            ),
+            '030',
+        )[0];
+        const afterDelete = applyCrdtUpdate(doc, deleteSecond);
+        expect(changedNormalPathsForCrdtUpdate(doc, afterDelete, deleteSecond)).toEqual([
+            [
+                {type: 'key', key: 'todos'},
+                {type: 'key', key: 1},
+            ],
+        ]);
     });
 
     it('queues array item updates and reorders until the item creation arrives', () => {

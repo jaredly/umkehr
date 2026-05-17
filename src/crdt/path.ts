@@ -2,7 +2,7 @@ import type {Path} from '../types.js';
 import {compareStrings} from './fractionalIndex.js';
 import {checkParent} from './traversal.js';
 import {fieldSegmentType, walkSchema} from './schema.js';
-import type {ArrayMeta, CrdtDocument, CrdtMeta, CrdtPathSegment} from './types.js';
+import type {ArrayMeta, CrdtDocument, CrdtMeta, CrdtPathSegment, CrdtUpdate} from './types.js';
 
 export function crdtPathForExisting<T>(doc: CrdtDocument<T>, path: Path) {
     let meta = doc.meta;
@@ -96,4 +96,66 @@ export function liveArrayItems(meta: ArrayMeta) {
 
 export function lastArrayOrder(meta: ArrayMeta) {
     return liveArrayItems(meta).at(-1)?.[1].order.value;
+}
+
+export function normalPathForCrdtPath<T>(
+    doc: CrdtDocument<T>,
+    path: CrdtPathSegment[],
+): Path | undefined {
+    let meta: CrdtMeta | undefined = doc.meta;
+    const out: Path = [];
+
+    for (const segment of path) {
+        if (!meta || meta.kind === 'tombstone') return undefined;
+        const check = checkParent(meta, segment);
+        if (check !== 'ready') return undefined;
+
+        switch (segment.type) {
+            case 'objectField':
+                if (meta.kind !== 'object') return undefined;
+                out.push({type: 'key', key: segment.key});
+                meta = meta.fields[segment.key];
+                break;
+            case 'recordEntry':
+                if (meta.kind !== 'record') return undefined;
+                out.push({type: 'key', key: segment.key});
+                meta = meta.entries[segment.key];
+                break;
+            case 'arrayItem': {
+                if (meta.kind !== 'array') return undefined;
+                const index = liveArrayItems(meta).findIndex(([id]) => id === segment.id);
+                if (index === -1) return undefined;
+                out.push({type: 'key', key: index});
+                meta = meta.items[segment.id]?.value;
+                break;
+            }
+            case 'taggedField':
+                if (meta.kind !== 'tagged') return undefined;
+                out.push({type: 'tag', key: segment.tagKey, value: segment.tagValue});
+                out.push({type: 'key', key: segment.key});
+                meta = meta.fields[segment.key];
+                break;
+        }
+    }
+
+    return out;
+}
+
+export function changedNormalPathsForCrdtUpdate<T>(
+    before: CrdtDocument<T>,
+    after: CrdtDocument<T>,
+    update: CrdtUpdate,
+): Path[] | null {
+    if (update.op === 'setOrder') {
+        const path =
+            normalPathForCrdtPath(after, update.arrayPath) ??
+            normalPathForCrdtPath(before, update.arrayPath);
+        return path ? [path] : null;
+    }
+
+    const path =
+        update.op === 'delete'
+            ? (normalPathForCrdtPath(before, update.path) ?? normalPathForCrdtPath(after, update.path))
+            : (normalPathForCrdtPath(after, update.path) ?? normalPathForCrdtPath(before, update.path));
+    return path ? [path] : null;
 }

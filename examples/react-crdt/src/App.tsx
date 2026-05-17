@@ -7,9 +7,16 @@ import {
     type SetStateAction,
 } from 'react';
 import type {CrdtUpdate} from 'umkehr/crdt';
-import {ReplicaHost} from './ReplicaHost';
 import {SyncControls} from './SyncControls';
-import {replicas, type ReceiveUpdate, type RegisterReplica, type ReplicaId} from './model';
+import {TodoPanel} from './TodoPanel';
+import {
+    ProvideTodos,
+    createDemoTransport,
+    createInitialHistory,
+    replicas,
+    type DemoTransport,
+    type ReplicaId,
+} from './model';
 import './style.css';
 
 type TransportState = {
@@ -17,11 +24,13 @@ type TransportState = {
     outbox: Record<ReplicaId, CrdtUpdate[]>;
 };
 
-type ReceiverRegistry = Partial<Record<ReplicaId, ReceiveUpdate>>;
 type SetTransport = (next: TransportState) => void;
+type PublishUpdates = (from: ReplicaId, updates: CrdtUpdate[]) => void;
 
 export function App() {
-    const receivers = useRef<ReceiverRegistry>({});
+    const publishRef = useRef<PublishUpdates>(() => {});
+    const transports = useRef<Record<ReplicaId, DemoTransport>>(createDemoTransports(publishRef));
+    const initialHistory = useRef(createInitialHistory());
     const [transport, setTransportState] = useState<TransportState>(() => ({
         syncEnabled: true,
         outbox: emptyOutbox(),
@@ -33,12 +42,8 @@ export function App() {
         [],
     );
 
-    const registerReplica = useCallback<RegisterReplica>((id, receive) => {
-        return registerReceiver(receivers.current, id, receive);
-    }, []);
-
     const deliverUpdates = useCallback((from: ReplicaId, updates: CrdtUpdate[]) => {
-        deliverTransportUpdates(receivers.current, from, updates);
+        deliverTransportUpdates(transports.current, from, updates);
     }, []);
 
     const broadcastUpdates = useCallback(
@@ -58,18 +63,23 @@ export function App() {
         toggleTransportSync(transportRef.current, setTransport, deliverUpdates);
     }, [deliverUpdates, setTransport]);
 
+    publishRef.current = broadcastUpdates;
+
     return (
         <main className="collabShell">
             {replicas.map((replica, index) => (
-                <ReplicaHost
+                <ProvideTodos
                     key={replica.id}
-                    id={replica.id}
-                    title={replica.title}
-                    queued={transport.outbox[replica.id]?.length ?? 0}
-                    registerReplica={registerReplica}
-                    onOutboundUpdates={broadcastUpdates}
-                    gridSlot={index === 0 ? 'left' : 'right'}
-                />
+                    initial={initialHistory.current}
+                    transport={transports.current[replica.id]}
+                >
+                    <TodoPanel
+                        replicaId={replica.id}
+                        title={replica.title}
+                        queued={transport.outbox[replica.id]?.length ?? 0}
+                        gridSlot={index === 0 ? 'left' : 'right'}
+                    />
+                </ProvideTodos>
             ))}
             <SyncControls
                 syncEnabled={transport.syncEnabled}
@@ -81,6 +91,15 @@ export function App() {
             />
         </main>
     );
+}
+
+function createDemoTransports(ref: MutableRefObject<PublishUpdates>) {
+    return Object.fromEntries(
+        replicas.map((replica) => [
+            replica.id,
+            createDemoTransport(replica.id, (from, updates) => ref.current(from, updates)),
+        ]),
+    ) as Record<ReplicaId, DemoTransport>;
 }
 
 function emptyOutbox(): Record<ReplicaId, CrdtUpdate[]> {
@@ -96,23 +115,15 @@ function setTransportSnapshot(
     setState(next);
 }
 
-function registerReceiver(registry: ReceiverRegistry, id: ReplicaId, receive: ReceiveUpdate) {
-    registry[id] = receive;
-    return () => {
-        if (registry[id] === receive) delete registry[id];
-    };
-}
-
 function deliverTransportUpdates(
-    registry: ReceiverRegistry,
+    transports: Record<ReplicaId, DemoTransport>,
     from: ReplicaId,
     updates: CrdtUpdate[],
 ) {
     for (const replica of replicas) {
         if (replica.id === from) continue;
-        const receive = registry[replica.id];
-        if (!receive) continue;
-        for (const update of updates) receive(update);
+        const transport = transports[replica.id];
+        for (const update of updates) transport.receive(update);
     }
 }
 
