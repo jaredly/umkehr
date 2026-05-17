@@ -76,6 +76,11 @@ export async function listBatches(docId: string) {
     return db.getAllFromIndex('batches', 'docId', docId);
 }
 
+export async function deleteBatch(batch: PersistedBatch) {
+    const db = await openLocalFirstDb();
+    await db.delete('batches', batchKey(batch.docId, batch.origin, batch.batchId));
+}
+
 export async function countBatches(docId: string) {
     const db = await openLocalFirstDb();
     return db.countFromIndex('batches', 'docId', docId);

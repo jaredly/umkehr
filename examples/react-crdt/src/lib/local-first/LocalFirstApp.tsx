@@ -16,6 +16,7 @@ type Loaded<TState> = {
     identity: ReplicaIdentity;
     history: CrdtLocalHistory<TState>;
     vector: VersionVector;
+    compactedThrough?: VersionVector;
     source: 'created' | 'loaded';
     lock: Extract<TabLock, {kind: 'acquired'}>;
 };
@@ -115,6 +116,7 @@ function LocalFirstReadyApp<TState>({
         identity: loaded.identity,
         initialHistory: currentHistory,
         initialVector: loaded.vector,
+        initialCompactedThrough: loaded.compactedThrough,
         source: loaded.source,
         initialPeerId,
         replaceHistory: setCurrentHistory,
@@ -191,6 +193,7 @@ async function loadInitialState<TState>(
             identity,
             history: persisted.history,
             vector: persisted.vector,
+            compactedThrough: persisted.compactedThrough,
             source: 'loaded',
             lock,
         };
@@ -208,5 +211,5 @@ async function loadInitialState<TState>(
         vector,
         updatedAt: new Date().toISOString(),
     });
-    return {identity, history, vector, source: 'created', lock};
+    return {identity, history, vector, compactedThrough: undefined, source: 'created', lock};
 }

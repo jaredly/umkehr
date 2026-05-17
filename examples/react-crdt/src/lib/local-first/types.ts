@@ -49,10 +49,12 @@ export type LocalFirstPersistenceState =
 
 export type LocalFirstStats = {
     vector: VersionVector;
+    compactedThrough?: VersionVector;
     retainedBatches: number;
     receivedBatches: number;
     pendingUpdates: number;
     snapshotStatus?: string;
+    compactionStatus?: string;
 };
 
 export type LocalFirstConnectionInfo = {
@@ -81,6 +83,7 @@ export type LocalFirstSync<TState> = {
     connect(peerId: string): void;
     disconnect(peerId: string): void;
     requestSync(peerId?: string): void;
+    compactRetainedLog(): Promise<void>;
     saveHistory(history: CrdtLocalHistory<TState>): void;
     resetLocalReplica(): Promise<void>;
 };

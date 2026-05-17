@@ -35,6 +35,8 @@ export function LocalFirstControls<TState>({
                 <dd>{schemaFingerprint.slice(0, 16)}</dd>
                 <dt>Vector</dt>
                 <dd>{Object.keys(stats.vector).length || 'empty'}</dd>
+                <dt>Compacted</dt>
+                <dd>{stats.compactedThrough ? Object.keys(stats.compactedThrough).length : 'none'}</dd>
                 <dt>Batches</dt>
                 <dd>{stats.retainedBatches}</dd>
                 <dt>Received</dt>
@@ -43,6 +45,8 @@ export function LocalFirstControls<TState>({
                 <dd>{stats.pendingUpdates}</dd>
                 <dt>Snapshot</dt>
                 <dd>{stats.snapshotStatus ?? 'none'}</dd>
+                <dt>Compaction</dt>
+                <dd>{stats.compactionStatus ?? 'none'}</dd>
                 <dt>Peers</dt>
                 <dd>{connections.length}</dd>
             </dl>
@@ -87,6 +91,13 @@ export function LocalFirstControls<TState>({
             >
                 Request sync
             </button>
+            <button
+                type="button"
+                disabled={stats.retainedBatches === 0}
+                onClick={() => void compact(sync)}
+            >
+                Compact retained log
+            </button>
             <section className="connectionList">
                 {connections.map((connection) => (
                     <div className="connectionRow" key={connection.peerId}>
@@ -127,6 +138,17 @@ function createInviteUrl(peerId: string) {
 async function reset<TState>(sync: LocalFirstSync<TState>) {
     if (!window.confirm('Reset the local-first document for this browser?')) return;
     await sync.resetLocalReplica();
+}
+
+async function compact<TState>(sync: LocalFirstSync<TState>) {
+    if (
+        !window.confirm(
+            'Compact retained batches for this replica? Peers behind this frontier will need a snapshot.',
+        )
+    ) {
+        return;
+    }
+    await sync.compactRetainedLog();
 }
 
 function statusText(status: ReturnType<LocalFirstSync<unknown>['persistenceStore']['getSnapshot']>) {

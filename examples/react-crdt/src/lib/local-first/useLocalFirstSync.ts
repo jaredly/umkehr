@@ -15,6 +15,7 @@ import {
     clearReplica,
     countBatches,
     countReceivedBatches,
+    deleteBatch,
     hasReceivedBatch,
     listBatches,
     markReceivedBatch,
@@ -64,6 +65,7 @@ export function useLocalFirstSync<TState>({
     identity,
     initialHistory,
     initialVector,
+    initialCompactedThrough,
     source,
     initialPeerId,
     replaceHistory,
@@ -76,12 +78,14 @@ export function useLocalFirstSync<TState>({
     identity: ReplicaIdentity;
     initialHistory: CrdtLocalHistory<TState>;
     initialVector: VersionVector;
+    initialCompactedThrough?: VersionVector;
     source: 'created' | 'loaded';
     initialPeerId?: string;
     replaceHistory(history: CrdtLocalHistory<TState>): void;
 }): LocalFirstSync<TState> {
     const historyRef = useRef(initialHistory);
     const vectorRef = useRef(initialVector);
+    const compactedThroughRef = useRef<VersionVector | undefined>(initialCompactedThrough);
     const sourceRef = useRef(source);
     const clockRef = useRef(initialClock(identity.replicaId, initialVector));
     const listenersRef = useRef(new Set<(update: CrdtUpdate) => void>());
@@ -95,6 +99,7 @@ export function useLocalFirstSync<TState>({
         validateState,
     });
     const snapshotStatusRef = useRef<string | undefined>(undefined);
+    const compactionStatusRef = useRef<string | undefined>(undefined);
 
     protocolRef.current = {docId, schema, tagKey, validateState};
 
@@ -115,10 +120,12 @@ export function useLocalFirstSync<TState>({
         () =>
             createExternalStore<LocalFirstStats>({
                 vector: initialVector,
+                compactedThrough: initialCompactedThrough,
                 retainedBatches: 0,
                 receivedBatches: 0,
                 pendingUpdates: initialHistory.doc.pending.length,
                 snapshotStatus: undefined,
+                compactionStatus: undefined,
             }),
         [],
     );
@@ -148,10 +155,12 @@ export function useLocalFirstSync<TState>({
         ]);
         statsStore.setSnapshot({
             vector: vectorRef.current,
+            compactedThrough: compactedThroughRef.current,
             retainedBatches,
             receivedBatches,
             pendingUpdates: historyRef.current.doc.pending.length,
             snapshotStatus: snapshotStatusRef.current,
+            compactionStatus: compactionStatusRef.current,
         });
     }, [docId, statsStore]);
 
@@ -176,6 +185,7 @@ export function useLocalFirstSync<TState>({
                     replicaId: identity.replicaId,
                     history: historyRef.current,
                     vector: vectorRef.current,
+                    compactedThrough: compactedThroughRef.current,
                     updatedAt: savedAt,
                 } satisfies PersistedReplica<TState>);
                 persistenceStore.setSnapshot({
@@ -292,6 +302,7 @@ export function useLocalFirstSync<TState>({
             const history = createCrdtLocalHistory(document);
             historyRef.current = history;
             vectorRef.current = compactedThrough;
+            compactedThroughRef.current = compactedThrough;
             sourceRef.current = 'loaded';
             snapshotStatusRef.current = 'Accepted peer snapshot.';
             replaceHistory(history);
@@ -302,6 +313,10 @@ export function useLocalFirstSync<TState>({
 
     const sendMissingBatches = useCallback(
         async (record: ConnectionRecord<TState>, since: VersionVector) => {
+            const requiresSnapshot = compactedThroughRef.current
+                ? !vectorDominates(since, compactedThroughRef.current)
+                : false;
+            if (requiresSnapshot) sendSnapshot(record);
             const batches = (await listBatches(docId)).filter(
                 (batch) => !vectorDominates(since, vectorForUpdates(batch.updates)),
             );
@@ -312,9 +327,10 @@ export function useLocalFirstSync<TState>({
                 docId,
                 since,
                 batches,
+                requiresSnapshot,
             });
         },
-        [docId, identity.replicaId, sendOrQueue],
+        [docId, identity.replicaId, sendOrQueue, sendSnapshot],
     );
 
     const broadcastBatch = useCallback(
@@ -533,6 +549,21 @@ export function useLocalFirstSync<TState>({
         window.location.reload();
     }, [docId]);
 
+    const compactRetainedLog = useCallback(async () => {
+        const frontier = {...vectorRef.current};
+        const batches = await listBatches(docId);
+        const deletable = batches.filter((batch) =>
+            vectorDominates(frontier, vectorForUpdates(batch.updates)),
+        );
+        await Promise.all(deletable.map(deleteBatch));
+        compactedThroughRef.current = frontier;
+        compactionStatusRef.current = `Compacted ${deletable.length} retained batch${
+            deletable.length === 1 ? '' : 'es'
+        }.`;
+        await persistReplica();
+        await refreshCounts();
+    }, [docId, persistReplica, refreshCounts]);
+
     useEffect(() => {
         void refreshCounts();
     }, [refreshCounts]);
@@ -578,10 +609,12 @@ export function useLocalFirstSync<TState>({
             connect,
             disconnect,
             requestSync,
+            compactRetainedLog,
             saveHistory,
             resetLocalReplica,
         }),
         [
+            compactRetainedLog,
             connect,
             connectionsStore,
             disconnect,
