@@ -1,7 +1,6 @@
 import {useCallback, useEffect, useMemo, useRef} from 'react';
 import Peer, {type DataConnection} from 'peerjs';
 import {
-    applyRemoteHistoryUpdate,
     createCrdtLocalHistory,
     hlc,
     type CrdtDocument,
@@ -30,6 +29,11 @@ import {
 } from './vector';
 import {batchKey, createRecentBatchCache} from './recentBatchCache';
 import {
+    buildSnapshotReplayPreview,
+    type PendingSnapshot,
+    type ReplayPreview,
+} from './replay';
+import {
     LOCAL_FIRST_PROTOCOL_VERSION,
     parseLocalFirstMessage,
     type LocalFirstMessage,
@@ -56,12 +60,6 @@ type ConnectionRecord<TState> = {
     queued: LocalFirstMessage<TState>[];
     error?: string;
     lastSyncAt?: string;
-};
-
-type PendingSnapshot<TState> = {
-    actor: string;
-    document: CrdtDocument<TState>;
-    compactedThrough: VersionVector;
 };
 
 export function useLocalFirstSync<TState>({
@@ -108,6 +106,7 @@ export function useLocalFirstSync<TState>({
         validateState,
     });
     const pendingSnapshotRef = useRef<PendingSnapshot<TState> | null>(null);
+    const replayPreviewRef = useRef<ReplayPreview<TState> | null>(null);
     const snapshotStatusRef = useRef<string | undefined>(undefined);
     const compactionStatusRef = useRef<string | undefined>(undefined);
 
@@ -136,6 +135,7 @@ export function useLocalFirstSync<TState>({
                 pendingUpdates: initialHistory.doc.pending.length,
                 snapshotStatus: undefined,
                 pendingSnapshot: undefined,
+                replayPreview: undefined,
                 compactionStatus: undefined,
             }),
         [],
@@ -175,6 +175,13 @@ export function useLocalFirstSync<TState>({
                 ? {
                       actor: pendingSnapshotRef.current.actor,
                       compactedActors: Object.keys(pendingSnapshotRef.current.compactedThrough).length,
+                  }
+                : undefined,
+            replayPreview: replayPreviewRef.current
+                ? {
+                      actor: replayPreviewRef.current.actor,
+                      localBatches: replayPreviewRef.current.localBatches.length,
+                      state: replayPreviewRef.current.history.doc.state,
                   }
                 : undefined,
             compactionStatus: compactionStatusRef.current,
@@ -356,6 +363,7 @@ export function useLocalFirstSync<TState>({
             await clearReplica(docId);
             recentBatchesRef.current.clear();
             pendingSnapshotRef.current = null;
+            replayPreviewRef.current = null;
             compactionStatusRef.current = undefined;
             const history = createCrdtLocalHistory(document);
             historyRef.current = history;
@@ -378,6 +386,7 @@ export function useLocalFirstSync<TState>({
             const hasLocalKnowledge = Object.keys(vectorRef.current).length > 0;
             if (hasLocalKnowledge) {
                 pendingSnapshotRef.current = {actor, document, compactedThrough};
+                replayPreviewRef.current = null;
                 snapshotStatusRef.current =
                     'Peer snapshot is available, but this replica has local state.';
                 await refreshCounts();
@@ -389,6 +398,17 @@ export function useLocalFirstSync<TState>({
         },
         [installSnapshot, refreshCounts],
     );
+
+    const buildReplayPreview = useCallback(async () => {
+        const pending = pendingSnapshotRef.current;
+        if (!pending) return null;
+
+        return buildSnapshotReplayPreview({
+            pending,
+            localReplicaId: identity.replicaId,
+            batches: await listBatches(docId),
+        });
+    }, [docId, identity.replicaId]);
 
     const sendMissingBatches = useCallback(
         async (record: ConnectionRecord<TState>, since: VersionVector) => {
@@ -671,37 +691,34 @@ export function useLocalFirstSync<TState>({
         await refreshCounts();
     }, [installSnapshot, refreshCounts]);
 
-    const replayLocalBatchesOnSnapshot = useCallback(async () => {
-        const pending = pendingSnapshotRef.current;
-        if (!pending) return;
+    const previewLocalBatchesOnSnapshot = useCallback(async () => {
+        const preview = await buildReplayPreview();
+        if (!preview) return;
+        replayPreviewRef.current = preview;
+        snapshotStatusRef.current = `Previewing ${preview.localBatches.length} local batch${
+            preview.localBatches.length === 1 ? '' : 'es'
+        } on snapshot from ${preview.actor}.`;
+        await refreshCounts();
+    }, [buildReplayPreview, refreshCounts]);
 
-        const localBatches = (await listBatches(docId)).filter(
-            (batch) =>
-                batch.origin === identity.replicaId &&
-                !vectorDominates(pending.compactedThrough, vectorForUpdates(batch.updates)),
-        );
-        let history = createCrdtLocalHistory(pending.document);
-        let vector = {...pending.compactedThrough};
-        for (const batch of localBatches) {
-            for (const update of batch.updates) {
-                history = applyRemoteHistoryUpdate(history, update);
-            }
-            vector = advanceVector(vector, batch.updates);
-        }
+    const replayLocalBatchesOnSnapshot = useCallback(async () => {
+        const preview = replayPreviewRef.current ?? (await buildReplayPreview());
+        if (!preview) return;
 
         await clearReplica(docId);
         recentBatchesRef.current.clear();
         pendingSnapshotRef.current = null;
-        historyRef.current = history;
-        vectorRef.current = vector;
-        compactedThroughRef.current = pending.compactedThrough;
+        replayPreviewRef.current = null;
+        historyRef.current = preview.history;
+        vectorRef.current = preview.vector;
+        compactedThroughRef.current = preview.compactedThrough;
         sourceRef.current = 'loaded';
-        snapshotStatusRef.current = `Replayed ${localBatches.length} local batch${
-            localBatches.length === 1 ? '' : 'es'
-        } on snapshot from ${pending.actor}.`;
-        replaceHistory(history);
+        snapshotStatusRef.current = `Replayed ${preview.localBatches.length} local batch${
+            preview.localBatches.length === 1 ? '' : 'es'
+        } on snapshot from ${preview.actor}.`;
+        replaceHistory(preview.history);
         await persistReplica();
-        for (const batch of localBatches) {
+        for (const batch of preview.localBatches) {
             await appendBatch(batch);
             await markReceivedBatch({
                 docId,
@@ -711,7 +728,7 @@ export function useLocalFirstSync<TState>({
             });
         }
         await refreshCounts();
-    }, [docId, identity.replicaId, persistReplica, refreshCounts, replaceHistory]);
+    }, [buildReplayPreview, docId, persistReplica, refreshCounts, replaceHistory]);
 
     useEffect(() => {
         void refreshCounts();
@@ -760,6 +777,7 @@ export function useLocalFirstSync<TState>({
             requestSync,
             compactRetainedLog,
             discardLocalAndAcceptSnapshot,
+            previewLocalBatchesOnSnapshot,
             replayLocalBatchesOnSnapshot,
             saveHistory,
             resetLocalReplica,
@@ -772,6 +790,7 @@ export function useLocalFirstSync<TState>({
             disconnect,
             identity,
             persistenceStore,
+            previewLocalBatchesOnSnapshot,
             requestSync,
             replayLocalBatchesOnSnapshot,
             resetLocalReplica,

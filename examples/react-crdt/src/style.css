@@ -344,6 +344,18 @@ p {
     overflow-wrap: anywhere;
 }
 
+.replayPreview {
+    max-height: 220px;
+    margin: 0;
+    overflow: auto;
+    border: 1px solid #dce4ed;
+    border-radius: 8px;
+    padding: 10px;
+    background: #f8fafc;
+    color: #334155;
+    font-size: 12px;
+}
+
 .rolePicker {
     display: flex;
     gap: 8px;

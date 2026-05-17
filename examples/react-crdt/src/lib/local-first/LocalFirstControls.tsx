@@ -51,6 +51,12 @@ export function LocalFirstControls<TState>({
                         <dd>{stats.pendingSnapshot.actor}</dd>
                     </>
                 ) : null}
+                {stats.replayPreview ? (
+                    <>
+                        <dt>Preview</dt>
+                        <dd>{stats.replayPreview.localBatches} local batches</dd>
+                    </>
+                ) : null}
                 <dt>Compaction</dt>
                 <dd>{stats.compactionStatus ?? 'none'}</dd>
                 <dt>Peers</dt>
@@ -114,9 +120,21 @@ export function LocalFirstControls<TState>({
             <button
                 type="button"
                 disabled={!stats.pendingSnapshot}
+                onClick={() => void previewSnapshot(sync)}
+            >
+                Preview local on snapshot
+            </button>
+            {stats.replayPreview ? (
+                <pre className="replayPreview">
+                    {JSON.stringify(stats.replayPreview.state, null, 2)}
+                </pre>
+            ) : null}
+            <button
+                type="button"
+                disabled={!stats.replayPreview}
                 onClick={() => void replaySnapshot(sync)}
             >
-                Replay local on snapshot
+                Apply preview
             </button>
             <section className="connectionList">
                 {connections.map((connection) => (
@@ -180,6 +198,10 @@ async function acceptSnapshot<TState>(sync: LocalFirstSync<TState>) {
         return;
     }
     await sync.discardLocalAndAcceptSnapshot();
+}
+
+async function previewSnapshot<TState>(sync: LocalFirstSync<TState>) {
+    await sync.previewLocalBatchesOnSnapshot();
 }
 
 async function replaySnapshot<TState>(sync: LocalFirstSync<TState>) {
