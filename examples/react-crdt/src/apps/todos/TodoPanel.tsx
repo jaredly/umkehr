@@ -1,6 +1,7 @@
 import {useMemo, useState} from 'react';
 import {useValue} from 'umkehr/react-crdt';
-import {type GridSlot, type ReplicaId, type Todo, useTodos} from './model';
+import type {GridSlot} from '../../lib/crdtApp';
+import {type Todo, useTodos} from './model';
 
 export function TodoPanel({
     replicaId,
@@ -8,17 +9,15 @@ export function TodoPanel({
     queued = 0,
     gridSlot = 'full',
 }: {
-    replicaId: ReplicaId;
+    replicaId: string;
     title: string;
     queued?: number;
     gridSlot?: GridSlot | 'full';
 }) {
     const ctx = useTodos();
     const todos = useValue(ctx.$.todos);
-    const history = ctx.useLocalHistory();
     const [draftTitle, setDraftTitle] = useState('');
     const completed = useMemo(() => todos.filter((todo) => todo.done).length, [todos]);
-    history;
 
     return (
         <section

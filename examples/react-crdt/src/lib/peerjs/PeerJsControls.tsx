@@ -2,7 +2,7 @@ import {useMemo, useState} from 'react';
 import {useStore} from '../store';
 import type {PeerJsSync, PeerRole} from './types';
 
-export function PeerJsControls({
+export function PeerJsControls<TState>({
     role,
     setRole,
     sync,
@@ -10,7 +10,7 @@ export function PeerJsControls({
 }: {
     role: PeerRole;
     setRole: (role: PeerRole) => void;
-    sync: PeerJsSync;
+    sync: PeerJsSync<TState>;
     initialHostPeerId?: string;
 }) {
     const [hostPeerId, setHostPeerId] = useState(initialHostPeerId);

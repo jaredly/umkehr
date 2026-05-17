@@ -1,14 +1,14 @@
 import typia from 'typia';
 import {type History, type Patch} from 'umkehr';
 import {createPatchValidator} from 'umkehr/validation';
-import type {State} from './model';
+import {todoSchema, type TodoState} from './model';
 
 const STORAGE_KEY = 'umkehr.react-example.history.v1';
 
-const validateState = typia.createValidate<State>();
-const patchValidator = createPatchValidator<State>(typia.json.schemas<[State], '3.1'>());
+const validateState = typia.createValidate<TodoState>();
+const patchValidator = createPatchValidator<TodoState>(todoSchema);
 
-export function loadPersistedHistory(): History<State, never> | null {
+export function loadPersistedHistory(): History<TodoState, never> | null {
     if (typeof window === 'undefined') return null;
 
     const raw = window.localStorage.getItem(STORAGE_KEY);
@@ -29,12 +29,12 @@ export function loadPersistedHistory(): History<State, never> | null {
     }
 }
 
-export function savePersistedHistory(history: History<State, never>) {
+export function savePersistedHistory(history: History<TodoState, never>) {
     if (typeof window === 'undefined') return;
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
 }
 
-function validateHistory(input: unknown): History<State, never> | null {
+function validateHistory(input: unknown): History<TodoState, never> | null {
     if (!isRecord(input)) return null;
     if (input.version !== 2) return null;
     if (typeof input.root !== 'string' || typeof input.tip !== 'string') return null;
@@ -47,7 +47,7 @@ function validateHistory(input: unknown): History<State, never> | null {
     if (!isRecord(input.nodes) || !isRecord(input.annotations)) return null;
     if (!Object.values(input.annotations).every(isRecord)) return null;
 
-    const nodes: History<State, never>['nodes'] = {};
+    const nodes: History<TodoState, never>['nodes'] = {};
     for (const [id, node] of Object.entries(input.nodes)) {
         const validated = validateHistoryNode(id, node);
         if (!validated) return null;
@@ -64,7 +64,7 @@ function validateHistory(input: unknown): History<State, never> | null {
         version: 2,
         initial: initial.data,
         nodes,
-        annotations: input.annotations as History<State, never>['annotations'],
+        annotations: input.annotations as History<TodoState, never>['annotations'],
         root: input.root,
         tip: input.tip,
         current: current.data,
@@ -72,7 +72,10 @@ function validateHistory(input: unknown): History<State, never> | null {
     };
 }
 
-function validateHistoryNode(id: string, input: unknown): History<State, never>['nodes'][string] | null {
+function validateHistoryNode(
+    id: string,
+    input: unknown,
+): History<TodoState, never>['nodes'][string] | null {
     if (!isRecord(input)) return null;
     if (input.id !== id) return null;
     if (typeof input.pid !== 'string') return null;
@@ -81,7 +84,7 @@ function validateHistoryNode(id: string, input: unknown): History<State, never>[
     }
     if (!Array.isArray(input.changes)) return null;
 
-    const changes: Patch<State>[] = [];
+    const changes: Patch<TodoState>[] = [];
     for (const change of input.changes) {
         const result = patchValidator.validate(change);
         if (!result.success) return null;

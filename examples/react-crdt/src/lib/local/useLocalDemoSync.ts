@@ -1,7 +1,7 @@
 import {useCallback, useMemo, useRef, type MutableRefObject} from 'react';
 import type {CrdtUpdate} from 'umkehr/crdt';
+import {createExternalStore, type ExternalStore} from '../store';
 import {createDemoTransport, replicas, type DemoTransport, type ReplicaId} from './model';
-import {createExternalStore, type ExternalStore} from './store';
 
 export type TransportState = {
     syncEnabled: boolean;
@@ -17,7 +17,7 @@ export type DemoSync = {
     toggleSync(): void;
 };
 
-export function useDemoSync() {
+export function useLocalDemoSync() {
     const publishRef = useRef<PublishUpdates>(() => {});
     const stateStore = useMemo(
         () => createExternalStore<TransportState>({syncEnabled: true, outbox: emptyOutbox()}),

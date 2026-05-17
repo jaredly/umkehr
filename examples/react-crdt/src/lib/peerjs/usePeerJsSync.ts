@@ -7,39 +7,43 @@ import {
     type CrdtUpdate,
 } from 'umkehr/crdt';
 import type {SyncedTransport} from 'umkehr/react-crdt';
-import type {State} from '../model';
 import {createExternalStore} from '../store';
-import {PEER_PROTOCOL_VERSION, parsePeerMessage, type PeerMessage} from './protocol';
+import {
+    PEER_PROTOCOL_VERSION,
+    parsePeerMessage,
+    type PeerMessage,
+    type PeerProtocolConfig,
+} from './protocol';
 import type {PeerConnectionInfo, PeerJsSync, PeerRole, PeerSyncState} from './types';
 
-type ConnectionRecord = {
+type ConnectionRecord<TState> = {
     conn: DataConnection;
     actor?: string;
     role?: PeerRole;
-    queued: PeerMessage[];
+    queued: PeerMessage<TState>[];
     gotSnapshot: boolean;
     error?: string;
 };
 
-export function usePeerJsSync({
+export function usePeerJsSync<TState>({
     role,
     actor,
     initialDocument,
-    docId,
+    protocol,
 }: {
     role: PeerRole;
     actor: string;
-    initialDocument?: CrdtDocument<State>;
-    docId: string;
-}): PeerJsSync {
+    initialDocument?: CrdtDocument<TState>;
+    protocol: PeerProtocolConfig<TState>;
+}): PeerJsSync<TState> {
     const peerRef = useRef<Peer | null>(null);
     const roleRef = useRef(role);
     const actorRef = useRef(actor);
-    const docIdRef = useRef(docId);
+    const protocolRef = useRef(protocol);
     const clockRef = useRef(hlc.init(actor, Date.now()));
-    const snapshotRef = useRef<CrdtDocument<State> | undefined>(initialDocument);
+    const snapshotRef = useRef<CrdtDocument<TState> | undefined>(initialDocument);
     const listenersRef = useRef(new Set<(update: CrdtUpdate) => void>());
-    const connectionsRef = useRef(new Map<string, ConnectionRecord>());
+    const connectionsRef = useRef(new Map<string, ConnectionRecord<TState>>());
     const lastHostPeerIdRef = useRef<string | null>(null);
 
     const stateStore = useMemo(
@@ -47,11 +51,11 @@ export function usePeerJsSync({
         [role],
     );
     const connectionsStore = useMemo(() => createExternalStore<PeerConnectionInfo[]>([]), []);
-    const snapshotStore = useMemo(() => createExternalStore<CrdtDocument<State> | null>(null), []);
+    const snapshotStore = useMemo(() => createExternalStore<CrdtDocument<TState> | null>(null), []);
 
     roleRef.current = role;
     actorRef.current = actor;
-    docIdRef.current = docId;
+    protocolRef.current = protocol;
     snapshotRef.current = initialDocument ?? snapshotRef.current;
 
     const publishConnections = useCallback(() => {
@@ -83,7 +87,7 @@ export function usePeerJsSync({
         (peerId?: string) => {
             const records = peerId
                 ? [connectionsRef.current.get(peerId)].filter(
-                      (record): record is ConnectionRecord => Boolean(record),
+                      (record): record is ConnectionRecord<TState> => Boolean(record),
                   )
                 : [...connectionsRef.current.values()];
 
@@ -99,7 +103,7 @@ export function usePeerJsSync({
     );
 
     const sendOrQueue = useCallback(
-        (record: ConnectionRecord, message: PeerMessage) => {
+        (record: ConnectionRecord<TState>, message: PeerMessage<TState>) => {
             if (record.conn.open) {
                 record.conn.send(message);
             } else {
@@ -111,12 +115,12 @@ export function usePeerJsSync({
     );
 
     const sendHello = useCallback(
-        (record: ConnectionRecord) => {
+        (record: ConnectionRecord<TState>) => {
             sendOrQueue(record, {
                 kind: 'hello',
                 version: PEER_PROTOCOL_VERSION,
                 actor: actorRef.current,
-                docId: docIdRef.current,
+                docId: protocolRef.current.docId,
                 role: roleRef.current,
             });
         },
@@ -124,13 +128,13 @@ export function usePeerJsSync({
     );
 
     const sendSnapshot = useCallback(
-        (record: ConnectionRecord) => {
+        (record: ConnectionRecord<TState>) => {
             if (roleRef.current !== 'host' || !snapshotRef.current) return;
             sendOrQueue(record, {
                 kind: 'snapshot',
                 version: PEER_PROTOCOL_VERSION,
                 actor: actorRef.current,
-                docId: docIdRef.current,
+                docId: protocolRef.current.docId,
                 document: snapshotRef.current,
             });
         },
@@ -148,7 +152,11 @@ export function usePeerJsSync({
     const broadcastFromHost = useCallback(
         (updates: CrdtUpdate[], exceptPeerId?: string) => {
             if (!updates.length) return;
-            const message = createUpdatesMessage(actorRef.current, docIdRef.current, updates);
+            const message = createUpdatesMessage<TState>(
+                actorRef.current,
+                protocolRef.current.docId,
+                updates,
+            );
             for (const record of connectionsRef.current.values()) {
                 if (record.conn.peer === exceptPeerId) continue;
                 sendOrQueue(record, message);
@@ -159,7 +167,7 @@ export function usePeerJsSync({
 
     const handleMessage = useCallback(
         (conn: DataConnection, input: unknown) => {
-            const message = parsePeerMessage(input, docIdRef.current);
+            const message = parsePeerMessage(input, protocolRef.current);
             if (!message) {
                 setProtocolError(`Rejected invalid message from ${conn.peer}.`, conn);
                 return;
@@ -210,7 +218,7 @@ export function usePeerJsSync({
     );
 
     const trackConnection = useCallback(
-        (conn: DataConnection): ConnectionRecord => {
+        (conn: DataConnection): ConnectionRecord<TState> => {
             const existing = connectionsRef.current.get(conn.peer);
             const record =
                 existing ??
@@ -218,7 +226,7 @@ export function usePeerJsSync({
                     conn,
                     queued: [],
                     gotSnapshot: roleRef.current === 'host',
-                } satisfies ConnectionRecord);
+                } satisfies ConnectionRecord<TState>);
 
             record.conn = conn;
             record.error = undefined;
@@ -260,7 +268,14 @@ export function usePeerJsSync({
                 const hostPeerId = lastHostPeerIdRef.current;
                 const record = hostPeerId ? connectionsRef.current.get(hostPeerId) : undefined;
                 if (record) {
-                    sendOrQueue(record, createUpdatesMessage(actorRef.current, docIdRef.current, updates));
+                    sendOrQueue(
+                        record,
+                        createUpdatesMessage<TState>(
+                            actorRef.current,
+                            protocolRef.current.docId,
+                            updates,
+                        ),
+                    );
                 }
             },
             subscribe(receive) {
@@ -309,7 +324,7 @@ export function usePeerJsSync({
         publishConnections();
     }, [publishConnections]);
 
-    const setSnapshotDocument = useCallback((document: CrdtDocument<State>) => {
+    const setSnapshotDocument = useCallback((document: CrdtDocument<TState>) => {
         snapshotRef.current = document;
     }, []);
 
@@ -366,7 +381,11 @@ export function usePeerJsSync({
     );
 }
 
-function createUpdatesMessage(actor: string, docId: string, updates: CrdtUpdate[]): PeerMessage {
+function createUpdatesMessage<TState>(
+    actor: string,
+    docId: string,
+    updates: CrdtUpdate[],
+): PeerMessage<TState> {
     return {
         kind: 'updates',
         version: PEER_PROTOCOL_VERSION,

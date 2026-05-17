@@ -1,4 +1,4 @@
-import typia from 'typia';
+import type {IJsonSchemaCollection, IValidation} from 'typia';
 import {
     createCrdtUpdateValidator,
     type CrdtDocument,
@@ -6,13 +6,18 @@ import {
     type CrdtUpdate,
     type PendingUpdate,
 } from 'umkehr/crdt';
-import {schema, type State} from '../model';
 import type {PeerRole} from './types';
 
-export const TODO_DOC_ID = 'umkehr-react-crdt-todos-v1';
 export const PEER_PROTOCOL_VERSION = 1;
 
-export type PeerMessage =
+export type PeerProtocolConfig<TState> = {
+    docId: string;
+    tagKey: string;
+    schema: IJsonSchemaCollection<'3.1', [TState]>;
+    validateState(input: unknown): IValidation<TState>;
+};
+
+export type PeerMessage<TState> =
     | {
           kind: 'hello';
           version: 1;
@@ -25,7 +30,7 @@ export type PeerMessage =
           version: 1;
           actor: string;
           docId: string;
-          document: CrdtDocument<State>;
+          document: CrdtDocument<TState>;
       }
     | {
           kind: 'updates';
@@ -36,55 +41,67 @@ export type PeerMessage =
           updates: CrdtUpdate[];
       };
 
-const validateState = typia.createValidate<State>();
-const updateValidator = createCrdtUpdateValidator<State>(schema);
-
-export function parsePeerMessage(input: unknown, docId = TODO_DOC_ID): PeerMessage | null {
+export function parsePeerMessage<TState>(
+    input: unknown,
+    config: PeerProtocolConfig<TState>,
+): PeerMessage<TState> | null {
     if (!isRecord(input)) return null;
     if (input.version !== PEER_PROTOCOL_VERSION) return null;
-    if (input.docId !== docId) return null;
+    if (input.docId !== config.docId) return null;
     if (typeof input.actor !== 'string' || input.actor.length === 0) return null;
 
     if (input.kind === 'hello') {
         if (input.role !== 'host' && input.role !== 'client') return null;
-        return input as PeerMessage;
+        return input as PeerMessage<TState>;
     }
 
     if (input.kind === 'snapshot') {
-        const document = validatePeerSnapshot(input.document);
+        const document = validatePeerSnapshot(input.document, config);
         if (!document) return null;
-        return {...input, document} as PeerMessage;
+        return {...input, document} as PeerMessage<TState>;
     }
 
     if (input.kind === 'updates') {
         if (typeof input.batchId !== 'string' || input.batchId.length === 0) return null;
         if (!Array.isArray(input.updates) || input.updates.length === 0) return null;
+        const updateValidator = createCrdtUpdateValidator<TState>(config.schema);
         const updates: CrdtUpdate[] = [];
         for (const update of input.updates) {
             const result = updateValidator.validate(update);
             if (!result.success) return null;
             updates.push(result.data);
         }
-        return {...input, updates} as PeerMessage;
+        return {...input, updates} as PeerMessage<TState>;
     }
 
     return null;
 }
 
-export function validatePeerSnapshot(input: unknown): CrdtDocument<State> | null {
+export function validatePeerSnapshot<TState>(
+    input: unknown,
+    config: PeerProtocolConfig<TState>,
+): CrdtDocument<TState> | null {
     if (!isRecord(input)) return null;
     if (!hasOnlyDocumentKeys(input)) return null;
 
-    const state = validateState(input.state);
+    const state = config.validateState(input.state);
     if (!state.success) return null;
     if (!validateCrdtMeta(input.meta)) return null;
-    if (!Array.isArray(input.pending) || !input.pending.every(validatePendingUpdate)) return null;
-    if (!validateSchemaContext(input.schema)) return null;
+    if (
+        !Array.isArray(input.pending) ||
+        !input.pending.every((pending) => validatePendingUpdate(pending, config))
+    ) {
+        return null;
+    }
+    if (!validateSchemaContext(input.schema, config)) return null;
 
-    return input as CrdtDocument<State>;
+    return input as CrdtDocument<TState>;
 }
 
-function validatePendingUpdate(input: unknown): input is PendingUpdate {
+function validatePendingUpdate<TState>(
+    input: unknown,
+    config: PeerProtocolConfig<TState>,
+): input is PendingUpdate {
     if (!isRecord(input)) return false;
     if (
         input.reason !== 'missing-parent' &&
@@ -94,6 +111,7 @@ function validatePendingUpdate(input: unknown): input is PendingUpdate {
         return false;
     }
     if (typeof input.queuedAt !== 'string' || input.queuedAt.length === 0) return false;
+    const updateValidator = createCrdtUpdateValidator<TState>(config.schema);
     return updateValidator.is(input.update);
 }
 
@@ -138,11 +156,13 @@ function validateMetaRecord(input: unknown) {
     return isRecord(input) && Object.values(input).every(validateCrdtMeta);
 }
 
-function validateSchemaContext(input: unknown) {
+function validateSchemaContext<TState>(input: unknown, config: PeerProtocolConfig<TState>) {
     if (!isRecord(input)) return false;
-    if (input.tagKey !== 'type') return false;
-    return stableStringify(input.root) === stableStringify(schema.schemas[0]) &&
-        stableStringify(input.components) === stableStringify(schema.components);
+    if (input.tagKey !== config.tagKey) return false;
+    return (
+        stableStringify(input.root) === stableStringify(config.schema.schemas[0]) &&
+        stableStringify(input.components) === stableStringify(config.schema.components)
+    );
 }
 
 function hasOnlyDocumentKeys(input: Record<string, unknown>) {

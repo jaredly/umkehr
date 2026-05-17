@@ -1,13 +1,14 @@
 import {useState} from 'react';
+import type {CrdtLocalHistory} from 'umkehr/crdt';
+import type {CrdtAppDefinition} from '../crdtApp';
+import {useStore} from '../store';
+import {replicas} from './model';
 import {SyncControls} from './SyncControls';
-import {TodoPanel} from './TodoPanel';
-import {ProvideTodos, createInitialHistory, replicas} from './model';
-import {useStore} from './store';
-import {type DemoSync, useDemoSync} from './useDemoSync';
+import {type DemoSync, useLocalDemoSync} from './useLocalDemoSync';
 
-export function LocalSimulatorApp() {
-    const [initialHistory] = useState(createInitialHistory);
-    const sync = useDemoSync();
+export function LocalSimulatorApp<TState>({app}: {app: CrdtAppDefinition<TState>}) {
+    const [initialHistory] = useState(app.createInitialHistory);
+    const sync = useLocalDemoSync();
 
     return (
         <main className="collabShell">
@@ -18,6 +19,7 @@ export function LocalSimulatorApp() {
                     sync={sync}
                     replica={replica}
                     initial={initialHistory}
+                    app={app}
                 />
             ))}
             <LocalSyncControls sync={sync} />
@@ -25,28 +27,31 @@ export function LocalSimulatorApp() {
     );
 }
 
-function LocalReplicaPanel({
+function LocalReplicaPanel<TState>({
     index,
     sync,
     replica,
     initial,
+    app,
 }: {
     index: number;
     sync: DemoSync;
     replica: (typeof replicas)[number];
-    initial: ReturnType<typeof createInitialHistory>;
+    initial: CrdtLocalHistory<TState>;
+    app: CrdtAppDefinition<TState>;
 }) {
     const state = useStore(sync.stateStore);
+    const {Provider} = app;
 
     return (
-        <ProvideTodos initial={initial} transport={sync.transports[replica.id]}>
-            <TodoPanel
-                replicaId={replica.id}
-                title={replica.title}
-                queued={state.outbox[replica.id]?.length ?? 0}
-                gridSlot={index === 0 ? 'left' : 'right'}
-            />
-        </ProvideTodos>
+        <Provider initial={initial} transport={sync.transports[replica.id]}>
+            {app.renderPanel({
+                actor: replica.id,
+                title: replica.title,
+                queued: state.outbox[replica.id]?.length ?? 0,
+                gridSlot: index === 0 ? 'left' : 'right',
+            })}
+        </Provider>
     );
 }
 
