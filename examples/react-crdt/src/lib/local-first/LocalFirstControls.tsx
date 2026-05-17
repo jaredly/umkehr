@@ -45,6 +45,12 @@ export function LocalFirstControls<TState>({
                 <dd>{stats.pendingUpdates}</dd>
                 <dt>Snapshot</dt>
                 <dd>{stats.snapshotStatus ?? 'none'}</dd>
+                {stats.pendingSnapshot ? (
+                    <>
+                        <dt>Remote</dt>
+                        <dd>{stats.pendingSnapshot.actor}</dd>
+                    </>
+                ) : null}
                 <dt>Compaction</dt>
                 <dd>{stats.compactionStatus ?? 'none'}</dd>
                 <dt>Peers</dt>
@@ -98,6 +104,13 @@ export function LocalFirstControls<TState>({
             >
                 Compact retained log
             </button>
+            <button
+                type="button"
+                disabled={!stats.pendingSnapshot}
+                onClick={() => void acceptSnapshot(sync)}
+            >
+                Discard local and accept snapshot
+            </button>
             <section className="connectionList">
                 {connections.map((connection) => (
                     <div className="connectionRow" key={connection.peerId}>
@@ -149,6 +162,17 @@ async function compact<TState>(sync: LocalFirstSync<TState>) {
         return;
     }
     await sync.compactRetainedLog();
+}
+
+async function acceptSnapshot<TState>(sync: LocalFirstSync<TState>) {
+    if (
+        !window.confirm(
+            'Discard this browser’s local document and retained log, then accept the pending peer snapshot?',
+        )
+    ) {
+        return;
+    }
+    await sync.discardLocalAndAcceptSnapshot();
 }
 
 function statusText(status: ReturnType<LocalFirstSync<unknown>['persistenceStore']['getSnapshot']>) {

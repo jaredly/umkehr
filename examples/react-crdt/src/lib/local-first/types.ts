@@ -54,6 +54,10 @@ export type LocalFirstStats = {
     receivedBatches: number;
     pendingUpdates: number;
     snapshotStatus?: string;
+    pendingSnapshot?: {
+        actor: string;
+        compactedActors: number;
+    };
     compactionStatus?: string;
 };
 
@@ -84,6 +88,7 @@ export type LocalFirstSync<TState> = {
     disconnect(peerId: string): void;
     requestSync(peerId?: string): void;
     compactRetainedLog(): Promise<void>;
+    discardLocalAndAcceptSnapshot(): Promise<void>;
     saveHistory(history: CrdtLocalHistory<TState>): void;
     resetLocalReplica(): Promise<void>;
 };

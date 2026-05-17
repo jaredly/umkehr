@@ -56,6 +56,12 @@ type ConnectionRecord<TState> = {
     lastSyncAt?: string;
 };
 
+type PendingSnapshot<TState> = {
+    actor: string;
+    document: CrdtDocument<TState>;
+    compactedThrough: VersionVector;
+};
+
 export function useLocalFirstSync<TState>({
     docId,
     schema,
@@ -98,6 +104,7 @@ export function useLocalFirstSync<TState>({
         tagKey,
         validateState,
     });
+    const pendingSnapshotRef = useRef<PendingSnapshot<TState> | null>(null);
     const snapshotStatusRef = useRef<string | undefined>(undefined);
     const compactionStatusRef = useRef<string | undefined>(undefined);
 
@@ -125,6 +132,7 @@ export function useLocalFirstSync<TState>({
                 receivedBatches: 0,
                 pendingUpdates: initialHistory.doc.pending.length,
                 snapshotStatus: undefined,
+                pendingSnapshot: undefined,
                 compactionStatus: undefined,
             }),
         [],
@@ -160,6 +168,12 @@ export function useLocalFirstSync<TState>({
             receivedBatches,
             pendingUpdates: historyRef.current.doc.pending.length,
             snapshotStatus: snapshotStatusRef.current,
+            pendingSnapshot: pendingSnapshotRef.current
+                ? {
+                      actor: pendingSnapshotRef.current.actor,
+                      compactedActors: Object.keys(pendingSnapshotRef.current.compactedThrough).length,
+                  }
+                : undefined,
             compactionStatus: compactionStatusRef.current,
         });
     }, [docId, statsStore]);
@@ -290,15 +304,12 @@ export function useLocalFirstSync<TState>({
         [docId, identity.replicaId, sendOrQueue],
     );
 
-    const acceptSnapshot = useCallback(
+    const installSnapshot = useCallback(
         async (document: CrdtDocument<TState>, compactedThrough: VersionVector) => {
-            const hasLocalKnowledge = Object.keys(vectorRef.current).length > 0;
-            if (hasLocalKnowledge) {
-                snapshotStatusRef.current = 'Skipped peer snapshot because this replica has local state.';
-                await refreshCounts();
-                return;
-            }
-
+            await clearReplica(docId);
+            recentBatchesRef.current.clear();
+            pendingSnapshotRef.current = null;
+            compactionStatusRef.current = undefined;
             const history = createCrdtLocalHistory(document);
             historyRef.current = history;
             vectorRef.current = compactedThrough;
@@ -308,7 +319,28 @@ export function useLocalFirstSync<TState>({
             replaceHistory(history);
             await persistReplica();
         },
-        [persistReplica, refreshCounts, replaceHistory],
+        [docId, persistReplica, replaceHistory],
+    );
+
+    const acceptSnapshot = useCallback(
+        async (
+            actor: string,
+            document: CrdtDocument<TState>,
+            compactedThrough: VersionVector,
+        ) => {
+            const hasLocalKnowledge = Object.keys(vectorRef.current).length > 0;
+            if (hasLocalKnowledge) {
+                pendingSnapshotRef.current = {actor, document, compactedThrough};
+                snapshotStatusRef.current =
+                    'Peer snapshot is available, but this replica has local state.';
+                await refreshCounts();
+                return;
+            }
+
+            snapshotStatusRef.current = 'Accepted peer snapshot.';
+            await installSnapshot(document, compactedThrough);
+        },
+        [installSnapshot, refreshCounts],
     );
 
     const sendMissingBatches = useCallback(
@@ -422,7 +454,7 @@ export function useLocalFirstSync<TState>({
             }
 
             if (message.kind === 'snapshot') {
-                void acceptSnapshot(message.document, message.compactedThrough);
+                void acceptSnapshot(message.actor, message.document, message.compactedThrough);
             }
         },
         [
@@ -564,6 +596,14 @@ export function useLocalFirstSync<TState>({
         await refreshCounts();
     }, [docId, persistReplica, refreshCounts]);
 
+    const discardLocalAndAcceptSnapshot = useCallback(async () => {
+        const pending = pendingSnapshotRef.current;
+        if (!pending) return;
+        snapshotStatusRef.current = `Accepted snapshot from ${pending.actor} and discarded local retained log.`;
+        await installSnapshot(pending.document, pending.compactedThrough);
+        await refreshCounts();
+    }, [installSnapshot, refreshCounts]);
+
     useEffect(() => {
         void refreshCounts();
     }, [refreshCounts]);
@@ -610,6 +650,7 @@ export function useLocalFirstSync<TState>({
             disconnect,
             requestSync,
             compactRetainedLog,
+            discardLocalAndAcceptSnapshot,
             saveHistory,
             resetLocalReplica,
         }),
@@ -617,6 +658,7 @@ export function useLocalFirstSync<TState>({
             compactRetainedLog,
             connect,
             connectionsStore,
+            discardLocalAndAcceptSnapshot,
             disconnect,
             identity,
             persistenceStore,
