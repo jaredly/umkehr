@@ -1,5 +1,5 @@
-import equal from 'fast-deep-equal';
 import {createContext, useContext, useEffect, useMemo, useRef, useState} from 'react';
+import {deepEqual as equal} from '../deepEqual.js';
 import {createPatchDispatcher} from '../helper.js';
 import {
     type Annotations,

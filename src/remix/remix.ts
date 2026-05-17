@@ -1,4 +1,4 @@
-import equal from 'fast-deep-equal';
+import {deepEqual as equal} from '../deepEqual.js';
 import {createPatchDispatcher, getExtra, getPath} from '../helper.js';
 import {
     type Annotations,

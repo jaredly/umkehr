@@ -30,6 +30,13 @@ export function ModeTabs({
             >
                 PeerJS
             </button>
+            <button
+                type="button"
+                className={mode === 'local-first' ? 'active' : ''}
+                onClick={() => setMode('local-first')}
+            >
+                Local-first
+            </button>
         </nav>
     );
 }

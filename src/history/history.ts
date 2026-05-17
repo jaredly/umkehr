@@ -1,4 +1,4 @@
-import equal from 'fast-deep-equal';
+import {deepEqual as equal} from '../deepEqual.js';
 import {splitPathToDestination} from './findHistoryJump.js';
 import type {Patch, DraftPatch, Path} from '../types.js';
 import {resolveAndApply} from '../make.js';

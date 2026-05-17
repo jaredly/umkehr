@@ -1,4 +1,4 @@
-import equal from 'fast-deep-equal';
+import {deepEqual as equal} from '../deepEqual.js';
 import type {EqualFn} from '../internal.js';
 import type {DraftPatch, Patch} from '../types.js';
 import {resolveAndApply, type MaybeNested} from '../make.js';

@@ -1,5 +1,5 @@
-import equal from 'fast-deep-equal';
 import {useEffect, useState} from 'react';
+import {deepEqual as equal} from '../deepEqual.js';
 import {getExtra, getPath} from '../helper.js';
 import {type EqualFn} from '../internal.js';
 import type {PatchBuilderInternal} from '../types.js';
