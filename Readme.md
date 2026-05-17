@@ -28,8 +28,10 @@ bun add umkehr
 | --- | --- |
 | `umkehr` | Core patch builders, patch application, and history helpers |
 | `umkehr/react` | React contexts, hooks, and updater types |
+| `umkehr/remix` | Remix 3 client component contexts and updater types |
 
-React is an optional peer dependency. Non-React users should import from `umkehr`.
+React and Remix are optional peer dependencies. Non-React and non-Remix users should import from
+`umkehr`.
 
 ## Examples
 
@@ -40,6 +42,7 @@ Small runnable examples live in [`examples`](./examples):
 | [`examples/basic`](./examples/basic) | Draft patches, realized changes, applying and inverting patches |
 | [`examples/history`](./examples/history) | Dispatch, undo, redo, branching, and jump |
 | [`examples/react`](./examples/react) | React context setup, `useValue`, preview updates, undo, and redo |
+| [`examples/remix3`](./examples/remix3) | Remix 3 beta client components, path watches, preview updates, undo, and redo |
 | [`examples/tagged-union`](./examples/tagged-union) | `$variant` with direct and callback forms |
 
 ## Quick Start

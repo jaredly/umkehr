@@ -17,6 +17,14 @@ pnpm install
 pnpm dev
 ```
 
+The Remix 3 example is an experimental Remix beta app and currently requires Node `>=24.3.0`:
+
+```sh
+cd examples/remix3
+pnpm install
+pnpm dev
+```
+
 ## Examples
 
 | Example | Shows |
@@ -24,4 +32,5 @@ pnpm dev
 | `basic` | Draft patches, realized patches, applying and inverting changes |
 | `history` | History dispatch, undo, redo, branching, and jump |
 | `react` | `createHistoryContext`, `useValue`, preview updates, undo, and redo |
+| `remix3` | Remix 3 beta client components with `umkehr/remix`, path watches, preview updates, undo, and redo |
 | `tagged-union` | `$variant` with direct and callback forms |
