@@ -33,6 +33,7 @@ export function LocalFirstApp<TState>({
     app: AppDefinition<TState>;
     runtime: CrdtRuntime<TState>;
 }) {
+    const initialPeerId = readInvitePeerId();
     const fingerprint = useMemo(() => schemaFingerprint(app), [app]);
     const [loadState, setLoadState] = useState<LoadState<TState>>({kind: 'loading'});
 
@@ -86,6 +87,7 @@ export function LocalFirstApp<TState>({
             runtime={runtime}
             schemaFingerprint={fingerprint}
             loaded={loadState.loaded}
+            initialPeerId={initialPeerId}
         />
     );
 }
@@ -95,20 +97,24 @@ function LocalFirstReadyApp<TState>({
     runtime,
     schemaFingerprint,
     loaded,
+    initialPeerId,
 }: {
     app: AppDefinition<TState>;
     runtime: CrdtRuntime<TState>;
     schemaFingerprint: string;
     loaded: Loaded<TState>;
+    initialPeerId: string;
 }) {
     const [currentHistory, setCurrentHistory] = useState(loaded.history);
     const sync = useLocalFirstSync({
         docId: runtime.docId,
+        schema: app.schema,
         schemaFingerprint,
         identity: loaded.identity,
         initialHistory: currentHistory,
         initialVector: loaded.vector,
         source: loaded.source,
+        initialPeerId,
     });
     const {Provider} = runtime;
     const saveHistory = useCallback(
@@ -135,6 +141,11 @@ function LocalFirstReadyApp<TState>({
             />
         </main>
     );
+}
+
+function readInvitePeerId() {
+    if (typeof window === 'undefined') return '';
+    return new URLSearchParams(window.location.search).get('peer')?.trim() ?? '';
 }
 
 function LocalFirstDocument<TState>({

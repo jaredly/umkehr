@@ -1,16 +1,32 @@
 import {useCallback, useEffect, useMemo, useRef} from 'react';
-import Peer from 'peerjs';
+import Peer, {type DataConnection} from 'peerjs';
 import {hlc, type CrdtLocalHistory, type CrdtUpdate} from 'umkehr/crdt';
 import type {SyncedTransport} from 'umkehr/react-crdt';
+import type {IJsonSchemaCollection} from 'typia';
 import {createExternalStore} from '../store';
 import {
     appendBatch,
     clearReplica,
     countBatches,
     countReceivedBatches,
+    hasReceivedBatch,
+    listBatches,
+    markReceivedBatch,
     saveReplica,
 } from './persistence';
-import {batchTimestampRange, advanceVector} from './vector';
+import {
+    batchTimestampRange,
+    advanceVector,
+    vectorDominates,
+    vectorForUpdates,
+} from './vector';
+import {batchKey, createRecentBatchCache} from './recentBatchCache';
+import {
+    LOCAL_FIRST_PROTOCOL_VERSION,
+    parseLocalFirstMessage,
+    type LocalFirstMessage,
+    type LocalFirstProtocolConfig,
+} from './protocol';
 import type {
     LocalFirstConnectionInfo,
     LocalFirstPersistenceState,
@@ -24,20 +40,33 @@ import type {
     VersionVector,
 } from './types';
 
+type ConnectionRecord<TState> = {
+    conn: DataConnection;
+    actor?: string;
+    role?: LocalFirstRole;
+    queued: LocalFirstMessage<TState>[];
+    error?: string;
+    lastSyncAt?: string;
+};
+
 export function useLocalFirstSync<TState>({
     docId,
+    schema,
     schemaFingerprint,
     identity,
     initialHistory,
     initialVector,
     source,
+    initialPeerId,
 }: {
     docId: string;
+    schema: IJsonSchemaCollection<'3.1', [TState]>;
     schemaFingerprint: string;
     identity: ReplicaIdentity;
     initialHistory: CrdtLocalHistory<TState>;
     initialVector: VersionVector;
     source: 'created' | 'loaded';
+    initialPeerId?: string;
 }): LocalFirstSync<TState> {
     const historyRef = useRef(initialHistory);
     const vectorRef = useRef(initialVector);
@@ -45,6 +74,11 @@ export function useLocalFirstSync<TState>({
     const clockRef = useRef(initialClock(identity.replicaId, initialVector));
     const listenersRef = useRef(new Set<(update: CrdtUpdate) => void>());
     const peerRef = useRef<Peer | null>(null);
+    const connectionsRef = useRef(new Map<string, ConnectionRecord<TState>>());
+    const recentBatchesRef = useRef(createRecentBatchCache());
+    const protocolRef = useRef<LocalFirstProtocolConfig<TState>>({docId, schema});
+
+    protocolRef.current = {docId, schema};
 
     const stateStore = useMemo(
         () => createExternalStore<LocalFirstSyncState>({kind: 'offline', role: 'host'}),
@@ -67,12 +101,26 @@ export function useLocalFirstSync<TState>({
                 receivedBatches: 0,
                 pendingUpdates: initialHistory.doc.pending.length,
             }),
-        [initialHistory, initialVector],
+        [],
     );
     const connectionsStore = useMemo(
         () => createExternalStore<LocalFirstConnectionInfo[]>([]),
         [],
     );
+
+    const publishConnections = useCallback(() => {
+        connectionsStore.setSnapshot(
+            [...connectionsRef.current.values()].map(({conn, actor, role, queued, error, lastSyncAt}) => ({
+                peerId: conn.peer,
+                actor,
+                role,
+                open: conn.open,
+                queuedOutgoing: queued.length,
+                error,
+                lastSyncAt,
+            })),
+        );
+    }, [connectionsStore]);
 
     const refreshCounts = useCallback(async () => {
         const [retainedBatches, receivedBatches] = await Promise.all([
@@ -134,6 +182,249 @@ export function useLocalFirstSync<TState>({
         [persistReplica],
     );
 
+    const sendOrQueue = useCallback(
+        (record: ConnectionRecord<TState>, message: LocalFirstMessage<TState>) => {
+            if (record.conn.open) record.conn.send(message);
+            else {
+                record.queued.push(message);
+                publishConnections();
+            }
+        },
+        [publishConnections],
+    );
+
+    const flushQueued = useCallback(
+        (peerId?: string) => {
+            const records = peerId
+                ? [connectionsRef.current.get(peerId)].filter(
+                      (record): record is ConnectionRecord<TState> => Boolean(record),
+                  )
+                : [...connectionsRef.current.values()];
+            for (const record of records) {
+                if (!record.conn.open || !record.queued.length) continue;
+                const queued = record.queued;
+                record.queued = [];
+                for (const message of queued) record.conn.send(message);
+            }
+            publishConnections();
+        },
+        [publishConnections],
+    );
+
+    const sendHello = useCallback(
+        (record: ConnectionRecord<TState>) => {
+            sendOrQueue(record, {
+                kind: 'hello',
+                version: LOCAL_FIRST_PROTOCOL_VERSION,
+                actor: identity.replicaId,
+                peerId: peerRef.current?.id,
+                docId,
+                role: 'host',
+                vector: vectorRef.current,
+            });
+        },
+        [docId, identity.replicaId, sendOrQueue],
+    );
+
+    const requestSync = useCallback(
+        (peerId?: string) => {
+            const records = peerId
+                ? [connectionsRef.current.get(peerId)].filter(
+                      (record): record is ConnectionRecord<TState> => Boolean(record),
+                  )
+                : [...connectionsRef.current.values()];
+            for (const record of records) {
+                sendOrQueue(record, {
+                    kind: 'syncRequest',
+                    version: LOCAL_FIRST_PROTOCOL_VERSION,
+                    actor: identity.replicaId,
+                    docId,
+                    vector: vectorRef.current,
+                });
+            }
+        },
+        [docId, identity.replicaId, sendOrQueue],
+    );
+
+    const sendSnapshot = useCallback(
+        (record: ConnectionRecord<TState>) => {
+            sendOrQueue(record, {
+                kind: 'snapshot',
+                version: LOCAL_FIRST_PROTOCOL_VERSION,
+                actor: identity.replicaId,
+                docId,
+                document: historyRef.current.doc,
+                compactedThrough: {},
+            });
+        },
+        [docId, identity.replicaId, sendOrQueue],
+    );
+
+    const sendMissingBatches = useCallback(
+        async (record: ConnectionRecord<TState>, since: VersionVector) => {
+            const batches = (await listBatches(docId)).filter(
+                (batch) => !vectorDominates(since, vectorForUpdates(batch.updates)),
+            );
+            sendOrQueue(record, {
+                kind: 'syncResponse',
+                version: LOCAL_FIRST_PROTOCOL_VERSION,
+                actor: identity.replicaId,
+                docId,
+                since,
+                batches,
+            });
+        },
+        [docId, identity.replicaId, sendOrQueue],
+    );
+
+    const broadcastBatch = useCallback(
+        (batch: PersistedBatch, exceptPeerId?: string) => {
+            const message: LocalFirstMessage<TState> = {
+                kind: 'updates',
+                version: LOCAL_FIRST_PROTOCOL_VERSION,
+                actor: identity.replicaId,
+                docId,
+                batch,
+            };
+            for (const record of connectionsRef.current.values()) {
+                if (record.conn.peer === exceptPeerId) continue;
+                sendOrQueue(record, message);
+            }
+        },
+        [docId, identity.replicaId, sendOrQueue],
+    );
+
+    const acceptBatch = useCallback(
+        async (batch: PersistedBatch, fromPeerId?: string) => {
+            const key = batchKey(batch.docId, batch.origin, batch.batchId);
+            if (recentBatchesRef.current.has(key)) return;
+            if (await hasReceivedBatch(batch.docId, batch.origin, batch.batchId)) {
+                recentBatchesRef.current.add(key);
+                return;
+            }
+
+            recentBatchesRef.current.add(key);
+            await markReceivedBatch({
+                docId: batch.docId,
+                origin: batch.origin,
+                batchId: batch.batchId,
+                receivedAt: new Date().toISOString(),
+            });
+            await appendBatch(batch);
+            vectorRef.current = advanceVector(vectorRef.current, batch.updates);
+            const ts = batch.maxTs;
+            if (ts) clockRef.current = hlc.recv(clockRef.current, hlc.unpack(ts), Date.now());
+            for (const update of batch.updates) {
+                for (const listener of listenersRef.current) listener(update);
+            }
+            await persistReplica();
+            broadcastBatch(batch, fromPeerId);
+        },
+        [broadcastBatch, persistReplica],
+    );
+
+    const handleMessage = useCallback(
+        (conn: DataConnection, input: unknown) => {
+            const message = parseLocalFirstMessage(input, protocolRef.current);
+            const record = connectionsRef.current.get(conn.peer);
+            if (!message) {
+                if (record) record.error = `Rejected invalid message from ${conn.peer}.`;
+                publishConnections();
+                return;
+            }
+
+            if (record) {
+                record.actor = message.actor;
+                if (message.kind === 'hello') record.role = message.role;
+                record.lastSyncAt = new Date().toISOString();
+                publishConnections();
+            }
+
+            if (message.kind === 'hello') {
+                if (record) {
+                    sendSnapshot(record);
+                    requestSync(conn.peer);
+                }
+                return;
+            }
+
+            if (message.kind === 'updates') {
+                void acceptBatch(message.batch, conn.peer);
+                return;
+            }
+
+            if (message.kind === 'syncRequest') {
+                if (record) void sendMissingBatches(record, message.vector);
+                return;
+            }
+
+            if (message.kind === 'syncResponse') {
+                void (async () => {
+                    for (const batch of message.batches) await acceptBatch(batch, conn.peer);
+                })();
+            }
+        },
+        [
+            acceptBatch,
+            publishConnections,
+            requestSync,
+            sendMissingBatches,
+            sendSnapshot,
+        ],
+    );
+
+    const trackConnection = useCallback(
+        (conn: DataConnection) => {
+            const existing = connectionsRef.current.get(conn.peer);
+            const record =
+                existing ??
+                ({
+                    conn,
+                    queued: [],
+                } satisfies ConnectionRecord<TState>);
+            record.conn = conn;
+            record.error = undefined;
+            connectionsRef.current.set(conn.peer, record);
+
+            conn.on('open', () => {
+                sendHello(record);
+                requestSync(conn.peer);
+                flushQueued(conn.peer);
+                publishConnections();
+            });
+            conn.on('data', (data) => handleMessage(conn, data));
+            conn.on('close', () => publishConnections());
+            conn.on('error', (error) => {
+                record.error = error instanceof Error ? error.message : String(error);
+                publishConnections();
+            });
+
+            publishConnections();
+            return record;
+        },
+        [flushQueued, handleMessage, publishConnections, requestSync, sendHello],
+    );
+
+    const connect = useCallback(
+        (peerId: string) => {
+            const peer = peerRef.current;
+            const trimmed = peerId.trim();
+            if (!peer || !trimmed || trimmed === peer.id) return;
+            const existing = connectionsRef.current.get(trimmed);
+            if (existing?.conn.open) return;
+            trackConnection(peer.connect(trimmed, {serialization: 'json'}));
+        },
+        [trackConnection],
+    );
+
+    const disconnect = useCallback(
+        (peerId: string) => {
+            connectionsRef.current.get(peerId)?.conn.close();
+            publishConnections();
+        },
+        [publishConnections],
+    );
+
     const publishLocalBatch = useCallback(
         async (updates: CrdtUpdate[]) => {
             if (!updates.length) return;
@@ -152,7 +443,15 @@ export function useLocalFirstSync<TState>({
 
             try {
                 await appendBatch(batch);
+                await markReceivedBatch({
+                    docId,
+                    origin: identity.replicaId,
+                    batchId: batch.batchId,
+                    receivedAt: batch.receivedAt,
+                });
+                recentBatchesRef.current.add(batchKey(docId, identity.replicaId, batch.batchId));
                 await persistReplica();
+                broadcastBatch(batch);
             } catch (error) {
                 persistenceStore.setSnapshot({
                     kind: 'error',
@@ -160,7 +459,7 @@ export function useLocalFirstSync<TState>({
                 });
             }
         },
-        [docId, identity.replicaId, persistReplica, persistenceStore],
+        [broadcastBatch, docId, identity.replicaId, persistReplica, persistenceStore],
     );
 
     const transport = useMemo(
@@ -199,6 +498,10 @@ export function useLocalFirstSync<TState>({
 
         peer.on('open', (peerId) => {
             stateStore.setSnapshot({kind: 'ready', role: 'host', peerId});
+            if (initialPeerId) connect(initialPeerId);
+        });
+        peer.on('connection', (conn) => {
+            trackConnection(conn);
         });
         peer.on('error', (error) => {
             stateStore.setSnapshot({
@@ -209,11 +512,14 @@ export function useLocalFirstSync<TState>({
         });
 
         return () => {
+            for (const record of connectionsRef.current.values()) record.conn.close();
+            connectionsRef.current.clear();
             peer.destroy();
             if (peerRef.current === peer) peerRef.current = null;
             stateStore.setSnapshot({kind: 'offline', role: 'host'});
+            publishConnections();
         };
-    }, [stateStore]);
+    }, [connect, initialPeerId, publishConnections, stateStore, trackConnection]);
 
     return useMemo(
         () => ({
@@ -223,13 +529,19 @@ export function useLocalFirstSync<TState>({
             persistenceStore,
             statsStore,
             connectionsStore,
+            connect,
+            disconnect,
+            requestSync,
             saveHistory,
             resetLocalReplica,
         }),
         [
+            connect,
             connectionsStore,
+            disconnect,
             identity,
             persistenceStore,
+            requestSync,
             resetLocalReplica,
             saveHistory,
             stateStore,

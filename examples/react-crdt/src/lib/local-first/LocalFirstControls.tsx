@@ -1,3 +1,4 @@
+import {useState} from 'react';
 import {useStore} from '../store';
 import type {LocalFirstSync} from './types';
 
@@ -15,6 +16,7 @@ export function LocalFirstControls<TState>({
     const stats = useStore(sync.statsStore);
     const connections = useStore(sync.connectionsStore);
     const inviteUrl = state.kind === 'ready' ? createInviteUrl(state.peerId) : '';
+    const [peerId, setPeerId] = useState('');
 
     return (
         <aside className="localFirstControls">
@@ -58,6 +60,53 @@ export function LocalFirstControls<TState>({
                         Copy
                     </button>
                 </div>
+            </section>
+            <form
+                className="peerConnect"
+                onSubmit={(event) => {
+                    event.preventDefault();
+                    sync.connect(peerId);
+                    setPeerId('');
+                }}
+            >
+                <input
+                    value={peerId}
+                    placeholder="Peer ID"
+                    onChange={(event) => setPeerId(event.target.value)}
+                />
+                <button type="submit" disabled={!peerId.trim()}>
+                    Connect
+                </button>
+            </form>
+            <button
+                type="button"
+                disabled={!connections.some((connection) => connection.open)}
+                onClick={() => sync.requestSync()}
+            >
+                Request sync
+            </button>
+            <section className="connectionList">
+                {connections.map((connection) => (
+                    <div className="connectionRow" key={connection.peerId}>
+                        <strong>{connection.actor ?? connection.peerId}</strong>
+                        <span>
+                            {connection.open ? 'open' : 'closed'}
+                            {connection.role ? ` / ${connection.role}` : ''}
+                            {connection.queuedOutgoing
+                                ? ` / ${connection.queuedOutgoing} queued`
+                                : ''}
+                        </span>
+                        {connection.error ? <em>{connection.error}</em> : null}
+                        <div className="connectionActions">
+                            <button type="button" onClick={() => sync.requestSync(connection.peerId)}>
+                                Sync
+                            </button>
+                            <button type="button" onClick={() => sync.disconnect(connection.peerId)}>
+                                Disconnect
+                            </button>
+                        </div>
+                    </div>
+                ))}
             </section>
             <button type="button" onClick={() => void reset(sync)}>
                 Reset local replica
