@@ -26,7 +26,7 @@ export type State = {
     todos: Todo[];
 };
 
-type ReplicaId = 'replica-a' | 'replica-b';
+type ReplicaId = string;
 type TodoDraft = DraftPatch<State, 'type', undefined>;
 type ReceiveUpdate = (update: CrdtUpdate) => void;
 type RegisterReplica = (id: ReplicaId, receive: ReceiveUpdate) => () => void;
@@ -39,7 +39,7 @@ type TransportState = {
 const replicas = [
     {id: 'replica-a', title: 'Replica A', label: 'A'},
     {id: 'replica-b', title: 'Replica B', label: 'B'},
-] as const satisfies ReadonlyArray<{id: ReplicaId; title: string; label: string}>;
+] as const;
 
 const schema = typia.json.schemas<[State], '3.1'>();
 const $ = createPatchBuilder<State>();
@@ -94,7 +94,7 @@ export function App() {
                 ...current,
                 outbox: {
                     ...current.outbox,
-                    [from]: [...current.outbox[from], ...updates],
+                    [from]: [...(current.outbox[from] ?? []), ...updates],
                 },
             });
         },
@@ -110,7 +110,7 @@ export function App() {
 
         const queued = current.outbox;
         setTransport({syncEnabled: true, outbox: emptyOutbox()});
-        for (const replica of replicas) deliverUpdates(replica.id, queued[replica.id]);
+        for (const replica of replicas) deliverUpdates(replica.id, queued[replica.id] ?? []);
     }, [deliverUpdates, setTransport]);
 
     return (
@@ -120,7 +120,7 @@ export function App() {
                     key={replica.id}
                     id={replica.id}
                     title={replica.title}
-                    queued={transport.outbox[replica.id].length}
+                    queued={transport.outbox[replica.id]?.length ?? 0}
                     registerReplica={registerReplica}
                     onOutboundUpdates={broadcastUpdates}
                     gridSlot={index === 0 ? 'left' : 'right'}
@@ -130,7 +130,7 @@ export function App() {
                 syncEnabled={transport.syncEnabled}
                 queueCounts={replicas.map((replica) => ({
                     label: replica.label,
-                    count: transport.outbox[replica.id].length,
+                    count: transport.outbox[replica.id]?.length ?? 0,
                 }))}
                 toggleSync={toggleSync}
             />
@@ -428,8 +428,5 @@ function TodoItem({
 }
 
 function emptyOutbox(): Record<ReplicaId, CrdtUpdate[]> {
-    return {
-        'replica-a': [],
-        'replica-b': [],
-    };
+    return Object.fromEntries(replicas.map((replica) => [replica.id, []]));
 }
