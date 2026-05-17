@@ -1,21 +1,20 @@
 import {useMemo, useState} from 'react';
-import {useValue} from 'umkehr/react-crdt';
-import type {GridSlot} from '../../lib/crdtApp';
-import {type Todo, useTodos} from './model';
+import {useValue} from 'umkehr/react';
+import type {AppEditorContext, GridSlot} from '../../lib/crdtApp';
+import type {Todo, TodoState} from './model';
 
 export function TodoPanel({
+    editor,
     replicaId,
     title,
-    queued = 0,
     gridSlot = 'full',
 }: {
+    editor: AppEditorContext<TodoState>;
     replicaId: string;
     title: string;
-    queued?: number;
     gridSlot?: GridSlot | 'full';
 }) {
-    const ctx = useTodos();
-    const todos = useValue(ctx.$.todos);
+    const todos = useValue(editor.$.todos);
     const [draftTitle, setDraftTitle] = useState('');
     const completed = useMemo(() => todos.filter((todo) => todo.done).length, [todos]);
 
@@ -33,13 +32,12 @@ export function TodoPanel({
                     </p>
                 </div>
                 <div className="panelActions">
-                    <button type="button" onClick={() => ctx.undo()} disabled={!ctx.canUndo()}>
+                    <button type="button" onClick={() => editor.undo()} disabled={!editor.canUndo()}>
                         Undo
                     </button>
-                    <button type="button" onClick={() => ctx.redo()} disabled={!ctx.canRedo()}>
+                    <button type="button" onClick={() => editor.redo()} disabled={!editor.canRedo()}>
                         Redo
                     </button>
-                    <span className="queuedBadge">{queued} queued</span>
                 </div>
             </header>
 
@@ -49,7 +47,7 @@ export function TodoPanel({
                     event.preventDefault();
                     const next = draftTitle.trim();
                     if (!next) return;
-                    ctx.$.todos.$push({
+                    editor.$.todos.$push({
                         id: `${replicaId}-${crypto.randomUUID()}`,
                         title: next,
                         done: false,
@@ -67,15 +65,22 @@ export function TodoPanel({
 
             <ul className="todoList">
                 {todos.map((todo, index) => (
-                    <TodoItem key={todo.id} todo={todo} index={index} />
+                    <TodoItem key={todo.id} editor={editor} todo={todo} index={index} />
                 ))}
             </ul>
         </section>
     );
 }
 
-function TodoItem({todo, index}: {todo: Todo; index: number}) {
-    const ctx = useTodos();
+function TodoItem({
+    editor,
+    todo,
+    index,
+}: {
+    editor: AppEditorContext<TodoState>;
+    todo: Todo;
+    index: number;
+}) {
     const [isEditing, setIsEditing] = useState(false);
     const [title, setTitle] = useState(todo.title);
 
@@ -86,7 +91,7 @@ function TodoItem({todo, index}: {todo: Todo; index: number}) {
             setTitle(todo.title);
             return;
         }
-        ctx.$.todos[index].title(next);
+        editor.$.todos[index].title(next);
     };
 
     return (
@@ -95,7 +100,7 @@ function TodoItem({todo, index}: {todo: Todo; index: number}) {
                 <input
                     type="checkbox"
                     checked={todo.done}
-                    onChange={(event) => ctx.$.todos[index].done(event.target.checked)}
+                    onChange={(event) => editor.$.todos[index].done(event.target.checked)}
                 />
                 {isEditing ? (
                     <input
@@ -120,7 +125,7 @@ function TodoItem({todo, index}: {todo: Todo; index: number}) {
                 <button type="button" onClick={() => setIsEditing(true)}>
                     Edit
                 </button>
-                <button type="button" onClick={() => ctx.$.todos[index].$remove()}>
+                <button type="button" onClick={() => editor.$.todos[index].$remove()}>
                     Delete
                 </button>
             </div>

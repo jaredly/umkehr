@@ -11,6 +11,13 @@ export function ModeTabs({
         <nav className="modeTabs" aria-label="Demo mode">
             <button
                 type="button"
+                className={mode === 'solo' ? 'active' : ''}
+                onClick={() => setMode('solo')}
+            >
+                Solo
+            </button>
+            <button
+                type="button"
                 className={mode === 'local' ? 'active' : ''}
                 onClick={() => setMode('local')}
             >

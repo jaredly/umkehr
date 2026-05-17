@@ -76,6 +76,13 @@ button.active {
     align-items: start;
 }
 
+.soloShell {
+    width: min(760px, calc(100vw - 32px));
+    min-height: calc(100vh - 72px);
+    margin: 0 auto;
+    padding: 32px 0;
+}
+
 .todoPanel {
     min-width: 0;
     border: 1px solid #d4dde7;
@@ -109,16 +116,6 @@ h1 {
 p {
     margin: 6px 0 0;
     color: #64748b;
-}
-
-.queuedBadge {
-    align-self: start;
-    white-space: nowrap;
-    border-radius: 999px;
-    padding: 4px 10px;
-    color: #334155;
-    background: #e8eef5;
-    font-size: 13px;
 }
 
 .panelActions {
@@ -389,6 +386,102 @@ p {
 .waitingPanel {
     min-height: 220px;
     padding: 24px;
+}
+
+.historyView {
+    display: grid;
+    gap: 12px;
+}
+
+.historyView h2 {
+    margin: 0;
+    font-size: 16px;
+    line-height: 1.2;
+}
+
+.historyScroller {
+    max-width: 100%;
+    overflow: auto;
+    border: 1px solid #dce4ed;
+    border-radius: 8px;
+    padding: 14px;
+    background: #f8fafc;
+}
+
+.historyTree {
+    position: relative;
+    width: max-content;
+    min-width: 100%;
+}
+
+.historyBranch,
+.historyNodeRow {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+.historyNodeStem {
+    width: 10px;
+    height: 4px;
+    margin-left: -10px;
+    background: #9aa8b8;
+}
+
+.historyNode {
+    z-index: 5;
+    flex-shrink: 0;
+    width: 18px;
+    height: 18px;
+    min-width: 18px;
+    margin-block: 2px;
+    border: 2px solid #9aa8b8;
+    border-radius: 999px;
+    padding: 0;
+    background: #334155;
+}
+
+.historyNode.current {
+    border-color: #93c5fd;
+    background: #1f6feb;
+}
+
+.historyNode.previewing {
+    border-color: #f8fafc;
+    background: #93c5fd;
+}
+
+.historyBranchLineWrap {
+    margin-right: 6px;
+    margin-left: -6px;
+}
+
+.historyBranchLine {
+    width: 4px;
+    background: #9aa8b8;
+}
+
+.historyChildren {
+    display: flex;
+    flex-direction: column;
+}
+
+.historySkip {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 60px;
+    height: 4px;
+    background: #9aa8b8;
+}
+
+.historySkip span {
+    border: 1px solid #dce4ed;
+    border-radius: 999px;
+    padding: 1px 6px;
+    background: #f8fafc;
+    color: #64748b;
+    font-size: 12px;
 }
 
 @media (max-width: 820px) {

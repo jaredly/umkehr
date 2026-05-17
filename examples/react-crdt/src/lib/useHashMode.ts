@@ -1,6 +1,6 @@
 import {useCallback, useEffect, useState} from 'react';
 
-export type AppMode = 'local' | 'peerjs';
+export type AppMode = 'solo' | 'local' | 'peerjs';
 
 export function useHashMode(): [AppMode, (mode: AppMode) => void] {
     const [mode, setModeState] = useState<AppMode>(() => readHashMode());
@@ -20,5 +20,6 @@ export function useHashMode(): [AppMode, (mode: AppMode) => void] {
 }
 
 function readHashMode(): AppMode {
+    if (window.location.hash === '#solo') return 'solo';
     return window.location.hash === '#peerjs' ? 'peerjs' : 'local';
 }

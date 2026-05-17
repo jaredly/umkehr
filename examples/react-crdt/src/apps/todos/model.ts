@@ -1,10 +1,6 @@
 import typia from 'typia';
-import {
-    createCrdtDocument,
-    createCrdtLocalHistory,
-    hlc,
-    type CrdtLocalHistory,
-} from 'umkehr/crdt';
+import {hlc} from 'umkehr/crdt';
+import {createHistoryContext} from 'umkehr/react';
 import {createSyncedContext} from 'umkehr/react-crdt';
 
 export type Todo = {
@@ -20,6 +16,9 @@ export type TodoState = {
 export const TODO_DOC_ID = 'umkehr-react-crdt-todos-v1';
 export const todoSchema = typia.json.schemas<[TodoState], '3.1'>();
 export const validateTodoState = typia.createValidate<TodoState>();
+export const [ProvideTodoHistory, useTodoHistory] = createHistoryContext<TodoState, never, 'type'>(
+    'type',
+);
 export const [ProvideTodos, useTodos] = createSyncedContext<TodoState>('type');
 
 export const initialTodoState: TodoState = {
@@ -30,9 +29,3 @@ export const initialTodoState: TodoState = {
 };
 
 export const initialTodoTimestamp = hlc.pack(hlc.init('seed', 0));
-
-export function createTodoInitialHistory(): CrdtLocalHistory<TodoState> {
-    return createCrdtLocalHistory(
-        createCrdtDocument(initialTodoState, todoSchema, {timestamp: initialTodoTimestamp}),
-    );
-}

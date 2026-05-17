@@ -1,13 +1,23 @@
 import {useState} from 'react';
 import type {CrdtLocalHistory} from 'umkehr/crdt';
-import type {CrdtAppDefinition} from '../crdtApp';
+import {
+    createInitialCrdtHistory,
+    type AppDefinition,
+    type CrdtRuntime,
+} from '../crdtApp';
 import {useStore} from '../store';
 import {replicas} from './model';
 import {SyncControls} from './SyncControls';
 import {type DemoSync, useLocalDemoSync} from './useLocalDemoSync';
 
-export function LocalSimulatorApp<TState>({app}: {app: CrdtAppDefinition<TState>}) {
-    const [initialHistory] = useState(app.createInitialHistory);
+export function LocalSimulatorApp<TState>({
+    app,
+    runtime,
+}: {
+    app: AppDefinition<TState>;
+    runtime: CrdtRuntime<TState>;
+}) {
+    const [initialHistory] = useState(() => createInitialCrdtHistory(app));
     const sync = useLocalDemoSync();
 
     return (
@@ -20,6 +30,7 @@ export function LocalSimulatorApp<TState>({app}: {app: CrdtAppDefinition<TState>
                     replica={replica}
                     initial={initialHistory}
                     app={app}
+                    runtime={runtime}
                 />
             ))}
             <LocalSyncControls sync={sync} />
@@ -33,26 +44,51 @@ function LocalReplicaPanel<TState>({
     replica,
     initial,
     app,
+    runtime,
 }: {
     index: number;
     sync: DemoSync;
     replica: (typeof replicas)[number];
     initial: CrdtLocalHistory<TState>;
-    app: CrdtAppDefinition<TState>;
+    app: AppDefinition<TState>;
+    runtime: CrdtRuntime<TState>;
 }) {
-    const state = useStore(sync.stateStore);
-    const {Provider} = app;
+    const {Provider} = runtime;
 
     return (
         <Provider initial={initial} transport={sync.transports[replica.id]}>
-            {app.renderPanel({
-                actor: replica.id,
-                title: replica.title,
-                queued: state.outbox[replica.id]?.length ?? 0,
-                gridSlot: index === 0 ? 'left' : 'right',
-            })}
+            <LocalReplicaDocument
+                actor={replica.id}
+                app={app}
+                gridSlot={index === 0 ? 'left' : 'right'}
+                runtime={runtime}
+                title={replica.title}
+            />
         </Provider>
     );
+}
+
+function LocalReplicaDocument<TState>({
+    actor,
+    app,
+    gridSlot,
+    runtime,
+    title,
+}: {
+    actor: string;
+    app: AppDefinition<TState>;
+    gridSlot: 'left' | 'right';
+    runtime: CrdtRuntime<TState>;
+    title: string;
+}) {
+    const editor = runtime.useEditorContext();
+
+    return app.renderPanel({
+        actor,
+        editor,
+        title,
+        gridSlot,
+    });
 }
 
 function LocalSyncControls({sync}: {sync: DemoSync}) {

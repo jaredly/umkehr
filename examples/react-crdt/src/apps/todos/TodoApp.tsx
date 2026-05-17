@@ -1,8 +1,11 @@
-import type {CrdtAppDefinition} from '../../lib/crdtApp';
+import type {AppDefinition, CrdtRuntime, HistoryRuntime} from '../../lib/crdtApp';
 import {
     TODO_DOC_ID,
+    ProvideTodoHistory,
     ProvideTodos,
-    createTodoInitialHistory,
+    initialTodoState,
+    initialTodoTimestamp,
+    useTodoHistory,
     todoSchema,
     useTodos,
     validateTodoState,
@@ -10,17 +13,33 @@ import {
 } from './model';
 import {TodoPanel} from './TodoPanel';
 
-export const todoApp: CrdtAppDefinition<TodoState> = {
+export const todoApp: AppDefinition<TodoState> = {
     id: 'todos',
     title: 'Todos',
-    docId: TODO_DOC_ID,
     tagKey: 'type',
     schema: todoSchema,
     validateState: validateTodoState,
-    createInitialHistory: createTodoInitialHistory,
-    Provider: ProvideTodos,
-    useSyncedContext: useTodos,
-    renderPanel({actor, title, queued, gridSlot}) {
-        return <TodoPanel replicaId={actor} title={title} queued={queued} gridSlot={gridSlot} />;
+    initialState: initialTodoState,
+    initialTimestamp: initialTodoTimestamp,
+    renderPanel({editor, actor, title, gridSlot}) {
+        return (
+            <TodoPanel
+                editor={editor}
+                replicaId={actor}
+                title={title}
+                gridSlot={gridSlot}
+            />
+        );
     },
+};
+
+export const todoCrdtRuntime: CrdtRuntime<TodoState> = {
+    docId: TODO_DOC_ID,
+    Provider: ProvideTodos,
+    useEditorContext: useTodos,
+};
+
+export const todoHistoryRuntime: HistoryRuntime<TodoState> = {
+    Provider: ProvideTodoHistory,
+    useEditorContext: useTodoHistory,
 };
