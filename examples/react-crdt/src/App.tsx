@@ -1,4 +1,4 @@
-import {useMemo, useRef, useState} from 'react';
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import typia from 'typia';
 import {createPatchBuilder, type DraftPatch} from 'umkehr';
 import {
@@ -26,16 +26,20 @@ export type State = {
     todos: Todo[];
 };
 
-type Side = 'left' | 'right';
-
-type CollaborationState = {
-    left: CrdtLocalHistory<State>;
-    right: CrdtLocalHistory<State>;
-    leftOutbox: CrdtUpdate[];
-    rightOutbox: CrdtUpdate[];
-    syncEnabled: boolean;
-};
+type ReplicaId = 'replica-a' | 'replica-b';
 type TodoDraft = DraftPatch<State, 'type', undefined>;
+type ReceiveUpdate = (update: CrdtUpdate) => void;
+type RegisterReplica = (id: ReplicaId, receive: ReceiveUpdate) => () => void;
+
+type TransportState = {
+    syncEnabled: boolean;
+    outbox: Record<ReplicaId, CrdtUpdate[]>;
+};
+
+const replicas = [
+    {id: 'replica-a', title: 'Replica A', label: 'A'},
+    {id: 'replica-b', title: 'Replica B', label: 'B'},
+] as const satisfies ReadonlyArray<{id: ReplicaId; title: string; label: string}>;
 
 const schema = typia.json.schemas<[State], '3.1'>();
 const $ = createPatchBuilder<State>();
@@ -50,157 +54,211 @@ const initialState: State = {
 const initialTimestamp = hlc.pack(hlc.init('seed', 0));
 
 export function App() {
-    const clock = useRef({
-        left: hlc.init('left', Date.now()),
-        right: hlc.init('right', Date.now()),
-    });
-    const [collab, setCollab] = useState<CollaborationState>(() => ({
-        left: createCrdtLocalHistory(
-            createCrdtDocument(initialState, schema, {timestamp: initialTimestamp}),
-        ),
-        right: createCrdtLocalHistory(
-            createCrdtDocument(initialState, schema, {timestamp: initialTimestamp}),
-        ),
-        leftOutbox: [],
-        rightOutbox: [],
+    const receivers = useRef<Partial<Record<ReplicaId, ReceiveUpdate>>>({});
+    const [transport, setTransportState] = useState<TransportState>(() => ({
         syncEnabled: true,
+        outbox: emptyOutbox(),
     }));
+    const transportRef = useRef(transport);
 
-    const receiveUpdate = (side: Side, history: CrdtLocalHistory<State>, update: CrdtUpdate) => {
-        const next = applyRemoteUpdate(history, update, clock.current[side]);
-        clock.current[side] = next.clock;
-        return next.history;
-    };
+    const setTransport = useCallback((next: TransportState) => {
+        transportRef.current = next;
+        setTransportState(next);
+    }, []);
 
-    const applyLocal = (side: Side, draft: TodoDraft) => {
-        setCollab((current) => {
-            const targetSide: Side = side === 'left' ? 'right' : 'left';
-            const local = applyLocalCommand(current[side], draft, clock.current[side]);
-            clock.current[side] = local.clock;
-            let nextSource = local.history;
-            let nextTarget = current[targetSide];
+    const registerReplica = useCallback<RegisterReplica>((id, receive) => {
+        receivers.current[id] = receive;
+        return () => {
+            if (receivers.current[id] === receive) delete receivers.current[id];
+        };
+    }, []);
 
+    const deliverUpdates = useCallback((from: ReplicaId, updates: CrdtUpdate[]) => {
+        for (const replica of replicas) {
+            if (replica.id === from) continue;
+            const receive = receivers.current[replica.id];
+            if (!receive) continue;
+            for (const update of updates) receive(update);
+        }
+    }, []);
+
+    const broadcastUpdates = useCallback(
+        (from: ReplicaId, updates: CrdtUpdate[]) => {
+            if (!updates.length) return;
+            const current = transportRef.current;
             if (current.syncEnabled) {
-                for (const update of local.updates) {
-                    nextTarget = receiveUpdate(targetSide, nextTarget, update);
-                }
+                deliverUpdates(from, updates);
+                return;
             }
-
-            if (side === 'left') {
-                return {
-                    ...current,
-                    left: nextSource,
-                    right: nextTarget,
-                    leftOutbox: current.syncEnabled
-                        ? current.leftOutbox
-                        : [...current.leftOutbox, ...local.updates],
-                };
-            }
-            return {
+            setTransport({
                 ...current,
-                left: nextTarget,
-                right: nextSource,
-                rightOutbox: current.syncEnabled
-                    ? current.rightOutbox
-                    : [...current.rightOutbox, ...local.updates],
-            };
-        });
-    };
+                outbox: {
+                    ...current.outbox,
+                    [from]: [...current.outbox[from], ...updates],
+                },
+            });
+        },
+        [deliverUpdates, setTransport],
+    );
 
-    const applyHistoryCommand = (side: Side, kind: 'undo' | 'redo') => {
-        setCollab((current) => {
-            const targetSide: Side = side === 'left' ? 'right' : 'left';
-            const result =
-                kind === 'undo'
-                    ? undoLocalCommand(current[side], clock.current[side])
-                    : redoLocalCommand(current[side], clock.current[side]);
-            clock.current[side] = result.clock;
-            if (!result.ok) return current;
+    const toggleSync = useCallback(() => {
+        const current = transportRef.current;
+        if (current.syncEnabled) {
+            setTransport({...current, syncEnabled: false});
+            return;
+        }
 
-            let nextSource = result.history;
-            let nextTarget = current[targetSide];
-            if (current.syncEnabled) {
-                for (const update of result.updates) {
-                    nextTarget = receiveUpdate(targetSide, nextTarget, update);
-                }
-            }
-
-            if (side === 'left') {
-                return {
-                    ...current,
-                    left: nextSource,
-                    right: nextTarget,
-                    leftOutbox: current.syncEnabled
-                        ? current.leftOutbox
-                        : [...current.leftOutbox, ...result.updates],
-                };
-            }
-            return {
-                ...current,
-                left: nextTarget,
-                right: nextSource,
-                rightOutbox: current.syncEnabled
-                    ? current.rightOutbox
-                    : [...current.rightOutbox, ...result.updates],
-            };
-        });
-    };
-
-    const toggleSync = () => {
-        setCollab((current) => {
-            if (current.syncEnabled) return {...current, syncEnabled: false};
-
-            let left = current.left;
-            let right = current.right;
-            for (const update of current.leftOutbox) right = receiveUpdate('right', right, update);
-            for (const update of current.rightOutbox) left = receiveUpdate('left', left, update);
-            return {
-                left,
-                right,
-                leftOutbox: [],
-                rightOutbox: [],
-                syncEnabled: true,
-            };
-        });
-    };
+        const queued = current.outbox;
+        setTransport({syncEnabled: true, outbox: emptyOutbox()});
+        for (const replica of replicas) deliverUpdates(replica.id, queued[replica.id]);
+    }, [deliverUpdates, setTransport]);
 
     return (
         <main className="collabShell">
-            <TodoPanel
-                title="Replica A"
-                side="left"
-                history={collab.left}
-                queued={collab.leftOutbox.length}
-                applyLocal={applyLocal}
-                applyHistoryCommand={applyHistoryCommand}
-            />
+            {replicas.map((replica, index) => (
+                <ReplicaHost
+                    key={replica.id}
+                    id={replica.id}
+                    title={replica.title}
+                    queued={transport.outbox[replica.id].length}
+                    registerReplica={registerReplica}
+                    onOutboundUpdates={broadcastUpdates}
+                    gridSlot={index === 0 ? 'left' : 'right'}
+                />
+            ))}
             <SyncControls
-                syncEnabled={collab.syncEnabled}
-                leftQueued={collab.leftOutbox.length}
-                rightQueued={collab.rightOutbox.length}
+                syncEnabled={transport.syncEnabled}
+                queueCounts={replicas.map((replica) => ({
+                    label: replica.label,
+                    count: transport.outbox[replica.id].length,
+                }))}
                 toggleSync={toggleSync}
-            />
-            <TodoPanel
-                title="Replica B"
-                side="right"
-                history={collab.right}
-                queued={collab.rightOutbox.length}
-                applyLocal={applyLocal}
-                applyHistoryCommand={applyHistoryCommand}
             />
         </main>
     );
 }
 
+function ReplicaHost({
+    id,
+    title,
+    queued,
+    registerReplica,
+    onOutboundUpdates,
+    gridSlot,
+}: {
+    id: ReplicaId;
+    title: string;
+    queued: number;
+    registerReplica: RegisterReplica;
+    onOutboundUpdates: (from: ReplicaId, updates: CrdtUpdate[]) => void;
+    gridSlot: 'left' | 'right';
+}) {
+    const clock = useRef(hlc.init(id, Date.now()));
+    const [history, setHistoryState] = useState<CrdtLocalHistory<State>>(() =>
+        createCrdtLocalHistory(
+            createCrdtDocument(initialState, schema, {timestamp: initialTimestamp}),
+        ),
+    );
+    const historyRef = useRef(history);
+
+    const setHistory = useCallback((next: CrdtLocalHistory<State>) => {
+        historyRef.current = next;
+        setHistoryState(next);
+    }, []);
+
+    const receiveRemoteUpdate = useCallback(
+        (update: CrdtUpdate) => {
+            const result = applyRemoteUpdate(historyRef.current, update, clock.current);
+            clock.current = result.clock;
+            setHistory(result.history);
+        },
+        [setHistory],
+    );
+
+    useEffect(
+        () => registerReplica(id, receiveRemoteUpdate),
+        [id, receiveRemoteUpdate, registerReplica],
+    );
+
+    const applyLocal = useCallback(
+        (draft: TodoDraft) => {
+            const result = applyLocalCommand(historyRef.current, draft, clock.current);
+            clock.current = result.clock;
+            setHistory(result.history);
+            onOutboundUpdates(id, result.updates);
+        },
+        [id, onOutboundUpdates, setHistory],
+    );
+
+    const undo = useCallback(() => {
+        const result = undoLocalCommand(historyRef.current, clock.current);
+        clock.current = result.clock;
+        if (!result.ok) return;
+        setHistory(result.history);
+        onOutboundUpdates(id, result.updates);
+    }, [id, onOutboundUpdates, setHistory]);
+
+    const redo = useCallback(() => {
+        const result = redoLocalCommand(historyRef.current, clock.current);
+        clock.current = result.clock;
+        if (!result.ok) return;
+        setHistory(result.history);
+        onOutboundUpdates(id, result.updates);
+    }, [id, onOutboundUpdates, setHistory]);
+
+    const addTodo = useCallback(
+        (todoTitle: string) => {
+            applyLocal(
+                $.todos.$push({
+                    id: `${id}-${crypto.randomUUID()}`,
+                    title: todoTitle,
+                    done: false,
+                }),
+            );
+        },
+        [applyLocal, id],
+    );
+
+    const toggleTodo = useCallback(
+        (index: number, done: boolean) => applyLocal($.todos[index].done(done)),
+        [applyLocal],
+    );
+
+    const renameTodo = useCallback(
+        (index: number, todoTitle: string) => applyLocal($.todos[index].title(todoTitle)),
+        [applyLocal],
+    );
+
+    const deleteTodo = useCallback(
+        (index: number) => applyLocal($.todos[index].$remove()),
+        [applyLocal],
+    );
+
+    return (
+        <TodoPanel
+            title={title}
+            state={history.doc.state}
+            queued={queued}
+            canUndo={canUndoLocalCommand(history)}
+            canRedo={canRedoLocalCommand(history)}
+            onAddTodo={addTodo}
+            onToggleTodo={toggleTodo}
+            onRenameTodo={renameTodo}
+            onDeleteTodo={deleteTodo}
+            onUndo={undo}
+            onRedo={redo}
+            gridSlot={gridSlot}
+        />
+    );
+}
+
 function SyncControls({
     syncEnabled,
-    leftQueued,
-    rightQueued,
+    queueCounts,
     toggleSync,
 }: {
     syncEnabled: boolean;
-    leftQueued: number;
-    rightQueued: number;
+    queueCounts: Array<{label: string; count: number}>;
     toggleSync: () => void;
 }) {
     return (
@@ -210,8 +268,11 @@ function SyncControls({
                 {syncEnabled ? 'Pause sync' : 'Resume sync'}
             </button>
             <div className="queueCounts">
-                <span>A {leftQueued}</span>
-                <span>B {rightQueued}</span>
+                {queueCounts.map((queue) => (
+                    <span key={queue.label}>
+                        {queue.label} {queue.count}
+                    </span>
+                ))}
             </div>
         </section>
     );
@@ -219,50 +280,48 @@ function SyncControls({
 
 function TodoPanel({
     title,
-    side,
-    history,
+    state,
     queued,
-    applyLocal,
-    applyHistoryCommand,
+    canUndo,
+    canRedo,
+    onAddTodo,
+    onToggleTodo,
+    onRenameTodo,
+    onDeleteTodo,
+    onUndo,
+    onRedo,
+    gridSlot,
 }: {
     title: string;
-    side: Side;
-    history: CrdtLocalHistory<State>;
+    state: State;
     queued: number;
-    applyLocal: (side: Side, draft: TodoDraft) => void;
-    applyHistoryCommand: (side: Side, kind: 'undo' | 'redo') => void;
+    canUndo: boolean;
+    canRedo: boolean;
+    onAddTodo: (title: string) => void;
+    onToggleTodo: (index: number, done: boolean) => void;
+    onRenameTodo: (index: number, title: string) => void;
+    onDeleteTodo: (index: number) => void;
+    onUndo: () => void;
+    onRedo: () => void;
+    gridSlot: 'left' | 'right';
 }) {
     const [draftTitle, setDraftTitle] = useState('');
-    const doc = history.doc;
-    const completed = useMemo(
-        () => doc.state.todos.filter((todo) => todo.done).length,
-        [doc.state.todos],
-    );
-    const canUndo = useMemo(() => canUndoLocalCommand(history), [history]);
-    const canRedo = useMemo(() => canRedoLocalCommand(history), [history]);
+    const completed = useMemo(() => state.todos.filter((todo) => todo.done).length, [state.todos]);
 
     return (
-        <section className="todoPanel">
+        <section className={`todoPanel ${gridSlot === 'left' ? 'leftPanel' : 'rightPanel'}`}>
             <header className="panelHeader">
                 <div>
                     <h1>{title}</h1>
                     <p>
-                        {completed}/{doc.state.todos.length} done
+                        {completed}/{state.todos.length} done
                     </p>
                 </div>
                 <div className="panelActions">
-                    <button
-                        type="button"
-                        onClick={() => applyHistoryCommand(side, 'undo')}
-                        disabled={!canUndo}
-                    >
+                    <button type="button" onClick={onUndo} disabled={!canUndo}>
                         Undo
                     </button>
-                    <button
-                        type="button"
-                        onClick={() => applyHistoryCommand(side, 'redo')}
-                        disabled={!canRedo}
-                    >
+                    <button type="button" onClick={onRedo} disabled={!canRedo}>
                         Redo
                     </button>
                     <span className="queuedBadge">{queued} queued</span>
@@ -273,16 +332,9 @@ function TodoPanel({
                 className="addForm"
                 onSubmit={(event) => {
                     event.preventDefault();
-                    const title = draftTitle.trim();
-                    if (!title) return;
-                    applyLocal(
-                        side,
-                        $.todos.$push({
-                            id: `${side}-${crypto.randomUUID()}`,
-                            title,
-                            done: false,
-                        }),
-                    );
+                    const next = draftTitle.trim();
+                    if (!next) return;
+                    onAddTodo(next);
                     setDraftTitle('');
                 }}
             >
@@ -295,13 +347,14 @@ function TodoPanel({
             </form>
 
             <ul className="todoList">
-                {doc.state.todos.map((todo, index) => (
+                {state.todos.map((todo, index) => (
                     <TodoItem
                         key={todo.id}
                         todo={todo}
                         index={index}
-                        side={side}
-                        applyLocal={applyLocal}
+                        onToggleTodo={onToggleTodo}
+                        onRenameTodo={onRenameTodo}
+                        onDeleteTodo={onDeleteTodo}
                     />
                 ))}
             </ul>
@@ -312,13 +365,15 @@ function TodoPanel({
 function TodoItem({
     todo,
     index,
-    side,
-    applyLocal,
+    onToggleTodo,
+    onRenameTodo,
+    onDeleteTodo,
 }: {
     todo: Todo;
     index: number;
-    side: Side;
-    applyLocal: (side: Side, draft: TodoDraft) => void;
+    onToggleTodo: (index: number, done: boolean) => void;
+    onRenameTodo: (index: number, title: string) => void;
+    onDeleteTodo: (index: number) => void;
 }) {
     const [isEditing, setIsEditing] = useState(false);
     const [title, setTitle] = useState(todo.title);
@@ -330,7 +385,7 @@ function TodoItem({
             setTitle(todo.title);
             return;
         }
-        applyLocal(side, $.todos[index].title(next));
+        onRenameTodo(index, next);
     };
 
     return (
@@ -339,9 +394,7 @@ function TodoItem({
                 <input
                     type="checkbox"
                     checked={todo.done}
-                    onChange={(event) =>
-                        applyLocal(side, $.todos[index].done(event.target.checked))
-                    }
+                    onChange={(event) => onToggleTodo(index, event.target.checked)}
                 />
                 {isEditing ? (
                     <input
@@ -366,10 +419,17 @@ function TodoItem({
                 <button type="button" onClick={() => setIsEditing(true)}>
                     Edit
                 </button>
-                <button type="button" onClick={() => applyLocal(side, $.todos[index].$remove())}>
+                <button type="button" onClick={() => onDeleteTodo(index)}>
                     Delete
                 </button>
             </div>
         </li>
     );
+}
+
+function emptyOutbox(): Record<ReplicaId, CrdtUpdate[]> {
+    return {
+        'replica-a': [],
+        'replica-b': [],
+    };
 }

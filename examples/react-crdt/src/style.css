@@ -52,6 +52,7 @@ button:disabled:hover {
     padding: 32px 0;
     display: grid;
     grid-template-columns: minmax(0, 1fr) 132px minmax(0, 1fr);
+    grid-template-areas: 'left sync right';
     gap: 18px;
     align-items: start;
 }
@@ -62,6 +63,14 @@ button:disabled:hover {
     border-radius: 8px;
     background: #fdfefe;
     box-shadow: 0 10px 24px rgb(25 42 62 / 8%);
+}
+
+.leftPanel {
+    grid-area: left;
+}
+
+.rightPanel {
+    grid-area: right;
 }
 
 .panelHeader {
@@ -180,6 +189,7 @@ p {
 }
 
 .syncRail {
+    grid-area: sync;
     position: sticky;
     top: 32px;
     display: grid;
@@ -230,11 +240,14 @@ p {
 @media (max-width: 820px) {
     .collabShell {
         grid-template-columns: 1fr;
+        grid-template-areas:
+            'left'
+            'sync'
+            'right';
     }
 
     .syncRail {
         position: static;
-        grid-row: 2;
     }
 
     .todoList {
