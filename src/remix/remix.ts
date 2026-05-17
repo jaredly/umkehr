@@ -92,16 +92,18 @@ export type RemixStateContextFactory<T, Tag extends string = 'type'> = {
     provide(
         handle: RemixHandle,
         props: {initial: T; save?(value: T): void},
+        contextKey?: unknown,
     ): RemixStateContext<T, Tag>;
-    get(handle: RemixHandle): RemixStateContext<T, Tag>;
+    get(handle: RemixHandle, contextKey?: unknown): RemixStateContext<T, Tag>;
 };
 
 export type RemixHistoryContextFactory<T, An, Tag extends string = 'type'> = {
     provide(
         handle: RemixHandle,
         props: {initial: History<T, An>; save?(value: History<T, An>): void},
+        contextKey?: unknown,
     ): RemixHistoryContext<T, An, Tag>;
-    get(handle: RemixHandle): RemixHistoryContext<T, An, Tag>;
+    get(handle: RemixHandle, contextKey?: unknown): RemixHistoryContext<T, An, Tag>;
 };
 
 export const createStateContext = <T, Tag extends string = 'type'>(
@@ -111,7 +113,7 @@ export const createStateContext = <T, Tag extends string = 'type'>(
     const key = function UmkehrRemixStateProvider() {};
 
     return {
-        provide(handle, {initial, save}) {
+        provide(handle, {initial, save}, contextKey = key) {
             const ctx: ContextBase<T, T, Tag> = {
                 state: initial,
                 save: (v) => save?.(v),
@@ -123,11 +125,11 @@ export const createStateContext = <T, Tag extends string = 'type'>(
                 watches: new Map(),
             };
             const runtime = makeStateRuntime(ctx, tag, equalFn);
-            provideContext(handle, key, runtime);
+            provideContext(handle, contextKey, runtime);
             return runtime;
         },
-        get(handle) {
-            return getContext(handle, key, 'createStateContext');
+        get(handle, contextKey = key) {
+            return getContext(handle, contextKey, 'createStateContext');
         },
     };
 };
@@ -139,7 +141,7 @@ export const createHistoryContext = <T, An, Tag extends string = 'type'>(
     const key = function UmkehrRemixHistoryProvider() {};
 
     return {
-        provide(handle, {initial, save}) {
+        provide(handle, {initial, save}, contextKey = key) {
             const ctx: CH<T, An, Tag> = {
                 state: initial,
                 save: (v) => save?.(v),
@@ -153,11 +155,11 @@ export const createHistoryContext = <T, An, Tag extends string = 'type'>(
                 watches: new Map(),
             };
             const runtime = makeHistoryRuntime(ctx, tag, equalFn);
-            provideContext(handle, key, runtime);
+            provideContext(handle, contextKey, runtime);
             return runtime;
         },
-        get(handle) {
-            return getContext(handle, key, 'createHistoryContext');
+        get(handle, contextKey = key) {
+            return getContext(handle, contextKey, 'createHistoryContext');
         },
     };
 };

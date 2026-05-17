@@ -103,14 +103,13 @@ function TodoItem({
     todo: Todo;
     index: number;
 }) {
-    const [isEditing, setIsEditing] = useState(false);
-    const [title, setTitle] = useState(todo.title);
+    const [editingTitle, setEditingTitle] = useState<null | string>(null);
 
     const commit = () => {
-        const next = title.trim();
-        setIsEditing(false);
+        if (editingTitle === null) return;
+        const next = editingTitle.trim();
+        setEditingTitle(null);
         if (!next || next === todo.title) {
-            setTitle(todo.title);
             return;
         }
         editor.$.todos[index].title(next);
@@ -124,17 +123,16 @@ function TodoItem({
                     checked={todo.done}
                     onChange={(event) => editor.$.todos[index].done(event.target.checked)}
                 />
-                {isEditing ? (
+                {editingTitle !== null ? (
                     <input
                         className="titleInput"
-                        value={title}
-                        onChange={(event) => setTitle(event.target.value)}
+                        value={editingTitle}
+                        onChange={(event) => setEditingTitle(event.target.value)}
                         onBlur={commit}
                         onKeyDown={(event) => {
                             if (event.key === 'Enter') event.currentTarget.blur();
                             if (event.key === 'Escape') {
-                                setTitle(todo.title);
-                                setIsEditing(false);
+                                setEditingTitle(null);
                             }
                         }}
                         autoFocus
@@ -144,7 +142,7 @@ function TodoItem({
                 )}
             </label>
             <div className="itemActions">
-                <button type="button" onClick={() => setIsEditing(true)}>
+                <button type="button" onClick={() => setEditingTitle(todo.title)}>
                     Edit
                 </button>
                 <button type="button" onClick={() => editor.$.todos[index].$remove()}>

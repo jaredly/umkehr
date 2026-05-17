@@ -5,7 +5,7 @@ import {resolveAndApply, type MaybeNested} from '../make.js';
 import {applyCrdtUpdate} from './apply.js';
 import * as hlc from './hlc.js';
 import {materialize} from './materialize.js';
-import {cloneMeta, versionOf} from './metadata.js';
+import {cloneMeta} from './metadata.js';
 import {getMetaAtPath} from './path.js';
 import {createCrdtUpdates} from './updates.js';
 import type {
@@ -176,17 +176,13 @@ export function undoLocalCommand<T>(
         nextTs.current(),
     );
     const undone: LocalCommand = {...command, undoEffects: generated.effects};
-    const nextHistory = refreshLocalCommandGuards(
-        {
+    return {
+        ok: true,
+        history: {
             doc: generated.doc,
             undoStack: history.undoStack.slice(0, -1),
             redoStack: [...history.redoStack, undone],
         },
-        generated.effects,
-    );
-    return {
-        ok: true,
-        history: nextHistory,
         updates: generated.updates,
         clock: generated.clock,
     };
@@ -210,17 +206,13 @@ export function redoLocalCommand<T>(
         nextTs.current(),
     );
     const redone: LocalCommand = {...command, effects: generated.effects, undoEffects: undefined};
-    const nextHistory = refreshLocalCommandGuards(
-        {
+    return {
+        ok: true,
+        history: {
             doc: generated.doc,
             undoStack: [...history.undoStack, redone],
             redoStack: history.redoStack.slice(0, -1),
         },
-        generated.effects,
-    );
-    return {
-        ok: true,
-        history: nextHistory,
         updates: generated.updates,
         clock: generated.clock,
     };
@@ -441,83 +433,10 @@ function checkEffect<T>(
         if (target.deleted !== effect.localTs) return {command, effect, reason: 'superseded'};
         return null;
     }
-    const version = versionOf(target);
-    if (version !== effect.localTs) return {command, effect, reason: 'superseded'};
+    if (!equal(materialize(target), materialize(effect.after))) {
+        return {command, effect, reason: 'superseded'};
+    }
     return null;
-}
-
-function refreshLocalCommandGuards<T>(
-    history: CrdtLocalHistory<T>,
-    generated: LocalEffect[],
-): CrdtLocalHistory<T> {
-    const undoStack = history.undoStack.map((command) => refreshCommandGuards(command, generated));
-    const redoStack = history.redoStack.map((command) => refreshCommandGuards(command, generated));
-    return {...history, undoStack, redoStack};
-}
-
-function refreshCommandGuards(command: LocalCommand, generated: LocalEffect[]): LocalCommand {
-    const effects = refreshEffects(command.effects, generated);
-    const undoEffects = command.undoEffects
-        ? refreshEffects(command.undoEffects, generated)
-        : undefined;
-    if (effects === command.effects && undoEffects === command.undoEffects) return command;
-    return {...command, effects, undoEffects};
-}
-
-function refreshEffects(effects: LocalEffect[], generated: LocalEffect[]): LocalEffect[] {
-    let changed = false;
-    const refreshed = effects.map((effect) => {
-        const next = refreshEffect(effect, generated);
-        if (next !== effect) changed = true;
-        return next;
-    });
-    return changed ? refreshed : effects;
-}
-
-function refreshEffect(effect: LocalEffect, generated: LocalEffect[]): LocalEffect {
-    for (const update of generated) {
-        if (effect.kind !== 'set' || update.kind !== 'set') continue;
-        if (!sameCrdtPath(effect.path, update.path)) continue;
-        if (!sameMaterializedValue(effect.after, update.after)) continue;
-
-        const localTs = versionOf(update.after);
-        if (!localTs || localTs === effect.localTs) return effect;
-        return {
-            ...effect,
-            localTs,
-            after: cloneEffectMeta(update.after) as CrdtMeta,
-        };
-    }
-    return effect;
-}
-
-function sameCrdtPath(a: CrdtPathSegment[], b: CrdtPathSegment[]) {
-    return a.length === b.length && a.every((segment, index) => sameCrdtPathSegment(segment, b[index]));
-}
-
-function sameCrdtPathSegment(a: CrdtPathSegment, b: CrdtPathSegment) {
-    if (a.type !== b.type) return false;
-    switch (a.type) {
-        case 'arrayItem':
-            return b.type === 'arrayItem' && a.id === b.id && a.parentCreated === b.parentCreated;
-        case 'objectField':
-            return b.type === 'objectField' && a.key === b.key && a.parentCreated === b.parentCreated;
-        case 'recordEntry':
-            return b.type === 'recordEntry' && a.key === b.key && a.parentCreated === b.parentCreated;
-        case 'taggedField':
-            return (
-                b.type === 'taggedField' &&
-                a.key === b.key &&
-                a.tagKey === b.tagKey &&
-                a.tagValue === b.tagValue &&
-                a.parentCreated === b.parentCreated &&
-                a.tagTs === b.tagTs
-            );
-    }
-}
-
-function sameMaterializedValue(a: CrdtMeta, b: CrdtMeta) {
-    return equal(materialize(a), materialize(b));
 }
 
 function cloneEffectMeta(meta: CrdtMeta | undefined): CrdtMeta | undefined {
