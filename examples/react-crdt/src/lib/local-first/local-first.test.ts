@@ -16,6 +16,12 @@ import {
     vectorDominates,
     vectorForUpdates,
 } from './vector';
+import {
+    createMembersMessage,
+    planConnectionOpened,
+    planIncomingMessage,
+    type LocalFirstSessionState,
+} from './session';
 
 type Todo = {id: string; title: string; done: boolean};
 type State = {
@@ -336,5 +342,166 @@ describe('local-first snapshot replay preview', () => {
 
         expect(preview.localBatches).toEqual([]);
         expect(preview.history.doc.state.title).toBe('Remote');
+    });
+});
+
+describe('local-first session planning', () => {
+    const session = (
+        overrides: Partial<LocalFirstSessionState<State>> = {},
+    ): LocalFirstSessionState<State> => ({
+        docId: 'todos',
+        replicaId: 'local',
+        role: 'host',
+        selfPeerId: 'peer-local',
+        vector: {local: ts('local', 10)},
+        document: doc({title: 'Local', todos: []}, ts('local', 1)),
+        connections: [{peerId: 'peer-remote', open: true}],
+        ...overrides,
+    });
+
+    it('plans the connection-open handshake without using a transport', () => {
+        const effects = planConnectionOpened(session(), 'peer-remote');
+
+        expect(effects.map((effect) => effect.kind)).toEqual(['send', 'send', 'send']);
+        expect(
+            effects.map((effect) => (effect.kind === 'send' ? effect.message.kind : undefined)),
+        ).toEqual(['hello', 'syncRequest', 'members']);
+    });
+
+    it('plans hello responses as snapshot, sync request, and membership gossip', () => {
+        const effects = planIncomingMessage({
+            state: session(),
+            peerId: 'peer-remote',
+            input: {
+                kind: 'hello',
+                version: LOCAL_FIRST_PROTOCOL_VERSION,
+                actor: 'remote',
+                peerId: 'peer-remote',
+                docId: 'todos',
+                role: 'client',
+                vector: {remote: ts('remote', 1)},
+            },
+            config,
+        });
+
+        expect(effects.map((effect) => effect.kind)).toEqual([
+            'markConnection',
+            'send',
+            'send',
+            'send',
+            'broadcastMembers',
+        ]);
+        expect(
+            effects.map((effect) => (effect.kind === 'send' ? effect.message.kind : undefined)),
+        ).toEqual([undefined, 'snapshot', 'syncRequest', 'members', undefined]);
+        expect(effects[0]).toMatchObject({
+            kind: 'markConnection',
+            peerId: 'peer-remote',
+            actor: 'remote',
+            role: 'client',
+        });
+    });
+
+    it('turns invalid input into a connection error effect', () => {
+        expect(
+            planIncomingMessage({
+                state: session(),
+                peerId: 'peer-remote',
+                input: {kind: 'hello', version: 2, actor: 'remote', docId: 'todos'},
+                config,
+            }),
+        ).toEqual([
+            {
+                kind: 'connectionError',
+                peerId: 'peer-remote',
+                message: 'Rejected invalid message from peer-remote.',
+            },
+        ]);
+    });
+
+    it('plans sync requests and sync responses as transport-independent effects', () => {
+        const syncRequestEffects = planIncomingMessage({
+            state: session(),
+            peerId: 'peer-remote',
+            input: {
+                kind: 'syncRequest',
+                version: LOCAL_FIRST_PROTOCOL_VERSION,
+                actor: 'remote',
+                docId: 'todos',
+                vector: {remote: ts('remote', 1)},
+            },
+            config,
+        });
+        expect(syncRequestEffects).toMatchObject([
+            {kind: 'markConnection', peerId: 'peer-remote', actor: 'remote'},
+            {kind: 'sendMissingBatches', peerId: 'peer-remote', since: {remote: ts('remote', 1)}},
+        ]);
+
+        const remoteBatch = batch({origin: 'remote', timestamp: ts('remote', 20)});
+        const syncResponseEffects = planIncomingMessage({
+            state: session(),
+            peerId: 'peer-remote',
+            input: {
+                kind: 'syncResponse',
+                version: LOCAL_FIRST_PROTOCOL_VERSION,
+                actor: 'remote',
+                docId: 'todos',
+                since: {},
+                batches: [remoteBatch],
+            },
+            config,
+        });
+        expect(syncResponseEffects).toMatchObject([
+            {kind: 'markConnection', peerId: 'peer-remote', actor: 'remote'},
+            {kind: 'acceptBatch', fromPeerId: 'peer-remote', batch: remoteBatch},
+        ]);
+    });
+
+    it('plans snapshots and discovered mesh peers without PeerJS', () => {
+        const snapshot = doc({title: 'Remote snapshot', todos: []}, ts('remote', 1));
+        const snapshotEffects = planIncomingMessage({
+            state: session(),
+            peerId: 'peer-remote',
+            input: {
+                kind: 'snapshot',
+                version: LOCAL_FIRST_PROTOCOL_VERSION,
+                actor: 'remote',
+                docId: 'todos',
+                document: snapshot,
+                compactedThrough: {remote: ts('remote', 1)},
+            },
+            config,
+        });
+        expect(snapshotEffects).toMatchObject([
+            {kind: 'markConnection', peerId: 'peer-remote', actor: 'remote'},
+            {
+                kind: 'acceptSnapshot',
+                actor: 'remote',
+                document: snapshot,
+                compactedThrough: {remote: ts('remote', 1)},
+            },
+        ]);
+
+        const members = createMembersMessage(
+            session({
+                replicaId: 'remote',
+                selfPeerId: 'peer-remote',
+                connections: [
+                    {peerId: 'peer-local', actor: 'local', role: 'host', open: true},
+                    {peerId: 'peer-third', actor: 'third', role: 'client', open: true},
+                ],
+            }),
+        );
+        const memberEffects = planIncomingMessage({
+            state: session(),
+            peerId: 'peer-remote',
+            input: members,
+            config,
+        });
+
+        expect(memberEffects).toMatchObject([
+            {kind: 'markConnection', peerId: 'peer-remote', actor: 'remote'},
+            {kind: 'connect', peerId: 'peer-third'},
+        ]);
     });
 });

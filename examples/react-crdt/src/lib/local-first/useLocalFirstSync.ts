@@ -33,12 +33,18 @@ import {
     type PendingSnapshot,
     type ReplayPreview,
 } from './replay';
+import {type LocalFirstMessage, type LocalFirstProtocolConfig} from './protocol';
 import {
-    LOCAL_FIRST_PROTOCOL_VERSION,
-    parseLocalFirstMessage,
-    type LocalFirstMessage,
-    type LocalFirstProtocolConfig,
-} from './protocol';
+    createMembersMessage,
+    createSnapshotMessage,
+    createSyncRequestMessage,
+    createSyncResponseMessage,
+    createUpdatesMessage,
+    planConnectionOpened,
+    planIncomingMessage,
+    type LocalFirstSessionEffect,
+    type LocalFirstSessionState,
+} from './session';
 import type {
     LocalFirstConnectionInfo,
     LocalFirstPersistenceState,
@@ -46,7 +52,6 @@ import type {
     LocalFirstStats,
     LocalFirstSync,
     LocalFirstSyncState,
-    LocalFirstMember,
     PersistedBatch,
     PersistedReplica,
     ReplicaIdentity,
@@ -247,6 +252,24 @@ export function useLocalFirstSync<TState>({
         [publishConnections],
     );
 
+    const sessionState = useCallback(
+        (): LocalFirstSessionState<TState> => ({
+            docId,
+            replicaId: identity.replicaId,
+            role: 'host',
+            selfPeerId: peerRef.current?.id,
+            vector: vectorRef.current,
+            document: historyRef.current.doc,
+            connections: [...connectionsRef.current.values()].map(({conn, actor, role}) => ({
+                peerId: conn.peer,
+                actor,
+                role,
+                open: conn.open,
+            })),
+        }),
+        [docId, identity.replicaId],
+    );
+
     const flushQueued = useCallback(
         (peerId?: string) => {
             const records = peerId
@@ -265,65 +288,6 @@ export function useLocalFirstSync<TState>({
         [publishConnections],
     );
 
-    const sendHello = useCallback(
-        (record: ConnectionRecord<TState>) => {
-            sendOrQueue(record, {
-                kind: 'hello',
-                version: LOCAL_FIRST_PROTOCOL_VERSION,
-                actor: identity.replicaId,
-                peerId: peerRef.current?.id,
-                docId,
-                role: 'host',
-                vector: vectorRef.current,
-            });
-        },
-        [docId, identity.replicaId, sendOrQueue],
-    );
-
-    const currentMembers = useCallback((): LocalFirstMember[] => {
-        const selfPeerId = peerRef.current?.id;
-        const members: LocalFirstMember[] = selfPeerId
-            ? [
-                  {
-                      peerId: selfPeerId,
-                      actor: identity.replicaId,
-                      role: 'host',
-                      vector: vectorRef.current,
-                  },
-              ]
-            : [];
-        for (const record of connectionsRef.current.values()) {
-            if (!record.actor) continue;
-            members.push({
-                peerId: record.conn.peer,
-                actor: record.actor,
-                role: record.role ?? 'host',
-                vector: {},
-            });
-        }
-        return members;
-    }, [identity.replicaId]);
-
-    const sendMembers = useCallback(
-        (record?: ConnectionRecord<TState>) => {
-            const message: LocalFirstMessage<TState> = {
-                kind: 'members',
-                version: LOCAL_FIRST_PROTOCOL_VERSION,
-                actor: identity.replicaId,
-                docId,
-                members: currentMembers(),
-            };
-            if (record) {
-                sendOrQueue(record, message);
-                return;
-            }
-            for (const connection of connectionsRef.current.values()) {
-                sendOrQueue(connection, message);
-            }
-        },
-        [currentMembers, docId, identity.replicaId, sendOrQueue],
-    );
-
     const requestSync = useCallback(
         (peerId?: string) => {
             const records = peerId
@@ -331,31 +295,19 @@ export function useLocalFirstSync<TState>({
                       (record): record is ConnectionRecord<TState> => Boolean(record),
                   )
                 : [...connectionsRef.current.values()];
+            const message = createSyncRequestMessage(sessionState());
             for (const record of records) {
-                sendOrQueue(record, {
-                    kind: 'syncRequest',
-                    version: LOCAL_FIRST_PROTOCOL_VERSION,
-                    actor: identity.replicaId,
-                    docId,
-                    vector: vectorRef.current,
-                });
+                sendOrQueue(record, message);
             }
         },
-        [docId, identity.replicaId, sendOrQueue],
+        [sendOrQueue, sessionState],
     );
 
     const sendSnapshot = useCallback(
         (record: ConnectionRecord<TState>) => {
-            sendOrQueue(record, {
-                kind: 'snapshot',
-                version: LOCAL_FIRST_PROTOCOL_VERSION,
-                actor: identity.replicaId,
-                docId,
-                document: historyRef.current.doc,
-                compactedThrough: vectorRef.current,
-            });
+            sendOrQueue(record, createSnapshotMessage(sessionState()));
         },
-        [docId, identity.replicaId, sendOrQueue],
+        [sendOrQueue, sessionState],
     );
 
     const installSnapshot = useCallback(
@@ -419,34 +371,25 @@ export function useLocalFirstSync<TState>({
             const batches = (await listBatches(docId)).filter(
                 (batch) => !vectorDominates(since, vectorForUpdates(batch.updates)),
             );
-            sendOrQueue(record, {
-                kind: 'syncResponse',
-                version: LOCAL_FIRST_PROTOCOL_VERSION,
-                actor: identity.replicaId,
-                docId,
+            sendOrQueue(record, createSyncResponseMessage({
+                state: sessionState(),
                 since,
                 batches,
                 requiresSnapshot,
-            });
+            }));
         },
-        [docId, identity.replicaId, sendOrQueue, sendSnapshot],
+        [docId, sendOrQueue, sendSnapshot, sessionState],
     );
 
     const broadcastBatch = useCallback(
         (batch: PersistedBatch, exceptPeerId?: string) => {
-            const message: LocalFirstMessage<TState> = {
-                kind: 'updates',
-                version: LOCAL_FIRST_PROTOCOL_VERSION,
-                actor: identity.replicaId,
-                docId,
-                batch,
-            };
+            const message = createUpdatesMessage(sessionState(), batch);
             for (const record of connectionsRef.current.values()) {
                 if (record.conn.peer === exceptPeerId) continue;
                 sendOrQueue(record, message);
             }
         },
-        [docId, identity.replicaId, sendOrQueue],
+        [sendOrQueue, sessionState],
     );
 
     const acceptBatch = useCallback(
@@ -478,77 +421,82 @@ export function useLocalFirstSync<TState>({
         [broadcastBatch, persistReplica],
     );
 
-    const handleMessage = useCallback(
-        (conn: DataConnection, input: unknown) => {
-            const message = parseLocalFirstMessage(input, protocolRef.current);
-            const record = connectionsRef.current.get(conn.peer);
-            if (!message) {
-                if (record) record.error = `Rejected invalid message from ${conn.peer}.`;
-                publishConnections();
-                return;
-            }
-
-            if (record) {
-                record.actor = message.actor;
-                if (message.kind === 'hello') record.role = message.role;
-                record.lastSyncAt = new Date().toISOString();
-                publishConnections();
-            }
-
-            if (message.kind === 'hello') {
-                if (record) {
-                    sendSnapshot(record);
-                    requestSync(conn.peer);
-                    sendMembers(record);
-                    sendMembers();
+    const executeEffects = useCallback(
+        (effects: LocalFirstSessionEffect<TState>[]) => {
+            for (const effect of effects) {
+                if (effect.kind === 'markConnection') {
+                    const record = connectionsRef.current.get(effect.peerId);
+                    if (!record) continue;
+                    record.actor = effect.actor;
+                    if (effect.role) record.role = effect.role;
+                    record.lastSyncAt = new Date().toISOString();
+                    publishConnections();
+                    continue;
                 }
-                return;
-            }
 
-            if (message.kind === 'updates') {
-                void acceptBatch(message.batch, conn.peer);
-                return;
-            }
+                if (effect.kind === 'connectionError') {
+                    const record = connectionsRef.current.get(effect.peerId);
+                    if (record) record.error = effect.message;
+                    publishConnections();
+                    continue;
+                }
 
-            if (message.kind === 'syncRequest') {
-                if (record) void sendMissingBatches(record, message.vector);
-                return;
-            }
+                if (effect.kind === 'send') {
+                    const record = connectionsRef.current.get(effect.peerId);
+                    if (record) sendOrQueue(record, effect.message);
+                    continue;
+                }
 
-            if (message.kind === 'syncResponse') {
-                void (async () => {
-                    for (const batch of message.batches) await acceptBatch(batch, conn.peer);
-                })();
-                return;
-            }
-
-            if (message.kind === 'snapshot') {
-                void acceptSnapshot(message.actor, message.document, message.compactedThrough);
-                return;
-            }
-
-            if (message.kind === 'members') {
-                const selfPeerId = peerRef.current?.id;
-                for (const member of message.members) {
-                    if (member.peerId === selfPeerId || member.actor === identity.replicaId) {
-                        continue;
+                if (effect.kind === 'broadcastMembers') {
+                    const message = createMembersMessage(sessionState());
+                    for (const record of connectionsRef.current.values()) {
+                        if (record.conn.peer === effect.exceptPeerId) continue;
+                        sendOrQueue(record, message);
                     }
-                    const existing = connectionsRef.current.get(member.peerId);
-                    if (existing?.conn.open) continue;
-                    connectRef.current(member.peerId);
+                    continue;
                 }
+
+                if (effect.kind === 'sendMissingBatches') {
+                    const record = connectionsRef.current.get(effect.peerId);
+                    if (record) void sendMissingBatches(record, effect.since);
+                    continue;
+                }
+
+                if (effect.kind === 'acceptBatch') {
+                    void acceptBatch(effect.batch, effect.fromPeerId);
+                    continue;
+                }
+
+                if (effect.kind === 'acceptSnapshot') {
+                    void acceptSnapshot(effect.actor, effect.document, effect.compactedThrough);
+                    continue;
+                }
+
+                connectRef.current(effect.peerId);
             }
         },
         [
             acceptBatch,
             acceptSnapshot,
-            identity.replicaId,
             publishConnections,
-            requestSync,
-            sendMembers,
             sendMissingBatches,
-            sendSnapshot,
+            sendOrQueue,
+            sessionState,
         ],
+    );
+
+    const handleMessage = useCallback(
+        (conn: DataConnection, input: unknown) => {
+            executeEffects(
+                planIncomingMessage({
+                    state: sessionState(),
+                    peerId: conn.peer,
+                    input,
+                    config: protocolRef.current,
+                }),
+            );
+        },
+        [executeEffects, sessionState],
     );
 
     const trackConnection = useCallback(
@@ -565,9 +513,7 @@ export function useLocalFirstSync<TState>({
             connectionsRef.current.set(conn.peer, record);
 
             conn.on('open', () => {
-                sendHello(record);
-                requestSync(conn.peer);
-                sendMembers(record);
+                executeEffects(planConnectionOpened(sessionState(), conn.peer));
                 flushQueued(conn.peer);
                 publishConnections();
             });
@@ -581,7 +527,7 @@ export function useLocalFirstSync<TState>({
             publishConnections();
             return record;
         },
-        [flushQueued, handleMessage, publishConnections, requestSync, sendHello],
+        [executeEffects, flushQueued, handleMessage, publishConnections, sessionState],
     );
 
     const connect = useCallback(
