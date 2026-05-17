@@ -77,6 +77,9 @@ export type LocalFirstSync<TState> = {
     persistenceStore: ExternalStore<LocalFirstPersistenceState>;
     statsStore: ExternalStore<LocalFirstStats>;
     connectionsStore: ExternalStore<LocalFirstConnectionInfo[]>;
+    connect(peerId: string): void;
+    disconnect(peerId: string): void;
+    requestSync(peerId?: string): void;
     saveHistory(history: CrdtLocalHistory<TState>): void;
     resetLocalReplica(): Promise<void>;
 };

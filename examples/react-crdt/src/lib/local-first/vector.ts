@@ -42,6 +42,10 @@ export function advanceVector(
     return next;
 }
 
+export function vectorForUpdates(updates: readonly CrdtUpdate[]): VersionVector {
+    return advanceVector({}, updates);
+}
+
 export function mergeVectors(a: VersionVector, b: VersionVector): VersionVector {
     const next = {...a};
     for (const [actor, timestamp] of Object.entries(b)) {

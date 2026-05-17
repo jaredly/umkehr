@@ -14,6 +14,7 @@ export function LocalFirstControls<TState>({
     const persistence = useStore(sync.persistenceStore);
     const stats = useStore(sync.statsStore);
     const connections = useStore(sync.connectionsStore);
+    const inviteUrl = state.kind === 'ready' ? createInviteUrl(state.peerId) : '';
 
     return (
         <aside className="localFirstControls">
@@ -41,11 +42,35 @@ export function LocalFirstControls<TState>({
                 <dt>Peers</dt>
                 <dd>{connections.length}</dd>
             </dl>
+            <section className="inviteBox">
+                <label htmlFor="local-first-invite">Invite link</label>
+                <div>
+                    <input
+                        id="local-first-invite"
+                        value={inviteUrl || 'Waiting for PeerJS'}
+                        readOnly
+                    />
+                    <button
+                        type="button"
+                        disabled={!inviteUrl}
+                        onClick={() => void navigator.clipboard.writeText(inviteUrl)}
+                    >
+                        Copy
+                    </button>
+                </div>
+            </section>
             <button type="button" onClick={() => void reset(sync)}>
                 Reset local replica
             </button>
         </aside>
     );
+}
+
+function createInviteUrl(peerId: string) {
+    const url = new URL(window.location.href);
+    url.searchParams.set('peer', peerId);
+    url.hash = 'local-first';
+    return url.toString();
 }
 
 async function reset<TState>(sync: LocalFirstSync<TState>) {

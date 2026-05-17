@@ -71,6 +71,11 @@ export async function appendBatch(batch: PersistedBatch) {
     await db.put('batches', batch, batchKey(batch.docId, batch.origin, batch.batchId));
 }
 
+export async function listBatches(docId: string) {
+    const db = await openLocalFirstDb();
+    return db.getAllFromIndex('batches', 'docId', docId);
+}
+
 export async function countBatches(docId: string) {
     const db = await openLocalFirstDb();
     return db.countFromIndex('batches', 'docId', docId);

@@ -1,4 +1,5 @@
 import {useCallback, useEffect, useMemo, useRef} from 'react';
+import Peer from 'peerjs';
 import {hlc, type CrdtLocalHistory, type CrdtUpdate} from 'umkehr/crdt';
 import type {SyncedTransport} from 'umkehr/react-crdt';
 import {createExternalStore} from '../store';
@@ -43,6 +44,7 @@ export function useLocalFirstSync<TState>({
     const sourceRef = useRef(source);
     const clockRef = useRef(initialClock(identity.replicaId, initialVector));
     const listenersRef = useRef(new Set<(update: CrdtUpdate) => void>());
+    const peerRef = useRef<Peer | null>(null);
 
     const stateStore = useMemo(
         () => createExternalStore<LocalFirstSyncState>({kind: 'offline', role: 'host'}),
@@ -189,6 +191,29 @@ export function useLocalFirstSync<TState>({
     useEffect(() => {
         void refreshCounts();
     }, [refreshCounts]);
+
+    useEffect(() => {
+        const peer = new Peer({debug: 1});
+        peerRef.current = peer;
+        stateStore.setSnapshot({kind: 'initializing', role: 'host'});
+
+        peer.on('open', (peerId) => {
+            stateStore.setSnapshot({kind: 'ready', role: 'host', peerId});
+        });
+        peer.on('error', (error) => {
+            stateStore.setSnapshot({
+                kind: 'error',
+                role: 'host',
+                message: error instanceof Error ? error.message : String(error),
+            });
+        });
+
+        return () => {
+            peer.destroy();
+            if (peerRef.current === peer) peerRef.current = null;
+            stateStore.setSnapshot({kind: 'offline', role: 'host'});
+        };
+    }, [stateStore]);
 
     return useMemo(
         () => ({
