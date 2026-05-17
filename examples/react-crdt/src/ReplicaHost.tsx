@@ -1,6 +1,7 @@
 import {
     useCallback,
     useEffect,
+    useMemo,
     useRef,
     useState,
     type Dispatch,
@@ -22,7 +23,6 @@ import {
 } from 'umkehr/crdt';
 import {TodoPanel} from './TodoPanel';
 import {
-    $,
     initialState,
     initialTimestamp,
     schema,
@@ -36,6 +36,7 @@ import {
 type SetHistory = (next: CrdtLocalHistory<State>) => void;
 type HistoryRef = MutableRefObject<CrdtLocalHistory<State>>;
 type ClockRef = MutableRefObject<hlc.HLC>;
+type OutboundUpdates = (from: ReplicaId, updates: CrdtUpdate[]) => void;
 
 export function ReplicaHost({
     id,
@@ -52,7 +53,31 @@ export function ReplicaHost({
     onOutboundUpdates: (from: ReplicaId, updates: CrdtUpdate[]) => void;
     gridSlot: GridSlot;
 }) {
-    const clock = useRef(hlc.init(id, Date.now()));
+    const runtime = useReplicaRuntime(id, onOutboundUpdates);
+
+    useEffect(
+        () => registerReplica(id, runtime.receiveRemoteUpdate),
+        [id, runtime.receiveRemoteUpdate, registerReplica],
+    );
+
+    return (
+        <TodoPanel
+            replicaId={id}
+            title={title}
+            state={runtime.state}
+            queued={queued}
+            canUndo={runtime.canUndo}
+            canRedo={runtime.canRedo}
+            applyLocal={runtime.applyLocal}
+            onUndo={runtime.undo}
+            onRedo={runtime.redo}
+            gridSlot={gridSlot}
+        />
+    );
+}
+
+function useReplicaRuntime(id: ReplicaId, onOutboundUpdates: OutboundUpdates) {
+    const clockRef = useRef(hlc.init(id, Date.now()));
     const [history, setHistoryState] = useState<CrdtLocalHistory<State>>(createInitialHistory);
     const historyRef = useRef(history);
 
@@ -63,68 +88,37 @@ export function ReplicaHost({
 
     const receiveRemoteUpdate = useCallback(
         (update: CrdtUpdate) => {
-            receiveReplicaUpdate(historyRef, clock, setHistory, update);
+            receiveReplicaUpdate(historyRef, clockRef, setHistory, update);
         },
         [setHistory],
     );
 
-    useEffect(
-        () => registerReplica(id, receiveRemoteUpdate),
-        [id, receiveRemoteUpdate, registerReplica],
-    );
-
     const applyLocal = useCallback(
         (draft: TodoDraft) => {
-            applyReplicaDraft(historyRef, clock, setHistory, id, draft, onOutboundUpdates);
+            applyReplicaDraft(historyRef, clockRef, setHistory, id, draft, onOutboundUpdates);
         },
         [id, onOutboundUpdates, setHistory],
     );
 
     const undo = useCallback(() => {
-        undoReplicaCommand(historyRef, clock, setHistory, id, onOutboundUpdates);
+        undoReplicaCommand(historyRef, clockRef, setHistory, id, onOutboundUpdates);
     }, [id, onOutboundUpdates, setHistory]);
 
     const redo = useCallback(() => {
-        redoReplicaCommand(historyRef, clock, setHistory, id, onOutboundUpdates);
+        redoReplicaCommand(historyRef, clockRef, setHistory, id, onOutboundUpdates);
     }, [id, onOutboundUpdates, setHistory]);
 
-    const addTodo = useCallback(
-        (todoTitle: string) => {
-            applyLocal(createAddTodoDraft(id, todoTitle));
-        },
-        [applyLocal, id],
-    );
-
-    const toggleTodo = useCallback(
-        (index: number, done: boolean) => applyLocal(createToggleTodoDraft(index, done)),
-        [applyLocal],
-    );
-
-    const renameTodo = useCallback(
-        (index: number, todoTitle: string) => applyLocal(createRenameTodoDraft(index, todoTitle)),
-        [applyLocal],
-    );
-
-    const deleteTodo = useCallback(
-        (index: number) => applyLocal(createDeleteTodoDraft(index)),
-        [applyLocal],
-    );
-
-    return (
-        <TodoPanel
-            title={title}
-            state={history.doc.state}
-            queued={queued}
-            canUndo={canUndoLocalCommand(history)}
-            canRedo={canRedoLocalCommand(history)}
-            onAddTodo={addTodo}
-            onToggleTodo={toggleTodo}
-            onRenameTodo={renameTodo}
-            onDeleteTodo={deleteTodo}
-            onUndo={undo}
-            onRedo={redo}
-            gridSlot={gridSlot}
-        />
+    return useMemo(
+        () => ({
+            state: history.doc.state,
+            canUndo: canUndoLocalCommand(history),
+            canRedo: canRedoLocalCommand(history),
+            receiveRemoteUpdate,
+            applyLocal,
+            undo,
+            redo,
+        }),
+        [history, receiveRemoteUpdate, applyLocal, undo, redo],
     );
 }
 
@@ -160,7 +154,7 @@ function applyReplicaDraft(
     setHistory: SetHistory,
     id: ReplicaId,
     draft: TodoDraft,
-    onOutboundUpdates: (from: ReplicaId, updates: CrdtUpdate[]) => void,
+    onOutboundUpdates: OutboundUpdates,
 ) {
     const result = applyLocalCommand(historyRef.current, draft, clockRef.current);
     clockRef.current = result.clock;
@@ -173,7 +167,7 @@ function undoReplicaCommand(
     clockRef: ClockRef,
     setHistory: SetHistory,
     id: ReplicaId,
-    onOutboundUpdates: (from: ReplicaId, updates: CrdtUpdate[]) => void,
+    onOutboundUpdates: OutboundUpdates,
 ) {
     const result = undoLocalCommand(historyRef.current, clockRef.current);
     clockRef.current = result.clock;
@@ -187,31 +181,11 @@ function redoReplicaCommand(
     clockRef: ClockRef,
     setHistory: SetHistory,
     id: ReplicaId,
-    onOutboundUpdates: (from: ReplicaId, updates: CrdtUpdate[]) => void,
+    onOutboundUpdates: OutboundUpdates,
 ) {
     const result = redoLocalCommand(historyRef.current, clockRef.current);
     clockRef.current = result.clock;
     if (!result.ok) return;
     setHistory(result.history);
     onOutboundUpdates(id, result.updates);
-}
-
-function createAddTodoDraft(id: ReplicaId, title: string) {
-    return $.todos.$push({
-        id: `${id}-${crypto.randomUUID()}`,
-        title,
-        done: false,
-    });
-}
-
-function createToggleTodoDraft(index: number, done: boolean) {
-    return $.todos[index].done(done);
-}
-
-function createRenameTodoDraft(index: number, title: string) {
-    return $.todos[index].title(title);
-}
-
-function createDeleteTodoDraft(index: number) {
-    return $.todos[index].$remove();
 }

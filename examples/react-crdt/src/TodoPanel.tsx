@@ -1,29 +1,25 @@
 import {useMemo, useState} from 'react';
-import type {GridSlot, State, Todo} from './model';
+import {$, type GridSlot, type ReplicaId, type State, type Todo, type TodoDraft} from './model';
 
 export function TodoPanel({
+    replicaId,
     title,
     state,
     queued,
     canUndo,
     canRedo,
-    onAddTodo,
-    onToggleTodo,
-    onRenameTodo,
-    onDeleteTodo,
+    applyLocal,
     onUndo,
     onRedo,
     gridSlot,
 }: {
+    replicaId: ReplicaId;
     title: string;
     state: State;
     queued: number;
     canUndo: boolean;
     canRedo: boolean;
-    onAddTodo: (title: string) => void;
-    onToggleTodo: (index: number, done: boolean) => void;
-    onRenameTodo: (index: number, title: string) => void;
-    onDeleteTodo: (index: number) => void;
+    applyLocal: (draft: TodoDraft) => void;
     onUndo: () => void;
     onRedo: () => void;
     gridSlot: GridSlot;
@@ -57,7 +53,13 @@ export function TodoPanel({
                     event.preventDefault();
                     const next = draftTitle.trim();
                     if (!next) return;
-                    onAddTodo(next);
+                    applyLocal(
+                        $.todos.$push({
+                            id: `${replicaId}-${crypto.randomUUID()}`,
+                            title: next,
+                            done: false,
+                        }),
+                    );
                     setDraftTitle('');
                 }}
             >
@@ -74,10 +76,10 @@ export function TodoPanel({
                     <TodoItem
                         key={todo.id}
                         todo={todo}
-                        index={index}
-                        onToggleTodo={onToggleTodo}
-                        onRenameTodo={onRenameTodo}
-                        onDeleteTodo={onDeleteTodo}
+                        applyLocal={applyLocal}
+                        onToggleTodo={$.todos[index].done.$replace}
+                        onRenameTodo={$.todos[index].title.$replace}
+                        onDeleteTodo={$.todos[index].$remove}
                     />
                 ))}
             </ul>
@@ -87,16 +89,16 @@ export function TodoPanel({
 
 function TodoItem({
     todo,
-    index,
+    applyLocal,
     onToggleTodo,
     onRenameTodo,
     onDeleteTodo,
 }: {
     todo: Todo;
-    index: number;
-    onToggleTodo: (index: number, done: boolean) => void;
-    onRenameTodo: (index: number, title: string) => void;
-    onDeleteTodo: (index: number) => void;
+    applyLocal: (draft: TodoDraft) => void;
+    onToggleTodo: (done: boolean) => TodoDraft;
+    onRenameTodo: (title: string) => TodoDraft;
+    onDeleteTodo: () => TodoDraft;
 }) {
     const [isEditing, setIsEditing] = useState(false);
     const [title, setTitle] = useState(todo.title);
@@ -108,7 +110,7 @@ function TodoItem({
             setTitle(todo.title);
             return;
         }
-        onRenameTodo(index, next);
+        applyLocal(onRenameTodo(next));
     };
 
     return (
@@ -117,7 +119,7 @@ function TodoItem({
                 <input
                     type="checkbox"
                     checked={todo.done}
-                    onChange={(event) => onToggleTodo(index, event.target.checked)}
+                    onChange={(event) => applyLocal(onToggleTodo(event.target.checked))}
                 />
                 {isEditing ? (
                     <input
@@ -142,7 +144,7 @@ function TodoItem({
                 <button type="button" onClick={() => setIsEditing(true)}>
                     Edit
                 </button>
-                <button type="button" onClick={() => onDeleteTodo(index)}>
+                <button type="button" onClick={() => applyLocal(onDeleteTodo())}>
                     Delete
                 </button>
             </div>
