@@ -8,6 +8,8 @@ export {
     canRedoLocalCommand,
     canUndoLocalCommand,
     createCrdtLocalHistory,
+    latestCrdtUpdateBatchTimestamp,
+    latestCrdtUpdateTimestamp,
     redoLocalCommand,
     receiveRemoteUpdate,
     undoLocalCommand,

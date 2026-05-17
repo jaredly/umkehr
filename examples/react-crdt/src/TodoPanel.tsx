@@ -5,13 +5,13 @@ import {type GridSlot, type ReplicaId, type Todo, useTodos} from './model';
 export function TodoPanel({
     replicaId,
     title,
-    queued,
-    gridSlot,
+    queued = 0,
+    gridSlot = 'full',
 }: {
     replicaId: ReplicaId;
     title: string;
-    queued: number;
-    gridSlot: GridSlot;
+    queued?: number;
+    gridSlot?: GridSlot | 'full';
 }) {
     const ctx = useTodos();
     const todos = useValue(ctx.$.todos);
@@ -21,7 +21,11 @@ export function TodoPanel({
     history;
 
     return (
-        <section className={`todoPanel ${gridSlot === 'left' ? 'leftPanel' : 'rightPanel'}`}>
+        <section
+            className={`todoPanel ${
+                gridSlot === 'left' ? 'leftPanel' : gridSlot === 'right' ? 'rightPanel' : ''
+            }`}
+        >
             <header className="panelHeader">
                 <div>
                     <h1>{title}</h1>

@@ -150,7 +150,7 @@ export function receiveRemoteUpdate<T>(
     update: CrdtUpdate,
     clock: hlc.HLC,
 ): {history: CrdtLocalHistory<T>; clock: hlc.HLC} {
-    const ts = latestUpdateTimestamp(update);
+    const ts = latestCrdtUpdateTimestamp(update);
     return {
         history: applyRemoteHistoryUpdate(history, update),
         clock: ts ? hlc.recv(clock, hlc.unpack(ts), Date.now()) : clock,
@@ -241,7 +241,7 @@ function createLocalCrdtCommand<T>(
         doc: applied.doc,
         command: {
             id: updates[0]
-                ? (latestUpdateTimestamp(updates[0]) ?? nextTs.currentPacked())
+                ? (latestCrdtUpdateTimestamp(updates[0]) ?? nextTs.currentPacked())
                 : nextTs.currentPacked(),
             forward: updates,
             effects: applied.effects,
@@ -261,7 +261,7 @@ function applyGeneratedUpdates<T>(
     let clock =
         initialClock ??
         hlc.unpack(
-            latestUpdateTimestamp(updates.at(-1) ?? {op: 'setOrder', arrayPath: [], orders: {}}) ??
+            latestCrdtUpdateTimestamp(updates.at(-1) ?? {op: 'setOrder', arrayPath: [], orders: {}}) ??
                 '000000000000000:00000:history',
         );
 
@@ -270,7 +270,7 @@ function applyGeneratedUpdates<T>(
         const next = applyCrdtUpdate(current, update);
         effects.push(captureEffect(current, next, update, before));
         current = next;
-        const ts = latestUpdateTimestamp(update);
+        const ts = latestCrdtUpdateTimestamp(update);
         if (ts) clock = hlc.unpack(ts);
     }
 
@@ -307,7 +307,7 @@ function captureEffect<T>(
         return {
             kind: 'setOrder',
             arrayPath: update.arrayPath,
-            localTs: latestUpdateTimestamp(update) ?? '',
+            localTs: latestCrdtUpdateTimestamp(update) ?? '',
             before: before as SetOrderEffect['before'],
             after,
         };
@@ -453,10 +453,20 @@ function nextTimestamper(clock: hlc.HLC) {
     return next;
 }
 
-function latestUpdateTimestamp(update: CrdtUpdate) {
+export function latestCrdtUpdateTimestamp(update: CrdtUpdate): HlcTimestamp | undefined {
     if (update.op !== 'setOrder') return update.ts;
     return Object.values(update.orders)
         .map(({ts}) => ts)
+        .sort()
+        .at(-1);
+}
+
+export function latestCrdtUpdateBatchTimestamp(
+    updates: readonly CrdtUpdate[],
+): HlcTimestamp | undefined {
+    return updates
+        .map((update) => latestCrdtUpdateTimestamp(update))
+        .filter((timestamp): timestamp is HlcTimestamp => timestamp !== undefined)
         .sort()
         .at(-1);
 }

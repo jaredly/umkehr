@@ -1,14 +1,7 @@
-import {
-    useCallback,
-    useMemo,
-    useRef,
-    useState,
-    type Dispatch,
-    type MutableRefObject,
-    type SetStateAction,
-} from 'react';
+import {useCallback, useMemo, useRef, type MutableRefObject} from 'react';
 import type {CrdtUpdate} from 'umkehr/crdt';
 import {createDemoTransport, replicas, type DemoTransport, type ReplicaId} from './model';
+import {createExternalStore, type ExternalStore} from './store';
 
 export type TransportState = {
     syncEnabled: boolean;
@@ -18,18 +11,23 @@ export type TransportState = {
 type SetTransport = (next: TransportState) => void;
 type PublishUpdates = (from: ReplicaId, updates: CrdtUpdate[]) => void;
 
+export type DemoSync = {
+    stateStore: ExternalStore<TransportState>;
+    transports: Record<ReplicaId, DemoTransport>;
+    toggleSync(): void;
+};
+
 export function useDemoSync() {
     const publishRef = useRef<PublishUpdates>(() => {});
-    const [state, setState] = useState<TransportState>(() => ({
-        syncEnabled: true,
-        outbox: emptyOutbox(),
-    }));
-    const stateRef = useRef(state);
+    const stateStore = useMemo(
+        () => createExternalStore<TransportState>({syncEnabled: true, outbox: emptyOutbox()}),
+        [],
+    );
     const transports = useMemo(() => createDemoTransports(publishRef), []);
 
     const setTransport = useCallback(
-        (next: TransportState) => setTransportSnapshot(next, stateRef, setState),
-        [],
+        (next: TransportState) => stateStore.setSnapshot(next),
+        [stateStore],
     );
 
     const deliverUpdates = useCallback(
@@ -41,24 +39,30 @@ export function useDemoSync() {
 
     const publishUpdates = useCallback(
         (from: ReplicaId, updates: CrdtUpdate[]) => {
-            broadcastTransportUpdates(stateRef.current, setTransport, deliverUpdates, from, updates);
+            broadcastTransportUpdates(
+                stateStore.getSnapshot(),
+                setTransport,
+                deliverUpdates,
+                from,
+                updates,
+            );
         },
-        [deliverUpdates, setTransport],
+        [deliverUpdates, setTransport, stateStore],
     );
 
     const toggleSync = useCallback(() => {
-        toggleTransportSync(stateRef.current, setTransport, deliverUpdates);
-    }, [deliverUpdates, setTransport]);
+        toggleTransportSync(stateStore.getSnapshot(), setTransport, deliverUpdates);
+    }, [deliverUpdates, setTransport, stateStore]);
 
     publishRef.current = publishUpdates;
 
     return useMemo(
-        () => ({
-            state,
+        (): DemoSync => ({
+            stateStore,
             transports,
             toggleSync,
         }),
-        [state, transports, toggleSync],
+        [stateStore, transports, toggleSync],
     );
 }
 
@@ -73,15 +77,6 @@ function createDemoTransports(ref: MutableRefObject<PublishUpdates>) {
 
 function emptyOutbox(): Record<ReplicaId, CrdtUpdate[]> {
     return Object.fromEntries(replicas.map((replica) => [replica.id, []]));
-}
-
-function setTransportSnapshot(
-    next: TransportState,
-    ref: MutableRefObject<TransportState>,
-    setState: Dispatch<SetStateAction<TransportState>>,
-) {
-    ref.current = next;
-    setState(next);
 }
 
 function deliverTransportUpdates(

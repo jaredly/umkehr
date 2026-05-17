@@ -6,6 +6,7 @@
         "build": "tsc -p tsconfig.json --noEmit && vite build"
     },
     "dependencies": {
+        "peerjs": "^1.5.5",
         "typia": "^12.1.1",
         "umkehr": "link:../..",
         "vite": "^7.2.7"

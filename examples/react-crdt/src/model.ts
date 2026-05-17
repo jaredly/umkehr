@@ -3,6 +3,7 @@ import {
     createCrdtDocument,
     createCrdtLocalHistory,
     hlc,
+    latestCrdtUpdateTimestamp,
     type CrdtLocalHistory,
     type CrdtUpdate,
 } from 'umkehr/crdt';
@@ -71,27 +72,9 @@ export function createDemoTransport(
             };
         },
         receive(update) {
-            const ts = latestUpdateTimestamp(update);
+            const ts = latestCrdtUpdateTimestamp(update);
             if (ts) clock = hlc.recv(clock, hlc.unpack(ts), Date.now());
             for (const listener of listeners) listener(update);
         },
     };
-}
-
-function latestUpdateTimestamp(update: CrdtUpdate) {
-    if (update.op === 'set' || update.op === 'delete') return update.ts;
-
-    let latest: string | undefined;
-    for (const order of Object.values(update.orders)) {
-        if (!latest || comparePackedHlc(order.ts, latest) > 0) latest = order.ts;
-    }
-    return latest;
-}
-
-function comparePackedHlc(a: string, b: string) {
-    const left = hlc.unpack(a);
-    const right = hlc.unpack(b);
-    if (left.ts !== right.ts) return left.ts > right.ts ? 1 : -1;
-    if (left.count !== right.count) return left.count > right.count ? 1 : -1;
-    return left.node.localeCompare(right.node);
 }
