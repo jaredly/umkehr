@@ -6,7 +6,12 @@ import {
     type PendingUpdate,
 } from 'umkehr/crdt';
 import type {IJsonSchemaCollection, IValidation} from 'typia';
-import type {LocalFirstRole, PersistedBatch, VersionVector} from './types';
+import type {
+    LocalFirstMember,
+    LocalFirstRole,
+    PersistedBatch,
+    VersionVector,
+} from './types';
 import {stableStringify} from './schemaFingerprint';
 
 export const LOCAL_FIRST_PROTOCOL_VERSION = 1;
@@ -51,6 +56,13 @@ export type LocalFirstMessage<TState> =
           docId: string;
           document: CrdtDocument<TState>;
           compactedThrough: VersionVector;
+      }
+    | {
+          kind: 'members';
+          version: 1;
+          actor: string;
+          docId: string;
+          members: LocalFirstMember[];
       };
 
 export type LocalFirstProtocolConfig<TState> = {
@@ -107,6 +119,20 @@ export function parseLocalFirstMessage<TState>(
         const document = validateSnapshot(input.document, config);
         if (!document) return null;
         return {...input, document} as LocalFirstMessage<TState>;
+    }
+
+    if (input.kind === 'members') {
+        if (!Array.isArray(input.members)) return null;
+        const members: LocalFirstMember[] = [];
+        for (const member of input.members) {
+            if (!isRecord(member)) return null;
+            if (typeof member.peerId !== 'string' || member.peerId.length === 0) return null;
+            if (typeof member.actor !== 'string' || member.actor.length === 0) return null;
+            if (member.role !== 'host' && member.role !== 'client') return null;
+            if (!isVersionVector(member.vector)) return null;
+            members.push(member as LocalFirstMember);
+        }
+        return {...input, members} as LocalFirstMessage<TState>;
     }
 
     return null;

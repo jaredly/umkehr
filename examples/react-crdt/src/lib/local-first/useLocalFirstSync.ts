@@ -41,6 +41,7 @@ import type {
     LocalFirstStats,
     LocalFirstSync,
     LocalFirstSyncState,
+    LocalFirstMember,
     PersistedBatch,
     PersistedReplica,
     ReplicaIdentity,
@@ -97,6 +98,7 @@ export function useLocalFirstSync<TState>({
     const listenersRef = useRef(new Set<(update: CrdtUpdate) => void>());
     const peerRef = useRef<Peer | null>(null);
     const connectionsRef = useRef(new Map<string, ConnectionRecord<TState>>());
+    const connectRef = useRef<(peerId: string) => void>(() => {});
     const recentBatchesRef = useRef(createRecentBatchCache());
     const protocolRef = useRef<LocalFirstProtocolConfig<TState>>({
         docId,
@@ -270,6 +272,50 @@ export function useLocalFirstSync<TState>({
         [docId, identity.replicaId, sendOrQueue],
     );
 
+    const currentMembers = useCallback((): LocalFirstMember[] => {
+        const selfPeerId = peerRef.current?.id;
+        const members: LocalFirstMember[] = selfPeerId
+            ? [
+                  {
+                      peerId: selfPeerId,
+                      actor: identity.replicaId,
+                      role: 'host',
+                      vector: vectorRef.current,
+                  },
+              ]
+            : [];
+        for (const record of connectionsRef.current.values()) {
+            if (!record.actor) continue;
+            members.push({
+                peerId: record.conn.peer,
+                actor: record.actor,
+                role: record.role ?? 'host',
+                vector: {},
+            });
+        }
+        return members;
+    }, [identity.replicaId]);
+
+    const sendMembers = useCallback(
+        (record?: ConnectionRecord<TState>) => {
+            const message: LocalFirstMessage<TState> = {
+                kind: 'members',
+                version: LOCAL_FIRST_PROTOCOL_VERSION,
+                actor: identity.replicaId,
+                docId,
+                members: currentMembers(),
+            };
+            if (record) {
+                sendOrQueue(record, message);
+                return;
+            }
+            for (const connection of connectionsRef.current.values()) {
+                sendOrQueue(connection, message);
+            }
+        },
+        [currentMembers, docId, identity.replicaId, sendOrQueue],
+    );
+
     const requestSync = useCallback(
         (peerId?: string) => {
             const records = peerId
@@ -432,6 +478,8 @@ export function useLocalFirstSync<TState>({
                 if (record) {
                     sendSnapshot(record);
                     requestSync(conn.peer);
+                    sendMembers(record);
+                    sendMembers();
                 }
                 return;
             }
@@ -455,13 +503,28 @@ export function useLocalFirstSync<TState>({
 
             if (message.kind === 'snapshot') {
                 void acceptSnapshot(message.actor, message.document, message.compactedThrough);
+                return;
+            }
+
+            if (message.kind === 'members') {
+                const selfPeerId = peerRef.current?.id;
+                for (const member of message.members) {
+                    if (member.peerId === selfPeerId || member.actor === identity.replicaId) {
+                        continue;
+                    }
+                    const existing = connectionsRef.current.get(member.peerId);
+                    if (existing?.conn.open) continue;
+                    connectRef.current(member.peerId);
+                }
             }
         },
         [
             acceptBatch,
             acceptSnapshot,
+            identity.replicaId,
             publishConnections,
             requestSync,
+            sendMembers,
             sendMissingBatches,
             sendSnapshot,
         ],
@@ -483,6 +546,7 @@ export function useLocalFirstSync<TState>({
             conn.on('open', () => {
                 sendHello(record);
                 requestSync(conn.peer);
+                sendMembers(record);
                 flushQueued(conn.peer);
                 publishConnections();
             });
@@ -510,6 +574,8 @@ export function useLocalFirstSync<TState>({
         },
         [trackConnection],
     );
+
+    connectRef.current = connect;
 
     const disconnect = useCallback(
         (peerId: string) => {

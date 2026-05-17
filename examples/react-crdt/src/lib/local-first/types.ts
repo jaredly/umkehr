@@ -40,6 +40,13 @@ export type ReceivedBatch = {
     receivedAt: string;
 };
 
+export type LocalFirstMember = {
+    peerId: string;
+    actor: string;
+    role: LocalFirstRole;
+    vector: VersionVector;
+};
+
 export type LocalFirstPersistenceState =
     | {kind: 'loading'}
     | {kind: 'ready'; source: 'created' | 'loaded'; savedAt?: string}
