@@ -31,7 +31,14 @@ export function createCrdtUpdates<T>(
         case 'reorder':
             return [createReorderUpdate(doc, patch.path, patch.indices, ts)];
         case 'move':
-            return createMoveUpdates(doc, patch.path, patch.fromIdx, patch.targetIdx, patch.after, ts);
+            return createMoveUpdates(
+                doc,
+                patch.path,
+                patch.fromIdx,
+                patch.targetIdx,
+                patch.after,
+                ts,
+            );
     }
 }
 
@@ -113,15 +120,6 @@ function createMoveUpdates<T>(
     if (!meta || meta.kind !== 'array')
         throw new Error('Cannot create CRDT move update: path is not an array.');
     const live = liveArrayItems(meta);
-    if (!Number.isInteger(fromIdx)) {
-        throw new Error('Cannot create CRDT move update: fromIdx must be an integer.');
-    }
-    if (!Number.isInteger(targetIdx)) {
-        throw new Error('Cannot create CRDT move update: targetIdx must be an integer.');
-    }
-    if (typeof after !== 'boolean') {
-        throw new Error('Cannot create CRDT move update: after must be a boolean.');
-    }
     if (fromIdx < 0 || fromIdx >= live.length) {
         throw new Error('Cannot create CRDT move update: fromIdx is out of range.');
     }
@@ -130,14 +128,12 @@ function createMoveUpdates<T>(
     }
     if (fromIdx === targetIdx) return [];
 
-    const reordered = live.slice();
-    const [moved] = reordered.splice(fromIdx, 1);
+    const moved = live[fromIdx];
     if (!moved) return [];
-    const targetPosition = targetIdx > fromIdx ? targetIdx - 1 : targetIdx;
-    reordered.splice(targetPosition + (after ? 1 : 0), 0, moved);
-    const movedPostIdx = reordered.findIndex(([id]) => id === moved[0]);
-    const previous = reordered[movedPostIdx - 1]?.[1].order.value;
-    const next = reordered[movedPostIdx + 1]?.[1].order.value;
+    const previousItem = after ? live[targetIdx] : live[toPreviousIndex(fromIdx, targetIdx)];
+    const nextItem = after ? live[toNextIndex(fromIdx, targetIdx)] : live[targetIdx];
+    const previous = previousItem?.[1].order.value;
+    const next = nextItem?.[1].order.value;
 
     return [
         {
@@ -148,6 +144,16 @@ function createMoveUpdates<T>(
             },
         },
     ];
+}
+
+function toPreviousIndex(fromIdx: number, targetIdx: number) {
+    const previousIdx = targetIdx - 1;
+    return previousIdx === fromIdx ? previousIdx - 1 : previousIdx;
+}
+
+function toNextIndex(fromIdx: number, targetIdx: number) {
+    const nextIdx = targetIdx + 1;
+    return nextIdx === fromIdx ? nextIdx + 1 : nextIdx;
 }
 
 function arrayAddTarget<T>(doc: CrdtDocument<T>, path: Path, ts: HlcTimestamp) {

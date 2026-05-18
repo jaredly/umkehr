@@ -165,6 +165,34 @@ describe('undo/redo', () => {
         expect(redoSecond.current).toEqual(afterSecond.current);
     });
 
+    it('undoes and redoes array moves', () => {
+        const genId = idGenerator();
+        const initial = {
+            ...initialArticle,
+            meta: {...initialArticle.meta, tags: ['draft', 'review', 'published']},
+        };
+        let history = makeHistory(initial);
+
+        history = dispatch(
+            history,
+            [builder.meta.tags.$move({fromIdx: 0, targetIdx: 2, after: true})],
+            null,
+            'type',
+            cheapEqual,
+            genId,
+        );
+
+        expect(history.current.meta.tags).toEqual(['review', 'published', 'draft']);
+
+        const undone = dispatch(history, {op: 'undo'}, null, 'type', cheapEqual);
+        expect(undone.current.meta.tags).toEqual(['draft', 'review', 'published']);
+        expect(undone.undoTrail).toEqual(['node-1']);
+
+        const redone = dispatch(undone, {op: 'redo'}, null, 'type', cheapEqual);
+        expect(redone.current.meta.tags).toEqual(['review', 'published', 'draft']);
+        expect(redone.undoTrail).toEqual([]);
+    });
+
     it('clears the redo trail when dispatching a new change after undo', () => {
         const genId = idGenerator();
         let history = makeHistory(initialArticle);

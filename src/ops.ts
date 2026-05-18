@@ -1,5 +1,14 @@
 import {_add, _get, _remove, _replace, type EqualFn} from './internal.js';
-import type {AddOp, Patch, MoveOp, Path, DraftPatch, RemoveOp, ReplaceOp, ReorderOp} from './types.js';
+import type {
+    AddOp,
+    Patch,
+    MoveOp,
+    Path,
+    DraftPatch,
+    RemoveOp,
+    ReplaceOp,
+    ReorderOp,
+} from './types.js';
 
 function add<T, V>(base: T, op: AddOp<V>) {
     return _add(base, op.path, op.value);
@@ -11,9 +20,6 @@ function replace<T, V>(base: T, op: ReplaceOp<V>, equal: EqualFn) {
     return _replace(base, op.path, op.previous, op.value, equal);
 }
 function moveIndices(length: number, fromIdx: number, targetIdx: number, after: boolean) {
-    if (!Number.isInteger(fromIdx)) throw new Error('move fromIdx must be an integer');
-    if (!Number.isInteger(targetIdx)) throw new Error('move targetIdx must be an integer');
-    if (typeof after !== 'boolean') throw new Error('move after must be a boolean');
     if (fromIdx < 0 || fromIdx >= length) throw new Error('move fromIdx is out of range');
     if (targetIdx < 0 || targetIdx >= length) throw new Error('move targetIdx is out of range');
 

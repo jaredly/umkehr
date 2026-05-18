@@ -19,22 +19,10 @@ export function realizeDraftPatch<T, V, Tag extends PropertyKey, Extra>(
         }
         case 'move': {
             const arr = _get(base, draft.path);
-            if (!Array.isArray(arr)) {
-                throw new Error(`Cannot move in "${describePath(draft.path)}": value is not an array.`);
-            }
-            if (!Number.isInteger(draft.fromIdx)) {
-                throw new Error(`Cannot move in "${describePath(draft.path)}": fromIdx must be an integer.`);
-            }
-            if (!Number.isInteger(draft.targetIdx)) {
-                throw new Error(
-                    `Cannot move in "${describePath(draft.path)}": targetIdx must be an integer.`,
-                );
-            }
-            if (typeof draft.after !== 'boolean') {
-                throw new Error(`Cannot move in "${describePath(draft.path)}": after must be a boolean.`);
-            }
             if (draft.fromIdx < 0 || draft.fromIdx >= arr.length) {
-                throw new Error(`Cannot move in "${describePath(draft.path)}": fromIdx is out of range.`);
+                throw new Error(
+                    `Cannot move in "${describePath(draft.path)}": fromIdx is out of range.`,
+                );
             }
             if (draft.targetIdx < 0 || draft.targetIdx >= arr.length) {
                 throw new Error(
@@ -53,14 +41,18 @@ export function realizeDraftPatch<T, V, Tag extends PropertyKey, Extra>(
         case 'remove': {
             const prev = _get(base, draft.path);
             if (prev === undefined) {
-                throw new Error(`Cannot remove "${describePath(draft.path)}": value does not exist.`);
+                throw new Error(
+                    `Cannot remove "${describePath(draft.path)}": value does not exist.`,
+                );
             }
             return {...draft, value: _get(base, draft.path)};
         }
         case 'push': {
             const arr = _get(base, draft.path);
             if (!Array.isArray(arr)) {
-                throw new Error(`Cannot push to "${describePath(draft.path)}": value is not an array.`);
+                throw new Error(
+                    `Cannot push to "${describePath(draft.path)}": value is not an array.`,
+                );
             }
             return {
                 op: 'add',
@@ -71,7 +63,9 @@ export function realizeDraftPatch<T, V, Tag extends PropertyKey, Extra>(
         case 'reorder': {
             const arr = _get(base, draft.path);
             if (!Array.isArray(arr)) {
-                throw new Error(`Cannot reorder "${describePath(draft.path)}": value is not an array.`);
+                throw new Error(
+                    `Cannot reorder "${describePath(draft.path)}": value is not an array.`,
+                );
             }
             if (draft.indices.length !== arr.length) {
                 throw new Error(
