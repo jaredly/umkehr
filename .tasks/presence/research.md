@@ -2,6 +2,8 @@
 
 This document maps the architecture relevant to adding presence indicators to the `examples/react-crdt/src/lib/server` example and records the open questions before implementation.
 
+Update after server-user work: the server mode now has nickname login, durable `userId`s, query-param `sessionId`s, and actor strings shaped as `${userId}:${sessionId}`. Presence should present user-level identity where possible, but CRDT authorship and status ids still need to preserve session-level actor identity.
+
 The requested behavior has three parts:
 
 - a Google Docs-like "who is online" indicator for the server-backed document;
@@ -63,7 +65,7 @@ Implication for presence:
 - "Last edited here by Alice" should be a `Status` with a stable id such as `presence:last-edit:${actor}`.
 - The status `path` should be the latest normal path changed by that actor.
 - The status `kind` can be open-ended, for example `presence:last-edit`.
-- `data` can carry `{actor, label, color, timestamp, receivedAt}`.
+- `data` can carry `{actor, userId, nickname, color, timestamp, receivedAt}`.
 
 ### CRDT metadata and authorship
 
@@ -96,22 +98,34 @@ Important caveat: the public UI path for todos uses array indices, while CRDT pa
 
 The browser-side server sync code is present under `examples/react-crdt/src/lib/server`:
 
-- `types.ts` defines `ServerSync`, `ServerChange`, `ServerSyncState`, and stores exposed to UI.
+- `types.ts` defines `ServerUser`, `PersistedServerUser`, `ServerSessionIdentity`, `ServerSync`, `ServerChange`, `ServerSyncState`, and stores exposed to UI.
+- `session.ts` builds and parses session actors. Current actor format is `${userId}:${sessionId}`.
 - `protocol.ts` defines versioned messages:
-  - client to server: `hello`, `clientUpdate`, `syncRequest`;
-  - server to client: `hello`, `serverUpdates`, `ack`, `error`.
+  - client to server: `hello`, `clientUpdate`, `syncRequest`, all with `actor` and `userId`;
+  - server to client: `hello`, `serverUpdates`, `ack`, `error`;
+  - current protocol version is `2`.
 - `useServerSync.ts` owns the WebSocket, reconnect loop, pending local uploads, server cursor, local change log, and `SyncedTransport`.
-- `persistence.ts` stores durable browser identity and per-document replica state in IndexedDB.
+- `persistence.ts` stores durable browser user identity and per-document replica state in IndexedDB.
+- `ServerApp.tsx` handles login/bootstrap and logout before mounting the CRDT provider.
+- `ServerControls.tsx` shows nickname, user id, session id, and actor.
 
 The transport already records actor identity in three places:
 
-- `identity.replicaId` is the local actor.
+- `identity.actor` is the local CRDT/HLC actor and includes both user id and session id.
 - each `ServerChange` has `origin`.
 - each server log entry has `origin`.
 
-The browser-side hook currently exchanges only CRDT update messages. It has no presence protocol and no status store.
+The browser-side hook currently exchanges only CRDT update messages. It has user bootstrap HTTP calls, but no presence protocol and no status store.
 
-The separate Bun server package directory exists at `examples/react-crdt-server`, but it is currently empty in this checkout. The older server plan expects a Bun server at fixed port `8787` with WebSocket path `/sync`.
+The Bun server package exists at `examples/react-crdt-server` and now implements:
+
+- `GET /users`;
+- `POST /users/login`;
+- WebSocket `/sync`;
+- duplicate live-session rejection;
+- `/debug` with known users, connected clients, documents, and recent messages.
+
+Messages still store `origin` as the full actor. The server does not persist `userId` separately per message; it derives user/session from `origin` when needed.
 
 ### Todo UI
 
@@ -136,8 +150,10 @@ Recommended server-mode state:
 
 ```ts
 type ServerPresenceUser = {
+    userId: string;
+    nickname: string;
+    sessionId?: string;
     actor: string;
-    label: string;
     color: string;
     online: boolean;
     lastSeenAt: string;
@@ -158,6 +174,8 @@ statusStore: StatusStore;
 
 Then `ServerApp` can pass `statusStore` into `runtime.Provider`.
 
+Modeling note: a user can have more than one live session. The roster can group by `userId`, but cursor/status entries should be keyed by full `actor` so two tabs for the same user do not overwrite each other's last-edit location.
+
 ### Extend the server protocol with ephemeral presence messages
 
 Add messages alongside the CRDT sync protocol:
@@ -167,10 +185,10 @@ type ClientServerMessage =
     | ExistingMessages
     | {
           kind: 'presenceHello';
-          version: 1;
+          version: 2;
           actor: string;
+          userId: string;
           docId: string;
-          label: string;
           color: string;
       };
 
@@ -178,28 +196,28 @@ type ServerClientMessage =
     | ExistingMessages
     | {
           kind: 'presenceSnapshot';
-          version: 1;
+          version: 2;
           docId: string;
           users: ServerPresenceUser[];
       }
     | {
           kind: 'presenceUpdate';
-          version: 1;
+          version: 2;
           docId: string;
           user: ServerPresenceUser;
       }
     | {
           kind: 'presenceLeave';
-          version: 1;
+          version: 2;
           docId: string;
           actor: string;
           at: string;
       };
 ```
 
-Presence should remain non-durable. The server can derive online state from open sockets and broadcast leave on socket close. The client can preserve the local user's label/color in IndexedDB or derive it from the replica id.
+Presence should remain non-durable. The server can derive online state from open sockets and broadcast leave on socket close. Nickname and user id already come from login; color can be derived from `userId` or persisted later as non-auth profile data.
 
-`hello` could be extended with label/color instead of adding `presenceHello`. A separate presence message is cleaner because it keeps document sync and ephemeral session state distinct.
+`hello` could be extended with presence fields instead of adding `presenceHello`. A separate presence message is cleaner because it keeps document sync and ephemeral session state distinct. Any presence message should be validated like sync messages: v2 only, non-empty `userId`, parseable actor, and parsed actor user id matching `userId`.
 
 ### Derive last-edit cursor statuses in the client
 
@@ -276,7 +294,7 @@ Implementation route:
 3. Read title metadata with `getMetaAtPath(history.doc.meta, titleCrdtPath)`.
 4. If the title meta is `primitive`, unpack `meta.ts` to get last editor.
 5. Translate `[{key: 'todos'}, {key: index}]` and read the todo item/container metadata to get creation timestamp.
-6. Render the actor labels using the presence/user directory when available, falling back to actor id.
+6. Parse the actor from the timestamp into `{userId, sessionId}` and render the nickname from the presence/user directory when available, falling back to the full actor id.
 
 This likely requires exporting `crdtPathForExisting` and `getMetaAtPath` if they are not already public enough for the example. `src/crdt/index.ts` currently exports `changedNormalPathsForCrdtUpdate` and `normalPathForCrdtPath` from `path.ts`, but not `crdtPathForExisting` or `getMetaAtPath`.
 
@@ -284,28 +302,42 @@ Alternative: scan the local `changesStore` for updates affecting the todo title 
 
 ## Open questions
 
-- User identity: should actors be displayed as raw replica ids, generated friendly names, or user-editable names persisted with the server identity?
+- User identity display: nickname/user id now exist. Should cursor chips show nickname only, nickname plus session hint, or full actor in a tooltip?
+  -> first letter of nickname, and a bgcolor based on a hash of the user id
 - Local user in presence: should the online roster include the current client, or only other connected clients?
+  -> exclude current client
 - Offline display: when a socket closes unexpectedly, should remote users disappear immediately, or remain as "recently online" for a short TTL?
+  -> disappear immediately
 - Protocol shape: should presence fields be added to existing `hello`, or should presence use separate messages?
+  -> separate messages
 - Cursor scope: should the last-edit marker point to the most specific changed field, the todo row containing it, or both?
+  -> let's just do the containing TODO
 - Multiple updates per command: local commands can publish multiple CRDT updates. Should the cursor use the last update in the command, the first user-visible path, or aggregate all changed paths?
+  -> last update
 - Local cursor: should the current user's own last-edit marker be visible?
+  -> no
 - Status lifecycle: should last-edit statuses persist while the user is online only, or remain after disconnect as "last seen editing here"?
+  -> they should be ephemeral; disappearing after a minute or so while oneline, or when the user goes offline, whichever is sooner
 - Status replacement: `StatusStore` can replace a status by reusing its id, but it has no source-level clear. Do we need a helper to clear all presence statuses for an actor on leave?
+  -> have the status for an actor be keyed by the actor's ID. there should only ever be one status for an actor
 - Blame semantics: does "who added the title" mean who created the todo item, who first set the title field, or both?
+  -> most recent edit of the title field
 - Undo/redo semantics: should undo/redo change blame to the actor performing the undo/redo, or preserve the original author restored by undo metadata? Current CRDT updates generated by undo/redo use fresh timestamps, so "last edited" will naturally be the undoing actor.
+  -> respect the fresh timestamps
 - Server authority: should the server broadcast `lastEdit` metadata, or should every client derive it independently from received updates?
-- Validation: how strict should presence message validation be in the example server? The CRDT update protocol validates updates; presence messages still need basic actor/doc/label/color checks.
-- Empty server package: the Bun server directory currently has no implementation in this checkout. Presence cannot be fully wired until the server package has the WebSocket connection registry.
+  -> derive from updates
+- Same-user sessions: should two live sessions for the same user render as one online person with multiple cursors, or as separate online entries?
+  -> multiple cursors, one person
+- Validation: how strict should presence message validation be in the example server? The CRDT update protocol validates actor/user consistency; presence messages should match that strictness.
+  -> yup let's validate
 
 ## Suggested first pass
 
 1. Add presence types and stores to the browser-side server sync layer.
-2. Add ephemeral presence messages to client/server protocol definitions.
-3. Implement server-side connection tracking when the Bun server exists.
+2. Add ephemeral v2 presence messages to client/server protocol definitions.
+3. Reuse the existing Bun server connection tracking for online user/session presence.
 4. Pass a `StatusStore` from server mode into the CRDT provider.
 5. Derive `presence:last-edit` statuses from local publishes and remote server entries.
 6. Render online users and path-scoped cursor chips in the todo UI.
 7. Add a small blame helper for current todo title metadata and expose it behind an item-level button.
-8. Test the pure helpers first: actor extraction from timestamps, metadata blame lookup, and last-edit status replacement.
+8. Test the pure helpers first: actor/session parsing from timestamps, metadata blame lookup, nickname lookup fallback, and last-edit status replacement.

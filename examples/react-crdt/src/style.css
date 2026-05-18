@@ -189,8 +189,9 @@ p {
 }
 
 .todoItem {
+    position: relative;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: 28px minmax(0, 1fr) auto;
     gap: 10px;
     align-items: center;
     min-height: 54px;
@@ -198,10 +199,82 @@ p {
     border-radius: 8px;
     padding: 10px;
     background: var(--task-bg, #fff);
+    touch-action: pan-y;
+    will-change: transform;
 }
 
 .todoItem.done {
     background: #f6f8fa;
+}
+
+.todoItem.dragging {
+    border-color: #829ab1;
+    opacity: 0.62;
+}
+
+.todoItem.dropBefore::before,
+.todoItem.dropAfter::after {
+    position: absolute;
+    right: 10px;
+    left: 10px;
+    height: 3px;
+    border-radius: 999px;
+    background: #2563eb;
+    content: '';
+}
+
+.todoItem.dropBefore::before {
+    top: -6px;
+}
+
+.todoItem.dropAfter::after {
+    bottom: -6px;
+}
+
+.dragHandle,
+.dragHandleSpacer {
+    width: 28px;
+    height: 34px;
+}
+
+.dragHandle {
+    display: inline-grid;
+    place-items: center;
+    border: 0;
+    border-radius: 6px;
+    padding: 0;
+    color: #64748b;
+    background: transparent;
+    cursor: grab;
+    opacity: 0;
+    touch-action: none;
+    transition:
+        background 0.15s ease,
+        color 0.15s ease,
+        opacity 0.15s ease;
+}
+
+.dragHandle span {
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: 0;
+    transform: rotate(90deg);
+}
+
+.todoItem:hover .dragHandle,
+.todoItem:focus-within .dragHandle,
+.draggingList .dragHandle {
+    opacity: 1;
+}
+
+.dragHandle:hover,
+.dragHandle:focus-visible {
+    color: #17202a;
+    background: #e6eef7;
+}
+
+.dragHandle:active {
+    cursor: grabbing;
 }
 
 .todoItem label {
