@@ -14,7 +14,10 @@ export function TodoPage() {
                 <meta charSet="utf-8" />
                 <meta name="viewport" content="width=device-width, initial-scale=1" />
                 <title>Umkehr Remix 3 Example</title>
-                <script type="module" src={routes.assets.href({path: 'app/assets/entry.ts'})}></script>
+                <script
+                    type="module"
+                    src={routes.assets.href({path: 'app/assets/entry.ts'})}
+                ></script>
             </head>
             <body mix={pageStyle}>
                 <TodoProvider />
@@ -55,7 +58,9 @@ function TodoApp(handle: Handle) {
             <header mix={headerStyle}>
                 <div>
                     <h1 mix={titleStyle}>Todos</h1>
-                    <p mix={subtleStyle}>Remix 3 client components with path-scoped Umkehr updates.</p>
+                    <p mix={subtleStyle}>
+                        Remix 3 client components with path-scoped Umkehr updates.
+                    </p>
                 </div>
                 <nav mix={toolbarStyle} aria-label="History controls">
                     <button
@@ -88,7 +93,6 @@ function TodoApp(handle: Handle) {
                         mix={[
                             swatchStyle,
                             on('pointerenter', () => ctx.$.bgcolor(color, 'preview')),
-                            on('pointerleave', () => ctx.clearPreview()),
                             on('click', () => ctx.$.bgcolor(color)),
                         ]}
                         style={{
@@ -147,7 +151,6 @@ function TodoItem(handle: Handle<{index: number}>) {
     const todo = ctx.watch(handle as RemixHandle, ctx.$.todos[handle.props.index]);
     const bgcolor = ctx.watch(handle as RemixHandle, ctx.$.bgcolor);
     let isEditing = false;
-    let draftTitle = todo.current.title;
 
     function commitTitle(value: string) {
         const nextTitle = value.trim();
@@ -161,7 +164,6 @@ function TodoItem(handle: Handle<{index: number}>) {
 
     return () => {
         const current = todo.current;
-        if (!isEditing) draftTitle = current.title;
 
         return (
             <li mix={itemStyle} style={{background: bgcolor.current}}>
@@ -176,19 +178,16 @@ function TodoItem(handle: Handle<{index: number}>) {
                     {isEditing ? (
                         <input
                             aria-label={`Edit ${current.title}`}
-                            defaultValue={draftTitle}
+                            defaultValue={current.title}
                             mix={[
                                 editInputStyle,
-                                on('input', (event) => {
-                                    draftTitle = event.currentTarget.value;
-                                }),
                                 on('blur', (event) => commitTitle(event.currentTarget.value)),
                                 on('keydown', (event) => {
                                     if (event.key === 'Enter') {
                                         event.currentTarget.blur();
                                     } else if (event.key === 'Escape') {
+                                        event.currentTarget.value = current.title;
                                         isEditing = false;
-                                        draftTitle = current.title;
                                         handle.update();
                                     }
                                 }),
@@ -205,7 +204,6 @@ function TodoItem(handle: Handle<{index: number}>) {
                         mix={[
                             smallButtonStyle,
                             on('click', () => {
-                                draftTitle = current.title;
                                 isEditing = true;
                                 handle.update();
                             }),
