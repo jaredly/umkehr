@@ -152,16 +152,23 @@ Recommended tests if implementing this:
 
 - Should drag be row-wide, or should there be an explicit drag handle? Recommendation: explicit
   handle.
+  -> handle, only show up on hover
 - Should the first implementation include keyboard up/down reorder controls? Recommendation: yes if
   this is intended as a polished example, no if the goal is only to exercise CRDT reorder.
+  -> no keyboard for now
 - Should touch/mobile reorder be supported now? Native HTML drag is not a great mobile story; a
   library such as `@dnd-kit` would be better if mobile is important.
+  -> yeah mobile support would be great
 - Will the new `$move({fromIdx, targetIdx, after})` API be available before Todo reorder work starts?
   If not, Todo should wait rather than adding a temporary local `$reorder` adapter.
+  -> yup it's available now
 - Is touching every item order on each reorder acceptable long term? It is fine for the Todo demo,
   but a larger app might want a CRDT helper that only changes the moved item's fractional index.
+  -> the new $move api means we're not doing that anymore
 - Should reordering be disabled while a title input is being edited? Recommendation: keep the drag
   handle disabled or hidden for the currently edited row to avoid blur/drop edge cases.
+  -> yeah hide while it's being edited
 - Should remote concurrent reorders be explained visually in the demo? Current CRDT semantics merge
   by per-item order timestamp; no extra UI is needed, but concurrent drag behavior may surprise
   users in two-panel demos.
+  -> hmmm could we get an animation for remote reorders? and for local ones? that would be very cool

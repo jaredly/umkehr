@@ -1,5 +1,10 @@
 import type {CrdtUpdate, HlcTimestamp} from 'umkehr/crdt';
 
+export type ServerUser = {
+    userId: string;
+    nickname: string;
+};
+
 export type ServerLogEntry = {
     messageIndex: number;
     docId: string;
@@ -18,5 +23,7 @@ export type DocumentSummary = {
 
 export type ConnectedClient = {
     actor?: string;
+    userId?: string;
+    sessionId?: string;
     docId?: string;
 };

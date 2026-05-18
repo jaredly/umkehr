@@ -437,6 +437,20 @@ describe('crdt', () => {
                 '010',
             ),
         ).toThrow('Cannot create CRDT move update: fromIdx is out of range.');
+
+        expect(() =>
+            createCrdtUpdates(
+                doc,
+                {
+                    op: 'move',
+                    path: [{type: 'key', key: 'todos'}],
+                    fromIdx: 0.5,
+                    targetIdx: 0,
+                    after: false,
+                },
+                '010',
+            ),
+        ).toThrow('Cannot create CRDT move update: fromIdx must be an integer.');
     });
 
     it('translates CRDT paths back to normal paths', () => {

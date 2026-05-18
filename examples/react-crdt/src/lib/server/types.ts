@@ -2,8 +2,21 @@ import type {CrdtLocalHistory, CrdtUpdate, HlcTimestamp} from 'umkehr/crdt';
 import type {SyncedTransport} from 'umkehr/react-crdt';
 import type {ExternalStore} from '../store';
 
-export type ServerReplicaIdentity = {
-    replicaId: string;
+export type ServerUser = {
+    userId: string;
+    nickname: string;
+};
+
+export type PersistedServerUser = ServerUser & {
+    storageVersion: 2;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type ServerSessionIdentity = {
+    user: ServerUser;
+    sessionId: string;
+    actor: string;
     createdAt: string;
 };
 
@@ -22,10 +35,9 @@ export type ServerChange = {
 
 export type PersistedServerReplica<TState> = {
     docId: string;
-    storageVersion: 1;
-    protocolVersion: 1;
+    storageVersion: 2;
+    protocolVersion: 2;
     schemaFingerprint: string;
-    replicaId: string;
     history: CrdtLocalHistory<TState>;
     lastSeenMessageIndex: number;
     changes: ServerChange[];
@@ -48,7 +60,7 @@ export type ServerSyncStats = {
 
 export type ServerSync<TState> = {
     transport: SyncedTransport & {receive(update: CrdtUpdate): void};
-    identity: ServerReplicaIdentity;
+    identity: ServerSessionIdentity;
     stateStore: ExternalStore<ServerSyncState>;
     statsStore: ExternalStore<ServerSyncStats>;
     changesStore: ExternalStore<ServerChange[]>;

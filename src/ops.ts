@@ -20,6 +20,8 @@ function replace<T, V>(base: T, op: ReplaceOp<V>, equal: EqualFn) {
     return _replace(base, op.path, op.previous, op.value, equal);
 }
 function moveIndices(length: number, fromIdx: number, targetIdx: number, after: boolean) {
+    if (!Number.isInteger(fromIdx)) throw new Error('move fromIdx must be an integer');
+    if (!Number.isInteger(targetIdx)) throw new Error('move targetIdx must be an integer');
     if (fromIdx < 0 || fromIdx >= length) throw new Error('move fromIdx is out of range');
     if (targetIdx < 0 || targetIdx >= length) throw new Error('move targetIdx is out of range');
 

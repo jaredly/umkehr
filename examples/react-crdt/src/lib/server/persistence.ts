@@ -1,14 +1,14 @@
 import {openDB, type DBSchema, type IDBPDatabase} from 'idb';
-import type {PersistedServerReplica, ServerChange, ServerReplicaIdentity} from './types';
+import type {PersistedServerReplica, PersistedServerUser, ServerChange, ServerUser} from './types';
 
 const DB_NAME = 'umkehr-react-crdt-server-sync';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const IDENTITY_KEY = 'default';
 
 interface ServerSyncDb extends DBSchema {
     identity: {
         key: string;
-        value: ServerReplicaIdentity;
+        value: PersistedServerUser;
     };
     replicas: {
         key: string;
@@ -16,17 +16,29 @@ interface ServerSyncDb extends DBSchema {
     };
 }
 
-export async function loadOrCreateServerIdentity(): Promise<ServerReplicaIdentity> {
+export async function loadServerUser(): Promise<PersistedServerUser | null> {
+    const db = await openServerSyncDb();
+    return (await db.get('identity', IDENTITY_KEY)) ?? null;
+}
+
+export async function saveServerUser(user: ServerUser): Promise<PersistedServerUser> {
     const db = await openServerSyncDb();
     const existing = await db.get('identity', IDENTITY_KEY);
-    if (existing) return existing;
-
-    const identity: ServerReplicaIdentity = {
-        replicaId: `client-${crypto.randomUUID()}`,
-        createdAt: new Date().toISOString(),
+    const now = new Date().toISOString();
+    const persisted: PersistedServerUser = {
+        storageVersion: 2,
+        userId: user.userId,
+        nickname: user.nickname,
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now,
     };
-    await db.put('identity', identity, IDENTITY_KEY);
-    return identity;
+    await db.put('identity', persisted, IDENTITY_KEY);
+    return persisted;
+}
+
+export async function clearServerUser() {
+    const db = await openServerSyncDb();
+    await db.delete('identity', IDENTITY_KEY);
 }
 
 export async function loadServerReplica<TState>(
@@ -34,8 +46,7 @@ export async function loadServerReplica<TState>(
 ): Promise<PersistedServerReplica<TState> | null> {
     const db = await openServerSyncDb();
     return (
-        ((await db.get('replicas', docId)) as PersistedServerReplica<TState> | undefined) ??
-        null
+        ((await db.get('replicas', docId)) as PersistedServerReplica<TState> | undefined) ?? null
     );
 }
 
@@ -56,9 +67,12 @@ let dbPromise: Promise<IDBPDatabase<ServerSyncDb>> | null = null;
 
 function openServerSyncDb() {
     dbPromise ??= openDB<ServerSyncDb>(DB_NAME, DB_VERSION, {
-        upgrade(db) {
+        upgrade(db, oldVersion, _newVersion, tx) {
             if (!db.objectStoreNames.contains('identity')) db.createObjectStore('identity');
             if (!db.objectStoreNames.contains('replicas')) db.createObjectStore('replicas');
+            if (oldVersion < 2) {
+                tx.objectStore('identity').delete(IDENTITY_KEY);
+            }
         },
     });
     return dbPromise;

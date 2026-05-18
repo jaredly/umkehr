@@ -120,6 +120,12 @@ function createMoveUpdates<T>(
     if (!meta || meta.kind !== 'array')
         throw new Error('Cannot create CRDT move update: path is not an array.');
     const live = liveArrayItems(meta);
+    if (!Number.isInteger(fromIdx)) {
+        throw new Error('Cannot create CRDT move update: fromIdx must be an integer.');
+    }
+    if (!Number.isInteger(targetIdx)) {
+        throw new Error('Cannot create CRDT move update: targetIdx must be an integer.');
+    }
     if (fromIdx < 0 || fromIdx >= live.length) {
         throw new Error('Cannot create CRDT move update: fromIdx is out of range.');
     }

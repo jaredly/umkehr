@@ -19,6 +19,21 @@ export function realizeDraftPatch<T, V, Tag extends PropertyKey, Extra>(
         }
         case 'move': {
             const arr = _get(base, draft.path);
+            if (!Array.isArray(arr)) {
+                throw new Error(
+                    `Cannot move in "${describePath(draft.path)}": value is not an array.`,
+                );
+            }
+            if (!Number.isInteger(draft.fromIdx)) {
+                throw new Error(
+                    `Cannot move in "${describePath(draft.path)}": fromIdx must be an integer.`,
+                );
+            }
+            if (!Number.isInteger(draft.targetIdx)) {
+                throw new Error(
+                    `Cannot move in "${describePath(draft.path)}": targetIdx must be an integer.`,
+                );
+            }
             if (draft.fromIdx < 0 || draft.fromIdx >= arr.length) {
                 throw new Error(
                     `Cannot move in "${describePath(draft.path)}": fromIdx is out of range.`,

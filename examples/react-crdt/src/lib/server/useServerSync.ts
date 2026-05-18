@@ -1,10 +1,5 @@
 import {useCallback, useEffect, useMemo, useRef} from 'react';
-import {
-    hlc,
-    latestCrdtUpdateTimestamp,
-    type CrdtLocalHistory,
-    type CrdtUpdate,
-} from 'umkehr/crdt';
+import {hlc, latestCrdtUpdateTimestamp, type CrdtLocalHistory, type CrdtUpdate} from 'umkehr/crdt';
 import {createExternalStore} from '../store';
 import {
     SERVER_PROTOCOL_VERSION,
@@ -13,11 +8,12 @@ import {
     type ClientServerMessage,
     type ServerLogEntry,
 } from './protocol';
+import {parseSessionActor} from './session';
 import {saveServerReplica, sortServerChanges} from './persistence';
 import type {
     PersistedServerReplica,
     ServerChange,
-    ServerReplicaIdentity,
+    ServerSessionIdentity,
     ServerSync,
     ServerSyncState,
     ServerSyncStats,
@@ -37,7 +33,7 @@ export function useServerSync<TState>({
     docId: string;
     schema: IJsonSchemaCollection<'3.1', [TState]>;
     schemaFingerprint: string;
-    identity: ServerReplicaIdentity;
+    identity: ServerSessionIdentity;
     initialHistory: CrdtLocalHistory<TState>;
     initialLastSeenMessageIndex: number;
     initialChanges: ServerChange[];
@@ -50,29 +46,26 @@ export function useServerSync<TState>({
     const reconnectTimerRef = useRef<number | undefined>(undefined);
     const manualOfflineRef = useRef(false);
     const listenersRef = useRef(new Set<(update: CrdtUpdate) => void>());
-    const clockRef = useRef(initialClock(identity.replicaId, changesRef.current));
+    const clockRef = useRef(initialClock(identity.actor, changesRef.current));
 
     const stateStore = useMemo(
         () => createExternalStore<ServerSyncState>({kind: 'offline', reason: 'starting'}),
         [],
     );
     const statsStore = useMemo(
-        () => createExternalStore<ServerSyncStats>(statsFor(lastSeenRef.current, changesRef.current)),
+        () =>
+            createExternalStore<ServerSyncStats>(statsFor(lastSeenRef.current, changesRef.current)),
         [],
     );
-    const changesStore = useMemo(
-        () => createExternalStore<ServerChange[]>(changesRef.current),
-        [],
-    );
+    const changesStore = useMemo(() => createExternalStore<ServerChange[]>(changesRef.current), []);
     const manualOfflineStore = useMemo(() => createExternalStore(false), []);
 
     const persist = useCallback(async () => {
         const replica: PersistedServerReplica<TState> = {
             docId,
-            storageVersion: 1,
+            storageVersion: 2,
             protocolVersion: SERVER_PROTOCOL_VERSION,
             schemaFingerprint,
-            replicaId: identity.replicaId,
             history: historyRef.current,
             lastSeenMessageIndex: lastSeenRef.current,
             changes: changesRef.current,
@@ -85,7 +78,7 @@ export function useServerSync<TState>({
             statsStore,
             changesStore,
         });
-    }, [changesStore, docId, identity.replicaId, schemaFingerprint, statsStore]);
+    }, [changesStore, docId, schemaFingerprint, statsStore]);
 
     const send = useCallback((message: ClientServerMessage) => {
         const socket = socketRef.current;
@@ -99,11 +92,14 @@ export function useServerSync<TState>({
             (change) => change.source === 'local' && !change.recorded,
         );
         for (const change of pending) {
+            const actor = parseSessionActor(change.origin);
+            if (!actor) continue;
             if (
                 !send({
                     kind: 'clientUpdate',
                     version: SERVER_PROTOCOL_VERSION,
-                    actor: identity.replicaId,
+                    actor: change.origin,
+                    userId: actor.userId,
                     docId,
                     schemaFingerprint,
                     hlcTimestamp: change.timestamp,
@@ -113,25 +109,26 @@ export function useServerSync<TState>({
                 break;
             }
         }
-    }, [docId, identity.replicaId, schemaFingerprint, send]);
+    }, [docId, schemaFingerprint, send]);
 
     const requestSync = useCallback(() => {
         send({
             kind: 'syncRequest',
             version: SERVER_PROTOCOL_VERSION,
-            actor: identity.replicaId,
+            actor: identity.actor,
+            userId: identity.user.userId,
             docId,
             schemaFingerprint,
             lastSeenMessageIndex: lastSeenRef.current,
         });
-    }, [docId, identity.replicaId, schemaFingerprint, send]);
+    }, [docId, identity.actor, identity.user.userId, schemaFingerprint, send]);
 
     const receiveServerEntries = useCallback(
         async (entries: ServerLogEntry[]) => {
             let changed = false;
             for (const entry of entries) {
                 lastSeenRef.current = Math.max(lastSeenRef.current, entry.messageIndex);
-                if (entry.origin === identity.replicaId) continue;
+                if (entry.origin === identity.actor) continue;
                 if (changesRef.current.some((change) => change.timestamp === entry.hlcTimestamp)) {
                     continue;
                 }
@@ -155,7 +152,7 @@ export function useServerSync<TState>({
                 await persist();
             }
         },
-        [docId, identity.replicaId, persist],
+        [docId, identity.actor, persist],
     );
 
     const markAcknowledged = useCallback(
@@ -185,7 +182,8 @@ export function useServerSync<TState>({
             send({
                 kind: 'hello',
                 version: SERVER_PROTOCOL_VERSION,
-                actor: identity.replicaId,
+                actor: identity.actor,
+                userId: identity.user.userId,
                 docId,
                 schemaFingerprint,
                 lastSeenMessageIndex: lastSeenRef.current,
@@ -196,7 +194,10 @@ export function useServerSync<TState>({
         socket.addEventListener('message', (event) => {
             const parsed = parseServerMessage<TState>(safeJsonParse(event.data), {docId, schema});
             if (!parsed) {
-                stateStore.setSnapshot({kind: 'error', message: 'Received invalid server message.'});
+                stateStore.setSnapshot({
+                    kind: 'error',
+                    message: 'Received invalid server message.',
+                });
                 return;
             }
             if (parsed.kind === 'hello') {
@@ -227,7 +228,8 @@ export function useServerSync<TState>({
     }, [
         docId,
         flushPending,
-        identity.replicaId,
+        identity.actor,
+        identity.user.userId,
         markAcknowledged,
         receiveServerEntries,
         requestSync,
@@ -255,7 +257,7 @@ export function useServerSync<TState>({
 
     const transport = useMemo(() => {
         return {
-            actor: identity.replicaId,
+            actor: identity.actor,
             tick() {
                 clockRef.current = hlc.inc(clockRef.current, Date.now());
                 return clockRef.current;
@@ -266,12 +268,16 @@ export function useServerSync<TState>({
                 for (const update of updates) {
                     const timestamp = latestCrdtUpdateTimestamp(update);
                     if (!timestamp) continue;
-                    clockRef.current = hlc.recv(clockRef.current, hlc.unpack(timestamp), Date.now());
+                    clockRef.current = hlc.recv(
+                        clockRef.current,
+                        hlc.unpack(timestamp),
+                        Date.now(),
+                    );
                     if (nextChanges.some((change) => change.timestamp === timestamp)) continue;
                     nextChanges.push({
                         docId,
                         timestamp,
-                        origin: identity.replicaId,
+                        origin: identity.actor,
                         source: 'local',
                         update,
                         recorded: false,
@@ -292,12 +298,16 @@ export function useServerSync<TState>({
             receive(update: CrdtUpdate) {
                 const timestamp = latestCrdtUpdateTimestamp(update);
                 if (timestamp) {
-                    clockRef.current = hlc.recv(clockRef.current, hlc.unpack(timestamp), Date.now());
+                    clockRef.current = hlc.recv(
+                        clockRef.current,
+                        hlc.unpack(timestamp),
+                        Date.now(),
+                    );
                 }
                 for (const listener of listenersRef.current) listener(update);
             },
         };
-    }, [docId, flushPending, identity.replicaId, persist]);
+    }, [docId, flushPending, identity.actor, persist]);
 
     useEffect(() => {
         connect();

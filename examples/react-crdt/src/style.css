@@ -341,6 +341,40 @@ p {
     width: 100%;
 }
 
+.serverLogin {
+    grid-column: 1 / -1;
+    display: grid;
+    gap: 16px;
+    align-content: start;
+    max-width: 520px;
+}
+
+.serverKnownUsers {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.serverLoginForm {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+}
+
+.serverLoginForm input {
+    min-width: 0;
+    width: 100%;
+    border: 1px solid #c3cfdb;
+    border-radius: 6px;
+    padding: 9px 10px;
+    color: #17202a;
+    background: #fff;
+}
+
+.serverLoginError {
+    color: #b42318;
+}
+
 .serverHistory {
     display: grid;
     gap: 14px;

@@ -1,12 +1,9 @@
-import {
-    createCrdtUpdateValidator,
-    type CrdtUpdate,
-    type HlcTimestamp,
-} from 'umkehr/crdt';
+import {createCrdtUpdateValidator, type CrdtUpdate, type HlcTimestamp} from 'umkehr/crdt';
 import type {IJsonSchemaCollection} from 'typia';
 
-export const SERVER_PROTOCOL_VERSION = 1;
+export const SERVER_PROTOCOL_VERSION = 2;
 export const SERVER_PORT = 8787;
+export const SERVER_HTTP_URL = `http://localhost:${SERVER_PORT}`;
 export const SERVER_WS_URL = `ws://localhost:${SERVER_PORT}/sync`;
 
 export type ServerLogEntry = {
@@ -21,16 +18,18 @@ export type ServerLogEntry = {
 export type ClientServerMessage =
     | {
           kind: 'hello';
-          version: 1;
+          version: 2;
           actor: string;
+          userId: string;
           docId: string;
           schemaFingerprint: string;
           lastSeenMessageIndex: number;
       }
     | {
           kind: 'clientUpdate';
-          version: 1;
+          version: 2;
           actor: string;
+          userId: string;
           docId: string;
           schemaFingerprint: string;
           hlcTimestamp: HlcTimestamp;
@@ -38,8 +37,9 @@ export type ClientServerMessage =
       }
     | {
           kind: 'syncRequest';
-          version: 1;
+          version: 2;
           actor: string;
+          userId: string;
           docId: string;
           schemaFingerprint: string;
           lastSeenMessageIndex: number;
@@ -48,25 +48,25 @@ export type ClientServerMessage =
 export type ServerClientMessage =
     | {
           kind: 'hello';
-          version: 1;
+          version: 2;
           docId: string;
           lastSeenMessageIndex: number;
       }
     | {
           kind: 'serverUpdates';
-          version: 1;
+          version: 2;
           docId: string;
           entries: ServerLogEntry[];
       }
     | {
           kind: 'ack';
-          version: 1;
+          version: 2;
           docId: string;
           hlcTimestamp: HlcTimestamp;
       }
     | {
           kind: 'error';
-          version: 1;
+          version: 2;
           message: string;
       };
 
@@ -107,10 +107,7 @@ export function parseServerMessage<TState>(
             if (!isSafeInteger(entry.messageIndex)) return null;
             if (entry.docId !== docId) return null;
             if (typeof entry.origin !== 'string' || entry.origin.length === 0) return null;
-            if (
-                typeof entry.hlcTimestamp !== 'string' ||
-                entry.hlcTimestamp.length === 0
-            ) {
+            if (typeof entry.hlcTimestamp !== 'string' || entry.hlcTimestamp.length === 0) {
                 return null;
             }
             if (typeof entry.receivedAt !== 'string' || entry.receivedAt.length === 0) {

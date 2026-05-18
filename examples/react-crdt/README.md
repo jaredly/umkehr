@@ -24,8 +24,10 @@ bun run dev
 ```
 
 Then open the React example and choose the Server tab. The client connects to
-`ws://localhost:8787/sync`, persists local changes in IndexedDB, and can be
-toggled offline from the demo controls.
+`ws://localhost:8787/sync`, asks for a nickname login backed by the example
+server, persists the returned user id and local changes in IndexedDB, and can
+be toggled offline from the demo controls. Logging out clears only the local
+user id; the document replica remains in browser storage.
 
 The example depends on the repository root through `file:../..`, so build the package first when
 you are running it from a fresh checkout:

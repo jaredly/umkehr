@@ -2,7 +2,13 @@ import {useStore} from '../store';
 import {SERVER_PORT} from './protocol';
 import type {ServerSync} from './types';
 
-export function ServerControls<TState>({sync}: {sync: ServerSync<TState>}) {
+export function ServerControls<TState>({
+    sync,
+    onLogout,
+}: {
+    sync: ServerSync<TState>;
+    onLogout(): void;
+}) {
     const state = useStore(sync.stateStore);
     const stats = useStore(sync.statsStore);
     const manualOffline = useStore(sync.manualOfflineStore);
@@ -13,8 +19,14 @@ export function ServerControls<TState>({sync}: {sync: ServerSync<TState>}) {
             <dl className="localFirstStats">
                 <dt>Status</dt>
                 <dd>{labelForState(state)}</dd>
-                <dt>Client</dt>
-                <dd>{sync.identity.replicaId}</dd>
+                <dt>Nickname</dt>
+                <dd>{sync.identity.user.nickname}</dd>
+                <dt>User</dt>
+                <dd>{sync.identity.user.userId}</dd>
+                <dt>Session</dt>
+                <dd>{sync.identity.sessionId}</dd>
+                <dt>Actor</dt>
+                <dd>{sync.identity.actor}</dd>
                 <dt>Port</dt>
                 <dd>{SERVER_PORT}</dd>
                 <dt>Last seen</dt>
@@ -37,6 +49,9 @@ export function ServerControls<TState>({sync}: {sync: ServerSync<TState>}) {
             </button>
             <button type="button" onClick={sync.requestSync} disabled={manualOffline}>
                 Sync now
+            </button>
+            <button type="button" onClick={onLogout}>
+                Log out
             </button>
             {state.kind === 'error' ? <p>{state.message}</p> : null}
         </aside>

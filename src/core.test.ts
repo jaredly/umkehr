@@ -242,6 +242,44 @@ describe('core failure behavior', () => {
         ).toThrow('Cannot move in "items": fromIdx is out of range.');
     });
 
+    it('rejects move operations with non-integer indexes', () => {
+        expect(() =>
+            resolveAndApply(
+                initialState,
+                builder.items.$move({fromIdx: 0.5, targetIdx: 1, after: false}),
+                null,
+                'type',
+                cheapEqual,
+            ),
+        ).toThrow('Cannot move in "items": fromIdx must be an integer.');
+
+        expect(() =>
+            ops.apply(
+                initialState,
+                {
+                    op: 'move',
+                    path: [{type: 'key', key: 'items'}],
+                    fromIdx: 0,
+                    targetIdx: 1.5,
+                    after: false,
+                },
+                cheapEqual,
+            ),
+        ).toThrow('move targetIdx must be an integer');
+    });
+
+    it('rejects move operations on non-arrays during realization', () => {
+        expect(() =>
+            resolveAndApply(
+                initialState,
+                builder.title.$move({fromIdx: 0, targetIdx: 1, after: false}),
+                null,
+                'type',
+                cheapEqual,
+            ),
+        ).toThrow('Cannot move in "title": value is not an array.');
+    });
+
     it('rejects realized replace operations when the previous value does not match', () => {
         expect(() =>
             ops.apply(

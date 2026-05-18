@@ -1,6 +1,6 @@
 import {Database} from 'bun:sqlite';
 import type {CrdtUpdate} from 'umkehr/crdt';
-import type {DocumentSummary, ServerLogEntry} from './types';
+import type {DocumentSummary, ServerLogEntry, ServerUser} from './types';
 
 export class ServerStore {
     private db: Database;
@@ -27,7 +27,57 @@ export class ServerStore {
                 on messages (docId, messageIndex);
             create index if not exists messages_doc_hlc_idx
                 on messages (docId, hlcTimestamp);
+            create table if not exists users (
+                userId text primary key,
+                nickname text not null,
+                nicknameKey text not null unique,
+                createdAt text not null,
+                lastSeenAt text not null
+            );
         `);
+    }
+
+    listUsers(): ServerUser[] {
+        return this.db
+            .query<UserRow, []>(
+                `select userId, nickname
+                 from users
+                 order by nicknameKey asc`,
+            )
+            .all()
+            .map(rowToUser);
+    }
+
+    loginUser(nickname: string): ServerUser {
+        const cleanNickname = nickname.trim();
+        if (!cleanNickname) throw new Error('Nickname is required.');
+        const nicknameKey = nicknameKeyFor(cleanNickname);
+        const existing = this.db
+            .query<UserRow, [string]>(
+                `select userId, nickname
+                 from users
+                 where nicknameKey = ?`,
+            )
+            .get(nicknameKey);
+        const now = new Date().toISOString();
+        if (existing) {
+            this.db
+                .query('update users set lastSeenAt = ? where userId = ?')
+                .run(now, existing.userId);
+            return rowToUser(existing);
+        }
+
+        const user: ServerUser = {
+            userId: `user-${crypto.randomUUID()}`,
+            nickname: cleanNickname,
+        };
+        this.db
+            .query(
+                `insert into users (userId, nickname, nicknameKey, createdAt, lastSeenAt)
+                 values (?, ?, ?, ?, ?)`,
+            )
+            .run(user.userId, user.nickname, nicknameKey, now, now);
+        return user;
     }
 
     ensureDocument(docId: string, schemaFingerprint: string) {
@@ -106,9 +156,7 @@ export class ServerStore {
                  order by messageIndex asc`,
             )
             .all(docId, afterMessageIndex);
-        return rows
-            .filter((row) => row.origin !== excludeOrigin)
-            .map(rowToEntry);
+        return rows.filter((row) => row.origin !== excludeOrigin).map(rowToEntry);
     }
 
     summarizeDocuments(): DocumentSummary[] {
@@ -159,6 +207,22 @@ type MessageRow = {
     receivedAt: string;
     updateJson: string;
 };
+
+type UserRow = {
+    userId: string;
+    nickname: string;
+};
+
+function rowToUser(row: UserRow): ServerUser {
+    return {
+        userId: row.userId,
+        nickname: row.nickname,
+    };
+}
+
+function nicknameKeyFor(nickname: string) {
+    return nickname.trim().toLocaleLowerCase();
+}
 
 function rowToEntry(row: MessageRow): ServerLogEntry {
     return {
