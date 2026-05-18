@@ -8,6 +8,7 @@ import {
     getExtraSymbol,
     type PathSegment,
     type OpMaker,
+    type ArrayMove,
 } from './types.js';
 
 export type PatchBuilder<
@@ -141,20 +142,14 @@ export function createPatchDispatcher<T, Extra, Tag extends string = 'type', R =
                 if (prop === '$move') {
                     const k = pathString + '/move';
                     if (!cache[k])
-                        cache[k] = (
-                            from: string | number,
-                            to: string | number,
-                            when?: ApplyTiming,
-                        ) => {
-                            const normalize = (v: string | number) =>
-                                typeof v === 'string' && /^\d+$/.test(v) ? Number(v) : v;
-                            const fromKey = normalize(from);
-                            const toKey = normalize(to);
+                        cache[k] = (move: ArrayMove, when?: ApplyTiming) => {
                             return apply(
                                 {
                                     op: 'move',
-                                    from: [...path, {type: 'key', key: fromKey}],
-                                    path: [...path, {type: 'key', key: toKey}],
+                                    path,
+                                    fromIdx: move.fromIdx,
+                                    targetIdx: move.targetIdx,
+                                    after: move.after,
                                     ...ghost,
                                     // biome-ignore lint: this one is fine
                                 } as any,

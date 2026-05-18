@@ -49,7 +49,9 @@ export type ReplaceOp<_T> = {
 
 export type RemoveOp<_T> = {op: 'remove'; path: Path; value: unknown};
 
-export type MoveOp<_T> = {op: 'move'; from: Path; path: Path};
+export type ArrayMove = {fromIdx: number; targetIdx: number; after: boolean};
+
+export type MoveOp<_T> = {op: 'move'; path: Path} & ArrayMove;
 
 export type ReorderOp<_T> = {
     op: 'reorder';
@@ -170,7 +172,7 @@ export type PatchBuilderInternal<
                 [K in number]: PatchBuilderInternal<Root, Elem, Tag, R, Extra>;
             } & {
                 $push(value: Elem, when?: ApplyTiming): R;
-                $move(from: string | number, to: string | number, when?: ApplyTiming): R;
+                $move(move: ArrayMove, when?: ApplyTiming): R;
                 $reorder(indices: number[], when?: ApplyTiming): R;
             }
           : // 🔹 plain objects (including unions that are NOT tagged on Tag)
@@ -183,8 +185,6 @@ export type PatchBuilderInternal<
                       R,
                       Extra
                   >;
-              } & {
-                  $move(from: string | number, to: string | number, when?: ApplyTiming): R;
               } & (string extends keyof NonNullish<Current> // optional: index signatures (Record<string, V>)
                       ? {
                             [key: string]: PatchBuilderInternal<

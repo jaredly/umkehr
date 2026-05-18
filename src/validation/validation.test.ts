@@ -170,7 +170,37 @@ describe('patch validation', () => {
         }
     });
 
-    it('rejects incompatible moves', () => {
+    it('accepts array move patches', () => {
+        expect(
+            validator.is({
+                op: 'move',
+                path: [{type: 'key', key: 'items'}],
+                fromIdx: 0,
+                targetIdx: 1,
+                after: true,
+            }),
+        ).toBe(true);
+    });
+
+    it('rejects move patches whose path does not point to an array', () => {
+        const result = validator.validate({
+            op: 'move',
+            path: [{type: 'key', key: 'title'}],
+            fromIdx: 0,
+            targetIdx: 1,
+            after: false,
+        });
+
+        expect(result.success).toBe(false);
+        if (!result.success) {
+            expect(result.errors[0]).toMatchObject({
+                path: 'path',
+                expected: 'array',
+            });
+        }
+    });
+
+    it('rejects old path-to-path move patches', () => {
         const result = validator.validate({
             op: 'move',
             from: [{type: 'key', key: 'title'}],
@@ -179,7 +209,9 @@ describe('patch validation', () => {
 
         expect(result.success).toBe(false);
         if (!result.success) {
-            expect(result.errors[0].message).toContain('Move source is not compatible');
+            expect(result.errors[0]).toMatchObject({
+                path: 'fromIdx',
+            });
         }
     });
 });

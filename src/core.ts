@@ -4,6 +4,7 @@ export {
 } from './types.js';
 export type {
     AddOp,
+    ArrayMove,
     ApplyTiming,
     DraftPatch,
     MoveOp,

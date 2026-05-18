@@ -280,6 +280,165 @@ describe('crdt', () => {
         expect(receiver.state.todos).toEqual([{title: 'First', done: false}]);
     });
 
+    it('creates CRDT order updates for array moves', () => {
+        let doc = createDoc();
+        const appendSecond = createCrdtUpdates(
+            doc,
+            add(
+                [
+                    {type: 'key', key: 'todos'},
+                    {type: 'key', key: 1},
+                ],
+                {title: 'Second', done: false},
+            ),
+            '010',
+        )[0];
+        doc = applyCrdtUpdate(doc, appendSecond);
+        const appendThird = createCrdtUpdates(
+            doc,
+            add(
+                [
+                    {type: 'key', key: 'todos'},
+                    {type: 'key', key: 2},
+                ],
+                {title: 'Third', done: false},
+            ),
+            '020',
+        )[0];
+        doc = applyCrdtUpdate(doc, appendThird);
+
+        const updates = createCrdtUpdates(
+            doc,
+            {
+                op: 'move',
+                path: [{type: 'key', key: 'todos'}],
+                fromIdx: 0,
+                targetIdx: 2,
+                after: true,
+            },
+            '030',
+        );
+
+        expect(updates).toHaveLength(1);
+        expect(updates[0]).toMatchObject({op: 'setOrder'});
+        expect(Object.keys(updates[0].op === 'setOrder' ? updates[0].orders : {})).toHaveLength(1);
+
+        const result = applyCrdtUpdate(doc, updates[0]);
+        expect(result.state.todos.map((todo) => todo.title)).toEqual(['Second', 'Third', 'First']);
+    });
+
+    it('moves duplicate array values by CRDT item identity', () => {
+        let doc = createDoc();
+        const appendDuplicate = createCrdtUpdates(
+            doc,
+            add(
+                [
+                    {type: 'key', key: 'todos'},
+                    {type: 'key', key: 1},
+                ],
+                {title: 'First', done: true},
+            ),
+            '010',
+        )[0];
+        doc = applyCrdtUpdate(doc, appendDuplicate);
+        const appendThird = createCrdtUpdates(
+            doc,
+            add(
+                [
+                    {type: 'key', key: 'todos'},
+                    {type: 'key', key: 2},
+                ],
+                {title: 'Third', done: false},
+            ),
+            '020',
+        )[0];
+        doc = applyCrdtUpdate(doc, appendThird);
+
+        const move = createCrdtUpdates(
+            doc,
+            {
+                op: 'move',
+                path: [{type: 'key', key: 'todos'}],
+                fromIdx: 1,
+                targetIdx: 0,
+                after: false,
+            },
+            '030',
+        )[0];
+        const result = applyCrdtUpdate(doc, move);
+
+        expect(result.state.todos).toEqual([
+            {title: 'First', done: true},
+            {title: 'First', done: false},
+            {title: 'Third', done: false},
+        ]);
+    });
+
+    it('applies move updates on another replica with the same array item IDs', () => {
+        let author = createDoc();
+        const appendSecond = createCrdtUpdates(
+            author,
+            add(
+                [
+                    {type: 'key', key: 'todos'},
+                    {type: 'key', key: 1},
+                ],
+                {title: 'Second', done: false},
+            ),
+            '010',
+        )[0];
+        author = applyCrdtUpdate(author, appendSecond);
+        const appendThird = createCrdtUpdates(
+            author,
+            add(
+                [
+                    {type: 'key', key: 'todos'},
+                    {type: 'key', key: 2},
+                ],
+                {title: 'Third', done: false},
+            ),
+            '020',
+        )[0];
+        author = applyCrdtUpdate(author, appendThird);
+        const move = createCrdtUpdates(
+            author,
+            {
+                op: 'move',
+                path: [{type: 'key', key: 'todos'}],
+                fromIdx: 2,
+                targetIdx: 0,
+                after: false,
+            },
+            '030',
+        )[0];
+        author = applyCrdtUpdate(author, move);
+
+        let receiver = createDoc();
+        for (const update of [appendSecond, appendThird, move]) {
+            receiver = applyCrdtUpdate(receiver, update);
+        }
+
+        expect(receiver.state.todos).toEqual(author.state.todos);
+    });
+
+    it('rejects invalid CRDT move indexes', () => {
+        const doc = createDoc();
+
+        expect(() =>
+            createCrdtUpdates(
+                doc,
+                {
+                    op: 'move',
+                    path: [{type: 'key', key: 'todos'}],
+                    fromIdx: 2,
+                    targetIdx: 0,
+                    after: false,
+                },
+                '010',
+            ),
+        ).toThrow('Cannot create CRDT move update: fromIdx is out of range.');
+    });
+
     it('translates CRDT paths back to normal paths', () => {
         let doc = createDoc();
         const append = createCrdtUpdates(

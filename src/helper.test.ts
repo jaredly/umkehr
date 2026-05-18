@@ -30,18 +30,15 @@ describe('helper2 extr', () => {
 
 describe('helper2 move()', () => {
     it('reorders array items', () => {
-        const op = moveBuilder.items.$move(0, 2);
+        const op = moveBuilder.items.$move({fromIdx: 0, targetIdx: 2, after: true});
 
         expect(op).toMatchObject({
-            from: [
-                {type: 'key', key: 'items'},
-                {type: 'key', key: 0},
-            ],
+            op: 'move',
+            path: [{type: 'key', key: 'items'}],
+            fromIdx: 0,
+            targetIdx: 2,
+            after: true,
         });
-        expect(op.path).toEqual([
-            {type: 'key', key: 'items'},
-            {type: 'key', key: 2},
-        ]);
 
         const result = resolveAndApply<{items: string[]; map: Record<string, number>}, string>(
             {items: ['a', 'b', 'c'], map: {a: 1, b: 2}},
@@ -51,30 +48,6 @@ describe('helper2 move()', () => {
             cheapEqual,
         );
         expect(result.current.items).toEqual(['b', 'c', 'a']);
-    });
-
-    it('moves object keys', () => {
-        const op = moveBuilder.map.$move('a', 'c');
-
-        const result = resolveAndApply<{items: string[]; map: Record<string, number>}, string>(
-            {items: [], map: {a: 1, b: 2}},
-            op,
-            '',
-            'type',
-            cheapEqual,
-        );
-        expect(result.current.map).toEqual({b: 2, c: 1});
-        expect(result.changes[0]).toMatchObject({
-            op: 'move',
-            from: [
-                {type: 'key', key: 'map'},
-                {type: 'key', key: 'a'},
-            ],
-            path: [
-                {type: 'key', key: 'map'},
-                {type: 'key', key: 'c'},
-            ],
-        });
     });
 });
 

@@ -188,10 +188,12 @@ const $ = createPatchDispatcher<State, undefined, 'type'>(
 | `some.path.$add(value)` | Any path | Draft `add` |
 | `some.path.$remove()` | Any path | Draft `remove` |
 | `some.path.$push(value)` | Arrays | Draft `push`, realized as an `add` at the current array length |
-| `some.path.$move(from, to)` | Arrays and objects | Draft `move` within the current path |
+| `some.path.$move({fromIdx, targetIdx, after})` | Arrays | Draft array `move` within the current path |
 | `some.path.$reorder(indices)` | Arrays | Realized `reorder` using old indices in their new order |
 | `some.path.$variant(tag)` | Tagged unions | Refines the updater to one union arm |
 | `some.path.$variant(value, handlers)` | Tagged unions | Runs the handler for the active union arm |
+
+`$move({fromIdx: 0, targetIdx: 2, after: true})` changes `['a', 'b', 'c']` into `['b', 'c', 'a']`.
 
 `$reorder([2, 0, 1])` changes `['a', 'b', 'c']` into `['c', 'a', 'b']`.
 
@@ -367,7 +369,7 @@ Umkehr is intended for plain JSON-like data:
 | Equality | Defaults to `fast-deep-equal` in history and React helpers; lower-level APIs accept a custom equality function |
 | Paths | Structured `PathSegment[]`; no JSON Pointer strings |
 | Tagged unions | Supported through Umkehr-specific tag path segments |
-| CRDT behavior | Not supported |
+| CRDT behavior | Supported through `umkehr/crdt`; array `move` maps to stable item order updates |
 | Arbitrary object diffing | Not supported |
 
 ## Limitations

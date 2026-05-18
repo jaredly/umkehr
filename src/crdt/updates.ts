@@ -31,7 +31,7 @@ export function createCrdtUpdates<T>(
         case 'reorder':
             return [createReorderUpdate(doc, patch.path, patch.indices, ts)];
         case 'move':
-            throw new Error('CRDT updates do not support move. Use remove plus add instead.');
+            return createMoveUpdates(doc, patch.path, patch.fromIdx, patch.targetIdx, patch.after, ts);
     }
 }
 
@@ -98,6 +98,56 @@ function createReorderUpdate<T>(
         orders[id] = {value: order, ts};
     }
     return {op: 'setOrder', arrayPath, orders};
+}
+
+function createMoveUpdates<T>(
+    doc: CrdtDocument<T>,
+    path: Path,
+    fromIdx: number,
+    targetIdx: number,
+    after: boolean,
+    ts: HlcTimestamp,
+): CrdtUpdate[] {
+    const arrayPath = crdtPathForExisting(doc, path);
+    const meta = getMetaAtPath(doc.meta, arrayPath);
+    if (!meta || meta.kind !== 'array')
+        throw new Error('Cannot create CRDT move update: path is not an array.');
+    const live = liveArrayItems(meta);
+    if (!Number.isInteger(fromIdx)) {
+        throw new Error('Cannot create CRDT move update: fromIdx must be an integer.');
+    }
+    if (!Number.isInteger(targetIdx)) {
+        throw new Error('Cannot create CRDT move update: targetIdx must be an integer.');
+    }
+    if (typeof after !== 'boolean') {
+        throw new Error('Cannot create CRDT move update: after must be a boolean.');
+    }
+    if (fromIdx < 0 || fromIdx >= live.length) {
+        throw new Error('Cannot create CRDT move update: fromIdx is out of range.');
+    }
+    if (targetIdx < 0 || targetIdx >= live.length) {
+        throw new Error('Cannot create CRDT move update: targetIdx is out of range.');
+    }
+    if (fromIdx === targetIdx) return [];
+
+    const reordered = live.slice();
+    const [moved] = reordered.splice(fromIdx, 1);
+    if (!moved) return [];
+    const targetPosition = targetIdx > fromIdx ? targetIdx - 1 : targetIdx;
+    reordered.splice(targetPosition + (after ? 1 : 0), 0, moved);
+    const movedPostIdx = reordered.findIndex(([id]) => id === moved[0]);
+    const previous = reordered[movedPostIdx - 1]?.[1].order.value;
+    const next = reordered[movedPostIdx + 1]?.[1].order.value;
+
+    return [
+        {
+            op: 'setOrder',
+            arrayPath,
+            orders: {
+                [moved[0]]: {value: fractionalIndexBetween(previous, next), ts},
+            },
+        },
+    ];
 }
 
 function arrayAddTarget<T>(doc: CrdtDocument<T>, path: Path, ts: HlcTimestamp) {

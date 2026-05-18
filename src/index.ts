@@ -7,6 +7,7 @@ export {
     realizeDraftPatch,
     resolveAndApply,
     type ApplyTiming,
+    type ArrayMove,
     type MaybeNested,
     type Patch,
     type Path,

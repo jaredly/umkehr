@@ -15,9 +15,9 @@ The Todo app lives in `examples/react-crdt/src/apps/todos`.
 
 So reorder should be implemented in `TodoPanel.tsx` and remain runtime-agnostic.
 
-## Existing reorder support
+## Existing reorder/move support
 
-The core patch builder already exposes array reorder:
+The core patch builder currently exposes array reorder:
 
 ```ts
 editor.$.todos.$reorder(indices)
@@ -34,9 +34,15 @@ Relevant code:
 - `src/ops.ts` applies reorder by replacing the array with `indices.map((index) => value[index])`.
 - `src/crdt/updates.ts` translates reorder patches into CRDT `setOrder` updates.
 
-Important: `editor.$.todos.$move(from, to)` exists in the generic patch API, but CRDT update
-creation explicitly rejects `move` with `CRDT updates do not support move. Use remove plus add
-instead.` The Todo app should use `$reorder`, not `$move`.
+There is also a generic `$move(from, to)` API today, but CRDT update creation currently rejects
+`move`. Another agent is changing `$move` to support a drag/drop-friendly signature:
+
+```ts
+editor.$.todos.$move({fromIdx, targetIdx, after})
+```
+
+For the Todo work, assume that updated `$move` is the intended high-level array positioning API and
+that it will produce CRDT-compatible reorder semantics rather than remove/add semantics.
 
 ## CRDT behavior
 
@@ -48,116 +54,48 @@ CRDT arrays are stored as stable item IDs plus fractional order strings.
 - Undo/redo support tracks `setOrder` effects in local command history.
 - Local-first vector helpers already include `setOrder` timestamps.
 
-This means drag-to-reorder does not require a new replicated operation. It can be a UI feature that
-dispatches a normal reorder patch.
+This means drag-to-reorder should not require a new replicated operation. It can be a UI feature
+that dispatches the updated `$move({fromIdx, targetIdx, after})`, provided that the core `$move`
+change lowers array moves to the existing CRDT `setOrder` behavior.
 
 One caveat: current `createReorderUpdate` assigns fresh order strings to every live item in the
 array, not only the dragged item. That is simple and already tested, but it means every reorder
 touches all live items. For the small Todo demo that is acceptable.
 
-## Recommended API extension
+## Expected `$move` API
 
-The current `$reorder(indices)` API is correct but awkward for drag/drop. A drag interaction usually
-produces:
-
-```ts
-{idx: number; targetIdx: number; after: boolean}
-```
-
-That means "move the item currently at `idx` before or after the item currently at `targetIdx`."
-This is a better app-facing form than asking every UI to build a full permutation.
-
-Recommended type shape:
+The Todo implementation should use the new object-form `$move` API:
 
 ```ts
-type ReorderMove = {
-    idx: number;
-    targetIdx: number;
-    after: boolean;
-};
-
-type ReorderSpec = number[] | ReorderMove;
+editor.$.todos.$move({fromIdx, targetIdx, after})
 ```
 
-Then expose:
+Semantics:
 
-```ts
-editor.$.todos.$reorder(indices)
-editor.$.todos.$reorder({idx, targetIdx, after})
-```
-
-Internally, normalize the object form to the existing full `indices` permutation during draft
-realization in `src/make.ts`. That keeps the realized `Patch` shape unchanged:
-
-```ts
-{op: 'reorder', path, indices: number[]}
-```
-
-Keeping realized patches in the old form has several advantages:
-
-- `ops.apply`, `ops.invert`, history, and CRDT update creation can remain unchanged.
-- Validation of replicated/raw patches can continue to require `indices: number[]`.
-- The object form is limited to the patch builder/draft convenience layer.
-- Undo/redo remains based on the canonical permutation.
-
-Normalization helper:
-
-```ts
-function reorderMoveToIndices(length: number, move: ReorderMove): number[] {
-    const {idx, targetIdx, after} = move;
-    if (
-        !Number.isInteger(idx) ||
-        !Number.isInteger(targetIdx) ||
-        idx < 0 ||
-        targetIdx < 0 ||
-        idx >= length ||
-        targetIdx >= length
-    ) {
-        throw new Error('Cannot reorder: idx and targetIdx must point at array items.');
-    }
-    if (idx === targetIdx) return Array.from({length}, (_, index) => index);
-
-    const indices = Array.from({length}, (_, index) => index);
-    const [moved] = indices.splice(idx, 1);
-    const targetPosition = indices.indexOf(targetIdx);
-    indices.splice(targetPosition + (after ? 1 : 0), 0, moved);
-    return indices;
-}
-```
+- `fromIdx`: current index of the dragged item.
+- `targetIdx`: current index of the row being targeted.
+- `after`: whether the dragged item should land after the target row. If false, it lands before the
+  target row.
 
 Examples for `[A, B, C, D]`:
 
-- `{idx: 1, targetIdx: 2, after: true}` -> `[0, 2, 1, 3]` -> `[A, C, B, D]`
-- `{idx: 3, targetIdx: 0, after: false}` -> `[3, 0, 1, 2]` -> `[D, A, B, C]`
-- `{idx: 1, targetIdx: 2, after: false}` is a no-op in visible order because `B` is already before
-  `C`; it can normalize to identity or the equivalent unchanged permutation.
+- `{fromIdx: 1, targetIdx: 2, after: true}` moves `B` after `C`, yielding `[A, C, B, D]`.
+- `{fromIdx: 3, targetIdx: 0, after: false}` moves `D` before `A`, yielding `[D, A, B, C]`.
+- `{fromIdx: 1, targetIdx: 2, after: false}` is a visible no-op because `B` is already before `C`.
 
-Files that would need code changes:
-
-- `src/types.ts`: add `ReorderMove`/`ReorderSpec`, make draft reorder accept `ReorderSpec`, and make
-  `$reorder` accept `ReorderSpec`.
-- `src/helper.ts`: pass the argument as a reorder spec instead of assuming `indices`.
-- `src/make.ts`: normalize object specs to canonical `indices: number[]` and keep existing
-  permutation validation.
-- `src/helper.test.ts` / `src/core.test.ts`: cover object-form reorder and no-op/invalid cases.
-
-Open design point: whether the public `ReorderOp` type should also accept the object form. My
-recommendation is no: keep `ReorderOp` canonical and add a separate draft-only type. That prevents
-raw patches, validation, persistence, and CRDT replication from gaining a second semantic encoding.
+Todo should not implement its own full-permutation reorder helper unless the `$move` core work is
+not available when this task is implemented.
 
 ## Recommended Todo implementation
 
-Use a small focused drag implementation in `TodoPanel.tsx`, backed by `$reorder`.
+Use a small focused drag implementation in `TodoPanel.tsx`, backed by the updated `$move` API.
 
 Recommended behavior:
 
 1. Track the dragged todo by stable `todo.id`, not by the starting index alone.
 2. Track the current drop target index while dragging.
 3. On drop, read the latest `todos` array from the current render and find both indexes by ID.
-4. Call `editor.$.todos.$reorder({idx, targetIdx, after})` only when the resulting order differs.
-
-If the core API extension is not implemented first, Todo can use a local helper to convert the same
-object shape into the existing full permutation and call `editor.$.todos.$reorder(indices)`.
+4. Call `editor.$.todos.$move({fromIdx, targetIdx, after})` only when the resulting order differs.
 
 ## UI approach
 
@@ -190,7 +128,7 @@ Low-cost option:
 
 - Add up/down buttons in `itemActions`.
 - Disable "move up" on the first item and "move down" on the last item.
-- Implement them with the same permutation helper and `$reorder`.
+- Implement them with `$move({fromIdx, targetIdx, after})`.
 
 This also gives a useful fallback for touch/mobile browsers, where native HTML drag events can be
 inconsistent.
@@ -199,9 +137,9 @@ inconsistent.
 
 Recommended tests if implementing this:
 
-- Add a focused unit test for the permutation helper if it is extracted.
-- Add or extend CRDT tests only if changing `createReorderUpdate`; pure UI work should not need CRDT
-  core changes.
+- Add UI-level tests only if this example has an established UI test harness.
+- Add or extend core tests in the `$move` task, not in the Todo task, to verify that object-form
+  array moves produce CRDT-compatible reorder behavior.
 - Run `pnpm --dir examples/react-crdt build` to typecheck and build the demo.
 - Manual smoke test in the local app:
   - reorder in solo/history mode;
@@ -218,9 +156,8 @@ Recommended tests if implementing this:
   this is intended as a polished example, no if the goal is only to exercise CRDT reorder.
 - Should touch/mobile reorder be supported now? Native HTML drag is not a great mobile story; a
   library such as `@dnd-kit` would be better if mobile is important.
-- Should `$reorder({idx, targetIdx, after})` be accepted only as a draft-builder convenience, or as
-  a persisted/raw `ReorderOp` too? Recommendation: draft-builder only; canonical patches should
-  still use `indices`.
+- Will the new `$move({fromIdx, targetIdx, after})` API be available before Todo reorder work starts?
+  If not, Todo should wait rather than adding a temporary local `$reorder` adapter.
 - Is touching every item order on each reorder acceptable long term? It is fine for the Todo demo,
   but a larger app might want a CRDT helper that only changes the moved item's fractional index.
 - Should reordering be disabled while a title input is being edited? Recommendation: keep the drag

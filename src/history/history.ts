@@ -54,7 +54,6 @@ const changedPaths = (changes: Patch<unknown>[]) => {
     const paths: Path[] = [];
     changes.forEach((op) => {
         paths.push(op.path);
-        if (op.op === 'move') paths.push(op.from);
     });
     return paths;
 };

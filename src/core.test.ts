@@ -131,6 +131,72 @@ describe('core operations', () => {
         });
         expect(restored).toEqual(initialState);
     });
+
+    it('moves array items before or after the target index', () => {
+        expect(
+            resolveAndApply(
+                initialState,
+                builder.items.$move({fromIdx: 0, targetIdx: 2, after: true}),
+                null,
+                'type',
+                cheapEqual,
+            ).current.items,
+        ).toEqual(['b', 'c', 'a']);
+        expect(
+            resolveAndApply(
+                initialState,
+                builder.items.$move({fromIdx: 0, targetIdx: 2, after: false}),
+                null,
+                'type',
+                cheapEqual,
+            ).current.items,
+        ).toEqual(['b', 'a', 'c']);
+        expect(
+            resolveAndApply(
+                initialState,
+                builder.items.$move({fromIdx: 2, targetIdx: 0, after: false}),
+                null,
+                'type',
+                cheapEqual,
+            ).current.items,
+        ).toEqual(['c', 'a', 'b']);
+        expect(
+            resolveAndApply(
+                initialState,
+                builder.items.$move({fromIdx: 2, targetIdx: 0, after: true}),
+                null,
+                'type',
+                cheapEqual,
+            ).current.items,
+        ).toEqual(['a', 'c', 'b']);
+    });
+
+    it('inverts array moves', () => {
+        const result = resolveAndApply(
+            initialState,
+            builder.items.$move({fromIdx: 2, targetIdx: 0, after: false}),
+            null,
+            'type',
+            cheapEqual,
+        );
+        const restored = applyChanges(result.current, result.changes.toReversed().map(ops.invert));
+
+        expect(result.current.items).toEqual(['c', 'a', 'b']);
+        expect(restored).toEqual(initialState);
+    });
+
+    it('moves duplicate array values by index', () => {
+        const state = {...initialState, items: ['a', 'b', 'a', 'c']};
+        const result = resolveAndApply(
+            state,
+            builder.items.$move({fromIdx: 2, targetIdx: 0, after: true}),
+            null,
+            'type',
+            cheapEqual,
+        );
+
+        expect(result.current.items).toEqual(['a', 'a', 'b', 'c']);
+    });
 });
 
 describe('core failure behavior', () => {
@@ -166,8 +232,14 @@ describe('core failure behavior', () => {
 
     it('rejects moves from missing paths', () => {
         expect(() =>
-            resolveAndApply(initialState, builder.items.$move(8, 0), null, 'type', cheapEqual),
-        ).toThrow('Cannot remove "items/8": key does not exist.');
+            resolveAndApply(
+                initialState,
+                builder.items.$move({fromIdx: 8, targetIdx: 0, after: false}),
+                null,
+                'type',
+                cheapEqual,
+            ),
+        ).toThrow('Cannot move in "items": fromIdx is out of range.');
     });
 
     it('rejects realized replace operations when the previous value does not match', () => {

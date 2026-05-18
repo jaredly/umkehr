@@ -57,7 +57,7 @@ Important runtime details:
 - Calling a builder node as a function is shorthand for `$replace(...)`.
 - Passing a function to a builder node creates a `nested` draft update.
 - `$variant(value)` adds a tag path segment.
-- `$move(from, to)` creates a sibling move by appending key segments under the current path.
+- `$move({fromIdx, targetIdx, after})` creates an array-local move at the current path.
 - Numeric-looking property names are normalized to numbers so array paths use numeric indices.
 - `createPatchDispatcher(...)` is the underlying primitive. The React bindings use it to dispatch immediately instead of returning drafts.
 
@@ -90,7 +90,7 @@ Patch application lives in two layers:
 - `add` inserts into arrays or assigns missing object keys;
 - `replace` requires `previous` to match the current value;
 - `remove` requires the expected removed value to match;
-- `move` reads from `from`, removes it, then adds it at `path`;
+- `move` reorders one array item before or after another index at `path`;
 - `reorder` replaces an array with a permutation.
 
 The low-level helpers clone only changed ancestors. Unchanged branches retain reference identity, which is important for React path subscriptions and general performance.
@@ -138,7 +138,7 @@ Important behavior to preserve:
 - CRDT updates are timestamped and last-writer-wins at each metadata node.
 - Deletions leave tombstones so older or out-of-order updates can be discarded correctly.
 - Array inserts use stable item ids and fractional order values instead of numeric indices.
-- `move` is intentionally not translated to a CRDT update; use remove plus add when CRDT sync is involved.
+- Array `move` translates to a narrow `setOrder` update for the moved item.
 - Remote updates apply to the CRDT document but do not enter local undo/redo history.
 - Undo and redo generate fresh CRDT updates only when the recorded local effects are still applicable.
 - Pending remote updates should stay queued only while a missing parent, missing tag branch, or future incarnation can still arrive.
@@ -197,7 +197,7 @@ The validator checks:
 - path legality against the schema;
 - `value` and `previous` payloads at the target path;
 - tagged-union path segments;
-- `move` source/destination compatibility;
+- `move` array targets;
 - `reorder` targets.
 
 It does not validate a whole history object and it does not prove state-level preconditions like `replace.previous` matching the current state. Callers that persist a full history should validate the history envelope themselves, validate states with typia, and validate stored patches with `createPatchValidator`.

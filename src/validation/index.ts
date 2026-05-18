@@ -102,8 +102,27 @@ function validateEnvelope(input: unknown): PatchValidationResult<unknown> {
                 return fail(input, {path: 'previous', message: '"replace" requires previous.'});
             break;
         case 'move': {
-            const fromIssue = validatePathEnvelope(input.from, 'from');
-            if (fromIssue) return fail(input, fromIssue);
+            if (!Number.isInteger(input.fromIdx)) {
+                return fail(input, {
+                    path: 'fromIdx',
+                    message: '"move" requires integer fromIdx.',
+                    value: input.fromIdx,
+                });
+            }
+            if (!Number.isInteger(input.targetIdx)) {
+                return fail(input, {
+                    path: 'targetIdx',
+                    message: '"move" requires integer targetIdx.',
+                    value: input.targetIdx,
+                });
+            }
+            if (typeof input.after !== 'boolean') {
+                return fail(input, {
+                    path: 'after',
+                    message: '"move" requires boolean after.',
+                    value: input.after,
+                });
+            }
             break;
         }
         case 'reorder':
@@ -150,14 +169,11 @@ function validatePatchSchema(patch: Patch<unknown>, root: Schema, components: Co
             pushValueErrors(errors, components, pathTarget.schema, patch.value, at('value'));
             break;
         case 'move': {
-            const fromTarget = walkPath(root, patch.from, components, 'from');
-            if (!fromTarget.ok) {
-                errors.push(fromTarget.issue);
-            } else if (!schemaCovers(components, pathTarget.schema, fromTarget.schema)) {
+            if (!isArrayLike(components, pathTarget.schema)) {
                 errors.push({
-                    path: 'from',
-                    message: `Move source is not compatible with destination "${pathToIssuePath(patch.path)}".`,
-                    expected: describeSchema(pathTarget.schema),
+                    path: 'path',
+                    message: `Move path "${pathToIssuePath(patch.path)}" must point to an array.`,
+                    expected: 'array',
                 });
             }
             break;

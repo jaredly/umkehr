@@ -17,8 +17,32 @@ export function realizeDraftPatch<T, V, Tag extends PropertyKey, Extra>(
             }
             return draft;
         }
-        case 'move':
+        case 'move': {
+            const arr = _get(base, draft.path);
+            if (!Array.isArray(arr)) {
+                throw new Error(`Cannot move in "${describePath(draft.path)}": value is not an array.`);
+            }
+            if (!Number.isInteger(draft.fromIdx)) {
+                throw new Error(`Cannot move in "${describePath(draft.path)}": fromIdx must be an integer.`);
+            }
+            if (!Number.isInteger(draft.targetIdx)) {
+                throw new Error(
+                    `Cannot move in "${describePath(draft.path)}": targetIdx must be an integer.`,
+                );
+            }
+            if (typeof draft.after !== 'boolean') {
+                throw new Error(`Cannot move in "${describePath(draft.path)}": after must be a boolean.`);
+            }
+            if (draft.fromIdx < 0 || draft.fromIdx >= arr.length) {
+                throw new Error(`Cannot move in "${describePath(draft.path)}": fromIdx is out of range.`);
+            }
+            if (draft.targetIdx < 0 || draft.targetIdx >= arr.length) {
+                throw new Error(
+                    `Cannot move in "${describePath(draft.path)}": targetIdx is out of range.`,
+                );
+            }
             return draft;
+        }
         case 'replace': {
             const prev = _get(base, draft.path);
             if (prev === undefined) {
