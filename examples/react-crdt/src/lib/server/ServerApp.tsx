@@ -179,6 +179,7 @@ function ServerReadyApp<TState>({
                     initial={currentHistory}
                     transport={sync.transport}
                     save={sync.saveHistory}
+                    statuses={sync.statusStore}
                 >
                     <ServerDocument app={app} runtime={runtime} actor={loaded.identity.actor} />
                 </Provider>

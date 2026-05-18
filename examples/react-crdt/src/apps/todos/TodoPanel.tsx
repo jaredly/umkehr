@@ -9,7 +9,11 @@ import {
     type PointerEvent as ReactPointerEvent,
 } from 'react';
 import {useValue} from 'umkehr/react';
+import {useStatuses} from 'umkehr/react-crdt';
 import type {AppEditorContext, GridSlot} from '../../lib/crdtApp';
+import {initialForNickname, lastEditStatusKind} from '../../lib/server/presence';
+import type {ServerLastEditStatusData} from '../../lib/server/types';
+import {formatTodoTitleBlame, titleBlameForTodo} from './blame';
 import type {Todo, TodoState} from './model';
 
 const pastelColors = ['#fff', '#fce7f3', '#dbeafe', '#dcfce7', '#fef3c7', '#ede9fe'] as const;
@@ -291,6 +295,18 @@ function TodoItem({
     registerRow(id: string, element: HTMLLIElement | null): void;
 }) {
     const [editingTitle, setEditingTitle] = useState<null | string>(null);
+    const presenceStatuses = useStatuses(editor.$.todos[index], {
+        kinds: [lastEditStatusKind],
+    });
+    const crdtHistory =
+        'useLocalHistory' in editor && typeof editor.useLocalHistory === 'function'
+            ? editor.useLocalHistory()
+            : null;
+    const titleBlame = crdtHistory ? titleBlameForTodo(crdtHistory, index) : null;
+    const titleTooltip = formatTodoTitleBlame(titleBlame);
+    const cursors = presenceStatuses
+        .map((status) => status.data)
+        .filter(isLastEditStatusData);
 
     const commit = () => {
         if (editingTitle === null) return;
@@ -313,7 +329,11 @@ function TodoItem({
         .join(' ');
 
     return (
-        <li ref={(element) => registerRow(todo.id, element)} className={className}>
+        <li
+            ref={(element) => registerRow(todo.id, element)}
+            className={className}
+            title={titleTooltip}
+        >
             {editingTitle === null ? (
                 <button
                     type="button"
@@ -352,6 +372,20 @@ function TodoItem({
                 )}
             </label>
             <div className="itemActions">
+                {cursors.length ? (
+                    <div className="presenceCursorStack" aria-label="Recent editors">
+                        {cursors.map((cursor) => (
+                            <span
+                                key={cursor.actor}
+                                className="presenceCursor"
+                                style={{backgroundColor: cursor.color}}
+                                title={`${cursor.nickname} edited this todo`}
+                            >
+                                {initialForNickname(cursor.nickname)}
+                            </span>
+                        ))}
+                    </div>
+                ) : null}
                 <button type="button" onClick={() => setEditingTitle(todo.title)}>
                     Edit
                 </button>
@@ -360,5 +394,19 @@ function TodoItem({
                 </button>
             </div>
         </li>
+    );
+}
+
+function isLastEditStatusData(value: unknown): value is ServerLastEditStatusData {
+    return (
+        typeof value === 'object' &&
+        value !== null &&
+        'actor' in value &&
+        'userId' in value &&
+        'sessionId' in value &&
+        'nickname' in value &&
+        'color' in value &&
+        'timestamp' in value &&
+        'receivedAt' in value
     );
 }

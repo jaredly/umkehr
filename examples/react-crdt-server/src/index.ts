@@ -5,7 +5,7 @@ import {
     parseSessionActor,
 } from './protocol';
 import {ServerStore} from './store';
-import type {ConnectedClient, ServerLogEntry} from './types';
+import type {ConnectedClient, ServerLogEntry, ServerPresenceSession, ServerPresenceUser} from './types';
 
 export const PORT = 8787;
 
@@ -84,11 +84,35 @@ const server = Bun.serve<ClientData>({
                     ws.close();
                     return;
                 }
-                store.ensureDocument(parsed.docId, parsed.schemaFingerprint);
                 ws.data.actor = parsed.actor;
                 ws.data.userId = parsed.userId;
                 ws.data.sessionId = actor.sessionId;
                 ws.data.docId = parsed.docId;
+
+                if (parsed.kind === 'presenceHello') {
+                    const user = store.getUserById(parsed.userId);
+                    if (!user) {
+                        send(ws, {
+                            kind: 'error',
+                            version: SERVER_PROTOCOL_VERSION,
+                            message: 'Unknown user.',
+                        });
+                        return;
+                    }
+                    ws.data.nickname = user.nickname;
+                    ws.data.color = parsed.color;
+                    ws.data.presenceReady = true;
+                    send(ws, {
+                        kind: 'presenceSnapshot',
+                        version: SERVER_PROTOCOL_VERSION,
+                        docId: parsed.docId,
+                        users: presenceUsersForDoc(parsed.docId, parsed.actor),
+                    });
+                    broadcastPresenceUpdate(parsed.docId, parsed.actor, parsed.userId);
+                    return;
+                }
+
+                store.ensureDocument(parsed.docId, parsed.schemaFingerprint);
                 ws.data.schemaFingerprint = parsed.schemaFingerprint;
 
                 if (parsed.kind === 'hello') {
@@ -131,6 +155,13 @@ const server = Bun.serve<ClientData>({
         },
         close(ws) {
             clients.delete(ws);
+            if (ws.data.presenceReady && ws.data.docId && ws.data.actor && ws.data.userId && ws.data.sessionId) {
+                broadcastPresenceLeave(ws.data.docId, {
+                    actor: ws.data.actor,
+                    userId: ws.data.userId,
+                    sessionId: ws.data.sessionId,
+                });
+            }
         },
     },
 });
@@ -141,8 +172,11 @@ type ClientData = {
     actor?: string;
     userId?: string;
     sessionId?: string;
+    nickname?: string;
+    color?: string;
     docId?: string;
     schemaFingerprint?: string;
+    presenceReady?: boolean;
 };
 
 type ServerWebSocket = Bun.ServerWebSocket<ClientData>;
@@ -183,6 +217,79 @@ function broadcast(entry: ServerLogEntry, origin: string) {
     }
 }
 
+function presenceUsersForDoc(docId: string, excludeActor?: string): ServerPresenceUser[] {
+    const byUser = new Map<string, ServerPresenceUser>();
+    for (const client of clients) {
+        const {actor, userId, sessionId, nickname, color} = client.data;
+        if (
+            !client.data.presenceReady ||
+            client.data.docId !== docId ||
+            !actor ||
+            !userId ||
+            !sessionId ||
+            !nickname ||
+            !color ||
+            actor === excludeActor
+        ) {
+            continue;
+        }
+        const session: ServerPresenceSession = {
+            actor,
+            userId,
+            sessionId,
+            nickname,
+            color,
+            online: true,
+            lastSeenAt: new Date().toISOString(),
+        };
+        const existing = byUser.get(userId);
+        if (existing) {
+            existing.sessions.push(session);
+        } else {
+            byUser.set(userId, {userId, nickname, color, sessions: [session]});
+        }
+    }
+    return [...byUser.values()].sort((a, b) =>
+        a.nickname.localeCompare(b.nickname, undefined, {sensitivity: 'base'}),
+    );
+}
+
+function broadcastPresenceUpdate(docId: string, originActor: string, userId: string) {
+    const [user] = presenceUsersForDoc(docId).filter((presence) => presence.userId === userId);
+    if (!user) return;
+    for (const client of clients) {
+        if (client.data.docId !== docId) continue;
+        if (client.data.actor === originActor) continue;
+        if (!client.data.presenceReady) continue;
+        send(client, {
+            kind: 'presenceUpdate',
+            version: SERVER_PROTOCOL_VERSION,
+            docId,
+            user,
+        });
+    }
+}
+
+function broadcastPresenceLeave(
+    docId: string,
+    leaving: {actor: string; userId: string; sessionId: string},
+) {
+    const at = new Date().toISOString();
+    for (const client of clients) {
+        if (client.data.docId !== docId) continue;
+        if (!client.data.presenceReady) continue;
+        send(client, {
+            kind: 'presenceLeave',
+            version: SERVER_PROTOCOL_VERSION,
+            docId,
+            actor: leaving.actor,
+            userId: leaving.userId,
+            sessionId: leaving.sessionId,
+            at,
+        });
+    }
+}
+
 function debugHtml() {
     const documents = store.summarizeDocuments();
     const users = store.listUsers();
@@ -191,7 +298,10 @@ function debugHtml() {
         actor: client.data.actor,
         userId: client.data.userId,
         sessionId: client.data.sessionId,
+        nickname: client.data.nickname,
+        color: client.data.color,
         docId: client.data.docId,
+        presenceReady: client.data.presenceReady,
     }));
     return `<!doctype html>
 <html>
@@ -230,12 +340,14 @@ function debugHtml() {
   <section>
     <h2>Connected clients</h2>
     ${table(
-        ['User', 'Session', 'Actor', 'Doc'],
+        ['User', 'Nickname', 'Session', 'Actor', 'Doc', 'Presence'],
         connected.map((client) => [
             client.userId ?? '',
+            client.nickname ?? '',
             client.sessionId ?? '',
             client.actor ?? '',
             client.docId ?? '',
+            client.presenceReady ? 'yes' : '',
         ]),
     )}
   </section>

@@ -1,5 +1,13 @@
 import {useCallback, useEffect, useMemo, useRef} from 'react';
-import {hlc, latestCrdtUpdateTimestamp, type CrdtLocalHistory, type CrdtUpdate} from 'umkehr/crdt';
+import {
+    applyRemoteHistoryUpdate,
+    changedNormalPathsForCrdtUpdate,
+    hlc,
+    latestCrdtUpdateTimestamp,
+    type CrdtLocalHistory,
+    type CrdtUpdate,
+} from 'umkehr/crdt';
+import {createStatusStore} from 'umkehr/react-crdt';
 import {createExternalStore} from '../store';
 import {
     SERVER_PROTOCOL_VERSION,
@@ -10,9 +18,19 @@ import {
 } from './protocol';
 import {parseSessionActor} from './session';
 import {saveServerReplica, sortServerChanges} from './persistence';
+import {
+    collapsePathToTodoRow,
+    colorForUserId,
+    lastEditStatusId,
+    presenceSessionForActor,
+    sanitizePresenceUsers,
+    statusForLastEdit,
+    upsertPresenceUser,
+} from './presence';
 import type {
     PersistedServerReplica,
     ServerChange,
+    ServerPresenceUser,
     ServerSessionIdentity,
     ServerSync,
     ServerSyncState,
@@ -44,6 +62,7 @@ export function useServerSync<TState>({
     const changesRef = useRef(sortServerChanges(initialChanges));
     const socketRef = useRef<WebSocket | null>(null);
     const reconnectTimerRef = useRef<number | undefined>(undefined);
+    const statusTimersRef = useRef(new Map<string, number>());
     const manualOfflineRef = useRef(false);
     const listenersRef = useRef(new Set<(update: CrdtUpdate) => void>());
     const clockRef = useRef(initialClock(identity.actor, changesRef.current));
@@ -58,6 +77,8 @@ export function useServerSync<TState>({
         [],
     );
     const changesStore = useMemo(() => createExternalStore<ServerChange[]>(changesRef.current), []);
+    const presenceStore = useMemo(() => createExternalStore<ServerPresenceUser[]>([]), []);
+    const statusStore = useMemo(() => createStatusStore(), []);
     const manualOfflineStore = useMemo(() => createExternalStore(false), []);
 
     const persist = useCallback(async () => {
@@ -123,6 +144,76 @@ export function useServerSync<TState>({
         });
     }, [docId, identity.actor, identity.user.userId, schemaFingerprint, send]);
 
+    const sendPresenceHello = useCallback(() => {
+        send({
+            kind: 'presenceHello',
+            version: SERVER_PROTOCOL_VERSION,
+            actor: identity.actor,
+            userId: identity.user.userId,
+            docId,
+            color: colorForUserId(identity.user.userId),
+        });
+    }, [docId, identity.actor, identity.user.userId, send]);
+
+    const clearLastEditStatus = useCallback(
+        (actor: string) => {
+            const timer = statusTimersRef.current.get(actor);
+            if (timer !== undefined) {
+                window.clearTimeout(timer);
+                statusTimersRef.current.delete(actor);
+            }
+            statusStore.clear(lastEditStatusId(actor));
+        },
+        [statusStore],
+    );
+
+    const scheduleLastEditStatusClear = useCallback(
+        (actor: string) => {
+            const existing = statusTimersRef.current.get(actor);
+            if (existing !== undefined) window.clearTimeout(existing);
+            const timer = window.setTimeout(() => {
+                statusTimersRef.current.delete(actor);
+                statusStore.clear(lastEditStatusId(actor));
+            }, 60_000);
+            statusTimersRef.current.set(actor, timer);
+        },
+        [statusStore],
+    );
+
+    const clearPresenceState = useCallback(() => {
+        presenceStore.setSnapshot([]);
+        for (const timer of statusTimersRef.current.values()) {
+            window.clearTimeout(timer);
+        }
+        statusTimersRef.current.clear();
+        statusStore.clearAll();
+    }, [presenceStore, statusStore]);
+
+    const recordRemoteLastEdit = useCallback(
+        (entry: ServerLogEntry) => {
+            const session = presenceSessionForActor(presenceStore.getSnapshot(), entry.origin);
+            if (!session) return;
+            const before = historyRef.current.doc;
+            const preview = applyRemoteHistoryUpdate(historyRef.current, entry.update);
+            const changedPaths = changedNormalPathsForCrdtUpdate(before, preview.doc, entry.update);
+            const rowPath = changedPaths
+                ?.toReversed()
+                .map(collapsePathToTodoRow)
+                .find((path) => path !== null);
+            if (!rowPath) return;
+            statusStore.add([
+                statusForLastEdit({
+                    path: rowPath,
+                    session,
+                    timestamp: entry.hlcTimestamp,
+                    receivedAt: entry.receivedAt,
+                }),
+            ]);
+            scheduleLastEditStatusClear(entry.origin);
+        },
+        [presenceStore, scheduleLastEditStatusClear, statusStore],
+    );
+
     const receiveServerEntries = useCallback(
         async (entries: ServerLogEntry[]) => {
             let changed = false;
@@ -145,6 +236,7 @@ export function useServerSync<TState>({
                         receivedAt: entry.receivedAt,
                     },
                 ]);
+                recordRemoteLastEdit(entry);
                 transport.receive(entry.update);
                 changed = true;
             }
@@ -152,7 +244,7 @@ export function useServerSync<TState>({
                 await persist();
             }
         },
-        [docId, identity.actor, persist],
+        [docId, identity.actor, persist, recordRemoteLastEdit],
     );
 
     const markAcknowledged = useCallback(
@@ -188,6 +280,7 @@ export function useServerSync<TState>({
                 schemaFingerprint,
                 lastSeenMessageIndex: lastSeenRef.current,
             });
+            sendPresenceHello();
             flushPending();
         });
 
@@ -208,11 +301,35 @@ export function useServerSync<TState>({
                 void markAcknowledged(parsed.hlcTimestamp).then(flushPending);
             } else if (parsed.kind === 'error') {
                 stateStore.setSnapshot({kind: 'error', message: parsed.message});
+            } else if (parsed.kind === 'presenceSnapshot') {
+                presenceStore.setSnapshot(sanitizePresenceUsers(parsed.users, identity.actor));
+            } else if (parsed.kind === 'presenceUpdate') {
+                presenceStore.setSnapshot(
+                    upsertPresenceUser(
+                        presenceStore.getSnapshot(),
+                        parsed.user,
+                        identity.actor,
+                    ),
+                );
+            } else if (parsed.kind === 'presenceLeave') {
+                presenceStore.setSnapshot(
+                    presenceStore
+                        .getSnapshot()
+                        .map((user) => ({
+                            ...user,
+                            sessions: user.sessions.filter(
+                                (session) => session.actor !== parsed.actor,
+                            ),
+                        }))
+                        .filter((user) => user.sessions.length > 0),
+                );
+                clearLastEditStatus(parsed.actor);
             }
         });
 
         socket.addEventListener('close', () => {
             if (socketRef.current === socket) socketRef.current = null;
+            clearPresenceState();
             if (manualOfflineRef.current) {
                 stateStore.setSnapshot({kind: 'offline', reason: 'manual'});
                 return;
@@ -228,9 +345,13 @@ export function useServerSync<TState>({
     }, [
         docId,
         flushPending,
+        sendPresenceHello,
         identity.actor,
         identity.user.userId,
+        clearLastEditStatus,
+        clearPresenceState,
         markAcknowledged,
+        presenceStore,
         receiveServerEntries,
         requestSync,
         schema,
@@ -314,8 +435,9 @@ export function useServerSync<TState>({
         return () => {
             window.clearTimeout(reconnectTimerRef.current);
             socketRef.current?.close();
+            clearPresenceState();
         };
-    }, [connect]);
+    }, [clearPresenceState, connect]);
 
     return {
         transport,
@@ -323,6 +445,8 @@ export function useServerSync<TState>({
         stateStore,
         statsStore,
         changesStore,
+        presenceStore,
+        statusStore,
         manualOfflineStore,
         setManualOffline,
         requestSync,

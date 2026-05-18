@@ -29,6 +29,7 @@ import {
     type ScheduledTask,
 } from '../react-core/index.js';
 import {useLatest} from './useLatest.js';
+import {createStatusStore, type StatusStore} from '../statuses.js';
 
 export {useStatusesFromStore, useValue};
 export type {Context};
@@ -48,6 +49,7 @@ type ContextBase<T, Change, Tag extends string> = {
     listenersByPath: PathListenerNode;
     queuedChanges: QueuedChanges<Change, Tag>;
     previewPaths: Record<string, Path>;
+    statuses: StatusStore;
 };
 
 type ContextHistory = {
@@ -82,6 +84,7 @@ const makeHistoryProvider = <T, An, Tag extends string = 'type'>(
             historyUp: [],
             queuedChanges: [],
             previewPaths: {},
+            statuses: createStatusStore(),
         });
         useEffect(() => {
             if (initial !== value.current.state) {
@@ -115,6 +118,7 @@ const makeProvider = <T, Tag extends string = 'type'>(
             listenersByPath: makePathListenerNode(),
             queuedChanges: [],
             previewPaths: {},
+            statuses: createStatusStore(),
         });
         useEffect(() => {
             if (initial !== value.current.state) {
@@ -217,7 +221,11 @@ const makeDispatch = <T, Tag extends string = 'type'>(
     equalFn: EqualFn = equal,
 ) => {
     // const inner = ctx;
-    const extra = makeContextForPath(() => ctx.previewState ?? ctx.state, ctx.listenersByPath);
+    const extra = makeContextForPath(
+        () => ctx.previewState ?? ctx.state,
+        ctx.listenersByPath,
+        () => ctx.statuses,
+    );
     const go = (v: MaybeNested<DraftPatch<T, Tag, Context>>, when?: ApplyTiming) => {
         if (when === 'preview') {
             ctx.queuedChanges.push(...(asFlat(v) as DraftPatch<T, Tag, Context>[]));
@@ -283,6 +291,7 @@ const makeHistoryDispatch = <T, An, Tag extends string = 'type'>(
     const extra = makeContextForPath(
         () => ctx.previewState?.current ?? ctx.state.current,
         ctx.listenersByPath,
+        () => ctx.statuses,
     );
     const go = (
         v:

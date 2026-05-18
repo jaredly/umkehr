@@ -16,6 +16,7 @@ import {
 } from 'umkehr/crdt';
 import type {Context} from 'umkehr/react';
 import type {SyncedTransport} from 'umkehr/react-crdt';
+import type {StatusStore} from 'umkehr';
 import type {ReactElement} from 'react';
 
 export type GridSlot = 'left' | 'right';
@@ -63,6 +64,7 @@ export type SyncedProvider<TState> = (props: {
     initial: CrdtLocalHistory<TState>;
     transport: SyncedTransport;
     save?(history: CrdtLocalHistory<TState>): void;
+    statuses?: StatusStore;
 }) => ReactElement;
 
 export type HistoryProvider<TState, TAnnotations> = (props: {

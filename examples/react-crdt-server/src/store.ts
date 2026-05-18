@@ -80,6 +80,17 @@ export class ServerStore {
         return user;
     }
 
+    getUserById(userId: string): ServerUser | null {
+        const row = this.db
+            .query<UserRow, [string]>(
+                `select userId, nickname
+                 from users
+                 where userId = ?`,
+            )
+            .get(userId);
+        return row ? rowToUser(row) : null;
+    }
+
     ensureDocument(docId: string, schemaFingerprint: string) {
         const existing = this.db
             .query<{schemaFingerprint: string}, [string]>(

@@ -5,6 +5,23 @@ export type ServerUser = {
     nickname: string;
 };
 
+export type ServerPresenceSession = {
+    actor: string;
+    userId: string;
+    sessionId: string;
+    nickname: string;
+    color: string;
+    online: true;
+    lastSeenAt: string;
+};
+
+export type ServerPresenceUser = {
+    userId: string;
+    nickname: string;
+    color: string;
+    sessions: ServerPresenceSession[];
+};
+
 export type ServerLogEntry = {
     messageIndex: number;
     docId: string;
@@ -25,5 +42,8 @@ export type ConnectedClient = {
     actor?: string;
     userId?: string;
     sessionId?: string;
+    nickname?: string;
+    color?: string;
     docId?: string;
+    presenceReady?: boolean;
 };

@@ -1,5 +1,5 @@
 import type {CrdtLocalHistory, CrdtUpdate, HlcTimestamp} from 'umkehr/crdt';
-import type {SyncedTransport} from 'umkehr/react-crdt';
+import type {StatusStore, SyncedTransport} from 'umkehr/react-crdt';
 import type {ExternalStore} from '../store';
 
 export type ServerUser = {
@@ -18,6 +18,33 @@ export type ServerSessionIdentity = {
     sessionId: string;
     actor: string;
     createdAt: string;
+};
+
+export type ServerPresenceSession = {
+    actor: string;
+    userId: string;
+    sessionId: string;
+    nickname: string;
+    color: string;
+    online: true;
+    lastSeenAt: string;
+};
+
+export type ServerPresenceUser = {
+    userId: string;
+    nickname: string;
+    color: string;
+    sessions: ServerPresenceSession[];
+};
+
+export type ServerLastEditStatusData = {
+    actor: string;
+    userId: string;
+    sessionId: string;
+    nickname: string;
+    color: string;
+    timestamp: HlcTimestamp;
+    receivedAt: string;
 };
 
 export type ServerChangeSource = 'local' | 'remote';
@@ -64,6 +91,8 @@ export type ServerSync<TState> = {
     stateStore: ExternalStore<ServerSyncState>;
     statsStore: ExternalStore<ServerSyncStats>;
     changesStore: ExternalStore<ServerChange[]>;
+    presenceStore: ExternalStore<ServerPresenceUser[]>;
+    statusStore: StatusStore;
     manualOfflineStore: ExternalStore<boolean>;
     setManualOffline(offline: boolean): void;
     requestSync(): void;

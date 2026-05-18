@@ -1,5 +1,6 @@
 import {useStore} from '../store';
 import {SERVER_PORT} from './protocol';
+import {initialForNickname} from './presence';
 import type {ServerSync} from './types';
 
 export function ServerControls<TState>({
@@ -11,6 +12,7 @@ export function ServerControls<TState>({
 }) {
     const state = useStore(sync.stateStore);
     const stats = useStore(sync.statsStore);
+    const presenceUsers = useStore(sync.presenceStore);
     const manualOffline = useStore(sync.manualOfflineStore);
 
     return (
@@ -53,6 +55,30 @@ export function ServerControls<TState>({
             <button type="button" onClick={onLogout}>
                 Log out
             </button>
+            <section className="presenceRoster" aria-label="Online users">
+                <h3>Online</h3>
+                {presenceUsers.length ? (
+                    <ul>
+                        {presenceUsers.map((user) => (
+                            <li key={user.userId}>
+                                <span
+                                    className="presenceAvatar"
+                                    style={{backgroundColor: user.color}}
+                                    aria-hidden="true"
+                                >
+                                    {initialForNickname(user.nickname)}
+                                </span>
+                                <span>{user.nickname}</span>
+                                {user.sessions.length > 1 ? (
+                                    <small>{user.sessions.length} sessions</small>
+                                ) : null}
+                            </li>
+                        ))}
+                    </ul>
+                ) : (
+                    <p>No one else online.</p>
+                )}
+            </section>
             {state.kind === 'error' ? <p>{state.message}</p> : null}
         </aside>
     );
