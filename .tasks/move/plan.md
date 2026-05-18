@@ -115,14 +115,35 @@ This does not require array length because the inverse move can target the origi
    - In `src/framework-core/index.ts` and `src/history/history.ts`, remove `op.from` from `move` handling.
    - A move changes the array at `op.path`. If index-level subscriptions are expected to refresh, consider notifying the array path plus affected child index paths. Today `reorder` only reports `op.path`, so match that behavior unless tests show otherwise.
 
-7. Update CRDT behavior in `src/crdt/updates.ts`.
-   - It currently rejects `move`; keep rejecting it unless this task intentionally adds CRDT support.
-   - Update the error text from "Use remove plus add instead" if the recommendation is no longer accurate for array identity-preserving moves.
+7. Add CRDT support for array `move`.
+   - `src/crdt/updates.ts` currently rejects `move`; replace that branch with CRDT order-update generation.
+   - Reuse the existing `setOrder` CRDT update shape instead of adding a new wire operation.
+   - Resolve `patch.path` with `crdtPathForExisting(doc, patch.path)`.
+   - Read the array metadata with `getMetaAtPath()` and `liveArrayItems(meta)`.
+   - Validate the same integer/range preconditions as normal patch application.
+   - Compute the post-move live item order using the same index algorithm as `ops.apply`.
+   - Emit a `CrdtSetOrderUpdate` that changes only the moved item's order when possible:
+     - identify the moved item ID from the pre-move live array,
+     - identify its new previous and next live neighbors after the move,
+     - assign `fractionalIndexBetween(previous?.order.value, next?.order.value)`,
+     - use the patch timestamp for the moved item's order timestamp.
+   - If the moved item already lands between the same neighbors, still returning an order update is acceptable, but a no-op move can return `[]` if callers already tolerate empty update lists.
+   - Keep full `reorder` behavior as-is; `reorder` rewrites every live item's order, while `move` should be a narrow item-order update.
 
-8. Update docs.
+8. Update CRDT tests.
+   - Add `src/crdt` tests showing `createCrdtUpdates()` accepts `move`.
+   - Verify the resulting update materializes the expected array order.
+   - Verify duplicate values are moved by item identity/index, not value equality.
+   - Verify applying the same move update to another replica with the same item IDs converges.
+   - Verify invalid move indexes fail before producing a CRDT update.
+   - Keep or update any tests/docs that previously asserted `move` is unsupported.
+
+9. Update docs.
    - `Readme.md`: change the `$move` API table and patch operation description.
+   - Document that array `move` is CRDT-compatible because it maps to an array item order update.
    - `CONTRIBUTING.md`: replace the remove-plus-add explanation with array-local semantics.
-   - Any task/research docs do not need to be rewritten unless they are actively misleading for current development.
+   - Remove or rewrite statements saying `move` is not translated to CRDT updates.
+   - Any older task/research docs do not need to be rewritten unless they are actively misleading for current development.
 
 ## Tests
 
@@ -131,6 +152,8 @@ Update or add tests in:
 - `src/helper.test.ts`
 - `src/core.test.ts`
 - `src/validation/validation.test.ts`
+- `src/crdt/crdt.test.ts`
+- `src/crdt/updates.ts` adjacent tests if a more focused file is added
 - `type-tests/patch-builder.ts`
 
 Core behavior cases:
@@ -165,7 +188,8 @@ Validation cases:
 2. Update `$move` builder output.
 3. Implement array move apply/realize/invert/rebase.
 4. Update validation.
-5. Update changed-path tracking and CRDT error text.
-6. Update tests.
-7. Update docs.
-8. Run `pnpm test` and `pnpm typecheck` or the equivalent package scripts in `package.json`.
+5. Update changed-path tracking.
+6. Implement CRDT move-to-`setOrder` conversion.
+7. Update tests.
+8. Update docs.
+9. Run `pnpm test` and `pnpm typecheck` or the equivalent package scripts in `package.json`.
