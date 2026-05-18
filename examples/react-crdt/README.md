@@ -14,6 +14,19 @@ pnpm install
 pnpm dev
 ```
 
+The server-backed offline-first mode also needs the Bun server in a second
+terminal:
+
+```sh
+cd ../react-crdt-server
+bun install
+bun run dev
+```
+
+Then open the React example and choose the Server tab. The client connects to
+`ws://localhost:8787/sync`, persists local changes in IndexedDB, and can be
+toggled offline from the demo controls.
+
 The example depends on the repository root through `file:../..`, so build the package first when
 you are running it from a fresh checkout:
 

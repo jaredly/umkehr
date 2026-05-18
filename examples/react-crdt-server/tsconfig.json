@@ -1,0 +1,15 @@
+{
+    "extends": "../../tsconfig.json",
+    "compilerOptions": {
+        "baseUrl": ".",
+        "noEmit": true,
+        "types": ["bun-types"],
+        "paths": {
+            "umkehr": ["../../dist/src/index.d.ts"],
+            "umkehr/crdt": ["../../dist/src/crdt/index.d.ts"],
+            "umkehr/react": ["../../dist/src/react/react.d.ts"],
+            "umkehr/react-crdt": ["../../dist/src/react-crdt/index.d.ts"]
+        }
+    },
+    "include": ["src/**/*.ts", "typiaPlugin.ts"]
+}

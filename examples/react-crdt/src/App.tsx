@@ -3,6 +3,7 @@ import {LocalSimulatorApp} from './lib/local/LocalSimulatorApp';
 import {LocalFirstApp} from './lib/local-first/LocalFirstApp';
 import {ModeTabs} from './lib/ModeTabs';
 import {PeerJsApp} from './lib/peerjs/PeerJsApp';
+import {ServerApp} from './lib/server/ServerApp';
 import {SoloApp} from './lib/solo/SoloApp';
 import './style.css';
 import {useHashMode} from './lib/useHashMode';
@@ -17,6 +18,8 @@ export function App() {
                 <SoloApp app={defaultApp} runtime={defaultHistoryRuntime} />
             ) : mode === 'local-first' ? (
                 <LocalFirstApp app={defaultApp} runtime={defaultCrdtRuntime} />
+            ) : mode === 'server' ? (
+                <ServerApp app={defaultApp} runtime={defaultCrdtRuntime} />
             ) : mode === 'peerjs' ? (
                 <PeerJsApp app={defaultApp} runtime={defaultCrdtRuntime} />
             ) : (

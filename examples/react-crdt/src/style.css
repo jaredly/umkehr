@@ -290,7 +290,8 @@ p {
     align-items: start;
 }
 
-.localFirstShell {
+.localFirstShell,
+.serverShell {
     width: min(1180px, calc(100vw - 32px));
     min-height: calc(100vh - 72px);
     margin: 0 auto;
@@ -303,6 +304,8 @@ p {
 
 .peerControls,
 .localFirstControls,
+.serverControls,
+.serverHistory,
 .waitingPanel {
     border: 1px solid #d4dde7;
     border-radius: 8px;
@@ -311,7 +314,8 @@ p {
 }
 
 .peerControls,
-.localFirstControls {
+.localFirstControls,
+.serverControls {
     position: sticky;
     top: 24px;
     display: grid;
@@ -319,10 +323,67 @@ p {
     padding: 18px;
 }
 
-.localFirstControls h2 {
+.localFirstControls h2,
+.serverControls h2,
+.serverHistory h2 {
     margin: 0;
     font-size: 18px;
     line-height: 1.2;
+}
+
+.serverDocument {
+    display: grid;
+    gap: 18px;
+    min-width: 0;
+}
+
+.serverControls button {
+    width: 100%;
+}
+
+.serverHistory {
+    display: grid;
+    gap: 14px;
+    padding: 18px;
+}
+
+.serverHistory header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.serverHistory header p {
+    margin: 0;
+}
+
+.serverTimeline {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+}
+
+.serverTimeline button {
+    flex: 0 0 auto;
+    max-width: 190px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+}
+
+.serverPreview {
+    max-height: 260px;
+    margin: 0;
+    overflow: auto;
+    border: 1px solid #dce4ed;
+    border-radius: 8px;
+    padding: 10px;
+    background: #f8fafc;
+    color: #334155;
+    font-size: 12px;
 }
 
 .localFirstStats {
@@ -584,12 +645,14 @@ p {
     }
 
     .peerShell,
-    .localFirstShell {
+    .localFirstShell,
+    .serverShell {
         grid-template-columns: 1fr;
     }
 
     .peerControls,
-    .localFirstControls {
+    .localFirstControls,
+    .serverControls {
         position: static;
     }
 }

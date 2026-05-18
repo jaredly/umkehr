@@ -37,6 +37,13 @@ export function ModeTabs({
             >
                 Local-first
             </button>
+            <button
+                type="button"
+                className={mode === 'server' ? 'active' : ''}
+                onClick={() => setMode('server')}
+            >
+                Server
+            </button>
         </nav>
     );
 }

@@ -1,0 +1,17 @@
+{
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "dev": "bun --bun src/index.ts",
+        "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "dependencies": {
+        "bun-plugin-typia": "^0.1.0",
+        "typia": "^12.1.1",
+        "umkehr": "link:../.."
+    },
+    "devDependencies": {
+        "bun-types": "^1.2.21",
+        "typescript": "^5.9.3"
+    }
+}

@@ -16,12 +16,23 @@ depend on.
 - Use fixed `PORT = 8787`.
 - Use WebSockets for sync. A health endpoint is still useful, but sync itself
   does not need HTTP snapshot/upload endpoints.
-- Persist server state across restarts.
+- Persist server state in SQLite.
 - Duplicate protocol code between client and server for now.
 - Support multiple documents from the first pass.
 - Do not implement migration, compaction, or snapshots.
 - Do not use version vectors for this server mode.
+- Stream client updates one by one for now.
+- Local updates have unique HLC timestamps. The server should acknowledge the
+  HLC timestamps it has recorded.
+- The server should not echo a client's own recorded updates back to that same
+  client.
 - Add a manual offline toggle to the client UI.
+- The client should maintain a full timestamp-sorted list of all known changes
+  so the user can scrub through document history.
+- The history scrubber should show timestamps only for now.
+- History scrubbing is preview-only for now.
+- Add a small debug view/log endpoint on the server.
+- The debug endpoint should be HTML.
 - Keep `examples/react-crdt-server` on its own `tsconfig.json` because it
   depends on Bun globals.
 
@@ -51,6 +62,8 @@ examples/
         server/
           ServerApp.tsx
           ServerControls.tsx
+          ServerHistoryView.tsx
+          persistence.ts
           protocol.ts
           useServerSync.ts
           types.ts
@@ -66,32 +79,52 @@ examples/
 
 `examples/react-crdt/src/lib/server` owns the browser mode. It should load or
 create a durable local replica, edit against the local CRDT document, persist
-local updates immediately, and opportunistically exchange missing updates with
-the server.
+local updates immediately, keep a full timestamp-sorted change list for history
+scrubbing, and opportunistically exchange missing remote updates with the
+server.
 
 `examples/react-crdt-server` owns the fixed-port Bun server. It should accept
-updates from any client, persist them in an append-only per-document log, and
-answer sync requests from a client-provided `lastSeenMessageIndex`.
+updates from any client, persist them in an append-only per-document SQLite log,
+and answer sync requests from a client-provided `lastSeenMessageIndex`.
 
 ## Sync Model
 
 The server maintains an append-only ordered list of accepted CRDT updates for
 each document. Each accepted update gets a monotonically increasing server
 `messageIndex`. A client stores the highest server message index it has already
-applied.
+seen from other clients.
 
 This replaces the heavier local-first version vector model:
 
 - The server is the single authoritative connection point.
 - Clients only need "what server message did I last see?"
-- The server can answer reconnects by sending all messages after that index.
+- The server can answer reconnects by sending all messages after that index,
+  excluding entries from the requesting client.
 - If trimming, compaction, or snapshots are added later, the cursor model can
   grow to handle that then.
 
-Batches can be kept minimal. Conceptually, the server log can store one CRDT
-update per message. The client may upload several updates in one websocket
-message for efficiency, but the server should still assign ordered message
-indexes to the accepted updates.
+Batches can be discarded conceptually for this example. Stream one CRDT update
+per client message and store one CRDT update per server log entry. The server
+still assigns ordered message indexes for replay to other clients, but the
+originating client does not need those indexes for its own local history.
+
+## History Scrubbing Model
+
+Each client should maintain a full list of all known changes, sorted by HLC
+timestamp:
+
+- Local changes are added immediately when produced.
+- Remote server changes are added when received.
+- Pending local changes remain in the list while offline or awaiting server
+  acknowledgement.
+- Server acknowledgement marks the matching HLC timestamp as recorded.
+- The list is persisted in IndexedDB with the local replica.
+- The UI can scrub through this list and preview the document at a selected
+  timestamp.
+
+This history list is separate from `lastSeenMessageIndex`. The cursor tracks
+what remote server log entries have been seen. The history list drives the user
+experience for browsing and previewing known document evolution.
 
 ## Server Protocol
 
@@ -102,12 +135,13 @@ Core messages:
 
 - `hello`: client announces actor, doc id, schema fingerprint, and
   `lastSeenMessageIndex`.
-- `clientUpdates`: client uploads one or more local CRDT updates that are not
-  known to be in the server log yet.
+- `clientUpdate`: client uploads one local CRDT update that is not yet recorded
+  by the server.
 - `serverUpdates`: server sends log entries with
-  `messageIndex > lastSeenMessageIndex`.
-- `ack`: server acknowledges accepted client updates with their assigned
-  message indexes.
+  `messageIndex > lastSeenMessageIndex`, excluding entries from the receiving
+  client's actor.
+- `ack`: server acknowledges an accepted client update by returning the HLC
+  timestamp it recorded.
 - `syncRequest`: client asks the server to resend entries after a given
   `lastSeenMessageIndex`.
 - `error`: either side reports invalid schema, invalid update shape, unknown
@@ -149,17 +183,20 @@ The server should:
   validators.
 - Keep server state per `docId` and schema fingerprint.
 - Persist server state across restarts.
+- Expose a small debug endpoint or page.
 
-Use a small Bun-friendly durable store. JSONL is probably enough for the first
-pass:
+Use SQLite for durable server storage:
 
-- One server log file per document, or one log file whose entries include
-  `docId`.
-- Each stored entry includes `messageIndex`, `docId`, `origin`, `receivedAt`,
-  and the CRDT update payload.
-- On startup, replay the log into memory to rebuild per-document message lists
-  and next message indexes.
-- A simple debug reset can be deferred unless it becomes useful for demos.
+- A `documents` table tracks `docId`, schema fingerprint, and next message
+  index.
+- A `messages` table stores `messageIndex`, `docId`, `origin`, `hlcTimestamp`,
+  `receivedAt`, and the CRDT update payload as JSON.
+- Index `(docId, messageIndex)` for reconnect replay.
+- Index `(docId, hlcTimestamp)` for duplicate detection and ack lookup.
+- On startup, read the database normally; no in-memory replay-only design is
+  required, though a small in-memory cache is fine for connected clients.
+- The debug endpoint should show known documents, message counts, recent
+  messages, and connected clients.
 
 ## Client Mode
 
@@ -173,6 +210,8 @@ Add a new `server` mode to the React example:
   upload queueing, sync request/response handling, and server-log cursor
   tracking.
 - Persist `lastSeenMessageIndex` with the local replica.
+- Persist all local and remote changes in a timestamp-sorted history list.
+- Add a history scrubber UI that can preview the document at a selected change.
 - Reuse `runtime.Provider` and `app.renderPanel(...)` exactly like the other
   CRDT modes.
 
@@ -180,9 +219,11 @@ The user-visible behavior should make intermittent connectivity obvious:
 
 - Client can edit while disconnected.
 - Local edits persist in IndexedDB immediately.
-- Reconnect uploads queued local updates.
+- Reconnect uploads queued local updates one by one.
+- Server acknowledges local updates by HLC timestamp.
 - Server returns changes from other clients.
 - Conflicting edits converge through the existing CRDT merge semantics.
+- User can scrub through the complete known change history in timestamp order.
 - Controls expose connection state, `lastSeenMessageIndex`, pending upload
   count, received update count, and last sync time.
 - A manual offline/online toggle lets demos simulate intermittent connectivity
@@ -190,18 +231,24 @@ The user-visible behavior should make intermittent connectivity obvious:
 
 ## Data Flow
 
-1. Browser loads local replica from IndexedDB or creates a new one.
+1. Browser loads local replica, `lastSeenMessageIndex`, and timestamp-sorted
+   change list from IndexedDB, or creates new local state.
 2. Browser connects to `ws://localhost:8787/sync`.
 3. Browser sends `hello` with doc id, schema metadata, actor id, and
    `lastSeenMessageIndex`.
-4. Server responds with all log entries after `lastSeenMessageIndex`.
-5. Local edits apply immediately to the browser CRDT history.
-6. Browser persists local updates and attempts upload.
-7. Server validates each update, assigns message indexes, appends the entries
-   to durable storage, and acknowledges the accepted indexes.
+4. Server responds with all log entries after `lastSeenMessageIndex`, excluding
+   entries from the same actor.
+5. Local edits apply immediately to the browser CRDT history and are inserted
+   into the local timestamp-sorted change list.
+6. Browser streams pending local updates to the server one at a time.
+7. Server validates each update, deduplicates by `(docId, hlcTimestamp)`,
+   assigns a message index, appends the entry to SQLite, and acknowledges the
+   recorded HLC timestamp.
 8. Server broadcasts new log entries to connected clients for the same
-   document.
-9. Disconnected clients continue editing locally and reconcile on reconnect.
+   document, excluding the origin actor.
+9. Receiving clients apply remote updates, insert them into their
+   timestamp-sorted change lists, and advance `lastSeenMessageIndex`.
+10. Disconnected clients continue editing locally and reconcile on reconnect.
 
 ## Implementation Steps
 
@@ -211,39 +258,42 @@ The user-visible behavior should make intermittent connectivity obvious:
    - Duplicate protocol types in the client and server example packages.
    - Define CORS and websocket message envelopes.
    - Use `lastSeenMessageIndex` as the client sync cursor.
+   - Use HLC timestamps as local update identities and server ack keys.
 
 2. Scaffold `examples/react-crdt-server`.
    - Add `package.json`, `tsconfig.json`, and `src/index.ts`.
    - Configure Bun and `bun-plugin-typia`.
    - Add a health endpoint such as `GET /health`.
+   - Add a debug endpoint or page for documents, messages, and connected
+     clients.
    - Add websocket upgrade handling for `/sync`.
 
 3. Implement server state.
    - Store documents by `docId`.
    - Track schema fingerprint per document.
-   - Store append-only update log entries.
+   - Store append-only update log entries in SQLite.
    - Maintain the next message index per document.
-   - Persist entries across restarts, likely using JSONL or another simple
-     file-backed format.
+   - Deduplicate by `(docId, hlcTimestamp)`.
    - Do not implement migration, compaction, or snapshots.
 
 4. Implement server message handling.
    - Validate message shape and schema metadata.
-   - Accept client updates and assign server message indexes.
+   - Accept one client update per message and assign a server message index.
    - Answer `hello` and `syncRequest` by sending entries after
-     `lastSeenMessageIndex`.
-   - Acknowledge accepted client updates.
-   - Broadcast new server log entries to connected clients.
-   - Decide the minimal duplicate-upload handling needed for reconnects. This
-     may be a client-generated update id, or the client may keep pending
-     uploads until the server acknowledges assigned message indexes.
+     `lastSeenMessageIndex`, excluding the requesting actor's entries.
+   - Acknowledge accepted or already-recorded client updates by HLC timestamp.
+   - Broadcast new server log entries to connected clients except the origin.
 
 5. Add the client server mode.
    - Create `src/lib/server` files.
    - Load/create the durable local replica using the same IndexedDB persistence
      ideas as `local-first`, without migration support.
    - Persist `lastSeenMessageIndex` with the local replica.
+   - Persist all local and remote changes in a timestamp-sorted history list.
+   - Add a history scrubber UI that can preview the document at a selected
+     change.
    - Add websocket sync and retry behavior.
+   - Stream pending local updates one by one.
    - Add a manual offline toggle that closes/suppresses the websocket while
      local editing continues.
    - Render app panel through the existing CRDT runtime.
@@ -261,25 +311,15 @@ The user-visible behavior should make intermittent connectivity obvious:
    - Typecheck/start `examples/react-crdt-server`.
    - Manually test two browser clients: edit offline, reconnect, and confirm
      convergence.
-   - Restart the server and confirm persisted log entries are still served.
+   - Restart the server and confirm persisted SQLite log entries are still
+     served.
+   - Verify the client history scrubber includes local and remote changes in
+     timestamp order.
+   - Verify duplicate local update replay after reconnect is handled by HLC
+     timestamp.
    - Add focused tests for protocol/session logic if the extracted logic is
      pure enough to test without a browser.
 
 ## Remaining Open Questions
 
-- What durable format should the server use: JSONL for maximum readability, or
-  SQLite for easier indexed lookup once the log grows?
-  - SQLite
-- What is the cleanest representation of "pending local update not yet assigned
-  a server message index" in IndexedDB?
-  - do local updates need server message indices? the server shouldn't be sending them back to us (it should only send updates from other clients)
-- Should clients send one CRDT update per server log message, or group several
-  local CRDT updates in one upload while the server still assigns individual
-  message indexes?
-  - let's stream one by one for now
-- Should duplicate upload prevention use a client-generated id per local update,
-  or is ack-based pending queue management enough for this example?
-  - local updates will have unique HLC timestamps, server should respond with timestamps it has recorded
-- Should the server expose a small debug view/log endpoint for development, even
-  though sync itself is WebSocket-only?
-  - yes please
+None for the first implementation pass.

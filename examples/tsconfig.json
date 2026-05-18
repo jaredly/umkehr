@@ -12,5 +12,5 @@
         }
     },
     "include": ["**/*.ts", "**/*.tsx"],
-    "exclude": ["**/node_modules", "remix3"]
+    "exclude": ["**/node_modules", "remix3", "react-crdt-server"]
 }
