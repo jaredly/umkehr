@@ -398,9 +398,12 @@ p {
     align-items: start;
 }
 
+.serverShell {
+    grid-template-columns: minmax(0, 1fr);
+}
+
 .peerControls,
 .localFirstControls,
-.serverControls,
 .serverHistory,
 .waitingPanel {
     border: 1px solid #d4dde7;
@@ -410,8 +413,7 @@ p {
 }
 
 .peerControls,
-.localFirstControls,
-.serverControls {
+.localFirstControls {
     position: sticky;
     top: 24px;
     display: grid;
@@ -420,11 +422,40 @@ p {
 }
 
 .localFirstControls h2,
-.serverControls h2,
 .serverHistory h2 {
     margin: 0;
     font-size: 18px;
     line-height: 1.2;
+}
+
+.serverControls {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    border: 1px solid #d4dde7;
+    border-radius: 8px;
+    padding: 8px 10px;
+    background: #fdfefe;
+    box-shadow: 0 8px 18px rgb(25 42 62 / 8%);
+}
+
+.serverIdentity {
+    min-width: 0;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.serverIdentity strong {
+    min-width: 0;
+    overflow: hidden;
+    color: #17202a;
+    font-size: 14px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .serverDocument {
@@ -433,43 +464,62 @@ p {
     min-width: 0;
 }
 
-.serverControls button {
-    width: 100%;
+.serverToolbarActions {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
+.serverIconButton,
+.serverSyncIndicator {
+    display: inline-grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 6px;
+    padding: 0;
+    color: #52616f;
+}
+
+.serverSyncIndicator {
+    border: 1px solid transparent;
+}
+
+.serverIconButton svg,
+.serverSyncIndicator svg {
+    width: 18px;
+    height: 18px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.9;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.serverIconButton.active,
+.serverSyncIndicator.active {
+    color: #0f3d8a;
 }
 
 .presenceRoster {
-    display: grid;
-    gap: 8px;
-    border-top: 1px solid #e1e8f0;
-    padding-top: 14px;
-}
-
-.presenceRoster h3 {
-    margin: 0;
-    font-size: 14px;
-    line-height: 1.2;
+    display: flex;
+    flex: 1;
+    justify-content: flex-end;
+    min-width: 0;
 }
 
 .presenceRoster ul {
-    display: grid;
-    gap: 7px;
+    display: flex;
+    flex-direction: row-reverse;
+    align-items: center;
     margin: 0;
     padding: 0;
     list-style: none;
 }
 
 .presenceRoster li {
-    display: grid;
-    grid-template-columns: 24px minmax(0, 1fr) auto;
-    gap: 8px;
-    align-items: center;
-    color: #334155;
-    font-size: 14px;
-}
-
-.presenceRoster small {
-    color: #64748b;
-    font-size: 12px;
+    display: flex;
+    margin-left: -5px;
 }
 
 .presenceAvatar {
@@ -482,6 +532,25 @@ p {
     font-size: 12px;
     font-weight: 700;
     line-height: 1;
+}
+
+.presenceRoster .presenceAvatar,
+.serverIdentity .presenceAvatar {
+    border: 2px solid #fff;
+    box-shadow: 0 1px 3px rgb(15 23 42 / 18%);
+}
+
+.presenceEmpty {
+    color: #64748b;
+    font-size: 13px;
+    white-space: nowrap;
+}
+
+.serverToolbarError {
+    grid-column: 1 / -1;
+    margin: -2px 0 0;
+    color: #b42318;
+    font-size: 13px;
 }
 
 .serverLogin {
@@ -828,8 +897,7 @@ p {
     }
 
     .peerControls,
-    .localFirstControls,
-    .serverControls {
+    .localFirstControls {
         position: static;
     }
 }

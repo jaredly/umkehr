@@ -174,6 +174,7 @@ function ServerReadyApp<TState>({
 
     return (
         <main className="serverShell">
+            <ServerControls sync={sync} onLogout={onLogout} />
             <section className="serverDocument">
                 <Provider
                     initial={currentHistory}
@@ -185,7 +186,6 @@ function ServerReadyApp<TState>({
                 </Provider>
                 <ServerHistoryView app={app} sync={sync} />
             </section>
-            <ServerControls sync={sync} onLogout={onLogout} />
         </main>
     );
 }
