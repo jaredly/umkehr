@@ -12,11 +12,16 @@ export type LocalFirstSessionPeer = {
     actor?: string;
     role?: LocalFirstRole;
     vector?: VersionVector;
+    docId?: string;
+    schemaVersion?: number;
+    schemaFingerprint?: string;
     open: boolean;
 };
 
 export type LocalFirstSessionState<TState> = {
     docId: string;
+    schemaVersion: number;
+    schemaFingerprint: string;
     replicaId: string;
     role: LocalFirstRole;
     selfPeerId?: string;
@@ -32,6 +37,9 @@ export type LocalFirstSessionEffect<TState> =
           actor: string;
           role?: LocalFirstRole;
           vector?: VersionVector;
+          docId?: string;
+          schemaVersion?: number;
+          schemaFingerprint?: string;
       }
     | {kind: 'connectionError'; peerId: string; message: string}
     | {kind: 'recordMembers'; peerId: string; members: LocalFirstMember[]}
@@ -56,6 +64,8 @@ export function createHelloMessage<TState>(
         actor: state.replicaId,
         peerId: state.selfPeerId,
         docId: state.docId,
+        schemaVersion: state.schemaVersion,
+        schemaFingerprint: state.schemaFingerprint,
         role: state.role,
         vector: state.vector,
     };
@@ -69,6 +79,8 @@ export function createSyncRequestMessage<TState>(
         version: LOCAL_FIRST_PROTOCOL_VERSION,
         actor: state.replicaId,
         docId: state.docId,
+        schemaVersion: state.schemaVersion,
+        schemaFingerprint: state.schemaFingerprint,
         vector: state.vector,
     };
 }
@@ -81,6 +93,8 @@ export function createSnapshotMessage<TState>(
         version: LOCAL_FIRST_PROTOCOL_VERSION,
         actor: state.replicaId,
         docId: state.docId,
+        schemaVersion: state.schemaVersion,
+        schemaFingerprint: state.schemaFingerprint,
         document: state.document,
         compactedThrough: state.vector,
     };
@@ -94,6 +108,8 @@ export function createMembersMessage<TState>(
         version: LOCAL_FIRST_PROTOCOL_VERSION,
         actor: state.replicaId,
         docId: state.docId,
+        schemaVersion: state.schemaVersion,
+        schemaFingerprint: state.schemaFingerprint,
         members: currentMembers(state),
     };
 }
@@ -107,6 +123,8 @@ export function createUpdatesMessage<TState>(
         version: LOCAL_FIRST_PROTOCOL_VERSION,
         actor: state.replicaId,
         docId: state.docId,
+        schemaVersion: state.schemaVersion,
+        schemaFingerprint: state.schemaFingerprint,
         batch,
     };
 }
@@ -127,6 +145,8 @@ export function createSyncResponseMessage<TState>({
         version: LOCAL_FIRST_PROTOCOL_VERSION,
         actor: state.replicaId,
         docId: state.docId,
+        schemaVersion: state.schemaVersion,
+        schemaFingerprint: state.schemaFingerprint,
         since,
         batches,
         requiresSnapshot,
@@ -167,6 +187,9 @@ export function planIncomingMessage<TState>({
             actor: message.actor,
             role: message.kind === 'hello' ? message.role : undefined,
             vector: vectorForMessage(message),
+            docId: message.docId,
+            schemaVersion: message.schemaVersion,
+            schemaFingerprint: message.schemaFingerprint,
         },
     ];
 
@@ -210,6 +233,13 @@ export function planIncomingMessage<TState>({
     effects.push({kind: 'recordMembers', peerId, members: message.members});
     for (const member of message.members) {
         if (member.peerId === state.selfPeerId || member.actor === state.replicaId) continue;
+        if (
+            member.docId !== state.docId ||
+            member.schemaVersion !== state.schemaVersion ||
+            member.schemaFingerprint !== state.schemaFingerprint
+        ) {
+            continue;
+        }
         const existing = state.connections.find((connection) => connection.peerId === member.peerId);
         if (existing?.open) continue;
         effects.push({kind: 'connect', peerId: member.peerId});
@@ -227,6 +257,9 @@ export function currentMembers<TState>(
                   actor: state.replicaId,
                   role: state.role,
                   vector: state.vector,
+                  docId: state.docId,
+                  schemaVersion: state.schemaVersion,
+                  schemaFingerprint: state.schemaFingerprint,
               },
           ]
         : [];
@@ -237,6 +270,9 @@ export function currentMembers<TState>(
             actor: connection.actor,
             role: connection.role ?? 'host',
             vector: connection.vector ?? {},
+            docId: connection.docId ?? state.docId,
+            schemaVersion: connection.schemaVersion ?? state.schemaVersion,
+            schemaFingerprint: connection.schemaFingerprint ?? state.schemaFingerprint,
         });
     }
     return members;

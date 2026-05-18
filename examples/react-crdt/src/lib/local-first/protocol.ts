@@ -24,6 +24,8 @@ export type LocalFirstMessage<TState> =
           actor: string;
           peerId?: string;
           docId: string;
+          schemaVersion: number;
+          schemaFingerprint: string;
           role: LocalFirstRole;
           vector: VersionVector;
       }
@@ -32,6 +34,8 @@ export type LocalFirstMessage<TState> =
           version: 1;
           actor: string;
           docId: string;
+          schemaVersion: number;
+          schemaFingerprint: string;
           batch: PersistedBatch;
       }
     | {
@@ -39,6 +43,8 @@ export type LocalFirstMessage<TState> =
           version: 1;
           actor: string;
           docId: string;
+          schemaVersion: number;
+          schemaFingerprint: string;
           vector: VersionVector;
       }
     | {
@@ -46,6 +52,8 @@ export type LocalFirstMessage<TState> =
           version: 1;
           actor: string;
           docId: string;
+          schemaVersion: number;
+          schemaFingerprint: string;
           since: VersionVector;
           batches: PersistedBatch[];
           requiresSnapshot?: boolean;
@@ -55,6 +63,8 @@ export type LocalFirstMessage<TState> =
           version: 1;
           actor: string;
           docId: string;
+          schemaVersion: number;
+          schemaFingerprint: string;
           document: CrdtDocument<TState>;
           compactedThrough: VersionVector;
       }
@@ -63,11 +73,15 @@ export type LocalFirstMessage<TState> =
           version: 1;
           actor: string;
           docId: string;
+          schemaVersion: number;
+          schemaFingerprint: string;
           members: LocalFirstMember[];
       };
 
 export type LocalFirstProtocolConfig<TState> = {
     docId: string;
+    schemaVersion: number;
+    schemaFingerprint: string;
     schema: IJsonSchemaCollection<'3.1', [TState]>;
     tagKey: string;
     validateState(input: unknown): IValidation<TState>;
@@ -80,6 +94,7 @@ export function parseLocalFirstMessage<TState>(
     if (!isRecord(input)) return null;
     if (input.version !== LOCAL_FIRST_PROTOCOL_VERSION) return null;
     if (input.docId !== config.docId) return null;
+    if (!hasExpectedSchema(input, config)) return null;
     if (typeof input.actor !== 'string' || input.actor.length === 0) return null;
 
     if (input.kind === 'hello') {
@@ -129,6 +144,14 @@ export function parseLocalFirstMessage<TState>(
             if (!isRecord(member)) return null;
             if (typeof member.peerId !== 'string' || member.peerId.length === 0) return null;
             if (typeof member.actor !== 'string' || member.actor.length === 0) return null;
+            if (typeof member.docId !== 'string' || member.docId.length === 0) return null;
+            if (typeof member.schemaVersion !== 'number') return null;
+            if (
+                typeof member.schemaFingerprint !== 'string' ||
+                member.schemaFingerprint.length === 0
+            ) {
+                return null;
+            }
             if (member.role !== 'host' && member.role !== 'client') return null;
             if (!isVersionVector(member.vector)) return null;
             members.push(member as LocalFirstMember);
@@ -165,6 +188,16 @@ function validateBatch<TState>(
 
 function isVersionVector(input: unknown): input is VersionVector {
     return isRecord(input) && Object.values(input).every(isHlcTimestamp);
+}
+
+function hasExpectedSchema<TState>(
+    input: Record<string, unknown>,
+    config: LocalFirstProtocolConfig<TState>,
+) {
+    return (
+        input.schemaVersion === config.schemaVersion &&
+        input.schemaFingerprint === config.schemaFingerprint
+    );
 }
 
 function validateSnapshot<TState>(

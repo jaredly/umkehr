@@ -1,3 +1,5 @@
+import type {IJsonSchemaCollection} from 'typia';
+
 export type Todo = {
     id: string;
     title: string;
@@ -18,3 +20,33 @@ export const initialState: State = {
         {id: 'two', title: 'Add examples', done: false},
     ],
 };
+
+export const stateSchema = {
+    version: '3.1',
+    schemas: [{$ref: '#/components/schemas/State'}],
+    components: {
+        schemas: {
+            State: {
+                type: 'object',
+                required: ['bgcolor', 'todos'],
+                properties: {
+                    bgcolor: {type: 'string'},
+                    todos: {$ref: '#/components/schemas/Todos'},
+                },
+            },
+            Todos: {
+                type: 'array',
+                items: {$ref: '#/components/schemas/Todo'},
+            },
+            Todo: {
+                type: 'object',
+                required: ['id', 'title', 'done'],
+                properties: {
+                    id: {type: 'string'},
+                    title: {type: 'string'},
+                    done: {type: 'boolean'},
+                },
+            },
+        },
+    },
+} satisfies IJsonSchemaCollection<'3.1', [State]>;

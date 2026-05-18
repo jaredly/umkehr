@@ -12,6 +12,7 @@
     "dependencies": {
         "remix": "^3.0.0-beta.0",
         "tsx": "latest",
+        "typia": "^12.1.1",
         "umkehr": "link:../.."
     },
     "devDependencies": {

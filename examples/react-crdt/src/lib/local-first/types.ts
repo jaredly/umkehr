@@ -10,15 +10,30 @@ export type ReplicaIdentity = {
     createdAt: string;
 };
 
+export type LocalFirstSchemaMetadata = {
+    schemaVersion: number;
+    schemaFingerprint: string;
+};
+
+export type DocumentLineage = {
+    sourceDocId: string;
+    sourceSchemaVersion: number;
+    sourceSchemaFingerprint: string;
+    migratedAt: string;
+    migrationId: string;
+};
+
 export type PersistedReplica<TState> = {
     docId: string;
     storageVersion: 1;
     protocolVersion: 1;
+    schemaVersion: number;
     schemaFingerprint: string;
     replicaId: string;
     history: CrdtLocalHistory<TState>;
     vector: VersionVector;
     compactedThrough?: VersionVector;
+    lineage?: DocumentLineage;
     updatedAt: string;
 };
 
@@ -45,12 +60,15 @@ export type LocalFirstMember = {
     actor: string;
     role: LocalFirstRole;
     vector: VersionVector;
+    docId: string;
+    schemaVersion: number;
+    schemaFingerprint: string;
 };
 
 export type LocalFirstPersistenceState =
     | {kind: 'loading'}
-    | {kind: 'ready'; source: 'created' | 'loaded'; savedAt?: string}
-    | {kind: 'saving'; source: 'created' | 'loaded'; savedAt?: string}
+    | {kind: 'ready'; source: 'created' | 'loaded' | 'migrated'; savedAt?: string}
+    | {kind: 'saving'; source: 'created' | 'loaded' | 'migrated'; savedAt?: string}
     | {kind: 'incompatible'; message: string}
     | {kind: 'error'; message: string};
 
@@ -60,6 +78,8 @@ export type LocalFirstStats = {
     retainedBatches: number;
     receivedBatches: number;
     pendingUpdates: number;
+    schemaVersion: number;
+    lineage?: DocumentLineage;
     mesh: {
         discoveredMembers: number;
         directConnections: number;
@@ -92,6 +112,9 @@ export type LocalFirstConnectionInfo = {
     actor?: string;
     role?: LocalFirstRole;
     vector?: VersionVector;
+    docId?: string;
+    schemaVersion?: number;
+    schemaFingerprint?: string;
     open: boolean;
     queuedOutgoing: number;
     error?: string;

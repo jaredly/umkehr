@@ -60,6 +60,7 @@ import type {
     PersistedReplica,
     ReplicaIdentity,
     VersionVector,
+    DocumentLineage,
 } from './types';
 
 type ConnectionRecord<TState> = {
@@ -67,6 +68,9 @@ type ConnectionRecord<TState> = {
     actor?: string;
     role?: LocalFirstRole;
     vector?: VersionVector;
+    docId?: string;
+    schemaVersion?: number;
+    schemaFingerprint?: string;
     queued: LocalFirstMessage<TState>[];
     error?: string;
     lastSyncAt?: string;
@@ -83,6 +87,8 @@ export function useLocalFirstSync<TState>({
     tagKey,
     validateState,
     schemaFingerprint,
+    schemaVersion,
+    lineage,
     identity,
     initialHistory,
     initialVector,
@@ -96,11 +102,13 @@ export function useLocalFirstSync<TState>({
     tagKey: string;
     validateState(input: unknown): IValidation<TState>;
     schemaFingerprint: string;
+    schemaVersion: number;
+    lineage?: DocumentLineage;
     identity: ReplicaIdentity;
     initialHistory: CrdtLocalHistory<TState>;
     initialVector: VersionVector;
     initialCompactedThrough?: VersionVector;
-    source: 'created' | 'loaded';
+    source: 'created' | 'loaded' | 'migrated';
     initialPeerId?: string;
     replaceHistory(history: CrdtLocalHistory<TState>): void;
 }): LocalFirstSync<TState> {
@@ -122,13 +130,15 @@ export function useLocalFirstSync<TState>({
         schema,
         tagKey,
         validateState,
+        schemaVersion,
+        schemaFingerprint,
     });
     const pendingSnapshotRef = useRef<PendingSnapshot<TState> | null>(null);
     const replayPreviewRef = useRef<ReplayPreview<TState> | null>(null);
     const snapshotStatusRef = useRef<string | undefined>(undefined);
     const compactionStatusRef = useRef<string | undefined>(undefined);
 
-    protocolRef.current = {docId, schema, tagKey, validateState};
+    protocolRef.current = {docId, schemaVersion, schemaFingerprint, schema, tagKey, validateState};
 
     const stateStore = useMemo(
         () => createExternalStore<LocalFirstSyncState>({kind: 'offline', role: roleRef.current}),
@@ -151,6 +161,8 @@ export function useLocalFirstSync<TState>({
                 retainedBatches: 0,
                 receivedBatches: 0,
                 pendingUpdates: initialHistory.doc.pending.length,
+                schemaVersion,
+                lineage,
                 mesh: {
                     discoveredMembers: 0,
                     directConnections: 0,
@@ -173,11 +185,25 @@ export function useLocalFirstSync<TState>({
     const publishConnections = useCallback(() => {
         connectionsStore.setSnapshot(
             [...connectionsRef.current.values()].map(
-                ({conn, actor, role, vector, queued, error, lastSyncAt}) => ({
+                ({
+                    conn,
+                    actor,
+                    role,
+                    vector,
+                    docId: connectionDocId,
+                    schemaVersion: connectionSchemaVersion,
+                    schemaFingerprint: connectionSchemaFingerprint,
+                    queued,
+                    error,
+                    lastSyncAt,
+                }) => ({
                     peerId: conn.peer,
                     actor,
                     role,
                     vector,
+                    docId: connectionDocId,
+                    schemaVersion: connectionSchemaVersion,
+                    schemaFingerprint: connectionSchemaFingerprint,
                     open: conn.open,
                     queuedOutgoing: queued.length,
                     error,
@@ -209,6 +235,8 @@ export function useLocalFirstSync<TState>({
             retainedBatches,
             receivedBatches,
             pendingUpdates: historyRef.current.doc.pending.length,
+            schemaVersion,
+            lineage,
             mesh: meshStats(),
             snapshotStatus: snapshotStatusRef.current,
             pendingSnapshot: pendingSnapshotRef.current
@@ -227,7 +255,7 @@ export function useLocalFirstSync<TState>({
                 : undefined,
             compactionStatus: compactionStatusRef.current,
         });
-    }, [docId, meshStats, statsStore]);
+    }, [docId, lineage, meshStats, schemaVersion, statsStore]);
 
     const persistReplica = useCallback(
         async (state: LocalFirstPersistenceState = persistenceStore.getSnapshot()) => {
@@ -246,11 +274,13 @@ export function useLocalFirstSync<TState>({
                     docId,
                     storageVersion: 1,
                     protocolVersion: 1,
+                    schemaVersion,
                     schemaFingerprint,
                     replicaId: identity.replicaId,
                     history: historyRef.current,
                     vector: vectorRef.current,
                     compactedThrough: compactedThroughRef.current,
+                    lineage,
                     updatedAt: savedAt,
                 } satisfies PersistedReplica<TState>);
                 persistenceStore.setSnapshot({
@@ -266,7 +296,15 @@ export function useLocalFirstSync<TState>({
                 });
             }
         },
-        [docId, identity.replicaId, persistenceStore, refreshCounts, schemaFingerprint],
+        [
+            docId,
+            identity.replicaId,
+            lineage,
+            persistenceStore,
+            refreshCounts,
+            schemaFingerprint,
+            schemaVersion,
+        ],
     );
 
     const saveHistory = useCallback(
@@ -291,20 +329,35 @@ export function useLocalFirstSync<TState>({
     const sessionState = useCallback(
         (): LocalFirstSessionState<TState> => ({
             docId,
+            schemaVersion,
+            schemaFingerprint,
             replicaId: identity.replicaId,
             role: roleRef.current,
             selfPeerId: peerRef.current?.id,
             vector: vectorRef.current,
             document: historyRef.current.doc,
-            connections: [...connectionsRef.current.values()].map(({conn, actor, role, vector}) => ({
-                peerId: conn.peer,
-                actor,
-                role,
-                vector,
-                open: conn.open,
-            })),
+            connections: [...connectionsRef.current.values()].map(
+                ({
+                    conn,
+                    actor,
+                    role,
+                    vector,
+                    docId: connectionDocId,
+                    schemaVersion: connectionSchemaVersion,
+                    schemaFingerprint: connectionSchemaFingerprint,
+                }) => ({
+                    peerId: conn.peer,
+                    actor,
+                    role,
+                    vector,
+                    docId: connectionDocId,
+                    schemaVersion: connectionSchemaVersion,
+                    schemaFingerprint: connectionSchemaFingerprint,
+                    open: conn.open,
+                }),
+            ),
         }),
-        [docId, identity.replicaId],
+        [docId, identity.replicaId, schemaFingerprint, schemaVersion],
     );
 
     const flushQueued = useCallback(
@@ -494,6 +547,9 @@ export function useLocalFirstSync<TState>({
                     record.actor = effect.actor;
                     if (effect.role) record.role = effect.role;
                     if (effect.vector) record.vector = effect.vector;
+                    record.docId = effect.docId;
+                    record.schemaVersion = effect.schemaVersion;
+                    record.schemaFingerprint = effect.schemaFingerprint;
                     record.lastSyncAt = new Date().toISOString();
                     publishConnections();
                     void refreshCounts();
@@ -513,7 +569,10 @@ export function useLocalFirstSync<TState>({
                     for (const member of effect.members) {
                         if (
                             member.peerId === peerRef.current?.id ||
-                            member.actor === identity.replicaId
+                            member.actor === identity.replicaId ||
+                            member.docId !== docId ||
+                            member.schemaVersion !== schemaVersion ||
+                            member.schemaFingerprint !== schemaFingerprint
                         ) {
                             continue;
                         }
@@ -564,9 +623,12 @@ export function useLocalFirstSync<TState>({
         [
             acceptBatch,
             acceptSnapshot,
+            docId,
             identity.replicaId,
             publishConnections,
             refreshCounts,
+            schemaFingerprint,
+            schemaVersion,
             sendMissingBatches,
             sendOrQueue,
             sessionState,
@@ -771,10 +833,10 @@ export function useLocalFirstSync<TState>({
 
     const importLocalState = useCallback(
         async (json: string) => {
-            await importReplicaState<TState>({docId, schemaFingerprint, json});
+            await importReplicaState<TState>({docId, schemaVersion, schemaFingerprint, json});
             window.location.reload();
         },
-        [docId, schemaFingerprint],
+        [docId, schemaFingerprint, schemaVersion],
     );
 
     useEffect(() => {

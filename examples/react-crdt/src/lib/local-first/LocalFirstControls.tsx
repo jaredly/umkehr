@@ -5,10 +5,12 @@ import type {LocalFirstSync} from './types';
 export function LocalFirstControls<TState>({
     sync,
     docId,
+    schemaVersion,
     schemaFingerprint,
 }: {
     sync: LocalFirstSync<TState>;
     docId: string;
+    schemaVersion: number;
     schemaFingerprint: string;
 }) {
     const state = useStore(sync.stateStore);
@@ -16,7 +18,7 @@ export function LocalFirstControls<TState>({
     const stats = useStore(sync.statsStore);
     const connections = useStore(sync.connectionsStore);
     const compactionRisks = stats.mesh.compactionRisks;
-    const inviteUrl = state.kind === 'ready' ? createInviteUrl(state.peerId) : '';
+    const inviteUrl = state.kind === 'ready' ? createInviteUrl(state.peerId, docId) : '';
     const [peerId, setPeerId] = useState('');
 
     return (
@@ -33,7 +35,19 @@ export function LocalFirstControls<TState>({
                 <dt>Document</dt>
                 <dd>{docId}</dd>
                 <dt>Schema</dt>
-                <dd>{schemaFingerprint.slice(0, 16)}</dd>
+                <dd>
+                    v{schemaVersion} / {schemaFingerprint.slice(0, 16)}
+                </dd>
+                {stats.lineage ? (
+                    <>
+                        <dt>Lineage</dt>
+                        <dd>
+                            {stats.lineage.sourceDocId} / v{stats.lineage.sourceSchemaVersion}
+                        </dd>
+                        <dt>Migrated</dt>
+                        <dd>{stats.lineage.migratedAt}</dd>
+                    </>
+                ) : null}
                 <dt>Vector</dt>
                 <dd>{Object.keys(stats.vector).length || 'empty'}</dd>
                 <dt>Compacted</dt>
@@ -223,9 +237,10 @@ export function LocalFirstControls<TState>({
     );
 }
 
-function createInviteUrl(peerId: string) {
+function createInviteUrl(peerId: string, docId: string) {
     const url = new URL(window.location.href);
     url.searchParams.set('peer', peerId);
+    url.searchParams.set('doc', docId);
     url.hash = 'local-first';
     return url.toString();
 }
@@ -301,7 +316,11 @@ function statusText(status: ReturnType<LocalFirstSync<unknown>['persistenceStore
         case 'loading':
             return 'Loading persisted state';
         case 'ready':
-            return status.source === 'loaded' ? 'Loaded from this browser' : 'Created in this browser';
+            return status.source === 'loaded'
+                ? 'Loaded from this browser'
+                : status.source === 'migrated'
+                  ? 'Created from a migrated document'
+                  : 'Created in this browser';
         case 'saving':
             return 'Saving';
         case 'incompatible':

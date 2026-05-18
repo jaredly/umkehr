@@ -52,6 +52,16 @@ export async function loadReplica<TState>(
     return ((await db.get('replicas', docId)) as PersistedReplica<TState> | undefined) ?? null;
 }
 
+export async function listReplicas(): Promise<PersistedReplica<unknown>[]> {
+    const db = await openLocalFirstDb();
+    return db.getAll('replicas');
+}
+
+export async function hasReplica(docId: string) {
+    const db = await openLocalFirstDb();
+    return (await db.getKey('replicas', docId)) !== undefined;
+}
+
 export async function saveReplica<TState>(replica: PersistedReplica<TState>) {
     const db = await openLocalFirstDb();
     await db.put('replicas', replica as PersistedReplica<unknown>, replica.docId);
@@ -116,10 +126,12 @@ export async function exportReplicaState<TState>(docId: string) {
 
 export async function importReplicaState<TState>({
     docId,
+    schemaVersion,
     schemaFingerprint,
     json,
 }: {
     docId: string;
+    schemaVersion: number;
     schemaFingerprint: string;
     json: string;
 }) {
@@ -135,6 +147,9 @@ export async function importReplicaState<TState>({
     }
     if (parsed.replica.schemaFingerprint !== schemaFingerprint) {
         throw new Error('Imported state schema does not match this app version.');
+    }
+    if ((parsed.replica.schemaVersion ?? 1) !== schemaVersion) {
+        throw new Error('Imported state schema version does not match this app version.');
     }
     if (!Array.isArray(parsed.batches)) {
         throw new Error('Imported state does not contain a retained batch list.');

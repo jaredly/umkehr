@@ -8,7 +8,7 @@ import {
     type LocalFirstProtocolConfig,
 } from './protocol';
 import {buildSnapshotReplayPreview} from './replay';
-import type {PersistedBatch, VersionVector} from './types';
+import type {PersistedBatch, PersistedReplica, VersionVector} from './types';
 import {
     advanceVector,
     batchTimestampRange,
@@ -22,6 +22,12 @@ import {
     planIncomingMessage,
     type LocalFirstSessionState,
 } from './session';
+import {
+    createMigratedReplica,
+    findMigrationCandidate,
+    normalizePersistedReplica,
+} from './migration';
+import type {LocalFirstSchemaConfig} from './schemaConfig';
 
 type Todo = {id: string; title: string; done: boolean};
 type State = {
@@ -77,9 +83,16 @@ const validateState = (input: unknown): IValidation<State> => {
 
 const config: LocalFirstProtocolConfig<State> = {
     docId: 'todos',
+    schemaVersion: 1,
+    schemaFingerprint: 'test-schema',
     schema,
     tagKey: 'type',
     validateState,
+};
+
+const schemaHeader = {
+    schemaVersion: 1,
+    schemaFingerprint: 'test-schema',
 };
 
 function titleUpdate(document: CrdtDocument<State>, title: string, timestamp: string) {
@@ -165,6 +178,7 @@ describe('local-first protocol validation', () => {
                 version: LOCAL_FIRST_PROTOCOL_VERSION,
                 actor: 'local',
                 docId: 'todos',
+                ...schemaHeader,
                 batch: batch(),
             },
             config,
@@ -182,6 +196,7 @@ describe('local-first protocol validation', () => {
                     version: LOCAL_FIRST_PROTOCOL_VERSION,
                     actor: 'local',
                     docId: 'other',
+                    ...schemaHeader,
                     role: 'host',
                     vector: {},
                 },
@@ -195,6 +210,40 @@ describe('local-first protocol validation', () => {
                     version: 2,
                     actor: 'local',
                     docId: 'todos',
+                    ...schemaHeader,
+                    role: 'host',
+                    vector: {},
+                },
+                config,
+            ),
+        ).toBeNull();
+    });
+
+    it('rejects messages for another schema version or fingerprint', () => {
+        expect(
+            parseLocalFirstMessage(
+                {
+                    kind: 'hello',
+                    version: LOCAL_FIRST_PROTOCOL_VERSION,
+                    actor: 'local',
+                    docId: 'todos',
+                    schemaVersion: 2,
+                    schemaFingerprint: 'test-schema',
+                    role: 'host',
+                    vector: {},
+                },
+                config,
+            ),
+        ).toBeNull();
+        expect(
+            parseLocalFirstMessage(
+                {
+                    kind: 'hello',
+                    version: LOCAL_FIRST_PROTOCOL_VERSION,
+                    actor: 'local',
+                    docId: 'todos',
+                    schemaVersion: 1,
+                    schemaFingerprint: 'other-schema',
                     role: 'host',
                     vector: {},
                 },
@@ -211,6 +260,7 @@ describe('local-first protocol validation', () => {
                     version: LOCAL_FIRST_PROTOCOL_VERSION,
                     actor: 'local',
                     docId: 'todos',
+                    ...schemaHeader,
                     role: 'host',
                     vector: {local: 'not-a-timestamp'},
                 },
@@ -225,6 +275,7 @@ describe('local-first protocol validation', () => {
                     version: LOCAL_FIRST_PROTOCOL_VERSION,
                     actor: 'local',
                     docId: 'todos',
+                    ...schemaHeader,
                     batch: {...batch(), maxTs: 'not-a-timestamp'},
                 },
                 config,
@@ -241,6 +292,7 @@ describe('local-first protocol validation', () => {
                     version: LOCAL_FIRST_PROTOCOL_VERSION,
                     actor: 'local',
                     docId: 'todos',
+                    ...schemaHeader,
                     batch: invalidBatch,
                 },
                 config,
@@ -253,7 +305,17 @@ describe('local-first protocol validation', () => {
                     version: LOCAL_FIRST_PROTOCOL_VERSION,
                     actor: 'local',
                     docId: 'todos',
-                    members: [{peerId: '', actor: 'remote', role: 'host', vector: {}}],
+                    ...schemaHeader,
+                    members: [
+                        {
+                            peerId: '',
+                            actor: 'remote',
+                            role: 'host',
+                            vector: {},
+                            docId: 'todos',
+                            ...schemaHeader,
+                        },
+                    ],
                 },
                 config,
             ),
@@ -266,6 +328,7 @@ describe('local-first protocol validation', () => {
             version: LOCAL_FIRST_PROTOCOL_VERSION,
             actor: 'remote',
             docId: 'todos',
+            ...schemaHeader,
             document: doc({title: 'Remote', todos: []}, ts('remote', 1)),
             compactedThrough: {remote: ts('remote', 1)},
         };
@@ -409,6 +472,7 @@ describe('local-first session planning', () => {
         overrides: Partial<LocalFirstSessionState<State>> = {},
     ): LocalFirstSessionState<State> => ({
         docId: 'todos',
+        ...schemaHeader,
         replicaId: 'local',
         role: 'host',
         selfPeerId: 'peer-local',
@@ -437,6 +501,7 @@ describe('local-first session planning', () => {
                 actor: 'remote',
                 peerId: 'peer-remote',
                 docId: 'todos',
+                ...schemaHeader,
                 role: 'client',
                 vector: {remote: ts('remote', 1)},
             },
@@ -466,7 +531,13 @@ describe('local-first session planning', () => {
             planIncomingMessage({
                 state: session(),
                 peerId: 'peer-remote',
-                input: {kind: 'hello', version: 2, actor: 'remote', docId: 'todos'},
+                input: {
+                    kind: 'hello',
+                    version: 2,
+                    actor: 'remote',
+                    docId: 'todos',
+                    ...schemaHeader,
+                },
                 config,
             }),
         ).toEqual([
@@ -487,6 +558,7 @@ describe('local-first session planning', () => {
                 version: LOCAL_FIRST_PROTOCOL_VERSION,
                 actor: 'remote',
                 docId: 'todos',
+                ...schemaHeader,
                 vector: {remote: ts('remote', 1)},
             },
             config,
@@ -505,6 +577,7 @@ describe('local-first session planning', () => {
                 version: LOCAL_FIRST_PROTOCOL_VERSION,
                 actor: 'remote',
                 docId: 'todos',
+                ...schemaHeader,
                 since: {},
                 batches: [remoteBatch],
             },
@@ -526,6 +599,7 @@ describe('local-first session planning', () => {
                 version: LOCAL_FIRST_PROTOCOL_VERSION,
                 actor: 'remote',
                 docId: 'todos',
+                ...schemaHeader,
                 document: snapshot,
                 compactedThrough: {remote: ts('remote', 1)},
             },
@@ -563,5 +637,123 @@ describe('local-first session planning', () => {
             {kind: 'recordMembers', peerId: 'peer-remote'},
             {kind: 'connect', peerId: 'peer-third'},
         ]);
+    });
+
+    it('does not connect to discovered members for another document schema', () => {
+        const members = createMembersMessage(
+            session({
+                replicaId: 'remote',
+                selfPeerId: 'peer-remote',
+                connections: [
+                    {
+                        peerId: 'peer-other-schema',
+                        actor: 'other',
+                        role: 'client',
+                        docId: 'todos',
+                        schemaVersion: 2,
+                        schemaFingerprint: 'other-schema',
+                        open: true,
+                    },
+                ],
+            }),
+        );
+        const effects = planIncomingMessage({
+            state: session(),
+            peerId: 'peer-remote',
+            input: members,
+            config,
+        });
+
+        expect(effects.some((effect) => effect.kind === 'connect')).toBe(false);
+    });
+});
+
+describe('local-first new-document migrations', () => {
+    const sourceReplica = () =>
+        ({
+        docId: 'todos-v1',
+        storageVersion: 1,
+        protocolVersion: 1,
+        schemaFingerprint: 'old-schema',
+        replicaId: 'local',
+        history: {doc: doc({title: 'Old', todos: []}), undoStack: [], redoStack: []},
+        vector: {local: ts('local', 10)},
+        updatedAt: '2026-05-17T00:00:00.000Z',
+    }) as Omit<PersistedReplica<State>, 'schemaVersion'>;
+
+    const migrationConfig: LocalFirstSchemaConfig<State> = {
+        version: 2,
+        migrations: [
+            {
+                id: 'todos-v1-to-v2',
+                fromVersion: 1,
+                toVersion: 2,
+                fromFingerprint: 'old-schema',
+                toDocId: 'todos-v2',
+                migrateState(input) {
+                    return input as State;
+                },
+            },
+        ],
+    };
+
+    it('normalizes missing schema versions to v1', () => {
+        expect(normalizePersistedReplica(sourceReplica()).schemaVersion).toBe(1);
+    });
+
+    it('finds a new-document migration candidate for a mismatched schema', () => {
+        const candidate = findMigrationCandidate({
+            source: normalizePersistedReplica(sourceReplica()),
+            current: migrationConfig,
+            currentFingerprint: 'new-schema',
+        });
+
+        expect(candidate).toMatchObject({
+            sourceDocId: 'todos-v1',
+            targetDocId: 'todos-v2',
+            sourceSchemaVersion: 1,
+            targetSchemaVersion: 2,
+            migrationIds: ['todos-v1-to-v2'],
+        });
+    });
+
+    it('creates a migrated replica without mutating the source document', () => {
+        const source = normalizePersistedReplica(sourceReplica());
+        const candidate = findMigrationCandidate({
+            source,
+            current: migrationConfig,
+            currentFingerprint: 'new-schema',
+        });
+        expect(candidate).not.toBeNull();
+        if (!candidate) return;
+
+        const migrated = createMigratedReplica({
+            source,
+            candidate,
+            identity: {replicaId: 'local', createdAt: '2026-05-17T00:00:00.000Z'},
+            schema,
+            tagKey: 'type',
+            validateState,
+            now: '2026-05-17T00:00:00.000Z',
+        });
+
+        expect(source.docId).toBe('todos-v1');
+        expect(source.vector).toEqual({local: ts('local', 10)});
+        expect(migrated).toMatchObject({
+            docId: 'todos-v2',
+            schemaVersion: 2,
+            schemaFingerprint: 'new-schema',
+            replicaId: 'local',
+            vector: {},
+            lineage: {
+                sourceDocId: 'todos-v1',
+                sourceSchemaVersion: 1,
+                sourceSchemaFingerprint: 'old-schema',
+                migrationId: 'todos-v1-to-v2',
+            },
+        });
+        expect(migrated.compactedThrough).toBeUndefined();
+        expect(migrated.history.doc.state.title).toBe('Old');
+        expect(migrated.history.doc.schema.tagKey).toBe('type');
     });
 });
