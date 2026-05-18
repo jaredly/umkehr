@@ -22,6 +22,7 @@ import {
     recordPreviewPaths,
     replacePreviewState,
     scheduleTask,
+    useStatusesFromStore,
     useValue,
     type Context,
     type PathListenerNode,
@@ -29,7 +30,7 @@ import {
 } from '../react-core/index.js';
 import {useLatest} from './useLatest.js';
 
-export {useValue};
+export {useStatusesFromStore, useValue};
 export type {Context};
 
 type C<T> = {

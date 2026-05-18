@@ -5,6 +5,7 @@ import {type EqualFn} from '../internal.js';
 import type {PatchBuilderInternal} from '../types.js';
 import {useLatest} from '../react/useLatest.js';
 import type {Context} from '../framework-core/index.js';
+import type {Status, StatusQuery, StatusStore} from '../statuses.js';
 
 export {
     addPathListener,
@@ -60,3 +61,42 @@ export const useValue: (<Current, Return, Tag extends PropertyKey>(
     );
     return v;
 };
+
+export function useStatusesFromStore<Current, Tag extends PropertyKey>(
+    node: PatchBuilderInternal<unknown, Current, Tag, unknown, Context>,
+    store: StatusStore,
+    query?: StatusQuery,
+): Status[] {
+    const path = getPath(node);
+    const [statuses, setStatuses] = useState(() => store.get(path, query));
+    const latestStatuses = useLatest(statuses);
+    useEffect(
+        () => {
+            const current = store.get(path, query);
+            if (!equal(latestStatuses.current, current)) {
+                latestStatuses.current = current;
+                setStatuses(current);
+            }
+            return store.subscribe(path, query, (next) => {
+                if (!equal(latestStatuses.current, next)) {
+                    latestStatuses.current = next;
+                    setStatuses(next);
+                }
+            });
+        },
+        [store, path, query, latestStatuses],
+    );
+    return statuses;
+}
+
+export function useStatuses<Current, Tag extends PropertyKey>(
+    node: PatchBuilderInternal<unknown, Current, Tag, unknown, Context>,
+    query?: StatusQuery,
+): Status[] {
+    const extra = getExtra(node);
+    const store = extra.getStatusStore?.();
+    if (!store) {
+        throw new Error(`useStatuses requires a status store in the patch builder context.`);
+    }
+    return useStatusesFromStore(node, store, query);
+}

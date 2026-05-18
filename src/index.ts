@@ -14,3 +14,5 @@ export {
     type DraftPatch,
 } from './core.js';
 export {blankHistory, dispatch, jump, type Annotations, type History} from './history/history.js';
+export {createStatusStore} from './statuses.js';
+export type {Status, StatusQuery, StatusStore} from './statuses.js';

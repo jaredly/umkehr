@@ -9,7 +9,13 @@ import {
     hlc,
     type CrdtUpdate,
 } from '../crdt/index';
-import {createSyncedContext, useValue, type SyncedTransport} from './react-crdt';
+import {
+    createSyncedContext,
+    useStatuses,
+    useValue,
+    type SyncedTransport,
+} from './react-crdt';
+import {createStatusStore} from '../statuses';
 
 type State = {
     title: string;
@@ -238,5 +244,96 @@ describe('createSyncedContext', () => {
         expect(localView.container.querySelector('[data-testid="title"]')?.textContent).toBe('Preview');
         expect(localView.container.querySelector('[data-testid="count"]')?.textContent).toBe('1');
         expect(local.published).toEqual([]);
+    });
+
+    it('subscribes to statuses for typed paths', () => {
+        const [Provider, useTodos] = createSyncedContext<State>('type');
+        const transport = new TestTransport('local');
+        const statuses = createStatusStore();
+
+        function Editor() {
+            const ctx = useTodos();
+            const titleStatuses = useStatuses(ctx.$.title);
+            return (
+                <span data-testid="statuses">
+                    {titleStatuses.map((status) => status.kind).join(',')}
+                </span>
+            );
+        }
+
+        const view = render(
+            <Provider initial={createInitialHistory()} transport={transport} statuses={statuses}>
+                <Editor />
+            </Provider>,
+        );
+
+        expect(view.getByTestId('statuses').textContent).toBe('');
+
+        act(() => {
+            statuses.add([{id: 'title', path: [{type: 'key', key: 'title'}], kind: 'conflict'}]);
+        });
+
+        expect(view.getByTestId('statuses').textContent).toBe('conflict');
+    });
+
+    it('supports descendant and kind-filtered status subscriptions', () => {
+        const [Provider, useTodos] = createSyncedContext<State>('type');
+        const transport = new TestTransport('local');
+        const statuses = createStatusStore();
+
+        function Editor() {
+            const ctx = useTodos();
+            const titleStatuses = useStatuses(ctx.$.title, {
+                descendants: true,
+                kinds: ['conflict'],
+            });
+            return (
+                <span data-testid="statuses">
+                    {titleStatuses.map((status) => status.id).join(',')}
+                </span>
+            );
+        }
+
+        const view = render(
+            <Provider initial={createInitialHistory()} transport={transport} statuses={statuses}>
+                <Editor />
+            </Provider>,
+        );
+
+        act(() => {
+            statuses.add([
+                {id: 'title', path: [{type: 'key', key: 'title'}], kind: 'changed'},
+                {
+                    id: 'child',
+                    path: [
+                        {type: 'key', key: 'title'},
+                        {type: 'key', key: 'nested'},
+                    ],
+                    kind: 'conflict',
+                },
+                {id: 'count', path: [{type: 'key', key: 'count'}], kind: 'conflict'},
+            ]);
+        });
+
+        expect(view.getByTestId('statuses').textContent).toBe('child');
+    });
+
+    it('returns no statuses when the provider has no status store', () => {
+        const [Provider, useTodos] = createSyncedContext<State>('type');
+        const transport = new TestTransport('local');
+
+        function Editor() {
+            const ctx = useTodos();
+            const titleStatuses = useStatuses(ctx.$.title);
+            return <span data-testid="statuses">{titleStatuses.length}</span>;
+        }
+
+        const view = render(
+            <Provider initial={createInitialHistory()} transport={transport}>
+                <Editor />
+            </Provider>,
+        );
+
+        expect(view.getByTestId('statuses').textContent).toBe('0');
     });
 });

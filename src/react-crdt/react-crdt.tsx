@@ -26,12 +26,14 @@ import {
     recordPreviewPaths,
     scheduleTask,
     useValue,
+    useStatuses,
     type Context,
     type PathListenerNode,
     type ScheduledTask,
 } from '../react-core/index.js';
 import type {ApplyTiming, DraftPatch, Path} from '../types.js';
 import {useLatest} from '../react/useLatest.js';
+import {createStatusStore, type StatusStore} from '../statuses.js';
 
 export type SyncedTransport = {
     actor: string;
@@ -68,6 +70,7 @@ type SyncedContextBase<T, Tag extends string> = {
     queuedChanges: QueuedChanges<T, Tag>;
     activePreviewChanges: QueuedChanges<T, Tag>;
     previewPaths: Record<string, Path>;
+    statuses: StatusStore;
 };
 
 export const createSyncedContext = <T, Tag extends string = 'type'>(
@@ -140,13 +143,16 @@ function makeProvider<T, Tag extends string>(
         initial,
         transport,
         save,
+        statuses,
     }: {
         children: React.ReactElement;
         initial: CrdtLocalHistory<T>;
         transport: SyncedTransport;
         save?(history: CrdtLocalHistory<T>): void;
+        statuses?: StatusStore;
     }) {
         const latestSave = useLatest(save);
+        const internalStatuses = useRef(statuses ?? createStatusStore());
         const value = useRef<SyncedContextBase<T, Tag>>({
             history: initial,
             transport,
@@ -160,7 +166,10 @@ function makeProvider<T, Tag extends string>(
             queuedChanges: [],
             activePreviewChanges: [],
             previewPaths: {},
+            statuses: statuses ?? internalStatuses.current,
         });
+
+        value.current.statuses = statuses ?? internalStatuses.current;
 
         useEffect(() => {
             value.current.transport = transport;
@@ -191,6 +200,7 @@ function makeDispatch<T, Tag extends string>(
     const extra = makeContextForPath(
         () => ctx.previewState ?? ctx.history.doc.state,
         ctx.listenersByPath,
+        () => ctx.statuses,
     );
     const go = (v: MaybeNested<DraftPatch<T, Tag, Context>>, when?: ApplyTiming) => {
         if (when === 'preview') {
@@ -372,4 +382,4 @@ function notifyAll<T, Tag extends string>(ctx: SyncedContextBase<T, Tag>) {
     ctx.localHistoryListeners.forEach((f) => f());
 }
 
-export {useValue};
+export {useValue, useStatuses};

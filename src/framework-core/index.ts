@@ -1,10 +1,12 @@
 import {_get} from '../internal.js';
 import {pathToString} from '../types.js';
 import type {DraftPatch, Patch, Path, PathSegment} from '../types.js';
+import type {StatusStore} from '../statuses.js';
 
 export type Context = {
     getForPath<T>(v: Path): T;
     listenToPath(v: Path, f: () => void): () => void;
+    getStatusStore?(): StatusStore;
 };
 
 export type PathListener = () => void;
@@ -142,6 +144,7 @@ export const recordPreviewPaths = (previewPaths: Record<string, Path>, paths: Pa
 export const makeContextForPath = <State>(
     getState: () => State,
     listenersByPath: PathListenerNode,
+    getStatusStore?: () => StatusStore,
 ): Context => ({
     getForPath(path) {
         return _get(getState(), path);
@@ -150,6 +153,7 @@ export const makeContextForPath = <State>(
         addPathListener(listenersByPath, path, f);
         return () => removePathListener(listenersByPath, path, f);
     },
+    getStatusStore,
 });
 
 export const clearPreviewState = <T, Change, Tag extends string>(
