@@ -1,15 +1,17 @@
-import {useMemo, useState} from 'react';
+import {useEffect, useMemo, useState} from 'react';
 import {useStore} from '../store';
-import type {AppDefinition} from '../crdtApp';
+import type {AppDefinition, CrdtEditorContext} from '../crdtApp';
 import type {ServerSync} from './types';
 import {pathKey, pathLabel} from './materialize';
 
 export function ServerHistoryView<TState>({
     app: _app,
     sync,
+    editor,
 }: {
     app: AppDefinition<TState>;
     sync: ServerSync<TState>;
+    editor: CrdtEditorContext<TState>;
 }) {
     const branches = useStore(sync.branchesStore);
     const events = useStore(sync.eventsStore);
@@ -29,6 +31,11 @@ export function ServerHistoryView<TState>({
     );
     const revertedCount = revertedPathKeys.size;
     const appliedCount = Math.max(0, changedPathKeys.length - revertedCount);
+
+    useEffect(() => {
+        editor.previewHistory(mergePreview?.preview ?? null);
+        return () => editor.previewHistory(null);
+    }, [editor, mergePreview]);
 
     function createBranch() {
         const name = branchName.trim();
@@ -61,6 +68,7 @@ export function ServerHistoryView<TState>({
 
     function commitMerge() {
         if (!mergeSourceId) return;
+        editor.previewHistory(null);
         sync.mergeBranch(mergeSourceId, undefined, revertedPathKeys);
         setMergeSourceId('');
         setRevertedPathKeys(new Set());

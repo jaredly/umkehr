@@ -48,6 +48,7 @@ export type ClientServerMessage =
           actor: string;
           userId: string;
           docId: string;
+          mergeId: string;
           targetBranchId: string;
           sourceBranchId: string;
           sourceThroughEventIndex: number;
@@ -105,6 +106,7 @@ export type ServerClientMessage =
           docId: string;
           branchId?: string;
           hlcTimestamp?: HlcTimestamp;
+          mergeId?: string;
           eventIndex?: number;
           branchIdCreated?: string;
       }
@@ -165,7 +167,7 @@ export function parseClientMessage(input: unknown): ClientServerMessage | null {
             if (!result.data.branchId || !result.data.name.trim()) return null;
             return result.data;
         case 'mergeBranch':
-            if (!result.data.targetBranchId || !result.data.sourceBranchId) return null;
+            if (!result.data.mergeId || !result.data.targetBranchId || !result.data.sourceBranchId) return null;
             if (!Number.isSafeInteger(result.data.sourceThroughEventIndex)) return null;
             if (result.data.sourceThroughEventIndex < 0) return null;
             return result.data;

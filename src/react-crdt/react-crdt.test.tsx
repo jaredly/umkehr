@@ -250,6 +250,67 @@ describe('createSyncedContext', () => {
         expect(local.published).toEqual([]);
     });
 
+    it('returns preview history from useLocalHistory while external preview history is active', () => {
+        const [Provider, useTodos] = createSyncedContext<State>('type');
+        const transport = new TestTransport('local');
+        const saved: string[] = [];
+        const previewHistory = createCrdtLocalHistory(
+            createCrdtDocument({title: 'Preview', count: 7}, schema, {
+                timestamp: hlc.pack(hlc.init('preview', 3_000_000)),
+            }),
+        );
+
+        function Editor() {
+            const ctx = useTodos();
+            const title = useValue(ctx.$.title);
+            const history = ctx.useLocalHistory();
+            return (
+                <>
+                    <span data-testid="title">{title}</span>
+                    <span data-testid="history-title">{history.doc.state.title}</span>
+                    <span data-testid="history-count">{history.doc.state.count}</span>
+                    <button type="button" onClick={() => ctx.previewHistory(previewHistory)}>
+                        preview history
+                    </button>
+                    <button type="button" onClick={() => ctx.previewHistory(null)}>
+                        clear preview history
+                    </button>
+                    <button type="button" onClick={() => ctx.$.title('Committed')}>
+                        commit title
+                    </button>
+                </>
+            );
+        }
+
+        const view = render(
+            <Provider
+                initial={createInitialHistory()}
+                transport={transport}
+                save={(history) => saved.push(history.doc.state.title)}
+            >
+                <Editor />
+            </Provider>,
+        );
+
+        expect(view.getByTestId('title').textContent).toBe('Draft');
+        expect(view.getByTestId('history-title').textContent).toBe('Draft');
+
+        fireEvent.click(view.getByText('preview history'));
+
+        expect(view.getByTestId('title').textContent).toBe('Preview');
+        expect(view.getByTestId('history-title').textContent).toBe('Preview');
+        expect(view.getByTestId('history-count').textContent).toBe('7');
+        expect(saved).toEqual([]);
+        expect(transport.published).toEqual([]);
+
+        fireEvent.click(view.getByText('commit title'));
+
+        expect(view.getByTestId('title').textContent).toBe('Committed');
+        expect(view.getByTestId('history-title').textContent).toBe('Committed');
+        expect(saved).toEqual(['Committed']);
+        expect(transport.published).toHaveLength(1);
+    });
+
     it('subscribes to statuses for typed paths', () => {
         const [Provider, useTodos] = createSyncedContext<State>('type');
         const transport = new TestTransport('local');

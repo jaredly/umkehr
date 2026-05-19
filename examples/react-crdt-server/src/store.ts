@@ -41,6 +41,7 @@ export class ServerStore {
                 kind text not null,
                 origin text,
                 hlcTimestamp text,
+                mergeId text,
                 receivedAt text not null,
                 payloadJson text not null,
                 primary key (docId, branchId, eventIndex)
@@ -59,6 +60,7 @@ export class ServerStore {
             );
         `);
         this.migrateLegacyDocuments();
+        this.migrateBranchEvents();
     }
 
     listUsers(): ServerUser[] {
@@ -256,16 +258,20 @@ export class ServerStore {
     appendMergeEvent({
         docId,
         branchId,
+        mergeId,
         actor,
         sourceBranchId,
         sourceThroughEventIndex,
     }: {
         docId: string;
         branchId: string;
+        mergeId: string;
         actor: string;
         sourceBranchId: string;
         sourceThroughEventIndex: number;
     }): ServerMergeEvent {
+        const existing = this.findMergeById(docId, branchId, mergeId);
+        if (existing) return existing;
         const source = this.findBranch(docId, sourceBranchId);
         if (!source) throw new Error('Source branch does not exist.');
         if (
@@ -277,7 +283,7 @@ export class ServerStore {
         }
         return this.appendEvent(docId, branchId, (eventIndex, now) => ({
             kind: 'merge',
-            mergeId: `merge-${crypto.randomUUID()}`,
+            mergeId,
             docId,
             branchId,
             eventIndex,
@@ -363,8 +369,8 @@ export class ServerStore {
             this.db
                 .query(
                     `insert into branch_events
-                        (docId, branchId, eventIndex, kind, origin, hlcTimestamp, receivedAt, payloadJson)
-                     values (?, ?, ?, ?, ?, ?, ?, ?)`,
+                        (docId, branchId, eventIndex, kind, origin, hlcTimestamp, mergeId, receivedAt, payloadJson)
+                     values (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                 )
                 .run(
                     docId,
@@ -373,6 +379,7 @@ export class ServerStore {
                     event.kind,
                     event.kind === 'update' ? event.origin : event.actor,
                     event.kind === 'update' ? event.hlcTimestamp : null,
+                    event.kind === 'merge' ? event.mergeId : null,
                     event.kind === 'update' ? event.receivedAt : event.createdAt,
                     JSON.stringify(event),
                 );
@@ -410,6 +417,34 @@ export class ServerStore {
         if (!row) return null;
         const event = rowToEvent(row);
         return event.kind === 'update' ? event : null;
+    }
+
+    private findMergeById(docId: string, branchId: string, mergeId: string): ServerMergeEvent | null {
+        const row = this.db
+            .query<EventRow, [string, string, string]>(
+                `select docId, branchId, eventIndex, kind, origin, hlcTimestamp, receivedAt, payloadJson
+                 from branch_events
+                 where docId = ? and branchId = ? and mergeId = ?`,
+            )
+            .get(docId, branchId, mergeId);
+        if (!row) return null;
+        const event = rowToEvent(row);
+        return event.kind === 'merge' ? event : null;
+    }
+
+    private migrateBranchEvents() {
+        const columns = this.db
+            .query<{name: string}, []>('pragma table_info(branch_events)')
+            .all()
+            .map((column) => column.name);
+        if (!columns.includes('mergeId')) {
+            this.db.exec('alter table branch_events add column mergeId text');
+        }
+        this.db.exec(`
+            create unique index if not exists branch_events_merge_id_idx
+                on branch_events (docId, branchId, mergeId)
+                where mergeId is not null;
+        `);
     }
 
     private migrateLegacyDocuments() {

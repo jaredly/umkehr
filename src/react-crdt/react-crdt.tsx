@@ -45,6 +45,7 @@ export type SyncedTransport = {
 export type SyncedContext<T, Tag extends string = 'type'> = {
     latest(): T;
     clearPreview(): void;
+    previewHistory(history: CrdtLocalHistory<T> | null): void;
     canUndo(): boolean;
     canRedo(): boolean;
     undo(): void;
@@ -65,6 +66,7 @@ type SyncedContextBase<T, Tag extends string> = {
     listeners: (() => void)[];
     localHistoryListeners: (() => void)[];
     previewState: null | T;
+    externalPreviewHistory: null | CrdtLocalHistory<T>;
     scheduled?: ScheduledTask;
     listenersByPath: PathListenerNode;
     queuedChanges: QueuedChanges<T, Tag>;
@@ -95,10 +97,18 @@ export const createSyncedContext = <T, Tag extends string = 'type'>(
 
                 return {
                     latest() {
-                        return ctx.history.doc.state;
+                        return visibleState(ctx);
                     },
                     clearPreview() {
                         clearSyncedPreview(ctx);
+                    },
+                    previewHistory(history) {
+                        if (history === null) {
+                            clearSyncedPreview(ctx);
+                            clearExternalPreview(ctx);
+                        } else {
+                            replaceExternalPreview(ctx, history);
+                        }
                     },
                     canUndo() {
                         return canUndoLocalCommand(ctx.history, ctx.transport.actor);
@@ -123,7 +133,7 @@ export const createSyncedContext = <T, Tag extends string = 'type'>(
                             };
                         }, []);
                         tick;
-                        return ctx.history;
+                        return visibleHistory(ctx);
                     },
                     $,
                     dispatch,
@@ -162,6 +172,7 @@ function makeProvider<T, Tag extends string>(
             listeners: [],
             localHistoryListeners: [],
             previewState: null,
+            externalPreviewHistory: null,
             listenersByPath: makePathListenerNode(),
             queuedChanges: [],
             activePreviewChanges: [],
@@ -179,6 +190,7 @@ function makeProvider<T, Tag extends string>(
             if (initial !== value.current.history) {
                 value.current.history = initial;
                 clearSyncedPreview(value.current);
+                clearExternalPreview(value.current);
                 notifyAll(value.current);
             }
         }, [initial]);
@@ -198,7 +210,7 @@ function makeDispatch<T, Tag extends string>(
     equalFn: EqualFn,
 ) {
     const extra = makeContextForPath(
-        () => ctx.previewState ?? ctx.history.doc.state,
+        () => visibleState(ctx),
         ctx.listenersByPath,
         () => ctx.statuses,
     );
@@ -246,7 +258,7 @@ function recomputePreview<T, Tag extends string>(
         return;
     }
     const {current, changes} = resolveAndApply(
-        ctx.history.doc.state,
+        visibleHistory(ctx).doc.state,
         ctx.activePreviewChanges,
         extra,
         tag,
@@ -261,7 +273,7 @@ function recomputePreview<T, Tag extends string>(
 
 function clearSyncedPreview<T, Tag extends string>(ctx: SyncedContextBase<T, Tag>) {
     const previewPaths = Object.values(ctx.previewPaths);
-    const hadPreview = previewPaths.length > 0;
+    const hadPreview = ctx.previewState !== null || previewPaths.length > 0;
     ctx.previewState = null;
     ctx.previewPaths = {};
     ctx.queuedChanges = [];
@@ -270,8 +282,36 @@ function clearSyncedPreview<T, Tag extends string>(ctx: SyncedContextBase<T, Tag
     ctx.scheduled = undefined;
     if (hadPreview) {
         ctx.listeners.forEach((f) => f());
-        notifyPaths(ctx.listenersByPath, previewPaths);
+        if (previewPaths.length) notifyPaths(ctx.listenersByPath, previewPaths);
+        else notifyAllPaths(ctx.listenersByPath);
     }
+}
+
+function replaceExternalPreview<T, Tag extends string>(
+    ctx: SyncedContextBase<T, Tag>,
+    history: CrdtLocalHistory<T>,
+) {
+    ctx.externalPreviewHistory = history;
+    clearSyncedPreview(ctx);
+    ctx.listeners.forEach((f) => f());
+    notifyAllPaths(ctx.listenersByPath);
+    ctx.localHistoryListeners.forEach((f) => f());
+}
+
+function clearExternalPreview<T, Tag extends string>(ctx: SyncedContextBase<T, Tag>) {
+    if (ctx.externalPreviewHistory === null) return;
+    ctx.externalPreviewHistory = null;
+    ctx.listeners.forEach((f) => f());
+    notifyAllPaths(ctx.listenersByPath);
+    ctx.localHistoryListeners.forEach((f) => f());
+}
+
+function visibleState<T, Tag extends string>(ctx: SyncedContextBase<T, Tag>) {
+    return ctx.previewState ?? visibleHistory(ctx).doc.state;
+}
+
+function visibleHistory<T, Tag extends string>(ctx: SyncedContextBase<T, Tag>) {
+    return ctx.externalPreviewHistory ?? ctx.history;
 }
 
 function applyLocalDraft<T, Tag extends string>(
@@ -283,6 +323,7 @@ function applyLocalDraft<T, Tag extends string>(
 ) {
     const previewPaths = Object.values(ctx.previewPaths);
     clearSyncedPreview(ctx);
+    clearExternalPreview(ctx);
     const {current, changes} = resolveAndApply(ctx.history.doc.state, v, extra, tag, equalFn);
     if (current === ctx.history.doc.state || !changes.length) return;
 
@@ -311,7 +352,7 @@ function receiveRemoteUpdate<T, Tag extends string>(
 
     const paths = changedNormalPathsForCrdtUpdate(before, history.doc, update);
     const extra = makeContextForPath(
-        () => ctx.previewState ?? ctx.history.doc.state,
+        () => visibleState(ctx),
         ctx.listenersByPath,
     );
     if (ctx.activePreviewChanges.length || ctx.queuedChanges.length) {
@@ -330,6 +371,7 @@ function receiveRemoteUpdate<T, Tag extends string>(
 
 function applyUndo<T, Tag extends string>(ctx: SyncedContextBase<T, Tag>) {
     clearSyncedPreview(ctx);
+    clearExternalPreview(ctx);
     const before = ctx.history.doc;
     const result = undoLocalCommand(ctx.history, ctx.transport.actor, ctx.transport.tick());
     if (!result.ok) return;
@@ -341,6 +383,7 @@ function applyUndo<T, Tag extends string>(ctx: SyncedContextBase<T, Tag>) {
 
 function applyRedo<T, Tag extends string>(ctx: SyncedContextBase<T, Tag>) {
     clearSyncedPreview(ctx);
+    clearExternalPreview(ctx);
     const before = ctx.history.doc;
     const result = redoLocalCommand(ctx.history, ctx.transport.actor, ctx.transport.tick());
     if (!result.ok) return;

@@ -141,6 +141,7 @@ const server = Bun.serve<ClientData>({
                         const event = store.appendMergeEvent({
                             docId: parsed.docId,
                             branchId: parsed.targetBranchId,
+                            mergeId: parsed.mergeId,
                             actor: parsed.actor,
                             sourceBranchId: parsed.sourceBranchId,
                             sourceThroughEventIndex: parsed.sourceThroughEventIndex,
@@ -150,6 +151,7 @@ const server = Bun.serve<ClientData>({
                             version: SERVER_PROTOCOL_VERSION,
                             docId: parsed.docId,
                             branchId: parsed.targetBranchId,
+                            mergeId: parsed.mergeId,
                             eventIndex: event.eventIndex,
                         });
                         broadcastEvent(event, parsed.actor);

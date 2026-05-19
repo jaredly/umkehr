@@ -34,6 +34,7 @@ export type AppEditorContext<TState, Tag extends string = 'type'> = {
 
 export type CrdtEditorContext<TState, Tag extends string = 'type'> =
     AppEditorContext<TState, Tag> & {
+        previewHistory(history: CrdtLocalHistory<TState> | null): void;
         useLocalHistory(): CrdtLocalHistory<TState>;
     };
 

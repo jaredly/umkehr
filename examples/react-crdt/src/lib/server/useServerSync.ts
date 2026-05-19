@@ -193,6 +193,7 @@ export function useServerSync<TState>({
                         actor: identity.actor,
                         userId: identity.user.userId,
                         docId,
+                        mergeId: event.mergeId,
                         targetBranchId: event.branchId,
                         sourceBranchId: event.sourceBranchId,
                         sourceThroughEventIndex: event.sourceThroughEventIndex,
@@ -305,7 +306,13 @@ export function useServerSync<TState>({
     );
 
     const markAcknowledged = useCallback(
-        async (parsed: {branchId?: string; hlcTimestamp?: string; eventIndex?: number; branchIdCreated?: string}) => {
+        async (parsed: {
+            branchId?: string;
+            hlcTimestamp?: string;
+            mergeId?: string;
+            eventIndex?: number;
+            branchIdCreated?: string;
+        }) => {
             if (parsed.branchIdCreated) {
                 branchListRef.current = branchListRef.current.map((branch) =>
                     branch.branchId === parsed.branchIdCreated ? {...branch, pending: false} : branch,
@@ -317,6 +324,19 @@ export function useServerSync<TState>({
                     branch.events = sortServerEvents(
                         branch.events.map((event) =>
                             event.kind === 'update' && event.hlcTimestamp === parsed.hlcTimestamp
+                                ? {...event, recorded: true, eventIndex: parsed.eventIndex ?? event.eventIndex}
+                                : event,
+                        ),
+                    );
+                    branch.lastSeenEventIndex = Math.max(branch.lastSeenEventIndex, parsed.eventIndex ?? 0);
+                }
+            }
+            if (parsed.branchId && parsed.mergeId) {
+                const branch = branchesRef.current[parsed.branchId];
+                if (branch) {
+                    branch.events = sortServerEvents(
+                        branch.events.map((event) =>
+                            event.kind === 'merge' && event.mergeId === parsed.mergeId
                                 ? {...event, recorded: true, eventIndex: parsed.eventIndex ?? event.eventIndex}
                                 : event,
                         ),

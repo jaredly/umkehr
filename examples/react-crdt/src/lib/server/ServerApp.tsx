@@ -13,7 +13,7 @@ import {
 import {SERVER_HTTP_URL, SERVER_PROTOCOL_VERSION} from './protocol';
 import {actorForSession, ensureServerSessionId} from './session';
 import {useServerSync} from './useServerSync';
-import type {PersistedServerReplica, ServerSessionIdentity, ServerUser} from './types';
+import type {PersistedServerReplica, ServerSessionIdentity, ServerSync, ServerUser} from './types';
 
 type Loaded<TState> = {
     identity: ServerSessionIdentity;
@@ -179,9 +179,13 @@ function ServerReadyApp<TState>({
                     save={sync.saveHistory}
                     statuses={sync.statusStore}
                 >
-                    <ServerDocument app={app} runtime={runtime} actor={loaded.identity.actor} />
+                    <ServerDocumentWorkspace
+                        app={app}
+                        runtime={runtime}
+                        actor={loaded.identity.actor}
+                        sync={sync}
+                    />
                 </Provider>
-                <ServerHistoryView app={app} sync={sync} />
             </section>
         </main>
     );
@@ -237,24 +241,31 @@ function ServerLogin({
     );
 }
 
-function ServerDocument<TState>({
+function ServerDocumentWorkspace<TState>({
     app,
     runtime,
     actor,
+    sync,
 }: {
     app: AppDefinition<TState>;
     runtime: CrdtRuntime<TState>;
     actor: string;
+    sync: ServerSync<TState>;
 }) {
     const editor = runtime.useEditorContext();
     editor.useLocalHistory();
 
-    return app.renderPanel({
-        actor,
-        editor,
-        title: `${app.title} server client`,
-        gridSlot: 'full',
-    });
+    return (
+        <>
+            {app.renderPanel({
+                actor,
+                editor,
+                title: `${app.title} server client`,
+                gridSlot: 'full',
+            })}
+            <ServerHistoryView app={app} sync={sync} editor={editor} />
+        </>
+    );
 }
 
 async function loadInitialState<TState>(

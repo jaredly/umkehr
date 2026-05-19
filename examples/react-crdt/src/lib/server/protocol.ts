@@ -52,6 +52,7 @@ export type ClientServerMessage =
           actor: string;
           userId: string;
           docId: string;
+          mergeId: string;
           targetBranchId: string;
           sourceBranchId: string;
           sourceThroughEventIndex: number;
@@ -109,6 +110,7 @@ export type ServerClientMessage =
           docId: string;
           branchId?: string;
           hlcTimestamp?: HlcTimestamp;
+          mergeId?: string;
           eventIndex?: number;
           branchIdCreated?: string;
       }
