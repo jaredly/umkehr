@@ -129,6 +129,7 @@ export type ServerMergePreview<TState> = {
     targetBranchId: string;
     preview: CrdtLocalHistory<TState>;
     changedPaths: import('umkehr/crdt').CrdtPathSegment[][];
+    revertUpdates: CrdtUpdate[];
     revertedPathKeys: Set<string>;
 };
 

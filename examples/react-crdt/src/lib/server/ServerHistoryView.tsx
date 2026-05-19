@@ -18,16 +18,52 @@ export function ServerHistoryView<TState>({
     const [mergeSourceId, setMergeSourceId] = useState('');
     const [revertedPathKeys, setRevertedPathKeys] = useState(() => new Set<string>());
     const activeBranch = branches.find((branch) => branch.branchId === activeBranchId);
+    const mergeSource = branches.find((branch) => branch.branchId === mergeSourceId);
     const mergePreview = useMemo(
         () => (mergeSourceId ? sync.buildMergePreview(mergeSourceId, undefined, revertedPathKeys) : null),
         [mergeSourceId, sync, events, activeBranchId, revertedPathKeys],
     );
+    const changedPathKeys = useMemo(
+        () => mergePreview?.changedPaths.map((path) => pathKey(path)) ?? [],
+        [mergePreview],
+    );
+    const revertedCount = revertedPathKeys.size;
+    const appliedCount = Math.max(0, changedPathKeys.length - revertedCount);
 
     function createBranch() {
         const name = branchName.trim();
         if (!name) return;
         sync.createBranch(name);
         setBranchName('');
+    }
+
+    function selectMergeSource(branchId: string) {
+        setMergeSourceId(branchId);
+        setRevertedPathKeys(new Set());
+    }
+
+    function toggleRevertedPath(key: string) {
+        setRevertedPathKeys((previous) => {
+            const next = new Set(previous);
+            if (next.has(key)) next.delete(key);
+            else next.add(key);
+            return next;
+        });
+    }
+
+    function revertAllChangedPaths() {
+        setRevertedPathKeys(new Set(changedPathKeys));
+    }
+
+    function applyAllChangedPaths() {
+        setRevertedPathKeys(new Set());
+    }
+
+    function commitMerge() {
+        if (!mergeSourceId) return;
+        sync.mergeBranch(mergeSourceId, undefined, revertedPathKeys);
+        setMergeSourceId('');
+        setRevertedPathKeys(new Set());
     }
 
     return (
@@ -64,7 +100,7 @@ export function ServerHistoryView<TState>({
             <div className="serverBranchActions">
                 <select
                     value={mergeSourceId}
-                    onChange={(event) => setMergeSourceId(event.currentTarget.value)}
+                    onChange={(event) => selectMergeSource(event.currentTarget.value)}
                     aria-label="Merge source branch"
                 >
                     <option value="">Merge source...</option>
@@ -76,44 +112,96 @@ export function ServerHistoryView<TState>({
                             </option>
                         ))}
                 </select>
-                <button
-                    type="button"
-                    disabled={!mergeSourceId}
-                    onClick={() => {
-                        sync.mergeBranch(mergeSourceId, undefined, revertedPathKeys);
-                        setMergeSourceId('');
-                        setRevertedPathKeys(new Set());
-                    }}
-                >
+                <button type="button" disabled={!mergeSourceId} onClick={commitMerge}>
                     Merge
                 </button>
             </div>
             {mergePreview ? (
-                <div className="serverMergePaths">
-                    {mergePreview.changedPaths.length ? (
-                        mergePreview.changedPaths.map((path) => {
-                            const key = pathKey(path);
-                            const checked = revertedPathKeys.has(key);
-                            return (
-                                <label key={key}>
-                                    <input
-                                        type="checkbox"
-                                        checked={checked}
-                                        onChange={() => {
-                                            const next = new Set(revertedPathKeys);
-                                            if (next.has(key)) next.delete(key);
-                                            else next.add(key);
-                                            setRevertedPathKeys(next);
-                                        }}
-                                    />
-                                    {pathLabel(path)}
-                                </label>
-                            );
-                        })
-                    ) : (
-                        <p>No changed paths.</p>
-                    )}
-                </div>
+                <section className="serverMergePanel" aria-label="Merge preview">
+                    <div className="serverMergeHeader">
+                        <div>
+                            <h3>Merge preview</h3>
+                            <p>
+                                {mergeSource?.name ?? mergeSourceId} into{' '}
+                                {activeBranch?.name ?? activeBranchId}
+                            </p>
+                        </div>
+                        <button type="button" onClick={commitMerge}>
+                            Accept merge
+                        </button>
+                    </div>
+                    <dl className="serverMergeFacts">
+                        <div>
+                            <dt>Source through</dt>
+                            <dd>{mergePreview.sourceThroughEventIndex}</dd>
+                        </div>
+                        <div>
+                            <dt>Changed paths</dt>
+                            <dd>{mergePreview.changedPaths.length}</dd>
+                        </div>
+                        <div>
+                            <dt>Applied</dt>
+                            <dd>{appliedCount}</dd>
+                        </div>
+                        <div>
+                            <dt>Reverted</dt>
+                            <dd>{revertedCount}</dd>
+                        </div>
+                    </dl>
+                    <div className="serverMergeToolbar">
+                        <button
+                            type="button"
+                            disabled={changedPathKeys.length === 0 || revertedCount === changedPathKeys.length}
+                            onClick={revertAllChangedPaths}
+                        >
+                            Revert all
+                        </button>
+                        <button
+                            type="button"
+                            disabled={revertedCount === 0}
+                            onClick={applyAllChangedPaths}
+                        >
+                            Apply all
+                        </button>
+                        <button type="button" onClick={() => selectMergeSource('')}>
+                            Cancel
+                        </button>
+                    </div>
+                    <div className="serverMergePreviewGrid">
+                        <div className="serverMergePaths">
+                            <h4>Changed paths</h4>
+                            {mergePreview.changedPaths.length ? (
+                                <ul>
+                                    {mergePreview.changedPaths.map((path) => {
+                                        const key = pathKey(path);
+                                        const checked = revertedPathKeys.has(key);
+                                        return (
+                                            <li key={key}>
+                                                <label className={checked ? 'reverted' : ''}>
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={checked}
+                                                        onChange={() => toggleRevertedPath(key)}
+                                                    />
+                                                    <span>{pathLabel(path)}</span>
+                                                    <strong>{checked ? 'Revert' : 'Apply'}</strong>
+                                                </label>
+                                            </li>
+                                        );
+                                    })}
+                                </ul>
+                            ) : (
+                                <p className="serverMergeEmpty">No changed paths in this merge.</p>
+                            )}
+                        </div>
+                        <div className="serverMergeState">
+                            <h4>Resulting state</h4>
+                            <pre className="serverPreview">
+                                {JSON.stringify(mergePreview.preview.doc.state, null, 2)}
+                            </pre>
+                        </div>
+                    </div>
+                </section>
             ) : null}
             <div className="serverTimeline">
                 {events.length === 0 ? (
@@ -131,11 +219,6 @@ export function ServerHistoryView<TState>({
                     ))
                 )}
             </div>
-            {mergePreview ? (
-                <pre className="serverPreview">
-                    {JSON.stringify(mergePreview.preview.doc.state, null, 2)}
-                </pre>
-            ) : null}
         </section>
     );
 }

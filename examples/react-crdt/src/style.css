@@ -17,7 +17,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
     font: inherit;
 }
 
@@ -604,6 +605,155 @@ p {
     margin: 0;
 }
 
+.serverHistory h3,
+.serverHistory h4 {
+    margin: 0;
+}
+
+.serverBranchList,
+.serverBranchActions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.serverBranchActions input,
+.serverBranchActions select {
+    min-width: min(260px, 100%);
+    border: 1px solid #c3cfdb;
+    border-radius: 6px;
+    padding: 8px 10px;
+    color: #17202a;
+    background: #fff;
+}
+
+.serverMergePanel {
+    display: grid;
+    gap: 12px;
+    border-top: 1px solid #dce4ed;
+    border-bottom: 1px solid #dce4ed;
+    padding: 14px 0;
+}
+
+.serverMergeHeader {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.serverMergeHeader p {
+    margin: 4px 0 0;
+    color: #64748b;
+    font-size: 13px;
+}
+
+.serverMergeFacts {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+    margin: 0;
+}
+
+.serverMergeFacts div {
+    min-width: 0;
+    border: 1px solid #dce4ed;
+    border-radius: 8px;
+    padding: 8px 10px;
+    background: #f8fafc;
+}
+
+.serverMergeFacts dt {
+    color: #64748b;
+    font-size: 11px;
+    text-transform: uppercase;
+}
+
+.serverMergeFacts dd {
+    margin: 3px 0 0;
+    color: #17202a;
+    font-weight: 700;
+}
+
+.serverMergeToolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.serverMergePreviewGrid {
+    display: grid;
+    grid-template-columns: minmax(220px, 0.8fr) minmax(280px, 1.2fr);
+    gap: 12px;
+    min-width: 0;
+}
+
+.serverMergePaths,
+.serverMergeState {
+    min-width: 0;
+}
+
+.serverMergePaths h4,
+.serverMergeState h4 {
+    margin-bottom: 8px;
+    font-size: 13px;
+}
+
+.serverMergePaths ul {
+    display: grid;
+    gap: 6px;
+    max-height: 260px;
+    margin: 0;
+    padding: 0;
+    overflow: auto;
+    list-style: none;
+}
+
+.serverMergePaths label {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+    min-height: 34px;
+    border: 1px solid #dce4ed;
+    border-radius: 8px;
+    padding: 7px 9px;
+    background: #fff;
+}
+
+.serverMergePaths label.reverted {
+    border-color: #f1c9a7;
+    background: #fff8f1;
+}
+
+.serverMergePaths span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family:
+        ui-monospace,
+        SFMono-Regular,
+        Menlo,
+        Monaco,
+        Consolas,
+        'Liberation Mono',
+        monospace;
+    font-size: 12px;
+}
+
+.serverMergePaths strong {
+    color: #64748b;
+    font-size: 11px;
+    text-transform: uppercase;
+}
+
+.serverMergeEmpty {
+    margin: 0;
+    color: #64748b;
+    font-size: 13px;
+}
+
 .serverTimeline {
     display: flex;
     gap: 8px;
@@ -630,6 +780,17 @@ p {
     background: #f8fafc;
     color: #334155;
     font-size: 12px;
+}
+
+@media (max-width: 760px) {
+    .serverMergeFacts,
+    .serverMergePreviewGrid {
+        grid-template-columns: 1fr;
+    }
+
+    .serverMergeHeader {
+        display: grid;
+    }
 }
 
 .localFirstStats {
