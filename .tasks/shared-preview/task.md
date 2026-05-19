@@ -1,0 +1,1 @@
+For the whiteboard application, it would be nice to have the concept of a "shared preview", e.g. some user is dragging an element around, and we don't want to spam CRDT updates, so when:'preview' is natural fit, but we would like other users do be able to see the preview too.
