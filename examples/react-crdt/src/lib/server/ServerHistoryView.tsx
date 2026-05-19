@@ -17,13 +17,19 @@ export function ServerHistoryView<TState>({
     const events = useStore(sync.eventsStore);
     const activeBranchId = useStore(sync.activeBranchStore);
     const [branchName, setBranchName] = useState('');
+    const [renameValue, setRenameValue] = useState('');
+    const [forkEventIndex, setForkEventIndex] = useState<number | undefined>();
     const [mergeSourceId, setMergeSourceId] = useState('');
+    const [mergeSourceThroughEventIndex, setMergeSourceThroughEventIndex] = useState<number | undefined>();
     const [revertedPathKeys, setRevertedPathKeys] = useState(() => new Set<string>());
     const activeBranch = branches.find((branch) => branch.branchId === activeBranchId);
     const mergeSource = branches.find((branch) => branch.branchId === mergeSourceId);
     const mergePreview = useMemo(
-        () => (mergeSourceId ? sync.buildMergePreview(mergeSourceId, undefined, revertedPathKeys) : null),
-        [mergeSourceId, sync, events, activeBranchId, revertedPathKeys],
+        () =>
+            mergeSourceId && mergeSourceThroughEventIndex !== undefined
+                ? sync.buildMergePreview(mergeSourceId, mergeSourceThroughEventIndex, revertedPathKeys)
+                : null,
+        [mergeSourceId, mergeSourceThroughEventIndex, sync, events, activeBranchId, revertedPathKeys],
     );
     const changedPathKeys = useMemo(
         () => mergePreview?.changedPaths.map((path) => pathKey(path)) ?? [],
@@ -40,12 +46,22 @@ export function ServerHistoryView<TState>({
     function createBranch() {
         const name = branchName.trim();
         if (!name) return;
-        sync.createBranch(name);
+        sync.createBranch(name, forkEventIndex);
         setBranchName('');
+        setForkEventIndex(undefined);
+    }
+
+    function renameActiveBranch() {
+        const name = renameValue.trim();
+        if (!name || !activeBranch) return;
+        sync.renameBranch(activeBranch.branchId, name);
+        setRenameValue('');
     }
 
     function selectMergeSource(branchId: string) {
         setMergeSourceId(branchId);
+        const source = branches.find((branch) => branch.branchId === branchId);
+        setMergeSourceThroughEventIndex(source?.tipEventIndex);
         setRevertedPathKeys(new Set());
     }
 
@@ -67,10 +83,11 @@ export function ServerHistoryView<TState>({
     }
 
     function commitMerge() {
-        if (!mergeSourceId) return;
+        if (!mergeSourceId || mergeSourceThroughEventIndex === undefined) return;
         editor.previewHistory(null);
-        sync.mergeBranch(mergeSourceId, undefined, revertedPathKeys);
+        sync.mergeBranch(mergeSourceId, mergeSourceThroughEventIndex, revertedPathKeys);
         setMergeSourceId('');
+        setMergeSourceThroughEventIndex(undefined);
         setRevertedPathKeys(new Set());
     }
 
@@ -86,7 +103,14 @@ export function ServerHistoryView<TState>({
                         key={branch.branchId}
                         type="button"
                         className={branch.branchId === activeBranchId ? 'active' : ''}
-                        onClick={() => sync.switchBranch(branch.branchId)}
+                        onClick={() => {
+                            editor.previewHistory(null);
+                            setMergeSourceId('');
+                            setMergeSourceThroughEventIndex(undefined);
+                            setRevertedPathKeys(new Set());
+                            setForkEventIndex(undefined);
+                            sync.switchBranch(branch.branchId);
+                        }}
                         title={branch.pending ? 'Pending local branch' : branch.branchId}
                     >
                         {branch.name}
@@ -102,7 +126,27 @@ export function ServerHistoryView<TState>({
                     aria-label="New branch name"
                 />
                 <button type="button" disabled={!branchName.trim()} onClick={createBranch}>
-                    Branch
+                    {forkEventIndex === undefined ? 'Branch' : `Branch at ${forkEventIndex}`}
+                </button>
+                {forkEventIndex !== undefined ? (
+                    <button type="button" onClick={() => setForkEventIndex(undefined)}>
+                        Clear fork point
+                    </button>
+                ) : null}
+            </div>
+            <div className="serverBranchActions">
+                <input
+                    value={renameValue}
+                    onChange={(event) => setRenameValue(event.currentTarget.value)}
+                    placeholder={activeBranch ? `Rename ${activeBranch.name}` : 'Rename branch'}
+                    aria-label="Rename active branch"
+                />
+                <button
+                    type="button"
+                    disabled={!activeBranch || !renameValue.trim()}
+                    onClick={renameActiveBranch}
+                >
+                    Rename
                 </button>
             </div>
             <div className="serverBranchActions">
@@ -171,7 +215,13 @@ export function ServerHistoryView<TState>({
                         >
                             Apply all
                         </button>
-                        <button type="button" onClick={() => selectMergeSource('')}>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                editor.previewHistory(null);
+                                selectMergeSource('');
+                            }}
+                        >
                             Cancel
                         </button>
                     </div>
@@ -219,7 +269,9 @@ export function ServerHistoryView<TState>({
                         <button
                             key={`${event.branchId}:${event.eventIndex}:${event.kind}`}
                             type="button"
+                            className={forkEventIndex === event.eventIndex ? 'active' : ''}
                             title={event.kind === 'update' ? event.hlcTimestamp : event.mergeId}
+                            onClick={() => setForkEventIndex(event.eventIndex)}
                         >
                             {event.eventIndex}. {event.kind}
                             {!event.recorded ? ' *' : ''}
