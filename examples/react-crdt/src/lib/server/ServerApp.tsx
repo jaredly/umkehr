@@ -262,6 +262,7 @@ function ServerDocumentWorkspace<TState>({
                 editor,
                 title: `${app.title} server client`,
                 gridSlot: 'full',
+                setPresenceSelection: sync.setPresenceSelection,
             })}
             <ServerHistoryView app={app} sync={sync} editor={editor} />
         </>

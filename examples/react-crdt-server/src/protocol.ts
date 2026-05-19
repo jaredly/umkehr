@@ -72,6 +72,15 @@ export type ClientServerMessage =
           docId: string;
           branchId: string;
           color: string;
+      }
+    | {
+          kind: 'presenceSelection';
+          version: 3;
+          actor: string;
+          userId: string;
+          docId: string;
+          branchId: string;
+          elementId: string | null;
       };
 
 export type ServerClientMessage =
@@ -135,6 +144,17 @@ export type ServerClientMessage =
           userId: string;
           sessionId: string;
           at: string;
+      }
+    | {
+          kind: 'presenceSelection';
+          version: 3;
+          docId: string;
+          actor: string;
+          userId: string;
+          sessionId: string;
+          branchId: string;
+          elementId: string | null;
+          at: string;
       };
 
 const validateClientMessage = typia.createValidate<ClientServerMessage>();
@@ -152,6 +172,10 @@ export function parseClientMessage(input: unknown): ClientServerMessage | null {
         case 'presenceHello':
             if (!result.data.branchId) return null;
             if (!isValidPresenceColor(result.data.color)) return null;
+            return result.data;
+        case 'presenceSelection':
+            if (!result.data.branchId) return null;
+            if (result.data.elementId !== null && !result.data.elementId.trim()) return null;
             return result.data;
         case 'branchSubscribe':
             if (!result.data.branchId) return null;

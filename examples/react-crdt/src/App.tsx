@@ -1,4 +1,5 @@
-import {defaultApp, defaultCrdtRuntime, defaultHistoryRuntime} from './lib/appRegistry';
+import {AppPicker} from './lib/AppPicker';
+import {apps, defaultApp, registeredAppForId} from './lib/appRegistry';
 import {LocalSimulatorApp} from './lib/local/LocalSimulatorApp';
 import {LocalFirstApp} from './lib/local-first/LocalFirstApp';
 import {ModeTabs} from './lib/ModeTabs';
@@ -9,21 +10,28 @@ import './style.css';
 import {useHashMode} from './lib/useHashMode';
 
 export function App() {
-    const [mode, setMode] = useHashMode();
+    const [{mode, appId}, setMode, setAppId] = useHashMode(defaultApp.id);
+    const registered = registeredAppForId(appId);
+    const {app, crdt, history} = registered;
 
     return (
         <>
+            <AppPicker
+                apps={apps as any}
+                activeAppId={app.id}
+                setAppId={setAppId}
+            />
             <ModeTabs mode={mode} setMode={setMode} />
             {mode === 'solo' ? (
-                <SoloApp app={defaultApp} runtime={defaultHistoryRuntime} />
+                <SoloApp key={app.id} app={app as any} runtime={history as any} />
             ) : mode === 'local-first' ? (
-                <LocalFirstApp app={defaultApp} runtime={defaultCrdtRuntime} />
+                <LocalFirstApp key={app.id} app={app as any} runtime={crdt as any} />
             ) : mode === 'server' ? (
-                <ServerApp app={defaultApp} runtime={defaultCrdtRuntime} />
+                <ServerApp key={app.id} app={app as any} runtime={crdt as any} />
             ) : mode === 'peerjs' ? (
-                <PeerJsApp app={defaultApp} runtime={defaultCrdtRuntime} />
+                <PeerJsApp key={app.id} app={app as any} runtime={crdt as any} />
             ) : (
-                <LocalSimulatorApp app={defaultApp} runtime={defaultCrdtRuntime} />
+                <LocalSimulatorApp key={app.id} app={app as any} runtime={crdt as any} />
             )}
         </>
     );

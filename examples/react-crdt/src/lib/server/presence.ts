@@ -4,6 +4,7 @@ import type {
     ServerLastEditStatusData,
     ServerPresenceSession,
     ServerPresenceUser,
+    ServerSelectionStatusData,
 } from './types';
 
 const presenceColors = [
@@ -18,6 +19,7 @@ const presenceColors = [
 ] as const;
 
 export const lastEditStatusKind = 'presence:last-edit';
+export const whiteboardSelectionStatusKind = 'presence:whiteboard-selection';
 
 export function colorForUserId(userId: string) {
     let hash = 0;
@@ -106,6 +108,39 @@ export function statusForLastEdit({
 
 export function lastEditStatusId(actor: string) {
     return `${lastEditStatusKind}:${actor}`;
+}
+
+export function statusForWhiteboardSelection({
+    session,
+    elementId,
+    receivedAt,
+}: {
+    session: ServerPresenceSession;
+    elementId: string;
+    receivedAt: string;
+}): Status {
+    const data: ServerSelectionStatusData = {
+        actor: session.actor,
+        userId: session.userId,
+        sessionId: session.sessionId,
+        nickname: session.nickname,
+        color: session.color,
+        elementId,
+        receivedAt,
+    };
+    return {
+        id: whiteboardSelectionStatusId(session.actor),
+        path: [
+            {type: 'key', key: 'elements'},
+            {type: 'key', key: elementId},
+        ],
+        kind: whiteboardSelectionStatusKind,
+        data,
+    };
+}
+
+export function whiteboardSelectionStatusId(actor: string) {
+    return `${whiteboardSelectionStatusKind}:${actor}`;
 }
 
 function sanitizePresenceUser(user: ServerPresenceUser, localActor: string) {

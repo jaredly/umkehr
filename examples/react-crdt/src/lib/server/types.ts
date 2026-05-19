@@ -68,6 +68,7 @@ export type ServerPresenceSession = {
     online: true;
     lastSeenAt: string;
     branchId?: string;
+    selectionElementId?: string;
 };
 
 export type ServerPresenceUser = {
@@ -84,6 +85,16 @@ export type ServerLastEditStatusData = {
     nickname: string;
     color: string;
     timestamp: HlcTimestamp;
+    receivedAt: string;
+};
+
+export type ServerSelectionStatusData = {
+    actor: string;
+    userId: string;
+    sessionId: string;
+    nickname: string;
+    color: string;
+    elementId: string;
     receivedAt: string;
 };
 
@@ -152,4 +163,5 @@ export type ServerSync<TState> = {
     renameBranch(branchId: string, name: string): void;
     mergeBranch(sourceBranchId: string, sourceThroughEventIndex?: number, revertedPathKeys?: Set<string>): void;
     buildMergePreview(sourceBranchId: string, sourceThroughEventIndex?: number, revertedPathKeys?: Set<string>): ServerMergePreview<TState> | null;
+    setPresenceSelection(elementId: string | null): void;
 };

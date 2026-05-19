@@ -27,7 +27,9 @@ import {
     removePresenceSession,
     sanitizePresenceUsers,
     statusForLastEdit,
+    statusForWhiteboardSelection,
     upsertPresenceUser,
+    whiteboardSelectionStatusId,
 } from './presence';
 import {buildMergePathPreview, materializeServerBranch} from './materialize';
 import type {
@@ -144,6 +146,23 @@ export function useServerSync<TState>({
         });
     }, [docId, identity.actor, identity.user.userId, send]);
 
+    const setPresenceSelection = useCallback(
+        (elementId: string | null) => {
+            const branchId = activeBranchIdRef.current;
+            if (!elementId) statusStore.clear(whiteboardSelectionStatusId(identity.actor));
+            send({
+                kind: 'presenceSelection',
+                version: SERVER_PROTOCOL_VERSION,
+                actor: identity.actor,
+                userId: identity.user.userId,
+                docId,
+                branchId,
+                elementId,
+            });
+        },
+        [docId, identity.actor, identity.user.userId, send, statusStore],
+    );
+
     const flushPending = useCallback(() => {
         for (const branch of Object.values(branchesRef.current)) {
             const listed = branchListRef.current.find((candidate) => candidate.branchId === branch.branchId);
@@ -240,6 +259,51 @@ export function useServerSync<TState>({
         statusTimersRef.current.clear();
         statusStore.clearAll();
     }, [presenceStore, statusStore]);
+
+    const syncSelectionStatuses = useCallback(
+        (users: ServerPresenceUser[]) => {
+            for (const user of users) {
+                for (const session of user.sessions) {
+                    statusStore.clear(whiteboardSelectionStatusId(session.actor));
+                    if (session.branchId !== activeBranchIdRef.current || !session.selectionElementId) {
+                        continue;
+                    }
+                    statusStore.add([
+                        statusForWhiteboardSelection({
+                            session,
+                            elementId: session.selectionElementId,
+                            receivedAt: new Date().toISOString(),
+                        }),
+                    ]);
+                }
+            }
+        },
+        [statusStore],
+    );
+
+    const applySelectionMessage = useCallback(
+        (message: {
+            actor: string;
+            userId: string;
+            sessionId: string;
+            branchId: string;
+            elementId: string | null;
+            at: string;
+        }) => {
+            statusStore.clear(whiteboardSelectionStatusId(message.actor));
+            if (message.branchId !== activeBranchIdRef.current || !message.elementId) return;
+            const session = presenceSessionForActor(presenceStore.getSnapshot(), message.actor);
+            if (!session) return;
+            statusStore.add([
+                statusForWhiteboardSelection({
+                    session,
+                    elementId: message.elementId,
+                    receivedAt: message.at,
+                }),
+            ]);
+        },
+        [presenceStore, statusStore],
+    );
 
     const recordRemoteLastEdit = useCallback(
         (entry: ServerUpdateEvent) => {
@@ -394,14 +458,19 @@ export function useServerSync<TState>({
             } else if (parsed.kind === 'error') {
                 stateStore.setSnapshot({kind: 'error', message: parsed.message});
             } else if (parsed.kind === 'presenceSnapshot') {
-                presenceStore.setSnapshot(sanitizePresenceUsers(parsed.users, identity.actor));
+                const users = sanitizePresenceUsers(parsed.users, identity.actor);
+                presenceStore.setSnapshot(users);
+                syncSelectionStatuses(users);
             } else if (parsed.kind === 'presenceUpdate') {
-                presenceStore.setSnapshot(
-                    upsertPresenceUser(presenceStore.getSnapshot(), parsed.user, identity.actor),
-                );
+                const users = upsertPresenceUser(presenceStore.getSnapshot(), parsed.user, identity.actor);
+                presenceStore.setSnapshot(users);
+                syncSelectionStatuses(users);
             } else if (parsed.kind === 'presenceLeave') {
                 presenceStore.setSnapshot(removePresenceSession(presenceStore.getSnapshot(), parsed.actor));
                 clearLastEditStatus(parsed.actor);
+                statusStore.clear(whiteboardSelectionStatusId(parsed.actor));
+            } else if (parsed.kind === 'presenceSelection') {
+                applySelectionMessage(parsed);
             }
         });
 
@@ -436,7 +505,10 @@ export function useServerSync<TState>({
         send,
         sendPresenceHello,
         stateStore,
+        statusStore,
         subscribeActiveBranch,
+        syncSelectionStatuses,
+        applySelectionMessage,
     ]);
 
     const mergeBranchList = useCallback(
@@ -676,6 +748,7 @@ export function useServerSync<TState>({
             replaceHistory(history);
             void persist();
         },
+        setPresenceSelection,
         switchBranch,
         createBranch,
         renameBranch,

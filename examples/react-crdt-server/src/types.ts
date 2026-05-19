@@ -14,6 +14,7 @@ export type ServerPresenceSession = {
     online: true;
     lastSeenAt: string;
     branchId?: string;
+    selectionElementId?: string;
 };
 
 export type ServerPresenceUser = {
@@ -74,5 +75,6 @@ export type ConnectedClient = {
     color?: string;
     docId?: string;
     branchId?: string;
+    selectionElementId?: string;
     presenceReady?: boolean;
 };

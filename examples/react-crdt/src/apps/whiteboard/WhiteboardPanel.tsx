@@ -1,0 +1,849 @@
+import {
+    useCallback,
+    useEffect,
+    useMemo,
+    useRef,
+    useState,
+    type CSSProperties,
+    type PointerEvent as ReactPointerEvent,
+} from 'react';
+import {useValue} from 'umkehr/react';
+import {useStatuses} from 'umkehr/react-crdt';
+import type {AppEditorContext, GridSlot} from '../../lib/crdtApp';
+import {initialForNickname} from '../../lib/server/presence';
+import {
+    BOARD_HEIGHT,
+    BOARD_WIDTH,
+    archivedElements,
+    boardToScreen,
+    clamp,
+    elementFieldPath,
+    elementPath,
+    nextBottomZOrder,
+    nextTopZOrder,
+    orderedElements,
+    screenToBoard,
+    simplifyStroke,
+    strokePath,
+    zOrderBetween,
+    type Viewport,
+} from './helpers';
+import type {
+    EmojiStampElement,
+    StickyNoteElement,
+    StrokeElement,
+    StrokePoint,
+    WhiteboardElement,
+    WhiteboardState,
+} from './model';
+
+const noteColors = ['#fff7b8', '#fed7aa', '#bbf7d0', '#bfdbfe', '#fbcfe8'] as const;
+const emojiChoices = ['👍', '⭐', '💡', '✅', '❗', '❤️'] as const;
+const selectionStatusKind = 'presence:whiteboard-selection';
+
+type Tool = 'select' | 'note' | 'pen' | 'emoji' | 'erase' | 'pan';
+type DragState =
+    | null
+    | {
+          kind: 'move';
+          id: string;
+          pointerId: number;
+          offsetX: number;
+          offsetY: number;
+      }
+    | {
+          kind: 'resize-note';
+          id: string;
+          pointerId: number;
+          originX: number;
+          originY: number;
+      }
+    | {
+          kind: 'pan';
+          pointerId: number;
+          startX: number;
+          startY: number;
+          panX: number;
+          panY: number;
+      };
+
+export function WhiteboardPanel({
+    editor,
+    actor,
+    title,
+    gridSlot = 'full',
+    setPresenceSelection,
+}: {
+    editor: AppEditorContext<WhiteboardState>;
+    actor: string;
+    title: string;
+    gridSlot?: GridSlot | 'full';
+    setPresenceSelection?: (elementId: string | null) => void;
+}) {
+    const elementsRecord = useValue(editor.$.elements);
+    const state = useMemo<WhiteboardState>(
+        () => ({background: editor.latest().background, elements: elementsRecord}),
+        [editor, elementsRecord],
+    );
+    const elements = useMemo(() => orderedElements(state), [state]);
+    const archived = useMemo(() => archivedElements(state), [state]);
+    const latestState = useRef(state);
+    const viewportRef = useRef<HTMLDivElement | null>(null);
+    const [tool, setTool] = useState<Tool>('select');
+    const [selectedId, setSelectedId] = useState<string | null>(null);
+    const [selectedEmoji, setSelectedEmoji] = useState<(typeof emojiChoices)[number]>('👍');
+    const [noteColor, setNoteColor] = useState<(typeof noteColors)[number]>('#fff7b8');
+    const [viewport, setViewport] = useState<Viewport>({panX: 80, panY: 70, zoom: 0.75});
+    const [activeStroke, setActiveStroke] = useState<StrokePoint[] | null>(null);
+    const [drag, setDrag] = useState<DragState>(null);
+    const [showArchive, setShowArchive] = useState(false);
+    const [viewportSize, setViewportSize] = useState({width: 1, height: 1});
+
+    latestState.current = state;
+
+    useEffect(() => {
+        setPresenceSelection?.(selectedId);
+    }, [selectedId, setPresenceSelection]);
+
+    useEffect(() => {
+        const element = viewportRef.current;
+        if (!element) return;
+        const observer = new ResizeObserver(([entry]) => {
+            setViewportSize({
+                width: entry.contentRect.width,
+                height: entry.contentRect.height,
+            });
+        });
+        observer.observe(element);
+        return () => observer.disconnect();
+    }, []);
+
+    useEffect(() => {
+        if (!drag) return;
+        const onPointerMove = (event: PointerEvent) => {
+            if (event.pointerId !== drag.pointerId) return;
+            const rect = viewportRef.current?.getBoundingClientRect();
+            if (!rect) return;
+            if (drag.kind === 'pan') {
+                setViewport((current) => ({
+                    ...current,
+                    panX: drag.panX + event.clientX - drag.startX,
+                    panY: drag.panY + event.clientY - drag.startY,
+                }));
+                return;
+            }
+            const point = screenToBoard(event.clientX, event.clientY, rect, viewport);
+            const element = latestState.current.elements[drag.id];
+            if (!element) return;
+            if (drag.kind === 'move') {
+                editor.dispatch(
+                    [
+                        {op: 'replace', path: elementFieldPath(drag.id, 'x'), value: point.x - drag.offsetX},
+                        {op: 'replace', path: elementFieldPath(drag.id, 'y'), value: point.y - drag.offsetY},
+                    ],
+                    'preview',
+                );
+            } else if (drag.kind === 'resize-note' && element.type === 'note') {
+                editor.dispatch(
+                    [
+                        {
+                            op: 'replace',
+                            path: elementFieldPath(drag.id, 'width'),
+                            value: Math.max(120, point.x - drag.originX),
+                        },
+                        {
+                            op: 'replace',
+                            path: elementFieldPath(drag.id, 'height'),
+                            value: Math.max(96, point.y - drag.originY),
+                        },
+                    ],
+                    'preview',
+                );
+            }
+        };
+        const onPointerUp = (event: PointerEvent) => {
+            if (event.pointerId !== drag.pointerId) return;
+            const rect = viewportRef.current?.getBoundingClientRect();
+            if (!rect) {
+                setDrag(null);
+                editor.clearPreview();
+                return;
+            }
+            if (drag.kind === 'pan') {
+                setDrag(null);
+                return;
+            }
+            const point = screenToBoard(event.clientX, event.clientY, rect, viewport);
+            const element = latestState.current.elements[drag.id];
+            setDrag(null);
+            editor.clearPreview();
+            if (!element) return;
+            if (drag.kind === 'move') {
+                editor.dispatch([
+                    {op: 'replace', path: elementFieldPath(drag.id, 'x'), value: point.x - drag.offsetX},
+                    {op: 'replace', path: elementFieldPath(drag.id, 'y'), value: point.y - drag.offsetY},
+                ]);
+            } else if (drag.kind === 'resize-note' && element.type === 'note') {
+                editor.dispatch([
+                    {
+                        op: 'replace',
+                        path: elementFieldPath(drag.id, 'width'),
+                        value: Math.max(120, point.x - drag.originX),
+                    },
+                    {
+                        op: 'replace',
+                        path: elementFieldPath(drag.id, 'height'),
+                        value: Math.max(96, point.y - drag.originY),
+                    },
+                ]);
+            }
+        };
+        const onCancel = () => {
+            setDrag(null);
+            editor.clearPreview();
+        };
+        window.addEventListener('pointermove', onPointerMove, {passive: false});
+        window.addEventListener('pointerup', onPointerUp, {passive: false});
+        window.addEventListener('pointercancel', onCancel);
+        return () => {
+            window.removeEventListener('pointermove', onPointerMove);
+            window.removeEventListener('pointerup', onPointerUp);
+            window.removeEventListener('pointercancel', onCancel);
+        };
+    }, [drag, editor, viewport]);
+
+    const makeBase = useCallback(
+        (type: WhiteboardElement['type'], x: number, y: number) => {
+            const id = `wb-${crypto.randomUUID()}`;
+            return {
+                type,
+                id,
+                x,
+                y,
+                rotation: 0,
+                zOrder: nextTopZOrder(elements),
+                createdBy: actor,
+                createdAt: new Date().toISOString(),
+                archived: false,
+            };
+        },
+        [actor, elements],
+    );
+
+    const addElement = useCallback(
+        (element: WhiteboardElement) => {
+            editor.dispatch({op: 'add', path: elementPath(element.id), value: element});
+            setSelectedId(element.id);
+            setTool('select');
+        },
+        [editor],
+    );
+
+    const addNote = useCallback(
+        (x: number, y: number) => {
+            addElement({
+                ...makeBase('note', x, y),
+                type: 'note',
+                width: 220,
+                height: 150,
+                color: noteColor,
+                text: '',
+            });
+        },
+        [addElement, makeBase, noteColor],
+    );
+
+    const addEmoji = useCallback(
+        (x: number, y: number) => {
+            addElement({
+                ...makeBase('emoji', x, y),
+                type: 'emoji',
+                emoji: selectedEmoji,
+                size: 48,
+            });
+        },
+        [addElement, makeBase, selectedEmoji],
+    );
+
+    const commitStroke = useCallback(
+        (points: StrokePoint[]) => {
+            const simplified = simplifyStroke(points);
+            if (simplified.length < 2) return;
+            const first = simplified[0];
+            addElement({
+                ...makeBase('stroke', first.x, first.y),
+                type: 'stroke',
+                color: '#17202a',
+                width: 4,
+                points: simplified,
+            });
+        },
+        [addElement, makeBase],
+    );
+
+    const archiveSelected = useCallback(() => {
+        if (!selectedId) return;
+        editor.dispatch([
+            {op: 'replace', path: elementFieldPath(selectedId, 'archived'), value: true},
+            {op: 'replace', path: elementFieldPath(selectedId, 'archivedBy'), value: actor},
+            {op: 'replace', path: elementFieldPath(selectedId, 'archivedAt'), value: new Date().toISOString()},
+        ]);
+        setSelectedId(null);
+    }, [actor, editor, selectedId]);
+
+    const recover = useCallback(
+        (id: string) => {
+            editor.dispatch([
+                {op: 'replace', path: elementFieldPath(id, 'archived'), value: false},
+                {op: 'remove', path: elementFieldPath(id, 'archivedBy')},
+                {op: 'remove', path: elementFieldPath(id, 'archivedAt')},
+            ]);
+            setSelectedId(id);
+            setShowArchive(false);
+        },
+        [editor],
+    );
+
+    const setLayer = useCallback(
+        (placement: 'front' | 'back' | 'forward' | 'backward') => {
+            if (!selectedId) return;
+            const current = orderedElements(latestState.current);
+            const selected = current.find((element) => element.id === selectedId);
+            if (!selected) return;
+            const without = current.filter((element) => element.id !== selectedId);
+            let next: string | null = null;
+            if (placement === 'front') next = nextTopZOrder(without);
+            if (placement === 'back') next = nextBottomZOrder(without);
+            const index = current.findIndex((element) => element.id === selectedId);
+            if (placement === 'forward' && index < current.length - 1) {
+                next = zOrderBetween(current[index + 1], current[index + 2]);
+            }
+            if (placement === 'backward' && index > 0) {
+                next = zOrderBetween(current[index - 2], current[index - 1]);
+            }
+            if (next && next !== selected.zOrder) {
+                editor.dispatch({op: 'replace', path: elementFieldPath(selectedId, 'zOrder'), value: next});
+            }
+        },
+        [editor, selectedId],
+    );
+
+    const onBoardPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+        if (event.button !== 0 || !event.isPrimary) return;
+        const rect = viewportRef.current?.getBoundingClientRect();
+        if (!rect) return;
+        const point = screenToBoard(event.clientX, event.clientY, rect, viewport);
+        if (tool === 'note') {
+            addNote(point.x, point.y);
+            return;
+        }
+        if (tool === 'emoji') {
+            addEmoji(point.x, point.y);
+            return;
+        }
+        if (tool === 'pen') {
+            event.currentTarget.setPointerCapture(event.pointerId);
+            setActiveStroke([point]);
+            return;
+        }
+        if (tool === 'pan') {
+            setDrag({
+                kind: 'pan',
+                pointerId: event.pointerId,
+                startX: event.clientX,
+                startY: event.clientY,
+                panX: viewport.panX,
+                panY: viewport.panY,
+            });
+            return;
+        }
+        setSelectedId(null);
+    };
+
+    const onBoardPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+        if (!activeStroke) return;
+        const rect = viewportRef.current?.getBoundingClientRect();
+        if (!rect) return;
+        const point = screenToBoard(event.clientX, event.clientY, rect, viewport);
+        setActiveStroke((current) => (current ? [...current, point] : current));
+    };
+
+    const onBoardPointerUp = () => {
+        if (!activeStroke) return;
+        commitStroke(activeStroke);
+        setActiveStroke(null);
+    };
+
+    const startElementDrag = (
+        element: WhiteboardElement,
+        event: ReactPointerEvent<HTMLElement | SVGElement>,
+    ) => {
+        if (event.button !== 0 || !event.isPrimary) return;
+        event.stopPropagation();
+        if (tool === 'erase') {
+            editor.dispatch([
+                {op: 'replace', path: elementFieldPath(element.id, 'archived'), value: true},
+                {op: 'replace', path: elementFieldPath(element.id, 'archivedBy'), value: actor},
+                {op: 'replace', path: elementFieldPath(element.id, 'archivedAt'), value: new Date().toISOString()},
+            ]);
+            setSelectedId(null);
+            return;
+        }
+        setSelectedId(element.id);
+        if (tool !== 'select') return;
+        const rect = viewportRef.current?.getBoundingClientRect();
+        if (!rect) return;
+        const point = screenToBoard(event.clientX, event.clientY, rect, viewport);
+        setDrag({
+            kind: 'move',
+            id: element.id,
+            pointerId: event.pointerId,
+            offsetX: point.x - element.x,
+            offsetY: point.y - element.y,
+        });
+    };
+
+    const zoomBy = (factor: number) => {
+        setViewport((current) => ({
+            ...current,
+            zoom: clamp(current.zoom * factor, 0.2, 2.5),
+        }));
+    };
+
+    const onWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+        if (!event.ctrlKey && !event.metaKey) return;
+        event.preventDefault();
+        const rect = viewportRef.current?.getBoundingClientRect();
+        if (!rect) return;
+        const before = screenToBoard(event.clientX, event.clientY, rect, viewport);
+        const nextZoom = clamp(viewport.zoom * (event.deltaY > 0 ? 0.92 : 1.08), 0.2, 2.5);
+        setViewport({
+            zoom: nextZoom,
+            panX: event.clientX - rect.left - before.x * nextZoom,
+            panY: event.clientY - rect.top - before.y * nextZoom,
+        });
+    };
+
+    const minimapScale = 120 / BOARD_WIDTH;
+    const viewRect = {
+        x: clamp(-viewport.panX / viewport.zoom, 0, BOARD_WIDTH),
+        y: clamp(-viewport.panY / viewport.zoom, 0, BOARD_HEIGHT),
+        width: clamp(viewportSize.width / viewport.zoom, 1, BOARD_WIDTH),
+        height: clamp(viewportSize.height / viewport.zoom, 1, BOARD_HEIGHT),
+    };
+
+    return (
+        <section
+            className={`whiteboardPanel ${
+                gridSlot === 'left' ? 'leftPanel' : gridSlot === 'right' ? 'rightPanel' : ''
+            }`}
+        >
+            <header className="whiteboardHeader">
+                <div>
+                    <h1>{title}</h1>
+                    <p>{elements.length} visible</p>
+                </div>
+                <div className="whiteboardActions">
+                    <button type="button" onClick={() => editor.undo()} disabled={!editor.canUndo()}>
+                        Undo
+                    </button>
+                    <button type="button" onClick={() => editor.redo()} disabled={!editor.canRedo()}>
+                        Redo
+                    </button>
+                </div>
+            </header>
+
+            <div className="whiteboardToolbar" aria-label="Whiteboard tools">
+                {(['select', 'note', 'pen', 'emoji', 'erase', 'pan'] as const).map((item) => (
+                    <button
+                        key={item}
+                        type="button"
+                        className={tool === item ? 'active' : ''}
+                        onClick={() => setTool(item)}
+                    >
+                        {labelForTool(item)}
+                    </button>
+                ))}
+                <div className="whiteboardSwatches" aria-label="Note color">
+                    {noteColors.map((color) => (
+                        <button
+                            key={color}
+                            type="button"
+                            className={noteColor === color ? 'whiteboardSwatch active' : 'whiteboardSwatch'}
+                            style={{backgroundColor: color}}
+                            onClick={() => setNoteColor(color)}
+                            aria-label={`Note color ${color}`}
+                        />
+                    ))}
+                </div>
+                <select
+                    value={selectedEmoji}
+                    onChange={(event) => setSelectedEmoji(event.target.value as typeof selectedEmoji)}
+                    aria-label="Emoji stamp"
+                >
+                    {emojiChoices.map((emoji) => (
+                        <option key={emoji} value={emoji}>
+                            {emoji}
+                        </option>
+                    ))}
+                </select>
+                <button type="button" onClick={() => setLayer('back')} disabled={!selectedId}>
+                    Back
+                </button>
+                <button type="button" onClick={() => setLayer('backward')} disabled={!selectedId}>
+                    Down
+                </button>
+                <button type="button" onClick={() => setLayer('forward')} disabled={!selectedId}>
+                    Up
+                </button>
+                <button type="button" onClick={() => setLayer('front')} disabled={!selectedId}>
+                    Front
+                </button>
+                <button type="button" onClick={archiveSelected} disabled={!selectedId}>
+                    Archive
+                </button>
+                <button type="button" onClick={() => setShowArchive((value) => !value)}>
+                    Recover ({archived.length})
+                </button>
+                <button type="button" onClick={() => zoomBy(0.9)}>
+                    -
+                </button>
+                <button type="button" onClick={() => zoomBy(1.1)}>
+                    +
+                </button>
+            </div>
+
+            {showArchive ? (
+                <div className="whiteboardArchive">
+                    {archived.length ? (
+                        archived.map((element) => (
+                            <button key={element.id} type="button" onClick={() => recover(element.id)}>
+                                Recover {nameForElement(element)}
+                            </button>
+                        ))
+                    ) : (
+                        <span>No archived elements</span>
+                    )}
+                </div>
+            ) : null}
+
+            <div
+                ref={viewportRef}
+                className={`whiteboardViewport tool-${tool}`}
+                onPointerDown={onBoardPointerDown}
+                onPointerMove={onBoardPointerMove}
+                onPointerUp={onBoardPointerUp}
+                onWheel={onWheel}
+            >
+                <div
+                    className="whiteboardCanvas"
+                    style={{
+                        width: BOARD_WIDTH,
+                        height: BOARD_HEIGHT,
+                        transform: `translate(${viewport.panX}px, ${viewport.panY}px) scale(${viewport.zoom})`,
+                    }}
+                >
+                    <svg
+                        className="whiteboardSvg"
+                        width={BOARD_WIDTH}
+                        height={BOARD_HEIGHT}
+                        viewBox={`0 0 ${BOARD_WIDTH} ${BOARD_HEIGHT}`}
+                    >
+                        <rect width={BOARD_WIDTH} height={BOARD_HEIGHT} fill={state.background} />
+                        {elements.map((element) =>
+                            element.type === 'stroke' ? (
+                                <StrokeView
+                                    key={element.id}
+                                    element={element}
+                                    selected={selectedId === element.id}
+                                    onPointerDown={(event) => startElementDrag(element, event)}
+                                    editor={editor}
+                                />
+                            ) : null,
+                        )}
+                        {activeStroke ? (
+                            <path
+                                className="whiteboardActiveStroke"
+                                d={strokePath(activeStroke)}
+                                fill="none"
+                                stroke="#17202a"
+                                strokeWidth={4}
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                            />
+                        ) : null}
+                    </svg>
+
+                    {elements.map((element) =>
+                        element.type === 'note' ? (
+                            <NoteView
+                                key={element.id}
+                                element={element}
+                                selected={selectedId === element.id}
+                                editor={editor}
+                                onPointerDown={(event) => startElementDrag(element, event)}
+                                onResizePointerDown={(event) => {
+                                    event.stopPropagation();
+                                    setSelectedId(element.id);
+                                    setDrag({
+                                        kind: 'resize-note',
+                                        id: element.id,
+                                        pointerId: event.pointerId,
+                                        originX: element.x,
+                                        originY: element.y,
+                                    });
+                                }}
+                            />
+                        ) : element.type === 'emoji' ? (
+                            <EmojiView
+                                key={element.id}
+                                element={element}
+                                selected={selectedId === element.id}
+                                editor={editor}
+                                onPointerDown={(event) => startElementDrag(element, event)}
+                            />
+                        ) : null,
+                    )}
+                </div>
+
+                <button
+                    type="button"
+                    className="whiteboardMinimap"
+                    onClick={(event) => {
+                        const rect = event.currentTarget.getBoundingClientRect();
+                        const x = (event.clientX - rect.left) / minimapScale;
+                        const y = (event.clientY - rect.top) / minimapScale;
+                        setViewport((current) => ({
+                            ...current,
+                            panX: viewportSize.width / 2 - x * current.zoom,
+                            panY: viewportSize.height / 2 - y * current.zoom,
+                        }));
+                    }}
+                    aria-label="Recenter board"
+                >
+                    <svg width={120} height={80} viewBox={`0 0 ${BOARD_WIDTH} ${BOARD_HEIGHT}`}>
+                        <rect width={BOARD_WIDTH} height={BOARD_HEIGHT} fill="#f8fafc" />
+                        {elements.map((element) => (
+                            <rect
+                                key={element.id}
+                                x={element.x}
+                                y={element.y}
+                                width={element.type === 'note' ? element.width : element.type === 'emoji' ? element.size : 40}
+                                height={element.type === 'note' ? element.height : element.type === 'emoji' ? element.size : 24}
+                                fill={element.type === 'note' ? element.color : '#94a3b8'}
+                            />
+                        ))}
+                        <rect
+                            x={viewRect.x}
+                            y={viewRect.y}
+                            width={viewRect.width}
+                            height={viewRect.height}
+                            fill="none"
+                            stroke="#2563eb"
+                            strokeWidth={20}
+                        />
+                    </svg>
+                </button>
+            </div>
+        </section>
+    );
+}
+
+function NoteView({
+    element,
+    selected,
+    editor,
+    onPointerDown,
+    onResizePointerDown,
+}: {
+    element: StickyNoteElement;
+    selected: boolean;
+    editor: AppEditorContext<WhiteboardState>;
+    onPointerDown(event: ReactPointerEvent<HTMLElement>): void;
+    onResizePointerDown(event: ReactPointerEvent<HTMLButtonElement>): void;
+}) {
+    const [draft, setDraft] = useState(element.text);
+    const statuses = useSelectionStatuses(editor, element.id);
+    useEffect(() => setDraft(element.text), [element.text]);
+
+    const commit = () => {
+        if (draft !== element.text) {
+            editor.dispatch({op: 'replace', path: elementFieldPath(element.id, 'text'), value: draft});
+        }
+    };
+
+    return (
+        <article
+            className={selected ? 'whiteboardNote selected' : 'whiteboardNote'}
+            style={elementStyle(element, {
+                width: element.width,
+                height: element.height,
+                backgroundColor: element.color,
+            })}
+        >
+            <div className="whiteboardNoteHandle" onPointerDown={onPointerDown} />
+            <textarea
+                value={draft}
+                onChange={(event) => setDraft(event.currentTarget.value)}
+                onPointerDown={(event) => event.stopPropagation()}
+                onBlur={commit}
+                onKeyDown={(event) => {
+                    if (event.key === 'Enter' && !event.shiftKey) {
+                        event.preventDefault();
+                        event.currentTarget.blur();
+                    }
+                    if (event.key === 'Escape') {
+                        setDraft(element.text);
+                        event.currentTarget.blur();
+                    }
+                }}
+                placeholder="Note"
+            />
+            <RemoteSelections statuses={statuses} />
+            <button
+                type="button"
+                className="whiteboardResize"
+                onPointerDown={onResizePointerDown}
+                aria-label="Resize note"
+            />
+        </article>
+    );
+}
+
+function EmojiView({
+    element,
+    selected,
+    editor,
+    onPointerDown,
+}: {
+    element: EmojiStampElement;
+    selected: boolean;
+    editor: AppEditorContext<WhiteboardState>;
+    onPointerDown(event: ReactPointerEvent<HTMLElement>): void;
+}) {
+    const statuses = useSelectionStatuses(editor, element.id);
+    return (
+        <div
+            className={selected ? 'whiteboardEmoji selected' : 'whiteboardEmoji'}
+            style={elementStyle(element, {
+                width: element.size,
+                height: element.size,
+                fontSize: element.size,
+            })}
+            onPointerDown={onPointerDown}
+        >
+            {element.emoji}
+            <RemoteSelections statuses={statuses} />
+        </div>
+    );
+}
+
+function StrokeView({
+    element,
+    selected,
+    editor,
+    onPointerDown,
+}: {
+    element: StrokeElement;
+    selected: boolean;
+    editor: AppEditorContext<WhiteboardState>;
+    onPointerDown(event: ReactPointerEvent<SVGPathElement>): void;
+}) {
+    const statuses = useSelectionStatuses(editor, element.id);
+    return (
+        <g>
+            <path
+                className={selected ? 'whiteboardStroke selected' : 'whiteboardStroke'}
+                d={strokePath(element.points)}
+                fill="none"
+                stroke={element.color}
+                strokeWidth={element.width}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                onPointerDown={onPointerDown}
+            />
+            {statuses.length ? (
+                <foreignObject x={element.x} y={element.y - 30} width={120} height={28}>
+                    <RemoteSelections statuses={statuses} />
+                </foreignObject>
+            ) : null}
+        </g>
+    );
+}
+
+function useSelectionStatuses(editor: AppEditorContext<WhiteboardState>, id: string) {
+    return useStatuses(editor.$.elements[id], {kinds: [selectionStatusKind]})
+        .map((status) => status.data)
+        .filter(isSelectionStatusData);
+}
+
+function RemoteSelections({statuses}: {statuses: SelectionStatusData[]}) {
+    if (!statuses.length) return null;
+    return (
+        <div className="whiteboardRemoteSelections">
+            {statuses.map((status) => (
+                <span
+                    key={status.actor}
+                    style={{backgroundColor: status.color}}
+                    title={`${status.nickname} selected this`}
+                >
+                    {initialForNickname(status.nickname)}
+                </span>
+            ))}
+        </div>
+    );
+}
+
+type SelectionStatusData = {
+    actor: string;
+    nickname: string;
+    color: string;
+    elementId: string;
+};
+
+function isSelectionStatusData(value: unknown): value is SelectionStatusData {
+    return (
+        typeof value === 'object' &&
+        value !== null &&
+        'actor' in value &&
+        'nickname' in value &&
+        'color' in value &&
+        'elementId' in value
+    );
+}
+
+function elementStyle(
+    element: WhiteboardElement,
+    extra?: CSSProperties,
+): CSSProperties {
+    return {
+        position: 'absolute',
+        left: element.x,
+        top: element.y,
+        transform: `rotate(${element.rotation}deg)`,
+        ...extra,
+    };
+}
+
+function labelForTool(tool: Tool) {
+    switch (tool) {
+        case 'select':
+            return 'Select';
+        case 'note':
+            return 'Note';
+        case 'pen':
+            return 'Pen';
+        case 'emoji':
+            return 'Emoji';
+        case 'erase':
+            return 'Erase';
+        case 'pan':
+            return 'Pan';
+    }
+}
+
+function nameForElement(element: WhiteboardElement) {
+    if (element.type === 'note') return element.text.trim() || 'note';
+    if (element.type === 'emoji') return `${element.emoji} stamp`;
+    return 'stroke';
+}

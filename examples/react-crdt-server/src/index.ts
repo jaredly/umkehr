@@ -104,6 +104,13 @@ const server = Bun.serve<ClientData>({
                         broadcastPresenceUpdate(parsed.docId, parsed.actor, parsed.userId);
                         return;
                     }
+                    case 'presenceSelection': {
+                        ws.data.branchId = parsed.branchId;
+                        ws.data.selectionElementId = parsed.elementId ?? undefined;
+                        broadcastPresenceSelection(parsed);
+                        broadcastPresenceUpdate(parsed.docId, parsed.actor, parsed.userId);
+                        return;
+                    }
                     case 'branchSubscribe': {
                         ws.data.branchId = parsed.branchId;
                         sendEventsAfter(ws, parsed.branchId, parsed.lastSeenEventIndex);
@@ -216,6 +223,7 @@ type ClientData = {
     color?: string;
     docId?: string;
     branchId?: string;
+    selectionElementId?: string;
     schemaFingerprint?: string;
     presenceReady?: boolean;
 };
@@ -281,7 +289,7 @@ function branchFor(docId: string, branchId: string) {
 function presenceUsersForDoc(docId: string, excludeActor?: string): ServerPresenceUser[] {
     const byUser = new Map<string, ServerPresenceUser>();
     for (const client of clients) {
-        const {actor, userId, sessionId, nickname, color, branchId} = client.data;
+        const {actor, userId, sessionId, nickname, color, branchId, selectionElementId} = client.data;
         if (
             !client.data.presenceReady ||
             client.data.docId !== docId ||
@@ -303,6 +311,7 @@ function presenceUsersForDoc(docId: string, excludeActor?: string): ServerPresen
             online: true,
             lastSeenAt: new Date().toISOString(),
             branchId,
+            selectionElementId,
         };
         const existing = byUser.get(userId);
         if (existing) existing.sessions.push(session);
@@ -311,6 +320,30 @@ function presenceUsersForDoc(docId: string, excludeActor?: string): ServerPresen
     return [...byUser.values()].sort((a, b) =>
         a.nickname.localeCompare(b.nickname, undefined, {sensitivity: 'base'}),
     );
+}
+
+function broadcastPresenceSelection(message: Extract<ReturnType<typeof parseClientMessage>, {kind: 'presenceSelection'}>) {
+    if (!message) return;
+    const actor = parseSessionActor(message.actor);
+    if (!actor) return;
+    const at = new Date().toISOString();
+    for (const client of clients) {
+        if (client.data.docId !== message.docId) continue;
+        if (client.data.actor === message.actor) continue;
+        if (!client.data.presenceReady) continue;
+        if (client.data.branchId !== message.branchId) continue;
+        send(client, {
+            kind: 'presenceSelection',
+            version: SERVER_PROTOCOL_VERSION,
+            docId: message.docId,
+            actor: message.actor,
+            userId: message.userId,
+            sessionId: actor.sessionId,
+            branchId: message.branchId,
+            elementId: message.elementId,
+            at,
+        });
+    }
 }
 
 function broadcastPresenceUpdate(docId: string, originActor: string, userId: string) {
@@ -361,6 +394,7 @@ function debugHtml() {
         color: client.data.color,
         docId: client.data.docId,
         branchId: client.data.branchId,
+        selectionElementId: client.data.selectionElementId,
         presenceReady: client.data.presenceReady,
     }));
     return `<!doctype html>

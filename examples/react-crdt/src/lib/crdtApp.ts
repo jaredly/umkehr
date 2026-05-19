@@ -58,6 +58,7 @@ export type AppPanelProps<TState> = {
     actor: string;
     title: string;
     gridSlot?: GridSlot | 'full';
+    setPresenceSelection?(elementId: string | null): void;
 };
 
 export type SyncedProvider<TState> = (props: {

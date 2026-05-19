@@ -76,6 +76,15 @@ export type ClientServerMessage =
           docId: string;
           branchId: string;
           color: string;
+      }
+    | {
+          kind: 'presenceSelection';
+          version: 3;
+          actor: string;
+          userId: string;
+          docId: string;
+          branchId: string;
+          elementId: string | null;
       };
 
 export type ServerClientMessage =
@@ -138,6 +147,17 @@ export type ServerClientMessage =
           actor: string;
           userId: string;
           sessionId: string;
+          at: string;
+      }
+    | {
+          kind: 'presenceSelection';
+          version: 3;
+          docId: string;
+          actor: string;
+          userId: string;
+          sessionId: string;
+          branchId: string;
+          elementId: string | null;
           at: string;
       };
 
@@ -212,6 +232,21 @@ export function parseServerMessage<TState>(
         if (typeof input.actor !== 'string' || input.actor.length === 0) return null;
         if (typeof input.userId !== 'string' || input.userId.length === 0) return null;
         if (typeof input.sessionId !== 'string' || input.sessionId.length === 0) return null;
+        if (typeof input.at !== 'string' || input.at.length === 0) return null;
+        const actor = parseSessionActor(input.actor);
+        if (!actor || actor.userId !== input.userId || actor.sessionId !== input.sessionId) {
+            return null;
+        }
+        return input as ServerClientMessage;
+    }
+
+    if (input.kind === 'presenceSelection') {
+        if (input.docId !== docId) return null;
+        if (typeof input.actor !== 'string' || input.actor.length === 0) return null;
+        if (typeof input.userId !== 'string' || input.userId.length === 0) return null;
+        if (typeof input.sessionId !== 'string' || input.sessionId.length === 0) return null;
+        if (typeof input.branchId !== 'string' || input.branchId.length === 0) return null;
+        if (input.elementId !== null && typeof input.elementId !== 'string') return null;
         if (typeof input.at !== 'string' || input.at.length === 0) return null;
         const actor = parseSessionActor(input.actor);
         if (!actor || actor.userId !== input.userId || actor.sessionId !== input.sessionId) {
@@ -316,6 +351,9 @@ function parsePresenceUser(input: unknown): ServerPresenceUser | null {
             return null;
         }
         if (session.branchId !== undefined && typeof session.branchId !== 'string') return null;
+        if (session.selectionElementId !== undefined && typeof session.selectionElementId !== 'string') {
+            return null;
+        }
         sessions.push({
             actor: session.actor,
             userId: session.userId,
@@ -325,6 +363,7 @@ function parsePresenceUser(input: unknown): ServerPresenceUser | null {
             online: true,
             lastSeenAt: session.lastSeenAt,
             branchId: session.branchId,
+            selectionElementId: session.selectionElementId,
         });
     }
     return {
