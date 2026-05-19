@@ -21,13 +21,14 @@ export const whiteboardApp: AppDefinition<WhiteboardState> = {
     validateState: validateWhiteboardState,
     initialState: initialWhiteboardState,
     initialTimestamp: initialWhiteboardTimestamp,
-    renderPanel({editor, actor, title, gridSlot, setPresenceSelection}) {
+    renderPanel({editor, actor, title, gridSlot, readOnly, setPresenceSelection}) {
         return (
             <WhiteboardPanel
                 editor={editor}
                 actor={actor}
                 title={title}
                 gridSlot={gridSlot}
+                readOnly={readOnly}
                 setPresenceSelection={setPresenceSelection}
             />
         );

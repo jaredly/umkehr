@@ -162,6 +162,7 @@ export type ServerSync<TState> = {
     createBranch(name: string, forkEventIndex?: number): void;
     renameBranch(branchId: string, name: string): void;
     mergeBranch(sourceBranchId: string, sourceThroughEventIndex?: number, revertedPathKeys?: Set<string>): void;
+    buildEventPreview(throughEventIndex: number): CrdtLocalHistory<TState>;
     buildMergePreview(sourceBranchId: string, sourceThroughEventIndex?: number, revertedPathKeys?: Set<string>): ServerMergePreview<TState> | null;
     setPresenceSelection(elementId: string | null): void;
 };

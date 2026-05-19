@@ -34,11 +34,13 @@ export function TodoPanel({
     replicaId,
     title,
     gridSlot = 'full',
+    readOnly = false,
 }: {
     editor: AppEditorContext<TodoState>;
     replicaId: string;
     title: string;
     gridSlot?: GridSlot | 'full';
+    readOnly?: boolean;
 }) {
     const bgcolor = useValue(editor.$.bgcolor);
     const todos = useValue(editor.$.todos);
@@ -100,6 +102,7 @@ export function TodoPanel({
         if (!draggingId) return;
 
         const onPointerMove = (event: PointerEvent) => {
+            if (readOnly) return;
             event.preventDefault();
             const nextTarget = findDropTarget(event.clientY);
             dropTargetRef.current = nextTarget;
@@ -115,6 +118,7 @@ export function TodoPanel({
             const draggedId = draggingIdRef.current;
             const target = findDropTarget(event.clientY) ?? dropTargetRef.current;
             clearDrag();
+            if (readOnly) return;
             if (!draggedId || !target) return;
 
             const currentTodos = latestTodos.current;
@@ -136,7 +140,7 @@ export function TodoPanel({
             window.removeEventListener('pointerup', onPointerUp);
             window.removeEventListener('pointercancel', onPointerCancel);
         };
-    }, [clearDrag, draggingId, editor, findDropTarget]);
+    }, [clearDrag, draggingId, editor, findDropTarget, readOnly]);
 
     useLayoutEffect(() => {
         const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -167,6 +171,7 @@ export function TodoPanel({
     }, [todos]);
 
     const startDrag = useCallback((id: string, event: ReactPointerEvent<HTMLElement>) => {
+        if (readOnly) return;
         if (!event.isPrimary || event.button !== 0) return;
         event.preventDefault();
         event.stopPropagation();
@@ -176,7 +181,7 @@ export function TodoPanel({
         dropTargetRef.current = initialTarget;
         setDraggingId(id);
         setDropTarget(initialTarget);
-    }, []);
+    }, [readOnly]);
 
     return (
         <section
@@ -195,14 +200,14 @@ export function TodoPanel({
                     <button
                         type="button"
                         onClick={() => editor.undo()}
-                        disabled={!editor.canUndo()}
+                        disabled={readOnly || !editor.canUndo()}
                     >
                         Undo
                     </button>
                     <button
                         type="button"
                         onClick={() => editor.redo()}
-                        disabled={!editor.canRedo()}
+                        disabled={readOnly || !editor.canRedo()}
                     >
                         Redo
                     </button>
@@ -223,7 +228,10 @@ export function TodoPanel({
                         title={color}
                         aria-label={`Use ${color}`}
                         onClick={() => editor.$.bgcolor(color)}
-                        onMouseEnter={() => editor.$.bgcolor(color, 'preview')}
+                        onMouseEnter={() => {
+                            if (!readOnly) editor.$.bgcolor(color, 'preview');
+                        }}
+                        disabled={readOnly}
                     />
                 ))}
             </section>
@@ -233,7 +241,7 @@ export function TodoPanel({
                 onSubmit={(event) => {
                     event.preventDefault();
                     const next = draftTitle.trim();
-                    if (!next) return;
+                    if (readOnly || !next) return;
                     editor.$.todos.$push({
                         id: `${replicaId}-${crypto.randomUUID()}`,
                         title: next,
@@ -246,8 +254,9 @@ export function TodoPanel({
                     value={draftTitle}
                     placeholder="New todo"
                     onChange={(event) => setDraftTitle(event.target.value)}
+                    disabled={readOnly}
                 />
-                <button type="submit">Add</button>
+                <button type="submit" disabled={readOnly}>Add</button>
             </form>
 
             <ul
@@ -270,6 +279,7 @@ export function TodoPanel({
                         }
                         onDragStart={startDrag}
                         registerRow={registerRow}
+                        readOnly={readOnly}
                     />
                 ))}
             </ul>
@@ -285,6 +295,7 @@ function TodoItem({
     dropPosition,
     onDragStart,
     registerRow,
+    readOnly,
 }: {
     editor: AppEditorContext<TodoState>;
     todo: Todo;
@@ -293,6 +304,7 @@ function TodoItem({
     dropPosition: 'before' | 'after' | null;
     onDragStart(id: string, event: ReactPointerEvent<HTMLElement>): void;
     registerRow(id: string, element: HTMLLIElement | null): void;
+    readOnly: boolean;
 }) {
     const [editingTitle, setEditingTitle] = useState<null | string>(null);
     const presenceStatuses = useStatuses(editor.$.todos[index], {
@@ -312,7 +324,7 @@ function TodoItem({
         if (editingTitle === null) return;
         const next = editingTitle.trim();
         setEditingTitle(null);
-        if (!next || next === todo.title) {
+        if (readOnly || !next || next === todo.title) {
             return;
         }
         editor.$.todos[index].title(next);
@@ -341,6 +353,7 @@ function TodoItem({
                     aria-label={`Move ${todo.title}`}
                     title="Move"
                     onPointerDown={(event) => onDragStart(todo.id, event)}
+                    disabled={readOnly}
                 >
                     <span aria-hidden="true">::</span>
                 </button>
@@ -352,6 +365,7 @@ function TodoItem({
                     type="checkbox"
                     checked={todo.done}
                     onChange={(event) => editor.$.todos[index].done(event.target.checked)}
+                    disabled={readOnly}
                 />
                 {editingTitle !== null ? (
                     <input
@@ -366,6 +380,7 @@ function TodoItem({
                             }
                         }}
                         autoFocus
+                        disabled={readOnly}
                     />
                 ) : (
                     <span className="todoTitle">{todo.title}</span>
@@ -386,10 +401,10 @@ function TodoItem({
                         ))}
                     </div>
                 ) : null}
-                <button type="button" onClick={() => setEditingTitle(todo.title)}>
+                <button type="button" onClick={() => setEditingTitle(todo.title)} disabled={readOnly}>
                     Edit
                 </button>
-                <button type="button" onClick={() => editor.$.todos[index].$remove()}>
+                <button type="button" onClick={() => editor.$.todos[index].$remove()} disabled={readOnly}>
                     Delete
                 </button>
             </div>

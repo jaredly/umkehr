@@ -694,6 +694,19 @@ p {
     gap: 8px;
 }
 
+.serverPreviewNotice {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    border: 1px solid #b8d6ff;
+    border-radius: 8px;
+    padding: 8px 10px;
+    background: #f0f6ff;
+    color: #0f3d8a;
+    font-size: 13px;
+}
+
 .serverMergePreviewGrid {
     display: grid;
     grid-template-columns: minmax(220px, 0.8fr) minmax(280px, 1.2fr);

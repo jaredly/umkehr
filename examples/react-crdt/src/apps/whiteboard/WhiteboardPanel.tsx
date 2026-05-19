@@ -71,12 +71,14 @@ export function WhiteboardPanel({
     actor,
     title,
     gridSlot = 'full',
+    readOnly = false,
     setPresenceSelection,
 }: {
     editor: AppEditorContext<WhiteboardState>;
     actor: string;
     title: string;
     gridSlot?: GridSlot | 'full';
+    readOnly?: boolean;
     setPresenceSelection?: (elementId: string | null) => void;
 }) {
     const elementsRecord = useValue(editor.$.elements);
@@ -98,12 +100,21 @@ export function WhiteboardPanel({
     const [showArchive, setShowArchive] = useState(false);
     const [viewportSize, setViewportSize] = useState({width: 1, height: 1});
     const [draggingMinimap, setDraggingMinimap] = useState(false);
+    const [focusNoteId, setFocusNoteId] = useState<string | null>(null);
 
     latestState.current = state;
 
     useEffect(() => {
-        setPresenceSelection?.(selectedId);
-    }, [selectedId, setPresenceSelection]);
+        if (!readOnly) return;
+        editor.clearPreview();
+        setActiveStroke(null);
+        setDrag(null);
+        if (tool !== 'pan') setTool('select');
+    }, [editor, readOnly, tool]);
+
+    useEffect(() => {
+        setPresenceSelection?.(readOnly ? null : selectedId);
+    }, [readOnly, selectedId, setPresenceSelection]);
 
     useEffect(() => {
         const element = viewportRef.current;
@@ -122,6 +133,7 @@ export function WhiteboardPanel({
         if (!drag) return;
         const onPointerMove = (event: PointerEvent) => {
             if (event.pointerId !== drag.pointerId) return;
+            if (readOnly && drag.kind !== 'pan') return;
             const rect = viewportRef.current?.getBoundingClientRect();
             if (!rect) return;
             if (drag.kind === 'pan') {
@@ -170,6 +182,11 @@ export function WhiteboardPanel({
                 setDrag(null);
                 return;
             }
+            if (readOnly) {
+                setDrag(null);
+                editor.clearPreview();
+                return;
+            }
             const point = screenToBoard(event.clientX, event.clientY, rect, viewport);
             const element = latestState.current.elements[drag.id];
             setDrag(null);
@@ -204,7 +221,7 @@ export function WhiteboardPanel({
             window.removeEventListener('pointerup', onPointerUp);
             window.removeEventListener('pointercancel', onCancel);
         };
-    }, [drag, editor, viewport]);
+    }, [drag, editor, readOnly, viewport]);
 
     const makeBase = useCallback(
         (type: WhiteboardElement['type'], x: number, y: number) => {
@@ -225,22 +242,25 @@ export function WhiteboardPanel({
 
     const addElement = useCallback(
         (element: WhiteboardElement) => {
+            if (readOnly) return;
             editor.dispatch({op: 'add', path: elementPath(element.id), value: element});
             setSelectedId(element.id);
             setTool('select');
         },
-        [editor],
+        [editor, readOnly],
     );
 
     const addNote = useCallback(
         (x: number, y: number) => {
-            addElement({
+            const note: StickyNoteElement = {
                 ...makeBase('note', x, y),
                 type: 'note',
                 size: {width: 220, height: 150},
                 color: noteColor,
                 text: '',
-            });
+            };
+            addElement(note);
+            setFocusNoteId(note.id);
         },
         [addElement, makeBase, noteColor],
     );
@@ -279,17 +299,18 @@ export function WhiteboardPanel({
     );
 
     const archiveSelected = useCallback(() => {
-        if (!selectedId) return;
+        if (readOnly || !selectedId) return;
         editor.dispatch([
             {op: 'replace', path: elementFieldPath(selectedId, 'archived'), value: true},
             {op: 'replace', path: elementFieldPath(selectedId, 'archivedBy'), value: actor},
             {op: 'replace', path: elementFieldPath(selectedId, 'archivedAt'), value: new Date().toISOString()},
         ]);
         setSelectedId(null);
-    }, [actor, editor, selectedId]);
+    }, [actor, editor, readOnly, selectedId]);
 
     const recover = useCallback(
         (id: string) => {
+            if (readOnly) return;
             editor.dispatch([
                 {op: 'replace', path: elementFieldPath(id, 'archived'), value: false},
                 {op: 'remove', path: elementFieldPath(id, 'archivedBy')},
@@ -298,12 +319,12 @@ export function WhiteboardPanel({
             setSelectedId(id);
             setShowArchive(false);
         },
-        [editor],
+        [editor, readOnly],
     );
 
     const setLayer = useCallback(
         (placement: 'front' | 'back' | 'forward' | 'backward') => {
-            if (!selectedId) return;
+            if (readOnly || !selectedId) return;
             const current = orderedElements(latestState.current);
             const selected = current.find((element) => element.id === selectedId);
             if (!selected) return;
@@ -322,7 +343,7 @@ export function WhiteboardPanel({
                 editor.dispatch({op: 'replace', path: elementFieldPath(selectedId, 'zOrder'), value: next});
             }
         },
-        [editor, selectedId],
+        [editor, readOnly, selectedId],
     );
 
     const onBoardPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -330,6 +351,10 @@ export function WhiteboardPanel({
         const rect = viewportRef.current?.getBoundingClientRect();
         if (!rect) return;
         const point = screenToBoard(event.clientX, event.clientY, rect, viewport);
+        if (readOnly && tool !== 'pan') {
+            setSelectedId(null);
+            return;
+        }
         if (tool === 'note') {
             addNote(point.x, point.y);
             return;
@@ -358,7 +383,7 @@ export function WhiteboardPanel({
     };
 
     const onBoardPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
-        if (!activeStroke) return;
+        if (readOnly || !activeStroke) return;
         const rect = viewportRef.current?.getBoundingClientRect();
         if (!rect) return;
         const point = screenToBoard(event.clientX, event.clientY, rect, viewport);
@@ -366,7 +391,7 @@ export function WhiteboardPanel({
     };
 
     const onBoardPointerUp = () => {
-        if (!activeStroke) return;
+        if (readOnly || !activeStroke) return;
         commitStroke(activeStroke);
         setActiveStroke(null);
     };
@@ -377,6 +402,10 @@ export function WhiteboardPanel({
     ) => {
         if (event.button !== 0 || !event.isPrimary) return;
         event.stopPropagation();
+        if (readOnly) {
+            setSelectedId(element.id);
+            return;
+        }
         if (tool === 'erase') {
             editor.dispatch([
                 {op: 'replace', path: elementFieldPath(element.id, 'archived'), value: true},
@@ -451,10 +480,10 @@ export function WhiteboardPanel({
                     <p>{elements.length} visible</p>
                 </div>
                 <div className="whiteboardActions">
-                    <button type="button" onClick={() => editor.undo()} disabled={!editor.canUndo()}>
+                    <button type="button" onClick={() => editor.undo()} disabled={readOnly || !editor.canUndo()}>
                         Undo
                     </button>
-                    <button type="button" onClick={() => editor.redo()} disabled={!editor.canRedo()}>
+                    <button type="button" onClick={() => editor.redo()} disabled={readOnly || !editor.canRedo()}>
                         Redo
                     </button>
                 </div>
@@ -467,6 +496,7 @@ export function WhiteboardPanel({
                         type="button"
                         className={tool === item ? 'active' : ''}
                         onClick={() => setTool(item)}
+                        disabled={readOnly && item !== 'select' && item !== 'pan'}
                     >
                         {labelForTool(item)}
                     </button>
@@ -480,6 +510,7 @@ export function WhiteboardPanel({
                             style={{backgroundColor: color}}
                             onClick={() => setNoteColor(color)}
                             aria-label={`Note color ${color}`}
+                            disabled={readOnly}
                         />
                     ))}
                 </div>
@@ -487,6 +518,7 @@ export function WhiteboardPanel({
                     value={selectedEmoji}
                     onChange={(event) => setSelectedEmoji(event.target.value as typeof selectedEmoji)}
                     aria-label="Emoji stamp"
+                    disabled={readOnly}
                 >
                     {emojiChoices.map((emoji) => (
                         <option key={emoji} value={emoji}>
@@ -494,19 +526,19 @@ export function WhiteboardPanel({
                         </option>
                     ))}
                 </select>
-                <button type="button" onClick={() => setLayer('back')} disabled={!selectedId}>
+                <button type="button" onClick={() => setLayer('back')} disabled={readOnly || !selectedId}>
                     Back
                 </button>
-                <button type="button" onClick={() => setLayer('backward')} disabled={!selectedId}>
+                <button type="button" onClick={() => setLayer('backward')} disabled={readOnly || !selectedId}>
                     Down
                 </button>
-                <button type="button" onClick={() => setLayer('forward')} disabled={!selectedId}>
+                <button type="button" onClick={() => setLayer('forward')} disabled={readOnly || !selectedId}>
                     Up
                 </button>
-                <button type="button" onClick={() => setLayer('front')} disabled={!selectedId}>
+                <button type="button" onClick={() => setLayer('front')} disabled={readOnly || !selectedId}>
                     Front
                 </button>
-                <button type="button" onClick={archiveSelected} disabled={!selectedId}>
+                <button type="button" onClick={archiveSelected} disabled={readOnly || !selectedId}>
                     Archive
                 </button>
                 <button type="button" onClick={() => setShowArchive((value) => !value)}>
@@ -524,7 +556,12 @@ export function WhiteboardPanel({
                 <div className="whiteboardArchive">
                     {archived.length ? (
                         archived.map((element) => (
-                            <button key={element.id} type="button" onClick={() => recover(element.id)}>
+                            <button
+                                key={element.id}
+                                type="button"
+                                onClick={() => recover(element.id)}
+                                disabled={readOnly}
+                            >
                                 Recover {nameForElement(element)}
                             </button>
                         ))
@@ -588,8 +625,12 @@ export function WhiteboardPanel({
                                 element={element}
                                 selected={selectedId === element.id}
                                 editor={editor}
+                                readOnly={readOnly}
+                                autoFocus={focusNoteId === element.id}
+                                onAutoFocused={() => setFocusNoteId(null)}
                                 onPointerDown={(event) => startElementDrag(element, event)}
                                 onResizePointerDown={(event) => {
+                                    if (readOnly) return;
                                     event.stopPropagation();
                                     setSelectedId(element.id);
                                     setDrag({
@@ -669,21 +710,33 @@ function NoteView({
     element,
     selected,
     editor,
+    readOnly,
+    autoFocus,
+    onAutoFocused,
     onPointerDown,
     onResizePointerDown,
 }: {
     element: StickyNoteElement;
     selected: boolean;
     editor: AppEditorContext<WhiteboardState>;
+    readOnly: boolean;
+    autoFocus: boolean;
+    onAutoFocused(): void;
     onPointerDown(event: ReactPointerEvent<HTMLElement>): void;
     onResizePointerDown(event: ReactPointerEvent<HTMLButtonElement>): void;
 }) {
     const [draft, setDraft] = useState(element.text);
+    const textareaRef = useRef<HTMLTextAreaElement | null>(null);
     const statuses = useSelectionStatuses(editor, element.id);
     useEffect(() => setDraft(element.text), [element.text]);
+    useEffect(() => {
+        if (!autoFocus || readOnly) return;
+        textareaRef.current?.focus();
+        onAutoFocused();
+    }, [autoFocus, onAutoFocused, readOnly]);
 
     const commit = () => {
-        if (draft !== element.text) {
+        if (!readOnly && draft !== element.text) {
             editor.dispatch({op: 'replace', path: elementFieldPath(element.id, 'text'), value: draft});
         }
     };
@@ -699,6 +752,7 @@ function NoteView({
         >
             <div className="whiteboardNoteHandle" onPointerDown={onPointerDown} />
             <textarea
+                ref={textareaRef}
                 value={draft}
                 onChange={(event) => setDraft(event.currentTarget.value)}
                 onPointerDown={(event) => event.stopPropagation()}
@@ -714,6 +768,7 @@ function NoteView({
                     }
                 }}
                 placeholder="Note"
+                readOnly={readOnly}
             />
             <RemoteSelections statuses={statuses} />
             <button
@@ -721,6 +776,7 @@ function NoteView({
                 className="whiteboardResize"
                 onPointerDown={onResizePointerDown}
                 aria-label="Resize note"
+                disabled={readOnly}
             />
         </article>
     );

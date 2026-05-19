@@ -253,6 +253,7 @@ function ServerDocumentWorkspace<TState>({
     sync: ServerSync<TState>;
 }) {
     const editor = runtime.useEditorContext();
+    const [readOnly, setReadOnly] = useState(false);
     editor.useLocalHistory();
 
     return (
@@ -262,9 +263,15 @@ function ServerDocumentWorkspace<TState>({
                 editor,
                 title: `${app.title} server client`,
                 gridSlot: 'full',
+                readOnly,
                 setPresenceSelection: sync.setPresenceSelection,
             })}
-            <ServerHistoryView app={app} sync={sync} editor={editor} />
+            <ServerHistoryView
+                app={app}
+                sync={sync}
+                editor={editor}
+                onPreviewingChange={setReadOnly}
+            />
         </>
     );
 }

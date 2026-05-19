@@ -8,10 +8,12 @@ export function ServerHistoryView<TState>({
     app: _app,
     sync,
     editor,
+    onPreviewingChange,
 }: {
     app: AppDefinition<TState>;
     sync: ServerSync<TState>;
     editor: CrdtEditorContext<TState>;
+    onPreviewingChange?(previewing: boolean): void;
 }) {
     const branches = useStore(sync.branchesStore);
     const events = useStore(sync.eventsStore);
@@ -19,6 +21,7 @@ export function ServerHistoryView<TState>({
     const [branchName, setBranchName] = useState('');
     const [renameValue, setRenameValue] = useState('');
     const [forkEventIndex, setForkEventIndex] = useState<number | undefined>();
+    const [previewEventIndex, setPreviewEventIndex] = useState<number | undefined>();
     const [mergeSourceId, setMergeSourceId] = useState('');
     const [mergeSourceThroughEventIndex, setMergeSourceThroughEventIndex] = useState<number | undefined>();
     const [revertedPathKeys, setRevertedPathKeys] = useState(() => new Set<string>());
@@ -31,6 +34,10 @@ export function ServerHistoryView<TState>({
                 : null,
         [mergeSourceId, mergeSourceThroughEventIndex, sync, events, activeBranchId, revertedPathKeys],
     );
+    const eventPreview = useMemo(
+        () => (previewEventIndex === undefined ? null : sync.buildEventPreview(previewEventIndex)),
+        [previewEventIndex, sync, events, activeBranchId],
+    );
     const changedPathKeys = useMemo(
         () => mergePreview?.changedPaths.map((path) => pathKey(path)) ?? [],
         [mergePreview],
@@ -39,9 +46,14 @@ export function ServerHistoryView<TState>({
     const appliedCount = Math.max(0, changedPathKeys.length - revertedCount);
 
     useEffect(() => {
-        editor.previewHistory(mergePreview?.preview ?? null);
+        editor.previewHistory(mergePreview?.preview ?? eventPreview);
         return () => editor.previewHistory(null);
-    }, [editor, mergePreview]);
+    }, [editor, eventPreview, mergePreview]);
+
+    useEffect(() => {
+        onPreviewingChange?.(mergePreview !== null || eventPreview !== null);
+        return () => onPreviewingChange?.(false);
+    }, [eventPreview, mergePreview, onPreviewingChange]);
 
     function createBranch() {
         const name = branchName.trim();
@@ -49,6 +61,7 @@ export function ServerHistoryView<TState>({
         sync.createBranch(name, forkEventIndex);
         setBranchName('');
         setForkEventIndex(undefined);
+        setPreviewEventIndex(undefined);
     }
 
     function renameActiveBranch() {
@@ -59,6 +72,7 @@ export function ServerHistoryView<TState>({
     }
 
     function selectMergeSource(branchId: string) {
+        setPreviewEventIndex(undefined);
         setMergeSourceId(branchId);
         const source = branches.find((branch) => branch.branchId === branchId);
         setMergeSourceThroughEventIndex(source?.tipEventIndex);
@@ -89,6 +103,7 @@ export function ServerHistoryView<TState>({
         setMergeSourceId('');
         setMergeSourceThroughEventIndex(undefined);
         setRevertedPathKeys(new Set());
+        setPreviewEventIndex(undefined);
     }
 
     return (
@@ -109,6 +124,7 @@ export function ServerHistoryView<TState>({
                             setMergeSourceThroughEventIndex(undefined);
                             setRevertedPathKeys(new Set());
                             setForkEventIndex(undefined);
+                            setPreviewEventIndex(undefined);
                             sync.switchBranch(branch.branchId);
                         }}
                         title={branch.pending ? 'Pending local branch' : branch.branchId}
@@ -129,7 +145,13 @@ export function ServerHistoryView<TState>({
                     {forkEventIndex === undefined ? 'Branch' : `Branch at ${forkEventIndex}`}
                 </button>
                 {forkEventIndex !== undefined ? (
-                    <button type="button" onClick={() => setForkEventIndex(undefined)}>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setForkEventIndex(undefined);
+                            setPreviewEventIndex(undefined);
+                        }}
+                    >
                         Clear fork point
                     </button>
                 ) : null}
@@ -168,6 +190,20 @@ export function ServerHistoryView<TState>({
                     Merge
                 </button>
             </div>
+            {previewEventIndex !== undefined && !mergePreview ? (
+                <div className="serverPreviewNotice">
+                    <span>Previewing state after event {previewEventIndex}</span>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setForkEventIndex(undefined);
+                            setPreviewEventIndex(undefined);
+                        }}
+                    >
+                        Exit preview
+                    </button>
+                </div>
+            ) : null}
             {mergePreview ? (
                 <section className="serverMergePanel" aria-label="Merge preview">
                     <div className="serverMergeHeader">
@@ -219,6 +255,7 @@ export function ServerHistoryView<TState>({
                             type="button"
                             onClick={() => {
                                 editor.previewHistory(null);
+                                setPreviewEventIndex(undefined);
                                 selectMergeSource('');
                             }}
                         >
@@ -269,9 +306,21 @@ export function ServerHistoryView<TState>({
                         <button
                             key={`${event.branchId}:${event.eventIndex}:${event.kind}`}
                             type="button"
-                            className={forkEventIndex === event.eventIndex ? 'active' : ''}
+                            className={
+                                previewEventIndex === event.eventIndex || forkEventIndex === event.eventIndex
+                                    ? 'active'
+                                    : ''
+                            }
                             title={event.kind === 'update' ? event.hlcTimestamp : event.mergeId}
-                            onClick={() => setForkEventIndex(event.eventIndex)}
+                            onClick={() => {
+                                setForkEventIndex(event.eventIndex);
+                                setPreviewEventIndex((current) =>
+                                    current === event.eventIndex ? undefined : event.eventIndex,
+                                );
+                                setMergeSourceId('');
+                                setMergeSourceThroughEventIndex(undefined);
+                                setRevertedPathKeys(new Set());
+                            }}
                         >
                             {event.eventIndex}. {event.kind}
                             {!event.recorded ? ' *' : ''}

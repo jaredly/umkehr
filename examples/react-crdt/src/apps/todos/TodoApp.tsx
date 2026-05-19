@@ -21,13 +21,14 @@ export const todoApp: AppDefinition<TodoState> = {
     validateState: validateTodoState,
     initialState: initialTodoState,
     initialTimestamp: initialTodoTimestamp,
-    renderPanel({editor, actor, title, gridSlot}) {
+    renderPanel({editor, actor, title, gridSlot, readOnly}) {
         return (
             <TodoPanel
                 editor={editor}
                 replicaId={actor}
                 title={title}
                 gridSlot={gridSlot}
+                readOnly={readOnly}
             />
         );
     },

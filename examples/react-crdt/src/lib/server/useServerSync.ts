@@ -730,6 +730,16 @@ export function useServerSync<TState>({
         return {...preview, revertedPathKeys};
     }
 
+    function buildEventPreview(throughEventIndex: number) {
+        const branch = activeBranch(branchesRef.current, activeBranchIdRef.current);
+        return materializeServerBranch({
+            app,
+            branches: branchesRef.current,
+            branchId: branch.branchId,
+            throughEventIndex,
+        });
+    }
+
     return {
         transport,
         identity,
@@ -754,6 +764,7 @@ export function useServerSync<TState>({
         createBranch,
         renameBranch,
         mergeBranch,
+        buildEventPreview,
         buildMergePreview,
     };
 }

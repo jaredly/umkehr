@@ -58,6 +58,7 @@ export type AppPanelProps<TState> = {
     actor: string;
     title: string;
     gridSlot?: GridSlot | 'full';
+    readOnly?: boolean;
     setPresenceSelection?(elementId: string | null): void;
 };
 
