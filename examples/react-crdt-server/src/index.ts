@@ -5,7 +5,7 @@ import {
     parseSessionActor,
 } from './protocol';
 import {ServerStore} from './store';
-import type {ConnectedClient, ServerLogEntry, ServerPresenceSession, ServerPresenceUser} from './types';
+import type {ConnectedClient, ServerBranch, ServerBranchEvent, ServerPresenceSession, ServerPresenceUser} from './types';
 
 export const PORT = 8787;
 
@@ -16,12 +16,8 @@ const server = Bun.serve<ClientData>({
     port: PORT,
     async fetch(request, server) {
         const url = new URL(request.url);
-        if (request.method === 'OPTIONS') {
-            return new Response(null, {headers: corsHeaders()});
-        }
-        if (url.pathname === '/health') {
-            return json({ok: true, port: PORT});
-        }
+        if (request.method === 'OPTIONS') return new Response(null, {headers: corsHeaders()});
+        if (url.pathname === '/health') return json({ok: true, port: PORT});
         if (url.pathname === '/users' && request.method === 'GET') {
             return json({users: store.listUsers()});
         }
@@ -38,10 +34,7 @@ const server = Bun.serve<ClientData>({
         }
         if (url.pathname === '/debug') {
             return new Response(debugHtml(), {
-                headers: {
-                    ...corsHeaders(),
-                    'content-type': 'text/html; charset=utf-8',
-                },
+                headers: {...corsHeaders(), 'content-type': 'text/html; charset=utf-8'},
             });
         }
         if (url.pathname === '/sync') {
@@ -67,14 +60,7 @@ const server = Bun.serve<ClientData>({
 
             try {
                 const actor = parseSessionActor(parsed.actor);
-                if (!actor) {
-                    send(ws, {
-                        kind: 'error',
-                        version: SERVER_PROTOCOL_VERSION,
-                        message: 'Invalid actor.',
-                    });
-                    return;
-                }
+                if (!actor) throw new Error('Invalid actor.');
                 if (ws.data.sessionId === undefined && hasDuplicateSession(ws, actor.sessionId)) {
                     send(ws, {
                         kind: 'error',
@@ -84,67 +70,113 @@ const server = Bun.serve<ClientData>({
                     ws.close();
                     return;
                 }
+
                 ws.data.actor = parsed.actor;
                 ws.data.userId = parsed.userId;
                 ws.data.sessionId = actor.sessionId;
                 ws.data.docId = parsed.docId;
 
-                if (parsed.kind === 'presenceHello') {
-                    const user = store.getUserById(parsed.userId);
-                    if (!user) {
+                switch (parsed.kind) {
+                    case 'hello': {
+                        store.ensureDocument(parsed.docId, parsed.schemaFingerprint);
+                        ws.data.schemaFingerprint = parsed.schemaFingerprint;
                         send(ws, {
-                            kind: 'error',
+                            kind: 'hello',
                             version: SERVER_PROTOCOL_VERSION,
-                            message: 'Unknown user.',
+                            docId: parsed.docId,
+                            branches: store.listBranches(parsed.docId),
                         });
                         return;
                     }
-                    ws.data.nickname = user.nickname;
-                    ws.data.color = parsed.color;
-                    ws.data.presenceReady = true;
-                    send(ws, {
-                        kind: 'presenceSnapshot',
-                        version: SERVER_PROTOCOL_VERSION,
-                        docId: parsed.docId,
-                        users: presenceUsersForDoc(parsed.docId, parsed.actor),
-                    });
-                    broadcastPresenceUpdate(parsed.docId, parsed.actor, parsed.userId);
-                    return;
+                    case 'presenceHello': {
+                        const user = store.getUserById(parsed.userId);
+                        if (!user) throw new Error('Unknown user.');
+                        ws.data.nickname = user.nickname;
+                        ws.data.color = parsed.color;
+                        ws.data.branchId = parsed.branchId;
+                        ws.data.presenceReady = true;
+                        send(ws, {
+                            kind: 'presenceSnapshot',
+                            version: SERVER_PROTOCOL_VERSION,
+                            docId: parsed.docId,
+                            users: presenceUsersForDoc(parsed.docId, parsed.actor),
+                        });
+                        broadcastPresenceUpdate(parsed.docId, parsed.actor, parsed.userId);
+                        return;
+                    }
+                    case 'branchSubscribe': {
+                        ws.data.branchId = parsed.branchId;
+                        sendEventsAfter(ws, parsed.branchId, parsed.lastSeenEventIndex);
+                        broadcastPresenceUpdate(parsed.docId, parsed.actor, parsed.userId);
+                        return;
+                    }
+                    case 'createBranch': {
+                        const branch = store.createBranch({
+                            docId: parsed.docId,
+                            branchId: parsed.branchId,
+                            sourceBranchId: parsed.sourceBranchId,
+                            forkEventIndex: parsed.forkEventIndex,
+                            name: parsed.name,
+                        });
+                        send(ws, {
+                            kind: 'ack',
+                            version: SERVER_PROTOCOL_VERSION,
+                            docId: parsed.docId,
+                            branchId: branch.branchId,
+                            branchIdCreated: branch.branchId,
+                        });
+                        broadcastBranchUpdate(parsed.docId, branch);
+                        return;
+                    }
+                    case 'renameBranch': {
+                        const branch = store.renameBranch({
+                            docId: parsed.docId,
+                            branchId: parsed.branchId,
+                            name: parsed.name,
+                        });
+                        broadcastBranchUpdate(parsed.docId, branch);
+                        return;
+                    }
+                    case 'mergeBranch': {
+                        const event = store.appendMergeEvent({
+                            docId: parsed.docId,
+                            branchId: parsed.targetBranchId,
+                            actor: parsed.actor,
+                            sourceBranchId: parsed.sourceBranchId,
+                            sourceThroughEventIndex: parsed.sourceThroughEventIndex,
+                        });
+                        send(ws, {
+                            kind: 'ack',
+                            version: SERVER_PROTOCOL_VERSION,
+                            docId: parsed.docId,
+                            branchId: parsed.targetBranchId,
+                            eventIndex: event.eventIndex,
+                        });
+                        broadcastEvent(event, parsed.actor);
+                        broadcastBranchUpdate(parsed.docId, branchFor(parsed.docId, parsed.targetBranchId));
+                        return;
+                    }
+                    case 'clientUpdate': {
+                        store.ensureDocument(parsed.docId, parsed.schemaFingerprint);
+                        const event = store.appendUpdateEvent({
+                            docId: parsed.docId,
+                            branchId: parsed.branchId,
+                            origin: parsed.actor,
+                            hlcTimestamp: parsed.hlcTimestamp,
+                            update: parsed.update,
+                        });
+                        send(ws, {
+                            kind: 'ack',
+                            version: SERVER_PROTOCOL_VERSION,
+                            docId: parsed.docId,
+                            branchId: parsed.branchId,
+                            hlcTimestamp: parsed.hlcTimestamp,
+                            eventIndex: event.eventIndex,
+                        });
+                        broadcastEvent(event, parsed.actor);
+                        broadcastBranchUpdate(parsed.docId, branchFor(parsed.docId, parsed.branchId));
+                    }
                 }
-
-                store.ensureDocument(parsed.docId, parsed.schemaFingerprint);
-                ws.data.schemaFingerprint = parsed.schemaFingerprint;
-
-                if (parsed.kind === 'hello') {
-                    send(ws, {
-                        kind: 'hello',
-                        version: SERVER_PROTOCOL_VERSION,
-                        docId: parsed.docId,
-                        lastSeenMessageIndex: parsed.lastSeenMessageIndex,
-                    });
-                    sendUpdatesAfter(ws, parsed.lastSeenMessageIndex);
-                    return;
-                }
-
-                if (parsed.kind === 'syncRequest') {
-                    sendUpdatesAfter(ws, parsed.lastSeenMessageIndex);
-                    return;
-                }
-
-                const entry = store.appendUpdate({
-                    docId: parsed.docId,
-                    schemaFingerprint: parsed.schemaFingerprint,
-                    origin: parsed.actor,
-                    hlcTimestamp: parsed.hlcTimestamp,
-                    update: parsed.update,
-                });
-                send(ws, {
-                    kind: 'ack',
-                    version: SERVER_PROTOCOL_VERSION,
-                    docId: parsed.docId,
-                    hlcTimestamp: parsed.hlcTimestamp,
-                });
-                broadcast(entry, parsed.actor);
             } catch (error) {
                 send(ws, {
                     kind: 'error',
@@ -155,7 +187,13 @@ const server = Bun.serve<ClientData>({
         },
         close(ws) {
             clients.delete(ws);
-            if (ws.data.presenceReady && ws.data.docId && ws.data.actor && ws.data.userId && ws.data.sessionId) {
+            if (
+                ws.data.presenceReady &&
+                ws.data.docId &&
+                ws.data.actor &&
+                ws.data.userId &&
+                ws.data.sessionId
+            ) {
                 broadcastPresenceLeave(ws.data.docId, {
                     actor: ws.data.actor,
                     userId: ws.data.userId,
@@ -175,6 +213,7 @@ type ClientData = {
     nickname?: string;
     color?: string;
     docId?: string;
+    branchId?: string;
     schemaFingerprint?: string;
     presenceReady?: boolean;
 };
@@ -193,34 +232,54 @@ function hasDuplicateSession(ws: ServerWebSocket, sessionId: string) {
     return false;
 }
 
-function sendUpdatesAfter(ws: ServerWebSocket, lastSeenMessageIndex: number) {
+function sendEventsAfter(ws: ServerWebSocket, branchId: string, lastSeenEventIndex: number) {
     if (!ws.data.docId) return;
-    const entries = store.listAfter(ws.data.docId, lastSeenMessageIndex, ws.data.actor);
     send(ws, {
-        kind: 'serverUpdates',
+        kind: 'branchEvents',
         version: SERVER_PROTOCOL_VERSION,
         docId: ws.data.docId,
-        entries,
+        branchId,
+        events: store.listEventsAfter(ws.data.docId, branchId, lastSeenEventIndex),
     });
 }
 
-function broadcast(entry: ServerLogEntry, origin: string) {
+function broadcastEvent(event: ServerBranchEvent, origin: string) {
     for (const client of clients) {
-        if (client.data.docId !== entry.docId) continue;
+        if (client.data.docId !== event.docId) continue;
         if (client.data.actor === origin) continue;
+        if (client.data.branchId !== event.branchId) continue;
         send(client, {
-            kind: 'serverUpdates',
+            kind: 'branchEvents',
             version: SERVER_PROTOCOL_VERSION,
-            docId: entry.docId,
-            entries: [entry],
+            docId: event.docId,
+            branchId: event.branchId,
+            events: [event],
         });
     }
+}
+
+function broadcastBranchUpdate(docId: string, branch: ServerBranch) {
+    for (const client of clients) {
+        if (client.data.docId !== docId) continue;
+        send(client, {
+            kind: 'branchUpdate',
+            version: SERVER_PROTOCOL_VERSION,
+            docId,
+            branch,
+        });
+    }
+}
+
+function branchFor(docId: string, branchId: string) {
+    const branch = store.listBranches(docId).find((candidate) => candidate.branchId === branchId);
+    if (!branch) throw new Error('Branch does not exist.');
+    return branch;
 }
 
 function presenceUsersForDoc(docId: string, excludeActor?: string): ServerPresenceUser[] {
     const byUser = new Map<string, ServerPresenceUser>();
     for (const client of clients) {
-        const {actor, userId, sessionId, nickname, color} = client.data;
+        const {actor, userId, sessionId, nickname, color, branchId} = client.data;
         if (
             !client.data.presenceReady ||
             client.data.docId !== docId ||
@@ -241,13 +300,11 @@ function presenceUsersForDoc(docId: string, excludeActor?: string): ServerPresen
             color,
             online: true,
             lastSeenAt: new Date().toISOString(),
+            branchId,
         };
         const existing = byUser.get(userId);
-        if (existing) {
-            existing.sessions.push(session);
-        } else {
-            byUser.set(userId, {userId, nickname, color, sessions: [session]});
-        }
+        if (existing) existing.sessions.push(session);
+        else byUser.set(userId, {userId, nickname, color, sessions: [session]});
     }
     return [...byUser.values()].sort((a, b) =>
         a.nickname.localeCompare(b.nickname, undefined, {sensitivity: 'base'}),
@@ -293,7 +350,7 @@ function broadcastPresenceLeave(
 function debugHtml() {
     const documents = store.summarizeDocuments();
     const users = store.listUsers();
-    const messages = store.recentMessages(100);
+    const events = store.recentEvents(100);
     const connected: ConnectedClient[] = [...clients].map((client) => ({
         actor: client.data.actor,
         userId: client.data.userId,
@@ -301,6 +358,7 @@ function debugHtml() {
         nickname: client.data.nickname,
         color: client.data.color,
         docId: client.data.docId,
+        branchId: client.data.branchId,
         presenceReady: client.data.presenceReady,
     }));
     return `<!doctype html>
@@ -320,51 +378,51 @@ function debugHtml() {
   <h1>React CRDT Server Debug</h1>
   <section>
     <h2>Users</h2>
-    ${table(
-        ['User', 'Nickname'],
-        users.map((user) => [user.userId, user.nickname]),
-    )}
+    ${table(['User', 'Nickname'], users.map((user) => [user.userId, user.nickname]))}
   </section>
   <section>
     <h2>Documents</h2>
     ${table(
-        ['Doc', 'Fingerprint', 'Next index', 'Messages'],
+        ['Doc', 'Fingerprint', 'Branches', 'Events'],
         documents.map((doc) => [
             doc.docId,
             doc.schemaFingerprint,
-            String(doc.nextMessageIndex),
-            String(doc.messageCount),
+            String(doc.branchCount),
+            String(doc.eventCount),
         ]),
     )}
   </section>
   <section>
     <h2>Connected clients</h2>
     ${table(
-        ['User', 'Nickname', 'Session', 'Actor', 'Doc', 'Presence'],
+        ['User', 'Nickname', 'Session', 'Actor', 'Doc', 'Branch', 'Presence'],
         connected.map((client) => [
             client.userId ?? '',
             client.nickname ?? '',
             client.sessionId ?? '',
             client.actor ?? '',
             client.docId ?? '',
+            client.branchId ?? '',
             client.presenceReady ? 'yes' : '',
         ]),
     )}
   </section>
   <section>
-    <h2>Recent messages</h2>
+    <h2>Recent events</h2>
     ${table(
-        ['Doc', 'Index', 'User', 'Session', 'Origin', 'Timestamp', 'Received'],
-        messages.map((message) => {
-            const actor = parseSessionActor(message.origin);
+        ['Doc', 'Branch', 'Index', 'Kind', 'User', 'Session', 'Origin', 'Timestamp'],
+        events.map((event) => {
+            const origin = event.kind === 'update' ? event.origin : event.actor;
+            const actor = parseSessionActor(origin);
             return [
-                message.docId,
-                String(message.messageIndex),
+                event.docId,
+                event.branchId,
+                String(event.eventIndex),
+                event.kind,
                 actor?.userId ?? '',
                 actor?.sessionId ?? '',
-                message.origin,
-                message.hlcTimestamp,
-                message.receivedAt,
+                origin,
+                event.kind === 'update' ? event.hlcTimestamp : '',
             ];
         }),
     )}
@@ -386,10 +444,7 @@ function table(headers: string[], rows: string[][]) {
 function json(value: unknown, status = 200) {
     return new Response(JSON.stringify(value), {
         status,
-        headers: {
-            ...corsHeaders(),
-            'content-type': 'application/json',
-        },
+        headers: {...corsHeaders(), 'content-type': 'application/json'},
     });
 }
 

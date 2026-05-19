@@ -392,14 +392,14 @@ p {
     min-height: calc(100vh - 72px);
     margin: 0 auto;
     padding: 32px 0;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 320px;
+    display: flex;
+    flex-direction: column;
     gap: 18px;
-    align-items: start;
+    align-items: stretch;
 }
 
 .serverShell {
-    grid-template-columns: minmax(0, 1fr);
+    /*grid-template-columns: minmax(0, 1fr);*/
 }
 
 .peerControls,

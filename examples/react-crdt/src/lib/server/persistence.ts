@@ -1,8 +1,8 @@
 import {openDB, type DBSchema, type IDBPDatabase} from 'idb';
-import type {PersistedServerReplica, PersistedServerUser, ServerChange, ServerUser} from './types';
+import type {PersistedServerReplica, PersistedServerUser, ServerBranchEvent, ServerUser} from './types';
 
 const DB_NAME = 'umkehr-react-crdt-server-sync';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const IDENTITY_KEY = 'default';
 
 interface ServerSyncDb extends DBSchema {
@@ -55,11 +55,11 @@ export async function saveServerReplica<TState>(replica: PersistedServerReplica<
     await db.put('replicas', replica as PersistedServerReplica<unknown>, replica.docId);
 }
 
-export function sortServerChanges(changes: ServerChange[]) {
-    return [...changes].sort((a, b) => {
-        const byTimestamp = a.timestamp.localeCompare(b.timestamp);
-        if (byTimestamp !== 0) return byTimestamp;
-        return a.origin.localeCompare(b.origin);
+export function sortServerEvents(events: ServerBranchEvent[]) {
+    return [...events].sort((a, b) => {
+        const byBranch = a.branchId.localeCompare(b.branchId);
+        if (byBranch !== 0) return byBranch;
+        return a.eventIndex - b.eventIndex;
     });
 }
 
@@ -72,6 +72,9 @@ function openServerSyncDb() {
             if (!db.objectStoreNames.contains('replicas')) db.createObjectStore('replicas');
             if (oldVersion < 2) {
                 tx.objectStore('identity').delete(IDENTITY_KEY);
+            }
+            if (oldVersion < 3) {
+                tx.objectStore('replicas').clear();
             }
         },
     });

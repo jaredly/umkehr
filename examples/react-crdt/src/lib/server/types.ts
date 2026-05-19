@@ -20,6 +20,45 @@ export type ServerSessionIdentity = {
     createdAt: string;
 };
 
+export type ServerBranch = {
+    docId: string;
+    branchId: string;
+    name: string;
+    sourceBranchId?: string;
+    forkEventIndex?: number;
+    tipEventIndex: number;
+    createdAt: string;
+    updatedAt: string;
+    pending?: boolean;
+};
+
+export type ServerUpdateEvent = {
+    kind: 'update';
+    docId: string;
+    branchId: string;
+    eventIndex: number;
+    origin: string;
+    hlcTimestamp: HlcTimestamp;
+    receivedAt: string;
+    update: CrdtUpdate;
+    recorded?: boolean;
+};
+
+export type ServerMergeEvent = {
+    kind: 'merge';
+    mergeId: string;
+    docId: string;
+    branchId: string;
+    eventIndex: number;
+    sourceBranchId: string;
+    sourceThroughEventIndex: number;
+    actor: string;
+    createdAt: string;
+    recorded?: boolean;
+};
+
+export type ServerBranchEvent = ServerUpdateEvent | ServerMergeEvent;
+
 export type ServerPresenceSession = {
     actor: string;
     userId: string;
@@ -28,6 +67,7 @@ export type ServerPresenceSession = {
     color: string;
     online: true;
     lastSeenAt: string;
+    branchId?: string;
 };
 
 export type ServerPresenceUser = {
@@ -47,27 +87,25 @@ export type ServerLastEditStatusData = {
     receivedAt: string;
 };
 
-export type ServerChangeSource = 'local' | 'remote';
-
-export type ServerChange = {
-    docId: string;
-    timestamp: HlcTimestamp;
-    origin: string;
-    source: ServerChangeSource;
-    update: CrdtUpdate;
-    recorded: boolean;
-    messageIndex?: number;
-    receivedAt: string;
+export type PersistedServerBranch<TState> = {
+    branchId: string;
+    sourceBranchId?: string;
+    forkEventIndex?: number;
+    history: CrdtLocalHistory<TState>;
+    lastSeenEventIndex: number;
+    undoCheckpointEventIndex: number;
+    events: ServerBranchEvent[];
+    mirrored: boolean;
 };
 
 export type PersistedServerReplica<TState> = {
     docId: string;
-    storageVersion: 2;
-    protocolVersion: 2;
+    storageVersion: 3;
+    protocolVersion: 3;
     schemaFingerprint: string;
-    history: CrdtLocalHistory<TState>;
-    lastSeenMessageIndex: number;
-    changes: ServerChange[];
+    activeBranchId: string;
+    branches: Record<string, PersistedServerBranch<TState>>;
+    branchList: ServerBranch[];
     updatedAt: string;
 };
 
@@ -78,11 +116,20 @@ export type ServerSyncState =
     | {kind: 'error'; message: string};
 
 export type ServerSyncStats = {
-    lastSeenMessageIndex: number;
+    lastSeenEventIndex: number;
     pendingUploads: number;
-    totalChanges: number;
-    receivedChanges: number;
+    totalEvents: number;
+    receivedEvents: number;
     lastSyncAt?: string;
+};
+
+export type ServerMergePreview<TState> = {
+    sourceBranchId: string;
+    sourceThroughEventIndex: number;
+    targetBranchId: string;
+    preview: CrdtLocalHistory<TState>;
+    changedPaths: import('umkehr/crdt').CrdtPathSegment[][];
+    revertedPathKeys: Set<string>;
 };
 
 export type ServerSync<TState> = {
@@ -90,11 +137,18 @@ export type ServerSync<TState> = {
     identity: ServerSessionIdentity;
     stateStore: ExternalStore<ServerSyncState>;
     statsStore: ExternalStore<ServerSyncStats>;
-    changesStore: ExternalStore<ServerChange[]>;
+    branchesStore: ExternalStore<ServerBranch[]>;
+    eventsStore: ExternalStore<ServerBranchEvent[]>;
+    activeBranchStore: ExternalStore<string>;
     presenceStore: ExternalStore<ServerPresenceUser[]>;
     statusStore: StatusStore;
     manualOfflineStore: ExternalStore<boolean>;
     setManualOffline(offline: boolean): void;
     requestSync(): void;
     saveHistory(history: CrdtLocalHistory<TState>): void;
+    switchBranch(branchId: string): void;
+    createBranch(name: string, forkEventIndex?: number): void;
+    renameBranch(branchId: string, name: string): void;
+    mergeBranch(sourceBranchId: string, sourceThroughEventIndex?: number, revertedPathKeys?: Set<string>): void;
+    buildMergePreview(sourceBranchId: string, sourceThroughEventIndex?: number, revertedPathKeys?: Set<string>): ServerMergePreview<TState> | null;
 };

@@ -2,6 +2,7 @@ import {useCallback, useEffect, useMemo, useRef} from 'react';
 import {
     applyRemoteHistoryUpdate,
     changedNormalPathsForCrdtUpdate,
+    createCrdtLocalHistory,
     hlc,
     latestCrdtUpdateTimestamp,
     type CrdtLocalHistory,
@@ -9,74 +10,81 @@ import {
 } from 'umkehr/crdt';
 import {createStatusStore} from 'umkehr/react-crdt';
 import {createExternalStore} from '../store';
+import {createInitialCrdtHistory, type AppDefinition} from '../crdtApp';
 import {
     SERVER_PROTOCOL_VERSION,
     SERVER_WS_URL,
     parseServerMessage,
     type ClientServerMessage,
-    type ServerLogEntry,
 } from './protocol';
 import {parseSessionActor} from './session';
-import {saveServerReplica, sortServerChanges} from './persistence';
+import {saveServerReplica, sortServerEvents} from './persistence';
 import {
     collapsePathToTodoRow,
     colorForUserId,
     lastEditStatusId,
     presenceSessionForActor,
+    removePresenceSession,
     sanitizePresenceUsers,
     statusForLastEdit,
     upsertPresenceUser,
 } from './presence';
+import {buildMergePathPreview, materializeServerBranch} from './materialize';
 import type {
+    PersistedServerBranch,
     PersistedServerReplica,
-    ServerChange,
+    ServerBranch,
+    ServerBranchEvent,
     ServerPresenceUser,
     ServerSessionIdentity,
     ServerSync,
     ServerSyncState,
     ServerSyncStats,
+    ServerUpdateEvent,
 } from './types';
 import type {IJsonSchemaCollection} from 'typia';
 
 export function useServerSync<TState>({
+    app,
     docId,
     schema,
     schemaFingerprint,
     identity,
-    initialHistory,
-    initialLastSeenMessageIndex,
-    initialChanges,
+    initialReplica,
     replaceHistory,
 }: {
+    app: AppDefinition<TState>;
     docId: string;
     schema: IJsonSchemaCollection<'3.1', [TState]>;
     schemaFingerprint: string;
     identity: ServerSessionIdentity;
-    initialHistory: CrdtLocalHistory<TState>;
-    initialLastSeenMessageIndex: number;
-    initialChanges: ServerChange[];
+    initialReplica: PersistedServerReplica<TState>;
     replaceHistory(history: CrdtLocalHistory<TState>): void;
 }): ServerSync<TState> {
-    const historyRef = useRef(initialHistory);
-    const lastSeenRef = useRef(initialLastSeenMessageIndex);
-    const changesRef = useRef(sortServerChanges(initialChanges));
+    const activeBranchIdRef = useRef(initialReplica.activeBranchId);
+    const branchesRef = useRef(initialReplica.branches);
+    const branchListRef = useRef(initialReplica.branchList);
     const socketRef = useRef<WebSocket | null>(null);
     const reconnectTimerRef = useRef<number | undefined>(undefined);
     const statusTimersRef = useRef(new Map<string, number>());
     const manualOfflineRef = useRef(false);
     const listenersRef = useRef(new Set<(update: CrdtUpdate) => void>());
-    const clockRef = useRef(initialClock(identity.actor, changesRef.current));
+    const clockRef = useRef(initialClock(identity.actor, allEvents(branchesRef.current)));
 
     const stateStore = useMemo(
         () => createExternalStore<ServerSyncState>({kind: 'offline', reason: 'starting'}),
         [],
     );
     const statsStore = useMemo(
-        () =>
-            createExternalStore<ServerSyncStats>(statsFor(lastSeenRef.current, changesRef.current)),
+        () => createExternalStore<ServerSyncStats>(statsFor(activeBranch(branchesRef.current, activeBranchIdRef.current))),
         [],
     );
-    const changesStore = useMemo(() => createExternalStore<ServerChange[]>(changesRef.current), []);
+    const eventsStore = useMemo(
+        () => createExternalStore<ServerBranchEvent[]>(activeBranch(branchesRef.current, activeBranchIdRef.current).events),
+        [],
+    );
+    const branchesStore = useMemo(() => createExternalStore<ServerBranch[]>(branchListRef.current), []);
+    const activeBranchStore = useMemo(() => createExternalStore(activeBranchIdRef.current), []);
     const presenceStore = useMemo(() => createExternalStore<ServerPresenceUser[]>([]), []);
     const statusStore = useMemo(() => createStatusStore(), []);
     const manualOfflineStore = useMemo(() => createExternalStore(false), []);
@@ -84,22 +92,25 @@ export function useServerSync<TState>({
     const persist = useCallback(async () => {
         const replica: PersistedServerReplica<TState> = {
             docId,
-            storageVersion: 2,
+            storageVersion: 3,
             protocolVersion: SERVER_PROTOCOL_VERSION,
             schemaFingerprint,
-            history: historyRef.current,
-            lastSeenMessageIndex: lastSeenRef.current,
-            changes: changesRef.current,
+            activeBranchId: activeBranchIdRef.current,
+            branches: branchesRef.current,
+            branchList: branchListRef.current,
             updatedAt: new Date().toISOString(),
         };
         await saveServerReplica(replica);
         publishStores({
-            lastSeen: lastSeenRef.current,
-            changes: changesRef.current,
+            branch: activeBranch(branchesRef.current, activeBranchIdRef.current),
             statsStore,
-            changesStore,
+            eventsStore,
+            branchesStore,
+            activeBranchStore,
+            branchList: branchListRef.current,
+            activeBranchId: activeBranchIdRef.current,
         });
-    }, [changesStore, docId, schemaFingerprint, statsStore]);
+    }, [activeBranchStore, branchesStore, docId, eventsStore, schemaFingerprint, statsStore]);
 
     const send = useCallback((message: ClientServerMessage) => {
         const socket = socketRef.current;
@@ -108,41 +119,18 @@ export function useServerSync<TState>({
         return true;
     }, []);
 
-    const flushPending = useCallback(() => {
-        const pending = changesRef.current.filter(
-            (change) => change.source === 'local' && !change.recorded,
-        );
-        for (const change of pending) {
-            const actor = parseSessionActor(change.origin);
-            if (!actor) continue;
-            if (
-                !send({
-                    kind: 'clientUpdate',
-                    version: SERVER_PROTOCOL_VERSION,
-                    actor: change.origin,
-                    userId: actor.userId,
-                    docId,
-                    schemaFingerprint,
-                    hlcTimestamp: change.timestamp,
-                    update: change.update,
-                })
-            ) {
-                break;
-            }
-        }
-    }, [docId, schemaFingerprint, send]);
-
-    const requestSync = useCallback(() => {
+    const subscribeActiveBranch = useCallback(() => {
+        const branch = activeBranch(branchesRef.current, activeBranchIdRef.current);
         send({
-            kind: 'syncRequest',
+            kind: 'branchSubscribe',
             version: SERVER_PROTOCOL_VERSION,
             actor: identity.actor,
             userId: identity.user.userId,
             docId,
-            schemaFingerprint,
-            lastSeenMessageIndex: lastSeenRef.current,
+            branchId: branch.branchId,
+            lastSeenEventIndex: branch.lastSeenEventIndex,
         });
-    }, [docId, identity.actor, identity.user.userId, schemaFingerprint, send]);
+    }, [docId, identity.actor, identity.user.userId, send]);
 
     const sendPresenceHello = useCallback(() => {
         send({
@@ -151,9 +139,74 @@ export function useServerSync<TState>({
             actor: identity.actor,
             userId: identity.user.userId,
             docId,
+            branchId: activeBranchIdRef.current,
             color: colorForUserId(identity.user.userId),
         });
     }, [docId, identity.actor, identity.user.userId, send]);
+
+    const flushPending = useCallback(() => {
+        for (const branch of Object.values(branchesRef.current)) {
+            const listed = branchListRef.current.find((candidate) => candidate.branchId === branch.branchId);
+            if (listed?.pending) {
+                if (
+                    !send({
+                        kind: 'createBranch',
+                        version: SERVER_PROTOCOL_VERSION,
+                        actor: identity.actor,
+                        userId: identity.user.userId,
+                        docId,
+                        branchId: listed.branchId,
+                        sourceBranchId: listed.sourceBranchId ?? 'main',
+                        forkEventIndex: listed.forkEventIndex ?? 0,
+                        name: listed.name,
+                    })
+                ) {
+                    return;
+                }
+            }
+            for (const event of branch.events) {
+                if (event.kind !== 'update' || event.recorded) continue;
+                const actor = parseSessionActor(event.origin);
+                if (!actor) continue;
+                if (
+                    !send({
+                        kind: 'clientUpdate',
+                        version: SERVER_PROTOCOL_VERSION,
+                        actor: event.origin,
+                        userId: actor.userId,
+                        docId,
+                        branchId: event.branchId,
+                        schemaFingerprint,
+                        hlcTimestamp: event.hlcTimestamp,
+                        update: event.update,
+                    })
+                ) {
+                    return;
+                }
+            }
+            for (const event of branch.events) {
+                if (event.kind !== 'merge' || event.recorded) continue;
+                if (
+                    !send({
+                        kind: 'mergeBranch',
+                        version: SERVER_PROTOCOL_VERSION,
+                        actor: identity.actor,
+                        userId: identity.user.userId,
+                        docId,
+                        targetBranchId: event.branchId,
+                        sourceBranchId: event.sourceBranchId,
+                        sourceThroughEventIndex: event.sourceThroughEventIndex,
+                    })
+                ) {
+                    return;
+                }
+            }
+        }
+    }, [docId, identity.actor, identity.user.userId, schemaFingerprint, send]);
+
+    const requestSync = useCallback(() => {
+        subscribeActiveBranch();
+    }, [subscribeActiveBranch]);
 
     const clearLastEditStatus = useCallback(
         (actor: string) => {
@@ -182,19 +235,18 @@ export function useServerSync<TState>({
 
     const clearPresenceState = useCallback(() => {
         presenceStore.setSnapshot([]);
-        for (const timer of statusTimersRef.current.values()) {
-            window.clearTimeout(timer);
-        }
+        for (const timer of statusTimersRef.current.values()) window.clearTimeout(timer);
         statusTimersRef.current.clear();
         statusStore.clearAll();
     }, [presenceStore, statusStore]);
 
     const recordRemoteLastEdit = useCallback(
-        (entry: ServerLogEntry) => {
+        (entry: ServerUpdateEvent) => {
             const session = presenceSessionForActor(presenceStore.getSnapshot(), entry.origin);
             if (!session) return;
-            const before = historyRef.current.doc;
-            const preview = applyRemoteHistoryUpdate(historyRef.current, entry.update);
+            const current = activeBranch(branchesRef.current, activeBranchIdRef.current).history;
+            const before = current.doc;
+            const preview = applyRemoteHistoryUpdate(current, entry.update);
             const changedPaths = changedNormalPathsForCrdtUpdate(before, preview.doc, entry.update);
             const rowPath = changedPaths
                 ?.toReversed()
@@ -214,48 +266,65 @@ export function useServerSync<TState>({
         [presenceStore, scheduleLastEditStatusClear, statusStore],
     );
 
-    const receiveServerEntries = useCallback(
-        async (entries: ServerLogEntry[]) => {
+    const receiveServerEvents = useCallback(
+        async (branchId: string, events: ServerBranchEvent[]) => {
+            const branch = ensureBranch(branchesRef.current, branchListRef.current, branchId, app);
             let changed = false;
-            for (const entry of entries) {
-                lastSeenRef.current = Math.max(lastSeenRef.current, entry.messageIndex);
-                if (entry.origin === identity.actor) continue;
-                if (changesRef.current.some((change) => change.timestamp === entry.hlcTimestamp)) {
-                    continue;
+            for (const event of events) {
+                branch.lastSeenEventIndex = Math.max(branch.lastSeenEventIndex, event.eventIndex);
+                if (hasEquivalentEvent(branch.events, event)) continue;
+                branch.events = sortServerEvents([...branch.events, markRecorded(event)]);
+                if (event.kind === 'update') {
+                    const pending = branch.events.find(
+                        (candidate) =>
+                            candidate.kind === 'update' &&
+                            candidate.hlcTimestamp === event.hlcTimestamp &&
+                            candidate !== event,
+                    );
+                    if (pending && pending.kind === 'update') pending.recorded = true;
                 }
-                changesRef.current = sortServerChanges([
-                    ...changesRef.current,
-                    {
-                        docId,
-                        timestamp: entry.hlcTimestamp,
-                        origin: entry.origin,
-                        source: 'remote',
-                        update: entry.update,
-                        recorded: true,
-                        messageIndex: entry.messageIndex,
-                        receivedAt: entry.receivedAt,
-                    },
-                ]);
-                recordRemoteLastEdit(entry);
-                transport.receive(entry.update);
                 changed = true;
+                if (branchId === activeBranchIdRef.current && event.kind === 'update') {
+                    if (event.origin !== identity.actor) {
+                        recordRemoteLastEdit(event);
+                        transport.receive(event.update);
+                    }
+                }
             }
-            if (entries.length || changed) {
+            if (changed) {
+                branch.history = materializeServerBranch({
+                    app,
+                    branches: branchesRef.current,
+                    branchId,
+                });
+                if (branchId === activeBranchIdRef.current) replaceHistory(branch.history);
                 await persist();
             }
         },
-        [docId, identity.actor, persist, recordRemoteLastEdit],
+        [app, identity.actor, persist, recordRemoteLastEdit, replaceHistory],
     );
 
     const markAcknowledged = useCallback(
-        async (timestamp: string) => {
-            let changed = false;
-            changesRef.current = changesRef.current.map((change) => {
-                if (change.timestamp !== timestamp || change.recorded) return change;
-                changed = true;
-                return {...change, recorded: true};
-            });
-            if (changed) await persist();
+        async (parsed: {branchId?: string; hlcTimestamp?: string; eventIndex?: number; branchIdCreated?: string}) => {
+            if (parsed.branchIdCreated) {
+                branchListRef.current = branchListRef.current.map((branch) =>
+                    branch.branchId === parsed.branchIdCreated ? {...branch, pending: false} : branch,
+                );
+            }
+            if (parsed.branchId && parsed.hlcTimestamp) {
+                const branch = branchesRef.current[parsed.branchId];
+                if (branch) {
+                    branch.events = sortServerEvents(
+                        branch.events.map((event) =>
+                            event.kind === 'update' && event.hlcTimestamp === parsed.hlcTimestamp
+                                ? {...event, recorded: true, eventIndex: parsed.eventIndex ?? event.eventIndex}
+                                : event,
+                        ),
+                    );
+                    branch.lastSeenEventIndex = Math.max(branch.lastSeenEventIndex, parsed.eventIndex ?? 0);
+                }
+            }
+            await persist();
         },
         [persist],
     );
@@ -278,7 +347,6 @@ export function useServerSync<TState>({
                 userId: identity.user.userId,
                 docId,
                 schemaFingerprint,
-                lastSeenMessageIndex: lastSeenRef.current,
             });
             sendPresenceHello();
             flushPending();
@@ -287,42 +355,32 @@ export function useServerSync<TState>({
         socket.addEventListener('message', (event) => {
             const parsed = parseServerMessage<TState>(safeJsonParse(event.data), {docId, schema});
             if (!parsed) {
-                stateStore.setSnapshot({
-                    kind: 'error',
-                    message: 'Received invalid server message.',
-                });
+                stateStore.setSnapshot({kind: 'error', message: 'Received invalid server message.'});
                 return;
             }
-            if (parsed.kind === 'hello') {
-                requestSync();
-            } else if (parsed.kind === 'serverUpdates') {
-                void receiveServerEntries(parsed.entries).then(flushPending);
+            if (parsed.kind === 'hello' || parsed.kind === 'branchSnapshot') {
+                mergeBranchList(parsed.branches);
+                void persist().then(() => {
+                    subscribeActiveBranch();
+                    flushPending();
+                });
+            } else if (parsed.kind === 'branchUpdate') {
+                mergeBranchList([parsed.branch]);
+                void persist();
+            } else if (parsed.kind === 'branchEvents') {
+                void receiveServerEvents(parsed.branchId, parsed.events).then(flushPending);
             } else if (parsed.kind === 'ack') {
-                void markAcknowledged(parsed.hlcTimestamp).then(flushPending);
+                void markAcknowledged(parsed).then(flushPending);
             } else if (parsed.kind === 'error') {
                 stateStore.setSnapshot({kind: 'error', message: parsed.message});
             } else if (parsed.kind === 'presenceSnapshot') {
                 presenceStore.setSnapshot(sanitizePresenceUsers(parsed.users, identity.actor));
             } else if (parsed.kind === 'presenceUpdate') {
                 presenceStore.setSnapshot(
-                    upsertPresenceUser(
-                        presenceStore.getSnapshot(),
-                        parsed.user,
-                        identity.actor,
-                    ),
+                    upsertPresenceUser(presenceStore.getSnapshot(), parsed.user, identity.actor),
                 );
             } else if (parsed.kind === 'presenceLeave') {
-                presenceStore.setSnapshot(
-                    presenceStore
-                        .getSnapshot()
-                        .map((user) => ({
-                            ...user,
-                            sessions: user.sessions.filter(
-                                (session) => session.actor !== parsed.actor,
-                            ),
-                        }))
-                        .filter((user) => user.sessions.length > 0),
-                );
+                presenceStore.setSnapshot(removePresenceSession(presenceStore.getSnapshot(), parsed.actor));
                 clearLastEditStatus(parsed.actor);
             }
         });
@@ -343,22 +401,37 @@ export function useServerSync<TState>({
             stateStore.setSnapshot({kind: 'error', message: 'WebSocket connection failed.'});
         });
     }, [
-        docId,
-        flushPending,
-        sendPresenceHello,
-        identity.actor,
-        identity.user.userId,
         clearLastEditStatus,
         clearPresenceState,
+        docId,
+        flushPending,
+        identity.actor,
+        identity.user.userId,
         markAcknowledged,
+        persist,
         presenceStore,
-        receiveServerEntries,
-        requestSync,
+        receiveServerEvents,
         schema,
         schemaFingerprint,
         send,
+        sendPresenceHello,
         stateStore,
+        subscribeActiveBranch,
     ]);
+
+    const mergeBranchList = useCallback(
+        (branches: ServerBranch[]) => {
+            const byId = new Map(branchListRef.current.map((branch) => [branch.branchId, branch]));
+            for (const branch of branches) byId.set(branch.branchId, {...byId.get(branch.branchId), ...branch, pending: false});
+            branchListRef.current = [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
+            for (const branch of branchListRef.current) {
+                const persisted = ensureBranch(branchesRef.current, branchListRef.current, branch.branchId, app);
+                persisted.sourceBranchId = branch.sourceBranchId;
+                persisted.forkEventIndex = branch.forkEventIndex;
+            }
+        },
+        [app],
+    );
 
     const setManualOffline = useCallback(
         (offline: boolean) => {
@@ -384,30 +457,30 @@ export function useServerSync<TState>({
                 return clockRef.current;
             },
             publish(updates: CrdtUpdate[]) {
-                const nextChanges = [...changesRef.current];
+                const branch = activeBranch(branchesRef.current, activeBranchIdRef.current);
                 let added = false;
                 for (const update of updates) {
                     const timestamp = latestCrdtUpdateTimestamp(update);
                     if (!timestamp) continue;
-                    clockRef.current = hlc.recv(
-                        clockRef.current,
-                        hlc.unpack(timestamp),
-                        Date.now(),
-                    );
-                    if (nextChanges.some((change) => change.timestamp === timestamp)) continue;
-                    nextChanges.push({
+                    clockRef.current = hlc.recv(clockRef.current, hlc.unpack(timestamp), Date.now());
+                    if (branch.events.some((event) => event.kind === 'update' && event.hlcTimestamp === timestamp)) {
+                        continue;
+                    }
+                    branch.events.push({
+                        kind: 'update',
                         docId,
-                        timestamp,
+                        branchId: branch.branchId,
+                        eventIndex: nextLocalEventIndex(branch),
                         origin: identity.actor,
-                        source: 'local',
+                        hlcTimestamp: timestamp,
+                        receivedAt: new Date().toISOString(),
                         update,
                         recorded: false,
-                        receivedAt: new Date().toISOString(),
                     });
                     added = true;
                 }
                 if (!added) return;
-                changesRef.current = sortServerChanges(nextChanges);
+                branch.events = sortServerEvents(branch.events);
                 void persist().then(flushPending);
             },
             subscribe(receive: (update: CrdtUpdate) => void) {
@@ -418,13 +491,7 @@ export function useServerSync<TState>({
             },
             receive(update: CrdtUpdate) {
                 const timestamp = latestCrdtUpdateTimestamp(update);
-                if (timestamp) {
-                    clockRef.current = hlc.recv(
-                        clockRef.current,
-                        hlc.unpack(timestamp),
-                        Date.now(),
-                    );
-                }
+                if (timestamp) clockRef.current = hlc.recv(clockRef.current, hlc.unpack(timestamp), Date.now());
                 for (const listener of listenersRef.current) listener(update);
             },
         };
@@ -439,57 +506,277 @@ export function useServerSync<TState>({
         };
     }, [clearPresenceState, connect]);
 
+    function switchBranch(branchId: string) {
+        if (!branchesRef.current[branchId]) ensureBranch(branchesRef.current, branchListRef.current, branchId, app);
+        activeBranchIdRef.current = branchId;
+        const branch = branchesRef.current[branchId];
+        branch.history = materializeServerBranch({app, branches: branchesRef.current, branchId});
+        replaceHistory(branch.history);
+        void persist().then(() => {
+            subscribeActiveBranch();
+            sendPresenceHello();
+        });
+    }
+
+    function createBranch(name: string, forkEventIndex?: number) {
+        const source = activeBranch(branchesRef.current, activeBranchIdRef.current);
+        const branchId = `branch-${crypto.randomUUID()}`;
+        const now = new Date().toISOString();
+        const branchMeta: ServerBranch = {
+            docId,
+            branchId,
+            name,
+            sourceBranchId: source.branchId,
+            forkEventIndex: forkEventIndex ?? source.lastSeenEventIndex,
+            tipEventIndex: 0,
+            createdAt: now,
+            updatedAt: now,
+            pending: true,
+        };
+        branchListRef.current = [...branchListRef.current, branchMeta];
+        branchesRef.current[branchId] = {
+            branchId,
+            sourceBranchId: branchMeta.sourceBranchId,
+            forkEventIndex: branchMeta.forkEventIndex,
+            history: source.history,
+            lastSeenEventIndex: 0,
+            undoCheckpointEventIndex: 0,
+            events: [],
+            mirrored: true,
+        };
+        switchBranch(branchId);
+        void persist().then(flushPending);
+    }
+
+    function renameBranch(branchId: string, name: string) {
+        branchListRef.current = branchListRef.current.map((branch) =>
+            branch.branchId === branchId ? {...branch, name, pending: branch.pending} : branch,
+        );
+        send({
+            kind: 'renameBranch',
+            version: SERVER_PROTOCOL_VERSION,
+            actor: identity.actor,
+            userId: identity.user.userId,
+            docId,
+            branchId,
+            name,
+        });
+        void persist();
+    }
+
+    function mergeBranch(
+        sourceBranchId: string,
+        sourceThroughEventIndex?: number,
+        revertedPathKeys = new Set<string>(),
+    ) {
+        const target = activeBranch(branchesRef.current, activeBranchIdRef.current);
+        const source = branchesRef.current[sourceBranchId];
+        if (!source) return;
+        const throughEventIndex = sourceThroughEventIndex ?? source.lastSeenEventIndex;
+        const preview = buildMergePathPreview({
+            app,
+            branches: branchesRef.current,
+            targetBranchId: target.branchId,
+            sourceBranchId,
+            sourceThroughEventIndex: throughEventIndex,
+            revertedPathKeys,
+            clock: clockRef.current,
+        });
+        const event: ServerBranchEvent = {
+            kind: 'merge',
+            mergeId: `merge-${crypto.randomUUID()}`,
+            docId,
+            branchId: target.branchId,
+            eventIndex: nextLocalEventIndex(target),
+            sourceBranchId,
+            sourceThroughEventIndex: throughEventIndex,
+            actor: identity.actor,
+            createdAt: new Date().toISOString(),
+            recorded: false,
+        };
+        const revertEvents: ServerBranchEvent[] = preview.revertUpdates.map((update, index) => {
+            const timestamp = latestCrdtUpdateTimestamp(update) ?? '';
+            if (timestamp) clockRef.current = hlc.recv(clockRef.current, hlc.unpack(timestamp), Date.now());
+            return {
+                kind: 'update',
+                docId,
+                branchId: target.branchId,
+                eventIndex: event.eventIndex + index + 1,
+                origin: identity.actor,
+                hlcTimestamp: timestamp,
+                receivedAt: new Date().toISOString(),
+                update,
+                recorded: false,
+            };
+        });
+        target.events = sortServerEvents([...target.events, event, ...revertEvents]);
+        target.history = materializeServerBranch({app, branches: branchesRef.current, branchId: target.branchId});
+        target.undoCheckpointEventIndex = Math.max(target.undoCheckpointEventIndex, ...target.events.map((item) => item.eventIndex));
+        target.history = createCrdtLocalHistory(target.history.doc);
+        replaceHistory(target.history);
+        void persist().then(flushPending);
+    }
+
+    function buildMergePreview(
+        sourceBranchId: string,
+        sourceThroughEventIndex?: number,
+        revertedPathKeys = new Set<string>(),
+    ) {
+        const source = branchesRef.current[sourceBranchId];
+        if (!source) return null;
+        const target = activeBranch(branchesRef.current, activeBranchIdRef.current);
+        const preview = buildMergePathPreview({
+            app,
+            branches: branchesRef.current,
+            targetBranchId: target.branchId,
+            sourceBranchId,
+            sourceThroughEventIndex: sourceThroughEventIndex ?? source.lastSeenEventIndex,
+            revertedPathKeys,
+            clock: clockRef.current,
+        });
+        return {...preview, revertedPathKeys};
+    }
+
     return {
         transport,
         identity,
         stateStore,
         statsStore,
-        changesStore,
+        branchesStore,
+        eventsStore,
+        activeBranchStore,
         presenceStore,
         statusStore,
         manualOfflineStore,
         setManualOffline,
         requestSync,
         saveHistory(history) {
-            historyRef.current = history;
+            const branch = activeBranch(branchesRef.current, activeBranchIdRef.current);
+            branch.history = history;
             replaceHistory(history);
             void persist();
         },
+        switchBranch,
+        createBranch,
+        renameBranch,
+        mergeBranch,
+        buildMergePreview,
     };
 }
 
-function publishStores({
-    lastSeen,
-    changes,
+function publishStores<TState>({
+    branch,
     statsStore,
-    changesStore,
+    eventsStore,
+    branchesStore,
+    activeBranchStore,
+    branchList,
+    activeBranchId,
 }: {
-    lastSeen: number;
-    changes: ServerChange[];
+    branch: PersistedServerBranch<TState>;
     statsStore: ReturnType<typeof createExternalStore<ServerSyncStats>>;
-    changesStore: ReturnType<typeof createExternalStore<ServerChange[]>>;
+    eventsStore: ReturnType<typeof createExternalStore<ServerBranchEvent[]>>;
+    branchesStore: ReturnType<typeof createExternalStore<ServerBranch[]>>;
+    activeBranchStore: ReturnType<typeof createExternalStore<string>>;
+    branchList: ServerBranch[];
+    activeBranchId: string;
 }) {
-    changesStore.setSnapshot(changes);
-    statsStore.setSnapshot(statsFor(lastSeen, changes));
+    eventsStore.setSnapshot(branch.events);
+    branchesStore.setSnapshot(branchList);
+    activeBranchStore.setSnapshot(activeBranchId);
+    statsStore.setSnapshot(statsFor(branch));
 }
 
-function statsFor(lastSeenMessageIndex: number, changes: ServerChange[]): ServerSyncStats {
+function statsFor<TState>(branch: PersistedServerBranch<TState>): ServerSyncStats {
     return {
-        lastSeenMessageIndex,
-        pendingUploads: changes.filter((change) => change.source === 'local' && !change.recorded)
-            .length,
-        totalChanges: changes.length,
-        receivedChanges: changes.filter((change) => change.source === 'remote').length,
-        lastSyncAt: changes.findLast((change) => change.recorded)?.receivedAt,
+        lastSeenEventIndex: branch.lastSeenEventIndex,
+        pendingUploads: branch.events.filter((event) => !event.recorded).length,
+        totalEvents: branch.events.length,
+        receivedEvents: branch.events.filter((event) => event.recorded).length,
+        lastSyncAt: branch.events.findLast((event) => event.recorded)?.kind === 'update'
+            ? (branch.events.findLast((event) => event.recorded) as ServerUpdateEvent).receivedAt
+            : undefined,
     };
 }
 
-function initialClock(actor: string, changes: ServerChange[]) {
+function initialClock(actor: string, events: ServerBranchEvent[]) {
     let clock = hlc.init(actor, Date.now());
-    for (const change of changes) {
-        clock = hlc.recv(clock, hlc.unpack(change.timestamp), Date.now());
+    for (const event of events) {
+        if (event.kind !== 'update') continue;
+        const timestamp = latestCrdtUpdateTimestamp(event.update);
+        if (timestamp) clock = hlc.recv(clock, hlc.unpack(timestamp), Date.now());
     }
     return clock;
+}
+
+function allEvents<TState>(branches: Record<string, PersistedServerBranch<TState>>) {
+    return Object.values(branches).flatMap((branch) => branch.events);
+}
+
+function activeBranch<TState>(
+    branches: Record<string, PersistedServerBranch<TState>>,
+    activeBranchId: string,
+) {
+    return branches[activeBranchId] ?? Object.values(branches)[0];
+}
+
+function ensureBranch<TState>(
+    branches: Record<string, PersistedServerBranch<TState>>,
+    branchList: ServerBranch[],
+    branchId: string,
+    app: AppDefinition<TState>,
+): PersistedServerBranch<TState> {
+    const meta = branchList.find((branch) => branch.branchId === branchId);
+    branches[branchId] ??= {
+        branchId,
+        sourceBranchId: meta?.sourceBranchId,
+        forkEventIndex: meta?.forkEventIndex,
+        history: createInitialHistoryForBranch(app, branches, branchList, branchId),
+        lastSeenEventIndex: 0,
+        undoCheckpointEventIndex: 0,
+        events: [],
+        mirrored: true,
+    };
+    return branches[branchId];
+}
+
+function createInitialHistoryForBranch<TState>(
+    app: AppDefinition<TState>,
+    branches: Record<string, PersistedServerBranch<TState>>,
+    branchList: ServerBranch[],
+    branchId: string,
+) {
+    const meta = branchList.find((branch) => branch.branchId === branchId);
+    if (meta?.sourceBranchId && branches[meta.sourceBranchId]) {
+        return materializeServerBranch({
+            app,
+            branches,
+            branchId: meta.sourceBranchId,
+            throughEventIndex: meta.forkEventIndex,
+        });
+    }
+    return createInitialCrdtHistory(app);
+}
+
+function hasEquivalentEvent(events: ServerBranchEvent[], next: ServerBranchEvent) {
+    return events.some((event) => {
+        if (event.kind !== next.kind) return false;
+        if (event.kind === 'update' && next.kind === 'update') {
+            return event.hlcTimestamp === next.hlcTimestamp;
+        }
+        if (event.kind === 'merge' && next.kind === 'merge') {
+            return event.mergeId === next.mergeId || event.eventIndex === next.eventIndex;
+        }
+        return false;
+    });
+}
+
+function markRecorded(event: ServerBranchEvent): ServerBranchEvent {
+    return {...event, recorded: true};
+}
+
+function nextLocalEventIndex<TState>(branch: PersistedServerBranch<TState>) {
+    return Math.max(branch.lastSeenEventIndex, ...branch.events.map((event) => event.eventIndex), 0) + 1;
 }
 
 function safeJsonParse(input: unknown) {

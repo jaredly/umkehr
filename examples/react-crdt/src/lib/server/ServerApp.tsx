@@ -1,5 +1,4 @@
 import {useCallback, useEffect, useMemo, useState, type FormEvent} from 'react';
-import type {CrdtLocalHistory} from 'umkehr/crdt';
 import {createInitialCrdtHistory, type AppDefinition, type CrdtRuntime} from '../crdtApp';
 import {schemaFingerprint} from '../local-first/schemaFingerprint';
 import {ServerControls} from './ServerControls';
@@ -18,9 +17,7 @@ import type {PersistedServerReplica, ServerSessionIdentity, ServerUser} from './
 
 type Loaded<TState> = {
     identity: ServerSessionIdentity;
-    history: CrdtLocalHistory<TState>;
-    lastSeenMessageIndex: number;
-    changes: PersistedServerReplica<TState>['changes'];
+    replica: PersistedServerReplica<TState>;
     source: 'created' | 'loaded';
 };
 
@@ -159,15 +156,15 @@ function ServerReadyApp<TState>({
     loaded: Loaded<TState>;
     onLogout(): void;
 }) {
-    const [currentHistory, setCurrentHistory] = useState(loaded.history);
+    const activeBranch = loaded.replica.branches[loaded.replica.activeBranchId];
+    const [currentHistory, setCurrentHistory] = useState(activeBranch.history);
     const sync = useServerSync({
+        app,
         docId,
         schema: app.schema,
         schemaFingerprint,
         identity: loaded.identity,
-        initialHistory: currentHistory,
-        initialLastSeenMessageIndex: loaded.lastSeenMessageIndex,
-        initialChanges: loaded.changes,
+        initialReplica: loaded.replica,
         replaceHistory: setCurrentHistory,
     });
     const {Provider} = runtime;
@@ -272,36 +269,51 @@ async function loadInitialState<TState>(
             throw new Error('Persisted server replica schema does not match this app version.');
         }
         if (
-            persisted.storageVersion === 2 &&
+            persisted.storageVersion === 3 &&
             persisted.protocolVersion === SERVER_PROTOCOL_VERSION
         ) {
             return {
                 identity,
-                history: persisted.history,
-                lastSeenMessageIndex: persisted.lastSeenMessageIndex,
-                changes: persisted.changes,
+                replica: persisted,
                 source: 'loaded',
             };
         }
     }
 
     const history = createInitialCrdtHistory(app);
+    const now = new Date().toISOString();
     const replica: PersistedServerReplica<TState> = {
         docId,
-        storageVersion: 2,
+        storageVersion: 3,
         protocolVersion: SERVER_PROTOCOL_VERSION,
         schemaFingerprint: fingerprint,
-        history,
-        lastSeenMessageIndex: 0,
-        changes: [],
-        updatedAt: new Date().toISOString(),
+        activeBranchId: 'main',
+        branchList: [
+            {
+                docId,
+                branchId: 'main',
+                name: 'main',
+                tipEventIndex: 0,
+                createdAt: now,
+                updatedAt: now,
+            },
+        ],
+        branches: {
+            main: {
+                branchId: 'main',
+                history,
+                lastSeenEventIndex: 0,
+                undoCheckpointEventIndex: 0,
+                events: [],
+                mirrored: true,
+            },
+        },
+        updatedAt: now,
     };
     await saveServerReplica(replica);
     return {
         identity,
-        history,
-        lastSeenMessageIndex: 0,
-        changes: [],
+        replica,
         source: 'created',
     };
 }

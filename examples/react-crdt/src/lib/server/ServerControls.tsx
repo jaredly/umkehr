@@ -18,9 +18,9 @@ export function ServerControls<TState>({
     const hasUnsyncedChanges = stats.pendingUploads > 0;
     const unsyncedLabel = hasUnsyncedChanges
         ? `${stats.pendingUploads} unsynced local ${
-              stats.pendingUploads === 1 ? 'change' : 'changes'
+              stats.pendingUploads === 1 ? 'event' : 'events'
           }`
-        : 'No unsynced local changes';
+        : 'No unsynced local events';
 
     return (
         <header className="serverControls" aria-label="Server sync toolbar">

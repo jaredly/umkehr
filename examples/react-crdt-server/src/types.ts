@@ -13,6 +13,7 @@ export type ServerPresenceSession = {
     color: string;
     online: true;
     lastSeenAt: string;
+    branchId?: string;
 };
 
 export type ServerPresenceUser = {
@@ -22,20 +23,47 @@ export type ServerPresenceUser = {
     sessions: ServerPresenceSession[];
 };
 
-export type ServerLogEntry = {
-    messageIndex: number;
+export type ServerBranch = {
     docId: string;
+    branchId: string;
+    name: string;
+    sourceBranchId?: string;
+    forkEventIndex?: number;
+    tipEventIndex: number;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type ServerUpdateEvent = {
+    kind: 'update';
+    docId: string;
+    branchId: string;
+    eventIndex: number;
     origin: string;
     hlcTimestamp: HlcTimestamp;
     receivedAt: string;
     update: CrdtUpdate;
 };
 
+export type ServerMergeEvent = {
+    kind: 'merge';
+    mergeId: string;
+    docId: string;
+    branchId: string;
+    eventIndex: number;
+    sourceBranchId: string;
+    sourceThroughEventIndex: number;
+    actor: string;
+    createdAt: string;
+};
+
+export type ServerBranchEvent = ServerUpdateEvent | ServerMergeEvent;
+
 export type DocumentSummary = {
     docId: string;
     schemaFingerprint: string;
-    nextMessageIndex: number;
-    messageCount: number;
+    branchCount: number;
+    eventCount: number;
 };
 
 export type ConnectedClient = {
@@ -45,5 +73,6 @@ export type ConnectedClient = {
     nickname?: string;
     color?: string;
     docId?: string;
+    branchId?: string;
     presenceReady?: boolean;
 };
