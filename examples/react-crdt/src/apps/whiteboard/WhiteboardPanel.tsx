@@ -10,7 +10,7 @@ import {
 import {useValue} from 'umkehr/react';
 import {useStatuses} from 'umkehr/react-crdt';
 import type {AppEditorContext, GridSlot} from '../../lib/crdtApp';
-import {initialForNickname} from '../../lib/server/presence';
+import {initialForNickname, whiteboardSelectionStatusKind} from '../../lib/server/presence';
 import {
     BOARD_HEIGHT,
     BOARD_WIDTH,
@@ -39,7 +39,6 @@ import type {
 
 const noteColors = ['#fff7b8', '#fed7aa', '#bbf7d0', '#bfdbfe', '#fbcfe8'] as const;
 const emojiChoices = ['👍', '⭐', '💡', '✅', '❗', '❤️'] as const;
-const selectionStatusKind = 'presence:whiteboard-selection';
 
 type Tool = 'select' | 'note' | 'pen' | 'emoji' | 'erase' | 'pan';
 type DragState =
@@ -98,6 +97,7 @@ export function WhiteboardPanel({
     const [drag, setDrag] = useState<DragState>(null);
     const [showArchive, setShowArchive] = useState(false);
     const [viewportSize, setViewportSize] = useState({width: 1, height: 1});
+    const [draggingMinimap, setDraggingMinimap] = useState(false);
 
     latestState.current = state;
 
@@ -137,26 +137,23 @@ export function WhiteboardPanel({
             if (!element) return;
             if (drag.kind === 'move') {
                 editor.dispatch(
-                    [
-                        {op: 'replace', path: elementFieldPath(drag.id, 'x'), value: point.x - drag.offsetX},
-                        {op: 'replace', path: elementFieldPath(drag.id, 'y'), value: point.y - drag.offsetY},
-                    ],
+                    {
+                        op: 'replace',
+                        path: elementFieldPath(drag.id, 'position'),
+                        value: {x: point.x - drag.offsetX, y: point.y - drag.offsetY},
+                    },
                     'preview',
                 );
             } else if (drag.kind === 'resize-note' && element.type === 'note') {
                 editor.dispatch(
-                    [
-                        {
-                            op: 'replace',
-                            path: elementFieldPath(drag.id, 'width'),
-                            value: Math.max(120, point.x - drag.originX),
+                    {
+                        op: 'replace',
+                        path: elementFieldPath(drag.id, 'size'),
+                        value: {
+                            width: Math.max(120, point.x - drag.originX),
+                            height: Math.max(96, point.y - drag.originY),
                         },
-                        {
-                            op: 'replace',
-                            path: elementFieldPath(drag.id, 'height'),
-                            value: Math.max(96, point.y - drag.originY),
-                        },
-                    ],
+                    },
                     'preview',
                 );
             }
@@ -179,23 +176,20 @@ export function WhiteboardPanel({
             editor.clearPreview();
             if (!element) return;
             if (drag.kind === 'move') {
-                editor.dispatch([
-                    {op: 'replace', path: elementFieldPath(drag.id, 'x'), value: point.x - drag.offsetX},
-                    {op: 'replace', path: elementFieldPath(drag.id, 'y'), value: point.y - drag.offsetY},
-                ]);
+                editor.dispatch({
+                    op: 'replace',
+                    path: elementFieldPath(drag.id, 'position'),
+                    value: {x: point.x - drag.offsetX, y: point.y - drag.offsetY},
+                });
             } else if (drag.kind === 'resize-note' && element.type === 'note') {
-                editor.dispatch([
-                    {
-                        op: 'replace',
-                        path: elementFieldPath(drag.id, 'width'),
-                        value: Math.max(120, point.x - drag.originX),
+                editor.dispatch({
+                    op: 'replace',
+                    path: elementFieldPath(drag.id, 'size'),
+                    value: {
+                        width: Math.max(120, point.x - drag.originX),
+                        height: Math.max(96, point.y - drag.originY),
                     },
-                    {
-                        op: 'replace',
-                        path: elementFieldPath(drag.id, 'height'),
-                        value: Math.max(96, point.y - drag.originY),
-                    },
-                ]);
+                });
             }
         };
         const onCancel = () => {
@@ -218,8 +212,7 @@ export function WhiteboardPanel({
             return {
                 type,
                 id,
-                x,
-                y,
+                position: {x, y},
                 rotation: 0,
                 zOrder: nextTopZOrder(elements),
                 createdBy: actor,
@@ -244,8 +237,7 @@ export function WhiteboardPanel({
             addElement({
                 ...makeBase('note', x, y),
                 type: 'note',
-                width: 220,
-                height: 150,
+                size: {width: 220, height: 150},
                 color: noteColor,
                 text: '',
             });
@@ -270,12 +262,17 @@ export function WhiteboardPanel({
             const simplified = simplifyStroke(points);
             if (simplified.length < 2) return;
             const first = simplified[0];
+            const localPoints = simplified.map((point) => ({
+                ...point,
+                x: point.x - first.x,
+                y: point.y - first.y,
+            }));
             addElement({
                 ...makeBase('stroke', first.x, first.y),
                 type: 'stroke',
                 color: '#17202a',
-                width: 4,
-                points: simplified,
+                strokeWidth: 4,
+                points: localPoints,
             });
         },
         [addElement, makeBase],
@@ -398,8 +395,8 @@ export function WhiteboardPanel({
             kind: 'move',
             id: element.id,
             pointerId: event.pointerId,
-            offsetX: point.x - element.x,
-            offsetY: point.y - element.y,
+            offsetX: point.x - element.position.x,
+            offsetY: point.y - element.position.y,
         });
     };
 
@@ -422,6 +419,16 @@ export function WhiteboardPanel({
             panX: event.clientX - rect.left - before.x * nextZoom,
             panY: event.clientY - rect.top - before.y * nextZoom,
         });
+    };
+
+    const recenterFromMinimap = (clientX: number, clientY: number, rect: DOMRect) => {
+        const x = (clientX - rect.left) / minimapScale;
+        const y = (clientY - rect.top) / minimapScale;
+        setViewport((current) => ({
+            ...current,
+            panX: viewportSize.width / 2 - x * current.zoom,
+            panY: viewportSize.height / 2 - y * current.zoom,
+        }));
     };
 
     const minimapScale = 120 / BOARD_WIDTH;
@@ -589,8 +596,8 @@ export function WhiteboardPanel({
                                         kind: 'resize-note',
                                         id: element.id,
                                         pointerId: event.pointerId,
-                                        originX: element.x,
-                                        originY: element.y,
+                                        originX: element.position.x,
+                                        originY: element.position.y,
                                     });
                                 }}
                             />
@@ -609,15 +616,24 @@ export function WhiteboardPanel({
                 <button
                     type="button"
                     className="whiteboardMinimap"
-                    onClick={(event) => {
+                    onPointerDown={(event) => {
                         const rect = event.currentTarget.getBoundingClientRect();
-                        const x = (event.clientX - rect.left) / minimapScale;
-                        const y = (event.clientY - rect.top) / minimapScale;
-                        setViewport((current) => ({
-                            ...current,
-                            panX: viewportSize.width / 2 - x * current.zoom,
-                            panY: viewportSize.height / 2 - y * current.zoom,
-                        }));
+                        event.currentTarget.setPointerCapture(event.pointerId);
+                        setDraggingMinimap(true);
+                        recenterFromMinimap(event.clientX, event.clientY, rect);
+                    }}
+                    onPointerMove={(event) => {
+                        if (!draggingMinimap) return;
+                        recenterFromMinimap(
+                            event.clientX,
+                            event.clientY,
+                            event.currentTarget.getBoundingClientRect(),
+                        );
+                    }}
+                    onPointerUp={() => setDraggingMinimap(false)}
+                    onPointerCancel={() => setDraggingMinimap(false)}
+                    onClick={(event) => {
+                        event.preventDefault();
                     }}
                     aria-label="Recenter board"
                 >
@@ -626,10 +642,10 @@ export function WhiteboardPanel({
                         {elements.map((element) => (
                             <rect
                                 key={element.id}
-                                x={element.x}
-                                y={element.y}
-                                width={element.type === 'note' ? element.width : element.type === 'emoji' ? element.size : 40}
-                                height={element.type === 'note' ? element.height : element.type === 'emoji' ? element.size : 24}
+                                x={element.position.x}
+                                y={element.position.y}
+                                width={element.type === 'note' ? element.size.width : element.type === 'emoji' ? element.size : 40}
+                                height={element.type === 'note' ? element.size.height : element.type === 'emoji' ? element.size : 24}
                                 fill={element.type === 'note' ? element.color : '#94a3b8'}
                             />
                         ))}
@@ -676,8 +692,8 @@ function NoteView({
         <article
             className={selected ? 'whiteboardNote selected' : 'whiteboardNote'}
             style={elementStyle(element, {
-                width: element.width,
-                height: element.height,
+                width: element.size.width,
+                height: element.size.height,
                 backgroundColor: element.color,
             })}
         >
@@ -751,19 +767,19 @@ function StrokeView({
 }) {
     const statuses = useSelectionStatuses(editor, element.id);
     return (
-        <g>
+        <g transform={`translate(${element.position.x} ${element.position.y})`}>
             <path
                 className={selected ? 'whiteboardStroke selected' : 'whiteboardStroke'}
                 d={strokePath(element.points)}
                 fill="none"
                 stroke={element.color}
-                strokeWidth={element.width}
+                strokeWidth={element.strokeWidth}
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 onPointerDown={onPointerDown}
             />
             {statuses.length ? (
-                <foreignObject x={element.x} y={element.y - 30} width={120} height={28}>
+                <foreignObject x={0} y={-30} width={120} height={28}>
                     <RemoteSelections statuses={statuses} />
                 </foreignObject>
             ) : null}
@@ -772,7 +788,7 @@ function StrokeView({
 }
 
 function useSelectionStatuses(editor: AppEditorContext<WhiteboardState>, id: string) {
-    return useStatuses(editor.$.elements[id], {kinds: [selectionStatusKind]})
+    return useStatuses(editor.$.elements[id], {kinds: [whiteboardSelectionStatusKind]})
         .map((status) => status.data)
         .filter(isSelectionStatusData);
 }
@@ -818,8 +834,8 @@ function elementStyle(
 ): CSSProperties {
     return {
         position: 'absolute',
-        left: element.x,
-        top: element.y,
+        left: element.position.x,
+        top: element.position.y,
         transform: `rotate(${element.rotation}deg)`,
         ...extra,
     };

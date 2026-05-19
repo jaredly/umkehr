@@ -56,12 +56,17 @@ function LocalReplicaPanel<TState>({
     const {Provider} = runtime;
 
     return (
-        <Provider initial={initial} transport={sync.transports[replica.id]}>
+        <Provider
+            initial={initial}
+            transport={sync.transports[replica.id]}
+            statuses={sync.statusStores[replica.id]}
+        >
             <LocalReplicaDocument
                 actor={replica.id}
                 app={app}
                 gridSlot={index === 0 ? 'left' : 'right'}
                 runtime={runtime}
+                sync={sync}
                 title={replica.title}
             />
         </Provider>
@@ -73,12 +78,14 @@ function LocalReplicaDocument<TState>({
     app,
     gridSlot,
     runtime,
+    sync,
     title,
 }: {
     actor: string;
     app: AppDefinition<TState>;
     gridSlot: 'left' | 'right';
     runtime: CrdtRuntime<TState>;
+    sync: DemoSync;
     title: string;
 }) {
     const editor = runtime.useEditorContext();
@@ -89,6 +96,7 @@ function LocalReplicaDocument<TState>({
         editor,
         title,
         gridSlot,
+        setPresenceSelection: (elementId) => sync.setPresenceSelection(actor, elementId),
     });
 }
 

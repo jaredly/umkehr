@@ -73,6 +73,7 @@ export type ClientServerMessage =
           version: 3;
           actor: string;
           userId: string;
+          nickname: string;
           docId: string;
           branchId: string;
           color: string;

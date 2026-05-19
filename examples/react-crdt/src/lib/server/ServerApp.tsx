@@ -363,7 +363,7 @@ function createSessionIdentity(user: ServerUser, sessionId: string): ServerSessi
 }
 
 async function fetchKnownUsers(): Promise<ServerUser[]> {
-    const response = await fetch(`${SERVER_HTTP_URL}/users`);
+    const response = await fetchWithTimeout(`${SERVER_HTTP_URL}/users`);
     const body = await parseJsonResponse(response);
     if (!isRecord(body) || !Array.isArray(body.users)) {
         throw new Error('Server returned an invalid user list.');
@@ -377,7 +377,7 @@ async function fetchKnownUsers(): Promise<ServerUser[]> {
 }
 
 async function loginServerUser(nickname: string): Promise<ServerUser> {
-    const response = await fetch(`${SERVER_HTTP_URL}/users/login`, {
+    const response = await fetchWithTimeout(`${SERVER_HTTP_URL}/users/login`, {
         method: 'POST',
         headers: {'content-type': 'application/json'},
         body: JSON.stringify({nickname}),
@@ -392,6 +392,21 @@ async function loginServerUser(nickname: string): Promise<ServerUser> {
         throw new Error('Server returned an invalid user.');
     }
     return body.user;
+}
+
+async function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit) {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 5000);
+    try {
+        return await fetch(input, {...init, signal: controller.signal});
+    } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+            throw new Error('Timed out connecting to the React CRDT server.');
+        }
+        throw error;
+    } finally {
+        window.clearTimeout(timer);
+    }
 }
 
 async function parseJsonResponse(response: Response) {

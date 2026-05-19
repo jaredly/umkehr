@@ -84,7 +84,7 @@ export function simplifyStroke(points: StrokePoint[], tolerance = 1.8) {
     }
     const last = points[points.length - 1];
     if (deduped[deduped.length - 1] !== last) deduped.push(last);
-    return deduped;
+    return simplifyDouglasPeucker(deduped, tolerance);
 }
 
 export function strokePath(points: StrokePoint[]) {
@@ -102,4 +102,35 @@ export function clamp(value: number, min: number, max: number) {
 
 function distance(a: StrokePoint, b: StrokePoint) {
     return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+function simplifyDouglasPeucker(points: StrokePoint[], tolerance: number): StrokePoint[] {
+    if (points.length <= 2) return points;
+
+    let maxDistance = 0;
+    let splitIndex = 0;
+    const first = points[0];
+    const last = points[points.length - 1];
+
+    for (let i = 1; i < points.length - 1; i++) {
+        const current = perpendicularDistance(points[i], first, last);
+        if (current > maxDistance) {
+            maxDistance = current;
+            splitIndex = i;
+        }
+    }
+
+    if (maxDistance <= tolerance) return [first, last];
+
+    const left = simplifyDouglasPeucker(points.slice(0, splitIndex + 1), tolerance);
+    const right = simplifyDouglasPeucker(points.slice(splitIndex), tolerance);
+    return [...left.slice(0, -1), ...right];
+}
+
+function perpendicularDistance(point: StrokePoint, start: StrokePoint, end: StrokePoint) {
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    if (dx === 0 && dy === 0) return distance(point, start);
+    const numerator = Math.abs(dy * point.x - dx * point.y + end.x * start.y - end.y * start.x);
+    return numerator / Math.hypot(dx, dy);
 }

@@ -140,11 +140,12 @@ export function useServerSync<TState>({
             version: SERVER_PROTOCOL_VERSION,
             actor: identity.actor,
             userId: identity.user.userId,
+            nickname: identity.user.nickname,
             docId,
             branchId: activeBranchIdRef.current,
             color: colorForUserId(identity.user.userId),
         });
-    }, [docId, identity.actor, identity.user.userId, send]);
+    }, [docId, identity.actor, identity.user.nickname, identity.user.userId, send]);
 
     const setPresenceSelection = useCallback(
         (elementId: string | null) => {

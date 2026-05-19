@@ -69,6 +69,7 @@ export type ClientServerMessage =
           version: 3;
           actor: string;
           userId: string;
+          nickname: string;
           docId: string;
           branchId: string;
           color: string;
@@ -171,6 +172,7 @@ export function parseClientMessage(input: unknown): ClientServerMessage | null {
     switch (result.data.kind) {
         case 'presenceHello':
             if (!result.data.branchId) return null;
+            if (!result.data.nickname.trim()) return null;
             if (!isValidPresenceColor(result.data.color)) return null;
             return result.data;
         case 'presenceSelection':

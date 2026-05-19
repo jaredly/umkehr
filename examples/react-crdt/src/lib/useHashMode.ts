@@ -38,15 +38,23 @@ export function useHashMode(defaultAppId = 'todos'): [
 }
 
 function writeHashSelection(selection: HashSelection, defaultAppId: string) {
+    window.location.hash = hashForSelection(selection, defaultAppId);
+}
+
+export function hashForSelection(selection: HashSelection, defaultAppId: string) {
     const params = new URLSearchParams();
     if (selection.mode !== 'local') params.set('mode', selection.mode);
     if (selection.appId !== defaultAppId) params.set('app', selection.appId);
     const next = params.toString();
-    window.location.hash = next ? `#${next}` : '';
+    return next ? `#${next}` : '';
 }
 
 function readHashSelection(defaultAppId: string): HashSelection {
-    const raw = window.location.hash.replace(/^#/, '');
+    return readHashSelectionFromHash(window.location.hash, defaultAppId);
+}
+
+export function readHashSelectionFromHash(hash: string, defaultAppId: string): HashSelection {
+    const raw = hash.replace(/^#/, '');
     if (!raw) return {mode: 'local', appId: defaultAppId};
 
     if (!raw.includes('=') && !raw.includes('&')) {

@@ -11,11 +11,20 @@ export type StrokePoint = {
     pressure?: number;
 };
 
+export type BoardPoint = {
+    x: number;
+    y: number;
+};
+
+export type ElementSize = {
+    width: number;
+    height: number;
+};
+
 export type BaseWhiteboardElement = {
     type: WhiteboardElementType;
     id: string;
-    x: number;
-    y: number;
+    position: BoardPoint;
     rotation: number;
     zOrder: string;
     createdBy: string;
@@ -27,8 +36,7 @@ export type BaseWhiteboardElement = {
 
 export type StickyNoteElement = BaseWhiteboardElement & {
     type: 'note';
-    width: number;
-    height: number;
+    size: ElementSize;
     color: string;
     text: string;
 };
@@ -36,7 +44,7 @@ export type StickyNoteElement = BaseWhiteboardElement & {
 export type StrokeElement = BaseWhiteboardElement & {
     type: 'stroke';
     color: string;
-    width: number;
+    strokeWidth: number;
     points: StrokePoint[];
 };
 
@@ -53,7 +61,7 @@ export type WhiteboardState = {
     elements: Record<string, WhiteboardElement>;
 };
 
-export const WHITEBOARD_DOC_ID = 'umkehr-react-crdt-whiteboard-v1';
+export const WHITEBOARD_DOC_ID = 'umkehr-react-crdt-whiteboard-v3';
 export const whiteboardSchema = typia.json.schemas<[WhiteboardState], '3.1'>();
 export const validateWhiteboardState = typia.createValidate<WhiteboardState>();
 export const [ProvideWhiteboardHistory, useWhiteboardHistory] = createHistoryContext<

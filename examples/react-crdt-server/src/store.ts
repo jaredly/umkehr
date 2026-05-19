@@ -106,6 +106,41 @@ export class ServerStore {
         return user;
     }
 
+    ensureUser(user: ServerUser): ServerUser {
+        const cleanNickname = user.nickname.trim();
+        if (!user.userId.trim()) throw new Error('User id is required.');
+        if (!cleanNickname) throw new Error('Nickname is required.');
+        const now = new Date().toISOString();
+        const existing = this.getUserById(user.userId);
+        if (existing) {
+            this.db
+                .query('update users set lastSeenAt = ? where userId = ?')
+                .run(now, existing.userId);
+            return existing;
+        }
+
+        const nickname = this.availableNickname(cleanNickname, user.userId);
+        this.db
+            .query(
+                `insert into users (userId, nickname, nicknameKey, createdAt, lastSeenAt)
+                 values (?, ?, ?, ?, ?)`,
+            )
+            .run(user.userId, nickname, nicknameKeyFor(nickname), now, now);
+        return {userId: user.userId, nickname};
+    }
+
+    private availableNickname(nickname: string, userId: string) {
+        const existing = this.db
+            .query<UserRow, [string]>(
+                `select userId, nickname
+                 from users
+                 where nicknameKey = ?`,
+            )
+            .get(nicknameKeyFor(nickname));
+        if (!existing || existing.userId === userId) return nickname;
+        return `${nickname} ${userId.slice(-4)}`;
+    }
+
     getUserById(userId: string): ServerUser | null {
         const row = this.db
             .query<UserRow, [string]>(

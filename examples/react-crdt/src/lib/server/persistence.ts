@@ -66,17 +66,54 @@ export function sortServerEvents(events: ServerBranchEvent[]) {
 let dbPromise: Promise<IDBPDatabase<ServerSyncDb>> | null = null;
 
 function openServerSyncDb() {
-    dbPromise ??= openDB<ServerSyncDb>(DB_NAME, DB_VERSION, {
-        upgrade(db, oldVersion, _newVersion, tx) {
-            if (!db.objectStoreNames.contains('identity')) db.createObjectStore('identity');
-            if (!db.objectStoreNames.contains('replicas')) db.createObjectStore('replicas');
-            if (oldVersion < 2) {
-                tx.objectStore('identity').delete(IDENTITY_KEY);
-            }
-            if (oldVersion < 3) {
-                tx.objectStore('replicas').clear();
-            }
-        },
-    });
+    dbPromise ??= withTimeout(
+        openDB<ServerSyncDb>(DB_NAME, DB_VERSION, {
+            upgrade(db, oldVersion, _newVersion, tx) {
+                if (!db.objectStoreNames.contains('identity')) db.createObjectStore('identity');
+                if (!db.objectStoreNames.contains('replicas')) db.createObjectStore('replicas');
+                if (oldVersion < 2) {
+                    tx.objectStore('identity').delete(IDENTITY_KEY);
+                }
+                if (oldVersion < 3) {
+                    tx.objectStore('replicas').clear();
+                }
+            },
+            blocked() {
+                dbPromise = Promise.reject(
+                    new Error(
+                        'Server replica storage is blocked by another open tab. Close other Umkehr example tabs and reload.',
+                    ),
+                );
+            },
+            blocking() {
+                dbPromise = null;
+            },
+            terminated() {
+                dbPromise = null;
+            },
+        }),
+        5000,
+        'Timed out opening server replica storage. Close other Umkehr example tabs and reload.',
+    );
     return dbPromise;
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+    return new Promise((resolve, reject) => {
+        const timer = window.setTimeout(() => {
+            dbPromise = null;
+            reject(new Error(message));
+        }, ms);
+        promise.then(
+            (value) => {
+                window.clearTimeout(timer);
+                resolve(value);
+            },
+            (error) => {
+                window.clearTimeout(timer);
+                dbPromise = null;
+                reject(error);
+            },
+        );
+    });
 }

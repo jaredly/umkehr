@@ -89,8 +89,10 @@ const server = Bun.serve<ClientData>({
                         return;
                     }
                     case 'presenceHello': {
-                        const user = store.getUserById(parsed.userId);
-                        if (!user) throw new Error('Unknown user.');
+                        const user = store.ensureUser({
+                            userId: parsed.userId,
+                            nickname: parsed.nickname,
+                        });
                         ws.data.nickname = user.nickname;
                         ws.data.color = parsed.color;
                         ws.data.branchId = parsed.branchId;
