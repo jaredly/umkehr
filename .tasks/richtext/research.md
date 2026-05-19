@@ -1,14 +1,15 @@
 # Collaborative rich text CRDT research
 
-This note looks at what it would take to add a collaborative rich text field to umkehr without breaking the current design principle: app state is ordinary UI-facing data, and CRDT metadata stays in the CRDT layer.
+This note looks at what it would take to add an in-house collaborative rich text field to umkehr without breaking the current design principle: app state is ordinary UI-facing data, and CRDT metadata stays in the CRDT layer.
 
 The short version:
 
 - Do not model collaborative rich text as a plain `string` with last-writer-wins replacement. That is only acceptable for commit-on-blur notes.
-- The cleanest fit is a first-class "special CRDT field" whose public value is a serializable rich-text snapshot, while its CRDT metadata is stored beside the existing `CrdtMeta` tree.
+- The direction is an in-house, first-class "special CRDT field" whose public state value is a lightweight typed sentinel, while the authoritative document content lives in `CrdtMeta`.
 - The UI layer probably does need a richer editor adapter API, but it does not need to see character IDs, tombstones, span endpoint IDs, clocks, or internal CRDT paths.
 - Type-level builder support is feasible with a branded/annotated type such as `RichCollaborativeText`.
 - Runtime detection should not rely on a TypeScript brand alone. The best match for the existing schema-derived architecture is a typia `tags.JsonSchemaPlugin` marker, for example `x-umkehr-crdt: "rich-text"`.
+- Yjs and Automerge should be treated as prior art and interop references, not implementation dependencies.
 
 ## Current constraints
 
@@ -24,80 +25,38 @@ That architecture is a good fit for JSON object collaboration. Rich text is diff
 
 If the field remains an ordinary `string`, concurrent character edits collapse to last-writer-wins. That is not "collaborative rich text"; it is field-level replacement.
 
-## External options
+## Decision
 
-### Option 1: Yjs-backed rich text field
+Implement a native, Peritext-like rich text CRDT and a native editor binding. Do not embed Yjs or Automerge as the engine for rich-text fields.
+
+The native implementation should use the same replication posture as the rest of umkehr:
+
+- JSON-ish update payloads where possible;
+- HLC timestamps and deterministic ordering;
+- schema-derived field recognition;
+- CRDT paths to locate the rich-text field in the larger document;
+- rich-text-specific anchors inside that field;
+- hidden metadata with derived render/editor views.
+
+This gives umkehr one coherent CRDT protocol, one validation story, and one history/undo model. The cost is that the first implementation must be deliberately scoped and tested as a CRDT algorithm, not just an editor feature.
+
+## Prior art
 
 Yjs has `Y.Text`, described as a shared type for text and rich text. It supports insertion, deletion, range formatting, string output, and Quill Delta output via `toDelta()`. It can also be nested inside other Yjs shared types.
 
-Potential umkehr mapping:
-
-```ts
-type RichCollaborativeText = RichTextSnapshot & RichTextBrand;
-
-type RichTextSnapshot = {
-    format: 'yjs-delta-v1';
-    delta: RichTextDelta;
-};
-```
-
-Internally, a rich text `CrdtMeta` node stores Yjs update bytes or an encoded Yjs document fragment. `materialize` returns a plain snapshot or editor-friendly value.
-
-Pros:
-
-- Mature ecosystem.
-- Existing editor integrations for ProseMirror/Tiptap, Slate-like stacks, Quill, CodeMirror-adjacent text flows, awareness/presence, and transport providers.
-- Good choice if the goal is "make a practical collaborative editor work soon."
-
-Cons:
-
-- It introduces a second CRDT engine inside umkehr's CRDT engine.
-- Yjs updates are binary and Yjs-specific, so umkehr's current JSON update validation story needs an escape hatch.
-- Undo/redo, history display, and schema validation become less transparent unless umkehr treats rich-text updates as opaque nested operations.
-- Full document sync might need a Yjs document lifecycle per field, not just per state document.
-
-API fit:
-
-- Good as an optional adapter package, for example `umkehr/richtext-yjs`.
-- Less good as the core internal representation if umkehr wants one coherent, inspectable CRDT format.
-
-### Option 2: Automerge rich text semantics
+Yjs is useful as a benchmark for editor ergonomics, awareness/presence expectations, and Delta-style interop. It is not the chosen internal implementation because it would put a second CRDT engine inside umkehr and make rich-text updates opaque to umkehr's validation/history layers.
 
 Automerge supports rich text on top of its document model with text marks, block markers, spans, and APIs such as `mark`, `marks`, `splitBlock`, `updateBlock`, `block`, `spans`, and `updateSpans`. Its documented model separates inline formatting marks from block markers, and has an interoperability-oriented rich text schema.
 
-Potential umkehr mapping:
-
-```ts
-type RichTextSnapshot = {
-    format: 'automerge-spans-v1';
-    spans: RichTextSpan[];
-};
-```
-
-Internally, umkehr could either embed Automerge for just that field or copy a similar span/block model.
-
-Pros:
-
-- The model is close to the shape a document editor actually needs: text spans plus block markers.
-- The public snapshot format can be JSON, which is friendlier to umkehr's validation and persistence posture than opaque binary.
-- The schema gives a concrete answer for common marks and blocks.
-
-Cons:
-
-- Embedding Automerge also means running another CRDT engine inside umkehr.
-- Automerge's rich-text API is tied to Automerge document paths and change semantics, not umkehr `CrdtPathSegment`s.
-- If copied rather than embedded, the hard part is still the rich-text CRDT merge algorithm.
-
-API fit:
-
-- Strong inspiration for umkehr's native model.
-- Reasonable as an adapter if the application already wants Automerge-style rich text.
-
-### Option 3: Native Peritext-like field
+Automerge is useful as a model for the derived render/export shape: text spans plus block markers are renderable JSON and close to what editors need. It is not the chosen engine because its operations are tied to Automerge documents rather than umkehr `CrdtPathSegment`s and HLC history.
 
 Peritext is a published rich-text CRDT algorithm. Its core idea is to store formatting spans alongside a plaintext character sequence, with span endpoints linked to stable character identifiers, then derive the final formatted text deterministically. The paper explicitly focuses on preserving rich-text editing intent under concurrency.
 
-Potential umkehr mapping:
+Peritext is the closest conceptual fit for umkehr's in-house algorithm. The implementation does not have to copy it verbatim, but it should use the same broad shape: stable character identity, tombstoned deleted characters, spans anchored to character identities, and deterministic materialization.
+
+## Native model
+
+The rich-text field should be a leaf in the ordinary umkehr state tree and a nested CRDT inside `CrdtMeta`:
 
 ```ts
 type RichTextMeta = {
@@ -115,75 +74,58 @@ type RichTextUpdate =
     | {op: 'textBlock'; path: CrdtPathSegment[]; at: Anchor; value: BlockValue; ts: HlcTimestamp};
 ```
 
-Pros:
+The first native surface should be narrower than a full document editor:
 
-- Best conceptual fit for umkehr: one CRDT engine, one HLC/order model, one validation pipeline, one history model.
-- Internal metadata remains hidden just like array IDs and tombstones.
-- Rich-text updates can be JSON, path-addressed, validated, logged, replayed, and inspected.
-- Enables umkehr-native undo/redo and history display later.
+- plaintext characters;
+- paragraph blocks;
+- heading blocks if cheap;
+- inline marks: `strong`, `em`, `code`, `link`;
+- paste as plaintext first, then structured paste later;
+- no tables, nested lists, comments, suggestions, collaborative selections, or embeds in the first pass.
 
-Cons:
+Structured JSON rich text using ordinary arrays/records is still useful as a derived render/export view, but it should not be public state and should not be the replicated editing model. Text edits inside leaf strings would still be last-writer-wins, and run splitting/normalization would fight the CRDT layer.
 
-- Highest implementation cost.
-- Requires careful randomized/property testing.
-- Editor bindings are non-trivial. The CRDT is only half the product; editor reconciliation and selection anchoring are the other half.
-- The initial version must deliberately limit scope: paragraphs, headings, basic inline marks, links, and maybe embeds. Tables, nested lists, comments, suggestions, and collaborative selections should wait.
+## Public State
 
-API fit:
-
-- Best long-term fit if rich text is intended as a core umkehr capability.
-- Risky as a first implementation unless the supported surface is narrow.
-
-### Option 4: Structured JSON rich text with existing arrays/records
-
-Represent rich text directly in normal State:
+The public state should contain a typed sentinel, not a materialized rich-text snapshot:
 
 ```ts
-type RichTextDoc = {
-    blocks: RichTextBlock[];
-};
-
-type RichTextBlock = {
-    type: 'paragraph' | 'heading';
-    children: RichTextInline[];
-};
-
-type RichTextInline = {
-    text: string;
-    marks?: Record<string, JsonValue>;
+type RichCollaborativeText = {
+    kind: 'rich-text';
+    version: 1;
+    id?: string;
 };
 ```
 
-Pros:
+The sentinel's job is to make the field visible to TypeScript, typia schema generation, validation, and the patch builder. It is not the source of truth for the rich-text content.
 
-- Requires no new CRDT metadata kind.
-- Builder and schema machinery already understand objects, arrays, records, and tagged unions.
-- Easy to validate and render.
+The actual renderable document is a derived view:
 
-Cons:
+```ts
+type RichTextRenderView = {
+    blocks: RichTextBlock[];
+};
 
-- Text edits inside each leaf string are still last-writer-wins.
-- Splitting/merging text runs creates many structural edits that do not preserve rich-text intent under concurrency.
-- Array index churn and run normalization can fight the CRDT layer.
+type RichTextBlock =
+    | {
+          type: 'paragraph';
+          spans: RichTextSpan[];
+      }
+    | {
+          type: 'heading';
+          level: 1 | 2 | 3;
+          spans: RichTextSpan[];
+      };
 
-API fit:
+type RichTextSpan = {
+    text: string;
+    marks?: RichTextMarks;
+};
+```
 
-- Good for non-realtime rich text, comments, import/export, or a "poor man's rich text" editor.
-- Not enough for Google Docs-style concurrent editing inside the same paragraph.
+This avoids duplicating chars/spans/blocks between public state and CRDT metadata. Character IDs, tombstones, deleted spans, clocks, causal dependencies, and pending operations stay in `RichTextMeta`; render/export/editor views are computed from that metadata.
 
-## Recommendation
-
-Use a staged design:
-
-1. Define the first-class public type and builder API now.
-2. Implement the runtime as a special CRDT field with an adapter boundary.
-3. Start with a limited native rich-text model or a Yjs-backed prototype behind the same public API.
-
-The important API decision is not whether the first engine is Yjs or native. The important API decision is that a rich text field should be a distinct semantic field type, not just `string`.
-
-## Public state shape
-
-The public state should still be clean:
+The public state remains clean:
 
 ```ts
 import type {RichCollaborativeText} from 'umkehr/richtext';
@@ -198,27 +140,36 @@ type State = {
 };
 ```
 
-At runtime, `doc.state.body` should be a serializable snapshot:
+The tradeoff is that `doc.state` is no longer a complete content snapshot for rich-text fields. Persistence and replication already need `CrdtDocument.meta` for CRDT correctness, so this is acceptable. For export, read-only rendering, or server snapshots, provide explicit materializers such as `materializeRichText(doc, path)` or `exportRichText(doc, path)`.
+
+Initial content should not be a special `createCrdtDocument` option. The default sentinel creates an empty rich-text document. Non-empty initial documents can be produced by dispatching the same rich-text replace command used for import, paste-over-all, migrations, and tests:
 
 ```ts
-type RichCollaborativeText = RichTextSnapshot & RichTextTypeMarker;
+let doc = createCrdtDocument(initialState, schema, {timestamp: seedTimestamp});
+doc = applyLocalRichTextCommand(doc, $.body.$text.replace(richTextFromPlainText('Hello')), ts);
+```
 
-type RichTextSnapshot = {
-    kind: 'rich-text';
-    version: 1;
-    spans: RichTextSpan[];
+The exact helper names can change, but the principle is that initialization is a normal timestamped rich-text operation after document creation. Peers that need the same non-empty initial content should receive/replay that first rich-text update with the rest of the CRDT log.
+
+## Derived Views
+
+There should be two derived views:
+
+```ts
+type RichTextRenderView = {
+    blocks: RichTextBlock[];
+    plainText: string;
+};
+
+type RichTextEditorView = RichTextRenderView & {
+    anchors: RichTextAnchorMap;
+    selection: RichTextSelectionModel;
 };
 ```
 
-This is not CRDT metadata. It is the materialized value the UI/editor can render, persist in snapshots, and validate. Character IDs, tombstones, deleted spans, clocks, causal dependencies, and pending operations stay in `CrdtMeta`.
+The render view is for normal UI. It has no CRDT internals and can be serialized for export.
 
-An even more ergonomic UI layer can hide the snapshot too:
-
-```tsx
-<RichTextEditor value={editor.latest().body} bind={editor.$.body} />
-```
-
-But the underlying state value still needs a deterministic JSON representation for persistence, initial state, server snapshots, and non-React consumers.
+The editor view can expose stable view-local anchors, position mapping, and selection rebasing helpers. Those are still not raw CRDT metadata; they are an editor-facing read model derived from metadata. The key point is that the editor is not limited to `doc.state.body`, so it can update local selections correctly after remote changes.
 
 ## Metadata visibility
 
@@ -254,20 +205,96 @@ Extend `CrdtMeta`:
 export type RichTextMeta = {
     kind: 'richText';
     created: HlcTimestamp;
-    value: RichTextInternalState;
+    chars: Record<RichTextCharId, RichTextCharMeta>;
+    spans: Record<RichTextSpanId, RichTextSpanMeta>;
+    blocks: Record<RichTextBlockId, RichTextBlockMeta>;
 };
 ```
 
 Then update:
 
 - `buildMeta`: if schema is a rich-text schema, build `RichTextMeta` instead of ordinary object/string metadata.
-- `cloneMeta`: `structuredClone` can still work if internal state is JSON; binary adapter payloads need explicit handling.
+- `cloneMeta`: `structuredClone` can still work because the native metadata should stay JSON-shaped.
 - `versionOf` / `createdOf`: return `created` for rich text.
-- `materialize`: convert `RichTextMeta` into `RichCollaborativeText`.
+- `materialize`: emit only the `RichCollaborativeText` sentinel into `doc.state`; rich-text content is materialized through explicit rich-text view helpers.
 - `getChild` / path walking: rich text should be a leaf for ordinary object navigation.
 - `applyCrdtUpdate`: route rich-text operations to a rich-text reducer.
 - `changedNormalPathsForCrdtUpdate`: rich-text operations invalidate the owning field path.
-- validation: recognize rich-text update envelopes and validate values against the rich-text public schema.
+- validation: recognize rich-text update envelopes and validate the sentinel shape plus rich-text operation invariants.
+
+### Use stable anchors internally
+
+The public API can accept index-based positions because that is what browser/editor selections naturally produce. The replicated update should not store those indices. Translation should resolve indices against the current rich-text metadata into stable anchors before replication.
+
+Suggested anchor shape:
+
+```ts
+type RichTextAnchor =
+    | {type: 'start'}
+    | {type: 'end'}
+    | {type: 'char'; id: RichTextCharId; bias?: 'before' | 'after'};
+
+type RichTextRange = {
+    start: RichTextAnchor;
+    end: RichTextAnchor;
+};
+```
+
+The same principle already exists for arrays: callers address array positions by numeric index, while CRDT updates address stable item IDs and order keys. Rich text should follow that pattern.
+
+### Character storage
+
+Use one stable ID per inserted character or per inserted run with deterministic sub-IDs. Per-character IDs are simpler and probably fine for a first version.
+
+```ts
+type RichTextCharMeta = {
+    id: RichTextCharId;
+    value: string;
+    after: RichTextAnchor;
+    ts: HlcTimestamp;
+    deleted?: HlcTimestamp;
+};
+```
+
+Ordering is derived by following insertion anchors plus deterministic timestamp/id tie-breaking for concurrent inserts at the same anchor. Deleted characters remain in metadata so older spans and delayed operations can still resolve anchors.
+
+If per-character metadata becomes too large, compaction can later replace runs that are causally stable and no longer needed as anchors. That is a later optimization, not a first-pass requirement.
+
+### Span storage
+
+Formatting should be represented as CRDT spans, not by mutating every character:
+
+```ts
+type RichTextSpanMeta = {
+    id: RichTextSpanId;
+    name: string;
+    value: JsonValue;
+    start: RichTextAnchor;
+    end: RichTextAnchor;
+    expand: 'none' | 'before' | 'after' | 'both';
+    ts: HlcTimestamp;
+    deleted?: HlcTimestamp;
+};
+```
+
+Materialization projects live spans onto live characters, splits output where marks change, and emits compact `RichTextSpan[]` inside each block. Concurrent spans with the same mark name should resolve deterministically. For boolean marks such as `strong`, same-name live spans can coalesce at render time. For scalar marks such as `link`, conflicts need a deterministic policy, probably newest span wins by HLC timestamp with ID tie-break.
+
+### Block storage
+
+Blocks can start as paragraph boundaries anchored into the character stream:
+
+```ts
+type RichTextBlockMeta = {
+    id: RichTextBlockId;
+    type: 'paragraph' | 'heading';
+    attrs?: Record<string, JsonValue>;
+    start: RichTextAnchor;
+    ts: HlcTimestamp;
+    deleted?: HlcTimestamp;
+};
+```
+
+The first block can be implicit at document start. `splitBlock` inserts a new block marker at an anchor. `mergeBlock` can be represented as deleting a block marker. This is enough for paragraphs and simple headings without modeling nested document structure in the first pass.
 
 ### Add rich-text CRDT updates
 
@@ -290,16 +317,7 @@ type CrdtRichTextUpdate = {
 };
 ```
 
-For a Yjs adapter, `change` could initially be:
-
-```ts
-type RichTextChange = {
-    engine: 'yjs';
-    update: string; // base64 bytes
-};
-```
-
-For a native engine:
+The native change payload should stay JSON-shaped:
 
 ```ts
 type RichTextChange =
@@ -311,11 +329,17 @@ type RichTextChange =
 
 The path still names the rich-text field using the existing stable CRDT path machinery. The nested rich-text change then uses rich-text anchors, not ordinary umkehr paths.
 
-### Keep ordinary replacement semantics
+### Keep replace/import semantics
 
-`editor.$.body.$replace(newSnapshot)` should still exist. It means "replace the whole rich text document with this snapshot" and creates a new rich-text field incarnation.
+The ordinary builder `$replace` method should probably remain available for the sentinel itself, but it should not be the normal rich-text content API. A replacement of the rich-text content should be explicit on the rich-text command surface:
 
-This is useful for import, paste-over-all, reset, migrations, and test setup. It should not be the operation used for normal typing.
+```ts
+editor.$.body.$text.replace(snapshot);
+```
+
+That means "replace the whole rich text document with this imported/exported content" and creates a new rich-text field incarnation in metadata.
+
+This is useful for initialization, import, paste-over-all, reset, migrations, and test setup. It should not be the operation used for normal typing.
 
 ## Builder type magic
 
@@ -324,7 +348,10 @@ The builder can recognize rich text at the type level:
 ```ts
 declare const richTextBrand: unique symbol;
 
-export type RichCollaborativeText = RichTextSnapshot & {
+export type RichCollaborativeText = {
+    kind: 'rich-text';
+    version: 1;
+    id?: string;
     readonly [richTextBrand]?: never;
 };
 
@@ -346,6 +373,7 @@ The method set should be small and editor-adapter-friendly:
 ```ts
 type RichTextBuilderMethods<R> = {
     $text: {
+        replace(value: RichTextImportSnapshot, when?: ApplyTiming): R;
         insert(at: RichTextPosition, text: string, attrs?: RichTextAttrs, when?: ApplyTiming): R;
         delete(range: RichTextRange, when?: ApplyTiming): R;
         mark(range: RichTextRange, name: string, value: JsonValue, when?: ApplyTiming): R;
@@ -376,8 +404,11 @@ import type {tags} from 'typia';
 
 declare const richTextBrand: unique symbol;
 
-export type RichCollaborativeText = RichTextSnapshot &
-    tags.JsonSchemaPlugin<{
+export type RichCollaborativeText = {
+    kind: 'rich-text';
+    version: 1;
+    id?: string;
+} & tags.JsonSchemaPlugin<{
         'x-umkehr-crdt': 'rich-text';
         'x-umkehr-rich-text-version': 1;
     }> & {
@@ -398,7 +429,7 @@ Benefits:
 - Keeps the "derive from State type definition" story.
 - Does not require users to pass a parallel map of rich-text paths.
 - Gives the builder a type-level hook and the runtime a schema-level hook from the same exported type.
-- Keeps the public value JSON-shaped.
+- Keeps the public sentinel JSON-shaped.
 
 Risks:
 
@@ -427,26 +458,26 @@ Cons:
 
 This is useful as an escape hatch, not the primary API.
 
-### Not recommended: magic object shape
+### Not recommended: content-bearing magic object shape
 
 ```ts
 type RichCollaborativeText = {
     __umkehrType: 'rich-text';
-    spans: RichTextSpan[];
+    blocks: RichTextBlock[];
 };
 ```
 
 Pros:
 
-- Runtime detection is trivial.
+- Runtime detection is trivial and the value is directly renderable.
 
 Cons:
 
-- Leaks implementation tagging into user data.
-- Makes editor state noisier.
-- Users can accidentally edit the marker through ordinary object navigation.
+- Duplicates render content in public state and authoritative CRDT metadata.
+- Makes editor state noisier and easier to desynchronize.
+- Users can accidentally edit content through ordinary object navigation instead of rich-text operations.
 
-This works, but it undermines the metadata-hiding goal.
+This works for non-collaborative rich text, but it undermines the no-duplication and metadata-hiding goals for collaborative rich text.
 
 ## Initial API sketch
 
@@ -455,9 +486,12 @@ Package exports:
 ```ts
 // umkehr/richtext
 export type RichCollaborativeText = ...
-export function richTextFromPlainText(text: string): RichCollaborativeText;
-export function richTextFromSpans(spans: RichTextSpan[]): RichCollaborativeText;
-export function richTextToPlainText(value: RichCollaborativeText): string;
+export function richText(): RichCollaborativeText;
+export function richTextFromPlainText(text: string): RichTextImportSnapshot;
+export function richTextFromBlocks(blocks: RichTextBlock[]): RichTextImportSnapshot;
+export function materializeRichText(doc: CrdtDocument<unknown>, path: Path): RichTextRenderView;
+export function createRichTextEditorView(doc: CrdtDocument<unknown>, path: Path): RichTextEditorView;
+export function richTextToPlainText(view: RichTextRenderView): string;
 ```
 
 State definition:
@@ -474,8 +508,14 @@ Initial state:
 ```ts
 const initialState: State = {
     title: 'Draft',
-    body: richTextFromPlainText(''),
+    body: richText(),
 };
+```
+
+Non-empty initial rich text can use the same command surface:
+
+```ts
+dispatch($.body.$text.replace(richTextFromPlainText('Draft body')));
 ```
 
 Builder usage:
@@ -485,16 +525,18 @@ const $ = createPatchBuilder<State>();
 
 $.body.$text.insert({index: 0}, 'Hello');
 $.body.$text.mark({start: 0, end: 5}, 'strong', true);
-$.body.$replace(richTextFromPlainText('Reset'));
+$.body.$text.replace(richTextFromPlainText('Reset'));
 ```
 
 React usage:
 
 ```tsx
-<RichTextEditor value={editor.latest().body} update={editor.$.body.$text} />
+const body = editor.richText(editor.$.body);
+
+<RichTextEditor view={body.editorView} commands={body.commands} />
 ```
 
-The exact position/range types should be designed around editor bindings. For a first cut, index-based public positions are acceptable if translation resolves them against current rich-text metadata into stable anchors before replication, the same way current array paths resolve numeric indices into stable array item IDs.
+The exact position/range types should be designed around editor bindings. For a first cut, index-based public positions are acceptable if the rich-text command layer resolves them against current rich-text metadata into stable anchors before replication, the same way current array paths resolve numeric indices into stable array item IDs.
 
 ## Undo, redo, and preview
 
@@ -510,29 +552,56 @@ Local undo should store command-level effects, not every keystroke as a separate
 
 For native rich text, undo effects should be expressed as fresh rich-text changes with fresh HLC timestamps. They should not remove old rich-text CRDT operations from the log.
 
+## Editor direction
+
+The editor should be native too. It should use umkehr's rich-text operations as its editing model, not adapt another editor's CRDT protocol.
+
+Recommended first editor architecture:
+
+- Render from `RichTextEditorView`, not directly from `doc.state.body`.
+- Keep DOM selection and composition state local.
+- Convert browser `beforeinput`, paste, key, and toolbar actions into `$text` operations.
+- Use preview for local composition/selection-sensitive UI where needed, but commit CRDT operations in meaningful command batches.
+- Translate public index-based editor positions into rich-text anchors at dispatch time.
+- Rebase local selection after local and remote changes by mapping through the rich-text metadata before materialization.
+
+Avoid a contenteditable free-for-all where the DOM becomes the source of truth. The source of truth should be the rich-text CRDT state; the DOM is an editing surface projected from that state. This is more work up front, but it keeps remote changes, undo/redo, validation, and history in the same model.
+
+The first editor can be intentionally narrow:
+
+- plain paragraphs;
+- simple headings;
+- bold/italic/code/link toggles;
+- plaintext paste;
+- keyboard input and selection deletion;
+- no markdown shortcuts, nested lists, tables, comments, or embeds.
+
 ## Open design decisions
 
-- Native vs adapter first: Yjs gets to a working demo faster; native is cleaner for long-term umkehr semantics.
-- Public snapshot format: Automerge-like spans are a good candidate because they are renderable JSON and close to editor output.
-- Block model: start with paragraphs/headings/lists only. Tables should be out of scope initially.
-- Anchor model: public API can use indices; replicated operations need stable anchors.
-- Validation: decide whether rich text update validation validates the public snapshot only or also validates rich-text internal operation invariants.
+- Exact insertion ordering: decide whether to use per-character IDs only, run IDs with offsets, or a hybrid. Per-character IDs are simplest for v1.
+- Render/export view format: block-plus-span JSON is the chosen direction, but the exact mark representation still needs to be locked down.
+- Block model: start with paragraphs and simple headings. Tables and nested lists should be out of scope initially.
+- Anchor bias semantics: define how marks and cursor positions attach around concurrent inserts at the same anchor.
+- Validation: decide how much rich-text operation validation should happen in the generic update validator versus the rich-text reducer.
 - History UI: decide whether rich-text operations display as opaque "edited body" entries or as operation summaries.
 - Storage compaction: rich-text CRDT metadata can grow quickly; compaction/snapshotting will matter earlier than it does for ordinary object fields.
+- Editor architecture: decide how much logic lives in the generic rich-text engine versus the React editor binding.
 
 ## Implementation path
 
 1. Add `umkehr/richtext` types and constructors.
 2. Add typia schema marker detection with tests proving `RichCollaborativeText` emits `x-umkehr-crdt: "rich-text"` in the field schema.
-3. Add a `richText` `CrdtMeta` kind and make it materialize back to `RichCollaborativeText`.
-4. Add whole-field replace support for rich text.
-5. Add `DraftRichTextPatch` and builder `$text` methods.
-6. Add `CrdtRichTextUpdate` as a nested update variant.
-7. Implement either:
-   - a Yjs-backed adapter with opaque base64 update payloads, or
-   - a minimal native plaintext-plus-marks CRDT.
-8. Build one React editor binding around the public `$text` methods.
-9. Add randomized convergence tests before expanding the feature set.
+3. Add a `richText` `CrdtMeta` kind and make ordinary state materialization emit only the `RichCollaborativeText` sentinel.
+4. Add explicit render/export/editor view helpers derived from `RichTextMeta`.
+5. Add `$text.replace(...)` for initialization, import, and whole-field replacement.
+6. Decide how command-surface rich-text patches are applied directly after `createCrdtDocument` in setup/tests/examples.
+7. Add `DraftRichTextPatch` and builder `$text` methods.
+8. Add `CrdtRichTextUpdate` as a nested update variant.
+9. Implement native plaintext insertion/deletion with stable anchors and deterministic convergence tests.
+10. Build a narrow React editor around the public `$text` methods and `RichTextEditorView`.
+11. Add inline marks, then block split/merge, with randomized convergence tests before each expansion.
+12. Add remote-selection/presence separately through an ephemeral channel, not as rich-text CRDT state.
+13. Add storage compaction/snapshotting once the metadata growth pattern is measurable.
 
 ## Sources
 

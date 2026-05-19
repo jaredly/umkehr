@@ -157,12 +157,13 @@ describe('createSyncedContext', () => {
         function Editor() {
             const ctx = useTodos();
             const title = useValue(ctx.$.title);
-            ctx.useLocalHistory();
+            const history = ctx.useLocalHistory();
             return (
                 <>
                     <span data-testid="title">{title}</span>
                     <span data-testid="can-undo">{String(ctx.canUndo())}</span>
                     <span data-testid="can-redo">{String(ctx.canRedo())}</span>
+                    <span data-testid="updates">{history.updates.length}</span>
                     <button type="button" onClick={() => ctx.$.title('Published')}>
                         rename
                     </button>
@@ -185,13 +186,16 @@ describe('createSyncedContext', () => {
         fireEvent.click(view.getByText('rename'));
         expect(view.getByTestId('title').textContent).toBe('Published');
         expect(view.getByTestId('can-undo').textContent).toBe('true');
+        expect(view.getByTestId('updates').textContent).toBe('1');
 
         fireEvent.click(view.getByText('undo'));
         expect(view.getByTestId('title').textContent).toBe('Draft');
         expect(view.getByTestId('can-redo').textContent).toBe('true');
+        expect(view.getByTestId('updates').textContent).toBe('2');
 
         fireEvent.click(view.getByText('redo'));
         expect(view.getByTestId('title').textContent).toBe('Published');
+        expect(view.getByTestId('updates').textContent).toBe('3');
         expect(transport.published).toHaveLength(3);
     });
 

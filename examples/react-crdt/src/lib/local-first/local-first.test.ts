@@ -1,6 +1,12 @@
 import {describe, expect, it} from 'vitest';
 import type {IJsonSchemaCollection, IValidation} from 'typia';
-import {createCrdtDocument, createCrdtUpdates, hlc, type CrdtDocument} from 'umkehr/crdt';
+import {
+    createCrdtDocument,
+    createCrdtLocalHistory,
+    createCrdtUpdates,
+    hlc,
+    type CrdtDocument,
+} from 'umkehr/crdt';
 import {createRecentBatchCache, batchKey} from './recentBatchCache';
 import {
     LOCAL_FIRST_PROTOCOL_VERSION,
@@ -676,7 +682,7 @@ describe('local-first new-document migrations', () => {
         protocolVersion: 1,
         schemaFingerprint: 'old-schema',
         replicaId: 'local',
-        history: {doc: doc({title: 'Old', todos: []}), undoStack: [], redoStack: []},
+        history: createCrdtLocalHistory(doc({title: 'Old', todos: []})),
         vector: {local: ts('local', 10)},
         updatedAt: '2026-05-17T00:00:00.000Z',
     }) as Omit<PersistedReplica<State>, 'schemaVersion'>;

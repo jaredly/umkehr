@@ -103,6 +103,8 @@ function validateEnvelope(input: unknown): CrdtUpdateValidationResult<unknown> {
     if (!['set', 'delete', 'setOrder'].includes(input.op)) {
         return fail(input, {path: 'op', message: `Unknown CRDT update op "${input.op}".`, value: input.op});
     }
+    const metaIssue = validateMeta(input.meta);
+    if (metaIssue) return fail(input, metaIssue);
 
     switch (input.op) {
         case 'set': {
@@ -155,6 +157,48 @@ function validateEnvelope(input: unknown): CrdtUpdateValidationResult<unknown> {
         }
     }
     return fail(input, {path: 'op', message: 'Unknown CRDT update op.', value: input.op});
+}
+
+function validateMeta(input: unknown): CrdtUpdateValidationIssue | null {
+    if (input === undefined) return null;
+    if (!isRecord(input)) {
+        return {path: 'meta', message: 'CRDT update metadata must be an object.', value: input};
+    }
+    const commandIdIssue = validateTimestamp(input.commandId, 'meta/commandId');
+    if (commandIdIssue) return commandIdIssue;
+    if (
+        typeof input.commandSeq !== 'number' ||
+        !Number.isInteger(input.commandSeq) ||
+        input.commandSeq < 0
+    ) {
+        return {
+            path: 'meta/commandSeq',
+            message: 'CRDT update metadata commandSeq must be a non-negative integer.',
+            expected: 'non-negative integer',
+            value: input.commandSeq,
+        };
+    }
+    if (input.intent !== 'edit' && input.intent !== 'undo' && input.intent !== 'redo') {
+        return {
+            path: 'meta/intent',
+            message: 'CRDT update metadata intent must be "edit", "undo", or "redo".',
+            expected: 'edit | undo | redo',
+            value: input.intent,
+        };
+    }
+    if (input.intent === 'edit') {
+        if (input.targetCommandId !== undefined) {
+            return {
+                path: 'meta/targetCommandId',
+                message: 'Edit metadata must not include targetCommandId.',
+                value: input.targetCommandId,
+            };
+        }
+        return null;
+    }
+    const targetIssue = validateTimestamp(input.targetCommandId, 'meta/targetCommandId');
+    if (targetIssue) return targetIssue;
+    return null;
 }
 
 function validateCrdtPathEnvelope(input: unknown, path: string): CrdtUpdateValidationIssue | null {

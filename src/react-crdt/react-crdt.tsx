@@ -101,10 +101,10 @@ export const createSyncedContext = <T, Tag extends string = 'type'>(
                         clearSyncedPreview(ctx);
                     },
                     canUndo() {
-                        return canUndoLocalCommand(ctx.history);
+                        return canUndoLocalCommand(ctx.history, ctx.transport.actor);
                     },
                     canRedo() {
-                        return canRedoLocalCommand(ctx.history);
+                        return canRedoLocalCommand(ctx.history, ctx.transport.actor);
                     },
                     undo() {
                         applyUndo(ctx);
@@ -331,7 +331,7 @@ function receiveRemoteUpdate<T, Tag extends string>(
 function applyUndo<T, Tag extends string>(ctx: SyncedContextBase<T, Tag>) {
     clearSyncedPreview(ctx);
     const before = ctx.history.doc;
-    const result = undoLocalCommand(ctx.history, ctx.transport.tick());
+    const result = undoLocalCommand(ctx.history, ctx.transport.actor, ctx.transport.tick());
     if (!result.ok) return;
     ctx.history = result.history;
     ctx.save(ctx.history);
@@ -342,7 +342,7 @@ function applyUndo<T, Tag extends string>(ctx: SyncedContextBase<T, Tag>) {
 function applyRedo<T, Tag extends string>(ctx: SyncedContextBase<T, Tag>) {
     clearSyncedPreview(ctx);
     const before = ctx.history.doc;
-    const result = redoLocalCommand(ctx.history, ctx.transport.tick());
+    const result = redoLocalCommand(ctx.history, ctx.transport.actor, ctx.transport.tick());
     if (!result.ok) return;
     ctx.history = result.history;
     ctx.save(ctx.history);

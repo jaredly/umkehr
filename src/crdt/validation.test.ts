@@ -80,6 +80,65 @@ describe('CRDT update validation', () => {
         ).toBe(true);
     });
 
+    it('accepts update metadata', () => {
+        expect(
+            validator.is({
+                op: 'set',
+                path: [{type: 'objectField', key: 'title', parentCreated: ts}],
+                value: 'Published',
+                ts,
+                meta: {
+                    commandId: ts,
+                    commandSeq: 0,
+                    intent: 'edit',
+                },
+            }),
+        ).toBe(true);
+    });
+
+    it('rejects undo metadata without a target command', () => {
+        const result = validator.validate({
+            op: 'set',
+            path: [{type: 'objectField', key: 'title', parentCreated: ts}],
+            value: 'Published',
+            ts,
+            meta: {
+                commandId: ts,
+                commandSeq: 0,
+                intent: 'undo',
+            },
+        });
+
+        expect(result.success).toBe(false);
+        if (!result.success) {
+            expect(result.errors[0]).toMatchObject({
+                path: 'meta/targetCommandId',
+            });
+        }
+    });
+
+    it('rejects edit metadata with a target command', () => {
+        const result = validator.validate({
+            op: 'set',
+            path: [{type: 'objectField', key: 'title', parentCreated: ts}],
+            value: 'Published',
+            ts,
+            meta: {
+                commandId: ts,
+                commandSeq: 0,
+                intent: 'edit',
+                targetCommandId: ts,
+            },
+        });
+
+        expect(result.success).toBe(false);
+        if (!result.success) {
+            expect(result.errors[0]).toMatchObject({
+                path: 'meta/targetCommandId',
+            });
+        }
+    });
+
     it('rejects a set update whose value does not match the schema at the CRDT path', () => {
         const result = validator.validate({
             op: 'set',

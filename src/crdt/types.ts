@@ -91,23 +91,33 @@ export type CrdtPathSegment =
           tagTs: HlcTimestamp;
       };
 
+export type CrdtUpdateMeta = {
+    commandId: HlcTimestamp;
+    commandSeq: number;
+    intent: 'edit' | 'undo' | 'redo';
+    targetCommandId?: HlcTimestamp;
+};
+
 export type CrdtSetUpdate = {
     op: 'set';
     path: CrdtPathSegment[];
     value: JsonValue;
     ts: HlcTimestamp;
+    meta?: CrdtUpdateMeta;
 };
 
 export type CrdtDeleteUpdate = {
     op: 'delete';
     path: CrdtPathSegment[];
     ts: HlcTimestamp;
+    meta?: CrdtUpdateMeta;
 };
 
 export type CrdtSetOrderUpdate = {
     op: 'setOrder';
     arrayPath: CrdtPathSegment[];
     orders: Record<ItemId, {value: FractionalIndex; ts: HlcTimestamp}>;
+    meta?: CrdtUpdateMeta;
 };
 
 export type CrdtUpdate = CrdtSetUpdate | CrdtDeleteUpdate | CrdtSetOrderUpdate;

@@ -101,14 +101,21 @@ type PersistedServerBranch<TState> = {
     branchId: string;
     history: CrdtLocalHistory<TState>;
     lastSeenEventIndex: number;
+    undoCheckpointEventIndex: number;
     events: ServerBranchEvent[];
     mirrored: boolean;
 };
 ```
 
+Implementation note: `history.updates` duplicates update events as a materialized undo cache, not as a separate source of truth. If that duplication becomes awkward, persist only `events` and rebuild `history` on load.
+
 Local branch creation must work offline. Offline-created branches should be persisted locally with a client-generated stable `branchId`, a unique local name, a source branch id, and a fork event index. When the client reconnects, it publishes the branch creation before publishing events on that branch.
 
 Offline update and merge events need provisional local ordering until the server assigns canonical `eventIndex` values. The client should keep local sequence ids for pending events, then reconcile them to server event indexes on ack. Rendered history can show pending events after the last acknowledged event, but persisted materialization should prefer server `eventIndex` whenever it exists.
+
+`CrdtLocalHistory` now retains `base`, `doc`, and `updates`; undo/redo is derived from `updates` at runtime. Branch event streams remain the durable source of truth for server mode, while `history` is a materialized cache for the active or mirrored branch. That cache must be rebuilt carefully so merge-included source updates can affect document state without accidentally becoming target-branch undo history.
+
+`undoCheckpointEventIndex` is local replica metadata, not shared branch data. It records the branch event index through which the local undo log has been reset. On reload, materialize document state through that checkpoint into `history.base`, then replay only later branch update events into `history.updates` for derived undo/redo. Merge accept advances this checkpoint after the merge event and its generated compensation update events are materialized.
 
 ## Phase 1: Server event log
 
@@ -196,10 +203,17 @@ function materializeBranch<TState>({
 Rules:
 
 - Replay events by ascending server `eventIndex`.
-- For `update`, apply `applyRemoteHistoryUpdate`.
+- For normal branch editing materialization, `update` events can use `applyRemoteHistoryUpdate` so `history.updates` retains the applied CRDT updates for derived undo/redo.
 - For `merge`, recursively materialize/apply the source branch through `sourceThroughEventIndex` at that point.
 - Track applied update HLC timestamps during one materialization pass to avoid redundant repeated-merge work.
-- Reset undo/redo stacks after branch switches and after merge accept.
+- Treat `CrdtLocalHistory.updates` as the undo derivation log, not merely as document replay. If a materialized update should affect state but should not become undoable in the target branch, apply it to the document without retaining it in `history.updates`.
+- Branch switches should load that branch's own materialized undo cache; they should not inherently reset undo/redo.
+- After merge accept, reset derived undo/redo by checkpointing: create a new `CrdtLocalHistory` whose `base` and `doc` are the current materialized document and whose `updates` contains only future edits after the reset. Persist the corresponding `undoCheckpointEventIndex` locally.
+
+The merge case should use two layers:
+
+- document replay layer: apply source-branch updates included by merge events so target state is correct;
+- undo derivation layer: retain only target-branch update events after the local `undoCheckpointEventIndex`, not source-branch updates included by merge events.
 
 Open design choice:
 
@@ -210,6 +224,7 @@ Verification:
 - Tests for event-index ordering vs HLC timestamp ordering.
 - Tests for merge event inclusion without copying updates.
 - Tests for repeated merge idempotency.
+- Tests that merge-included source updates affect target state but do not become undoable target-branch commands after an undo reset.
 
 ## Phase 4: Client sync state
 
@@ -230,6 +245,7 @@ Transport behavior:
 - `flushPending` must create offline-created branches before flushing their update events.
 - `receiveServerEvents(branchId, events)` stores events in event-index order and only applies them to the mounted provider if `branchId === activeBranchId`.
 - `switchBranch(branchId)` persists the current branch, materializes the target branch, replaces `currentHistory`, updates active branch presence, and subscribes to the target branch.
+- Branch switching should preserve each branch's local undo checkpoint. Undo/redo availability is derived from that branch's cached `CrdtLocalHistory.updates`, not from a global UI stack.
 
 Offline behavior:
 
@@ -297,8 +313,9 @@ Accept:
 1. Preserve any existing pending target update events before the merge event.
 2. Append a `merge` event to the target branch.
 3. Append generated revert updates as normal `update` events after the merge event.
-4. Reset the target branch undo stack.
-5. Persist and sync the target branch.
+4. Reset target branch undo/redo by checkpointing the post-merge materialized document into a fresh `CrdtLocalHistory` base with an empty retained update log.
+5. Persist the target branch `undoCheckpointEventIndex` at the last event produced by merge accept.
+6. Persist and sync the target branch.
 
 Conflict/pending behavior:
 
@@ -341,7 +358,9 @@ Verification:
   - server event order beats HLC timestamp order;
   - merge event includes source branch without copying updates;
   - repeated merge replay is idempotent;
-  - undo stack resets after branch switch and merge accept.
+  - merge-included source updates do not become target undo commands;
+  - branch switching preserves per-branch derived undo/redo;
+  - derived undo/redo resets after merge accept by checkpointing `CrdtLocalHistory.base` and persisting `undoCheckpointEventIndex`.
 - Sync:
   - active branch receives content events;
   - non-active branches receive metadata/presence but not applied content;

@@ -32,7 +32,6 @@ export type {
     ApplyLocalCommandResult,
     BlockedEffect,
     CrdtLocalHistory,
-    LocalCommand,
     LocalEffect,
     UndoRedoResult,
 } from './history.js';

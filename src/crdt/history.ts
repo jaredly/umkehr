@@ -14,6 +14,7 @@ import type {
     CrdtPathSegment,
     CrdtSetOrderUpdate,
     CrdtUpdate,
+    CrdtUpdateMeta,
     FractionalIndex,
     HlcTimestamp,
     ItemId,
@@ -21,16 +22,18 @@ import type {
 } from './types.js';
 
 export type CrdtLocalHistory<T> = {
+    base: CrdtDocument<T>;
     doc: CrdtDocument<T>;
-    undoStack: LocalCommand[];
-    redoStack: LocalCommand[];
+    updates: CrdtUpdate[];
 };
 
-export type LocalCommand = {
-    id: string;
-    forward: CrdtUpdate[];
+type DerivedCommand = {
+    id: HlcTimestamp;
+    intent: CrdtUpdateMeta['intent'];
+    targetCommandId?: HlcTimestamp;
+    updates: CrdtUpdate[];
     effects: LocalEffect[];
-    undoEffects?: LocalEffect[];
+    redoGuardEffects?: LocalEffect[];
 };
 
 export type LocalEffect =
@@ -56,12 +59,20 @@ export type LocalEffect =
       };
 
 export type BlockedEffect = {
-    command: LocalCommand;
+    command: {id: HlcTimestamp};
     effect: LocalEffect;
     reason: 'missing-target' | 'superseded' | 'wrong-incarnation' | 'deleted';
 };
 
 type SetOrderEffect = Extract<LocalEffect, {kind: 'setOrder'}>;
+
+type DerivedUndoCache<T> = {
+    doc: CrdtDocument<T>;
+    commands: DerivedCommand[];
+    undoStack: DerivedCommand[];
+    redoStack: DerivedCommand[];
+    commandById: Map<HlcTimestamp, DerivedCommand>;
+};
 
 export type ApplyLocalCommandResult<T> = {
     history: CrdtLocalHistory<T>;
@@ -86,26 +97,28 @@ export type UndoRedoResult<T> =
 
 type CreatedCrdtCommand<T> = {
     doc: CrdtDocument<T>;
-    command: LocalCommand;
+    command: DerivedCommand;
     updates: CrdtUpdate[];
     clock: hlc.HLC;
 };
 
+const undoCaches = new WeakMap<CrdtLocalHistory<unknown>, Map<string, DerivedUndoCache<unknown>>>();
+
 export function createCrdtLocalHistory<T>(doc: CrdtDocument<T>): CrdtLocalHistory<T> {
-    return {doc, undoStack: [], redoStack: []};
+    const base = cloneDocumentWithoutPending(doc);
+    return {base, doc: base, updates: []};
 }
 
-export function canUndoLocalCommand<T>(history: CrdtLocalHistory<T>) {
-    const command = history.undoStack.at(-1);
+export function canUndoLocalCommand<T>(history: CrdtLocalHistory<T>, actor: string) {
+    const command = getUndoCache(history, actor).undoStack.at(-1);
     if (!command) return false;
     return checkEffects(history.doc, command, command.effects.toReversed()).length === 0;
 }
 
-export function canRedoLocalCommand<T>(history: CrdtLocalHistory<T>) {
-    const command = history.redoStack.at(-1);
+export function canRedoLocalCommand<T>(history: CrdtLocalHistory<T>, actor: string) {
+    const command = getUndoCache(history, actor).redoStack.at(-1);
     if (!command) return false;
-    const guardEffects = command.undoEffects ?? command.effects;
-    return checkEffects(history.doc, command, guardEffects).length === 0;
+    return checkEffects(history.doc, command, command.redoGuardEffects ?? command.effects).length === 0;
 }
 
 export function applyLocalCommand<T, Tag extends string = 'type', Context = undefined>(
@@ -125,11 +138,7 @@ export function applyLocalCommand<T, Tag extends string = 'type', Context = unde
     );
     const created = createLocalCrdtCommand(history.doc, changes, clock);
     return {
-        history: {
-            doc: created.doc,
-            undoStack: [...history.undoStack, created.command],
-            redoStack: [],
-        },
+        history: appendAppliedUpdates(history, created.doc, created.updates),
         updates: created.updates,
         clock: created.clock,
     };
@@ -139,10 +148,7 @@ export function applyRemoteHistoryUpdate<T>(
     history: CrdtLocalHistory<T>,
     update: CrdtUpdate,
 ): CrdtLocalHistory<T> {
-    return {
-        ...history,
-        doc: applyCrdtUpdate(history.doc, update),
-    };
+    return appendUpdate(history, update);
 }
 
 export function receiveRemoteUpdate<T>(
@@ -161,28 +167,29 @@ export const applyRemoteUpdate = receiveRemoteUpdate;
 
 export function undoLocalCommand<T>(
     history: CrdtLocalHistory<T>,
+    actor: string,
     clock: hlc.HLC,
 ): UndoRedoResult<T> {
-    const command = history.undoStack.at(-1);
+    const command = getUndoCache(history, actor).undoStack.at(-1);
     if (!command) return {ok: false, reason: 'empty', history, clock};
 
     const blocked = checkEffects(history.doc, command, command.effects.toReversed());
     if (blocked.length) return {ok: false, reason: 'blocked', blocked, history, clock};
 
     const nextTs = nextTimestamper(clock);
-    const generated = applyGeneratedUpdates(
-        history.doc,
-        createUndoUpdates(command, nextTs),
-        nextTs.current(),
-    );
-    const undone: LocalCommand = {...command, undoEffects: generated.effects};
+    const undoUpdates = createUndoUpdates(command, nextTs);
+    const commandId = undoUpdates[0]
+        ? (latestCrdtUpdateTimestamp(undoUpdates[0]) ?? nextTs.currentPacked())
+        : nextTs.currentPacked();
+    const updates = withCommandMetadata(undoUpdates, {
+        commandId,
+        intent: 'undo',
+        targetCommandId: command.id,
+    });
+    const generated = applyGeneratedUpdates(history.doc, updates, nextTs.current());
     return {
         ok: true,
-        history: {
-            doc: generated.doc,
-            undoStack: history.undoStack.slice(0, -1),
-            redoStack: [...history.redoStack, undone],
-        },
+        history: appendAppliedUpdates(history, generated.doc, generated.updates),
         updates: generated.updates,
         clock: generated.clock,
     };
@@ -190,29 +197,29 @@ export function undoLocalCommand<T>(
 
 export function redoLocalCommand<T>(
     history: CrdtLocalHistory<T>,
+    actor: string,
     clock: hlc.HLC,
 ): UndoRedoResult<T> {
-    const command = history.redoStack.at(-1);
+    const command = getUndoCache(history, actor).redoStack.at(-1);
     if (!command) return {ok: false, reason: 'empty', history, clock};
 
-    const guardEffects = command.undoEffects ?? command.effects;
-    const blocked = checkEffects(history.doc, command, guardEffects);
+    const blocked = checkEffects(history.doc, command, command.redoGuardEffects ?? command.effects);
     if (blocked.length) return {ok: false, reason: 'blocked', blocked, history, clock};
 
     const nextTs = nextTimestamper(clock);
-    const generated = applyGeneratedUpdates(
-        history.doc,
-        createRedoUpdates(command, nextTs),
-        nextTs.current(),
-    );
-    const redone: LocalCommand = {...command, effects: generated.effects, undoEffects: undefined};
+    const redoUpdates = createRedoUpdates(command, nextTs);
+    const commandId = redoUpdates[0]
+        ? (latestCrdtUpdateTimestamp(redoUpdates[0]) ?? nextTs.currentPacked())
+        : nextTs.currentPacked();
+    const updates = withCommandMetadata(redoUpdates, {
+        commandId,
+        intent: 'redo',
+        targetCommandId: command.id,
+    });
+    const generated = applyGeneratedUpdates(history.doc, updates, nextTs.current());
     return {
         ok: true,
-        history: {
-            doc: generated.doc,
-            undoStack: [...history.undoStack, redone],
-            redoStack: history.redoStack.slice(0, -1),
-        },
+        history: appendAppliedUpdates(history, generated.doc, generated.updates),
         updates: generated.updates,
         clock: generated.clock,
     };
@@ -236,19 +243,184 @@ function createLocalCrdtCommand<T>(
         }
     }
 
-    const applied = applyGeneratedUpdates(doc, updates, nextTs.current());
+    const commandId = updates[0]
+        ? (latestCrdtUpdateTimestamp(updates[0]) ?? nextTs.currentPacked())
+        : nextTs.currentPacked();
+    const stamped = withCommandMetadata(updates, {commandId, intent: 'edit'});
+    const applied = applyGeneratedUpdates(doc, stamped, nextTs.current());
     return {
         doc: applied.doc,
         command: {
-            id: updates[0]
-                ? (latestCrdtUpdateTimestamp(updates[0]) ?? nextTs.currentPacked())
-                : nextTs.currentPacked(),
-            forward: updates,
+            id: commandId,
+            intent: 'edit',
+            updates: stamped,
             effects: applied.effects,
         },
-        updates,
+        updates: stamped,
         clock: applied.clock,
     };
+}
+
+function appendUpdate<T>(history: CrdtLocalHistory<T>, update: CrdtUpdate): CrdtLocalHistory<T> {
+    const doc = applyCrdtUpdate(history.doc, update);
+    return appendAppliedUpdates(history, doc, [update]);
+}
+
+function appendAppliedUpdates<T>(
+    history: CrdtLocalHistory<T>,
+    doc: CrdtDocument<T>,
+    updates: CrdtUpdate[],
+): CrdtLocalHistory<T> {
+    const next: CrdtLocalHistory<T> = {
+        base: history.base,
+        doc,
+        updates: [...history.updates, ...updates],
+    };
+    carryUndoCaches(history, next, updates);
+    return next;
+}
+
+function carryUndoCaches<T>(
+    previous: CrdtLocalHistory<T>,
+    next: CrdtLocalHistory<T>,
+    updates: CrdtUpdate[],
+) {
+    const previousCaches = undoCaches.get(previous as CrdtLocalHistory<unknown>);
+    if (!previousCaches || previousCaches.size === 0) return;
+
+    const nextCaches = new Map<string, DerivedUndoCache<unknown>>();
+    for (const [actor, cache] of previousCaches.entries()) {
+        let nextCache = cache;
+        for (const update of updates) {
+            nextCache = appendUpdateToCache(nextCache, update, actor);
+        }
+        nextCaches.set(actor, nextCache);
+    }
+    undoCaches.set(next as CrdtLocalHistory<unknown>, nextCaches);
+}
+
+function getUndoCache<T>(
+    history: CrdtLocalHistory<T>,
+    actor: string,
+): DerivedUndoCache<T> {
+    const key = history as CrdtLocalHistory<unknown>;
+    let caches = undoCaches.get(key);
+    if (!caches) {
+        caches = new Map();
+        undoCaches.set(key, caches);
+    }
+    const existing = caches.get(actor) as DerivedUndoCache<T> | undefined;
+    if (existing) return existing;
+
+    let cache = emptyUndoCache(history.base);
+    for (const update of history.updates) {
+        cache = appendUpdateToCache(cache, update, actor);
+    }
+    caches.set(actor, cache as DerivedUndoCache<unknown>);
+    return cache;
+}
+
+function emptyUndoCache<T>(base: CrdtDocument<T>): DerivedUndoCache<T> {
+    return {
+        doc: base,
+        commands: [],
+        undoStack: [],
+        redoStack: [],
+        commandById: new Map(),
+    };
+}
+
+function appendUpdateToCache<T>(
+    cache: DerivedUndoCache<T>,
+    update: CrdtUpdate,
+    actor: string,
+): DerivedUndoCache<T> {
+    const before = captureBefore(cache.doc, update);
+    const doc = applyCrdtUpdate(cache.doc, update);
+    const next: DerivedUndoCache<T> = {
+        doc,
+        commands: cache.commands.slice(),
+        undoStack: cache.undoStack.slice(),
+        redoStack: cache.redoStack.slice(),
+        commandById: new Map(cache.commandById),
+    };
+
+    const meta = update.meta;
+    if (!meta || !isAuthoredBy(update, actor)) return next;
+
+    let effect: LocalEffect;
+    try {
+        effect = captureEffect(cache.doc, doc, update, before);
+    } catch {
+        return next;
+    }
+
+    const previous = next.commands.at(-1);
+    let isNewCommand = false;
+    let command =
+        previous?.id === meta.commandId && previous.intent === meta.intent
+            ? {...previous}
+            : undefined;
+    if (command && previous) {
+        next.commands[next.commands.length - 1] = command;
+        next.commandById.set(command.id, command);
+        const commandId = command.id;
+        const undoAt = next.undoStack.findIndex((candidate) => candidate.id === commandId);
+        if (undoAt !== -1) next.undoStack[undoAt] = command;
+        const redoAt = next.redoStack.findIndex((candidate) => candidate.id === commandId);
+        if (redoAt !== -1) next.redoStack[redoAt] = command;
+    }
+    if (!command) {
+        if (next.commandById.has(meta.commandId)) return next;
+        command = {
+            id: meta.commandId,
+            intent: meta.intent,
+            targetCommandId: meta.targetCommandId,
+            updates: [],
+            effects: [],
+        };
+        next.commands.push(command);
+        next.commandById.set(command.id, command);
+        isNewCommand = true;
+    }
+
+    command.updates = [...command.updates, update];
+    command.effects = [...command.effects, effect];
+    if (isNewCommand) {
+        applyCommandTransition(next, command);
+    } else if (command.intent === 'undo' && command.targetCommandId) {
+        const redoAt = next.redoStack.findIndex(
+            (candidate) => candidate.id === command.targetCommandId,
+        );
+        if (redoAt !== -1) {
+            next.redoStack[redoAt] = {
+                ...next.redoStack[redoAt],
+                redoGuardEffects: command.effects,
+            };
+        }
+    }
+    return next;
+}
+
+function applyCommandTransition<T>(cache: DerivedUndoCache<T>, command: DerivedCommand) {
+    if (command.intent === 'edit') {
+        cache.undoStack = [...cache.undoStack, command];
+        cache.redoStack = [];
+        return;
+    }
+    const targetId = command.targetCommandId;
+    if (!targetId) return;
+    if (command.intent === 'undo') {
+        const at = cache.undoStack.findIndex((candidate) => candidate.id === targetId);
+        if (at === -1) return;
+        const [target] = cache.undoStack.splice(at, 1);
+        cache.redoStack = [...cache.redoStack, {...target, redoGuardEffects: command.effects}];
+        return;
+    }
+    const at = cache.redoStack.findIndex((candidate) => candidate.id === targetId);
+    if (at === -1) return;
+    const [target] = cache.redoStack.splice(at, 1);
+    cache.undoStack = [...cache.undoStack, {...target, redoGuardEffects: undefined}];
 }
 
 function applyGeneratedUpdates<T>(
@@ -261,8 +433,9 @@ function applyGeneratedUpdates<T>(
     let clock =
         initialClock ??
         hlc.unpack(
-            latestCrdtUpdateTimestamp(updates.at(-1) ?? {op: 'setOrder', arrayPath: [], orders: {}}) ??
-                '000000000000000:00000:history',
+            latestCrdtUpdateTimestamp(
+                updates.at(-1) ?? {op: 'setOrder', arrayPath: [], orders: {}},
+            ) ?? '000000000000000:00000:history',
         );
 
     for (const update of updates) {
@@ -335,7 +508,7 @@ function captureEffect<T>(
     };
 }
 
-function createUndoUpdates(command: LocalCommand, nextTs: ReturnType<typeof nextTimestamper>) {
+function createUndoUpdates(command: DerivedCommand, nextTs: ReturnType<typeof nextTimestamper>) {
     const updates: CrdtUpdate[] = [];
     for (const effect of command.effects.toReversed()) {
         switch (effect.kind) {
@@ -363,7 +536,7 @@ function createUndoUpdates(command: LocalCommand, nextTs: ReturnType<typeof next
     return updates;
 }
 
-function createRedoUpdates(command: LocalCommand, nextTs: ReturnType<typeof nextTimestamper>) {
+function createRedoUpdates(command: DerivedCommand, nextTs: ReturnType<typeof nextTimestamper>) {
     const updates: CrdtUpdate[] = [];
     for (const effect of command.effects) {
         switch (effect.kind) {
@@ -400,7 +573,7 @@ function metaToUpdate(
 
 function checkEffects<T>(
     doc: CrdtDocument<T>,
-    command: LocalCommand,
+    command: DerivedCommand,
     effects: LocalEffect[],
 ): BlockedEffect[] {
     return effects
@@ -410,7 +583,7 @@ function checkEffects<T>(
 
 function checkEffect<T>(
     doc: CrdtDocument<T>,
-    command: LocalCommand,
+    command: DerivedCommand,
     effect: LocalEffect,
 ): BlockedEffect | null {
     if (effect.kind === 'setOrder') {
@@ -439,8 +612,38 @@ function checkEffect<T>(
     return null;
 }
 
+function withCommandMetadata(
+    updates: CrdtUpdate[],
+    meta: Omit<CrdtUpdateMeta, 'commandSeq'>,
+): CrdtUpdate[] {
+    return updates.map((update, commandSeq) => ({
+        ...update,
+        meta: {...meta, commandSeq},
+    }));
+}
+
+function isAuthoredBy(update: CrdtUpdate, actor: string) {
+    const actors = updateActors(update);
+    return actors.length > 0 && actors.every((candidate) => candidate === actor);
+}
+
+function updateActors(update: CrdtUpdate) {
+    if (update.op !== 'setOrder') return [hlc.unpack(update.ts).node];
+    return Object.values(update.orders).map(({ts}) => hlc.unpack(ts).node);
+}
+
 function cloneEffectMeta(meta: CrdtMeta | undefined): CrdtMeta | undefined {
     return meta ? cloneMeta(meta) : undefined;
+}
+
+function cloneDocumentWithoutPending<T>(doc: CrdtDocument<T>): CrdtDocument<T> {
+    const meta = cloneMeta(doc.meta);
+    return {
+        state: materialize(meta) as T,
+        meta,
+        pending: [],
+        schema: doc.schema,
+    };
 }
 
 function nextTimestamper(clock: hlc.HLC) {
