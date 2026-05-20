@@ -269,18 +269,20 @@ Manual checks:
 ## Open questions
 
 - Should the seed script overwrite the test database by default, or should reset require `--force`?
+  - overwrite
 - Where should app schema and fixture builders live so both the client example and server seed script can import them without awkward package coupling?
+  - they should live in a script in the client, which produces a json blob that gets passed to a script in the server. either shell pipe or subprocess, I don't care which.
 - Do we want a document metadata table now, or is `docId` plus branch/event counts enough for the first dropdown?
+  - yes metadata table w/ title, size (approximate/proxy measure is fine), date created, date last accessed
 - Should normal usage and test usage be separate scripts only, or should the UI expose a database mode indicator?
+  - separate script invocations (use an argv)
 - Should seeded documents include users, or should users remain normal server state created through login?
+  - definitely should include users; and some docs should have updates from multiple users
 - How large should the stress fixtures be by default so they are useful without making local startup slow?
+  - idk a couple thousand updates is fine
 - Should generated fixture events be deterministic across runs, including HLC timestamps and branch ids, to make database diffs stable?
+  - hmm default to using current date for hlc timestamp, but the seed script should accept a --date param for determinism
 - Should the selector show only documents compatible with the current app/schema, or all documents with incompatible ones disabled?
+  - all documents for now
 - What query param name should be canonical: the existing `doc`, or a more explicit `docId`?
-
-#
-
-I think I want the server to also have a publicly available "import document" functionality, so this might be the time to implement that as well.
-definitely let's give documents titles and authorActor
-let's have a client package script produce json blobs that then get passed to a server package script
-future: expand to the other storage paradigms
+  - doc is fine
