@@ -316,19 +316,7 @@ function isJsonPrimitive(input: unknown) {
 
 function isHlcTimestamp(input: unknown): input is string {
     if (typeof input !== 'string' || input.length === 0) return false;
-    try {
-        const unpacked = hlc.unpack(input);
-        return (
-            Number.isSafeInteger(unpacked.ts) &&
-            unpacked.ts >= 0 &&
-            Number.isSafeInteger(unpacked.count) &&
-            unpacked.count >= 0 &&
-            unpacked.node.length > 0 &&
-            hlc.pack(unpacked) === input
-        );
-    } catch {
-        return false;
-    }
+    return hlc.tryUnpack(input) !== null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

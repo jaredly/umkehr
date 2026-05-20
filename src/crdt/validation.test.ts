@@ -96,6 +96,30 @@ describe('CRDT update validation', () => {
         ).toBe(true);
     });
 
+    it('accepts suffixed HLC timestamps', () => {
+        const suffixed = `${ts}~migration-1`;
+        expect(
+            validator.is({
+                op: 'set',
+                path: [{type: 'objectField', key: 'title', parentCreated: suffixed}],
+                value: 'Published',
+                ts: suffixed,
+            }),
+        ).toBe(true);
+    });
+
+    it('rejects malformed HLC timestamps', () => {
+        const result = validator.validate({
+            op: 'set',
+            path: [{type: 'objectField', key: 'title', parentCreated: ts}],
+            value: 'Published',
+            ts: 'not-a-timestamp',
+        });
+
+        expect(result.success).toBe(false);
+        if (!result.success) expect(result.errors[0].path).toBe('ts');
+    });
+
     it('rejects undo metadata without a target command', () => {
         const result = validator.validate({
             op: 'set',

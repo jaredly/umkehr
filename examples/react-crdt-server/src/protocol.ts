@@ -206,7 +206,7 @@ export function parseClientMessage(input: unknown): ClientServerMessage | null {
             if (latestCrdtUpdateTimestamp(result.data.update) !== result.data.hlcTimestamp) {
                 return null;
             }
-            if (hlc.unpack(result.data.hlcTimestamp).node !== result.data.actor) return null;
+            if (hlc.tryUnpack(result.data.hlcTimestamp)?.node !== result.data.actor) return null;
             return result.data;
         case 'hello':
             return result.data;

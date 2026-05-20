@@ -1,4 +1,5 @@
 import type {IJsonSchemaCollection, OpenApi} from 'typia';
+import {tryUnpack} from './hlc.js';
 import type {CrdtPathSegment, CrdtUpdate, HlcTimestamp, JsonValue} from './types.js';
 
 export type CrdtUpdateValidationIssue = {
@@ -542,8 +543,8 @@ function validateObjectValue(
 }
 
 function validateTimestamp(input: unknown, path: string): CrdtUpdateValidationIssue | null {
-    if (typeof input !== 'string' || input.length === 0) {
-        return {path, message: 'Timestamp must be a non-empty string.', expected: 'string', value: input};
+    if (typeof input !== 'string' || !tryUnpack(input)) {
+        return {path, message: 'Timestamp must be a valid HLC timestamp.', expected: 'HLC timestamp', value: input};
     }
     return null;
 }

@@ -1,5 +1,5 @@
 export {applyCrdtUpdate} from './apply.js';
-export {compareTimestamps} from './clock.js';
+export {compareTimestamps, newer} from './clock.js';
 export {createCrdtDocument} from './document.js';
 export {fractionalIndexBetween} from './fractionalIndex.js';
 export {

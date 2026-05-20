@@ -1,4 +1,4 @@
-import {createCrdtUpdateValidator, type CrdtUpdate, type HlcTimestamp} from 'umkehr/crdt';
+import {createCrdtUpdateValidator, hlc, type CrdtUpdate, type HlcTimestamp} from 'umkehr/crdt';
 import type {IJsonSchemaCollection} from 'typia';
 import type {ServerBranch, ServerBranchEvent, ServerPresenceSession, ServerPresenceUser} from './types';
 import {parseSessionActor} from './session';
@@ -299,9 +299,7 @@ function parseBranchEvent<TState>(
     if (input.kind === 'update') {
         if (typeof input.docId !== 'string' || input.docId.length === 0) return null;
         if (typeof input.origin !== 'string' || input.origin.length === 0) return null;
-        if (typeof input.hlcTimestamp !== 'string' || input.hlcTimestamp.length === 0) {
-            return null;
-        }
+        if (typeof input.hlcTimestamp !== 'string' || !hlc.tryUnpack(input.hlcTimestamp)) return null;
         if (typeof input.receivedAt !== 'string' || input.receivedAt.length === 0) {
             return null;
         }

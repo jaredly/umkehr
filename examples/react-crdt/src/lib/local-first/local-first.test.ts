@@ -291,6 +291,25 @@ describe('local-first protocol validation', () => {
         ).toBeNull();
     });
 
+    it('accepts suffixed HLC timestamps in vectors and batches', () => {
+        const suffixed = hlc.withSuffix(ts('local', 10), 'migration-1');
+        const message = parseLocalFirstMessage(
+            {
+                kind: 'hello',
+                version: LOCAL_FIRST_PROTOCOL_VERSION,
+                actor: 'local',
+                docId: 'todos',
+                ...schemaHeader,
+                role: 'host',
+                vector: {local: suffixed},
+            },
+            config,
+        );
+
+        expect(message?.kind).toBe('hello');
+        if (message?.kind === 'hello') expect(message.vector.local).toBe(suffixed);
+    });
+
     it('rejects malformed batches and member announcements', () => {
         const invalidBatch = {...batch(), updates: [{op: 'definitely-not-a-crdt-update'}]};
         expect(
