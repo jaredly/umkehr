@@ -34,6 +34,7 @@ import {
 import {buildMergePathPreview, materializeServerBranch} from './materialize';
 import {migrateServerDump} from './migration';
 import type {ServerSchemaConfig} from './schemaConfig';
+import {canFlushPendingServerWrites, serverMigrationStateForMessage} from './states';
 import type {
     PersistedServerBranch,
     PersistedServerReplica,
@@ -183,6 +184,7 @@ export function useServerSync<TState>({
     );
 
     const flushPending = useCallback(() => {
+        if (!canFlushPendingServerWrites(stateStore.getSnapshot())) return;
         for (const branch of Object.values(branchesRef.current)) {
             const listed = branchListRef.current.find((candidate) => candidate.branchId === branch.branchId);
             if (listed?.pending) {
@@ -503,11 +505,8 @@ export function useServerSync<TState>({
             } else if (parsed.kind === 'presenceSelection') {
                 applySelectionMessage(parsed);
             } else if (parsed.kind === 'serverMigrationRequired') {
+                stateStore.setSnapshot(serverMigrationStateForMessage(parsed));
                 if (!window.confirm('Migrate this server document to the current app schema?')) {
-                    stateStore.setSnapshot({
-                        kind: 'error',
-                        message: 'Server migration is required before this client can sync.',
-                    });
                     return;
                 }
                 send({
@@ -521,31 +520,39 @@ export function useServerSync<TState>({
                     targetSchemaFingerprintHash: schemaFingerprintHash,
                 });
             } else if (parsed.kind === 'waitForMigration') {
-                stateStore.setSnapshot({
-                    kind: 'error',
-                    message: 'A server schema migration is in progress. Wait for it to finish, then reload.',
-                });
+                stateStore.setSnapshot(serverMigrationStateForMessage(parsed));
             } else if (parsed.kind === 'clientMigrationRequired') {
-                stateStore.setSnapshot({
-                    kind: 'error',
-                    message: 'This app version is older than the server document. Update your app to connect.',
-                });
+                stateStore.setSnapshot(serverMigrationStateForMessage({
+                    kind: 'clientMigrationRequired',
+                    schemaVersion: parsed.schemaVersion,
+                    schemaFingerprintHash: parsed.schemaFingerprintHash,
+                }));
             } else if (parsed.kind === 'schemaMismatch') {
-                stateStore.setSnapshot({
-                    kind: 'error',
-                    message: 'Server document schema does not match this app version.',
-                });
+                stateStore.setSnapshot(serverMigrationStateForMessage({
+                    kind: 'schemaMismatch',
+                    schemaVersion: parsed.schemaVersion,
+                    schemaFingerprintHash: parsed.schemaFingerprintHash,
+                }));
             } else if (parsed.kind === 'migrationCancelled') {
-                stateStore.setSnapshot({kind: 'error', message: parsed.reason});
+                stateStore.setSnapshot(serverMigrationStateForMessage(parsed));
+                reconnectTimerRef.current = window.setTimeout(connect, 0);
             } else if (parsed.kind === 'serverMigrationDump') {
-                const upload = migrateServerDump({
-                    app,
-                    dump: parsed,
-                    schemaConfig,
-                    schemaFingerprint,
-                    schemaFingerprintHash,
-                });
-                send({...upload, actor: identity.actor, userId: identity.user.userId});
+                try {
+                    const upload = migrateServerDump({
+                        app,
+                        dump: parsed,
+                        schemaConfig,
+                        schemaFingerprint,
+                        schemaFingerprintHash,
+                    });
+                    send({...upload, actor: identity.actor, userId: identity.user.userId});
+                } catch (error) {
+                    console.error('Server document migration failed.', error);
+                    stateStore.setSnapshot({
+                        kind: 'error',
+                        message: 'Document migration failed. See developer console for details.',
+                    });
+                }
             } else if (parsed.kind === 'serverMigrationComplete') {
                 stateStore.setSnapshot({kind: 'offline', reason: 'starting'});
                 window.clearTimeout(reconnectTimerRef.current);

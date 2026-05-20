@@ -1,5 +1,6 @@
 import {useStore} from '../store';
 import {colorForUserId, initialForNickname} from './presence';
+import {serverStateNoticeTone} from './states';
 import type {ServerSync} from './types';
 
 export function ServerControls<TState>({
@@ -15,6 +16,7 @@ export function ServerControls<TState>({
     const manualOffline = useStore(sync.manualOfflineStore);
     const isConnected = state.kind === 'connected';
     const statusLabel = labelForState(state);
+    const noticeTone = serverStateNoticeTone(state);
     const hasUnsyncedChanges = stats.pendingUploads > 0;
     const unsyncedLabel = hasUnsyncedChanges
         ? `${stats.pendingUploads} unsynced local ${
@@ -85,7 +87,11 @@ export function ServerControls<TState>({
                     <span className="presenceEmpty">No one else online</span>
                 )}
             </section>
-            {state.kind === 'error' ? <p className="serverToolbarError">{state.message}</p> : null}
+            {'message' in state ? (
+                <p className={`serverToolbarNotice ${noticeTone === 'error' ? 'error' : 'info'}`}>
+                    {state.message}
+                </p>
+            ) : null}
         </header>
     );
 }
@@ -98,6 +104,16 @@ function labelForState(state: ReturnType<ServerSync<unknown>['stateStore']['getS
             return 'Connecting';
         case 'offline':
             return state.reason === 'manual' ? 'Offline' : 'Disconnected';
+        case 'migration-required':
+            return 'Migration required';
+        case 'migration-running':
+            return 'Migration in progress';
+        case 'migration-cancelled':
+            return 'Migration cancelled';
+        case 'client-migration-required':
+            return 'Update required';
+        case 'schema-mismatch':
+            return 'Schema mismatch';
         case 'error':
             return 'Error';
     }

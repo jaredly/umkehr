@@ -44,7 +44,12 @@ export type LocalFirstSessionEffect<TState> =
           schemaFingerprint?: string;
           schemaFingerprintHash?: string;
       }
-    | {kind: 'connectionError'; peerId: string; message: string}
+    | {
+          kind: 'connectionError';
+          peerId: string;
+          message: string;
+          code?: 'schema-mismatch' | 'invalid-message';
+      }
     | {kind: 'recordMembers'; peerId: string; members: LocalFirstMember[]}
     | {kind: 'send'; peerId: string; message: LocalFirstMessage<TState>}
     | {kind: 'broadcastMembers'; exceptPeerId?: string}
@@ -189,11 +194,17 @@ export function planIncomingMessage<TState>({
             kind: 'connectionError',
             peerId,
             message: `Rejected schema mismatch from ${peerId}. Update your app to connect to this document.`,
+            code: 'schema-mismatch',
         }];
     }
     const message = parseLocalFirstMessage(input, config);
     if (!message) {
-        return [{kind: 'connectionError', peerId, message: `Rejected invalid message from ${peerId}.`}];
+        return [{
+            kind: 'connectionError',
+            peerId,
+            message: `Rejected invalid message from ${peerId}.`,
+            code: 'invalid-message',
+        }];
     }
 
     const effects: LocalFirstSessionEffect<TState>[] = [

@@ -579,6 +579,14 @@ export function useLocalFirstSync<TState>({
                 if (effect.kind === 'connectionError') {
                     const record = connectionsRef.current.get(effect.peerId);
                     if (record) record.error = effect.message;
+                    if (effect.code === 'schema-mismatch') {
+                        stateStore.setSnapshot({
+                            kind: 'incompatible',
+                            role: roleRef.current,
+                            peerId: peerRef.current?.id,
+                            message: effect.message,
+                        });
+                    }
                     publishConnections();
                     continue;
                 }

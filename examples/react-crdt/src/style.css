@@ -560,11 +560,18 @@ p {
     white-space: nowrap;
 }
 
-.serverToolbarError {
+.serverToolbarNotice {
     grid-column: 1 / -1;
     margin: -2px 0 0;
-    color: #b42318;
     font-size: 13px;
+}
+
+.serverToolbarNotice.info {
+    color: #52616f;
+}
+
+.serverToolbarNotice.error {
+    color: #b42318;
 }
 
 .serverLogin {

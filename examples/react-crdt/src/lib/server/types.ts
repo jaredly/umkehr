@@ -126,6 +126,34 @@ export type ServerSyncState =
     | {kind: 'offline'; reason: 'manual' | 'starting'}
     | {kind: 'connecting'}
     | {kind: 'connected'}
+    | {
+          kind: 'migration-required';
+          message: string;
+          sourceSchemaVersion: number;
+          sourceSchemaFingerprintHash: string;
+          targetSchemaVersion: number;
+          targetSchemaFingerprintHash: string;
+      }
+    | {
+          kind: 'migration-running';
+          message: string;
+          ownerActor: string;
+          targetSchemaVersion: number;
+          targetSchemaFingerprintHash: string;
+      }
+    | {kind: 'migration-cancelled'; message: string}
+    | {
+          kind: 'client-migration-required';
+          message: string;
+          schemaVersion: number;
+          schemaFingerprintHash: string;
+      }
+    | {
+          kind: 'schema-mismatch';
+          message: string;
+          schemaVersion: number;
+          schemaFingerprintHash: string;
+      }
     | {kind: 'error'; message: string};
 
 export type ServerSyncStats = {

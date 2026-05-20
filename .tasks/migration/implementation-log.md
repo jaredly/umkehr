@@ -270,3 +270,34 @@
   - `npm run typecheck:tests`
   - `cd examples/react-crdt-server && npm run typecheck`
   - `cd examples/react-crdt-server && npm test`
+
+### Phase 11 progress
+
+- Added explicit server sync states for migration UX:
+  - document migration required
+  - migration in progress
+  - migration cancelled
+  - client update required
+  - schema mismatch
+- Added `serverMigrationStateForMessage` so server protocol messages map to stable user-facing states and messages.
+- Updated server sync handling to:
+  - show migration-required before prompting the user to initiate migration
+  - show migration-running while another client owns the migration lock
+  - pause server write flushes during migration-running while still allowing local edits to persist as pending events
+  - show update-your-app for old clients connecting to newer data as an informational toolbar notice while local edits stay pending
+  - show migration-cancelled after lock expiry and reconnect so waiting clients can resume
+  - log migration dump/package failures to the developer console while showing a short user-facing failure message
+- Updated server controls so migration states are displayed in the toolbar instead of being collapsed into a generic error.
+- Added local-first incompatible sync state handling for peer schema mismatches.
+- Tagged local-first invalid-message and schema-mismatch connection errors so the UI can distinguish schema incompatibility from malformed traffic.
+- Added tests for:
+  - server migration protocol messages mapping to UI states
+  - local-first schema mismatch errors carrying an explicit code
+  - failed server client migration preserving old local branch data
+- Verified:
+  - `npm test -- examples/react-crdt/src/lib/server/states.test.ts examples/react-crdt/src/apps/todos/migrationFixture.test.ts examples/react-crdt/src/lib/local-first/local-first.test.ts`
+  - `npm test`
+  - `npm run typecheck:examples`
+  - `npm run typecheck:tests`
+  - `cd examples/react-crdt-server && npm run typecheck`
+  - `cd examples/react-crdt-server && npm test`

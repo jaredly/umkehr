@@ -339,6 +339,10 @@ function networkText(state: ReturnType<LocalFirstSync<unknown>['stateStore']['ge
             return `initializing ${state.role}`;
         case 'ready':
             return `${state.role} ${state.peerId}`;
+        case 'incompatible':
+            return state.message;
+        case 'migration-required':
+            return state.message;
         case 'needs-rebase-or-discard':
             return `${state.role} needs rebase/discard from ${state.actor}`;
         case 'error':

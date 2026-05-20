@@ -130,6 +130,18 @@ export type LocalFirstSyncState =
     | {kind: 'initializing'; role: LocalFirstRole}
     | {kind: 'ready'; role: LocalFirstRole; peerId: string}
     | {
+          kind: 'incompatible';
+          role: LocalFirstRole;
+          peerId?: string;
+          message: string;
+      }
+    | {
+          kind: 'migration-required';
+          role: LocalFirstRole;
+          peerId?: string;
+          message: string;
+      }
+    | {
           kind: 'needs-rebase-or-discard';
           role: LocalFirstRole;
           peerId?: string;

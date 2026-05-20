@@ -573,6 +573,7 @@ describe('local-first session planning', () => {
                 kind: 'connectionError',
                 peerId: 'peer-remote',
                 message: 'Rejected invalid message from peer-remote.',
+                code: 'invalid-message',
             },
         ]);
     });
@@ -601,6 +602,7 @@ describe('local-first session planning', () => {
                 kind: 'connectionError',
                 peerId: 'peer-remote',
                 message: 'Rejected schema mismatch from peer-remote. Update your app to connect to this document.',
+                code: 'schema-mismatch',
             },
         ]);
     });
