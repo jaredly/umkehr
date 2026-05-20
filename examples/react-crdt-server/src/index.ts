@@ -5,7 +5,14 @@ import {
     parseSessionActor,
 } from './protocol';
 import {ServerStore} from './store';
-import type {ConnectedClient, ServerBranch, ServerBranchEvent, ServerPresenceSession, ServerPresenceUser} from './types';
+import type {
+    ConnectedClient,
+    ServerBranch,
+    ServerBranchEvent,
+    ServerMigrationLock,
+    ServerPresenceSession,
+    ServerPresenceUser,
+} from './types';
 
 export const PORT = 8787;
 
@@ -75,24 +82,97 @@ const server = Bun.serve<ClientData>({
                 ws.data.userId = parsed.userId;
                 ws.data.sessionId = actor.sessionId;
                 ws.data.docId = parsed.docId;
+                const expiredLock = store.expireMigrationLock(parsed.docId);
+                if (expiredLock) broadcastMigrationCancelled(parsed.docId, 'Server migration lock expired.');
 
                 switch (parsed.kind) {
                     case 'hello': {
+                        ws.data.schemaVersion = parsed.schemaVersion;
+                        ws.data.schemaFingerprint = parsed.schemaFingerprint;
+                        ws.data.schemaFingerprintHash = parsed.schemaFingerprintHash;
+                        const existing = store.getDocument(parsed.docId);
+                        if (existing && existing.schemaFingerprintHash !== parsed.schemaFingerprintHash) {
+                            const lock = store.activeMigrationLock(parsed.docId);
+                            if (lock) {
+                                send(ws, {
+                                    kind: 'waitForMigration',
+                                    version: SERVER_PROTOCOL_VERSION,
+                                    docId: parsed.docId,
+                                    ownerActor: lock.ownerActor,
+                                    targetSchemaVersion: lock.targetSchemaVersion,
+                                    targetSchemaFingerprintHash: lock.targetSchemaFingerprintHash,
+                                });
+                                return;
+                            }
+                            if (parsed.schemaVersion > existing.schemaVersion) {
+                                send(ws, {
+                                    kind: 'serverMigrationRequired',
+                                    version: SERVER_PROTOCOL_VERSION,
+                                    docId: parsed.docId,
+                                    sourceSchemaVersion: existing.schemaVersion,
+                                    sourceSchemaFingerprintHash: existing.schemaFingerprintHash,
+                                    targetSchemaVersion: parsed.schemaVersion,
+                                    targetSchemaFingerprintHash: parsed.schemaFingerprintHash,
+                                });
+                                return;
+                            }
+                            send(ws, {
+                                kind: parsed.schemaVersion < existing.schemaVersion
+                                    ? 'clientMigrationRequired'
+                                    : 'schemaMismatch',
+                                version: SERVER_PROTOCOL_VERSION,
+                                docId: parsed.docId,
+                                schemaVersion: existing.schemaVersion,
+                                schemaFingerprintHash: existing.schemaFingerprintHash,
+                            });
+                            return;
+                        }
                         store.ensureDocument(
                             parsed.docId,
                             parsed.schemaVersion,
                             parsed.schemaFingerprint,
                             parsed.schemaFingerprintHash,
                         );
-                        ws.data.schemaVersion = parsed.schemaVersion;
-                        ws.data.schemaFingerprint = parsed.schemaFingerprint;
-                        ws.data.schemaFingerprintHash = parsed.schemaFingerprintHash;
                         send(ws, {
                             kind: 'hello',
                             version: SERVER_PROTOCOL_VERSION,
                             docId: parsed.docId,
                             branches: store.listBranches(parsed.docId),
                         });
+                        return;
+                    }
+                    case 'serverMigrationRequest': {
+                        const result = store.beginMigration({
+                            docId: parsed.docId,
+                            ownerActor: parsed.actor,
+                            ownerUserId: parsed.userId,
+                            ownerSessionId: actor.sessionId,
+                            targetSchemaVersion: parsed.targetSchemaVersion,
+                            targetSchemaFingerprint: parsed.targetSchemaFingerprint,
+                            targetSchemaFingerprintHash: parsed.targetSchemaFingerprintHash,
+                        });
+                        if (result.kind === 'locked') {
+                            sendWaitForMigration(ws, result.lock);
+                            return;
+                        }
+                        send(ws, {
+                            kind: 'serverMigrationDump',
+                            version: SERVER_PROTOCOL_VERSION,
+                            ...result.dump,
+                        });
+                        broadcastWaitForMigration(parsed.docId, result.lock, parsed.actor);
+                        return;
+                    }
+                    case 'serverMigrationUpload': {
+                        const completed = store.completeMigration({ownerActor: parsed.actor, upload: parsed});
+                        send(ws, {
+                            kind: 'serverMigrationComplete',
+                            version: SERVER_PROTOCOL_VERSION,
+                            docId: parsed.docId,
+                            schemaVersion: completed.schemaVersion,
+                            schemaFingerprintHash: completed.schemaFingerprintHash,
+                        });
+                        broadcastMigrationComplete(parsed.docId, completed.schemaVersion, completed.schemaFingerprintHash, parsed.actor);
                         return;
                     }
                     case 'presenceHello': {
@@ -121,12 +201,14 @@ const server = Bun.serve<ClientData>({
                         return;
                     }
                     case 'branchSubscribe': {
+                        if (rejectLockedWrite(ws, parsed.docId, parsed.actor)) return;
                         ws.data.branchId = parsed.branchId;
                         sendEventsAfter(ws, parsed.branchId, parsed.lastSeenEventIndex);
                         broadcastPresenceUpdate(parsed.docId, parsed.actor, parsed.userId);
                         return;
                     }
                     case 'createBranch': {
+                        if (rejectLockedWrite(ws, parsed.docId, parsed.actor)) return;
                         const branch = store.createBranch({
                             docId: parsed.docId,
                             branchId: parsed.branchId,
@@ -145,6 +227,7 @@ const server = Bun.serve<ClientData>({
                         return;
                     }
                     case 'renameBranch': {
+                        if (rejectLockedWrite(ws, parsed.docId, parsed.actor)) return;
                         const branch = store.renameBranch({
                             docId: parsed.docId,
                             branchId: parsed.branchId,
@@ -154,6 +237,7 @@ const server = Bun.serve<ClientData>({
                         return;
                     }
                     case 'mergeBranch': {
+                        if (rejectLockedWrite(ws, parsed.docId, parsed.actor)) return;
                         const event = store.appendMergeEvent({
                             docId: parsed.docId,
                             branchId: parsed.targetBranchId,
@@ -175,6 +259,7 @@ const server = Bun.serve<ClientData>({
                         return;
                     }
                     case 'clientUpdate': {
+                        if (rejectLockedWrite(ws, parsed.docId, parsed.actor)) return;
                         store.ensureDocument(
                             parsed.docId,
                             parsed.schemaVersion,
@@ -256,6 +341,63 @@ function hasDuplicateSession(ws: ServerWebSocket, sessionId: string) {
         if (client.data.sessionId === sessionId) return true;
     }
     return false;
+}
+
+function rejectLockedWrite(ws: ServerWebSocket, docId: string, actor: string) {
+    const lock = store.activeMigrationLock(docId);
+    if (!lock || lock.ownerActor === actor) return false;
+    sendWaitForMigration(ws, lock);
+    return true;
+}
+
+function sendWaitForMigration(ws: ServerWebSocket, lock: ServerMigrationLock) {
+    send(ws, {
+        kind: 'waitForMigration',
+        version: SERVER_PROTOCOL_VERSION,
+        docId: lock.docId,
+        ownerActor: lock.ownerActor,
+        targetSchemaVersion: lock.targetSchemaVersion,
+        targetSchemaFingerprintHash: lock.targetSchemaFingerprintHash,
+    });
+}
+
+function broadcastWaitForMigration(docId: string, lock: ServerMigrationLock, ownerActor: string) {
+    for (const client of clients) {
+        if (client.data.docId !== docId) continue;
+        if (client.data.actor === ownerActor) continue;
+        sendWaitForMigration(client, lock);
+    }
+}
+
+function broadcastMigrationComplete(
+    docId: string,
+    schemaVersion: number,
+    schemaFingerprintHash: string,
+    ownerActor: string,
+) {
+    for (const client of clients) {
+        if (client.data.docId !== docId) continue;
+        if (client.data.actor === ownerActor) continue;
+        send(client, {
+            kind: 'clientMigrationRequired',
+            version: SERVER_PROTOCOL_VERSION,
+            docId,
+            schemaVersion,
+            schemaFingerprintHash,
+        });
+    }
+}
+
+function broadcastMigrationCancelled(docId: string, reason: string) {
+    for (const client of clients) {
+        if (client.data.docId !== docId) continue;
+        send(client, {
+            kind: 'migrationCancelled',
+            version: SERVER_PROTOCOL_VERSION,
+            docId,
+            reason,
+        });
+    }
 }
 
 function sendEventsAfter(ws: ServerWebSocket, branchId: string, lastSeenEventIndex: number) {

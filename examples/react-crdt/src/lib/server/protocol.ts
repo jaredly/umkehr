@@ -90,6 +90,29 @@ export type ClientServerMessage =
           docId: string;
           branchId: string;
           elementId: string | null;
+      }
+    | {
+          kind: 'serverMigrationRequest';
+          version: 3;
+          actor: string;
+          userId: string;
+          docId: string;
+          targetSchemaVersion: number;
+          targetSchemaFingerprint: string;
+          targetSchemaFingerprintHash: string;
+      }
+    | {
+          kind: 'serverMigrationUpload';
+          version: 3;
+          actor: string;
+          userId: string;
+          docId: string;
+          sourceSchemaFingerprintHash: string;
+          targetSchemaVersion: number;
+          targetSchemaFingerprint: string;
+          targetSchemaFingerprintHash: string;
+          branches: ServerBranch[];
+          events: ServerBranchEvent[];
       };
 
 export type ServerClientMessage =
@@ -164,6 +187,49 @@ export type ServerClientMessage =
           branchId: string;
           elementId: string | null;
           at: string;
+      }
+    | {
+          kind: 'serverMigrationRequired';
+          version: 3;
+          docId: string;
+          sourceSchemaVersion: number;
+          sourceSchemaFingerprintHash: string;
+          targetSchemaVersion: number;
+          targetSchemaFingerprintHash: string;
+      }
+    | {
+          kind: 'waitForMigration';
+          version: 3;
+          docId: string;
+          ownerActor: string;
+          targetSchemaVersion: number;
+          targetSchemaFingerprintHash: string;
+      }
+    | {
+          kind: 'serverMigrationDump';
+          version: 3;
+          docId: string;
+          sourceSchemaVersion: number;
+          sourceSchemaFingerprint: string;
+          sourceSchemaFingerprintHash: string;
+          targetSchemaVersion: number;
+          targetSchemaFingerprint: string;
+          targetSchemaFingerprintHash: string;
+          branches: ServerBranch[];
+          events: ServerBranchEvent[];
+      }
+    | {
+          kind: 'serverMigrationComplete' | 'clientMigrationRequired' | 'schemaMismatch';
+          version: 3;
+          docId: string;
+          schemaVersion: number;
+          schemaFingerprintHash: string;
+      }
+    | {
+          kind: 'migrationCancelled';
+          version: 3;
+          docId: string;
+          reason: string;
       };
 
 export function parseServerMessage<TState>(
@@ -214,6 +280,54 @@ export function parseServerMessage<TState>(
 
     if (input.kind === 'error') {
         if (typeof input.message !== 'string') return null;
+        return input as ServerClientMessage;
+    }
+
+    if (input.kind === 'serverMigrationRequired') {
+        if (input.docId !== docId) return null;
+        if (!Number.isSafeInteger(input.sourceSchemaVersion)) return null;
+        if (!Number.isSafeInteger(input.targetSchemaVersion)) return null;
+        if (typeof input.sourceSchemaFingerprintHash !== 'string') return null;
+        if (typeof input.targetSchemaFingerprintHash !== 'string') return null;
+        return input as ServerClientMessage;
+    }
+
+    if (input.kind === 'waitForMigration') {
+        if (input.docId !== docId) return null;
+        if (typeof input.ownerActor !== 'string' || input.ownerActor.length === 0) return null;
+        if (!Number.isSafeInteger(input.targetSchemaVersion)) return null;
+        if (typeof input.targetSchemaFingerprintHash !== 'string') return null;
+        return input as ServerClientMessage;
+    }
+
+    if (input.kind === 'serverMigrationDump') {
+        if (input.docId !== docId) return null;
+        if (!Number.isSafeInteger(input.sourceSchemaVersion)) return null;
+        if (!Number.isSafeInteger(input.targetSchemaVersion)) return null;
+        if (typeof input.sourceSchemaFingerprint !== 'string') return null;
+        if (typeof input.sourceSchemaFingerprintHash !== 'string') return null;
+        if (typeof input.targetSchemaFingerprint !== 'string') return null;
+        if (typeof input.targetSchemaFingerprintHash !== 'string') return null;
+        if (!Array.isArray(input.branches) || !Array.isArray(input.events)) return null;
+        const branches = parseBranches(input.branches);
+        if (!branches) return null;
+        return {...input, branches, events: input.events as ServerBranchEvent[]} as ServerClientMessage;
+    }
+
+    if (
+        input.kind === 'serverMigrationComplete' ||
+        input.kind === 'clientMigrationRequired' ||
+        input.kind === 'schemaMismatch'
+    ) {
+        if (input.docId !== docId) return null;
+        if (!Number.isSafeInteger(input.schemaVersion)) return null;
+        if (typeof input.schemaFingerprintHash !== 'string') return null;
+        return input as ServerClientMessage;
+    }
+
+    if (input.kind === 'migrationCancelled') {
+        if (input.docId !== docId) return null;
+        if (typeof input.reason !== 'string') return null;
         return input as ServerClientMessage;
     }
 

@@ -1,6 +1,11 @@
 import typia from 'typia';
 import {hlc, latestCrdtUpdateTimestamp, type CrdtUpdate, type HlcTimestamp} from 'umkehr/crdt';
-import type {ServerBranch, ServerBranchEvent, ServerPresenceUser} from './types';
+import type {
+    ServerBranch,
+    ServerBranchEvent,
+    ServerMigrationUpload,
+    ServerPresenceUser,
+} from './types';
 
 export const SERVER_PROTOCOL_VERSION = 3;
 
@@ -86,7 +91,87 @@ export type ClientServerMessage =
           docId: string;
           branchId: string;
           elementId: string | null;
-      };
+      }
+    | {
+          kind: 'serverMigrationRequest';
+          version: 3;
+          actor: string;
+          userId: string;
+          docId: string;
+          targetSchemaVersion: number;
+          targetSchemaFingerprint: string;
+          targetSchemaFingerprintHash: string;
+      }
+    | ({
+          kind: 'serverMigrationUpload';
+          version: 3;
+          actor: string;
+          userId: string;
+      } & ServerMigrationUpload);
+
+export type ServerMigrationRequiredMessage = {
+    kind: 'serverMigrationRequired';
+    version: 3;
+    docId: string;
+    sourceSchemaVersion: number;
+    sourceSchemaFingerprintHash: string;
+    targetSchemaVersion: number;
+    targetSchemaFingerprintHash: string;
+};
+
+export type WaitForMigrationMessage = {
+    kind: 'waitForMigration';
+    version: 3;
+    docId: string;
+    ownerActor: string;
+    targetSchemaVersion: number;
+    targetSchemaFingerprintHash: string;
+};
+
+export type ClientMigrationRequiredMessage = {
+    kind: 'clientMigrationRequired';
+    version: 3;
+    docId: string;
+    schemaVersion: number;
+    schemaFingerprintHash: string;
+};
+
+export type MigrationCancelledMessage = {
+    kind: 'migrationCancelled';
+    version: 3;
+    docId: string;
+    reason: string;
+};
+
+export type SchemaMismatchMessage = {
+    kind: 'schemaMismatch';
+    version: 3;
+    docId: string;
+    schemaVersion: number;
+    schemaFingerprintHash: string;
+};
+
+export type ServerMigrationDumpMessage = {
+    kind: 'serverMigrationDump';
+    version: 3;
+    docId: string;
+    sourceSchemaVersion: number;
+    sourceSchemaFingerprint: string;
+    sourceSchemaFingerprintHash: string;
+    targetSchemaVersion: number;
+    targetSchemaFingerprint: string;
+    targetSchemaFingerprintHash: string;
+    branches: ServerBranch[];
+    events: ServerBranchEvent[];
+};
+
+export type ServerMigrationCompleteMessage = {
+    kind: 'serverMigrationComplete';
+    version: 3;
+    docId: string;
+    schemaVersion: number;
+    schemaFingerprintHash: string;
+};
 
 export type ServerClientMessage =
     | {
@@ -160,7 +245,14 @@ export type ServerClientMessage =
           branchId: string;
           elementId: string | null;
           at: string;
-      };
+      }
+    | ServerMigrationRequiredMessage
+    | WaitForMigrationMessage
+    | ClientMigrationRequiredMessage
+    | MigrationCancelledMessage
+    | SchemaMismatchMessage
+    | ServerMigrationDumpMessage
+    | ServerMigrationCompleteMessage;
 
 const validateClientMessage = typia.createValidate<ClientServerMessage>();
 
@@ -182,6 +274,18 @@ export function parseClientMessage(input: unknown): ClientServerMessage | null {
         case 'presenceSelection':
             if (!result.data.branchId) return null;
             if (result.data.elementId !== null && !result.data.elementId.trim()) return null;
+            return result.data;
+        case 'serverMigrationRequest':
+            if (!Number.isSafeInteger(result.data.targetSchemaVersion)) return null;
+            if (!result.data.targetSchemaFingerprint.trim()) return null;
+            if (!result.data.targetSchemaFingerprintHash.trim()) return null;
+            return result.data;
+        case 'serverMigrationUpload':
+            if (!Number.isSafeInteger(result.data.targetSchemaVersion)) return null;
+            if (!result.data.sourceSchemaFingerprintHash.trim()) return null;
+            if (!result.data.targetSchemaFingerprint.trim()) return null;
+            if (!result.data.targetSchemaFingerprintHash.trim()) return null;
+            if (!Array.isArray(result.data.branches) || !Array.isArray(result.data.events)) return null;
             return result.data;
         case 'branchSubscribe':
             if (!result.data.branchId) return null;

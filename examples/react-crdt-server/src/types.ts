@@ -69,6 +69,42 @@ export type DocumentSummary = {
     eventCount: number;
 };
 
+export type ServerMigrationDump = {
+    docId: string;
+    sourceSchemaVersion: number;
+    sourceSchemaFingerprint: string;
+    sourceSchemaFingerprintHash: string;
+    targetSchemaVersion: number;
+    targetSchemaFingerprint: string;
+    targetSchemaFingerprintHash: string;
+    branches: ServerBranch[];
+    events: ServerBranchEvent[];
+};
+
+export type ServerMigrationUpload = {
+    docId: string;
+    sourceSchemaFingerprintHash: string;
+    targetSchemaVersion: number;
+    targetSchemaFingerprint: string;
+    targetSchemaFingerprintHash: string;
+    branches: ServerBranch[];
+    events: ServerBranchEvent[];
+};
+
+export type ServerMigrationLock = {
+    docId: string;
+    ownerActor: string;
+    ownerUserId: string;
+    ownerSessionId: string;
+    sourceSchemaVersion: number;
+    sourceSchemaFingerprint: string;
+    sourceSchemaFingerprintHash: string;
+    targetSchemaVersion: number;
+    targetSchemaFingerprint: string;
+    targetSchemaFingerprintHash: string;
+    updatedAt: string;
+};
+
 export type ConnectedClient = {
     actor?: string;
     userId?: string;

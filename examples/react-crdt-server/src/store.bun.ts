@@ -119,4 +119,122 @@ describe('ServerStore', () => {
         expect(store.listEventsAfter('doc', 'main', 0)).toEqual([first]);
         expect(store.ensureMainBranch('doc').tipEventIndex).toBe(1);
     });
+
+    it('grants a migration lock and dumps all branch data', () => {
+        const store = createStore();
+        store.ensureDocument('doc', 1, 'schema-v1', 'hash-v1');
+        const event = store.appendUpdateEvent({
+            docId: 'doc',
+            branchId: 'main',
+            origin: 'user:session',
+            hlcTimestamp: '001:user:session',
+            update: {op: 'set', path: [], value: {}, ts: '001:user:session'},
+        });
+
+        const result = store.beginMigration({
+            docId: 'doc',
+            ownerActor: 'user:session',
+            ownerUserId: 'user',
+            ownerSessionId: 'session',
+            targetSchemaVersion: 2,
+            targetSchemaFingerprint: 'schema-v2',
+            targetSchemaFingerprintHash: 'hash-v2',
+        });
+
+        expect(result.kind).toBe('granted');
+        if (result.kind !== 'granted') return;
+        expect(result.dump).toMatchObject({
+            docId: 'doc',
+            sourceSchemaVersion: 1,
+            sourceSchemaFingerprintHash: 'hash-v1',
+            targetSchemaVersion: 2,
+            targetSchemaFingerprintHash: 'hash-v2',
+        });
+        expect(result.dump.branches.map((branch) => branch.branchId)).toEqual(['main']);
+        expect(result.dump.events).toEqual([event]);
+    });
+
+    it('blocks competing migration locks until the active lock expires', () => {
+        const store = createStore();
+        store.ensureDocument('doc', 1, 'schema-v1', 'hash-v1');
+        store.beginMigration({
+            docId: 'doc',
+            ownerActor: 'user:session',
+            ownerUserId: 'user',
+            ownerSessionId: 'session',
+            targetSchemaVersion: 2,
+            targetSchemaFingerprint: 'schema-v2',
+            targetSchemaFingerprintHash: 'hash-v2',
+        });
+
+        const competing = store.beginMigration({
+            docId: 'doc',
+            ownerActor: 'other:session',
+            ownerUserId: 'other',
+            ownerSessionId: 'session',
+            targetSchemaVersion: 2,
+            targetSchemaFingerprint: 'schema-v2',
+            targetSchemaFingerprintHash: 'hash-v2',
+        });
+
+        expect(competing.kind).toBe('locked');
+        expect(store.expireMigrationLock('doc', new Date(Date.now() + 61_000))).toMatchObject({
+            ownerActor: 'user:session',
+        });
+        expect(store.activeMigrationLock('doc')).toBeNull();
+    });
+
+    it('archives old data and activates uploaded migrated data atomically', () => {
+        const store = createStore();
+        store.ensureDocument('doc', 1, 'schema-v1', 'hash-v1');
+        const event = store.appendUpdateEvent({
+            docId: 'doc',
+            branchId: 'main',
+            origin: 'user:session',
+            hlcTimestamp: '001:user:session',
+            update: {op: 'set', path: [], value: {}, ts: '001:user:session'},
+        });
+        store.beginMigration({
+            docId: 'doc',
+            ownerActor: 'user:session',
+            ownerUserId: 'user',
+            ownerSessionId: 'session',
+            targetSchemaVersion: 2,
+            targetSchemaFingerprint: 'schema-v2',
+            targetSchemaFingerprintHash: 'hash-v2',
+        });
+
+        const completed = store.completeMigration({
+            ownerActor: 'user:session',
+            upload: {
+                docId: 'doc',
+                sourceSchemaFingerprintHash: 'hash-v1',
+                targetSchemaVersion: 2,
+                targetSchemaFingerprint: 'schema-v2',
+                targetSchemaFingerprintHash: 'hash-v2',
+                branches: [
+                    {
+                        docId: 'doc',
+                        branchId: 'main',
+                        name: 'main',
+                        tipEventIndex: 1,
+                        createdAt: 'now',
+                        updatedAt: 'now',
+                    },
+                ],
+                events: [{
+                    ...event,
+                    update: {op: 'set', path: [], value: {migrated: true}, ts: event.hlcTimestamp},
+                }],
+            },
+        });
+
+        expect(completed).toEqual({schemaVersion: 2, schemaFingerprintHash: 'hash-v2'});
+        expect(store.getDocument('doc')).toMatchObject({schemaVersion: 2, schemaFingerprintHash: 'hash-v2'});
+        expect(store.archivedSchemaHashes('doc')).toEqual(['hash-v1']);
+        expect(store.listEventsAfter('doc', 'main', 0)[0]).toMatchObject({
+            kind: 'update',
+            update: {value: {migrated: true}},
+        });
+    });
 });

@@ -498,6 +498,30 @@ export function useServerSync<TState>({
                 statusStore.clear(whiteboardSelectionStatusId(parsed.actor));
             } else if (parsed.kind === 'presenceSelection') {
                 applySelectionMessage(parsed);
+            } else if (parsed.kind === 'serverMigrationRequired') {
+                stateStore.setSnapshot({
+                    kind: 'error',
+                    message: 'Server migration is required before this client can sync.',
+                });
+            } else if (parsed.kind === 'waitForMigration') {
+                stateStore.setSnapshot({
+                    kind: 'error',
+                    message: 'A server schema migration is in progress. Wait for it to finish, then reload.',
+                });
+            } else if (parsed.kind === 'clientMigrationRequired') {
+                stateStore.setSnapshot({
+                    kind: 'error',
+                    message: 'This app version is older than the server document. Update your app to connect.',
+                });
+            } else if (parsed.kind === 'schemaMismatch') {
+                stateStore.setSnapshot({
+                    kind: 'error',
+                    message: 'Server document schema does not match this app version.',
+                });
+            } else if (parsed.kind === 'migrationCancelled') {
+                stateStore.setSnapshot({kind: 'error', message: parsed.reason});
+            } else if (parsed.kind === 'serverMigrationComplete' || parsed.kind === 'serverMigrationDump') {
+                // Phase 8 server coordination is protocol-visible here; upload orchestration is wired in a later phase.
             }
         });
 

@@ -4,12 +4,16 @@ import type {
     DocumentSummary,
     ServerBranch,
     ServerBranchEvent,
+    ServerMigrationDump,
+    ServerMigrationLock,
+    ServerMigrationUpload,
     ServerMergeEvent,
     ServerUpdateEvent,
     ServerUser,
 } from './types';
 
 const MAIN_BRANCH_ID = 'main';
+const MIGRATION_LOCK_TTL_MS = 60_000;
 
 export class ServerStore {
     private db: Database;
@@ -59,6 +63,29 @@ export class ServerStore {
                 nicknameKey text not null unique,
                 createdAt text not null,
                 lastSeenAt text not null
+            );
+            create table if not exists archived_documents (
+                docId text not null,
+                schemaFingerprintHash text not null,
+                schemaVersion integer not null,
+                schemaFingerprint text not null,
+                archivedAt text not null,
+                branchesJson text not null,
+                eventsJson text not null,
+                primary key (docId, schemaFingerprintHash)
+            );
+            create table if not exists migration_locks (
+                docId text primary key,
+                ownerActor text not null,
+                ownerUserId text not null,
+                ownerSessionId text not null,
+                sourceSchemaVersion integer not null,
+                sourceSchemaFingerprint text not null,
+                sourceSchemaFingerprintHash text not null,
+                targetSchemaVersion integer not null,
+                targetSchemaFingerprint text not null,
+                targetSchemaFingerprintHash text not null,
+                updatedAt text not null
             );
         `);
         this.migrateLegacyDocuments();
@@ -184,6 +211,163 @@ export class ServerStore {
             )
             .run(docId, schemaVersion, schemaFingerprintHash, schemaFingerprint);
         this.ensureMainBranch(docId);
+    }
+
+    getDocument(docId: string): {schemaVersion: number; schemaFingerprint: string; schemaFingerprintHash: string} | null {
+        return this.db
+            .query<{schemaVersion: number; schemaFingerprint: string; schemaFingerprintHash: string}, [string]>(
+                'select schemaVersion, schemaFingerprint, schemaFingerprintHash from documents where docId = ?',
+            )
+            .get(docId) ?? null;
+    }
+
+    activeMigrationLock(docId: string, now = new Date()): ServerMigrationLock | null {
+        this.expireMigrationLock(docId, now);
+        const lock = this.getMigrationLock(docId);
+        return lock ?? null;
+    }
+
+    expireMigrationLock(docId: string, now = new Date()): ServerMigrationLock | null {
+        const lock = this.getMigrationLock(docId);
+        if (!lock) return null;
+        if (now.getTime() - Date.parse(lock.updatedAt) <= MIGRATION_LOCK_TTL_MS) return null;
+        this.db.query('delete from migration_locks where docId = ?').run(docId);
+        return lock;
+    }
+
+    beginMigration({
+        docId,
+        ownerActor,
+        ownerUserId,
+        ownerSessionId,
+        targetSchemaVersion,
+        targetSchemaFingerprint,
+        targetSchemaFingerprintHash,
+    }: {
+        docId: string;
+        ownerActor: string;
+        ownerUserId: string;
+        ownerSessionId: string;
+        targetSchemaVersion: number;
+        targetSchemaFingerprint: string;
+        targetSchemaFingerprintHash: string;
+    }): {kind: 'locked'; lock: ServerMigrationLock} | {kind: 'granted'; lock: ServerMigrationLock; dump: ServerMigrationDump} {
+        const existing = this.activeMigrationLock(docId);
+        if (existing && existing.ownerActor !== ownerActor) return {kind: 'locked', lock: existing};
+        const document = this.getDocument(docId);
+        if (!document) throw new Error('Document does not exist.');
+        const now = new Date().toISOString();
+        const lock: ServerMigrationLock = {
+            docId,
+            ownerActor,
+            ownerUserId,
+            ownerSessionId,
+            sourceSchemaVersion: document.schemaVersion,
+            sourceSchemaFingerprint: document.schemaFingerprint,
+            sourceSchemaFingerprintHash: document.schemaFingerprintHash,
+            targetSchemaVersion,
+            targetSchemaFingerprint,
+            targetSchemaFingerprintHash,
+            updatedAt: now,
+        };
+        this.db
+            .query(
+                `insert or replace into migration_locks
+                    (docId, ownerActor, ownerUserId, ownerSessionId, sourceSchemaVersion, sourceSchemaFingerprint,
+                     sourceSchemaFingerprintHash, targetSchemaVersion, targetSchemaFingerprint, targetSchemaFingerprintHash, updatedAt)
+                 values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            )
+            .run(
+                docId,
+                ownerActor,
+                ownerUserId,
+                ownerSessionId,
+                lock.sourceSchemaVersion,
+                lock.sourceSchemaFingerprint,
+                lock.sourceSchemaFingerprintHash,
+                targetSchemaVersion,
+                targetSchemaFingerprint,
+                targetSchemaFingerprintHash,
+                now,
+            );
+        return {kind: 'granted', lock, dump: this.migrationDump(lock)};
+    }
+
+    completeMigration({
+        ownerActor,
+        upload,
+    }: {
+        ownerActor: string;
+        upload: ServerMigrationUpload;
+    }) {
+        const tx = this.db.transaction(() => {
+            const lock = this.activeMigrationLock(upload.docId);
+            if (!lock || lock.ownerActor !== ownerActor) throw new Error('No active migration lock for this client.');
+            if (lock.sourceSchemaFingerprintHash !== upload.sourceSchemaFingerprintHash) {
+                throw new Error('Migration upload source schema does not match the active document.');
+            }
+            if (
+                lock.targetSchemaVersion !== upload.targetSchemaVersion ||
+                lock.targetSchemaFingerprintHash !== upload.targetSchemaFingerprintHash
+            ) {
+                throw new Error('Migration upload target schema does not match the lock.');
+            }
+            const document = this.getDocument(upload.docId);
+            if (!document) throw new Error('Document does not exist.');
+            if (document.schemaFingerprintHash !== upload.sourceSchemaFingerprintHash) {
+                throw new Error('Active document changed during migration.');
+            }
+            validateMigrationUpload(upload);
+            const branches = this.listBranches(upload.docId);
+            const events = branches.flatMap((branch) => this.listEventsAfter(upload.docId, branch.branchId, 0));
+            const now = new Date().toISOString();
+            this.db
+                .query(
+                    `insert or replace into archived_documents
+                        (docId, schemaFingerprintHash, schemaVersion, schemaFingerprint, archivedAt, branchesJson, eventsJson)
+                     values (?, ?, ?, ?, ?, ?, ?)`,
+                )
+                .run(
+                    upload.docId,
+                    document.schemaFingerprintHash,
+                    document.schemaVersion,
+                    document.schemaFingerprint,
+                    now,
+                    JSON.stringify(branches),
+                    JSON.stringify(events),
+                );
+            this.db.query('delete from branch_events where docId = ?').run(upload.docId);
+            this.db.query('delete from branches where docId = ?').run(upload.docId);
+            this.db
+                .query(
+                    `update documents
+                     set schemaVersion = ?, schemaFingerprintHash = ?, schemaFingerprint = ?
+                     where docId = ?`,
+                )
+                .run(
+                    upload.targetSchemaVersion,
+                    upload.targetSchemaFingerprintHash,
+                    upload.targetSchemaFingerprint,
+                    upload.docId,
+                );
+            for (const branch of upload.branches) this.insertBranch(branch);
+            for (const event of upload.events) this.insertEvent(event);
+            this.db.query('delete from migration_locks where docId = ?').run(upload.docId);
+            return {
+                schemaVersion: upload.targetSchemaVersion,
+                schemaFingerprintHash: upload.targetSchemaFingerprintHash,
+            };
+        });
+        return tx();
+    }
+
+    archivedSchemaHashes(docId: string): string[] {
+        return this.db
+            .query<{schemaFingerprintHash: string}, [string]>(
+                'select schemaFingerprintHash from archived_documents where docId = ? order by archivedAt desc',
+            )
+            .all(docId)
+            .map((row) => row.schemaFingerprintHash);
     }
 
     ensureMainBranch(docId: string) {
@@ -443,6 +627,73 @@ export class ServerStore {
         return tx();
     }
 
+    private migrationDump(lock: ServerMigrationLock): ServerMigrationDump {
+        const branches = this.listBranches(lock.docId);
+        return {
+            docId: lock.docId,
+            sourceSchemaVersion: lock.sourceSchemaVersion,
+            sourceSchemaFingerprint: lock.sourceSchemaFingerprint,
+            sourceSchemaFingerprintHash: lock.sourceSchemaFingerprintHash,
+            targetSchemaVersion: lock.targetSchemaVersion,
+            targetSchemaFingerprint: lock.targetSchemaFingerprint,
+            targetSchemaFingerprintHash: lock.targetSchemaFingerprintHash,
+            branches,
+            events: branches.flatMap((branch) => this.listEventsAfter(lock.docId, branch.branchId, 0)),
+        };
+    }
+
+    private getMigrationLock(docId: string): ServerMigrationLock | null {
+        return this.db
+            .query<ServerMigrationLock, [string]>(
+                `select docId, ownerActor, ownerUserId, ownerSessionId, sourceSchemaVersion, sourceSchemaFingerprint,
+                        sourceSchemaFingerprintHash, targetSchemaVersion, targetSchemaFingerprint,
+                        targetSchemaFingerprintHash, updatedAt
+                 from migration_locks
+                 where docId = ?`,
+            )
+            .get(docId) ?? null;
+    }
+
+    private insertBranch(branch: ServerBranch) {
+        this.db
+            .query(
+                `insert into branches
+                    (docId, branchId, name, nameKey, sourceBranchId, forkEventIndex, nextEventIndex, createdAt, updatedAt)
+                 values (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            )
+            .run(
+                branch.docId,
+                branch.branchId,
+                branch.name,
+                branchNameKey(branch.name),
+                branch.sourceBranchId ?? null,
+                branch.forkEventIndex ?? null,
+                branch.tipEventIndex + 1,
+                branch.createdAt,
+                branch.updatedAt,
+            );
+    }
+
+    private insertEvent(event: ServerBranchEvent) {
+        this.db
+            .query(
+                `insert into branch_events
+                    (docId, branchId, eventIndex, kind, origin, hlcTimestamp, mergeId, receivedAt, payloadJson)
+                 values (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            )
+            .run(
+                event.docId,
+                event.branchId,
+                event.eventIndex,
+                event.kind,
+                event.kind === 'update' ? event.origin : event.actor,
+                event.kind === 'update' ? event.hlcTimestamp : null,
+                event.kind === 'merge' ? event.mergeId : null,
+                event.kind === 'update' ? event.receivedAt : event.createdAt,
+                JSON.stringify(event),
+            );
+    }
+
     private findBranch(docId: string, branchId: string): ServerBranch | null {
         const row = this.db
             .query<BranchRow, [string, string]>(
@@ -579,6 +830,41 @@ function rowToUser(row: UserRow): ServerUser {
         userId: row.userId,
         nickname: row.nickname,
     };
+}
+
+function validateMigrationUpload(upload: ServerMigrationUpload) {
+    if (!upload.branches.length) throw new Error('Migration upload must include at least one branch.');
+    const branchIds = new Set(upload.branches.map((branch) => branch.branchId));
+    if (!branchIds.has(MAIN_BRANCH_ID)) throw new Error('Migration upload must include main branch.');
+    for (const branch of upload.branches) {
+        if (branch.docId !== upload.docId) throw new Error('Migration upload branch doc id mismatch.');
+        if (!branch.branchId.trim()) throw new Error('Migration upload branch id is required.');
+        if (!branch.name.trim()) throw new Error('Migration upload branch name is required.');
+        if (branch.sourceBranchId && !branchIds.has(branch.sourceBranchId)) {
+            throw new Error('Migration upload branch source is missing.');
+        }
+        if (!Number.isSafeInteger(branch.tipEventIndex) || branch.tipEventIndex < 0) {
+            throw new Error('Migration upload branch tip is invalid.');
+        }
+    }
+    const seen = new Set<string>();
+    for (const event of upload.events) {
+        if (event.docId !== upload.docId) throw new Error('Migration upload event doc id mismatch.');
+        if (!branchIds.has(event.branchId)) throw new Error('Migration upload event branch is missing.');
+        if (!Number.isSafeInteger(event.eventIndex) || event.eventIndex < 1) {
+            throw new Error('Migration upload event index is invalid.');
+        }
+        const key = `${event.branchId}:${event.eventIndex}`;
+        if (seen.has(key)) throw new Error('Migration upload event indexes must be unique.');
+        seen.add(key);
+        if (event.kind === 'merge' && !branchIds.has(event.sourceBranchId)) {
+            throw new Error('Migration upload merge source branch is missing.');
+        }
+        const branch = upload.branches.find((candidate) => candidate.branchId === event.branchId);
+        if (branch && event.eventIndex > branch.tipEventIndex) {
+            throw new Error('Migration upload event is beyond branch tip.');
+        }
+    }
 }
 
 function nicknameKeyFor(nickname: string) {

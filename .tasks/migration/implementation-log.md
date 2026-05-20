@@ -174,3 +174,45 @@
   - `npm run typecheck:tests`
   - `cd examples/react-crdt-server && npm run typecheck`
   - `cd examples/react-crdt-server && npm test`
+
+### Phase 8 progress
+
+- Added server migration coordination protocol messages:
+  - `serverMigrationRequired`
+  - `serverMigrationRequest`
+  - `serverMigrationDump`
+  - `serverMigrationUpload`
+  - `serverMigrationComplete`
+  - `waitForMigration`
+  - `migrationCancelled`
+  - `clientMigrationRequired`
+  - `schemaMismatch`
+- Added server-side migration locks with a one-minute expiration window.
+- Added server-side migration dumps containing active document schema metadata, all branches, and all branch events.
+- Added transactional migration upload handling that:
+  - verifies the active lock owner and source/target schema hashes
+  - validates branch/event package structure
+  - archives the old active branch/event data by schema hash
+  - replaces active document schema metadata, branches, and events atomically
+  - releases the lock after a successful upload
+- Changed server hello handling so newer clients receive `serverMigrationRequired`, old clients receive `clientMigrationRequired`, and competing clients receive `waitForMigration`.
+- Added write blocking while a migration lock is active.
+- Added migration cancellation broadcast when an expired lock is observed.
+- Updated the browser server protocol parser to accept the new migration messages and surface wait/update/schema-mismatch states as connection errors.
+- Added focused Bun store tests for:
+  - migration dump creation
+  - competing lock behavior
+  - lock expiration
+  - archive-and-activate upload transaction
+- Verified:
+  - `npm test`
+  - `npm run typecheck:examples`
+  - `npm run typecheck:tests`
+  - `cd examples/react-crdt-server && npm run typecheck`
+  - `cd examples/react-crdt-server && npm test`
+
+Remaining for Phase 9:
+
+- Define and tighten the final dump/upload package contract.
+- Wire browser-side user choice plus dump migration/upload orchestration.
+- Add upload stale-lock/source-hash negative tests and debug/admin display of archive/lock details.
