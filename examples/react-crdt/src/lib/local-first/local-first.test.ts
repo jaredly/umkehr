@@ -7,6 +7,7 @@ import {
     hlc,
     type CrdtDocument,
 } from 'umkehr/crdt';
+import {sha256Hex} from 'umkehr/migration';
 import {createRecentBatchCache, batchKey} from './recentBatchCache';
 import {
     LOCAL_FIRST_PROTOCOL_VERSION,
@@ -576,6 +577,34 @@ describe('local-first session planning', () => {
         ]);
     });
 
+    it('turns peer schema mismatches into an update-your-app connection error', () => {
+        expect(
+            planIncomingMessage({
+                state: session(),
+                peerId: 'peer-remote',
+                input: {
+                    kind: 'hello',
+                    version: LOCAL_FIRST_PROTOCOL_VERSION,
+                    actor: 'remote',
+                    peerId: 'peer-remote',
+                    docId: 'todos',
+                    schemaVersion: 2,
+                    schemaFingerprint: 'newer-schema',
+                    schemaFingerprintHash: 'newer-schema-hash',
+                    role: 'client',
+                    vector: {remote: ts('remote', 1)},
+                },
+                config,
+            }),
+        ).toEqual([
+            {
+                kind: 'connectionError',
+                peerId: 'peer-remote',
+                message: 'Rejected schema mismatch from peer-remote. Update your app to connect to this document.',
+            },
+        ]);
+    });
+
     it('plans sync requests and sync responses as transport-independent effects', () => {
         const syncRequestEffects = planIncomingMessage({
             state: session(),
@@ -733,6 +762,7 @@ describe('local-first new-document migrations', () => {
             source: normalizePersistedReplica(sourceReplica()),
             current: migrationConfig,
             currentFingerprint: 'new-schema',
+            currentFingerprintHash: sha256Hex('new-schema'),
         });
 
         expect(candidate).toMatchObject({
@@ -750,6 +780,7 @@ describe('local-first new-document migrations', () => {
             source,
             current: migrationConfig,
             currentFingerprint: 'new-schema',
+            currentFingerprintHash: sha256Hex('new-schema'),
         });
         expect(candidate).not.toBeNull();
         if (!candidate) return;
@@ -766,10 +797,11 @@ describe('local-first new-document migrations', () => {
 
         expect(source.docId).toBe('todos-v1');
         expect(source.vector).toEqual({local: ts('local', 10)});
-        expect(migrated).toMatchObject({
+        expect(migrated.replica).toMatchObject({
             docId: 'todos-v2',
             schemaVersion: 2,
             schemaFingerprint: 'new-schema',
+            schemaFingerprintHash: sha256Hex('new-schema'),
             replicaId: 'local',
             vector: {},
             lineage: {
@@ -779,8 +811,51 @@ describe('local-first new-document migrations', () => {
                 migrationId: 'todos-v1-to-v2',
             },
         });
-        expect(migrated.compactedThrough).toBeUndefined();
-        expect(migrated.history.doc.state.title).toBe('Old');
-        expect(migrated.history.doc.schema.tagKey).toBe('type');
+        expect(migrated.replica.compactedThrough).toBeUndefined();
+        expect(migrated.replica.history.doc.state.title).toBe('Old');
+        expect(migrated.replica.history.doc.schema.tagKey).toBe('type');
+    });
+
+    it('migrates retained batches and reconstructs history/vector from them', () => {
+        const source = normalizePersistedReplica(sourceReplica());
+        const candidate = findMigrationCandidate({
+            source,
+            current: migrationConfig,
+            currentFingerprint: 'new-schema',
+            currentFingerprintHash: sha256Hex('new-schema'),
+        });
+        expect(candidate).not.toBeNull();
+        if (!candidate) return;
+        const retained = batch({
+            docId: 'todos-v1',
+            origin: 'local',
+            batchId: 'batch-retained',
+            document: source.history.base,
+            title: 'Edited from retained log',
+            timestamp: ts('local', 10),
+        });
+
+        const migrated = createMigratedReplica({
+            source,
+            candidate,
+            identity: {replicaId: 'local', createdAt: '2026-05-17T00:00:00.000Z'},
+            schema,
+            tagKey: 'type',
+            validateState,
+            batches: [retained],
+            now: '2026-05-17T00:00:00.000Z',
+        });
+
+        expect(migrated.replica.history.updates).toEqual(migrated.batches.flatMap(({updates}) => updates));
+        expect(migrated.replica.history.doc.state.title).toBe('Edited from retained log');
+        expect(migrated.replica.vector).toEqual({local: ts('local', 10)});
+        expect(migrated.batches).toMatchObject([
+            {
+                docId: 'todos-v2',
+                batchId: 'batch-retained',
+                origin: 'local',
+                vectorAfter: {local: ts('local', 10)},
+            },
+        ]);
     });
 });

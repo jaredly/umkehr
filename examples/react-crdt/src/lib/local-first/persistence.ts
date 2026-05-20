@@ -67,6 +67,38 @@ export async function saveReplica<TState>(replica: PersistedReplica<TState>) {
     await db.put('replicas', replica as PersistedReplica<unknown>, replica.docId);
 }
 
+export async function replaceReplicaState<TState>(
+    replica: PersistedReplica<TState>,
+    batches: PersistedBatch[],
+) {
+    const db = await openLocalFirstDb();
+    const [batchKeys, receivedKeys] = await Promise.all([
+        db.getAllKeysFromIndex('batches', 'docId', replica.docId),
+        db.getAllKeysFromIndex('receivedBatches', 'docId', replica.docId),
+    ]);
+    const tx = db.transaction(['replicas', 'batches', 'receivedBatches'], 'readwrite');
+    await tx.objectStore('replicas').put(replica as PersistedReplica<unknown>, replica.docId);
+    await Promise.all([
+        ...batchKeys.map((key) => tx.objectStore('batches').delete(key)),
+        ...receivedKeys.map((key) => tx.objectStore('receivedBatches').delete(key)),
+        ...batches.map(async (batch) => {
+            await tx
+                .objectStore('batches')
+                .put(batch, batchKey(batch.docId, batch.origin, batch.batchId));
+            await tx.objectStore('receivedBatches').put(
+                {
+                    docId: batch.docId,
+                    origin: batch.origin,
+                    batchId: batch.batchId,
+                    receivedAt: batch.receivedAt,
+                } satisfies ReceivedBatch,
+                batchKey(batch.docId, batch.origin, batch.batchId),
+            );
+        }),
+    ]);
+    await tx.done;
+}
+
 export async function clearReplica(docId: string) {
     const db = await openLocalFirstDb();
     await Promise.all([

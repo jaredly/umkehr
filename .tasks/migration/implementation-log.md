@@ -119,3 +119,30 @@
   - `npm run typecheck:tests`
   - `cd examples/react-crdt-server && npm run typecheck`
   - `cd examples/react-crdt-server && npm test`
+
+### Phase 6 progress
+
+- Replaced the local-first state-only migration implementation with the shared CRDT history migration runner.
+- Extended `LocalFirstSchemaConfig` so local-first migrations can carry shared migration hooks, fingerprint hashes, and optional previous schema registrations.
+- Added `migrateCrdtUpdates` to `umkehr/migration` so local-first can migrate retained batches while preserving batch boundaries.
+- Changed local-first startup to load retained batches with the replica and treat retained batches as the source of truth when rebuilding `history` and `vector`.
+- Changed local-first new-document migration to:
+  - rebuild source history from retained batches
+  - migrate CRDT base/doc/update history
+  - migrate retained batches in timestamp order
+  - recompute migrated batch timestamp ranges and vectors
+  - reconstruct `history.updates` from migrated retained batches
+  - save the target replica and retained batches in one IndexedDB transaction
+- Preserved the existing explicit new-document migration/fork flow rather than making migrations required on startup.
+- Added local-first protocol/session handling for schema-version/hash mismatches with an update-your-app connection error.
+- Added focused tests for:
+  - retained batch migration and history/vector reconstruction
+  - schema mismatch connection errors
+  - existing v1 replica normalization
+- Verified:
+  - `npm test -- examples/react-crdt/src/lib/local-first/local-first.test.ts src/migration/migration.test.ts`
+  - `npm test`
+  - `npm run typecheck:examples`
+  - `npm run typecheck:tests`
+  - `cd examples/react-crdt-server && npm run typecheck`
+  - `cd examples/react-crdt-server && npm test`

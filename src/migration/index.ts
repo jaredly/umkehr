@@ -341,6 +341,23 @@ export function migrateCrdtHistory<TCurrent>(
     };
 }
 
+export function migrateCrdtUpdates<TCurrent>(
+    config: SchemaMigrationConfig<TCurrent>,
+    updates: CrdtUpdate[],
+    from: SchemaVersionMetadata,
+): MigrationResult<CrdtUpdate[]> {
+    const path = resolveMigrationPath(config, from);
+    const migratedUpdates = migrateCrdtUpdateList(config, updates, from, path);
+    return {
+        value: migratedUpdates,
+        migrationIds: path.map((migration) => migration.id),
+        fromVersion: from.schemaVersion,
+        toVersion: config.current.version,
+        fromFingerprintHash: from.schemaFingerprintHash,
+        toFingerprintHash: config.current.fingerprintHash,
+    };
+}
+
 export function renamePatchObjectField<T>(patch: Patch<T>, fromKey: string | number, toKey: string | number): Patch<T> {
     return {...patch, path: renamePatchPathKey(patch.path, fromKey, toKey)} as Patch<T>;
 }

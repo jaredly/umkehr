@@ -184,6 +184,13 @@ export function planIncomingMessage<TState>({
     input: unknown;
     config: LocalFirstProtocolConfig<TState>;
 }): LocalFirstSessionEffect<TState>[] {
+    if (hasMismatchedSchema(input, config)) {
+        return [{
+            kind: 'connectionError',
+            peerId,
+            message: `Rejected schema mismatch from ${peerId}. Update your app to connect to this document.`,
+        }];
+    }
     const message = parseLocalFirstMessage(input, config);
     if (!message) {
         return [{kind: 'connectionError', peerId, message: `Rejected invalid message from ${peerId}.`}];
@@ -295,4 +302,20 @@ function vectorForMessage<TState>(message: LocalFirstMessage<TState>): VersionVe
     if (message.kind === 'hello' || message.kind === 'syncRequest') return message.vector;
     if (message.kind === 'snapshot') return message.compactedThrough;
     return undefined;
+}
+
+function hasMismatchedSchema<TState>(input: unknown, config: LocalFirstProtocolConfig<TState>) {
+    if (!isRecord(input)) return false;
+    if (input.version !== LOCAL_FIRST_PROTOCOL_VERSION) return false;
+    if (input.docId !== config.docId) return false;
+    if (typeof input.schemaVersion !== 'number') return false;
+    if (typeof input.schemaFingerprintHash !== 'string') return false;
+    return (
+        input.schemaVersion !== config.schemaVersion ||
+        input.schemaFingerprintHash !== config.schemaFingerprintHash
+    );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

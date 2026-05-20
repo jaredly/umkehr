@@ -5,6 +5,7 @@ import {
     type HlcTimestamp,
 } from 'umkehr/crdt';
 import type {VersionVector} from './types';
+import type {PersistedBatch} from './types';
 
 export function timestampsForUpdate(update: CrdtUpdate): HlcTimestamp[] {
     if (update.op !== 'setOrder') return [update.ts];
@@ -44,6 +45,13 @@ export function advanceVector(
 
 export function vectorForUpdates(updates: readonly CrdtUpdate[]): VersionVector {
     return advanceVector({}, updates);
+}
+
+export function compareBatches(a: PersistedBatch, b: PersistedBatch) {
+    if (a.minTs && b.minTs) return compareTimestamps(a.minTs, b.minTs);
+    if (a.minTs) return -1;
+    if (b.minTs) return 1;
+    return a.batchId.localeCompare(b.batchId);
 }
 
 export function mergeVectors(a: VersionVector, b: VersionVector): VersionVector {

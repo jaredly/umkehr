@@ -6,7 +6,14 @@ import {
     type CrdtRuntime,
 } from '../crdtApp';
 import {LocalFirstControls} from './LocalFirstControls';
-import {hasReplica, loadOrCreateIdentity, loadReplica, saveReplica} from './persistence';
+import {
+    hasReplica,
+    listBatches,
+    loadOrCreateIdentity,
+    loadReplica,
+    replaceReplicaState,
+    saveReplica,
+} from './persistence';
 import {schemaFingerprint, schemaFingerprintHash} from './schemaFingerprint';
 import {acquireReplicaTabLock, type TabLock} from './tabLock';
 import type {DocumentLineage, PersistedReplica, ReplicaIdentity, VersionVector} from './types';
@@ -16,6 +23,8 @@ import {
     createMigratedReplica,
     findMigrationCandidate,
     normalizePersistedReplica,
+    retainedHistory,
+    vectorForBatches,
     type MigrationCandidate,
 } from './migration';
 
@@ -235,17 +244,21 @@ async function loadInitialState<TState>(
     const persisted = await loadReplica<TState>(docId);
     if (persisted) {
         const normalized = normalizePersistedReplica(persisted);
-        if (normalized.schemaFingerprint !== schemaFingerprint) {
+        const batches = await listBatches(docId);
+        if (normalized.schemaFingerprintHash !== schemaFingerprintHash) {
             const candidate = findMigrationCandidate({
                 source: normalized,
                 current: schemaConfig,
                 currentFingerprint: schemaFingerprint,
+                currentFingerprintHash: schemaFingerprintHash,
             });
             if (candidate) {
                 return {kind: 'migratable', identity, source: normalized, candidate, lock};
             }
             throw new Error('Persisted document schema does not match this app version.');
         }
+        const history = retainedHistory(normalized.history, batches);
+        const vector = batches.length ? vectorForBatches(batches) : normalized.vector;
         return {
             kind: 'ready',
             loaded: {
@@ -254,8 +267,8 @@ async function loadInitialState<TState>(
                 schemaVersion: normalized.schemaVersion,
                 schemaFingerprint,
                 schemaFingerprintHash,
-                history: normalized.history,
-                vector: normalized.vector,
+                history,
+                vector,
                 compactedThrough: normalized.compactedThrough,
                 lineage: normalized.lineage,
                 source: normalized.lineage ? 'migrated' : 'loaded',
@@ -354,7 +367,7 @@ function MigrationPanel<TState>({
 
 async function createMigratedDocument<TState>({
     app,
-    schemaConfig: _schemaConfig,
+    schemaConfig,
     schemaFingerprint: _schemaFingerprint,
     loadState,
     setError,
@@ -377,9 +390,11 @@ async function createMigratedDocument<TState>({
             schema: app.schema,
             tagKey: app.tagKey,
             validateState: app.validateState,
+            batches: await listBatches(loadState.source.docId),
+            previous: schemaConfig.previous,
         });
-        await saveReplica(migrated);
-        openDocument(migrated.docId);
+        await replaceReplicaState(migrated.replica, migrated.batches);
+        openDocument(migrated.replica.docId);
     } catch (error) {
         setError(error instanceof Error ? error.message : String(error));
     }
