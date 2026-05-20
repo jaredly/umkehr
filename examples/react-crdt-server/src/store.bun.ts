@@ -25,7 +25,7 @@ function createStore() {
 describe('ServerStore', () => {
     it('auto-creates main and assigns contiguous update event indexes', () => {
         const store = createStore();
-        store.ensureDocument('doc', 'schema');
+        store.ensureDocument('doc', 1, 'schema', 'schema-hash');
 
         expect(store.ensureMainBranch('doc').name).toBe('main');
         expect(store.listBranches('doc').map((branch) => branch.branchId)).toEqual(['main']);
@@ -60,7 +60,7 @@ describe('ServerStore', () => {
 
     it('creates and renames branches with unique names', () => {
         const store = createStore();
-        store.ensureDocument('doc', 'schema');
+        store.ensureDocument('doc', 1, 'schema', 'schema-hash');
 
         const branch = store.createBranch({
             docId: 'doc',
@@ -96,7 +96,7 @@ describe('ServerStore', () => {
 
     it('deduplicates merge events by mergeId', () => {
         const store = createStore();
-        store.ensureDocument('doc', 'schema');
+        store.ensureDocument('doc', 1, 'schema', 'schema-hash');
 
         const first = store.appendMergeEvent({
             docId: 'doc',

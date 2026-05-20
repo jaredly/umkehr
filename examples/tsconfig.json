@@ -6,6 +6,7 @@
         "paths": {
             "umkehr": ["../dist/src/index.d.ts"],
             "umkehr/crdt": ["../dist/src/crdt/index.d.ts"],
+            "umkehr/migration": ["../dist/src/migration/index.d.ts"],
             "umkehr/react": ["../dist/src/react/react.d.ts"],
             "umkehr/react-crdt": ["../dist/src/react-crdt/index.d.ts"],
             "umkehr/remix": ["../dist/src/remix/index.d.ts"]

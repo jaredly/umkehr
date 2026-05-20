@@ -5,6 +5,7 @@ import {
     hlc,
     type CrdtLocalHistory,
 } from 'umkehr/crdt';
+import {sha256Hex} from 'umkehr/migration';
 import type {DocumentLineage, PersistedReplica, ReplicaIdentity} from './types';
 import type {LocalFirstMigration, LocalFirstSchemaConfig} from './schemaConfig';
 
@@ -12,6 +13,7 @@ export const DEFAULT_SCHEMA_VERSION = 1;
 
 export type NormalizedPersistedReplica<TState> = PersistedReplica<TState> & {
     schemaVersion: number;
+    schemaFingerprintHash: string;
 };
 
 export type MigrationCandidate<TState> = {
@@ -31,6 +33,8 @@ export function normalizePersistedReplica<TState>(
     return {
         ...replica,
         schemaVersion: replica.schemaVersion ?? DEFAULT_SCHEMA_VERSION,
+        schemaFingerprintHash:
+            replica.schemaFingerprintHash ?? sha256Hex(replica.schemaFingerprint),
     };
 }
 
@@ -108,6 +112,7 @@ export function createMigratedReplica<TState>({
         protocolVersion: 1,
         schemaVersion: candidate.targetSchemaVersion,
         schemaFingerprint: candidate.targetSchemaFingerprint,
+        schemaFingerprintHash: sha256Hex(candidate.targetSchemaFingerprint),
         replicaId: identity.replicaId,
         history,
         vector: {},

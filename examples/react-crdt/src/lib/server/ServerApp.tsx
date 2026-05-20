@@ -1,6 +1,6 @@
 import {useCallback, useEffect, useMemo, useState, type FormEvent} from 'react';
 import {createInitialCrdtHistory, type AppDefinition, type CrdtRuntime} from '../crdtApp';
-import {schemaFingerprint} from '../local-first/schemaFingerprint';
+import {schemaFingerprint, schemaFingerprintHash} from '../local-first/schemaFingerprint';
 import {ServerControls} from './ServerControls';
 import {ServerHistoryView} from './ServerHistoryView';
 import {
@@ -36,12 +36,13 @@ export function ServerApp<TState>({
 }) {
     const activeDocId = readActiveDocId() ?? runtime.docId;
     const fingerprint = useMemo(() => schemaFingerprint(app), [app]);
+    const fingerprintHash = useMemo(() => schemaFingerprintHash(app), [app]);
     const [loadState, setLoadState] = useState<LoadState<TState>>({kind: 'loading'});
 
     useEffect(() => {
         let alive = true;
         setLoadState({kind: 'loading'});
-        bootstrapInitialState(app, activeDocId, fingerprint)
+        bootstrapInitialState(app, activeDocId, fingerprint, fingerprintHash)
             .then((loaded) => {
                 if (!alive) return;
                 if (loaded.kind === 'ready') {
@@ -60,7 +61,7 @@ export function ServerApp<TState>({
         return () => {
             alive = false;
         };
-    }, [activeDocId, app, fingerprint]);
+    }, [activeDocId, app, fingerprint, fingerprintHash]);
 
     const login = useCallback(
         async (sessionId: string, nickname: string) => {
@@ -72,6 +73,7 @@ export function ServerApp<TState>({
                     app,
                     activeDocId,
                     fingerprint,
+                    fingerprintHash,
                     createSessionIdentity(user, sessionId),
                 );
                 setLoadState({kind: 'ready', loaded});
@@ -85,7 +87,7 @@ export function ServerApp<TState>({
                 });
             }
         },
-        [activeDocId, app, fingerprint],
+        [activeDocId, app, fingerprint, fingerprintHash],
     );
 
     const logout = useCallback(async () => {
@@ -135,6 +137,7 @@ export function ServerApp<TState>({
             runtime={runtime}
             docId={activeDocId}
             schemaFingerprint={fingerprint}
+            schemaFingerprintHash={fingerprintHash}
             loaded={loadState.loaded}
             onLogout={() => void logout()}
         />
@@ -146,6 +149,7 @@ function ServerReadyApp<TState>({
     runtime,
     docId,
     schemaFingerprint,
+    schemaFingerprintHash,
     loaded,
     onLogout,
 }: {
@@ -153,6 +157,7 @@ function ServerReadyApp<TState>({
     runtime: CrdtRuntime<TState>;
     docId: string;
     schemaFingerprint: string;
+    schemaFingerprintHash: string;
     loaded: Loaded<TState>;
     onLogout(): void;
 }) {
@@ -163,6 +168,7 @@ function ServerReadyApp<TState>({
         docId,
         schema: app.schema,
         schemaFingerprint,
+        schemaFingerprintHash,
         identity: loaded.identity,
         initialReplica: loaded.replica,
         replaceHistory: setCurrentHistory,
@@ -280,6 +286,7 @@ async function loadInitialState<TState>(
     app: AppDefinition<TState>,
     docId: string,
     fingerprint: string,
+    fingerprintHash: string,
     identity: ServerSessionIdentity,
 ): Promise<Loaded<TState>> {
     const persisted = await loadServerReplica<TState>(docId);
@@ -288,6 +295,13 @@ async function loadInitialState<TState>(
             throw new Error('Persisted server replica schema does not match this app version.');
         }
         if (
+            persisted.schemaFingerprintHash !== undefined &&
+            persisted.schemaFingerprintHash !== fingerprintHash
+        ) {
+            throw new Error('Persisted server replica schema hash does not match this app version.');
+        }
+        if (
+            (persisted.schemaVersion ?? 1) === 1 &&
             persisted.storageVersion === 3 &&
             persisted.protocolVersion === SERVER_PROTOCOL_VERSION
         ) {
@@ -305,7 +319,9 @@ async function loadInitialState<TState>(
         docId,
         storageVersion: 3,
         protocolVersion: SERVER_PROTOCOL_VERSION,
+        schemaVersion: 1,
         schemaFingerprint: fingerprint,
+        schemaFingerprintHash: fingerprintHash,
         activeBranchId: 'main',
         branchList: [
             {
@@ -341,6 +357,7 @@ async function bootstrapInitialState<TState>(
     app: AppDefinition<TState>,
     docId: string,
     fingerprint: string,
+    fingerprintHash: string,
 ): Promise<
     | {kind: 'ready'; loaded: Loaded<TState>}
     | {kind: 'needsUser'; sessionId: string; users: ServerUser[]; message?: string}
@@ -355,6 +372,7 @@ async function bootstrapInitialState<TState>(
         app,
         docId,
         fingerprint,
+        fingerprintHash,
         createSessionIdentity(user, sessionId),
     );
     return {kind: 'ready', loaded};

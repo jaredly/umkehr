@@ -7,11 +7,13 @@ export function LocalFirstControls<TState>({
     docId,
     schemaVersion,
     schemaFingerprint,
+    schemaFingerprintHash,
 }: {
     sync: LocalFirstSync<TState>;
     docId: string;
     schemaVersion: number;
     schemaFingerprint: string;
+    schemaFingerprintHash: string;
 }) {
     const state = useStore(sync.stateStore);
     const persistence = useStore(sync.persistenceStore);
@@ -36,7 +38,7 @@ export function LocalFirstControls<TState>({
                 <dd>{docId}</dd>
                 <dt>Schema</dt>
                 <dd>
-                    v{schemaVersion} / {schemaFingerprint.slice(0, 16)}
+                    v{schemaVersion} / {schemaFingerprintHash.slice(0, 16)}
                 </dd>
                 {stats.lineage ? (
                     <>

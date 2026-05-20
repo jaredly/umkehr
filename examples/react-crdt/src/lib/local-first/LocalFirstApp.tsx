@@ -7,7 +7,7 @@ import {
 } from '../crdtApp';
 import {LocalFirstControls} from './LocalFirstControls';
 import {hasReplica, loadOrCreateIdentity, loadReplica, saveReplica} from './persistence';
-import {schemaFingerprint} from './schemaFingerprint';
+import {schemaFingerprint, schemaFingerprintHash} from './schemaFingerprint';
 import {acquireReplicaTabLock, type TabLock} from './tabLock';
 import type {DocumentLineage, PersistedReplica, ReplicaIdentity, VersionVector} from './types';
 import {useLocalFirstSync} from './useLocalFirstSync';
@@ -24,6 +24,7 @@ type Loaded<TState> = {
     docId: string;
     schemaVersion: number;
     schemaFingerprint: string;
+    schemaFingerprintHash: string;
     history: CrdtLocalHistory<TState>;
     vector: VersionVector;
     compactedThrough?: VersionVector;
@@ -57,6 +58,7 @@ export function LocalFirstApp<TState>({
     const initialPeerId = readInvitePeerId();
     const activeDocId = readActiveDocId() ?? runtime.docId;
     const fingerprint = useMemo(() => schemaFingerprint(app), [app]);
+    const fingerprintHash = useMemo(() => schemaFingerprintHash(app), [app]);
     const schemaConfig = useMemo(
         () => schemaConfigProp ?? defaultLocalFirstSchemaConfig<TState>(),
         [schemaConfigProp],
@@ -67,7 +69,7 @@ export function LocalFirstApp<TState>({
         let alive = true;
         let lock: Extract<TabLock, {kind: 'acquired'}> | null = null;
         setLoadState({kind: 'loading'});
-        loadInitialState(app, activeDocId, fingerprint, schemaConfig)
+        loadInitialState(app, activeDocId, fingerprint, fingerprintHash, schemaConfig)
             .then((loaded) => {
                 lock = loaded.kind === 'ready' ? loaded.loaded.lock : loaded.lock;
                 if (alive) setLoadState(loaded.kind === 'ready' ? loaded : loaded);
@@ -84,7 +86,7 @@ export function LocalFirstApp<TState>({
             alive = false;
             lock?.release();
         };
-    }, [activeDocId, app, fingerprint, runtime, schemaConfig]);
+    }, [activeDocId, app, fingerprint, fingerprintHash, runtime, schemaConfig]);
 
     if (loadState.kind === 'loading') {
         return (
@@ -147,6 +149,7 @@ function LocalFirstReadyApp<TState>({
         tagKey: app.tagKey,
         validateState: app.validateState,
         schemaFingerprint: loaded.schemaFingerprint,
+        schemaFingerprintHash: loaded.schemaFingerprintHash,
         schemaVersion: loaded.schemaVersion,
         lineage: loaded.lineage,
         identity: loaded.identity,
@@ -180,6 +183,7 @@ function LocalFirstReadyApp<TState>({
                 docId={loaded.docId}
                 schemaVersion={loaded.schemaVersion}
                 schemaFingerprint={loaded.schemaFingerprint}
+                schemaFingerprintHash={loaded.schemaFingerprintHash}
             />
         </main>
     );
@@ -219,6 +223,7 @@ async function loadInitialState<TState>(
     app: AppDefinition<TState>,
     docId: string,
     schemaFingerprint: string,
+    schemaFingerprintHash: string,
     schemaConfig: LocalFirstSchemaConfig<TState>,
 ): Promise<LoadState<TState> & {kind: 'ready' | 'migratable'}> {
     const identity = await loadOrCreateIdentity();
@@ -248,6 +253,7 @@ async function loadInitialState<TState>(
                 docId,
                 schemaVersion: normalized.schemaVersion,
                 schemaFingerprint,
+                schemaFingerprintHash,
                 history: normalized.history,
                 vector: normalized.vector,
                 compactedThrough: normalized.compactedThrough,
@@ -266,6 +272,7 @@ async function loadInitialState<TState>(
         protocolVersion: 1,
         schemaVersion: schemaConfig.version,
         schemaFingerprint,
+        schemaFingerprintHash,
         replicaId: identity.replicaId,
         history,
         vector,
@@ -278,6 +285,7 @@ async function loadInitialState<TState>(
             docId,
             schemaVersion: schemaConfig.version,
             schemaFingerprint,
+            schemaFingerprintHash,
             history,
             vector,
             compactedThrough: undefined,

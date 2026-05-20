@@ -1,12 +1,25 @@
 import typia from 'typia';
 import {type History, type Patch} from 'umkehr';
+import {schemaFingerprint, schemaFingerprintHash} from 'umkehr/migration';
 import {createPatchValidator} from 'umkehr/validation';
 import type {State} from './App';
 
 const STORAGE_KEY = 'umkehr.react-example.history.v1';
+const SCHEMA_VERSION = 1;
 
 const validateState = typia.createValidate<State>();
-const patchValidator = createPatchValidator<State>(typia.json.schemas<[State], '3.1'>());
+const stateSchema = typia.json.schemas<[State], '3.1'>();
+const patchValidator = createPatchValidator<State>(stateSchema);
+const currentSchemaFingerprint = schemaFingerprint(stateSchema);
+const currentSchemaFingerprintHash = schemaFingerprintHash(stateSchema);
+
+type PersistedHistory = {
+    storageVersion: 1;
+    schemaVersion: number;
+    schemaFingerprint: string;
+    schemaFingerprintHash: string;
+    history: History<State, never>;
+};
 
 export function loadPersistedHistory(): History<State, never> | null {
     if (typeof window === 'undefined') return null;
@@ -16,12 +29,12 @@ export function loadPersistedHistory(): History<State, never> | null {
 
     try {
         const parsed = JSON.parse(raw);
-        const history = validateHistory(parsed);
-        if (!history) {
+        const persisted = validatePersistedHistory(parsed);
+        if (!persisted) {
             window.localStorage.removeItem(STORAGE_KEY);
             return null;
         }
-        return history;
+        return persisted.history;
     } catch (error) {
         console.warn('Ignoring invalid persisted Umkehr history.', error);
         window.localStorage.removeItem(STORAGE_KEY);
@@ -31,7 +44,44 @@ export function loadPersistedHistory(): History<State, never> | null {
 
 export function savePersistedHistory(history: History<State, never>) {
     if (typeof window === 'undefined') return;
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
+    window.localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({
+            storageVersion: 1,
+            schemaVersion: SCHEMA_VERSION,
+            schemaFingerprint: currentSchemaFingerprint,
+            schemaFingerprintHash: currentSchemaFingerprintHash,
+            history,
+        } satisfies PersistedHistory),
+    );
+}
+
+function validatePersistedHistory(input: unknown): PersistedHistory | null {
+    if (isRecord(input) && input.storageVersion === 1) {
+        if (input.schemaVersion !== SCHEMA_VERSION) return null;
+        if (input.schemaFingerprintHash !== currentSchemaFingerprintHash) return null;
+        if (input.schemaFingerprint !== currentSchemaFingerprint) return null;
+        const history = validateHistory(input.history);
+        return history
+            ? {
+                  storageVersion: 1,
+                  schemaVersion: SCHEMA_VERSION,
+                  schemaFingerprint: currentSchemaFingerprint,
+                  schemaFingerprintHash: currentSchemaFingerprintHash,
+                  history,
+              }
+            : null;
+    }
+    const legacy = validateHistory(input);
+    return legacy
+        ? {
+              storageVersion: 1,
+              schemaVersion: SCHEMA_VERSION,
+              schemaFingerprint: currentSchemaFingerprint,
+              schemaFingerprintHash: currentSchemaFingerprintHash,
+              history: legacy,
+          }
+        : null;
 }
 
 function validateHistory(input: unknown): History<State, never> | null {

@@ -19,6 +19,8 @@ export class ServerStore {
         this.db.exec(`
             create table if not exists documents (
                 docId text primary key,
+                schemaVersion integer not null default 1,
+                schemaFingerprintHash text not null default '',
                 schemaFingerprint text not null
             );
             create table if not exists branches (
@@ -152,22 +154,35 @@ export class ServerStore {
         return row ? rowToUser(row) : null;
     }
 
-    ensureDocument(docId: string, schemaFingerprint: string) {
+    ensureDocument(docId: string, schemaVersion: number, schemaFingerprint: string, schemaFingerprintHash: string) {
         const existing = this.db
-            .query<{schemaFingerprint: string}, [string]>(
-                'select schemaFingerprint from documents where docId = ?',
+            .query<{schemaVersion: number; schemaFingerprint: string; schemaFingerprintHash: string}, [string]>(
+                'select schemaVersion, schemaFingerprint, schemaFingerprintHash from documents where docId = ?',
             )
             .get(docId);
         if (existing) {
-            if (existing.schemaFingerprint !== schemaFingerprint) {
+            const existingHash =
+                existing.schemaFingerprintHash ||
+                (existing.schemaFingerprint === schemaFingerprint ? schemaFingerprintHash : '');
+            if (
+                existing.schemaVersion !== schemaVersion ||
+                existingHash !== schemaFingerprintHash
+            ) {
                 throw new Error('Document schema fingerprint does not match.');
+            }
+            if (!existing.schemaFingerprintHash) {
+                this.db
+                    .query('update documents set schemaFingerprintHash = ? where docId = ?')
+                    .run(existingHash, docId);
             }
             this.ensureMainBranch(docId);
             return;
         }
         this.db
-            .query('insert into documents (docId, schemaFingerprint) values (?, ?)')
-            .run(docId, schemaFingerprint);
+            .query(
+                'insert into documents (docId, schemaVersion, schemaFingerprintHash, schemaFingerprint) values (?, ?, ?, ?)',
+            )
+            .run(docId, schemaVersion, schemaFingerprintHash, schemaFingerprint);
         this.ensureMainBranch(docId);
     }
 
@@ -362,6 +377,8 @@ export class ServerStore {
             .query<DocumentSummary, []>(
                 `select
                     d.docId as docId,
+                    d.schemaVersion as schemaVersion,
+                    d.schemaFingerprintHash as schemaFingerprintHash,
                     d.schemaFingerprint as schemaFingerprint,
                     count(distinct b.branchId) as branchCount,
                     count(e.eventIndex) as eventCount
@@ -483,7 +500,7 @@ export class ServerStore {
     }
 
     private migrateLegacyDocuments() {
-        const columns = this.db
+        let columns = this.db
             .query<{name: string}, []>('pragma table_info(documents)')
             .all()
             .map((column) => column.name);
@@ -492,11 +509,23 @@ export class ServerStore {
                 alter table documents rename to documents_v2;
                 create table documents (
                     docId text primary key,
+                    schemaVersion integer not null default 1,
+                    schemaFingerprintHash text not null default '',
                     schemaFingerprint text not null
                 );
-                insert or ignore into documents (docId, schemaFingerprint)
-                    select docId, schemaFingerprint from documents_v2;
+                insert or ignore into documents (docId, schemaVersion, schemaFingerprintHash, schemaFingerprint)
+                    select docId, 1, '', schemaFingerprint from documents_v2;
             `);
+            columns = this.db
+                .query<{name: string}, []>('pragma table_info(documents)')
+                .all()
+                .map((column) => column.name);
+        }
+        if (!columns.includes('schemaVersion')) {
+            this.db.exec('alter table documents add column schemaVersion integer not null default 1');
+        }
+        if (!columns.includes('schemaFingerprintHash')) {
+            this.db.exec("alter table documents add column schemaFingerprintHash text not null default ''");
         }
     }
 }

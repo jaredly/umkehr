@@ -15,6 +15,7 @@ export type LocalFirstSessionPeer = {
     docId?: string;
     schemaVersion?: number;
     schemaFingerprint?: string;
+    schemaFingerprintHash?: string;
     open: boolean;
 };
 
@@ -22,6 +23,7 @@ export type LocalFirstSessionState<TState> = {
     docId: string;
     schemaVersion: number;
     schemaFingerprint: string;
+    schemaFingerprintHash: string;
     replicaId: string;
     role: LocalFirstRole;
     selfPeerId?: string;
@@ -40,6 +42,7 @@ export type LocalFirstSessionEffect<TState> =
           docId?: string;
           schemaVersion?: number;
           schemaFingerprint?: string;
+          schemaFingerprintHash?: string;
       }
     | {kind: 'connectionError'; peerId: string; message: string}
     | {kind: 'recordMembers'; peerId: string; members: LocalFirstMember[]}
@@ -66,6 +69,7 @@ export function createHelloMessage<TState>(
         docId: state.docId,
         schemaVersion: state.schemaVersion,
         schemaFingerprint: state.schemaFingerprint,
+        schemaFingerprintHash: state.schemaFingerprintHash,
         role: state.role,
         vector: state.vector,
     };
@@ -81,6 +85,7 @@ export function createSyncRequestMessage<TState>(
         docId: state.docId,
         schemaVersion: state.schemaVersion,
         schemaFingerprint: state.schemaFingerprint,
+        schemaFingerprintHash: state.schemaFingerprintHash,
         vector: state.vector,
     };
 }
@@ -95,6 +100,7 @@ export function createSnapshotMessage<TState>(
         docId: state.docId,
         schemaVersion: state.schemaVersion,
         schemaFingerprint: state.schemaFingerprint,
+        schemaFingerprintHash: state.schemaFingerprintHash,
         document: state.document,
         compactedThrough: state.vector,
     };
@@ -110,6 +116,7 @@ export function createMembersMessage<TState>(
         docId: state.docId,
         schemaVersion: state.schemaVersion,
         schemaFingerprint: state.schemaFingerprint,
+        schemaFingerprintHash: state.schemaFingerprintHash,
         members: currentMembers(state),
     };
 }
@@ -125,6 +132,7 @@ export function createUpdatesMessage<TState>(
         docId: state.docId,
         schemaVersion: state.schemaVersion,
         schemaFingerprint: state.schemaFingerprint,
+        schemaFingerprintHash: state.schemaFingerprintHash,
         batch,
     };
 }
@@ -147,6 +155,7 @@ export function createSyncResponseMessage<TState>({
         docId: state.docId,
         schemaVersion: state.schemaVersion,
         schemaFingerprint: state.schemaFingerprint,
+        schemaFingerprintHash: state.schemaFingerprintHash,
         since,
         batches,
         requiresSnapshot,
@@ -190,6 +199,7 @@ export function planIncomingMessage<TState>({
             docId: message.docId,
             schemaVersion: message.schemaVersion,
             schemaFingerprint: message.schemaFingerprint,
+            schemaFingerprintHash: message.schemaFingerprintHash,
         },
     ];
 
@@ -236,7 +246,7 @@ export function planIncomingMessage<TState>({
         if (
             member.docId !== state.docId ||
             member.schemaVersion !== state.schemaVersion ||
-            member.schemaFingerprint !== state.schemaFingerprint
+            member.schemaFingerprintHash !== state.schemaFingerprintHash
         ) {
             continue;
         }
@@ -260,6 +270,7 @@ export function currentMembers<TState>(
                   docId: state.docId,
                   schemaVersion: state.schemaVersion,
                   schemaFingerprint: state.schemaFingerprint,
+                  schemaFingerprintHash: state.schemaFingerprintHash,
               },
           ]
         : [];
@@ -273,6 +284,8 @@ export function currentMembers<TState>(
             docId: connection.docId ?? state.docId,
             schemaVersion: connection.schemaVersion ?? state.schemaVersion,
             schemaFingerprint: connection.schemaFingerprint ?? state.schemaFingerprint,
+            schemaFingerprintHash:
+                connection.schemaFingerprintHash ?? state.schemaFingerprintHash,
         });
     }
     return members;

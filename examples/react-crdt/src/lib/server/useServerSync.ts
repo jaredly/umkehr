@@ -51,6 +51,7 @@ export function useServerSync<TState>({
     docId,
     schema,
     schemaFingerprint,
+    schemaFingerprintHash,
     identity,
     initialReplica,
     replaceHistory,
@@ -59,6 +60,7 @@ export function useServerSync<TState>({
     docId: string;
     schema: IJsonSchemaCollection<'3.1', [TState]>;
     schemaFingerprint: string;
+    schemaFingerprintHash: string;
     identity: ServerSessionIdentity;
     initialReplica: PersistedServerReplica<TState>;
     replaceHistory(history: CrdtLocalHistory<TState>): void;
@@ -96,7 +98,9 @@ export function useServerSync<TState>({
             docId,
             storageVersion: 3,
             protocolVersion: SERVER_PROTOCOL_VERSION,
+            schemaVersion: initialReplica.schemaVersion ?? 1,
             schemaFingerprint,
+            schemaFingerprintHash,
             activeBranchId: activeBranchIdRef.current,
             branches: branchesRef.current,
             branchList: branchListRef.current,
@@ -112,7 +116,15 @@ export function useServerSync<TState>({
             branchList: branchListRef.current,
             activeBranchId: activeBranchIdRef.current,
         });
-    }, [activeBranchStore, branchesStore, docId, eventsStore, schemaFingerprint, statsStore]);
+    }, [
+        activeBranchStore,
+        branchesStore,
+        docId,
+        eventsStore,
+        schemaFingerprint,
+        schemaFingerprintHash,
+        statsStore,
+    ]);
 
     const send = useCallback((message: ClientServerMessage) => {
         const socket = socketRef.current;
@@ -196,7 +208,9 @@ export function useServerSync<TState>({
                         userId: actor.userId,
                         docId,
                         branchId: event.branchId,
+                        schemaVersion: 1,
                         schemaFingerprint,
+                        schemaFingerprintHash,
                         hlcTimestamp: event.hlcTimestamp,
                         update: event.update,
                     })
@@ -223,7 +237,14 @@ export function useServerSync<TState>({
                 }
             }
         }
-    }, [docId, identity.actor, identity.user.userId, schemaFingerprint, send]);
+    }, [
+        docId,
+        identity.actor,
+        identity.user.userId,
+        schemaFingerprint,
+        schemaFingerprintHash,
+        send,
+    ]);
 
     const requestSync = useCallback(() => {
         subscribeActiveBranch();
@@ -431,7 +452,9 @@ export function useServerSync<TState>({
                 actor: identity.actor,
                 userId: identity.user.userId,
                 docId,
+                schemaVersion: 1,
                 schemaFingerprint,
+                schemaFingerprintHash,
             });
             sendPresenceHello();
             flushPending();
@@ -503,6 +526,7 @@ export function useServerSync<TState>({
         receiveServerEvents,
         schema,
         schemaFingerprint,
+        schemaFingerprintHash,
         send,
         sendPresenceHello,
         stateStore,

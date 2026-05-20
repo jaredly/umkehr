@@ -26,6 +26,7 @@ export type LocalFirstMessage<TState> =
           docId: string;
           schemaVersion: number;
           schemaFingerprint: string;
+          schemaFingerprintHash: string;
           role: LocalFirstRole;
           vector: VersionVector;
       }
@@ -36,6 +37,7 @@ export type LocalFirstMessage<TState> =
           docId: string;
           schemaVersion: number;
           schemaFingerprint: string;
+          schemaFingerprintHash: string;
           batch: PersistedBatch;
       }
     | {
@@ -45,6 +47,7 @@ export type LocalFirstMessage<TState> =
           docId: string;
           schemaVersion: number;
           schemaFingerprint: string;
+          schemaFingerprintHash: string;
           vector: VersionVector;
       }
     | {
@@ -54,6 +57,7 @@ export type LocalFirstMessage<TState> =
           docId: string;
           schemaVersion: number;
           schemaFingerprint: string;
+          schemaFingerprintHash: string;
           since: VersionVector;
           batches: PersistedBatch[];
           requiresSnapshot?: boolean;
@@ -65,6 +69,7 @@ export type LocalFirstMessage<TState> =
           docId: string;
           schemaVersion: number;
           schemaFingerprint: string;
+          schemaFingerprintHash: string;
           document: CrdtDocument<TState>;
           compactedThrough: VersionVector;
       }
@@ -75,6 +80,7 @@ export type LocalFirstMessage<TState> =
           docId: string;
           schemaVersion: number;
           schemaFingerprint: string;
+          schemaFingerprintHash: string;
           members: LocalFirstMember[];
       };
 
@@ -82,6 +88,7 @@ export type LocalFirstProtocolConfig<TState> = {
     docId: string;
     schemaVersion: number;
     schemaFingerprint: string;
+    schemaFingerprintHash: string;
     schema: IJsonSchemaCollection<'3.1', [TState]>;
     tagKey: string;
     validateState(input: unknown): IValidation<TState>;
@@ -152,6 +159,12 @@ export function parseLocalFirstMessage<TState>(
             ) {
                 return null;
             }
+            if (
+                typeof member.schemaFingerprintHash !== 'string' ||
+                member.schemaFingerprintHash.length === 0
+            ) {
+                return null;
+            }
             if (member.role !== 'host' && member.role !== 'client') return null;
             if (!isVersionVector(member.vector)) return null;
             members.push(member as LocalFirstMember);
@@ -196,7 +209,9 @@ function hasExpectedSchema<TState>(
 ) {
     return (
         input.schemaVersion === config.schemaVersion &&
-        input.schemaFingerprint === config.schemaFingerprint
+        (input.schemaFingerprintHash === config.schemaFingerprintHash ||
+            (input.schemaFingerprintHash === undefined &&
+                input.schemaFingerprint === config.schemaFingerprint))
     );
 }
 

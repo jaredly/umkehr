@@ -13,6 +13,7 @@ export type ReplicaIdentity = {
 export type LocalFirstSchemaMetadata = {
     schemaVersion: number;
     schemaFingerprint: string;
+    schemaFingerprintHash: string;
 };
 
 export type DocumentLineage = {
@@ -29,6 +30,7 @@ export type PersistedReplica<TState> = {
     protocolVersion: 1;
     schemaVersion: number;
     schemaFingerprint: string;
+    schemaFingerprintHash: string;
     replicaId: string;
     history: CrdtLocalHistory<TState>;
     vector: VersionVector;
@@ -63,6 +65,7 @@ export type LocalFirstMember = {
     docId: string;
     schemaVersion: number;
     schemaFingerprint: string;
+    schemaFingerprintHash: string;
 };
 
 export type LocalFirstPersistenceState =
@@ -115,6 +118,7 @@ export type LocalFirstConnectionInfo = {
     docId?: string;
     schemaVersion?: number;
     schemaFingerprint?: string;
+    schemaFingerprintHash?: string;
     open: boolean;
     queuedOutgoing: number;
     error?: string;

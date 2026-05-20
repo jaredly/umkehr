@@ -15,7 +15,9 @@ export type ClientServerMessage =
           actor: string;
           userId: string;
           docId: string;
+          schemaVersion: number;
           schemaFingerprint: string;
+          schemaFingerprintHash: string;
       }
     | {
           kind: 'branchSubscribe';
@@ -64,7 +66,9 @@ export type ClientServerMessage =
           userId: string;
           docId: string;
           branchId: string;
+          schemaVersion: number;
           schemaFingerprint: string;
+          schemaFingerprintHash: string;
           hlcTimestamp: HlcTimestamp;
           update: CrdtUpdate;
       }

@@ -128,11 +128,13 @@ export async function importReplicaState<TState>({
     docId,
     schemaVersion,
     schemaFingerprint,
+    schemaFingerprintHash,
     json,
 }: {
     docId: string;
     schemaVersion: number;
     schemaFingerprint: string;
+    schemaFingerprintHash: string;
     json: string;
 }) {
     const parsed = JSON.parse(json) as {
@@ -147,6 +149,12 @@ export async function importReplicaState<TState>({
     }
     if (parsed.replica.schemaFingerprint !== schemaFingerprint) {
         throw new Error('Imported state schema does not match this app version.');
+    }
+    if (
+        parsed.replica.schemaFingerprintHash !== undefined &&
+        parsed.replica.schemaFingerprintHash !== schemaFingerprintHash
+    ) {
+        throw new Error('Imported state schema hash does not match this app version.');
     }
     if ((parsed.replica.schemaVersion ?? 1) !== schemaVersion) {
         throw new Error('Imported state schema version does not match this app version.');

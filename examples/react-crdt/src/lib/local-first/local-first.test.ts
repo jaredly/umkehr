@@ -91,6 +91,7 @@ const config: LocalFirstProtocolConfig<State> = {
     docId: 'todos',
     schemaVersion: 1,
     schemaFingerprint: 'test-schema',
+    schemaFingerprintHash: 'test-schema-hash',
     schema,
     tagKey: 'type',
     validateState,
@@ -99,6 +100,7 @@ const config: LocalFirstProtocolConfig<State> = {
 const schemaHeader = {
     schemaVersion: 1,
     schemaFingerprint: 'test-schema',
+    schemaFingerprintHash: 'test-schema-hash',
 };
 
 function titleUpdate(document: CrdtDocument<State>, title: string, timestamp: string) {
@@ -685,7 +687,7 @@ describe('local-first new-document migrations', () => {
         history: createCrdtLocalHistory(doc({title: 'Old', todos: []})),
         vector: {local: ts('local', 10)},
         updatedAt: '2026-05-17T00:00:00.000Z',
-    }) as Omit<PersistedReplica<State>, 'schemaVersion'>;
+    }) as unknown as Omit<PersistedReplica<State>, 'schemaVersion'>;
 
     const migrationConfig: LocalFirstSchemaConfig<State> = {
         version: 2,

@@ -62,7 +62,9 @@ export type ServerBranchEvent = ServerUpdateEvent | ServerMergeEvent;
 
 export type DocumentSummary = {
     docId: string;
+    schemaVersion: number;
     schemaFingerprint: string;
+    schemaFingerprintHash: string;
     branchCount: number;
     eventCount: number;
 };

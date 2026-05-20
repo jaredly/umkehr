@@ -218,153 +218,6 @@ Problems:
 
 A practical compromise is to use generic ephemeral messages at the transport boundary and adapt path-bearing messages into a `StatusStore` for React rendering.
 
-## Option 4: Public preview CRDT updates over presence
-
-Another possibility is to add a third timing mode:
-
-```ts
-ctx.$.elements[id].x(nextX, 'public-preview')
-```
-
-This would run most of the committed CRDT update pipeline, but publish the resulting `CrdtUpdate` values through a presence/ephemeral channel instead of the durable update channel. Other clients would receive those updates, apply them in preview mode, and clear or replace them when the actor sends a newer preview, commits, cancels, disconnects, or changes branch.
-
-Sketch:
-
-```ts
-export type ApplyTiming = 'preview' | 'public-preview' | undefined;
-
-type PublicPreviewMessage = {
-    kind: 'crdt-public-preview';
-    actor: string;
-    previewId: string;
-    docId: string;
-    branchId?: string;
-    updates: CrdtUpdate[];
-    clear?: boolean;
-};
-```
-
-This approach is interesting because it keeps the application authoring model very close to normal edits:
-
-- local preview still uses the patch builder API;
-- the runtime translates draft patches to CRDT paths, stable record keys, and schema-shaped updates;
-- remote clients can reuse CRDT path translation to know which normal paths changed;
-- moving an element can be represented as the same field updates that a final commit would use;
-- app code would not need a parallel `whiteboard:element-preview` payload for every operation.
-
-However, it needs a very careful separation between durable CRDT state and preview CRDT state.
-
-### Max timestamp concern
-
-The proposed special timestamps are not malformed timestamp strings. The idea is a sentinel "max timestamp" clock domain that always wins LWW comparison inside preview application, so remote previews naturally overlay committed state.
-
-That does make the visible result intuitive: if Alice is dragging a note, her preview `x` and `y` should beat the committed `x` and `y` no matter how old the committed field timestamp is.
-
-The risk is that current CRDT semantics rely on HLC timestamps for more than LWW field comparison. They also carry actor identity, duplicate detection, pending update handling, local clock receive behavior, update timestamp extraction, and server actor/timestamp validation. A max timestamp that is valid only for preview must therefore be impossible to confuse with a durable HLC timestamp.
-
-If max preview timestamps are encoded directly into ordinary `CrdtUpdate.ts` fields, they can affect:
-
-- CRDT validation;
-- `hlc.unpack`;
-- `latestCrdtUpdateTimestamp`;
-- local clock receive logic;
-- last-writer-wins comparisons;
-- server actor/timestamp checks;
-- branch event sorting if a preview accidentally enters the durable path.
-
-A safer shape is to make the timestamp domain explicit rather than smuggling a sentinel into the existing HLC string:
-
-```ts
-type PublicPreviewMessage = {
-    kind: 'crdt-public-preview';
-    previewId: string;
-    actor: string;
-    sequence: number;
-    updates: PublicPreviewUpdate[];
-};
-
-type PublicPreviewUpdate = CrdtUpdate & {
-    previewTs: {kind: 'max'; actor: string; sequence: number};
-};
-```
-
-Conceptually, preview application would compare preview fields as:
-
-1. public preview max timestamps beat durable HLC timestamps;
-2. newer `sequence` wins over older `sequence` for the same actor/preview id;
-3. if multiple actors preview the same path, the runtime should avoid pretending there is one canonical winner and expose layered previews instead.
-
-The alternative is to keep contained `CrdtUpdate` values as ordinary real-HLC updates and have the preview applicator treat the entire preview layer as higher priority than durable state. That gets the same "preview wins over committed state" behavior without changing timestamp syntax, but it means the max behavior lives in the preview compositor rather than the CRDT update values.
-
-Either way, preview timestamps must not advance durable document clocks. The conservative rule is:
-
-- durable updates affect the transport/local HLC clock;
-- public preview messages do not affect durable history or durable clock state, even if their preview fields compare above durable HLC fields;
-- the sender's final commit mints fresh durable HLC timestamps.
-
-That means max preview timestamps are only for overlay ordering inside the ephemeral preview layer, not for durable causality.
-
-### Applying remote preview CRDT updates
-
-Remote clients cannot simply call `applyRemoteHistoryUpdate(ctx.history, update)` because that would mutate durable history. They need a parallel preview application path:
-
-1. Start from the current durable `ctx.history.doc`.
-2. Apply one actor/preview id's public-preview updates to a temporary document.
-3. Store the temporary document, changed normal paths, and preview metadata separately.
-4. Render those changes as an overlay or a preview layer.
-5. Rebase/recompute the preview document after durable remote/local updates.
-
-The design becomes harder with multiple remote previews. A single `previewState` cannot represent two users dragging the same element to different locations. The runtime needs either:
-
-- one preview document per `{actor, previewId}` and app-level overlay rendering; or
-- a layered preview compositor that can combine multiple preview documents into one visible state with deterministic priority.
-
-For whiteboard, per-preview overlay rendering is more honest. It can show two drag ghosts at once without pretending the document has one current value.
-
-### Local public preview pipeline
-
-A plausible local implementation:
-
-1. Resolve the draft patch against durable state or local preview state.
-2. Create CRDT updates with `applyLocalCommand`-like translation, but do not append to `ctx.history.localCommands` and do not mutate durable history.
-3. Apply the draft locally as ordinary local preview so the local user gets immediate feedback.
-4. Publish a `crdt-public-preview` message through the presence channel.
-5. On final commit, clear the public preview and run the normal committed path with fresh durable CRDT updates.
-
-The hard part is step 2. `applyLocalCommand` currently returns a new local history and updates intended to be durable. A public-preview implementation probably needs a lower-level helper that can translate a draft patch to CRDT updates against a document without recording local undo/redo history.
-
-### Benefits
-
-- Most ergonomic API for app authors: `when: 'public-preview'` is a natural extension of `when: 'preview'`.
-- Uses CRDT path addressing rather than inventing app-specific payloads for every field update.
-- Keeps preview update generation consistent with committed update generation.
-- Could work for any app whose preview can be represented by serializable draft patches and overlay rendering.
-- Avoids spamming durable CRDT history while still letting peers observe high-frequency interactions.
-
-### Problems
-
-- Preview CRDT updates must be impossible to persist accidentally.
-- Max preview timestamps would need an explicit non-durable timestamp domain or a preview compositor rule; putting sentinel values into ordinary durable HLC fields is risky.
-- The runtime needs a preview CRDT application path separate from durable history.
-- Multiple simultaneous remote previews require layered rendering, not just `ctx.previewState`.
-- Undo/redo must ignore public previews completely.
-- Server validation must distinguish durable `clientUpdate` from ephemeral `crdt-public-preview`.
-- Presence payload size can still become large for strokes or rapid multi-field updates.
-- It is unclear whether preview CRDT updates should be accepted if their parent/path metadata references elements that have since been archived, deleted, or recreated.
-- If public-preview CRDT updates are recomputed on every pointer move, they may still be relatively expensive even though they are not durable.
-
-### Fit assessment
-
-This remains a possible future direction, but it is not the chosen whiteboard v1 path. It is best if the goal later becomes automatic shared preview for arbitrary CRDT-backed apps. The current plan should use typed app-level ephemeral payloads instead.
-
-The most viable version is:
-
-- `when: 'public-preview'` exists as a React CRDT feature;
-- preview messages contain normal `CrdtUpdate[]` plus an ephemeral envelope;
-- preview "max timestamp" behavior is explicit and cannot be mistaken for durable HLC causality;
-- remote previews are exposed as layered preview records/statuses, not merged into `ctx.latest()`;
-- final commit always generates fresh durable CRDT updates.
-
 ## Recommended direction
 
 Keep `when: 'preview'` local and add a separate typed shared ephemeral channel for collaborative preview/presence. Use Option 2 as the implementation path.
@@ -439,8 +292,6 @@ type EphemeralConfig<Data> = {
 ```
 
 Given this is motivated by the whiteboard example, example-local is lower risk. Promote to core once the whiteboard proves the shape across cursor, selection, element drag, stroke preview, and validation.
-
-If `public-preview` is pursued later, the same optional transport extension can carry it as one particular typed ephemeral data variant. That keeps server/local/PeerJS transport work reusable even though the first implementation uses app-level payloads.
 
 ## Transport implementation notes
 
@@ -525,15 +376,23 @@ Avoid applying remote preview to `ctx.latest()` because multiple remote users ca
 - Should ephemeral messages be throttled by the core helper, by transports, or by whiteboard interaction code?
   - Decision: throttle in whiteboard interaction code first; transports should be allowed to enforce defensive rate/payload limits.
 - What is the stale-preview timeout? A short TTL, such as 2-5 seconds, prevents stuck ghosts after lost clear messages, but in-progress strokes may need refresh semantics.
+  - after 15 seconds the UI indicator should go partially transparent, and after 30 seconds it should disappear.
 - Should manual offline mode drop ephemeral messages or queue them? Dropping seems right for preview, but selection presence might want different behavior.
+  - drop of offline
 - How should remote previews interact with branches? The current server presence tracks `branchId`; shared preview should probably be branch-scoped and cleared on branch switch.
+  - yes branch scoped
 - Should remote selection be represented as path-scoped statuses, board-level overlay data, or both?
+  - path-scoped
 - Should preview ownership be session-level actor identity or user-level identity? Session-level matches CRDT authorship and avoids two tabs clobbering each other.
+  - session-level
 - Should final durable commits automatically clear matching previews from the same actor, or should the app always send explicit clear messages?
+  - we're no longer doing previews. ephemeral messages are entirely separate, and can either have explicit clear or an included TTL
 - Do we need remote preview history/replay for debugging? The likely answer is no, but server debug tooling may want to show current ephemeral counts.
+  - no
 - Should the public API include actor color/nickname data, or should preview rendering join ephemeral actor ids with existing presence users?
+  - just an actor id
 - Should local previews continue to be document-shaped while remote previews are overlays, or should the whiteboard use overlay rendering for both local and remote drags to keep behavior symmetric?
-- Future public-preview question: if automatic CRDT-shaped public preview is revisited, should "max timestamp wins" live in an explicit non-durable timestamp/clock domain on updates, or in a preview compositor that treats preview layers as higher priority than durable state?
+  - for drags let's do overlay rendering for both local and remote
 
 ## Recommendation summary
 
@@ -548,5 +407,3 @@ For the first whiteboard implementation, build the shared preview path example-l
 - clear-on-commit/cancel/disconnect/branch-switch behavior.
 
 After that works, consider promoting the transport extension and React helper into `umkehr/react-crdt`.
-
-`when: 'public-preview'` is not part of v1. Keep it as a future exploration if shared preview needs to become automatic across arbitrary CRDT-backed apps.

@@ -78,8 +78,15 @@ const server = Bun.serve<ClientData>({
 
                 switch (parsed.kind) {
                     case 'hello': {
-                        store.ensureDocument(parsed.docId, parsed.schemaFingerprint);
+                        store.ensureDocument(
+                            parsed.docId,
+                            parsed.schemaVersion,
+                            parsed.schemaFingerprint,
+                            parsed.schemaFingerprintHash,
+                        );
+                        ws.data.schemaVersion = parsed.schemaVersion;
                         ws.data.schemaFingerprint = parsed.schemaFingerprint;
+                        ws.data.schemaFingerprintHash = parsed.schemaFingerprintHash;
                         send(ws, {
                             kind: 'hello',
                             version: SERVER_PROTOCOL_VERSION,
@@ -168,7 +175,12 @@ const server = Bun.serve<ClientData>({
                         return;
                     }
                     case 'clientUpdate': {
-                        store.ensureDocument(parsed.docId, parsed.schemaFingerprint);
+                        store.ensureDocument(
+                            parsed.docId,
+                            parsed.schemaVersion,
+                            parsed.schemaFingerprint,
+                            parsed.schemaFingerprintHash,
+                        );
                         const event = store.appendUpdateEvent({
                             docId: parsed.docId,
                             branchId: parsed.branchId,
@@ -226,7 +238,9 @@ type ClientData = {
     docId?: string;
     branchId?: string;
     selectionElementId?: string;
+    schemaVersion?: number;
     schemaFingerprint?: string;
+    schemaFingerprintHash?: string;
     presenceReady?: boolean;
 };
 

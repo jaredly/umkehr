@@ -71,6 +71,7 @@ type ConnectionRecord<TState> = {
     docId?: string;
     schemaVersion?: number;
     schemaFingerprint?: string;
+    schemaFingerprintHash?: string;
     queued: LocalFirstMessage<TState>[];
     error?: string;
     lastSyncAt?: string;
@@ -87,6 +88,7 @@ export function useLocalFirstSync<TState>({
     tagKey,
     validateState,
     schemaFingerprint,
+    schemaFingerprintHash,
     schemaVersion,
     lineage,
     identity,
@@ -102,6 +104,7 @@ export function useLocalFirstSync<TState>({
     tagKey: string;
     validateState(input: unknown): IValidation<TState>;
     schemaFingerprint: string;
+    schemaFingerprintHash: string;
     schemaVersion: number;
     lineage?: DocumentLineage;
     identity: ReplicaIdentity;
@@ -132,13 +135,22 @@ export function useLocalFirstSync<TState>({
         validateState,
         schemaVersion,
         schemaFingerprint,
+        schemaFingerprintHash,
     });
     const pendingSnapshotRef = useRef<PendingSnapshot<TState> | null>(null);
     const replayPreviewRef = useRef<ReplayPreview<TState> | null>(null);
     const snapshotStatusRef = useRef<string | undefined>(undefined);
     const compactionStatusRef = useRef<string | undefined>(undefined);
 
-    protocolRef.current = {docId, schemaVersion, schemaFingerprint, schema, tagKey, validateState};
+    protocolRef.current = {
+        docId,
+        schemaVersion,
+        schemaFingerprint,
+        schemaFingerprintHash,
+        schema,
+        tagKey,
+        validateState,
+    };
 
     const stateStore = useMemo(
         () => createExternalStore<LocalFirstSyncState>({kind: 'offline', role: roleRef.current}),
@@ -193,6 +205,7 @@ export function useLocalFirstSync<TState>({
                     docId: connectionDocId,
                     schemaVersion: connectionSchemaVersion,
                     schemaFingerprint: connectionSchemaFingerprint,
+                    schemaFingerprintHash: connectionSchemaFingerprintHash,
                     queued,
                     error,
                     lastSyncAt,
@@ -204,6 +217,7 @@ export function useLocalFirstSync<TState>({
                     docId: connectionDocId,
                     schemaVersion: connectionSchemaVersion,
                     schemaFingerprint: connectionSchemaFingerprint,
+                    schemaFingerprintHash: connectionSchemaFingerprintHash,
                     open: conn.open,
                     queuedOutgoing: queued.length,
                     error,
@@ -276,6 +290,7 @@ export function useLocalFirstSync<TState>({
                     protocolVersion: 1,
                     schemaVersion,
                     schemaFingerprint,
+                    schemaFingerprintHash,
                     replicaId: identity.replicaId,
                     history: historyRef.current,
                     vector: vectorRef.current,
@@ -303,6 +318,7 @@ export function useLocalFirstSync<TState>({
             persistenceStore,
             refreshCounts,
             schemaFingerprint,
+            schemaFingerprintHash,
             schemaVersion,
         ],
     );
@@ -331,6 +347,7 @@ export function useLocalFirstSync<TState>({
             docId,
             schemaVersion,
             schemaFingerprint,
+            schemaFingerprintHash,
             replicaId: identity.replicaId,
             role: roleRef.current,
             selfPeerId: peerRef.current?.id,
@@ -345,6 +362,7 @@ export function useLocalFirstSync<TState>({
                     docId: connectionDocId,
                     schemaVersion: connectionSchemaVersion,
                     schemaFingerprint: connectionSchemaFingerprint,
+                    schemaFingerprintHash: connectionSchemaFingerprintHash,
                 }) => ({
                     peerId: conn.peer,
                     actor,
@@ -353,11 +371,12 @@ export function useLocalFirstSync<TState>({
                     docId: connectionDocId,
                     schemaVersion: connectionSchemaVersion,
                     schemaFingerprint: connectionSchemaFingerprint,
+                    schemaFingerprintHash: connectionSchemaFingerprintHash,
                     open: conn.open,
                 }),
             ),
         }),
-        [docId, identity.replicaId, schemaFingerprint, schemaVersion],
+        [docId, identity.replicaId, schemaFingerprint, schemaFingerprintHash, schemaVersion],
     );
 
     const flushQueued = useCallback(
@@ -550,6 +569,7 @@ export function useLocalFirstSync<TState>({
                     record.docId = effect.docId;
                     record.schemaVersion = effect.schemaVersion;
                     record.schemaFingerprint = effect.schemaFingerprint;
+                    record.schemaFingerprintHash = effect.schemaFingerprintHash;
                     record.lastSyncAt = new Date().toISOString();
                     publishConnections();
                     void refreshCounts();
@@ -572,7 +592,7 @@ export function useLocalFirstSync<TState>({
                             member.actor === identity.replicaId ||
                             member.docId !== docId ||
                             member.schemaVersion !== schemaVersion ||
-                            member.schemaFingerprint !== schemaFingerprint
+                            member.schemaFingerprintHash !== schemaFingerprintHash
                         ) {
                             continue;
                         }
@@ -628,6 +648,7 @@ export function useLocalFirstSync<TState>({
             publishConnections,
             refreshCounts,
             schemaFingerprint,
+            schemaFingerprintHash,
             schemaVersion,
             sendMissingBatches,
             sendOrQueue,
@@ -833,10 +854,16 @@ export function useLocalFirstSync<TState>({
 
     const importLocalState = useCallback(
         async (json: string) => {
-            await importReplicaState<TState>({docId, schemaVersion, schemaFingerprint, json});
+            await importReplicaState<TState>({
+                docId,
+                schemaVersion,
+                schemaFingerprint,
+                schemaFingerprintHash,
+                json,
+            });
             window.location.reload();
         },
-        [docId, schemaFingerprint, schemaVersion],
+        [docId, schemaFingerprint, schemaFingerprintHash, schemaVersion],
     );
 
     useEffect(() => {

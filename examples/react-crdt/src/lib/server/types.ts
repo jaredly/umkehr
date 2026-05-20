@@ -113,7 +113,9 @@ export type PersistedServerReplica<TState> = {
     docId: string;
     storageVersion: 3;
     protocolVersion: 3;
+    schemaVersion: number;
     schemaFingerprint: string;
+    schemaFingerprintHash: string;
     activeBranchId: string;
     branches: Record<string, PersistedServerBranch<TState>>;
     branchList: ServerBranch[];
