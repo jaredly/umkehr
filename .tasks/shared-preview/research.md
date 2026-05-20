@@ -105,25 +105,25 @@ Problems:
 
 This is attractive ergonomically but too invasive for a first pass unless preview patches are restricted to serializable patch forms.
 
-## Option 2: Broadcast app-level ephemeral presence payloads
+## Option 2: Broadcast typed app-level ephemeral presence payloads
 
 Add an ephemeral channel beside CRDT updates. The runtime/transport carries preview or presence messages, and apps decide how to render them.
 
 Sketch:
 
 ```ts
-export type EphemeralMessage = {
+export type EphemeralMessage<Data> = {
     kind: string;
     id: string;
     actor: string;
     path?: Path;
-    data: unknown;
+    data: Data;
     expiresAt?: string;
 };
 
-export type EphemeralTransport = {
-    publishEphemeral(message: EphemeralMessage): void;
-    subscribeEphemeral(receive: (message: EphemeralMessage) => void): () => void;
+export type EphemeralTransport<Data> = {
+    publishEphemeral(message: EphemeralMessage<Data>): void;
+    subscribeEphemeral(receive: (message: EphemeralMessage<Data>) => void): () => void;
 };
 ```
 
@@ -138,6 +138,35 @@ Whiteboard can send messages such as:
 }
 ```
 
+The important constraint is that `Data` should not stay as `unknown` at app boundaries. Each app/sync mode should supply a concrete payload union and a validator for messages received from the network.
+
+For whiteboard:
+
+```ts
+type WhiteboardEphemeralData =
+    | {
+          type: 'element-preview';
+          elementId: string;
+          x: number;
+          y: number;
+          width?: number;
+          height?: number;
+          rotation?: number;
+      }
+    | {
+          type: 'stroke-preview';
+          strokeId: string;
+          points: [number, number, number?][];
+          color: string;
+          width: number;
+      }
+    | {
+          type: 'selection';
+          elementIds: string[];
+          bounds?: {x: number; y: number; width: number; height: number};
+      };
+```
+
 The receiver stores this in a status/presence store. The whiteboard renderer reads remote preview statuses and overlays them on top of the committed board without changing the CRDT document.
 
 Benefits:
@@ -146,6 +175,8 @@ Benefits:
 - no serializable draft-patch problem;
 - works for cursors, selection, in-progress strokes, drag ghosts, resize boxes, and tool-specific affordances;
 - app controls payload shape and can optimize for rendering;
+- strong app-level payload types make authoring and rendering safer;
+- the same payload type can drive runtime validation in server, PeerJS, and browser receive paths;
 - stale data can be cleared by id, TTL, actor disconnect, branch switch, or explicit clear messages.
 
 Costs:
@@ -155,7 +186,7 @@ Costs:
 - each transport needs an ephemeral-message implementation if parity is required;
 - remote previews are overlays, not part of `ctx.latest()` or `useValue`.
 
-This is the best first version for whiteboard. It matches the fact that shared preview is presence-like UI, not collaborative document state.
+This is the chosen direction for whiteboard. It matches the fact that shared preview is presence-like UI, not collaborative document state, while still giving each app strong type guarantees for its ephemeral payloads.
 
 ## Option 3: Extend StatusStore into replicated statuses
 
@@ -324,7 +355,7 @@ The hard part is step 2. `applyLocalCommand` currently returns a new local histo
 
 ### Fit assessment
 
-This is a strong medium-term API direction, but it is probably not the simplest whiteboard v1. It is best if the goal is a general shared-preview abstraction in `umkehr/react-crdt`, not just a whiteboard-specific overlay channel.
+This remains a possible future direction, but it is not the chosen whiteboard v1 path. It is best if the goal later becomes automatic shared preview for arbitrary CRDT-backed apps. The current plan should use typed app-level ephemeral payloads instead.
 
 The most viable version is:
 
@@ -336,12 +367,12 @@ The most viable version is:
 
 ## Recommended direction
 
-Keep `when: 'preview'` local and add a separate shared ephemeral channel for collaborative preview/presence.
+Keep `when: 'preview'` local and add a separate typed shared ephemeral channel for collaborative preview/presence. Use Option 2 as the implementation path.
 
 For the whiteboard v1:
 
 1. During drag/resize, continue to update local state with `editor.$.elements[id].x(nextX, 'preview')` and related field previews.
-2. Also publish a throttled `whiteboard:element-preview` ephemeral message containing the element id and preview transform/size.
+2. Also publish a throttled `EphemeralMessage<WhiteboardEphemeralData>` containing the element id and preview transform/size.
 3. Render remote element previews as overlays above committed elements, keyed by actor and element id.
 4. On pointer up, publish the durable CRDT update once, then send a clear message for that preview id.
 5. On cancel/escape/pointer-cancel, clear local preview and send a clear message.
@@ -362,12 +393,12 @@ data: {elementIds: string[], bounds, tool}
 The smallest core-facing change is to define an optional extension on `SyncedTransport`:
 
 ```ts
-export type EphemeralMessage = {
+export type EphemeralMessage<Data> = {
     kind: string;
     id: string;
     actor: string;
     path?: Path;
-    data?: unknown;
+    data: Data;
     clear?: boolean;
     expiresAt?: string;
 };
@@ -377,16 +408,18 @@ export type SyncedTransport = {
     tick(): hlc.HLC;
     publish(updates: CrdtUpdate[]): void;
     subscribe(receive: (update: CrdtUpdate) => void): () => void;
-    publishEphemeral?(messages: EphemeralMessage[]): void;
-    subscribeEphemeral?(receive: (message: EphemeralMessage) => void): () => void;
+    publishEphemeral?<Data>(messages: EphemeralMessage<Data>[]): void;
+    subscribeEphemeral?<Data>(
+        receive: (message: EphemeralMessage<Data>) => void,
+    ): () => void;
 };
 ```
 
 Then add a small React helper in `umkehr/react-crdt`:
 
 ```ts
-ctx.publishEphemeral(messages)
-ctx.useEphemeral(query)
+ctx.publishEphemeral<WhiteboardEphemeralData>(messages)
+ctx.useEphemeral<WhiteboardEphemeralData>(query)
 ```
 
 or keep it example-local first:
@@ -396,9 +429,18 @@ sync.publishPresence(...)
 sync.presenceStore / previewStore
 ```
 
-Given this is motivated by the whiteboard example, example-local is lower risk. Promote to core once the whiteboard proves the shape across cursor, selection, element drag, and stroke preview.
+Because `Data` is erased at runtime, each transport boundary still needs a validator. A concrete app can provide:
 
-If `public-preview` is pursued instead, the same optional transport extension can carry it as one particular ephemeral message kind. That keeps server/local/PeerJS transport work reusable even if the first app uses app-level payloads and a later core API uses CRDT-shaped preview payloads.
+```ts
+type EphemeralConfig<Data> = {
+    validateEphemeralData(input: unknown): input is Data;
+    maxEphemeralBytes?: number;
+};
+```
+
+Given this is motivated by the whiteboard example, example-local is lower risk. Promote to core once the whiteboard proves the shape across cursor, selection, element drag, stroke preview, and validation.
+
+If `public-preview` is pursued later, the same optional transport extension can carry it as one particular typed ephemeral data variant. That keeps server/local/PeerJS transport work reusable even though the first implementation uses app-level payloads.
 
 ## Transport implementation notes
 
@@ -416,7 +458,7 @@ type ClientServerMessage =
           userId: string;
           docId: string;
           branchId: string;
-          event: EphemeralMessage;
+          event: EphemeralMessage<unknown>;
       };
 
 type ServerClientMessage =
@@ -426,18 +468,20 @@ type ServerClientMessage =
           version: 4;
           docId: string;
           branchId: string;
-          event: EphemeralMessage;
+          event: EphemeralMessage<unknown>;
       };
 ```
 
 Server behavior:
 
 - validate actor/user/session as strictly as `presenceHello`;
+- validate the message envelope shape before broadcast;
+- validate `event.data` with the app-provided ephemeral data validator;
 - require matching `docId` and current `branchId`;
 - broadcast only to clients on the same doc and branch;
 - do not persist events;
 - clear all ephemeral events for an actor on socket close;
-- optionally enforce max payload size and accepted `kind` prefixes.
+- enforce a max payload size and accepted `kind`/`data.type` values.
 
 The current protocol version is `3`. Adding message variants likely means bumping both client and server protocol types together.
 
@@ -469,16 +513,17 @@ Avoid applying remote preview to `ctx.latest()` because multiple remote users ca
 ## Open questions
 
 - Should shared preview become a core `umkehr/react-crdt` API now, or should the first implementation be whiteboard/example-local?
+  - Decision: start with the whiteboard/example path, but shape it so it can be promoted cleanly.
 - Should ephemeral messages be generic transport messages, replicated `Status` values, or both with an adapter?
+  - Decision: use generic typed transport messages and adapt path-bearing messages into a status/preview store for rendering.
 - Should `when: 'preview'` grow an option that automatically publishes shared preview, or should apps explicitly publish shared preview payloads beside local preview updates?
-- Should the API be `when: 'public-preview'`, or should public/private preview be a separate option object so timing does not become an expanding string union?
-- If public preview sends CRDT-shaped updates, should "max timestamp wins" live in an explicit non-durable timestamp/clock domain on the updates, or in a preview compositor that treats preview layers as higher priority than durable state?
-- Should receiving public-preview CRDT updates advance any local clock, or should they be completely outside durable causality?
-- What lower-level helper should translate a draft patch to CRDT updates without mutating durable local history or undo/redo stacks?
-- How should multiple remote public previews on the same path be rendered: layered overlays, deterministic merge into one preview state, or app-defined resolution?
-- What payload validation is expected for ephemeral messages? Generic `unknown` is flexible, but server mode probably needs size limits and either kind allowlists or app-provided validators.
-- Should shared preview be available in all sync modes for v1? Server and local simulator are straightforward; PeerJS is moderate; local-first likely needs a separate live channel.
+  - Decision: apps explicitly publish typed ephemeral preview payloads beside local preview updates.
+- What payload validation is expected for ephemeral messages?
+  - Decision: `EphemeralMessage<Data>` is generic at the TypeScript boundary, and every network receive path must validate `data` with an app-provided validator before accepting it.
+- Should shared preview be available in all sync modes for v1?
+  - Decision: implement server and local simulator first. PeerJS can follow. Local-first can be unsupported until it has a live ephemeral channel.
 - Should ephemeral messages be throttled by the core helper, by transports, or by whiteboard interaction code?
+  - Decision: throttle in whiteboard interaction code first; transports should be allowed to enforce defensive rate/payload limits.
 - What is the stale-preview timeout? A short TTL, such as 2-5 seconds, prevents stuck ghosts after lost clear messages, but in-progress strokes may need refresh semantics.
 - Should manual offline mode drop ephemeral messages or queue them? Dropping seems right for preview, but selection presence might want different behavior.
 - How should remote previews interact with branches? The current server presence tracks `branchId`; shared preview should probably be branch-scoped and cleared on branch switch.
@@ -488,18 +533,20 @@ Avoid applying remote preview to `ctx.latest()` because multiple remote users ca
 - Do we need remote preview history/replay for debugging? The likely answer is no, but server debug tooling may want to show current ephemeral counts.
 - Should the public API include actor color/nickname data, or should preview rendering join ephemeral actor ids with existing presence users?
 - Should local previews continue to be document-shaped while remote previews are overlays, or should the whiteboard use overlay rendering for both local and remote drags to keep behavior symmetric?
+- Future public-preview question: if automatic CRDT-shaped public preview is revisited, should "max timestamp wins" live in an explicit non-durable timestamp/clock domain on updates, or in a preview compositor that treats preview layers as higher priority than durable state?
 
 ## Recommendation summary
 
-Do not replicate `when: 'preview'` as durable CRDT updates. Keep it local for fast document-shaped feedback, and add an ephemeral preview/presence channel for shared whiteboard interactions.
+Do not replicate `when: 'preview'` as durable CRDT updates. Keep it local for fast document-shaped feedback, and add a typed ephemeral preview/presence channel for shared whiteboard interactions.
 
 For the first whiteboard implementation, build the shared preview path example-locally:
 
-- server/local simulator ephemeral messages;
+- server/local simulator `EphemeralMessage<WhiteboardEphemeralData>` transport;
 - a whiteboard preview store or status adapter;
-- explicit whiteboard preview payloads for drag, resize, stroke, and selection;
+- explicit typed whiteboard preview payloads for drag, resize, stroke, and selection;
+- app-provided runtime validators for inbound ephemeral data;
 - clear-on-commit/cancel/disconnect/branch-switch behavior.
 
 After that works, consider promoting the transport extension and React helper into `umkehr/react-crdt`.
 
-`when: 'public-preview'` is worth keeping on the table as the promoted API, especially if shared preview should become generic across apps. If it uses CRDT-shaped updates, model "max timestamp wins" explicitly in the ephemeral preview layer so it cannot leak into durable HLC causality.
+`when: 'public-preview'` is not part of v1. Keep it as a future exploration if shared preview needs to become automatic across arbitrary CRDT-backed apps.
