@@ -50,6 +50,7 @@ export function useServerSync<TState>({
     app,
     docId,
     schema,
+    schemaVersion,
     schemaFingerprint,
     schemaFingerprintHash,
     identity,
@@ -59,6 +60,7 @@ export function useServerSync<TState>({
     app: AppDefinition<TState>;
     docId: string;
     schema: IJsonSchemaCollection<'3.1', [TState]>;
+    schemaVersion: number;
     schemaFingerprint: string;
     schemaFingerprintHash: string;
     identity: ServerSessionIdentity;
@@ -208,7 +210,7 @@ export function useServerSync<TState>({
                         userId: actor.userId,
                         docId,
                         branchId: event.branchId,
-                        schemaVersion: 1,
+                        schemaVersion,
                         schemaFingerprint,
                         schemaFingerprintHash,
                         hlcTimestamp: event.hlcTimestamp,
@@ -241,6 +243,7 @@ export function useServerSync<TState>({
         docId,
         identity.actor,
         identity.user.userId,
+        schemaVersion,
         schemaFingerprint,
         schemaFingerprintHash,
         send,
@@ -452,7 +455,7 @@ export function useServerSync<TState>({
                 actor: identity.actor,
                 userId: identity.user.userId,
                 docId,
-                schemaVersion: 1,
+                schemaVersion,
                 schemaFingerprint,
                 schemaFingerprintHash,
             });
@@ -525,6 +528,7 @@ export function useServerSync<TState>({
         presenceStore,
         receiveServerEvents,
         schema,
+        schemaVersion,
         schemaFingerprint,
         schemaFingerprintHash,
         send,

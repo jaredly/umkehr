@@ -146,3 +146,31 @@
   - `npm run typecheck:tests`
   - `cd examples/react-crdt-server && npm run typecheck`
   - `cd examples/react-crdt-server && npm test`
+
+### Phase 7 progress
+
+- Added browser-side server replica migration before websocket connection.
+- Added `ServerSchemaConfig` so server-mode clients can opt into the same migration hooks without requiring local-first `toDocId` metadata.
+- Added `migrateServerReplica` for persisted server replicas.
+- The server client migration:
+  - normalizes legacy replica schema metadata
+  - migrates every branch update event payload through the shared CRDT update migration runner
+  - keeps merge events structurally unchanged
+  - remaps event indexes when migrated updates are dropped or expanded
+  - remaps branch fork/tip indexes and merge `sourceThroughEventIndex`
+  - preserves pending local events by keeping `recorded: false`
+  - rematerializes every branch history from the migrated event graph
+  - saves the migrated replica before `useServerSync` opens a websocket
+- Updated server sync hello and pending upload messages to send the loaded replica schema version rather than hard-coded v1.
+- Added focused tests for:
+  - branch update event migration
+  - pending local update preservation
+  - merge event preservation and rematerialization
+  - failed local migration when no path exists
+- Verified:
+  - `npm test -- examples/react-crdt/src/lib/server/migration.test.ts`
+  - `npm test`
+  - `npm run typecheck:examples`
+  - `npm run typecheck:tests`
+  - `cd examples/react-crdt-server && npm run typecheck`
+  - `cd examples/react-crdt-server && npm test`

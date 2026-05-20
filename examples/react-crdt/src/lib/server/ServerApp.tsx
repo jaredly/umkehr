@@ -13,6 +13,8 @@ import {
 import {SERVER_HTTP_URL, SERVER_PROTOCOL_VERSION} from './protocol';
 import {actorForSession, ensureServerSessionId} from './session';
 import {useServerSync} from './useServerSync';
+import {migrateServerReplica, normalizeServerReplica} from './migration';
+import {defaultServerSchemaConfig, type ServerSchemaConfig} from './schemaConfig';
 import type {PersistedServerReplica, ServerSessionIdentity, ServerSync, ServerUser} from './types';
 
 type Loaded<TState> = {
@@ -30,19 +32,25 @@ type LoadState<TState> =
 export function ServerApp<TState>({
     app,
     runtime,
+    schemaConfig: schemaConfigProp,
 }: {
     app: AppDefinition<TState>;
     runtime: CrdtRuntime<TState>;
+    schemaConfig?: ServerSchemaConfig<TState>;
 }) {
     const activeDocId = readActiveDocId() ?? runtime.docId;
     const fingerprint = useMemo(() => schemaFingerprint(app), [app]);
     const fingerprintHash = useMemo(() => schemaFingerprintHash(app), [app]);
+    const schemaConfig = useMemo(
+        () => schemaConfigProp ?? defaultServerSchemaConfig<TState>(),
+        [schemaConfigProp],
+    );
     const [loadState, setLoadState] = useState<LoadState<TState>>({kind: 'loading'});
 
     useEffect(() => {
         let alive = true;
         setLoadState({kind: 'loading'});
-        bootstrapInitialState(app, activeDocId, fingerprint, fingerprintHash)
+        bootstrapInitialState(app, activeDocId, fingerprint, fingerprintHash, schemaConfig)
             .then((loaded) => {
                 if (!alive) return;
                 if (loaded.kind === 'ready') {
@@ -61,7 +69,7 @@ export function ServerApp<TState>({
         return () => {
             alive = false;
         };
-    }, [activeDocId, app, fingerprint, fingerprintHash]);
+    }, [activeDocId, app, fingerprint, fingerprintHash, schemaConfig]);
 
     const login = useCallback(
         async (sessionId: string, nickname: string) => {
@@ -74,6 +82,7 @@ export function ServerApp<TState>({
                     activeDocId,
                     fingerprint,
                     fingerprintHash,
+                    schemaConfig,
                     createSessionIdentity(user, sessionId),
                 );
                 setLoadState({kind: 'ready', loaded});
@@ -87,7 +96,7 @@ export function ServerApp<TState>({
                 });
             }
         },
-        [activeDocId, app, fingerprint, fingerprintHash],
+        [activeDocId, app, fingerprint, fingerprintHash, schemaConfig],
     );
 
     const logout = useCallback(async () => {
@@ -167,6 +176,7 @@ function ServerReadyApp<TState>({
         app,
         docId,
         schema: app.schema,
+        schemaVersion: loaded.replica.schemaVersion,
         schemaFingerprint,
         schemaFingerprintHash,
         identity: loaded.identity,
@@ -287,30 +297,32 @@ async function loadInitialState<TState>(
     docId: string,
     fingerprint: string,
     fingerprintHash: string,
+    schemaConfig: ServerSchemaConfig<TState>,
     identity: ServerSessionIdentity,
 ): Promise<Loaded<TState>> {
     const persisted = await loadServerReplica<TState>(docId);
     if (persisted) {
-        if (persisted.schemaFingerprint !== fingerprint) {
-            throw new Error('Persisted server replica schema does not match this app version.');
-        }
-        if (
-            persisted.schemaFingerprintHash !== undefined &&
-            persisted.schemaFingerprintHash !== fingerprintHash
-        ) {
-            throw new Error('Persisted server replica schema hash does not match this app version.');
-        }
-        if (
-            (persisted.schemaVersion ?? 1) === 1 &&
-            persisted.storageVersion === 3 &&
-            persisted.protocolVersion === SERVER_PROTOCOL_VERSION
-        ) {
+        const normalized = normalizeServerReplica(persisted);
+        if (normalized.schemaFingerprintHash === fingerprintHash) {
             return {
                 identity,
-                replica: persisted,
+                replica: normalized,
                 source: 'loaded',
             };
         }
+        const migrated = migrateServerReplica({
+            app,
+            replica: normalized,
+            schemaConfig,
+            schemaFingerprint: fingerprint,
+            schemaFingerprintHash: fingerprintHash,
+        });
+        await saveServerReplica(migrated);
+        return {
+            identity,
+            replica: migrated,
+            source: 'loaded',
+        };
     }
 
     const history = createInitialCrdtHistory(app);
@@ -319,7 +331,7 @@ async function loadInitialState<TState>(
         docId,
         storageVersion: 3,
         protocolVersion: SERVER_PROTOCOL_VERSION,
-        schemaVersion: 1,
+        schemaVersion: schemaConfig.version,
         schemaFingerprint: fingerprint,
         schemaFingerprintHash: fingerprintHash,
         activeBranchId: 'main',
@@ -358,6 +370,7 @@ async function bootstrapInitialState<TState>(
     docId: string,
     fingerprint: string,
     fingerprintHash: string,
+    schemaConfig: ServerSchemaConfig<TState>,
 ): Promise<
     | {kind: 'ready'; loaded: Loaded<TState>}
     | {kind: 'needsUser'; sessionId: string; users: ServerUser[]; message?: string}
@@ -373,6 +386,7 @@ async function bootstrapInitialState<TState>(
         docId,
         fingerprint,
         fingerprintHash,
+        schemaConfig,
         createSessionIdentity(user, sessionId),
     );
     return {kind: 'ready', loaded};
