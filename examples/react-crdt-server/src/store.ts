@@ -834,6 +834,8 @@ function rowToUser(row: UserRow): ServerUser {
 
 function validateMigrationUpload(upload: ServerMigrationUpload) {
     if (!upload.branches.length) throw new Error('Migration upload must include at least one branch.');
+    if (!upload.migrationIds.length) throw new Error('Migration upload must include migration ids.');
+    if (!upload.migratedAt.trim()) throw new Error('Migration upload must include migration timestamp.');
     const branchIds = new Set(upload.branches.map((branch) => branch.branchId));
     if (!branchIds.has(MAIN_BRANCH_ID)) throw new Error('Migration upload must include main branch.');
     for (const branch of upload.branches) {
@@ -848,6 +850,7 @@ function validateMigrationUpload(upload: ServerMigrationUpload) {
         }
     }
     const seen = new Set<string>();
+    const branchEvents = new Map<string, ServerBranchEvent[]>();
     for (const event of upload.events) {
         if (event.docId !== upload.docId) throw new Error('Migration upload event doc id mismatch.');
         if (!branchIds.has(event.branchId)) throw new Error('Migration upload event branch is missing.');
@@ -863,6 +866,20 @@ function validateMigrationUpload(upload: ServerMigrationUpload) {
         const branch = upload.branches.find((candidate) => candidate.branchId === event.branchId);
         if (branch && event.eventIndex > branch.tipEventIndex) {
             throw new Error('Migration upload event is beyond branch tip.');
+        }
+        const list = branchEvents.get(event.branchId) ?? [];
+        list.push(event);
+        branchEvents.set(event.branchId, list);
+    }
+    for (const branch of upload.branches) {
+        const events = (branchEvents.get(branch.branchId) ?? []).sort((a, b) => a.eventIndex - b.eventIndex);
+        if (branch.tipEventIndex !== events.length) {
+            throw new Error('Migration upload branch tip must equal the number of events.');
+        }
+        for (let index = 0; index < events.length; index++) {
+            if (events[index].eventIndex !== index + 1) {
+                throw new Error('Migration upload event indexes must be contiguous per branch.');
+            }
         }
     }
 }

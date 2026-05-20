@@ -211,8 +211,35 @@
   - `cd examples/react-crdt-server && npm run typecheck`
   - `cd examples/react-crdt-server && npm test`
 
-Remaining for Phase 9:
+### Phase 9 progress
 
-- Define and tighten the final dump/upload package contract.
-- Wire browser-side user choice plus dump migration/upload orchestration.
-- Add upload stale-lock/source-hash negative tests and debug/admin display of archive/lock details.
+- Tightened the server migration upload package:
+  - requires migration ids and a migrated-at timestamp
+  - requires upload source hash to match the active migration lock
+  - requires upload target schema metadata to match the active migration lock
+  - requires per-branch event indexes to be contiguous
+  - requires branch tips to match migrated event counts
+- Added client-side `migrateServerDump`, which converts a `serverMigrationDump` into a `serverMigrationUpload` by:
+  - reconstructing a source persisted server replica from dump branches/events
+  - applying the configured server schema migrations
+  - preserving HLC timestamps unless migration hooks emit different updates
+  - emitting migrated branch metadata, events, migration ids, and migration timestamp
+- Wired browser-side server migration orchestration:
+  - prompts the user when the server reports `serverMigrationRequired`
+  - sends `serverMigrationRequest`
+  - migrates `serverMigrationDump`
+  - uploads the migrated package
+  - reconnects after `serverMigrationComplete`
+- Expanded the server debug page to show active schema hashes, archived schema hashes, and active migration locks.
+- Added focused tests for:
+  - client dump-to-upload package creation
+  - stale/missing lock rejection
+  - wrong source hash rejection
+  - incoherent migrated event indexes
+- Verified:
+  - `npm test -- examples/react-crdt/src/lib/server/migration.test.ts`
+  - `npm test`
+  - `npm run typecheck:examples`
+  - `npm run typecheck:tests`
+  - `cd examples/react-crdt-server && npm run typecheck`
+  - `cd examples/react-crdt-server && npm test`

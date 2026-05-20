@@ -212,6 +212,8 @@ describe('ServerStore', () => {
                 targetSchemaVersion: 2,
                 targetSchemaFingerprint: 'schema-v2',
                 targetSchemaFingerprintHash: 'hash-v2',
+                migrationIds: ['v1-to-v2'],
+                migratedAt: 'now',
                 branches: [
                     {
                         docId: 'doc',
@@ -236,5 +238,98 @@ describe('ServerStore', () => {
             kind: 'update',
             update: {value: {migrated: true}},
         });
+    });
+
+    it('rejects migration uploads without a matching active lock and source hash', () => {
+        const store = createStore();
+        store.ensureDocument('doc', 1, 'schema-v1', 'hash-v1');
+        const upload = {
+            docId: 'doc',
+            sourceSchemaFingerprintHash: 'hash-v1',
+            targetSchemaVersion: 2,
+            targetSchemaFingerprint: 'schema-v2',
+            targetSchemaFingerprintHash: 'hash-v2',
+            migrationIds: ['v1-to-v2'],
+            migratedAt: 'now',
+            branches: [
+                {
+                    docId: 'doc',
+                    branchId: 'main',
+                    name: 'main',
+                    tipEventIndex: 0,
+                    createdAt: 'now',
+                    updatedAt: 'now',
+                },
+            ],
+            events: [],
+        };
+
+        expect(() => store.completeMigration({ownerActor: 'user:session', upload})).toThrow();
+        store.beginMigration({
+            docId: 'doc',
+            ownerActor: 'user:session',
+            ownerUserId: 'user',
+            ownerSessionId: 'session',
+            targetSchemaVersion: 2,
+            targetSchemaFingerprint: 'schema-v2',
+            targetSchemaFingerprintHash: 'hash-v2',
+        });
+        expect(() =>
+            store.completeMigration({
+                ownerActor: 'user:session',
+                upload: {...upload, sourceSchemaFingerprintHash: 'wrong-hash'},
+            }),
+        ).toThrow();
+    });
+
+    it('rejects migrated branch events with incoherent indexes', () => {
+        const store = createStore();
+        store.ensureDocument('doc', 1, 'schema-v1', 'hash-v1');
+        store.beginMigration({
+            docId: 'doc',
+            ownerActor: 'user:session',
+            ownerUserId: 'user',
+            ownerSessionId: 'session',
+            targetSchemaVersion: 2,
+            targetSchemaFingerprint: 'schema-v2',
+            targetSchemaFingerprintHash: 'hash-v2',
+        });
+
+        expect(() =>
+            store.completeMigration({
+                ownerActor: 'user:session',
+                upload: {
+                    docId: 'doc',
+                    sourceSchemaFingerprintHash: 'hash-v1',
+                    targetSchemaVersion: 2,
+                    targetSchemaFingerprint: 'schema-v2',
+                    targetSchemaFingerprintHash: 'hash-v2',
+                    migrationIds: ['v1-to-v2'],
+                    migratedAt: 'now',
+                    branches: [
+                        {
+                            docId: 'doc',
+                            branchId: 'main',
+                            name: 'main',
+                            tipEventIndex: 2,
+                            createdAt: 'now',
+                            updatedAt: 'now',
+                        },
+                    ],
+                    events: [
+                        {
+                            kind: 'update',
+                            docId: 'doc',
+                            branchId: 'main',
+                            eventIndex: 2,
+                            origin: 'user:session',
+                            hlcTimestamp: '002:user:session',
+                            receivedAt: 'now',
+                            update: {op: 'set', path: [], value: {}, ts: '002:user:session'},
+                        },
+                    ],
+                },
+            }),
+        ).toThrow();
     });
 });

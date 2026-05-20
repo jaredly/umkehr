@@ -577,10 +577,12 @@ function debugHtml() {
   <section>
     <h2>Documents</h2>
     ${table(
-        ['Doc', 'Fingerprint', 'Branches', 'Events'],
+        ['Doc', 'Active hash', 'Archived hashes', 'Migration lock', 'Branches', 'Events'],
         documents.map((doc) => [
             doc.docId,
-            doc.schemaFingerprint,
+            doc.schemaFingerprintHash,
+            store.archivedSchemaHashes(doc.docId).join(', '),
+            migrationLockText(doc.docId),
             String(doc.branchCount),
             String(doc.eventCount),
         ]),
@@ -623,6 +625,11 @@ function debugHtml() {
   </section>
 </body>
 </html>`;
+}
+
+function migrationLockText(docId: string) {
+    const lock = store.activeMigrationLock(docId);
+    return lock ? `${lock.ownerActor} -> ${lock.targetSchemaFingerprintHash}` : '';
 }
 
 function table(headers: string[], rows: string[][]) {

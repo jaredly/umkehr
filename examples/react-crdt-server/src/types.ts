@@ -87,6 +87,8 @@ export type ServerMigrationUpload = {
     targetSchemaVersion: number;
     targetSchemaFingerprint: string;
     targetSchemaFingerprintHash: string;
+    migrationIds: string[];
+    migratedAt: string;
     branches: ServerBranch[];
     events: ServerBranchEvent[];
 };

@@ -147,6 +147,7 @@ export function ServerApp<TState>({
             docId={activeDocId}
             schemaFingerprint={fingerprint}
             schemaFingerprintHash={fingerprintHash}
+            schemaConfig={schemaConfig}
             loaded={loadState.loaded}
             onLogout={() => void logout()}
         />
@@ -159,6 +160,7 @@ function ServerReadyApp<TState>({
     docId,
     schemaFingerprint,
     schemaFingerprintHash,
+    schemaConfig,
     loaded,
     onLogout,
 }: {
@@ -167,6 +169,7 @@ function ServerReadyApp<TState>({
     docId: string;
     schemaFingerprint: string;
     schemaFingerprintHash: string;
+    schemaConfig: ServerSchemaConfig<TState>;
     loaded: Loaded<TState>;
     onLogout(): void;
 }) {
@@ -179,6 +182,7 @@ function ServerReadyApp<TState>({
         schemaVersion: loaded.replica.schemaVersion,
         schemaFingerprint,
         schemaFingerprintHash,
+        schemaConfig,
         identity: loaded.identity,
         initialReplica: loaded.replica,
         replaceHistory: setCurrentHistory,

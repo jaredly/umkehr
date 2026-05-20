@@ -285,6 +285,9 @@ export function parseClientMessage(input: unknown): ClientServerMessage | null {
             if (!result.data.sourceSchemaFingerprintHash.trim()) return null;
             if (!result.data.targetSchemaFingerprint.trim()) return null;
             if (!result.data.targetSchemaFingerprintHash.trim()) return null;
+            if (!Array.isArray(result.data.migrationIds)) return null;
+            if (!result.data.migrationIds.every((id) => typeof id === 'string' && id.length > 0)) return null;
+            if (!result.data.migratedAt.trim()) return null;
             if (!Array.isArray(result.data.branches) || !Array.isArray(result.data.events)) return null;
             return result.data;
         case 'branchSubscribe':

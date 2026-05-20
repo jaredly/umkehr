@@ -32,6 +32,8 @@ import {
     whiteboardSelectionStatusId,
 } from './presence';
 import {buildMergePathPreview, materializeServerBranch} from './materialize';
+import {migrateServerDump} from './migration';
+import type {ServerSchemaConfig} from './schemaConfig';
 import type {
     PersistedServerBranch,
     PersistedServerReplica,
@@ -53,6 +55,7 @@ export function useServerSync<TState>({
     schemaVersion,
     schemaFingerprint,
     schemaFingerprintHash,
+    schemaConfig,
     identity,
     initialReplica,
     replaceHistory,
@@ -63,6 +66,7 @@ export function useServerSync<TState>({
     schemaVersion: number;
     schemaFingerprint: string;
     schemaFingerprintHash: string;
+    schemaConfig: ServerSchemaConfig<TState>;
     identity: ServerSessionIdentity;
     initialReplica: PersistedServerReplica<TState>;
     replaceHistory(history: CrdtLocalHistory<TState>): void;
@@ -499,9 +503,22 @@ export function useServerSync<TState>({
             } else if (parsed.kind === 'presenceSelection') {
                 applySelectionMessage(parsed);
             } else if (parsed.kind === 'serverMigrationRequired') {
-                stateStore.setSnapshot({
-                    kind: 'error',
-                    message: 'Server migration is required before this client can sync.',
+                if (!window.confirm('Migrate this server document to the current app schema?')) {
+                    stateStore.setSnapshot({
+                        kind: 'error',
+                        message: 'Server migration is required before this client can sync.',
+                    });
+                    return;
+                }
+                send({
+                    kind: 'serverMigrationRequest',
+                    version: SERVER_PROTOCOL_VERSION,
+                    actor: identity.actor,
+                    userId: identity.user.userId,
+                    docId,
+                    targetSchemaVersion: schemaVersion,
+                    targetSchemaFingerprint: schemaFingerprint,
+                    targetSchemaFingerprintHash: schemaFingerprintHash,
                 });
             } else if (parsed.kind === 'waitForMigration') {
                 stateStore.setSnapshot({
@@ -520,8 +537,21 @@ export function useServerSync<TState>({
                 });
             } else if (parsed.kind === 'migrationCancelled') {
                 stateStore.setSnapshot({kind: 'error', message: parsed.reason});
-            } else if (parsed.kind === 'serverMigrationComplete' || parsed.kind === 'serverMigrationDump') {
-                // Phase 8 server coordination is protocol-visible here; upload orchestration is wired in a later phase.
+            } else if (parsed.kind === 'serverMigrationDump') {
+                const upload = migrateServerDump({
+                    app,
+                    dump: parsed,
+                    schemaConfig,
+                    schemaFingerprint,
+                    schemaFingerprintHash,
+                });
+                send({...upload, actor: identity.actor, userId: identity.user.userId});
+            } else if (parsed.kind === 'serverMigrationComplete') {
+                stateStore.setSnapshot({kind: 'offline', reason: 'starting'});
+                window.clearTimeout(reconnectTimerRef.current);
+                socketRef.current?.close();
+                socketRef.current = null;
+                reconnectTimerRef.current = window.setTimeout(connect, 0);
             }
         });
 
@@ -555,6 +585,7 @@ export function useServerSync<TState>({
         schemaVersion,
         schemaFingerprint,
         schemaFingerprintHash,
+        schemaConfig,
         send,
         sendPresenceHello,
         stateStore,
