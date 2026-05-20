@@ -1,7 +1,9 @@
 import {describe, expect, it} from 'vitest';
 import type {IJsonSchemaCollection, IValidation} from 'typia';
+import type {History} from '../history/history.js';
 import {
     MigrationError,
+    migrateHistory,
     migrateValue,
     resolveMigrationPath,
     type SchemaMigrationConfig,
@@ -16,6 +18,9 @@ const schemaCollection = {version: '3.1', schemas: [{}], components: {schemas: {
     '3.1',
     [unknown]
 >;
+const v1Schema = objectSchema(['title'], {title: {type: 'string'}});
+const v2Schema = objectSchema(['title', 'done'], {title: {type: 'string'}, done: {type: 'boolean'}});
+const v3Schema = objectSchema(['label', 'done'], {label: {type: 'string'}, done: {type: 'boolean'}});
 
 const v1 = versionedSchema<V1>(1, 'v1-hash', isV1);
 const v2 = versionedSchema<V2>(2, 'v2-hash', isV2);
@@ -45,6 +50,12 @@ const config: SchemaMigrationConfig<V3> = {
             migrateState(input) {
                 const state = input as V2;
                 return {label: state.title, done: state.done} satisfies V3;
+            },
+            migratePatch(input) {
+                if (input.path[0]?.type === 'key' && input.path[0].key === 'title') {
+                    return {...input, path: [{type: 'key', key: 'label'}]};
+                }
+                return input;
             },
         },
     ],
@@ -159,6 +170,110 @@ describe('schema migration core', () => {
     });
 });
 
+describe('history migration core', () => {
+    it('migrates local history patches and verifies reachable node replay', () => {
+        const result = migrateHistory(config, historyV1(), {
+            schemaVersion: 1,
+            schemaFingerprintHash: 'v1-hash',
+        });
+
+        expect(result.value.initial).toEqual({label: 'Draft', done: false});
+        expect(result.value.current).toEqual({label: 'Published', done: false});
+        expect(result.value.nodes.edit.changes).toEqual([
+            {
+                op: 'replace',
+                path: [{type: 'key', key: 'label'}],
+                previous: 'Draft',
+                value: 'Published',
+            },
+        ]);
+        expect(result.value.nodes.branch.changes).toEqual([
+            {
+                op: 'replace',
+                path: [{type: 'key', key: 'label'}],
+                previous: 'Draft',
+                value: 'Branch',
+            },
+        ]);
+    });
+
+    it('allows unchanged patches when they still validate against the target schema', () => {
+        const result = migrateHistory(
+            {
+                current: v2,
+                previous: [v1],
+                migrations: [
+                    {
+                        id: 'v1-to-v2',
+                        fromVersion: 1,
+                        toVersion: 2,
+                        fromFingerprintHash: 'v1-hash',
+                        toFingerprintHash: 'v2-hash',
+                        migrateState(input) {
+                            const state = input as V1;
+                            return {title: state.title, done: false} satisfies V2;
+                        },
+                    },
+                ],
+            },
+            historyV1(),
+            {schemaVersion: 1, schemaFingerprintHash: 'v1-hash'},
+        );
+
+        expect(result.value.nodes.edit.changes[0].path).toEqual([{type: 'key', key: 'title'}]);
+        expect(result.value.current).toEqual({title: 'Published', done: false});
+    });
+
+    it('fails when patch migration is missing for schema-dependent paths', () => {
+        const badConfig: SchemaMigrationConfig<V3> = {
+            ...config,
+            migrations: [
+                config.migrations[0],
+                {
+                    ...config.migrations[1],
+                    migratePatch: undefined,
+                },
+            ],
+        };
+
+        expect(() =>
+            migrateHistory(badConfig, historyV1(), {
+                schemaVersion: 1,
+                schemaFingerprintHash: 'v1-hash',
+            }),
+        ).toThrowMigrationError('validation-failed');
+    });
+
+    it('fails when migrated patch replay does not match migrated current state', () => {
+        const badConfig: SchemaMigrationConfig<V3> = {
+            ...config,
+            migrations: [
+                config.migrations[0],
+                {
+                    ...config.migrations[1],
+                    migratePatch(input) {
+                        if (input.op === 'replace' && input.path[0]?.type === 'key' && input.path[0].key === 'title') {
+                            return {
+                                ...input,
+                                path: [{type: 'key', key: 'label'}],
+                                value: 'Wrong',
+                            };
+                        }
+                        return input;
+                    },
+                },
+            ],
+        };
+
+        expect(() =>
+            migrateHistory(badConfig, historyV1(), {
+                schemaVersion: 1,
+                schemaFingerprintHash: 'v1-hash',
+            }),
+        ).toThrowMigrationError('replay-failed');
+    });
+});
+
 expect.extend({
     toThrowMigrationError(received: () => unknown, code: string) {
         try {
@@ -193,7 +308,7 @@ function versionedSchema<T>(
 ): VersionedSchema<T> {
     return {
         version,
-        schema: schemaCollection as IJsonSchemaCollection<'3.1', [T]>,
+        schema: schemaForHash(fingerprintHash) as IJsonSchemaCollection<'3.1', [T]>,
         fingerprint: `${fingerprintHash}-full`,
         fingerprintHash,
         tagKey: 'type',
@@ -203,6 +318,69 @@ function versionedSchema<T>(
                 : {success: false, data: input, errors: [{path: '$input', expected: 'test schema'}]};
         },
     };
+}
+
+function historyV1(): History<V1, never> {
+    return {
+        version: 2,
+        initial: {title: 'Draft'},
+        current: {title: 'Published'},
+        root: 'root',
+        tip: 'edit',
+        undoTrail: [],
+        annotations: {},
+        nodes: {
+            root: {id: 'root', pid: 'root', children: ['edit', 'branch'], changes: []},
+            edit: {
+                id: 'edit',
+                pid: 'root',
+                children: [],
+                changes: [
+                    {
+                        op: 'replace',
+                        path: [{type: 'key', key: 'title'}],
+                        previous: 'Draft',
+                        value: 'Published',
+                    },
+                ],
+            },
+            branch: {
+                id: 'branch',
+                pid: 'root',
+                children: [],
+                changes: [
+                    {
+                        op: 'replace',
+                        path: [{type: 'key', key: 'title'}],
+                        previous: 'Draft',
+                        value: 'Branch',
+                    },
+                ],
+            },
+        },
+    };
+}
+
+function schemaForHash(fingerprintHash: string) {
+    if (fingerprintHash === 'v1-hash') return v1Schema;
+    if (fingerprintHash === 'v2-hash') return v2Schema;
+    if (fingerprintHash === 'v3-hash') return v3Schema;
+    return schemaCollection;
+}
+
+function objectSchema(required: string[], properties: Record<string, unknown>) {
+    return {
+        version: '3.1',
+        schemas: [
+            {
+                type: 'object',
+                required,
+                properties,
+                additionalProperties: false,
+            },
+        ],
+        components: {schemas: {}},
+    } as IJsonSchemaCollection<'3.1', [unknown]>;
 }
 
 function isV1(input: unknown): input is V1 {

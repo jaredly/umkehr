@@ -66,3 +66,26 @@
   - `npm run typecheck:tests`
   - `cd examples/react-crdt-server && npm run typecheck`
   - `cd examples/react-crdt-server && npm test`
+
+### Phase 4 progress
+
+- Added `migrateHistory` to `umkehr/migration`.
+- The runner migrates `initial`, `current`, and every `History.nodes[id].changes` patch list.
+- Source patches are validated against the source schema before migration.
+- Migrated patches are validated against each migration step's target schema.
+- Patch migrations can emit zero, one, or many target patches through `SchemaMigration.migratePatch`.
+- The runner preserves annotations, root, tip, children, and undo trail.
+- The runner replays every reachable migrated history node from the migrated initial state.
+- Added `replay-failed` migration errors for graph issues and tip/current replay mismatches.
+- Added focused tests for:
+  - migrated local history patches
+  - branch/reachable node replay
+  - unchanged patches for compatible schema additions
+  - missing patch migration for renamed paths
+  - replay mismatch detection
+- Verified:
+  - `npm test`
+  - `npm run typecheck:examples`
+  - `npm run typecheck:tests`
+  - `cd examples/react-crdt-server && npm run typecheck`
+  - `cd examples/react-crdt-server && npm test`

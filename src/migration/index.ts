@@ -1,6 +1,10 @@
 import type {IJsonSchemaCollection, IValidation} from 'typia';
 import type {CrdtUpdate} from '../crdt/types.js';
+import {deepEqual} from '../deepEqual.js';
+import type {History} from '../history/history.js';
+import {ops} from '../ops.js';
 import type {Patch} from '../types.js';
+import {createPatchValidator} from '../validation/index.js';
 
 export type VersionedSchema<TState> = {
     version: number;
@@ -49,7 +53,8 @@ export type MigrationErrorCode =
     | 'missing-migration-path'
     | 'unsupported-downgrade'
     | 'fingerprint-mismatch'
-    | 'validation-failed';
+    | 'validation-failed'
+    | 'replay-failed';
 
 export class MigrationError extends Error {
     constructor(
@@ -220,6 +225,67 @@ export function migrateValue<TCurrent>(
     };
 }
 
+export function migrateHistory<TCurrent, An>(
+    config: SchemaMigrationConfig<TCurrent>,
+    history: History<unknown, An>,
+    from: SchemaVersionMetadata,
+): MigrationResult<History<TCurrent, An>> {
+    const source = schemaFor(config, from);
+    if (!source) {
+        throw new MigrationError(
+            'missing-source-schema',
+            `No schema is registered for version ${from.schemaVersion} and fingerprint hash ${from.schemaFingerprintHash}.`,
+            {from},
+        );
+    }
+    assertFingerprintMatch(source, from);
+    const path = resolveMigrationPath(config, from);
+    const migratedInitial = migrateValue(config, history.initial, from).value;
+    const migratedCurrent = migrateValue(config, history.current, from).value;
+    const nodes: History<TCurrent, An>['nodes'] = {};
+
+    for (const [id, node] of Object.entries(history.nodes)) {
+        nodes[id] = {
+            id: node.id,
+            pid: node.pid,
+            children: node.children.slice(),
+            changes: migratePatchList(config, node.changes, from, path),
+        };
+    }
+
+    const migrated: History<TCurrent, An> = {
+        version: 2,
+        initial: migratedInitial,
+        nodes,
+        annotations: history.annotations,
+        root: history.root,
+        tip: history.tip,
+        current: migratedCurrent,
+        undoTrail: history.undoTrail.slice(),
+    };
+
+    const replayed = replayHistory(migrated);
+    if (!deepEqual(replayed.get(migrated.tip), migrated.current)) {
+        throw new MigrationError(
+            'replay-failed',
+            'Migrated history replay does not match the migrated current state.',
+            {
+                tip: migrated.tip,
+                replayed: replayed.get(migrated.tip),
+                current: migrated.current,
+            },
+        );
+    }
+    return {
+        value: migrated,
+        migrationIds: path.map((migration) => migration.id),
+        fromVersion: from.schemaVersion,
+        toVersion: config.current.version,
+        fromFingerprintHash: from.schemaFingerprintHash,
+        toFingerprintHash: config.current.fingerprintHash,
+    };
+}
+
 export function schemaFingerprintInput<TState>(
     schema: IJsonSchemaCollection<'3.1', [TState]>,
     tagKey = 'type',
@@ -373,6 +439,126 @@ function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function migratePatchList<TCurrent>(
+    config: SchemaMigrationConfig<TCurrent>,
+    patches: Patch<unknown>[],
+    from: SchemaVersionMetadata,
+    path: SchemaMigration<unknown, unknown>[],
+): Patch<TCurrent>[] {
+    let currentPatches = patches;
+    let currentSchema = requiredSchemaFor(config, from);
+    validatePatches(currentSchema, currentPatches, 'source');
+
+    for (const migration of path) {
+        currentPatches = currentPatches.flatMap((patch) => {
+            const migrated = migration.migratePatch
+                ? migration.migratePatch(patch)
+                : patch;
+            if (migrated === null) return [];
+            return Array.isArray(migrated) ? migrated : [migrated];
+        });
+        currentSchema = requiredSchemaFor(config, {
+            schemaVersion: migration.toVersion,
+            schemaFingerprintHash: migration.toFingerprintHash,
+        });
+        validatePatches(currentSchema, currentPatches, 'target', migration.id);
+    }
+
+    return currentPatches as Patch<TCurrent>[];
+}
+
+function validatePatches(
+    schema: VersionedSchema<unknown>,
+    patches: Patch<unknown>[],
+    stage: 'source' | 'target',
+    migrationId?: string,
+) {
+    const validator = createPatchValidator(schema.schema);
+    for (let index = 0; index < patches.length; index++) {
+        const result = validator.validate(patches[index]);
+        if (result.success) {
+            patches[index] = result.data;
+            continue;
+        }
+        throw new MigrationError(
+            'validation-failed',
+            `${stage === 'source' ? 'Source' : 'Migrated'} patch ${index} does not match schema version ${schema.version}.`,
+            {
+                stage: `${stage}-patch`,
+                migrationId,
+                patchIndex: index,
+                schemaVersion: schema.version,
+                schemaFingerprintHash: schema.fingerprintHash,
+                errors: result.errors,
+            },
+        );
+    }
+}
+
+function replayHistory<TCurrent, An>(history: History<TCurrent, An>) {
+    const root = history.nodes[history.root];
+    if (!root) {
+        throw new MigrationError('replay-failed', `Migrated history root "${history.root}" is missing.`, {
+            root: history.root,
+        });
+    }
+    const states = new Map<string, TCurrent>();
+    const visiting = new Set<string>();
+
+    const replayNode = (id: string): TCurrent => {
+        const existing = states.get(id);
+        if (existing !== undefined) return existing;
+        if (visiting.has(id)) {
+            throw new MigrationError('replay-failed', 'Migrated history graph contains a cycle.', {
+                nodeId: id,
+            });
+        }
+        const node = history.nodes[id];
+        if (!node) {
+            throw new MigrationError('replay-failed', `Migrated history references missing node "${id}".`, {
+                nodeId: id,
+            });
+        }
+        visiting.add(id);
+        const parent =
+            id === history.root || node.pid === id ? history.initial : replayNode(node.pid);
+        let current = parent;
+        for (const patch of node.changes) current = ops.apply(current, patch, deepEqual);
+        states.set(id, current);
+        visiting.delete(id);
+        return current;
+    };
+
+    replayNode(history.root);
+    for (const node of Object.values(history.nodes)) {
+        replayNode(node.id);
+        for (const child of node.children) {
+            if (!history.nodes[child]) {
+                throw new MigrationError(
+                    'replay-failed',
+                    `Migrated history node "${node.id}" references missing child "${child}".`,
+                    {nodeId: node.id, childId: child},
+                );
+            }
+        }
+    }
+    if (!history.nodes[history.tip]) {
+        throw new MigrationError('replay-failed', `Migrated history tip "${history.tip}" is missing.`, {
+            tip: history.tip,
+        });
+    }
+    for (const id of history.undoTrail) {
+        if (!history.nodes[id]) {
+            throw new MigrationError(
+                'replay-failed',
+                `Migrated history undo trail references missing node "${id}".`,
+                {nodeId: id},
+            );
+        }
+    }
+    return states;
+}
+
 function schemaFor<TCurrent>(
     config: SchemaMigrationConfig<TCurrent>,
     metadata: SchemaVersionMetadata,
@@ -390,6 +576,22 @@ function schemaFor<TCurrent>(
                 schema.fingerprintHash === metadata.schemaFingerprintHash,
         ) ?? null
     );
+}
+
+function requiredSchemaFor<TCurrent>(
+    config: SchemaMigrationConfig<TCurrent>,
+    metadata: SchemaVersionMetadata,
+): VersionedSchema<unknown> {
+    const schema = schemaFor(config, metadata);
+    if (!schema) {
+        throw new MigrationError(
+            'missing-target-schema',
+            `No schema is registered for version ${metadata.schemaVersion} and fingerprint hash ${metadata.schemaFingerprintHash}.`,
+            {metadata},
+        );
+    }
+    assertFingerprintMatch(schema, metadata);
+    return schema;
 }
 
 function assertFingerprintMatch(schema: VersionedSchema<unknown>, metadata: SchemaVersionMetadata) {
