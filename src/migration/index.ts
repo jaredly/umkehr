@@ -1,9 +1,14 @@
 import type {IJsonSchemaCollection, IValidation} from 'typia';
-import type {CrdtUpdate} from '../crdt/types.js';
+import {applyCrdtUpdate} from '../crdt/apply.js';
+import {createCrdtDocument} from '../crdt/document.js';
+import type {CrdtLocalHistory} from '../crdt/history.js';
+import {versionOf} from '../crdt/metadata.js';
+import type {CrdtDocument, CrdtUpdate, JsonValue, PendingUpdate} from '../crdt/types.js';
+import {createCrdtUpdateValidator} from '../crdt/validation.js';
 import {deepEqual} from '../deepEqual.js';
 import type {History} from '../history/history.js';
 import {ops} from '../ops.js';
-import type {Patch} from '../types.js';
+import type {PathSegment, Patch} from '../types.js';
 import {createPatchValidator} from '../validation/index.js';
 
 export type VersionedSchema<TState> = {
@@ -25,6 +30,8 @@ export type SchemaMigration<TFrom, TTo> = {
     migratePatch?(input: Patch<TFrom>): Patch<TTo> | Patch<TTo>[] | null;
     migrateCrdtUpdate?(input: CrdtUpdate): CrdtUpdate | CrdtUpdate[] | null;
 };
+
+export type ObjectDefaults = Record<string, JsonValue>;
 
 export type SchemaMigrationConfig<TCurrent> = {
     current: VersionedSchema<TCurrent>;
@@ -286,6 +293,126 @@ export function migrateHistory<TCurrent, An>(
     };
 }
 
+export function migrateCrdtHistory<TCurrent>(
+    config: SchemaMigrationConfig<TCurrent>,
+    history: CrdtLocalHistory<unknown>,
+    from: SchemaVersionMetadata,
+): MigrationResult<CrdtLocalHistory<TCurrent>> {
+    const path = resolveMigrationPath(config, from);
+    const settledBase = settlePendingDocument(history.base, 'base');
+    const settledDoc = settlePendingDocument(history.doc, 'doc');
+    const migratedBaseState = migrateValue(config, settledBase.state, from).value;
+    const migratedRealizedState = migrateValue(config, settledDoc.state, from).value;
+    const timestamp = versionOf(settledBase.meta) ?? '000000000000000:00000:migration';
+    const migratedBase = createCrdtDocument(migratedBaseState, config.current.schema, {
+        timestamp,
+        tagKey: config.current.tagKey,
+    });
+    const migratedUpdates = migrateCrdtUpdateList(config, history.updates, from, path);
+    let replayed = migratedBase;
+    for (const update of migratedUpdates) replayed = applyCrdtUpdate(replayed, update);
+
+    if (replayed.pending.length) {
+        throw new MigrationError(
+            'replay-failed',
+            'Migrated CRDT updates left pending updates after replay.',
+            {pending: replayed.pending},
+        );
+    }
+    if (!deepEqual(replayed.state, migratedRealizedState)) {
+        throw new MigrationError(
+            'replay-failed',
+            'Migrated CRDT update replay does not match the migrated realized state.',
+            {replayed: replayed.state, realized: migratedRealizedState},
+        );
+    }
+
+    return {
+        value: {
+            base: migratedBase,
+            doc: replayed,
+            updates: migratedUpdates,
+        },
+        migrationIds: path.map((migration) => migration.id),
+        fromVersion: from.schemaVersion,
+        toVersion: config.current.version,
+        fromFingerprintHash: from.schemaFingerprintHash,
+        toFingerprintHash: config.current.fingerprintHash,
+    };
+}
+
+export function renamePatchObjectField<T>(patch: Patch<T>, fromKey: string | number, toKey: string | number): Patch<T> {
+    return {...patch, path: renamePatchPathKey(patch.path, fromKey, toKey)} as Patch<T>;
+}
+
+export function dropPatchObjectField<T>(patch: Patch<T>, key: string | number): Patch<T> | null {
+    return patch.path[0]?.type === 'key' && patch.path[0].key === key ? null : patch;
+}
+
+export function defaultPatchObjectValue<T>(patch: Patch<T>, defaults: ObjectDefaults): Patch<T> {
+    if (patch.op === 'replace') {
+        return {
+            ...patch,
+            value: isRecord(patch.value) ? withObjectDefaults(patch.value, defaults) : patch.value,
+            previous: isRecord(patch.previous) ? withObjectDefaults(patch.previous, defaults) : patch.previous,
+        } as Patch<T>;
+    }
+    if ((patch.op === 'add' || patch.op === 'remove') && isRecord(patch.value)) {
+        return {...patch, value: withObjectDefaults(patch.value, defaults)} as Patch<T>;
+    }
+    return patch;
+}
+
+export function renamePatchTag<T>(patch: Patch<T>, tagKey: string, fromValue: string, toValue: string): Patch<T> {
+    const path = patch.path.map((segment) =>
+        segment.type === 'tag' && segment.key === tagKey && segment.value === fromValue
+            ? {...segment, value: toValue}
+            : segment,
+    );
+    const next = {...patch, path} as Patch<T>;
+    if (next.op === 'replace') {
+        return {
+            ...next,
+            value: isRecord(next.value) ? renameTagValue(next.value, tagKey, fromValue, toValue) : next.value,
+            previous: isRecord(next.previous)
+                ? renameTagValue(next.previous, tagKey, fromValue, toValue)
+                : next.previous,
+        } as Patch<T>;
+    }
+    if ((next.op === 'add' || next.op === 'remove') && isRecord(next.value)) {
+        return {...next, value: renameTagValue(next.value, tagKey, fromValue, toValue)} as Patch<T>;
+    }
+    return next;
+}
+
+export function renameCrdtObjectField(update: CrdtUpdate, fromKey: string, toKey: string): CrdtUpdate {
+    if (update.op === 'setOrder') return {...update, arrayPath: renameCrdtPathObjectField(update.arrayPath, fromKey, toKey)};
+    return {...update, path: renameCrdtPathObjectField(update.path, fromKey, toKey)};
+}
+
+export function dropCrdtObjectField(update: CrdtUpdate, key: string): CrdtUpdate | null {
+    const path = update.op === 'setOrder' ? update.arrayPath : update.path;
+    return path[0]?.type === 'objectField' && path[0].key === key ? null : update;
+}
+
+export function defaultCrdtSetObjectValue(update: CrdtUpdate, defaults: ObjectDefaults): CrdtUpdate {
+    if (update.op === 'set' && isJsonObject(update.value)) {
+        return {...update, value: withJsonObjectDefaults(update.value, defaults)};
+    }
+    return update;
+}
+
+export function renameCrdtTaggedBranch(update: CrdtUpdate, tagKey: string, fromValue: string, toValue: string): CrdtUpdate {
+    if (update.op === 'setOrder') {
+        return {...update, arrayPath: renameCrdtTaggedPath(update.arrayPath, tagKey, fromValue, toValue)};
+    }
+    const path = renameCrdtTaggedPath(update.path, tagKey, fromValue, toValue);
+    if (update.op === 'set' && isJsonObject(update.value)) {
+        return {...update, path, value: renameJsonTagValue(update.value, tagKey, fromValue, toValue)};
+    }
+    return {...update, path};
+}
+
 export function schemaFingerprintInput<TState>(
     schema: IJsonSchemaCollection<'3.1', [TState]>,
     tagKey = 'type',
@@ -439,6 +566,58 @@ function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function renamePatchPathKey(path: PathSegment[], fromKey: string | number, toKey: string | number): PathSegment[] {
+    return path.map((segment) =>
+        segment.type === 'key' && segment.key === fromKey ? {...segment, key: toKey} : segment,
+    );
+}
+
+function renameCrdtPathObjectField(path: CrdtUpdatePath, fromKey: string, toKey: string): CrdtUpdatePath {
+    return path.map((segment) =>
+        segment.type === 'objectField' && segment.key === fromKey ? {...segment, key: toKey} : segment,
+    );
+}
+
+function renameCrdtTaggedPath(path: CrdtUpdatePath, tagKey: string, fromValue: string, toValue: string): CrdtUpdatePath {
+    return path.map((segment) =>
+        segment.type === 'taggedField' && segment.tagKey === tagKey && segment.tagValue === fromValue
+            ? {...segment, tagValue: toValue}
+            : segment,
+    );
+}
+
+type CrdtUpdatePath = Exclude<CrdtUpdate, {op: 'setOrder'}>['path'];
+
+function withObjectDefaults(value: Record<string, unknown>, defaults: ObjectDefaults): Record<string, unknown> {
+    const next = {...value};
+    for (const [key, defaultValue] of Object.entries(defaults)) {
+        if (!(key in next)) next[key] = defaultValue;
+    }
+    return next;
+}
+
+function renameTagValue(value: Record<string, unknown>, tagKey: string, fromValue: string, toValue: string) {
+    return value[tagKey] === fromValue ? {...value, [tagKey]: toValue} : value;
+}
+
+type JsonObject = {[key: string]: JsonValue | undefined};
+
+function isJsonObject(value: JsonValue): value is JsonObject {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function withJsonObjectDefaults(value: JsonObject, defaults: ObjectDefaults): JsonObject {
+    const next: JsonObject = {...value};
+    for (const [key, defaultValue] of Object.entries(defaults)) {
+        if (!(key in next)) next[key] = defaultValue;
+    }
+    return next;
+}
+
+function renameJsonTagValue(value: JsonObject, tagKey: string, fromValue: string, toValue: string): JsonObject {
+    return value[tagKey] === fromValue ? {...value, [tagKey]: toValue} : value;
+}
+
 function migratePatchList<TCurrent>(
     config: SchemaMigrationConfig<TCurrent>,
     patches: Patch<unknown>[],
@@ -465,6 +644,81 @@ function migratePatchList<TCurrent>(
     }
 
     return currentPatches as Patch<TCurrent>[];
+}
+
+function migrateCrdtUpdateList<TCurrent>(
+    config: SchemaMigrationConfig<TCurrent>,
+    updates: CrdtUpdate[],
+    from: SchemaVersionMetadata,
+    path: SchemaMigration<unknown, unknown>[],
+): CrdtUpdate[] {
+    let currentUpdates = updates.slice();
+    let currentSchema = requiredSchemaFor(config, from);
+    validateCrdtUpdates(currentSchema, currentUpdates, 'source');
+
+    for (const migration of path) {
+        currentUpdates = currentUpdates.flatMap((update) => {
+            const migrated = migration.migrateCrdtUpdate
+                ? migration.migrateCrdtUpdate(update)
+                : update;
+            if (migrated === null) return [];
+            return Array.isArray(migrated) ? migrated : [migrated];
+        });
+        currentSchema = requiredSchemaFor(config, {
+            schemaVersion: migration.toVersion,
+            schemaFingerprintHash: migration.toFingerprintHash,
+        });
+        validateCrdtUpdates(currentSchema, currentUpdates, 'target', migration.id);
+    }
+
+    return currentUpdates;
+}
+
+function validateCrdtUpdates(
+    schema: VersionedSchema<unknown>,
+    updates: CrdtUpdate[],
+    stage: 'source' | 'target',
+    migrationId?: string,
+) {
+    const validator = createCrdtUpdateValidator(schema.schema, {tagKey: schema.tagKey});
+    for (let index = 0; index < updates.length; index++) {
+        const result = validator.validate(updates[index]);
+        if (result.success) {
+            updates[index] = result.data;
+            continue;
+        }
+        throw new MigrationError(
+            'validation-failed',
+            `${stage === 'source' ? 'Source' : 'Migrated'} CRDT update ${index} does not match schema version ${schema.version}.`,
+            {
+                stage: `${stage}-crdt-update`,
+                migrationId,
+                updateIndex: index,
+                schemaVersion: schema.version,
+                schemaFingerprintHash: schema.fingerprintHash,
+                errors: result.errors,
+            },
+        );
+    }
+}
+
+function settlePendingDocument<T>(doc: CrdtDocument<T>, label: 'base' | 'doc'): CrdtDocument<T> {
+    if (!doc.pending.length) return doc;
+    const pending = doc.pending.slice();
+    let current: CrdtDocument<T> = {...doc, pending: []};
+    for (const entry of pending) current = applyCrdtUpdate(current, entry.update);
+    if (current.pending.length) {
+        throw new MigrationError(
+            'replay-failed',
+            `Cannot migrate CRDT ${label}: pending updates could not be applied first.`,
+            {pending: describePending(current.pending)},
+        );
+    }
+    return current;
+}
+
+function describePending(pending: PendingUpdate[]) {
+    return pending.map(({reason, queuedAt, update}) => ({reason, queuedAt, update}));
 }
 
 function validatePatches(

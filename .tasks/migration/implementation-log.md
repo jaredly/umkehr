@@ -89,3 +89,33 @@
   - `npm run typecheck:tests`
   - `cd examples/react-crdt-server && npm run typecheck`
   - `cd examples/react-crdt-server && npm test`
+
+### Phase 5 progress
+
+- Added `migrateCrdtHistory` to `umkehr/migration`.
+- The runner settles pending updates on both the CRDT base and realized document before migration, and fails with `replay-failed` if any pending updates remain.
+- The runner migrates the base state and realized state with the shared value migration path.
+- Rebuilt the migrated base document with the current schema while preserving the source base timestamp where available.
+- Added CRDT update migration through `SchemaMigration.migrateCrdtUpdate`, including support for dropping one update or expanding one update into many updates.
+- Added reusable migration helpers for common patch and CRDT update rewrites:
+  - object field rename/drop
+  - object-valued default insertion
+  - tagged-union branch/tag renames
+- Validated source CRDT updates against the source schema and migrated CRDT updates against every target schema in the migration path.
+- Replayed migrated updates from the migrated base using `applyCrdtUpdate`.
+- Added replay verification so migrated CRDT history fails if replay leaves pending updates or if the replayed state differs from the separately migrated realized state.
+- Added focused tests for:
+  - CRDT field rename update migration
+  - compatible schema additions with unchanged CRDT updates
+  - missing CRDT update migration for renamed paths
+  - replay mismatch detection
+  - pending updates that can be applied before migration
+  - unresolvable pending updates before migration
+  - patch and CRDT rewrite helpers
+- Verified:
+  - `npm test -- src/migration/migration.test.ts`
+  - `npm test`
+  - `npm run typecheck:examples`
+  - `npm run typecheck:tests`
+  - `cd examples/react-crdt-server && npm run typecheck`
+  - `cd examples/react-crdt-server && npm test`
