@@ -243,3 +243,30 @@
   - `npm run typecheck:tests`
   - `cd examples/react-crdt-server && npm run typecheck`
   - `cd examples/react-crdt-server && npm test`
+
+### Phase 10 progress
+
+- Added a shared todos v1-to-v2 migration fixture under `examples/migration-fixtures`.
+- The fixture models the intended migration cases:
+  - todo item field rename from `text` to `title`
+  - required `priority` field added with a default of `normal`
+  - obsolete optional `archived` and `legacyFilter` fields dropped
+- Added generated fixture schema fingerprints and precomputed SHA-256 fingerprint hashes.
+- Added fixture migration hooks for state, local patches, and CRDT updates.
+- Added fixture seed data for:
+  - non-CRDT local history
+  - CRDT/local-first history and retained updates
+  - server branch update events
+- Added React CRDT fixture tests covering:
+  - non-CRDT local history migration and replay
+  - local-first retained batch migration and history/vector reconstruction
+  - server client local branch migration with pending events
+  - server dump-to-upload migration packaging
+- Added a Bun server store test covering transactional activation of a migrated todos fixture upload, including archive creation.
+- Verified:
+  - `npm test -- examples/react-crdt/src/apps/todos/migrationFixture.test.ts`
+  - `npm test`
+  - `npm run typecheck:examples`
+  - `npm run typecheck:tests`
+  - `cd examples/react-crdt-server && npm run typecheck`
+  - `cd examples/react-crdt-server && npm test`

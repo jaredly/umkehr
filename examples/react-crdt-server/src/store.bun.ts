@@ -2,6 +2,15 @@ import {afterEach, describe, expect, it} from 'bun:test';
 import {unlinkSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
+import {
+    TODO_FIXTURE_DOC_ID_V1,
+    TODO_FIXTURE_MIGRATED_AT,
+    todoFixtureServerUpdateEventsV1,
+    todoFixtureV1Fingerprint,
+    todoFixtureV1FingerprintHash,
+    todoFixtureV2Fingerprint,
+    todoFixtureV2FingerprintHash,
+} from '../../migration-fixtures/todos';
 import {ServerStore} from './store';
 
 const dbPaths: string[] = [];
@@ -331,5 +340,91 @@ describe('ServerStore', () => {
                 },
             }),
         ).toThrow();
+    });
+
+    it('transactionally activates a migrated todos fixture upload', () => {
+        const store = createStore();
+        store.ensureDocument(
+            TODO_FIXTURE_DOC_ID_V1,
+            1,
+            todoFixtureV1Fingerprint,
+            todoFixtureV1FingerprintHash,
+        );
+        for (const event of todoFixtureServerUpdateEventsV1()) {
+            store.appendUpdateEvent({
+                docId: event.docId,
+                branchId: event.branchId,
+                origin: event.origin,
+                hlcTimestamp: event.hlcTimestamp,
+                update: event.update,
+            });
+        }
+        store.beginMigration({
+            docId: TODO_FIXTURE_DOC_ID_V1,
+            ownerActor: 'fixture:local',
+            ownerUserId: 'fixture',
+            ownerSessionId: 'local',
+            targetSchemaVersion: 2,
+            targetSchemaFingerprint: todoFixtureV2Fingerprint,
+            targetSchemaFingerprintHash: todoFixtureV2FingerprintHash,
+        });
+
+        const completed = store.completeMigration({
+            ownerActor: 'fixture:local',
+            upload: {
+                docId: TODO_FIXTURE_DOC_ID_V1,
+                sourceSchemaFingerprintHash: todoFixtureV1FingerprintHash,
+                targetSchemaVersion: 2,
+                targetSchemaFingerprint: todoFixtureV2Fingerprint,
+                targetSchemaFingerprintHash: todoFixtureV2FingerprintHash,
+                migrationIds: ['todos-fixture-v1-to-v2'],
+                migratedAt: TODO_FIXTURE_MIGRATED_AT,
+                branches: [
+                    {
+                        docId: TODO_FIXTURE_DOC_ID_V1,
+                        branchId: 'main',
+                        name: 'main',
+                        tipEventIndex: 2,
+                        createdAt: TODO_FIXTURE_MIGRATED_AT,
+                        updatedAt: TODO_FIXTURE_MIGRATED_AT,
+                    },
+                ],
+                events: todoFixtureServerUpdateEventsV1()
+                    .filter((event) => event.eventIndex !== 2)
+                    .map((event, index) => ({
+                        ...event,
+                        eventIndex: index + 1,
+                        update:
+                            event.update.op === 'set'
+                                ? {
+                                      ...event.update,
+                                      path: event.update.path.map((segment) =>
+                                          segment.type === 'objectField' && segment.key === 'text'
+                                              ? {...segment, key: 'title'}
+                                              : segment,
+                                      ),
+                                      value:
+                                          event.eventIndex === 3
+                                              ? {
+                                                    id: 'three',
+                                                    title: 'Ship fixture',
+                                                    done: false,
+                                                    priority: 'normal',
+                                                }
+                                              : event.update.value,
+                                  }
+                                : event.update,
+                    })),
+            },
+        });
+
+        expect(completed).toEqual({
+            schemaVersion: 2,
+            schemaFingerprintHash: todoFixtureV2FingerprintHash,
+        });
+        expect(store.archivedSchemaHashes(TODO_FIXTURE_DOC_ID_V1)).toEqual([
+            todoFixtureV1FingerprintHash,
+        ]);
+        expect(store.listEventsAfter(TODO_FIXTURE_DOC_ID_V1, 'main', 0)).toHaveLength(2);
     });
 });
