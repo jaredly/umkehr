@@ -1,0 +1,435 @@
+import type {IJsonSchemaCollection, IValidation} from 'typia';
+import type {CrdtUpdate} from '../crdt/types.js';
+import type {Patch} from '../types.js';
+
+export type VersionedSchema<TState> = {
+    version: number;
+    schema: IJsonSchemaCollection<'3.1', [TState]>;
+    fingerprint: string;
+    fingerprintHash: string;
+    tagKey: string;
+    validateState(input: unknown): IValidation<TState>;
+};
+
+export type SchemaMigration<TFrom, TTo> = {
+    id: string;
+    fromVersion: number;
+    toVersion: number;
+    fromFingerprintHash: string;
+    toFingerprintHash: string;
+    migrateState(input: TFrom): TTo;
+    migratePatch?(input: Patch<TFrom>): Patch<TTo> | Patch<TTo>[] | null;
+    migrateCrdtUpdate?(input: CrdtUpdate): CrdtUpdate | CrdtUpdate[] | null;
+};
+
+export type SchemaMigrationConfig<TCurrent> = {
+    current: VersionedSchema<TCurrent>;
+    previous: VersionedSchema<unknown>[];
+    migrations: SchemaMigration<unknown, unknown>[];
+};
+
+export type SchemaVersionMetadata = {
+    schemaVersion: number;
+    schemaFingerprintHash: string;
+    schemaFingerprint?: string;
+};
+
+export type MigrationResult<T> = {
+    value: T;
+    migrationIds: string[];
+    fromVersion: number;
+    toVersion: number;
+    fromFingerprintHash: string;
+    toFingerprintHash: string;
+};
+
+export type MigrationErrorCode =
+    | 'missing-source-schema'
+    | 'missing-target-schema'
+    | 'missing-migration-path'
+    | 'unsupported-downgrade'
+    | 'fingerprint-mismatch'
+    | 'validation-failed';
+
+export class MigrationError extends Error {
+    constructor(
+        readonly code: MigrationErrorCode,
+        message: string,
+        readonly details: Record<string, unknown> = {},
+    ) {
+        super(message);
+        this.name = 'MigrationError';
+    }
+}
+
+export function resolveMigrationPath<TCurrent>(
+    config: SchemaMigrationConfig<TCurrent>,
+    from: SchemaVersionMetadata,
+): SchemaMigration<unknown, unknown>[] {
+    const source = schemaFor(config, from);
+    if (!source) {
+        throw new MigrationError(
+            'missing-source-schema',
+            `No schema is registered for version ${from.schemaVersion} and fingerprint hash ${from.schemaFingerprintHash}.`,
+            {from},
+        );
+    }
+    assertFingerprintMatch(source, from);
+
+    if (from.schemaVersion > config.current.version) {
+        throw new MigrationError(
+            'unsupported-downgrade',
+            `Cannot migrate from future schema version ${from.schemaVersion} to ${config.current.version}.`,
+            {fromVersion: from.schemaVersion, toVersion: config.current.version},
+        );
+    }
+
+    if (from.schemaVersion === config.current.version) {
+        if (from.schemaFingerprintHash !== config.current.fingerprintHash) {
+            throw new MigrationError(
+                'fingerprint-mismatch',
+                `Schema version ${from.schemaVersion} has fingerprint hash ${from.schemaFingerprintHash}, not current hash ${config.current.fingerprintHash}.`,
+                {
+                    schemaVersion: from.schemaVersion,
+                    expectedFingerprintHash: config.current.fingerprintHash,
+                    actualFingerprintHash: from.schemaFingerprintHash,
+                },
+            );
+        }
+        return [];
+    }
+
+    const path: SchemaMigration<unknown, unknown>[] = [];
+    let version = from.schemaVersion;
+    let fingerprintHash = from.schemaFingerprintHash;
+    const seen = new Set<string>();
+
+    while (version < config.current.version) {
+        const key = `${version}:${fingerprintHash}`;
+        if (seen.has(key)) {
+            throw new MigrationError('missing-migration-path', 'Migration path contains a cycle.', {
+                from,
+                currentVersion: version,
+                currentFingerprintHash: fingerprintHash,
+            });
+        }
+        seen.add(key);
+
+        const next = config.migrations.find(
+            (migration) =>
+                migration.fromVersion === version &&
+                migration.fromFingerprintHash === fingerprintHash &&
+                migration.toVersion > migration.fromVersion &&
+                migration.toVersion <= config.current.version,
+        );
+        if (!next) {
+            throw new MigrationError(
+                'missing-migration-path',
+                `No migration step is registered from version ${version} and fingerprint hash ${fingerprintHash}.`,
+                {from, currentVersion: version, currentFingerprintHash: fingerprintHash},
+            );
+        }
+
+        const target = schemaFor(config, {
+            schemaVersion: next.toVersion,
+            schemaFingerprintHash: next.toFingerprintHash,
+        });
+        if (!target) {
+            throw new MigrationError(
+                'missing-target-schema',
+                `No target schema is registered for migration "${next.id}".`,
+                {
+                    migrationId: next.id,
+                    toVersion: next.toVersion,
+                    toFingerprintHash: next.toFingerprintHash,
+                },
+            );
+        }
+        assertFingerprintMatch(target, {
+            schemaVersion: next.toVersion,
+            schemaFingerprintHash: next.toFingerprintHash,
+        });
+
+        path.push(next);
+        version = next.toVersion;
+        fingerprintHash = next.toFingerprintHash;
+    }
+
+    if (version !== config.current.version || fingerprintHash !== config.current.fingerprintHash) {
+        throw new MigrationError(
+            'missing-migration-path',
+            `Migration path ended at version ${version} and fingerprint hash ${fingerprintHash}, not the current schema.`,
+            {
+                from,
+                endedAtVersion: version,
+                endedAtFingerprintHash: fingerprintHash,
+                currentVersion: config.current.version,
+                currentFingerprintHash: config.current.fingerprintHash,
+            },
+        );
+    }
+
+    return path;
+}
+
+export function migrateValue<TCurrent>(
+    config: SchemaMigrationConfig<TCurrent>,
+    value: unknown,
+    from: SchemaVersionMetadata,
+): MigrationResult<TCurrent> {
+    const source = schemaFor(config, from);
+    if (!source) {
+        throw new MigrationError(
+            'missing-source-schema',
+            `No schema is registered for version ${from.schemaVersion} and fingerprint hash ${from.schemaFingerprintHash}.`,
+            {from},
+        );
+    }
+    assertFingerprintMatch(source, from);
+    let currentValue = assertValid(source, value, 'source');
+    const path = resolveMigrationPath(config, from);
+
+    for (const migration of path) {
+        currentValue = migration.migrateState(currentValue);
+        const target = schemaFor(config, {
+            schemaVersion: migration.toVersion,
+            schemaFingerprintHash: migration.toFingerprintHash,
+        });
+        if (!target) {
+            throw new MigrationError(
+                'missing-target-schema',
+                `No target schema is registered for migration "${migration.id}".`,
+                {
+                    migrationId: migration.id,
+                    toVersion: migration.toVersion,
+                    toFingerprintHash: migration.toFingerprintHash,
+                },
+            );
+        }
+        currentValue = assertValid(target, currentValue, 'target', migration.id);
+    }
+
+    const current = assertValid(config.current, currentValue, 'target');
+    return {
+        value: current,
+        migrationIds: path.map((migration) => migration.id),
+        fromVersion: from.schemaVersion,
+        toVersion: config.current.version,
+        fromFingerprintHash: from.schemaFingerprintHash,
+        toFingerprintHash: config.current.fingerprintHash,
+    };
+}
+
+export function schemaFingerprintInput<TState>(
+    schema: IJsonSchemaCollection<'3.1', [TState]>,
+    tagKey = 'type',
+) {
+    return {
+        root: schema.schemas[0],
+        components: schema.components,
+        tagKey,
+    };
+}
+
+export function schemaFingerprint<TState>(
+    schema: IJsonSchemaCollection<'3.1', [TState]>,
+    tagKey = 'type',
+) {
+    return stableStringify(schemaFingerprintInput(schema, tagKey));
+}
+
+export function schemaFingerprintHash<TState>(
+    schema: IJsonSchemaCollection<'3.1', [TState]>,
+    tagKey = 'type',
+) {
+    return sha256Hex(schemaFingerprint(schema, tagKey));
+}
+
+export function stableStringify(value: unknown): string {
+    if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+    if (!isRecord(value)) return JSON.stringify(value);
+    return `{${Object.keys(value)
+        .sort()
+        .map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`)
+        .join(',')}}`;
+}
+
+export function sha256Hex(input: string): string {
+    const bytes = utf8Bytes(input);
+    const bitLength = bytes.length * 8;
+    const paddedLength = (((bytes.length + 9 + 63) >> 6) << 6);
+    const padded = new Uint8Array(paddedLength);
+    padded.set(bytes);
+    padded[bytes.length] = 0x80;
+    const view = new DataView(padded.buffer);
+    view.setUint32(paddedLength - 4, bitLength, false);
+
+    let h0 = 0x6a09e667;
+    let h1 = 0xbb67ae85;
+    let h2 = 0x3c6ef372;
+    let h3 = 0xa54ff53a;
+    let h4 = 0x510e527f;
+    let h5 = 0x9b05688c;
+    let h6 = 0x1f83d9ab;
+    let h7 = 0x5be0cd19;
+    const w = new Uint32Array(64);
+
+    for (let offset = 0; offset < padded.length; offset += 64) {
+        for (let i = 0; i < 16; i++) w[i] = view.getUint32(offset + i * 4, false);
+        for (let i = 16; i < 64; i++) {
+            const s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >>> 3);
+            const s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >>> 10);
+            w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0;
+        }
+
+        let a = h0;
+        let b = h1;
+        let c = h2;
+        let d = h3;
+        let e = h4;
+        let f = h5;
+        let g = h6;
+        let h = h7;
+
+        for (let i = 0; i < 64; i++) {
+            const s1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
+            const ch = (e & f) ^ (~e & g);
+            const temp1 = (h + s1 + ch + K[i] + w[i]) >>> 0;
+            const s0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
+            const maj = (a & b) ^ (a & c) ^ (b & c);
+            const temp2 = (s0 + maj) >>> 0;
+            h = g;
+            g = f;
+            f = e;
+            e = (d + temp1) >>> 0;
+            d = c;
+            c = b;
+            b = a;
+            a = (temp1 + temp2) >>> 0;
+        }
+
+        h0 = (h0 + a) >>> 0;
+        h1 = (h1 + b) >>> 0;
+        h2 = (h2 + c) >>> 0;
+        h3 = (h3 + d) >>> 0;
+        h4 = (h4 + e) >>> 0;
+        h5 = (h5 + f) >>> 0;
+        h6 = (h6 + g) >>> 0;
+        h7 = (h7 + h) >>> 0;
+    }
+
+    return [h0, h1, h2, h3, h4, h5, h6, h7]
+        .map((word) => word.toString(16).padStart(8, '0'))
+        .join('');
+}
+
+const K = new Uint32Array([
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1,
+    0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+    0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786,
+    0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147,
+    0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+    0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
+    0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a,
+    0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+    0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+]);
+
+function rotr(value: number, bits: number) {
+    return (value >>> bits) | (value << (32 - bits));
+}
+
+function utf8Bytes(input: string) {
+    const bytes: number[] = [];
+    for (let i = 0; i < input.length; i++) {
+        let code = input.charCodeAt(i);
+        if (code < 0x80) {
+            bytes.push(code);
+        } else if (code < 0x800) {
+            bytes.push(0xc0 | (code >> 6), 0x80 | (code & 0x3f));
+        } else if (code >= 0xd800 && code <= 0xdbff) {
+            const next = input.charCodeAt(++i);
+            code = 0x10000 + (((code & 0x3ff) << 10) | (next & 0x3ff));
+            bytes.push(
+                0xf0 | (code >> 18),
+                0x80 | ((code >> 12) & 0x3f),
+                0x80 | ((code >> 6) & 0x3f),
+                0x80 | (code & 0x3f),
+            );
+        } else {
+            bytes.push(
+                0xe0 | (code >> 12),
+                0x80 | ((code >> 6) & 0x3f),
+                0x80 | (code & 0x3f),
+            );
+        }
+    }
+    return new Uint8Array(bytes);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function schemaFor<TCurrent>(
+    config: SchemaMigrationConfig<TCurrent>,
+    metadata: SchemaVersionMetadata,
+): VersionedSchema<unknown> | null {
+    if (
+        config.current.version === metadata.schemaVersion &&
+        config.current.fingerprintHash === metadata.schemaFingerprintHash
+    ) {
+        return config.current as VersionedSchema<unknown>;
+    }
+    return (
+        config.previous.find(
+            (schema) =>
+                schema.version === metadata.schemaVersion &&
+                schema.fingerprintHash === metadata.schemaFingerprintHash,
+        ) ?? null
+    );
+}
+
+function assertFingerprintMatch(schema: VersionedSchema<unknown>, metadata: SchemaVersionMetadata) {
+    if (schema.fingerprintHash !== metadata.schemaFingerprintHash) {
+        throw new MigrationError(
+            'fingerprint-mismatch',
+            `Schema version ${metadata.schemaVersion} has fingerprint hash ${metadata.schemaFingerprintHash}, not ${schema.fingerprintHash}.`,
+            {
+                schemaVersion: metadata.schemaVersion,
+                expectedFingerprintHash: schema.fingerprintHash,
+                actualFingerprintHash: metadata.schemaFingerprintHash,
+            },
+        );
+    }
+    if (metadata.schemaFingerprint !== undefined && schema.fingerprint !== metadata.schemaFingerprint) {
+        throw new MigrationError(
+            'fingerprint-mismatch',
+            `Schema version ${metadata.schemaVersion} has a full fingerprint that does not match the registered schema.`,
+            {schemaVersion: metadata.schemaVersion},
+        );
+    }
+}
+
+function assertValid<T>(
+    schema: VersionedSchema<T>,
+    value: unknown,
+    stage: 'source' | 'target',
+    migrationId?: string,
+): T {
+    const result = schema.validateState(value);
+    if (result.success) return result.data;
+    throw new MigrationError(
+        'validation-failed',
+        `${stage === 'source' ? 'Source' : 'Migrated'} value does not match schema version ${schema.version}.`,
+        {
+            stage,
+            migrationId,
+            schemaVersion: schema.version,
+            schemaFingerprintHash: schema.fingerprintHash,
+            errors: result.errors,
+        },
+    );
+}
