@@ -12,6 +12,7 @@ import {
     todoFixtureV2FingerprintHash,
 } from '../../migration-fixtures/todos';
 import {ServerStore} from './store';
+import type {SeedDatabasePayload} from './types';
 
 const dbPaths: string[] = [];
 
@@ -29,6 +30,90 @@ function createStore() {
     const path = join(tmpdir(), `umkehr-server-store-${crypto.randomUUID()}.sqlite`);
     dbPaths.push(path);
     return new ServerStore(path);
+}
+
+function seedPayload(): SeedDatabasePayload {
+    return {
+        generatedAt: '2026-01-02T00:00:00.000Z',
+        users: [
+            {userId: 'user-ada', nickname: 'Ada'},
+            {userId: 'user-ben', nickname: 'Ben'},
+        ],
+        documents: [{
+            docId: 'seed-doc',
+            title: 'Seed document',
+            sizeLabel: '3 events',
+            sizeRank: 10,
+            createdAt: '2026-01-02T00:00:00.000Z',
+            lastAccessedAt: '2026-01-02T00:00:00.000Z',
+            schemaVersion: 1,
+            schemaFingerprint: 'schema',
+            schemaFingerprintHash: 'schema-hash',
+            branches: [
+                {
+                    docId: 'seed-doc',
+                    branchId: 'main',
+                    name: 'main',
+                    tipEventIndex: 2,
+                    createdAt: '2026-01-02T00:00:00.000Z',
+                    updatedAt: '2026-01-02T00:00:02.000Z',
+                },
+                {
+                    docId: 'seed-doc',
+                    branchId: 'feature',
+                    name: 'Feature',
+                    sourceBranchId: 'main',
+                    forkEventIndex: 1,
+                    tipEventIndex: 1,
+                    createdAt: '2026-01-02T00:00:01.000Z',
+                    updatedAt: '2026-01-02T00:00:01.000Z',
+                },
+            ],
+            events: [
+                {
+                    kind: 'update',
+                    docId: 'seed-doc',
+                    branchId: 'main',
+                    eventIndex: 1,
+                    origin: 'user-ada:session-a',
+                    hlcTimestamp: '2026-01-02T00:00:00.000Z:user-ada:session-a',
+                    receivedAt: '2026-01-02T00:00:00.000Z',
+                    update: {
+                        op: 'set',
+                        path: [],
+                        value: {todos: []},
+                        ts: '2026-01-02T00:00:00.000Z:user-ada:session-a',
+                    },
+                },
+                {
+                    kind: 'merge',
+                    docId: 'seed-doc',
+                    branchId: 'main',
+                    eventIndex: 2,
+                    mergeId: 'merge-feature',
+                    sourceBranchId: 'feature',
+                    sourceThroughEventIndex: 1,
+                    actor: 'user-ben:session-b',
+                    createdAt: '2026-01-02T00:00:02.000Z',
+                },
+                {
+                    kind: 'update',
+                    docId: 'seed-doc',
+                    branchId: 'feature',
+                    eventIndex: 1,
+                    origin: 'user-ben:session-b',
+                    hlcTimestamp: '2026-01-02T00:00:01.000Z:user-ben:session-b',
+                    receivedAt: '2026-01-02T00:00:01.000Z',
+                    update: {
+                        op: 'set',
+                        path: [],
+                        value: {todos: [{id: 'one', title: 'Seed', done: false}]},
+                        ts: '2026-01-02T00:00:01.000Z:user-ben:session-b',
+                    },
+                },
+            ],
+        }],
+    };
 }
 
 describe('ServerStore', () => {
@@ -127,6 +212,139 @@ describe('ServerStore', () => {
         expect(second).toEqual(first);
         expect(store.listEventsAfter('doc', 'main', 0)).toEqual([first]);
         expect(store.ensureMainBranch('doc').tipEventIndex).toBe(1);
+    });
+
+    it('imports seeded users, document metadata, branches, and events', () => {
+        const store = createStore();
+        const payload = seedPayload();
+
+        store.importSeedDatabase(payload);
+
+        expect(store.listUsers()).toEqual([
+            {userId: 'user-ada', nickname: 'Ada'},
+            {userId: 'user-ben', nickname: 'Ben'},
+        ]);
+        expect(store.getDocument('seed-doc')).toEqual({
+            schemaVersion: 1,
+            schemaFingerprint: 'schema',
+            schemaFingerprintHash: 'schema-hash',
+        });
+        expect(store.summarizeDocuments()).toEqual([
+            {
+                docId: 'seed-doc',
+                schemaVersion: 1,
+                schemaFingerprint: 'schema',
+                schemaFingerprintHash: 'schema-hash',
+                title: 'Seed document',
+                sizeLabel: '3 events',
+                sizeRank: 10,
+                createdAt: '2026-01-02T00:00:00.000Z',
+                lastAccessedAt: '2026-01-02T00:00:00.000Z',
+                branchCount: 2,
+                eventCount: 3,
+            },
+        ]);
+        expect(store.listBranches('seed-doc').map((branch) => branch.branchId)).toEqual([
+            'feature',
+            'main',
+        ]);
+        expect(store.listEventsAfter('seed-doc', 'main', 0)).toMatchObject([
+            {kind: 'update', eventIndex: 1, origin: 'user-ada:session-a'},
+            {kind: 'merge', eventIndex: 2, actor: 'user-ben:session-b'},
+        ]);
+    });
+
+    it('overwrites existing seeded database contents by default', () => {
+        const store = createStore();
+        store.importSeedDatabase(seedPayload());
+
+        store.importSeedDatabase({
+            generatedAt: '2026-01-03T00:00:00.000Z',
+            users: [{userId: 'user-cy', nickname: 'Cy'}],
+            documents: [{
+                docId: 'second-doc',
+                title: 'Second document',
+                sizeLabel: 'empty',
+                sizeRank: 1,
+                createdAt: '2026-01-03T00:00:00.000Z',
+                lastAccessedAt: '2026-01-03T00:00:00.000Z',
+                schemaVersion: 1,
+                schemaFingerprint: 'schema',
+                schemaFingerprintHash: 'schema-hash',
+                branches: [{
+                    docId: 'second-doc',
+                    branchId: 'main',
+                    name: 'main',
+                    tipEventIndex: 0,
+                    createdAt: '2026-01-03T00:00:00.000Z',
+                    updatedAt: '2026-01-03T00:00:00.000Z',
+                }],
+                events: [],
+            }],
+        });
+
+        expect(store.listUsers()).toEqual([{userId: 'user-cy', nickname: 'Cy'}]);
+        expect(store.summarizeDocuments().map((document) => document.docId)).toEqual([
+            'second-doc',
+        ]);
+        expect(store.getDocument('seed-doc')).toBeNull();
+    });
+
+    it('keeps existing data when seed import validation fails', () => {
+        const store = createStore();
+        store.importSeedDatabase(seedPayload());
+
+        expect(() =>
+            store.importSeedDatabase({
+                generatedAt: '2026-01-03T00:00:00.000Z',
+                users: [],
+                documents: [{
+                    ...seedPayload().documents[0],
+                    branches: [],
+                    events: [],
+                }],
+            }),
+        ).toThrow();
+
+        expect(store.summarizeDocuments().map((document) => document.docId)).toEqual([
+            'seed-doc',
+        ]);
+        expect(store.listUsers()).toHaveLength(2);
+    });
+
+    it('supports metadata upserts and access touches on normal documents', () => {
+        const store = createStore();
+        store.ensureDocument('doc', 1, 'schema', 'schema-hash');
+
+        expect(store.summarizeDocuments()).toMatchObject([
+            {
+                docId: 'doc',
+                title: 'doc',
+                sizeLabel: '',
+                sizeRank: 0,
+                branchCount: 1,
+                eventCount: 0,
+            },
+        ]);
+
+        store.upsertDocumentMetadata({
+            docId: 'doc',
+            title: 'Normal document',
+            sizeLabel: 'empty',
+            sizeRank: 5,
+            createdAt: '2026-01-04T00:00:00.000Z',
+            lastAccessedAt: '2026-01-04T00:00:00.000Z',
+        });
+        store.touchDocumentAccess('doc', '2026-01-05T00:00:00.000Z');
+
+        expect(store.summarizeDocuments()[0]).toMatchObject({
+            docId: 'doc',
+            title: 'Normal document',
+            sizeLabel: 'empty',
+            sizeRank: 5,
+            createdAt: '2026-01-04T00:00:00.000Z',
+            lastAccessedAt: '2026-01-05T00:00:00.000Z',
+        });
     });
 
     it('grants a migration lock and dumps all branch data', () => {

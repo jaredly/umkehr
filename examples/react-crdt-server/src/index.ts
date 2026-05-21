@@ -16,7 +16,8 @@ import type {
 
 export const PORT = 8787;
 
-const store = new ServerStore();
+const dbPath = databasePathFromArgs(Bun.argv);
+const store = new ServerStore(dbPath);
 const clients = new Set<ServerWebSocket>();
 
 const server = Bun.serve<ClientData>({
@@ -25,6 +26,9 @@ const server = Bun.serve<ClientData>({
         const url = new URL(request.url);
         if (request.method === 'OPTIONS') return new Response(null, {headers: corsHeaders()});
         if (url.pathname === '/health') return json({ok: true, port: PORT});
+        if (url.pathname === '/documents' && request.method === 'GET') {
+            return json({documents: store.summarizeDocuments()});
+        }
         if (url.pathname === '/users' && request.method === 'GET') {
             return json({users: store.listUsers()});
         }
@@ -133,6 +137,7 @@ const server = Bun.serve<ClientData>({
                             parsed.schemaFingerprint,
                             parsed.schemaFingerprintHash,
                         );
+                        store.touchDocumentAccess(parsed.docId);
                         send(ws, {
                             kind: 'hello',
                             version: SERVER_PROTOCOL_VERSION,
@@ -313,6 +318,7 @@ const server = Bun.serve<ClientData>({
 });
 
 console.log(`react-crdt server sync listening on http://localhost:${server.port}`);
+console.log(`react-crdt server sync database: ${dbPath}`);
 
 type ClientData = {
     actor?: string;
@@ -330,6 +336,14 @@ type ClientData = {
 };
 
 type ServerWebSocket = Bun.ServerWebSocket<ClientData>;
+
+export function databasePathFromArgs(argv: string[]) {
+    const dbIndex = argv.indexOf('--db');
+    if (dbIndex === -1) return 'server-sync.sqlite';
+    const path = argv[dbIndex + 1]?.trim();
+    if (!path) throw new Error('--db requires a database path.');
+    return path;
+}
 
 function send(ws: ServerWebSocket, message: Parameters<typeof encodeServerMessage>[0]) {
     ws.send(encodeServerMessage(message));
@@ -577,9 +591,12 @@ function debugHtml() {
   <section>
     <h2>Documents</h2>
     ${table(
-        ['Doc', 'Active hash', 'Archived hashes', 'Migration lock', 'Branches', 'Events'],
+        ['Doc', 'Title', 'Size', 'Last accessed', 'Active hash', 'Archived hashes', 'Migration lock', 'Branches', 'Events'],
         documents.map((doc) => [
             doc.docId,
+            doc.title,
+            doc.sizeLabel,
+            doc.lastAccessedAt,
             doc.schemaFingerprintHash,
             store.archivedSchemaHashes(doc.docId).join(', '),
             migrationLockText(doc.docId),

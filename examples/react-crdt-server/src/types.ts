@@ -65,8 +65,38 @@ export type DocumentSummary = {
     schemaVersion: number;
     schemaFingerprint: string;
     schemaFingerprintHash: string;
+    title: string;
+    sizeLabel: string;
+    sizeRank: number;
+    createdAt: string;
+    lastAccessedAt: string;
     branchCount: number;
     eventCount: number;
+};
+
+export type DocumentMetadata = {
+    docId: string;
+    title: string;
+    sizeLabel: string;
+    sizeRank: number;
+    createdAt: string;
+    lastAccessedAt: string;
+};
+
+export type SeedUser = ServerUser;
+
+export type SeedDocument = DocumentMetadata & {
+    schemaVersion: number;
+    schemaFingerprint: string;
+    schemaFingerprintHash: string;
+    branches: ServerBranch[];
+    events: ServerBranchEvent[];
+};
+
+export type SeedDatabasePayload = {
+    generatedAt: string;
+    users: SeedUser[];
+    documents: SeedDocument[];
 };
 
 export type ServerMigrationDump = {

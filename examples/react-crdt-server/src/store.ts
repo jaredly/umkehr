@@ -1,7 +1,10 @@
 import {Database} from 'bun:sqlite';
 import type {CrdtUpdate} from 'umkehr/crdt';
 import type {
+    DocumentMetadata,
     DocumentSummary,
+    SeedDatabasePayload,
+    SeedDocument,
     ServerBranch,
     ServerBranchEvent,
     ServerMigrationDump,
@@ -26,6 +29,15 @@ export class ServerStore {
                 schemaVersion integer not null default 1,
                 schemaFingerprintHash text not null default '',
                 schemaFingerprint text not null
+            );
+            create table if not exists document_metadata (
+                docId text primary key,
+                title text not null,
+                sizeLabel text not null,
+                sizeRank integer not null,
+                createdAt text not null,
+                lastAccessedAt text not null,
+                foreign key (docId) references documents(docId) on delete cascade
             );
             create table if not exists branches (
                 docId text not null,
@@ -219,6 +231,58 @@ export class ServerStore {
                 'select schemaVersion, schemaFingerprint, schemaFingerprintHash from documents where docId = ?',
             )
             .get(docId) ?? null;
+    }
+
+    upsertDocumentMetadata(metadata: DocumentMetadata) {
+        validateDocumentMetadata(metadata);
+        if (!this.getDocument(metadata.docId)) throw new Error('Document does not exist.');
+        this.db
+            .query(
+                `insert into document_metadata
+                    (docId, title, sizeLabel, sizeRank, createdAt, lastAccessedAt)
+                 values (?, ?, ?, ?, ?, ?)
+                 on conflict(docId) do update set
+                    title = excluded.title,
+                    sizeLabel = excluded.sizeLabel,
+                    sizeRank = excluded.sizeRank,
+                    createdAt = excluded.createdAt,
+                    lastAccessedAt = excluded.lastAccessedAt`,
+            )
+            .run(
+                metadata.docId,
+                metadata.title,
+                metadata.sizeLabel,
+                metadata.sizeRank,
+                metadata.createdAt,
+                metadata.lastAccessedAt,
+            );
+    }
+
+    touchDocumentAccess(docId: string, at = new Date().toISOString()) {
+        if (!at.trim()) throw new Error('Document access time is required.');
+        this.db
+            .query(
+                `update document_metadata
+                 set lastAccessedAt = ?
+                 where docId = ?`,
+            )
+            .run(at, docId);
+    }
+
+    importSeedDatabase(payload: SeedDatabasePayload, options: {overwrite?: boolean} = {}) {
+        validateSeedDatabasePayload(payload);
+        const overwrite = options.overwrite ?? true;
+        const tx = this.db.transaction(() => {
+            if (overwrite) this.clearSeedImportTables();
+            for (const user of payload.users) this.insertSeedUser(user, payload.generatedAt);
+            for (const document of payload.documents) {
+                this.insertSeedDocument(document);
+                this.insertDocumentMetadata(document);
+                for (const branch of document.branches) this.insertBranch(branch);
+                for (const event of document.events) this.insertEvent(event);
+            }
+        });
+        tx();
     }
 
     activeMigrationLock(docId: string, now = new Date()): ServerMigrationLock | null {
@@ -564,13 +628,19 @@ export class ServerStore {
                     d.schemaVersion as schemaVersion,
                     d.schemaFingerprintHash as schemaFingerprintHash,
                     d.schemaFingerprint as schemaFingerprint,
+                    coalesce(m.title, d.docId) as title,
+                    coalesce(m.sizeLabel, '') as sizeLabel,
+                    coalesce(m.sizeRank, 0) as sizeRank,
+                    coalesce(m.createdAt, min(b.createdAt), '') as createdAt,
+                    coalesce(m.lastAccessedAt, max(b.updatedAt), '') as lastAccessedAt,
                     count(distinct b.branchId) as branchCount,
                     count(e.eventIndex) as eventCount
                  from documents d
+                 left join document_metadata m on m.docId = d.docId
                  left join branches b on b.docId = d.docId
                  left join branch_events e on e.docId = b.docId and e.branchId = b.branchId
                  group by d.docId
-                 order by d.docId asc`,
+                 order by coalesce(m.sizeRank, 0) asc, coalesce(m.title, d.docId) asc, d.docId asc`,
             )
             .all();
     }
@@ -692,6 +762,56 @@ export class ServerStore {
                 event.kind === 'update' ? event.receivedAt : event.createdAt,
                 JSON.stringify(event),
             );
+    }
+
+    private insertSeedUser(user: ServerUser, at: string) {
+        this.db
+            .query(
+                `insert into users (userId, nickname, nicknameKey, createdAt, lastSeenAt)
+                 values (?, ?, ?, ?, ?)`,
+            )
+            .run(user.userId, user.nickname, nicknameKeyFor(user.nickname), at, at);
+    }
+
+    private insertSeedDocument(document: SeedDocument) {
+        this.db
+            .query(
+                `insert into documents (docId, schemaVersion, schemaFingerprintHash, schemaFingerprint)
+                 values (?, ?, ?, ?)`,
+            )
+            .run(
+                document.docId,
+                document.schemaVersion,
+                document.schemaFingerprintHash,
+                document.schemaFingerprint,
+            );
+    }
+
+    private insertDocumentMetadata(metadata: DocumentMetadata) {
+        this.db
+            .query(
+                `insert into document_metadata
+                    (docId, title, sizeLabel, sizeRank, createdAt, lastAccessedAt)
+                 values (?, ?, ?, ?, ?, ?)`,
+            )
+            .run(
+                metadata.docId,
+                metadata.title,
+                metadata.sizeLabel,
+                metadata.sizeRank,
+                metadata.createdAt,
+                metadata.lastAccessedAt,
+            );
+    }
+
+    private clearSeedImportTables() {
+        this.db.query('delete from migration_locks').run();
+        this.db.query('delete from archived_documents').run();
+        this.db.query('delete from branch_events').run();
+        this.db.query('delete from branches').run();
+        this.db.query('delete from document_metadata').run();
+        this.db.query('delete from documents').run();
+        this.db.query('delete from users').run();
     }
 
     private findBranch(docId: string, branchId: string): ServerBranch | null {
@@ -832,53 +952,149 @@ function rowToUser(row: UserRow): ServerUser {
     };
 }
 
+function validateSeedDatabasePayload(payload: SeedDatabasePayload) {
+    if (!payload.generatedAt.trim()) throw new Error('Seed payload generatedAt is required.');
+    const userIds = new Set<string>();
+    const nicknameKeys = new Set<string>();
+    for (const user of payload.users) {
+        if (!user.userId.trim()) throw new Error('Seed user id is required.');
+        if (!user.nickname.trim()) throw new Error('Seed user nickname is required.');
+        const userId = user.userId.trim();
+        const nicknameKey = nicknameKeyFor(user.nickname);
+        if (userIds.has(userId)) throw new Error('Seed user ids must be unique.');
+        if (nicknameKeys.has(nicknameKey)) throw new Error('Seed user nicknames must be unique.');
+        userIds.add(userId);
+        nicknameKeys.add(nicknameKey);
+    }
+    const docIds = new Set<string>();
+    for (const document of payload.documents) {
+        if (docIds.has(document.docId)) throw new Error('Seed document ids must be unique.');
+        docIds.add(document.docId);
+        validateSeedDocument(document);
+    }
+}
+
+function validateSeedDocument(document: SeedDocument) {
+    validateDocumentMetadata(document);
+    if (!Number.isSafeInteger(document.schemaVersion) || document.schemaVersion < 1) {
+        throw new Error('Seed document schema version is invalid.');
+    }
+    if (!document.schemaFingerprint.trim()) throw new Error('Seed document schema fingerprint is required.');
+    if (!document.schemaFingerprintHash.trim()) {
+        throw new Error('Seed document schema fingerprint hash is required.');
+    }
+    validateBranchEventSet({
+        docId: document.docId,
+        branches: document.branches,
+        events: document.events,
+    });
+}
+
+function validateDocumentMetadata(metadata: DocumentMetadata) {
+    if (!metadata.docId.trim()) throw new Error('Document id is required.');
+    if (!metadata.title.trim()) throw new Error('Document title is required.');
+    if (!metadata.sizeLabel.trim()) throw new Error('Document size label is required.');
+    if (!Number.isSafeInteger(metadata.sizeRank) || metadata.sizeRank < 0) {
+        throw new Error('Document size rank is invalid.');
+    }
+    if (!metadata.createdAt.trim()) throw new Error('Document createdAt is required.');
+    if (!metadata.lastAccessedAt.trim()) throw new Error('Document lastAccessedAt is required.');
+}
+
 function validateMigrationUpload(upload: ServerMigrationUpload) {
     if (!upload.branches.length) throw new Error('Migration upload must include at least one branch.');
     if (!upload.migrationIds.length) throw new Error('Migration upload must include migration ids.');
     if (!upload.migratedAt.trim()) throw new Error('Migration upload must include migration timestamp.');
-    const branchIds = new Set(upload.branches.map((branch) => branch.branchId));
-    if (!branchIds.has(MAIN_BRANCH_ID)) throw new Error('Migration upload must include main branch.');
-    for (const branch of upload.branches) {
-        if (branch.docId !== upload.docId) throw new Error('Migration upload branch doc id mismatch.');
-        if (!branch.branchId.trim()) throw new Error('Migration upload branch id is required.');
-        if (!branch.name.trim()) throw new Error('Migration upload branch name is required.');
+    validateBranchEventSet(upload);
+}
+
+function validateBranchEventSet({
+    docId,
+    branches,
+    events,
+}: {
+    docId: string;
+    branches: ServerBranch[];
+    events: ServerBranchEvent[];
+}) {
+    if (!branches.length) throw new Error('Document must include at least one branch.');
+    const branchIds = new Set(branches.map((branch) => branch.branchId));
+    if (branchIds.size !== branches.length) throw new Error('Document branch ids must be unique.');
+    const branchNameKeys = new Set<string>();
+    if (!branchIds.has(MAIN_BRANCH_ID)) throw new Error('Document must include main branch.');
+    for (const branch of branches) {
+        if (branch.docId !== docId) throw new Error('Document branch doc id mismatch.');
+        if (!branch.branchId.trim()) throw new Error('Document branch id is required.');
+        if (!branch.name.trim()) throw new Error('Document branch name is required.');
+        const branchName = branchNameKey(branch.name);
+        if (branchNameKeys.has(branchName)) throw new Error('Document branch names must be unique.');
+        branchNameKeys.add(branchName);
         if (branch.sourceBranchId && !branchIds.has(branch.sourceBranchId)) {
-            throw new Error('Migration upload branch source is missing.');
+            throw new Error('Document branch source is missing.');
         }
         if (!Number.isSafeInteger(branch.tipEventIndex) || branch.tipEventIndex < 0) {
-            throw new Error('Migration upload branch tip is invalid.');
+            throw new Error('Document branch tip is invalid.');
+        }
+        if (
+            branch.forkEventIndex !== undefined &&
+            (!Number.isSafeInteger(branch.forkEventIndex) || branch.forkEventIndex < 0)
+        ) {
+            throw new Error('Document branch fork event index is invalid.');
+        }
+    }
+    for (const branch of branches) {
+        if (!branch.sourceBranchId) continue;
+        const source = branches.find((candidate) => candidate.branchId === branch.sourceBranchId);
+        if (source && (branch.forkEventIndex ?? 0) > source.tipEventIndex) {
+            throw new Error('Document branch fork event index is beyond source branch tip.');
         }
     }
     const seen = new Set<string>();
     const branchEvents = new Map<string, ServerBranchEvent[]>();
-    for (const event of upload.events) {
-        if (event.docId !== upload.docId) throw new Error('Migration upload event doc id mismatch.');
-        if (!branchIds.has(event.branchId)) throw new Error('Migration upload event branch is missing.');
+    for (const event of events) {
+        if (event.docId !== docId) throw new Error('Document event doc id mismatch.');
+        if (!branchIds.has(event.branchId)) throw new Error('Document event branch is missing.');
         if (!Number.isSafeInteger(event.eventIndex) || event.eventIndex < 1) {
-            throw new Error('Migration upload event index is invalid.');
+            throw new Error('Document event index is invalid.');
         }
         const key = `${event.branchId}:${event.eventIndex}`;
-        if (seen.has(key)) throw new Error('Migration upload event indexes must be unique.');
+        if (seen.has(key)) throw new Error('Document event indexes must be unique.');
         seen.add(key);
         if (event.kind === 'merge' && !branchIds.has(event.sourceBranchId)) {
-            throw new Error('Migration upload merge source branch is missing.');
+            throw new Error('Document merge source branch is missing.');
         }
-        const branch = upload.branches.find((candidate) => candidate.branchId === event.branchId);
+        if (
+            event.kind === 'merge' &&
+            (!Number.isSafeInteger(event.sourceThroughEventIndex) || event.sourceThroughEventIndex < 0)
+        ) {
+            throw new Error('Document merge source event index is invalid.');
+        }
+        if (event.kind === 'update' && (!event.origin.trim() || !event.hlcTimestamp.trim())) {
+            throw new Error('Document update event origin and timestamp are required.');
+        }
+        const branch = branches.find((candidate) => candidate.branchId === event.branchId);
         if (branch && event.eventIndex > branch.tipEventIndex) {
-            throw new Error('Migration upload event is beyond branch tip.');
+            throw new Error('Document event is beyond branch tip.');
         }
         const list = branchEvents.get(event.branchId) ?? [];
         list.push(event);
         branchEvents.set(event.branchId, list);
     }
-    for (const branch of upload.branches) {
+    for (const event of events) {
+        if (event.kind !== 'merge') continue;
+        const source = branches.find((branch) => branch.branchId === event.sourceBranchId);
+        if (source && event.sourceThroughEventIndex > source.tipEventIndex) {
+            throw new Error('Document merge source event index is beyond source branch tip.');
+        }
+    }
+    for (const branch of branches) {
         const events = (branchEvents.get(branch.branchId) ?? []).sort((a, b) => a.eventIndex - b.eventIndex);
         if (branch.tipEventIndex !== events.length) {
-            throw new Error('Migration upload branch tip must equal the number of events.');
+            throw new Error('Document branch tip must equal the number of events.');
         }
         for (let index = 0; index < events.length; index++) {
             if (events[index].eventIndex !== index + 1) {
-                throw new Error('Migration upload event indexes must be contiguous per branch.');
+                throw new Error('Document event indexes must be contiguous per branch.');
             }
         }
     }

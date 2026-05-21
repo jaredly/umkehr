@@ -1,79 +1,26 @@
-import typia from 'typia';
-import {hlc} from 'umkehr/crdt';
 import {createHistoryContext} from 'umkehr/react';
 import {createSyncedContext} from 'umkehr/react-crdt';
-
-export type WhiteboardElementType = 'note' | 'stroke' | 'emoji';
-
-export type StrokePoint = {
-    x: number;
-    y: number;
-    pressure?: number;
-};
-
-export type BoardPoint = {
-    x: number;
-    y: number;
-};
-
-export type ElementSize = {
-    width: number;
-    height: number;
-};
-
-export type BaseWhiteboardElement = {
-    type: WhiteboardElementType;
-    id: string;
-    position: BoardPoint;
-    rotation: number;
-    zOrder: string;
-    createdBy: string;
-    createdAt: string;
-    archived: boolean;
-    archivedBy?: string;
-    archivedAt?: string;
-};
-
-export type StickyNoteElement = BaseWhiteboardElement & {
-    type: 'note';
-    size: ElementSize;
-    color: string;
-    text: string;
-};
-
-export type StrokeElement = BaseWhiteboardElement & {
-    type: 'stroke';
-    color: string;
-    strokeWidth: number;
-    points: StrokePoint[];
-};
-
-export type EmojiStampElement = BaseWhiteboardElement & {
-    type: 'emoji';
-    emoji: string;
-    size: number;
-};
-
-export type WhiteboardElement = StickyNoteElement | StrokeElement | EmojiStampElement;
-
-export type WhiteboardState = {
-    background: string;
-    elements: Record<string, WhiteboardElement>;
-};
-
-export const WHITEBOARD_DOC_ID = 'umkehr-react-crdt-whiteboard-v3';
-export const whiteboardSchema = typia.json.schemas<[WhiteboardState], '3.1'>();
-export const validateWhiteboardState = typia.createValidate<WhiteboardState>();
+export {
+    WHITEBOARD_DOC_ID,
+    initialWhiteboardState,
+    initialWhiteboardTimestamp,
+    validateWhiteboardState,
+    whiteboardSchema,
+    type BaseWhiteboardElement,
+    type BoardPoint,
+    type ElementSize,
+    type EmojiStampElement,
+    type StickyNoteElement,
+    type StrokeElement,
+    type StrokePoint,
+    type WhiteboardElement,
+    type WhiteboardElementType,
+    type WhiteboardState,
+} from './schema';
+import type {WhiteboardState} from './schema';
 export const [ProvideWhiteboardHistory, useWhiteboardHistory] = createHistoryContext<
     WhiteboardState,
     never,
     'type'
 >('type');
 export const [ProvideWhiteboard, useWhiteboard] = createSyncedContext<WhiteboardState>('type');
-
-export const initialWhiteboardState: WhiteboardState = {
-    background: '#f8fafc',
-    elements: {},
-};
-
-export const initialWhiteboardTimestamp = hlc.pack(hlc.init('seed', 0));

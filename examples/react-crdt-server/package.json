@@ -3,6 +3,8 @@
     "type": "module",
     "scripts": {
         "dev": "bun --bun src/index.ts",
+        "dev:test": "bun --bun src/index.ts --db test-server-sync.sqlite",
+        "seed:test": "bun --bun src/seedTest.ts",
         "test": "bun test ./src/store.bun.ts",
         "typecheck": "tsc -p tsconfig.json --noEmit"
     },
