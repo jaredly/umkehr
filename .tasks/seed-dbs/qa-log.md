@@ -75,6 +75,7 @@ Verification:
 - Removed broad `editor.useLocalHistory()` calls from document workspace wrappers that were rerendering entire CRDT panels on every history change.
 - Added small CRDT/history undo/redo subscribers inside todo and whiteboard panel headers so button disabled state can update without forcing list/board children to rerender.
 - Added a core render-count test proving array item field edits rerender only the changed row with the selector/id-list pattern.
+- Removed the server sync `saveHistory -> replaceHistory` feedback loop that updated `ServerReadyApp` state on every local edit and recreated the provider subtree.
 - Avoided `React.memo`.
 
 Verification:

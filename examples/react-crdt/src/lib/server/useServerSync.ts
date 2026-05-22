@@ -846,7 +846,6 @@ export function useServerSync<TState>({
         saveHistory(history) {
             const branch = activeBranch(branchesRef.current, activeBranchIdRef.current);
             branch.history = history;
-            replaceHistory(history);
             void persist();
         },
         setPresenceSelection,
