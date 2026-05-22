@@ -7,6 +7,20 @@ export type ServerUser = {
     nickname: string;
 };
 
+export type ServerDocumentSummary = {
+    docId: string;
+    schemaVersion: number;
+    schemaFingerprint: string;
+    schemaFingerprintHash: string;
+    title: string;
+    sizeLabel: string;
+    sizeRank: number;
+    createdAt: string;
+    lastAccessedAt: string;
+    branchCount: number;
+    eventCount: number;
+};
+
 export type PersistedServerUser = ServerUser & {
     storageVersion: 2;
     createdAt: string;

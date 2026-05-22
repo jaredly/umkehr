@@ -115,3 +115,23 @@ Verification:
 - Server store tests: 13 pass.
 - Determinism check with fixed `--date`: passed.
 - `bun run seed:test -- --date 2026-01-02 --size small --db /private/tmp/umkehr-phase3-wrapper.sqlite`: imported 7 documents and 4 users.
+
+## Phase 4: Client document discovery and URL switching
+
+Status: completed.
+
+Implemented:
+
+- Added client `ServerDocumentSummary` type.
+- Server mode now fetches `/documents` independently from login/sync bootstrap.
+- Added document dropdown to `ServerControls`.
+- Dropdown shows all server documents and keeps a manual active doc option if the URL doc is not in `/documents`.
+- Selecting a document updates `?doc=<docId>`, preserves the hash, and remounts server mode for the new doc.
+- `/documents` failures are shown as a toolbar notice without blocking login or sync controls.
+- Added responsive toolbar styles for the picker.
+
+Verification:
+
+- Client typecheck: passed.
+- Server typecheck: passed.
+- Server store tests: 13 pass.

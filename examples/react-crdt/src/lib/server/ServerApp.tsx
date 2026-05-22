@@ -15,7 +15,13 @@ import {actorForSession, ensureServerSessionId} from './session';
 import {useServerSync} from './useServerSync';
 import {migrateServerReplica, normalizeServerReplica} from './migration';
 import {defaultServerSchemaConfig, type ServerSchemaConfig} from './schemaConfig';
-import type {PersistedServerReplica, ServerSessionIdentity, ServerSync, ServerUser} from './types';
+import type {
+    PersistedServerReplica,
+    ServerDocumentSummary,
+    ServerSessionIdentity,
+    ServerSync,
+    ServerUser,
+} from './types';
 
 type Loaded<TState> = {
     identity: ServerSessionIdentity;
@@ -29,6 +35,11 @@ type LoadState<TState> =
     | {kind: 'ready'; loaded: Loaded<TState>}
     | {kind: 'error'; message: string};
 
+type DocumentsState =
+    | {kind: 'loading'; documents: ServerDocumentSummary[]}
+    | {kind: 'ready'; documents: ServerDocumentSummary[]}
+    | {kind: 'error'; documents: ServerDocumentSummary[]; message: string};
+
 export function ServerApp<TState>({
     app,
     runtime,
@@ -38,7 +49,7 @@ export function ServerApp<TState>({
     runtime: CrdtRuntime<TState>;
     schemaConfig?: ServerSchemaConfig<TState>;
 }) {
-    const activeDocId = readActiveDocId() ?? runtime.docId;
+    const [activeDocId, setActiveDocId] = useState(() => readActiveDocId() ?? runtime.docId);
     const fingerprint = useMemo(() => schemaFingerprint(app), [app]);
     const fingerprintHash = useMemo(() => schemaFingerprintHash(app), [app]);
     const schemaConfig = useMemo(
@@ -46,6 +57,30 @@ export function ServerApp<TState>({
         [schemaConfigProp],
     );
     const [loadState, setLoadState] = useState<LoadState<TState>>({kind: 'loading'});
+    const [documentsState, setDocumentsState] = useState<DocumentsState>({
+        kind: 'loading',
+        documents: [],
+    });
+
+    useEffect(() => {
+        let alive = true;
+        setDocumentsState((current) => ({kind: 'loading', documents: current.documents}));
+        fetchServerDocuments()
+            .then((documents) => {
+                if (alive) setDocumentsState({kind: 'ready', documents});
+            })
+            .catch((error) => {
+                if (!alive) return;
+                setDocumentsState((current) => ({
+                    kind: 'error',
+                    documents: current.documents,
+                    message: error instanceof Error ? error.message : String(error),
+                }));
+            });
+        return () => {
+            alive = false;
+        };
+    }, []);
 
     useEffect(() => {
         let alive = true;
@@ -106,6 +141,13 @@ export function ServerApp<TState>({
         setLoadState({kind: 'needsUser', sessionId, users});
     }, []);
 
+    const switchDocument = useCallback((docId: string) => {
+        const nextDocId = docId.trim();
+        if (!nextDocId || nextDocId === activeDocId) return;
+        writeActiveDocId(nextDocId);
+        setActiveDocId(nextDocId);
+    }, [activeDocId]);
+
     if (loadState.kind === 'loading') {
         return (
             <main className="serverShell">
@@ -142,9 +184,15 @@ export function ServerApp<TState>({
 
     return (
         <ServerReadyApp
+            key={activeDocId}
             app={app}
             runtime={runtime}
             docId={activeDocId}
+            documents={documentsForActiveDoc(documentsState.documents, activeDocId)}
+            documentsUnavailableMessage={
+                documentsState.kind === 'error' ? documentsState.message : undefined
+            }
+            onSwitchDocument={switchDocument}
             schemaFingerprint={fingerprint}
             schemaFingerprintHash={fingerprintHash}
             schemaConfig={schemaConfig}
@@ -158,6 +206,9 @@ function ServerReadyApp<TState>({
     app,
     runtime,
     docId,
+    documents,
+    documentsUnavailableMessage,
+    onSwitchDocument,
     schemaFingerprint,
     schemaFingerprintHash,
     schemaConfig,
@@ -167,6 +218,9 @@ function ServerReadyApp<TState>({
     app: AppDefinition<TState>;
     runtime: CrdtRuntime<TState>;
     docId: string;
+    documents: ServerDocumentSummary[];
+    documentsUnavailableMessage?: string;
+    onSwitchDocument(docId: string): void;
     schemaFingerprint: string;
     schemaFingerprintHash: string;
     schemaConfig: ServerSchemaConfig<TState>;
@@ -191,7 +245,14 @@ function ServerReadyApp<TState>({
 
     return (
         <main className="serverShell">
-            <ServerControls sync={sync} onLogout={onLogout} />
+            <ServerControls
+                sync={sync}
+                documents={documents}
+                activeDocId={docId}
+                documentsUnavailableMessage={documentsUnavailableMessage}
+                onSwitchDocument={onSwitchDocument}
+                onLogout={onLogout}
+            />
             <section className="serverDocument">
                 <Provider
                     initial={currentHistory}
@@ -419,6 +480,22 @@ async function fetchKnownUsers(): Promise<ServerUser[]> {
     return users;
 }
 
+async function fetchServerDocuments(): Promise<ServerDocumentSummary[]> {
+    const response = await fetchWithTimeout(`${SERVER_HTTP_URL}/documents`);
+    const body = await parseJsonResponse(response);
+    if (!isRecord(body) || !Array.isArray(body.documents)) {
+        throw new Error('Server returned an invalid document list.');
+    }
+    const documents: ServerDocumentSummary[] = [];
+    for (const document of body.documents) {
+        if (!isServerDocumentSummary(document)) {
+            throw new Error('Server returned an invalid document summary.');
+        }
+        documents.push(document);
+    }
+    return documents;
+}
+
 async function loginServerUser(nickname: string): Promise<ServerUser> {
     const response = await fetchWithTimeout(`${SERVER_HTTP_URL}/users/login`, {
         method: 'POST',
@@ -470,6 +547,24 @@ function isServerUser(value: unknown): value is ServerUser {
     );
 }
 
+function isServerDocumentSummary(value: unknown): value is ServerDocumentSummary {
+    return (
+        isRecord(value) &&
+        typeof value.docId === 'string' &&
+        value.docId.length > 0 &&
+        typeof value.schemaVersion === 'number' &&
+        typeof value.schemaFingerprint === 'string' &&
+        typeof value.schemaFingerprintHash === 'string' &&
+        typeof value.title === 'string' &&
+        typeof value.sizeLabel === 'string' &&
+        typeof value.sizeRank === 'number' &&
+        typeof value.createdAt === 'string' &&
+        typeof value.lastAccessedAt === 'string' &&
+        typeof value.branchCount === 'number' &&
+        typeof value.eventCount === 'number'
+    );
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -477,4 +572,30 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function readActiveDocId() {
     if (typeof window === 'undefined') return '';
     return new URLSearchParams(window.location.search).get('doc')?.trim() || undefined;
+}
+
+function writeActiveDocId(docId: string) {
+    const url = new URL(window.location.href);
+    url.searchParams.set('doc', docId);
+    window.history.pushState(null, '', `${url.pathname}${url.search}${url.hash}`);
+}
+
+function documentsForActiveDoc(documents: ServerDocumentSummary[], activeDocId: string) {
+    if (documents.some((document) => document.docId === activeDocId)) return documents;
+    return [
+        {
+            docId: activeDocId,
+            schemaVersion: 0,
+            schemaFingerprint: '',
+            schemaFingerprintHash: '',
+            title: activeDocId,
+            sizeLabel: 'manual',
+            sizeRank: 0,
+            createdAt: '',
+            lastAccessedAt: '',
+            branchCount: 0,
+            eventCount: 0,
+        },
+        ...documents,
+    ];
 }
