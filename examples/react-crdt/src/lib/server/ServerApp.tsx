@@ -15,6 +15,12 @@ import {actorForSession, ensureServerSessionId} from './session';
 import {useServerSync} from './useServerSync';
 import {migrateServerReplica, normalizeServerReplica} from './migration';
 import {defaultServerSchemaConfig, type ServerSchemaConfig} from './schemaConfig';
+import {
+    documentsForActiveDoc,
+    parseServerDocumentsResponse,
+    readActiveDocIdFromSearch,
+    urlWithActiveDocId,
+} from './documents';
 import type {
     PersistedServerReplica,
     ServerDocumentSummary,
@@ -483,17 +489,7 @@ async function fetchKnownUsers(): Promise<ServerUser[]> {
 async function fetchServerDocuments(): Promise<ServerDocumentSummary[]> {
     const response = await fetchWithTimeout(`${SERVER_HTTP_URL}/documents`);
     const body = await parseJsonResponse(response);
-    if (!isRecord(body) || !Array.isArray(body.documents)) {
-        throw new Error('Server returned an invalid document list.');
-    }
-    const documents: ServerDocumentSummary[] = [];
-    for (const document of body.documents) {
-        if (!isServerDocumentSummary(document)) {
-            throw new Error('Server returned an invalid document summary.');
-        }
-        documents.push(document);
-    }
-    return documents;
+    return parseServerDocumentsResponse(body);
 }
 
 async function loginServerUser(nickname: string): Promise<ServerUser> {
@@ -547,55 +543,15 @@ function isServerUser(value: unknown): value is ServerUser {
     );
 }
 
-function isServerDocumentSummary(value: unknown): value is ServerDocumentSummary {
-    return (
-        isRecord(value) &&
-        typeof value.docId === 'string' &&
-        value.docId.length > 0 &&
-        typeof value.schemaVersion === 'number' &&
-        typeof value.schemaFingerprint === 'string' &&
-        typeof value.schemaFingerprintHash === 'string' &&
-        typeof value.title === 'string' &&
-        typeof value.sizeLabel === 'string' &&
-        typeof value.sizeRank === 'number' &&
-        typeof value.createdAt === 'string' &&
-        typeof value.lastAccessedAt === 'string' &&
-        typeof value.branchCount === 'number' &&
-        typeof value.eventCount === 'number'
-    );
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function readActiveDocId() {
     if (typeof window === 'undefined') return '';
-    return new URLSearchParams(window.location.search).get('doc')?.trim() || undefined;
+    return readActiveDocIdFromSearch(window.location.search);
 }
 
 function writeActiveDocId(docId: string) {
-    const url = new URL(window.location.href);
-    url.searchParams.set('doc', docId);
-    window.history.pushState(null, '', `${url.pathname}${url.search}${url.hash}`);
-}
-
-function documentsForActiveDoc(documents: ServerDocumentSummary[], activeDocId: string) {
-    if (documents.some((document) => document.docId === activeDocId)) return documents;
-    return [
-        {
-            docId: activeDocId,
-            schemaVersion: 0,
-            schemaFingerprint: '',
-            schemaFingerprintHash: '',
-            title: activeDocId,
-            sizeLabel: 'manual',
-            sizeRank: 0,
-            createdAt: '',
-            lastAccessedAt: '',
-            branchCount: 0,
-            eventCount: 0,
-        },
-        ...documents,
-    ];
+    window.history.pushState(null, '', urlWithActiveDocId(window.location.href, docId));
 }

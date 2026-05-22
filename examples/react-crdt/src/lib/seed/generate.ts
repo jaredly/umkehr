@@ -25,7 +25,12 @@ import type {
 const TODO_SCHEMA_VERSION = 1;
 const WHITEBOARD_SCHEMA_VERSION = 1;
 
-type SeedSize = 'small' | 'default' | 'large';
+export type SeedSize = 'small' | 'default' | 'large';
+
+export type SeedGeneratorOptions = {
+    date?: string;
+    size?: SeedSize;
+};
 
 type FixtureClock = {
     generatedAt: string;
@@ -64,23 +69,30 @@ const actors = {
 
 const docClocks = new WeakMap<object, FixtureClock>();
 
-const args = parseArgs(process.argv);
-const clock = createClock(args.date);
-const payload: SeedDatabasePayload = {
-    generatedAt: clock.generatedAt,
-    users,
-    documents: [
-        todosSmall(clock),
-        todosManyItems(clock, itemCountFor(args.size)),
-        todosManyEvents(clock, eventCountFor(args.size)),
-        todosBranches(clock),
-        todosMergeReview(clock),
-        whiteboardManyElements(clock, whiteboardElementCountFor(args.size)),
-        whiteboardBranches(clock),
-    ],
-};
+if (isMainModule()) {
+    const payload = generateSeedDatabasePayload(parseArgs(process.argv));
+    process.stdout.write(`${JSON.stringify(payload)}\n`);
+}
 
-process.stdout.write(`${JSON.stringify(payload)}\n`);
+export function generateSeedDatabasePayload({
+    date,
+    size = 'default',
+}: SeedGeneratorOptions = {}): SeedDatabasePayload {
+    const clock = createClock(date);
+    return {
+        generatedAt: clock.generatedAt,
+        users,
+        documents: [
+            todosSmall(clock),
+            todosManyItems(clock, itemCountFor(size)),
+            todosManyEvents(clock, eventCountFor(size)),
+            todosBranches(clock),
+            todosMergeReview(clock),
+            whiteboardManyElements(clock, whiteboardElementCountFor(size)),
+            whiteboardBranches(clock),
+        ],
+    };
+}
 
 function todosSmall(clock: FixtureClock): SeedDocument {
     const doc = createTodoDoc({
@@ -634,4 +646,8 @@ function whiteboardElementCountFor(size: SeedSize) {
     if (size === 'small') return 60;
     if (size === 'large') return 1000;
     return 400;
+}
+
+function isMainModule() {
+    return process.argv[1] ? import.meta.url === new URL(`file://${process.argv[1]}`).href : false;
 }

@@ -8,3 +8,9 @@ Next things to tackle:
   - and like branches and such. what do we need to be able to do. do we need to change our CRDTUpdate to have an incrementing counter?
 
 - [x] peerjs example, how can we add vector index stuff, where each peer has its own persisted document and stuff. history compaction, for example.
+
+
+- [ ] seed db that's behind the client
+  - [ ] w/ empty client
+  - [ ] w/ client having the old db "loaded into local memory"
+- [ ] seed db that's ahead of the client

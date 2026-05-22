@@ -135,3 +135,31 @@ Verification:
 - Client typecheck: passed.
 - Server typecheck: passed.
 - Server store tests: 13 pass.
+
+## Phase 5: Tests
+
+Status: completed.
+
+Implemented:
+
+- Extracted server document parsing/URL helpers to `src/lib/server/documents.ts`.
+- Added client tests for:
+  - document summary parsing and malformed response rejection;
+  - reading/writing the `doc` query param while preserving hash and other params;
+  - keeping a manual active doc option when it is not in `/documents`.
+- Made seed generation importable via `generateSeedDatabasePayload(...)`.
+- Added client seed generator tests for:
+  - expected document ids and seeded users;
+  - deterministic output with fixed `--date`;
+  - stress fixture sizing.
+- Extracted server CLI `--db` parsing to `src/cli.ts`.
+- Added Bun tests for server `--db` parsing.
+- Updated the server test script to include CLI tests.
+
+Verification:
+
+- `npx vitest run src/lib/server/documents.test.ts src/lib/seed/generate.test.ts`: 6 pass.
+- `bun test ./src/store.bun.ts ./src/cli.bun.ts`: 16 pass.
+- Client typecheck: passed.
+- Server typecheck: passed.
+- `bun run seed:test -- --date 2026-01-02 --size small --db /private/tmp/umkehr-phase5-wrapper.sqlite`: imported 7 documents and 4 users.
