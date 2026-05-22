@@ -1,5 +1,32 @@
 import {describe, expect, it} from 'vitest';
+import type {IValidation} from 'typia';
+import {
+    initialWhiteboardState,
+    initialWhiteboardTimestamp,
+    validateWhiteboardState,
+    whiteboardSchema,
+    type WhiteboardState,
+} from '../../apps/whiteboard/schema';
+import type {AppDefinition} from '../crdtApp';
+import {createInitialCrdtHistory} from '../crdtApp';
+import {materializeServerBranch} from '../server/materialize';
+import type {PersistedServerBranch} from '../server/types';
 import {generateSeedDatabasePayload} from './generate';
+
+const whiteboardSeedApp: AppDefinition<WhiteboardState> = {
+    id: 'whiteboard',
+    title: 'Whiteboard',
+    tagKey: 'type',
+    schema: whiteboardSchema,
+    initialState: initialWhiteboardState,
+    initialTimestamp: initialWhiteboardTimestamp,
+    validateState(input: unknown): IValidation<WhiteboardState> {
+        return validateWhiteboardState(input);
+    },
+    renderPanel() {
+        return null as never;
+    },
+};
 
 describe('seed database generator', () => {
     it('emits the expected seeded documents and users', () => {
@@ -37,5 +64,58 @@ describe('seed database generator', () => {
 
         expect(smallManyEvents?.events.length).toBe(200);
         expect(largeManyEvents?.events.length).toBe(5000);
+    });
+
+    it('emits non-root CRDT paths for branch fixture edits', () => {
+        const payload = generateSeedDatabasePayload({date: '2026-01-02', size: 'small'});
+        const whiteboard = payload.documents.find(
+            (document) => document.docId === 'whiteboard-branches',
+        );
+        const branchUpdates = whiteboard?.events.filter(
+            (event) => event.kind === 'update' && event.branchId !== 'main',
+        );
+
+        expect(branchUpdates).toHaveLength(2);
+        expect(
+            branchUpdates?.every(
+                (event) => event.kind === 'update' && event.update.path.length > 0,
+            ),
+        ).toBe(true);
+    });
+
+    it('materializes whiteboard branch additions after merges into main', () => {
+        const payload = generateSeedDatabasePayload({date: '2026-01-02', size: 'small'});
+        const document = payload.documents.find(
+            (candidate) => candidate.docId === 'whiteboard-branches',
+        );
+        if (!document) throw new Error('Missing whiteboard branches fixture.');
+        const branches = Object.fromEntries(
+            document.branches.map((branch) => [
+                branch.branchId,
+                {
+                    branchId: branch.branchId,
+                    sourceBranchId: branch.sourceBranchId,
+                    forkEventIndex: branch.forkEventIndex,
+                    history: createInitialCrdtHistory(whiteboardSeedApp),
+                    lastSeenEventIndex: branch.tipEventIndex,
+                    undoCheckpointEventIndex: 0,
+                    events: document.events.filter((event) => event.branchId === branch.branchId),
+                    mirrored: true,
+                } satisfies PersistedServerBranch<WhiteboardState>,
+            ]),
+        );
+
+        const history = materializeServerBranch({
+            app: whiteboardSeedApp,
+            branches,
+            branchId: 'main',
+        });
+
+        expect(Object.keys(history.doc.state.elements).sort()).toEqual([
+            'annotation',
+            'intro',
+            'layout',
+            'sketch',
+        ]);
     });
 });

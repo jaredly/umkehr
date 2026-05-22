@@ -1,12 +1,24 @@
 import {schemaFingerprint, schemaFingerprintHash} from 'umkehr/migration';
-import {hlc, type HlcTimestamp, type JsonValue} from 'umkehr/crdt';
+import type {DraftPatch, MaybeNested} from 'umkehr';
 import {
+    applyLocalCommand,
+    createCrdtDocument,
+    createCrdtLocalHistory,
+    hlc,
+    latestCrdtUpdateTimestamp,
+    type CrdtLocalHistory,
+    type HlcTimestamp,
+} from 'umkehr/crdt';
+import type {IJsonSchemaCollection} from 'typia';
+import {
+    initialTodoTimestamp,
     initialTodoState,
     todoSchema,
     type Todo,
     type TodoState,
 } from '../../apps/todos/schema';
 import {
+    initialWhiteboardTimestamp,
     initialWhiteboardState,
     whiteboardSchema,
     type WhiteboardElement,
@@ -50,6 +62,7 @@ type BranchBuilder<TState> = {
     schemaFingerprintHash: string;
     branches: ServerBranch[];
     events: ServerBranchEvent[];
+    histories: Record<string, CrdtLocalHistory<TState>>;
     state: TState;
 };
 
@@ -111,12 +124,7 @@ function todosSmall(clock: FixtureClock): SeedDocument {
             {id: 'notes', title: 'Capture observations', done: false},
         ],
     });
-    setTodos(doc, actors.ben, {
-        ...doc.state,
-        todos: doc.state.todos.map((todo) =>
-            todo.id === 'review' ? {...todo, done: true} : todo,
-        ),
-    });
+    updateTodoDone(doc, actors.ben, 'review', true);
     return finishDocument(doc);
 }
 
@@ -147,31 +155,32 @@ function todosManyEvents(clock: FixtureClock, count: number): SeedDocument {
         sizeRank: 30,
         clock,
     });
-    let state: TodoState = {
+    setTodos(doc, actors.ada, {
         bgcolor: '#f8fafc',
         todos: Array.from({length: 12}, (_, index) => ({
             id: `slot-${index + 1}`,
             title: `Event target ${index + 1}`,
             done: false,
         })),
-    };
+    });
     const actorList = [actors.ada, actors.ben, actors.cy, actors.dee];
-    for (let index = 0; index < count; index++) {
+    for (let index = 1; index < count; index++) {
+        const state = branchState(doc);
         const target = index % state.todos.length;
-        const todos = state.todos.map((todo, todoIndex) =>
-            todoIndex === target
-                ? {
-                      ...todo,
-                      title: `Event ${index + 1} touched ${todo.id}`,
-                      done: index % 2 === 0,
-                  }
-                : todo,
-        );
-        state = {
-            bgcolor: index % 2 === 0 ? '#f8fafc' : '#ecfeff',
-            todos,
-        };
-        setTodos(doc, actorList[index % actorList.length], state);
+        const targetTodo = state.todos[target];
+        const actor = actorList[index % actorList.length];
+        if (index % 7 === 0) {
+            updateTodoBgcolor(doc, actor, index % 2 === 0 ? '#f8fafc' : '#ecfeff');
+        } else if (index % 2 === 0) {
+            updateTodoDone(doc, actor, targetTodo.id, !targetTodo.done);
+        } else {
+            updateTodoTitle(
+                doc,
+                actor,
+                targetTodo.id,
+                `Event ${index + 1} touched ${targetTodo.id}`,
+            );
+        }
     }
     return finishDocument(doc);
 }
@@ -194,9 +203,9 @@ function todosBranches(clock: FixtureClock): SeedDocument {
     setTodos(doc, actors.ada, base);
     createBranch(doc, 'feature-copy', 'Feature copy', 'main', 1);
     createBranch(doc, 'feature-cleanup', 'Feature cleanup', 'main', 1);
-    setTodos(doc, actors.ben, {...base, todos: [...base.todos, todo('copy', 'Write alternate copy')]}, 'feature-copy');
-    setTodos(doc, actors.cy, {...base, bgcolor: '#fef2f2'}, 'feature-cleanup');
-    setTodos(doc, actors.dee, {...base, todos: base.todos.map((item) => item.id === 'a' ? {...item, done: true} : item)});
+    addTodo(doc, actors.ben, todo('copy', 'Write alternate copy'), 'feature-copy');
+    updateTodoBgcolor(doc, actors.cy, '#fef2f2', 'feature-cleanup');
+    updateTodoDone(doc, actors.dee, 'a', true);
     return finishDocument(doc);
 }
 
@@ -215,10 +224,10 @@ function todosMergeReview(clock: FixtureClock): SeedDocument {
     setTodos(doc, actors.ada, base);
     createBranch(doc, 'design', 'Design', 'main', 1);
     createBranch(doc, 'qa', 'QA', 'main', 1);
-    setTodos(doc, actors.ben, {...base, bgcolor: '#f5f3ff'}, 'design');
-    setTodos(doc, actors.cy, {...base, todos: [...base.todos, todo('test', 'Test migration path')]}, 'qa');
-    setTodos(doc, actors.cy, {...base, todos: [...base.todos, todo('test', 'Test migration path'), todo('signoff', 'QA signoff')]}, 'qa');
-    setTodos(doc, actors.ada, {...base, todos: base.todos.map((item) => item.id === 'plan' ? {...item, done: true} : item)});
+    updateTodoBgcolor(doc, actors.ben, '#f5f3ff', 'design');
+    addTodo(doc, actors.cy, todo('test', 'Test migration path'), 'qa');
+    addTodo(doc, actors.cy, todo('signoff', 'QA signoff'), 'qa');
+    updateTodoDone(doc, actors.ada, 'plan', true);
     mergeBranch(doc, actors.dee, 'main', 'design', 1, 'merge-design');
     mergeBranch(doc, actors.dee, 'main', 'qa', 2, 'merge-qa');
     return finishDocument(doc);
@@ -262,18 +271,19 @@ function whiteboardBranches(clock: FixtureClock): SeedDocument {
     setWhiteboard(doc, actors.ada, base);
     createBranch(doc, 'layout', 'Layout', 'main', 1);
     createBranch(doc, 'annotations', 'Annotations', 'main', 1);
-    setWhiteboard(doc, actors.ben, {
-        ...base,
-        elements: {...base.elements, layout: noteElement(2, actors.ben, clock.generatedAt, 'layout', 'Layout pass')},
-    }, 'layout');
-    setWhiteboard(doc, actors.cy, {
-        ...base,
-        elements: {...base.elements, annotation: emojiElement(3, actors.cy, clock.generatedAt, 'annotation')},
-    }, 'annotations');
-    setWhiteboard(doc, actors.ada, {
-        ...base,
-        background: '#f0fdf4',
-    });
+    addWhiteboardElement(
+        doc,
+        actors.ben,
+        noteElement(2, actors.ben, clock.generatedAt, 'layout', 'Layout pass'),
+        'layout',
+    );
+    addWhiteboardElement(
+        doc,
+        actors.cy,
+        emojiElement(3, actors.cy, clock.generatedAt, 'annotation'),
+        'annotations',
+    );
+    updateWhiteboardBackground(doc, actors.ada, '#f0fdf4');
     mergeBranch(doc, actors.dee, 'main', 'layout', 1, 'merge-layout');
     mergeBranch(doc, actors.dee, 'main', 'annotations', 1, 'merge-annotations');
     return finishDocument(doc);
@@ -300,7 +310,9 @@ function createTodoDoc({
         schemaVersion: TODO_SCHEMA_VERSION,
         schemaFingerprint: schemaFingerprint(todoSchema, 'type'),
         schemaFingerprintHash: schemaFingerprintHash(todoSchema, 'type'),
+        schema: todoSchema,
         initialState: initialTodoState,
+        initialTimestamp: initialTodoTimestamp,
         clock,
     });
 }
@@ -326,7 +338,9 @@ function createWhiteboardDoc({
         schemaVersion: WHITEBOARD_SCHEMA_VERSION,
         schemaFingerprint: schemaFingerprint(whiteboardSchema, 'type'),
         schemaFingerprintHash: schemaFingerprintHash(whiteboardSchema, 'type'),
+        schema: whiteboardSchema,
         initialState: initialWhiteboardState,
+        initialTimestamp: initialWhiteboardTimestamp,
         clock,
     });
 }
@@ -339,7 +353,9 @@ function createDoc<TState>({
     schemaVersion,
     schemaFingerprint,
     schemaFingerprintHash,
+    schema,
     initialState,
+    initialTimestamp,
     clock,
 }: {
     docId: string;
@@ -349,10 +365,15 @@ function createDoc<TState>({
     schemaVersion: number;
     schemaFingerprint: string;
     schemaFingerprintHash: string;
+    schema: IJsonSchemaCollection<'3.1', [TState]>;
     initialState: TState;
+    initialTimestamp: HlcTimestamp;
     clock: FixtureClock;
 }): BranchBuilder<TState> {
     const now = clock.iso();
+    const initialHistory = createCrdtLocalHistory(
+        createCrdtDocument(initialState, schema, {timestamp: initialTimestamp}),
+    );
     return {
         docId,
         title,
@@ -372,6 +393,7 @@ function createDoc<TState>({
             updatedAt: now,
         }],
         events: [],
+        histories: {main: initialHistory},
         state: structuredClone(initialState),
     };
 }
@@ -382,7 +404,11 @@ function setTodos(
     state: TodoState,
     branchId = 'main',
 ) {
-    appendSetUpdate(doc, branchId, actor, state);
+    appendCommand(doc, branchId, actor, {
+        op: 'replace',
+        path: [],
+        value: state,
+    });
 }
 
 function setWhiteboard(
@@ -391,38 +417,136 @@ function setWhiteboard(
     state: WhiteboardState,
     branchId = 'main',
 ) {
-    appendSetUpdate(doc, branchId, actor, state);
+    appendCommand(doc, branchId, actor, {
+        op: 'replace',
+        path: [],
+        value: state,
+    });
 }
 
-function appendSetUpdate<TState>(
+function updateTodoTitle(
+    doc: BranchBuilder<TodoState>,
+    actor: string,
+    todoId: string,
+    title: string,
+    branchId = 'main',
+) {
+    appendCommand(doc, branchId, actor, {
+        op: 'replace',
+        path: todoFieldPath(doc, branchId, todoId, 'title'),
+        value: title,
+    });
+}
+
+function updateTodoDone(
+    doc: BranchBuilder<TodoState>,
+    actor: string,
+    todoId: string,
+    done: boolean,
+    branchId = 'main',
+) {
+    appendCommand(doc, branchId, actor, {
+        op: 'replace',
+        path: todoFieldPath(doc, branchId, todoId, 'done'),
+        value: done,
+    });
+}
+
+function updateTodoBgcolor(
+    doc: BranchBuilder<TodoState>,
+    actor: string,
+    bgcolor: string,
+    branchId = 'main',
+) {
+    appendCommand(doc, branchId, actor, {
+        op: 'replace',
+        path: [{type: 'key', key: 'bgcolor'}],
+        value: bgcolor,
+    });
+}
+
+function addTodo(
+    doc: BranchBuilder<TodoState>,
+    actor: string,
+    todo: Todo,
+    branchId = 'main',
+) {
+    appendCommand(doc, branchId, actor, {
+        op: 'push',
+        path: [{type: 'key', key: 'todos'}],
+        value: todo,
+    });
+}
+
+function addWhiteboardElement(
+    doc: BranchBuilder<WhiteboardState>,
+    actor: string,
+    element: WhiteboardElement,
+    branchId = 'main',
+) {
+    appendCommand(doc, branchId, actor, {
+        op: 'replace',
+        path: [{type: 'key', key: 'elements'}, {type: 'key', key: element.id}],
+        value: element,
+    });
+}
+
+function updateWhiteboardBackground(
+    doc: BranchBuilder<WhiteboardState>,
+    actor: string,
+    background: string,
+    branchId = 'main',
+) {
+    appendCommand(doc, branchId, actor, {
+        op: 'replace',
+        path: [{type: 'key', key: 'background'}],
+        value: background,
+    });
+}
+
+function appendCommand<TState>(
     doc: BranchBuilder<TState>,
     branchId: string,
     actor: string,
-    state: TState,
+    draft: MaybeNested<DraftPatch<TState, 'type', undefined>>,
 ) {
     const branch = branchFor(doc, branchId);
-    const eventIndex = branch.tipEventIndex + 1;
-    const ts = nextTimestamp(doc, actor);
-    const receivedAt = doc.lastAccessedAt;
-    const event: ServerUpdateEvent = {
-        kind: 'update',
-        docId: doc.docId,
-        branchId,
-        eventIndex,
-        origin: actor,
-        hlcTimestamp: ts,
-        receivedAt,
-        update: {
-            op: 'set',
-            path: [],
-            value: structuredClone(state) as JsonValue,
-            ts,
-        },
-    };
-    doc.events.push(event);
-    branch.tipEventIndex = eventIndex;
-    branch.updatedAt = receivedAt;
-    doc.state = structuredClone(state);
+    const history = doc.histories[branchId];
+    if (!history) throw new Error(`Missing history for branch ${branchId} in ${doc.docId}.`);
+
+    const baseTimestamp = nextTimestamp(doc, actor);
+    const baseClock = hlc.unpack(baseTimestamp);
+    const now = baseClock.ts;
+    const originalDateNow = Date.now;
+    let result;
+    Date.now = () => now;
+    try {
+        result = applyLocalCommand(history, draft, baseClock);
+    } finally {
+        Date.now = originalDateNow;
+    }
+
+    doc.histories[branchId] = result.history;
+    for (const update of result.updates) {
+        const ts = latestCrdtUpdateTimestamp(update);
+        if (!ts) continue;
+        const receivedAt = new Date(hlc.unpack(ts).ts).toISOString();
+        const event: ServerUpdateEvent = {
+            kind: 'update',
+            docId: doc.docId,
+            branchId,
+            eventIndex: branch.tipEventIndex + 1,
+            origin: actor,
+            hlcTimestamp: ts,
+            receivedAt,
+            update,
+        };
+        doc.events.push(event);
+        branch.tipEventIndex = event.eventIndex;
+        branch.updatedAt = receivedAt;
+        doc.lastAccessedAt = receivedAt;
+    }
+    if (branchId === 'main') doc.state = structuredClone(result.history.doc.state);
 }
 
 function createBranch<TState>(
@@ -433,6 +557,8 @@ function createBranch<TState>(
     forkEventIndex: number,
 ) {
     const now = doc.lastAccessedAt;
+    const sourceHistory = doc.histories[sourceBranchId];
+    if (!sourceHistory) throw new Error(`Cannot fork from unknown branch ${sourceBranchId}.`);
     doc.branches.push({
         docId: doc.docId,
         branchId,
@@ -443,6 +569,7 @@ function createBranch<TState>(
         createdAt: now,
         updatedAt: now,
     });
+    doc.histories[branchId] = sourceHistory;
 }
 
 function mergeBranch<TState>(
@@ -492,6 +619,27 @@ function branchFor<TState>(doc: BranchBuilder<TState>, branchId: string) {
     const branch = doc.branches.find((candidate) => candidate.branchId === branchId);
     if (!branch) throw new Error(`Unknown branch ${branchId} in ${doc.docId}.`);
     return branch;
+}
+
+function branchState<TState>(doc: BranchBuilder<TState>, branchId = 'main') {
+    const history = doc.histories[branchId];
+    if (!history) throw new Error(`Missing history for branch ${branchId} in ${doc.docId}.`);
+    return history.doc.state;
+}
+
+function todoFieldPath(
+    doc: BranchBuilder<TodoState>,
+    branchId: string,
+    todoId: string,
+    field: keyof Pick<Todo, 'title' | 'done'>,
+) {
+    const index = branchState(doc, branchId).todos.findIndex((todoItem) => todoItem.id === todoId);
+    if (index < 0) throw new Error(`Missing todo ${todoId} in ${doc.docId}/${branchId}.`);
+    return [
+        {type: 'key' as const, key: 'todos'},
+        {type: 'key' as const, key: index},
+        {type: 'key' as const, key: field},
+    ];
 }
 
 function nextTimestamp<TState>(doc: BranchBuilder<TState>, actor: string) {
