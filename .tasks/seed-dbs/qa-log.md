@@ -76,7 +76,8 @@ Verification:
 - Added small CRDT/history undo/redo subscribers inside todo and whiteboard panel headers so button disabled state can update without forcing list/board children to rerender.
 - Added a core render-count test proving array item field edits rerender only the changed row with the selector/id-list pattern.
 - Removed the server sync `saveHistory -> replaceHistory` feedback loop that updated `ServerReadyApp` state on every local edit and recreated the provider subtree.
-- Avoided provider-wide `replaceHistory` for active-branch remote update events; those now flow through `transport.receive` and path-scoped notifications. Active-branch merge events still replace history because they materialize a new branch result.
+- Avoided provider-wide `replaceHistory` for active-branch remote update events; those now flow through `transport.receive` and path-scoped notifications.
+- Active-branch merge events now derive effective source updates from the branch graph and apply them incrementally through `transport.receive`, avoiding a full provider refresh for merges too.
 - Avoided `React.memo`.
 
 Verification:

@@ -328,6 +328,16 @@ type CollectedUpdateEvent = {
     update: CrdtUpdate;
 };
 
+export function mergeSourceUpdatesForBranchThrough<TState>(
+    branches: Record<string, PersistedServerBranch<TState>>,
+    branchId: string,
+    throughEventIndex: number,
+): CrdtUpdate[] {
+    return updateEventsForBranchThrough(branches, branchId, throughEventIndex).map(
+        (event) => event.update,
+    );
+}
+
 function updateEventsForBranchThrough<TState>(
     branches: Record<string, PersistedServerBranch<TState>>,
     branchId: string,

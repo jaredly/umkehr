@@ -1,5 +1,6 @@
 import {useCallback, useEffect, useMemo, useRef} from 'react';
 import {
+    applyCrdtUpdate,
     applyRemoteHistoryUpdate,
     changedNormalPathsForCrdtUpdate,
     createCrdtLocalHistory,
@@ -31,7 +32,11 @@ import {
     upsertPresenceUser,
     whiteboardSelectionStatusId,
 } from './presence';
-import {buildMergePathPreview, materializeServerBranch} from './materialize';
+import {
+    buildMergePathPreview,
+    materializeServerBranch,
+    mergeSourceUpdatesForBranchThrough,
+} from './materialize';
 import {migrateServerDump} from './migration';
 import type {ServerSchemaConfig} from './schemaConfig';
 import {canFlushPendingServerWrites, serverMigrationStateForMessage} from './states';
@@ -387,7 +392,12 @@ export function useServerSync<TState>({
                         transport.receive(event.update);
                     }
                 } else if (branchId === activeBranchIdRef.current && event.kind === 'merge') {
-                    activeBranchNeedsReplacement = true;
+                    activeBranchNeedsReplacement = !applyMergeEventIncrementally(
+                        branchesRef.current,
+                        branch,
+                        event,
+                        transport.receive,
+                    );
                 }
             }
             if (changed) {
@@ -861,6 +871,35 @@ export function useServerSync<TState>({
         buildEventPreview,
         buildMergePreview,
     };
+}
+
+function applyMergeEventIncrementally<TState>(
+    branches: Record<string, PersistedServerBranch<TState>>,
+    branch: PersistedServerBranch<TState>,
+    event: Extract<ServerBranchEvent, {kind: 'merge'}>,
+    receive: (update: CrdtUpdate) => void,
+) {
+    const updates = mergeSourceUpdatesForBranchThrough(
+        branches,
+        event.sourceBranchId,
+        event.sourceThroughEventIndex,
+    );
+    if (!updates.length) return true;
+    let current = branch.history.doc;
+    for (const update of updates) {
+        const next = applyCrdtUpdate(current, update);
+        if (!sameDocumentContents(current, next)) receive(update);
+        current = next;
+    }
+    return true;
+}
+
+function sameDocumentContents<TState>(
+    left: import('umkehr/crdt').CrdtDocument<TState>,
+    right: import('umkehr/crdt').CrdtDocument<TState>,
+) {
+    return JSON.stringify(left.state) === JSON.stringify(right.state) &&
+        JSON.stringify(left.meta) === JSON.stringify(right.meta);
 }
 
 function publishStores<TState>({
