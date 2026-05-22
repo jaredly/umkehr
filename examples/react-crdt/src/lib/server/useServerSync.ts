@@ -366,6 +366,7 @@ export function useServerSync<TState>({
         async (branchId: string, events: ServerBranchEvent[]) => {
             const branch = ensureBranch(branchesRef.current, branchListRef.current, branchId, app);
             let changed = false;
+            let activeBranchNeedsReplacement = false;
             for (const event of events) {
                 branch.lastSeenEventIndex = Math.max(branch.lastSeenEventIndex, event.eventIndex);
                 if (hasEquivalentEvent(branch.events, event)) continue;
@@ -385,6 +386,8 @@ export function useServerSync<TState>({
                         recordRemoteLastEdit(event);
                         transport.receive(event.update);
                     }
+                } else if (branchId === activeBranchIdRef.current && event.kind === 'merge') {
+                    activeBranchNeedsReplacement = true;
                 }
             }
             if (changed) {
@@ -393,7 +396,9 @@ export function useServerSync<TState>({
                     branches: branchesRef.current,
                     branchId,
                 });
-                if (branchId === activeBranchIdRef.current) replaceHistory(branch.history);
+                if (branchId === activeBranchIdRef.current && activeBranchNeedsReplacement) {
+                    replaceHistory(branch.history);
+                }
                 await persist();
             }
         },
