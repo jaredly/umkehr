@@ -42,8 +42,17 @@ export function ServerHistoryView<TState>({
         () => mergePreview?.changedPaths.map((path) => pathKey(path)) ?? [],
         [mergePreview],
     );
+    const mergeImpact = mergePreview?.impact;
+    const canCommitMerge = Boolean(mergePreview && mergeImpact && mergeImpact.effectiveUpdateCount > 0);
     const revertedCount = revertedPathKeys.size;
     const appliedCount = Math.max(0, changedPathKeys.length - revertedCount);
+    const mergeBlockedReason = mergeImpact
+        ? mergeImpact.alreadyMerged
+            ? `Already merged through event ${mergeImpact.alreadyMergedThroughEventIndex}.`
+            : mergeImpact.effectiveUpdateCount === 0
+              ? 'No CRDT updates would change the current branch.'
+              : ''
+        : '';
 
     useEffect(() => {
         editor.previewHistory(mergePreview?.preview ?? eventPreview);
@@ -98,6 +107,7 @@ export function ServerHistoryView<TState>({
 
     function commitMerge() {
         if (!mergeSourceId || mergeSourceThroughEventIndex === undefined) return;
+        if (!canCommitMerge) return;
         editor.previewHistory(null);
         sync.mergeBranch(mergeSourceId, mergeSourceThroughEventIndex, revertedPathKeys);
         setMergeSourceId('');
@@ -186,7 +196,7 @@ export function ServerHistoryView<TState>({
                             </option>
                         ))}
                 </select>
-                <button type="button" disabled={!mergeSourceId} onClick={commitMerge}>
+                <button type="button" disabled={!canCommitMerge} onClick={commitMerge}>
                     Merge
                 </button>
             </div>
@@ -214,25 +224,48 @@ export function ServerHistoryView<TState>({
                                 {activeBranch?.name ?? activeBranchId}
                             </p>
                         </div>
-                        <button type="button" onClick={commitMerge}>
+                        <button type="button" disabled={!canCommitMerge} onClick={commitMerge}>
                             Accept merge
                         </button>
                     </div>
+                    {mergeBlockedReason ? (
+                        <p className="serverMergeWarning">{mergeBlockedReason}</p>
+                    ) : null}
                     <dl className="serverMergeFacts">
+                        <div className="primary">
+                            <dt>Changes to bring in</dt>
+                            <dd>{mergePreview.impact.effectiveUpdateCount}</dd>
+                        </div>
+                        <div>
+                            <dt>Already merged</dt>
+                            <dd>{mergePreview.impact.alreadyMerged ? 'Yes' : 'No'}</dd>
+                        </div>
                         <div>
                             <dt>Source through</dt>
                             <dd>{mergePreview.sourceThroughEventIndex}</dd>
                         </div>
                         <div>
-                            <dt>Changed paths</dt>
+                            <dt>Source updates</dt>
+                            <dd>{mergePreview.impact.sourceUpdateCount}</dd>
+                        </div>
+                        <div>
+                            <dt>No-effect updates</dt>
+                            <dd>{mergePreview.impact.noEffectUpdateCount}</dd>
+                        </div>
+                        <div>
+                            <dt>Already merged updates</dt>
+                            <dd>{mergePreview.impact.alreadyMergedUpdateCount}</dd>
+                        </div>
+                        <div>
+                            <dt>Source paths</dt>
                             <dd>{mergePreview.changedPaths.length}</dd>
                         </div>
                         <div>
-                            <dt>Applied</dt>
+                            <dt>Paths kept</dt>
                             <dd>{appliedCount}</dd>
                         </div>
                         <div>
-                            <dt>Reverted</dt>
+                            <dt>Paths reverted</dt>
                             <dd>{revertedCount}</dd>
                         </div>
                     </dl>
@@ -264,7 +297,7 @@ export function ServerHistoryView<TState>({
                     </div>
                     <div className="serverMergePreviewGrid">
                         <div className="serverMergePaths">
-                            <h4>Changed paths</h4>
+                            <h4>Source changed paths</h4>
                             {mergePreview.changedPaths.length ? (
                                 <ul>
                                     {mergePreview.changedPaths.map((path) => {

@@ -26,3 +26,15 @@ Verification:
 
 - `bun run build` in `examples/react-crdt`: passed.
 - `npx vitest run examples/react-crdt/src/lib/server/materialize.test.ts`: passed.
+
+## Phase 3: merge UI impact display
+
+- Updated the merge preview UI to lead with `Changes to bring in` from `effectiveUpdateCount`.
+- Added visible counts for already-merged status, source updates, no-effect updates, already-merged updates, source paths, kept paths, and reverted paths.
+- Disabled both merge buttons when the preview has zero effective updates.
+- Added no-op messaging for already-merged and otherwise no-effect merge previews.
+- Renamed path labels to make clear they are source changed paths, not the merge impact count.
+
+Verification:
+
+- `bun run build` in `examples/react-crdt`: passed.

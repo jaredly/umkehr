@@ -697,7 +697,7 @@ p {
 
 .serverMergeFacts {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
     gap: 8px;
     margin: 0;
 }
@@ -710,6 +710,11 @@ p {
     background: #f8fafc;
 }
 
+.serverMergeFacts div.primary {
+    border-color: #99c2ff;
+    background: #eef6ff;
+}
+
 .serverMergeFacts dt {
     color: #64748b;
     font-size: 11px;
@@ -719,7 +724,18 @@ p {
 .serverMergeFacts dd {
     margin: 3px 0 0;
     color: #17202a;
+    font-size: 16px;
     font-weight: 700;
+}
+
+.serverMergeWarning {
+    margin: 0;
+    border: 1px solid #f1c9a7;
+    border-radius: 8px;
+    padding: 8px 10px;
+    background: #fff8f1;
+    color: #9a3412;
+    font-size: 13px;
 }
 
 .serverMergeToolbar {
