@@ -13,3 +13,16 @@ Verification:
 - `bun run build` in `examples/react-crdt`: passed.
 - `bun run seed:test -- --date 2026-01-02 --size small --db /private/tmp/umkehr-qa-phase1.sqlite` in `examples/react-crdt-server`: passed.
 - `npm run test -- examples/react-crdt/src/lib/seed/generate.test.ts`: blocked by existing Typia transform setup in root Vitest, before tests run.
+
+## Phase 2: merge impact analysis
+
+- Added `MergeImpact` data to merge previews with total source updates, effective updates, already-merged updates, no-effect updates, and already-merged-through metadata.
+- Merge impact now recursively collects source update events through nested merge events.
+- Already-merged coverage is computed by walking target merge events and their nested source merges.
+- Effective update counts are computed by applying candidate source updates over the target pre-merge document and checking whether state or CRDT metadata changes.
+- Added materialization tests for fresh effective merges, already-merged no-op merges, LWW-losing source updates, and recursive source merge counts.
+
+Verification:
+
+- `bun run build` in `examples/react-crdt`: passed.
+- `npx vitest run examples/react-crdt/src/lib/server/materialize.test.ts`: passed.

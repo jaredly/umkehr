@@ -90,6 +90,16 @@ export type MergePathPreview<TState> = {
     preview: CrdtLocalHistory<TState>;
     changedPaths: CrdtPathSegment[][];
     revertUpdates: CrdtUpdate[];
+    impact: MergeImpact;
+};
+
+export type MergeImpact = {
+    sourceUpdateCount: number;
+    effectiveUpdateCount: number;
+    alreadyMergedUpdateCount: number;
+    noEffectUpdateCount: number;
+    alreadyMerged: boolean;
+    alreadyMergedThroughEventIndex?: number;
 };
 
 export function buildMergePathPreview<TState>({
@@ -116,6 +126,13 @@ export function buildMergePathPreview<TState>({
         branchId: targetBranchId,
     });
     const changedPaths = pathsForBranchThrough(branches, sourceBranchId, sourceThroughEventIndex);
+    const impact = buildMergeImpact({
+        branches,
+        before: before.doc,
+        targetBranchId,
+        sourceBranchId,
+        sourceThroughEventIndex,
+    });
     const revertPaths = changedPaths.filter((path) => revertedPathKeys.has(pathKey(path)));
     const revertUpdates = createRestoreUpdates(before.doc, revertPaths, clock);
     let preview = merged;
@@ -131,6 +148,7 @@ export function buildMergePathPreview<TState>({
         preview,
         changedPaths,
         revertUpdates,
+        impact,
     };
 }
 
@@ -259,6 +277,132 @@ function pathsForBranchThrough<TState>(
         paths.push(path);
     }
     return paths;
+}
+
+function buildMergeImpact<TState>({
+    branches,
+    before,
+    targetBranchId,
+    sourceBranchId,
+    sourceThroughEventIndex,
+}: {
+    branches: Record<string, PersistedServerBranch<TState>>;
+    before: CrdtDocument<TState>;
+    targetBranchId: string;
+    sourceBranchId: string;
+    sourceThroughEventIndex: number;
+}): MergeImpact {
+    const sourceUpdates = updateEventsForBranchThrough(
+        branches,
+        sourceBranchId,
+        sourceThroughEventIndex,
+    );
+    const coverage = mergedSourceCoverage(branches, targetBranchId);
+    const alreadyMergedThroughEventIndex = coverage.get(sourceBranchId);
+    const alreadyMergedUpdateCount = sourceUpdates.filter(
+        (event) => event.eventIndex <= (coverage.get(event.branchId) ?? 0),
+    ).length;
+    let effectiveUpdateCount = 0;
+    let current = before;
+    const applied = new Set<string>();
+    for (const event of sourceUpdates) {
+        const next = applyUpdateOnce(current, event.update, applied);
+        if (!sameDocumentContents(current, next)) effectiveUpdateCount += 1;
+        current = next;
+    }
+    return {
+        sourceUpdateCount: sourceUpdates.length,
+        effectiveUpdateCount,
+        alreadyMergedUpdateCount,
+        noEffectUpdateCount: sourceUpdates.length - effectiveUpdateCount,
+        alreadyMerged:
+            alreadyMergedThroughEventIndex !== undefined &&
+            alreadyMergedThroughEventIndex >= sourceThroughEventIndex,
+        alreadyMergedThroughEventIndex,
+    };
+}
+
+type CollectedUpdateEvent = {
+    branchId: string;
+    eventIndex: number;
+    update: CrdtUpdate;
+};
+
+function updateEventsForBranchThrough<TState>(
+    branches: Record<string, PersistedServerBranch<TState>>,
+    branchId: string,
+    throughEventIndex: number,
+    stack = new Set<string>(),
+): CollectedUpdateEvent[] {
+    const branch = branches[branchId];
+    if (!branch) return [];
+    if (stack.has(branchId)) return [];
+    stack.add(branchId);
+    const events: CollectedUpdateEvent[] = [];
+    for (const event of sortedEvents(branch.events)) {
+        if (event.eventIndex > throughEventIndex) break;
+        if (event.kind === 'merge') {
+            events.push(
+                ...updateEventsForBranchThrough(
+                    branches,
+                    event.sourceBranchId,
+                    event.sourceThroughEventIndex,
+                    stack,
+                ),
+            );
+        } else {
+            events.push({
+                branchId,
+                eventIndex: event.eventIndex,
+                update: event.update,
+            });
+        }
+    }
+    stack.delete(branchId);
+    return events;
+}
+
+function mergedSourceCoverage<TState>(
+    branches: Record<string, PersistedServerBranch<TState>>,
+    targetBranchId: string,
+) {
+    const coverage = new Map<string, number>();
+    collectMergedSourceCoverage(branches, targetBranchId, Number.MAX_SAFE_INTEGER, coverage);
+    return coverage;
+}
+
+function collectMergedSourceCoverage<TState>(
+    branches: Record<string, PersistedServerBranch<TState>>,
+    branchId: string,
+    throughEventIndex: number,
+    coverage: Map<string, number>,
+    stack = new Set<string>(),
+) {
+    const branch = branches[branchId];
+    if (!branch) return;
+    if (stack.has(branchId)) return;
+    stack.add(branchId);
+    for (const event of sortedEvents(branch.events)) {
+        if (event.eventIndex > throughEventIndex) break;
+        if (event.kind !== 'merge') continue;
+        coverage.set(
+            event.sourceBranchId,
+            Math.max(coverage.get(event.sourceBranchId) ?? 0, event.sourceThroughEventIndex),
+        );
+        collectMergedSourceCoverage(
+            branches,
+            event.sourceBranchId,
+            event.sourceThroughEventIndex,
+            coverage,
+            stack,
+        );
+    }
+    stack.delete(branchId);
+}
+
+function sameDocumentContents<TState>(left: CrdtDocument<TState>, right: CrdtDocument<TState>) {
+    return JSON.stringify(left.state) === JSON.stringify(right.state) &&
+        JSON.stringify(left.meta) === JSON.stringify(right.meta);
 }
 
 function pathForUpdate(update: CrdtUpdate): CrdtPathSegment[] {

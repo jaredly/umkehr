@@ -185,6 +185,7 @@ export type ServerMergePreview<TState> = {
     preview: CrdtLocalHistory<TState>;
     changedPaths: import('umkehr/crdt').CrdtPathSegment[][];
     revertUpdates: CrdtUpdate[];
+    impact: import('./materialize').MergeImpact;
     revertedPathKeys: Set<string>;
 };
 

@@ -2,11 +2,12 @@ import {describe, expect, it} from 'vitest';
 import type {IJsonSchemaCollection} from 'typia';
 import {
     createCrdtUpdates,
+    hlc,
     latestCrdtUpdateTimestamp,
     type CrdtUpdate,
 } from 'umkehr/crdt';
 import {createInitialCrdtHistory, type AppDefinition} from '../crdtApp';
-import {materializeServerBranch} from './materialize';
+import {buildMergePathPreview, materializeServerBranch} from './materialize';
 import type {PersistedServerBranch, ServerBranchEvent} from './types';
 
 type State = {
@@ -141,6 +142,235 @@ describe('materializeServerBranch', () => {
     });
 });
 
+describe('buildMergePathPreview impact', () => {
+    it('reports fresh source updates as effective', () => {
+        const initial = createInitialCrdtHistory(app);
+        const sourceUpdate = updateEvent(
+            'feature',
+            1,
+            createCrdtUpdates(
+                initial.doc,
+                {
+                    op: 'replace',
+                    path: [{type: 'key', key: 'title'}],
+                    value: 'Feature',
+                    previous: 'Draft',
+                },
+                timestamp('feature', 1),
+            )[0],
+        );
+
+        const preview = buildMergePathPreview({
+            app,
+            branches: {
+                main: branch('main', []),
+                feature: {
+                    ...branch('feature', [sourceUpdate]),
+                    sourceBranchId: 'main',
+                    forkEventIndex: 0,
+                },
+            },
+            targetBranchId: 'main',
+            sourceBranchId: 'feature',
+            sourceThroughEventIndex: 1,
+            revertedPathKeys: new Set(),
+            clock: hlc.init('preview', 0),
+        });
+
+        expect(preview.impact).toMatchObject({
+            sourceUpdateCount: 1,
+            effectiveUpdateCount: 1,
+            alreadyMergedUpdateCount: 0,
+            noEffectUpdateCount: 0,
+            alreadyMerged: false,
+        });
+    });
+
+    it('reports an already merged source as no effect', () => {
+        const initial = createInitialCrdtHistory(app);
+        const sourceUpdate = updateEvent(
+            'feature',
+            1,
+            createCrdtUpdates(
+                initial.doc,
+                {
+                    op: 'replace',
+                    path: [{type: 'key', key: 'title'}],
+                    value: 'Feature',
+                    previous: 'Draft',
+                },
+                timestamp('feature', 1),
+            )[0],
+        );
+        const merge = mergeEvent('main', 1, 'feature', 1);
+
+        const preview = buildMergePathPreview({
+            app,
+            branches: {
+                main: branch('main', [merge]),
+                feature: {
+                    ...branch('feature', [sourceUpdate]),
+                    sourceBranchId: 'main',
+                    forkEventIndex: 0,
+                },
+            },
+            targetBranchId: 'main',
+            sourceBranchId: 'feature',
+            sourceThroughEventIndex: 1,
+            revertedPathKeys: new Set(),
+            clock: hlc.init('preview', 0),
+        });
+
+        expect(preview.impact).toMatchObject({
+            sourceUpdateCount: 1,
+            effectiveUpdateCount: 0,
+            alreadyMergedUpdateCount: 1,
+            noEffectUpdateCount: 1,
+            alreadyMerged: true,
+            alreadyMergedThroughEventIndex: 1,
+        });
+    });
+
+    it('counts older source updates that lose to target LWW as no effect', () => {
+        const initial = createInitialCrdtHistory(app);
+        const sourceUpdate = updateEvent(
+            'feature',
+            1,
+            createCrdtUpdates(
+                initial.doc,
+                {
+                    op: 'replace',
+                    path: [{type: 'key', key: 'title'}],
+                    value: 'Feature',
+                    previous: 'Draft',
+                },
+                timestamp('feature', 1),
+            )[0],
+        );
+        const targetUpdate = updateEvent(
+            'main',
+            1,
+            createCrdtUpdates(
+                initial.doc,
+                {
+                    op: 'replace',
+                    path: [{type: 'key', key: 'title'}],
+                    value: 'Main',
+                    previous: 'Draft',
+                },
+                timestamp('main', 2),
+            )[0],
+        );
+
+        const preview = buildMergePathPreview({
+            app,
+            branches: {
+                main: branch('main', [targetUpdate]),
+                feature: {
+                    ...branch('feature', [sourceUpdate]),
+                    sourceBranchId: 'main',
+                    forkEventIndex: 0,
+                },
+            },
+            targetBranchId: 'main',
+            sourceBranchId: 'feature',
+            sourceThroughEventIndex: 1,
+            revertedPathKeys: new Set(),
+            clock: hlc.init('preview', 0),
+        });
+
+        expect(preview.impact).toMatchObject({
+            sourceUpdateCount: 1,
+            effectiveUpdateCount: 0,
+            alreadyMergedUpdateCount: 0,
+            noEffectUpdateCount: 1,
+            alreadyMerged: false,
+        });
+    });
+
+    it('includes recursive merge source updates in impact counts', () => {
+        const initial = createInitialCrdtHistory(app);
+        const dependencyUpdate = updateEvent(
+            'dependency',
+            1,
+            createCrdtUpdates(
+                initial.doc,
+                {
+                    op: 'replace',
+                    path: [{type: 'key', key: 'title'}],
+                    value: 'Dependency',
+                    previous: 'Draft',
+                },
+                timestamp('dependency', 1),
+            )[0],
+        );
+        const featureBase = materializeServerBranch({
+            app,
+            branchId: 'feature',
+            branches: {
+                main: branch('main', []),
+                dependency: {
+                    ...branch('dependency', [dependencyUpdate]),
+                    sourceBranchId: 'main',
+                    forkEventIndex: 0,
+                },
+                feature: {
+                    ...branch('feature', [mergeEvent('feature', 1, 'dependency', 1)]),
+                    sourceBranchId: 'main',
+                    forkEventIndex: 0,
+                },
+            },
+        });
+        const featureUpdate = updateEvent(
+            'feature',
+            2,
+            createCrdtUpdates(
+                featureBase.doc,
+                {
+                    op: 'replace',
+                    path: [{type: 'key', key: 'count'}],
+                    value: 2,
+                    previous: 0,
+                },
+                timestamp('feature', 2),
+            )[0],
+        );
+
+        const preview = buildMergePathPreview({
+            app,
+            branches: {
+                main: branch('main', [mergeEvent('main', 1, 'dependency', 1)]),
+                dependency: {
+                    ...branch('dependency', [dependencyUpdate]),
+                    sourceBranchId: 'main',
+                    forkEventIndex: 0,
+                },
+                feature: {
+                    ...branch('feature', [
+                        mergeEvent('feature', 1, 'dependency', 1),
+                        featureUpdate,
+                    ]),
+                    sourceBranchId: 'main',
+                    forkEventIndex: 0,
+                },
+            },
+            targetBranchId: 'main',
+            sourceBranchId: 'feature',
+            sourceThroughEventIndex: 2,
+            revertedPathKeys: new Set(),
+            clock: hlc.init('preview', 0),
+        });
+
+        expect(preview.impact).toMatchObject({
+            sourceUpdateCount: 2,
+            effectiveUpdateCount: 1,
+            alreadyMergedUpdateCount: 1,
+            noEffectUpdateCount: 1,
+            alreadyMerged: false,
+        });
+    });
+});
+
 function branch(
     branchId: string,
     events: ServerBranchEvent[],
@@ -168,4 +398,27 @@ function updateEvent(branchId: string, eventIndex: number, update: CrdtUpdate): 
         receivedAt: 'now',
         update,
     };
+}
+
+function mergeEvent(
+    branchId: string,
+    eventIndex: number,
+    sourceBranchId: string,
+    sourceThroughEventIndex: number,
+): ServerBranchEvent {
+    return {
+        kind: 'merge',
+        mergeId: `${branchId}-${sourceBranchId}-${eventIndex}`,
+        docId: 'doc',
+        branchId,
+        eventIndex,
+        sourceBranchId,
+        sourceThroughEventIndex,
+        actor: 'actor',
+        createdAt: 'now',
+    };
+}
+
+function timestamp(actor: string, logical: number) {
+    return hlc.pack({ts: logical, count: 0, node: actor});
 }
