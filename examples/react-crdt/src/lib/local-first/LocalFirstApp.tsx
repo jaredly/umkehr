@@ -218,7 +218,6 @@ function LocalFirstDocument<TState>({
     actor: string;
 }) {
     const editor = runtime.useEditorContext();
-    editor.useLocalHistory();
 
     return app.renderPanel({
         actor,

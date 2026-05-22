@@ -72,9 +72,13 @@ Verification:
 - Added `TodoItemSlot` so each row subscribes to its own `editor.$.todos[index]` value path.
 - Kept drag/reorder index math based on `editor.latest().todos` and the structural id list.
 - Replaced per-row `editor.useLocalHistory()` title blame with path-scoped CRDT helpers: `useCrdtPath` returns the `CrdtPathSegment[]` for a logical path, and `useCrdtMeta` supports the title tooltip without subscribing rows to unrelated CRDT history changes.
+- Removed broad `editor.useLocalHistory()` calls from document workspace wrappers that were rerendering entire CRDT panels on every history change.
+- Added small CRDT/history undo/redo subscribers inside todo and whiteboard panel headers so button disabled state can update without forcing list/board children to rerender.
+- Added a core render-count test proving array item field edits rerender only the changed row with the selector/id-list pattern.
 - Avoided `React.memo`.
 
 Verification:
 
 - `npx vitest run src/react-crdt/react-crdt.test.tsx`: passed.
+- `npm run build`: passed.
 - `bun run build` in `examples/react-crdt`: passed.

@@ -22,6 +22,10 @@ type State = {
     count: number;
 };
 
+type ListState = {
+    todos: Array<{id: string; title: string; done: boolean}>;
+};
+
 const schema = {
     schemas: [
         {
@@ -39,6 +43,42 @@ const initial: State = {title: 'Draft', count: 0};
 const startTs = hlc.pack(hlc.init('seed', 1_000_000));
 const createInitialHistory = () =>
     createCrdtLocalHistory(createCrdtDocument(initial, schema, {timestamp: startTs}));
+
+const listSchema = {
+    schemas: [
+        {
+            type: 'object',
+            properties: {
+                todos: {
+                    type: 'array',
+                    items: {
+                        type: 'object',
+                        properties: {
+                            id: {type: 'string'},
+                            title: {type: 'string'},
+                            done: {type: 'boolean'},
+                        },
+                    },
+                },
+            },
+        },
+    ],
+    components: {schemas: {}},
+} as unknown as IJsonSchemaCollection<'3.1', [ListState]>;
+
+const createInitialListHistory = () =>
+    createCrdtLocalHistory(
+        createCrdtDocument(
+            {
+                todos: [
+                    {id: 'a', title: 'A', done: false},
+                    {id: 'b', title: 'B', done: false},
+                ],
+            },
+            listSchema,
+            {timestamp: startTs},
+        ),
+    );
 
 class TestTransport implements SyncedTransport {
     clock: hlc.HLC;
@@ -154,6 +194,58 @@ describe('createSyncedContext', () => {
         fireEvent.click(view.getByText('title'));
         expect(view.getByTestId('crdt-path').textContent).toBe('objectField');
         expect(titlePathRenders).toBe(2);
+    });
+
+    it('does not rerender sibling rows for array item field changes', () => {
+        const [Provider, useTodos] = createSyncedContext<ListState>('type');
+        const transport = new TestTransport('local');
+        const renders = {list: 0, a: 0, b: 0};
+
+        function Row({id, index}: {id: 'a' | 'b'; index: number}) {
+            const ctx = useTodos();
+            const todo = useValue(ctx.$.todos[index]);
+            renders[id] += 1;
+            return <span data-testid={id}>{todo.title}:{String(todo.done)}</span>;
+        }
+
+        function List() {
+            const ctx = useTodos();
+            const ids = useValue(ctx.$.todos, (todos) => todos.map((todo) => todo.id));
+            renders.list += 1;
+            return (
+                <>
+                    {ids.map((id, index) => (
+                        <Row key={id} id={id as 'a' | 'b'} index={index} />
+                    ))}
+                    <button type="button" onClick={() => ctx.$.todos[0].title('A!')}>
+                        title
+                    </button>
+                    <button type="button" onClick={() => ctx.$.todos[0].done(true)}>
+                        done
+                    </button>
+                </>
+            );
+        }
+
+        const view = render(
+            <Provider initial={createInitialListHistory()} transport={transport}>
+                <List />
+            </Provider>,
+        );
+
+        expect(renders).toEqual({list: 1, a: 1, b: 1});
+
+        fireEvent.click(view.getByText('title'));
+
+        expect(view.getByTestId('a').textContent).toBe('A!:false');
+        expect(view.getByTestId('b').textContent).toBe('B:false');
+        expect(renders).toEqual({list: 1, a: 2, b: 1});
+
+        fireEvent.click(view.getByText('done'));
+
+        expect(view.getByTestId('a').textContent).toBe('A!:true');
+        expect(view.getByTestId('b').textContent).toBe('B:false');
+        expect(renders).toEqual({list: 1, a: 3, b: 1});
     });
 
     it('receives remote updates through transport without publishing them again', () => {

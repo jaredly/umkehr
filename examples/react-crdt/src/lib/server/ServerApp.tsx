@@ -341,7 +341,6 @@ function ServerDocumentWorkspace<TState>({
 }) {
     const editor = runtime.useEditorContext();
     const [readOnly, setReadOnly] = useState(false);
-    editor.useLocalHistory();
 
     return (
         <>

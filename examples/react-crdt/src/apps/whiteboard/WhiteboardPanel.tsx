@@ -8,7 +8,12 @@ import {
 } from 'react';
 import {useValue} from 'umkehr/react';
 import {useStatuses} from 'umkehr/react-crdt';
-import type {AppEditorContext, GridSlot} from '../../lib/crdtApp';
+import type {
+    AppEditorContext,
+    CrdtEditorContext,
+    GridSlot,
+    HistoryEditorContext,
+} from '../../lib/crdtApp';
 import {initialForNickname, whiteboardSelectionStatusKind} from '../../lib/server/presence';
 import {
     BOARD_HEIGHT,
@@ -515,12 +520,7 @@ export function WhiteboardPanel({
                     <p>{visibleElementIds.length} visible</p>
                 </div>
                 <div className="whiteboardActions">
-                    <button type="button" onClick={() => editor.undo()} disabled={readOnly || !editor.canUndo()}>
-                        Undo
-                    </button>
-                    <button type="button" onClick={() => editor.redo()} disabled={readOnly || !editor.canRedo()}>
-                        Redo
-                    </button>
+                    <UndoRedoButtons editor={editor} readOnly={readOnly} />
                 </div>
             </header>
 
@@ -728,6 +728,75 @@ export function WhiteboardPanel({
             </div>
         </section>
     );
+}
+
+function UndoRedoButtons({
+    editor,
+    readOnly,
+}: {
+    editor: AppEditorContext<WhiteboardState>;
+    readOnly: boolean;
+}) {
+    if (hasCrdtHistory(editor)) {
+        return <CrdtUndoRedoButtons editor={editor} readOnly={readOnly} />;
+    }
+    if (hasHistory(editor)) {
+        return <HistoryUndoRedoButtons editor={editor} readOnly={readOnly} />;
+    }
+    return null;
+}
+
+function CrdtUndoRedoButtons({
+    editor,
+    readOnly,
+}: {
+    editor: CrdtEditorContext<WhiteboardState>;
+    readOnly: boolean;
+}) {
+    editor.useLocalHistory();
+    return <UndoRedoButtonPair editor={editor} readOnly={readOnly} />;
+}
+
+function HistoryUndoRedoButtons({
+    editor,
+    readOnly,
+}: {
+    editor: HistoryEditorContext<WhiteboardState>;
+    readOnly: boolean;
+}) {
+    editor.useHistory();
+    return <UndoRedoButtonPair editor={editor} readOnly={readOnly} />;
+}
+
+function UndoRedoButtonPair({
+    editor,
+    readOnly,
+}: {
+    editor: AppEditorContext<WhiteboardState>;
+    readOnly: boolean;
+}) {
+    return (
+        <>
+            <button type="button" onClick={() => editor.undo()} disabled={readOnly || !editor.canUndo()}>
+                Undo
+            </button>
+            <button type="button" onClick={() => editor.redo()} disabled={readOnly || !editor.canRedo()}>
+                Redo
+            </button>
+        </>
+    );
+}
+
+function hasCrdtHistory(
+    editor: AppEditorContext<WhiteboardState>,
+): editor is CrdtEditorContext<WhiteboardState> {
+    return 'useLocalHistory' in editor && typeof editor.useLocalHistory === 'function';
+}
+
+function hasHistory(
+    editor: AppEditorContext<WhiteboardState>,
+): editor is HistoryEditorContext<WhiteboardState> {
+    return 'useHistory' in editor && typeof editor.useHistory === 'function';
 }
 
 function ElementSlot({
