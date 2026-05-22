@@ -1,6 +1,6 @@
 import {createContext, useContext, useEffect, useMemo, useRef, useState} from 'react';
 import {deepEqual as equal} from '../deepEqual.js';
-import {createPatchDispatcher} from '../helper.js';
+import {createPatchDispatcher, getPath} from '../helper.js';
 import {type EqualFn} from '../internal.js';
 import {asFlat, type MaybeNested, resolveAndApply} from '../make.js';
 import {
@@ -9,11 +9,15 @@ import {
     canRedoLocalCommand,
     canUndoLocalCommand,
     changedNormalPathsForCrdtUpdate,
+    crdtPathForExisting,
+    getMetaAtPath,
     redoLocalCommand,
     undoLocalCommand,
     hlc,
+    type CrdtMeta,
     type CrdtDocument,
     type CrdtLocalHistory,
+    type CrdtPathSegment,
     type CrdtUpdate,
 } from '../crdt/index.js';
 import {
@@ -32,6 +36,7 @@ import {
     type ScheduledTask,
 } from '../react-core/index.js';
 import type {ApplyTiming, DraftPatch, Path} from '../types.js';
+import type {PatchBuilderInternal} from '../types.js';
 import {useLatest} from '../react/useLatest.js';
 import {createStatusStore, type StatusStore} from '../statuses.js';
 
@@ -51,6 +56,12 @@ export type SyncedContext<T, Tag extends string = 'type'> = {
     undo(): void;
     redo(): void;
     useLocalHistory(): CrdtLocalHistory<T>;
+    useCrdtPath<Current>(
+        node: PatchBuilderInternal<unknown, Current, Tag, unknown, Context>,
+    ): CrdtPathSegment[];
+    useCrdtMeta<Current>(
+        node: PatchBuilderInternal<unknown, Current, Tag, unknown, Context>,
+    ): CrdtMeta | undefined;
     $: ReturnType<typeof createPatchDispatcher<T, Context, Tag, void>>;
     dispatch(v: MaybeNested<DraftPatch<T, Tag, Context>>, when?: ApplyTiming): void;
 };
@@ -134,6 +145,35 @@ export const createSyncedContext = <T, Tag extends string = 'type'>(
                         }, []);
                         tick;
                         return visibleHistory(ctx);
+                    },
+                    useCrdtPath(node) {
+                        const path = getPath(node);
+                        const [tick, setTick] = useState(0);
+                        useEffect(
+                            () =>
+                                makeContextForPath(
+                                    () => visibleState(ctx),
+                                    ctx.listenersByPath,
+                                ).listenToPath(path, () => setTick((t) => t + 1)),
+                            [ctx, path],
+                        );
+                        tick;
+                        return crdtPathForExisting(visibleHistory(ctx).doc, path);
+                    },
+                    useCrdtMeta(node) {
+                        const path = getPath(node);
+                        const [tick, setTick] = useState(0);
+                        useEffect(
+                            () =>
+                                makeContextForPath(
+                                    () => visibleState(ctx),
+                                    ctx.listenersByPath,
+                                ).listenToPath(path, () => setTick((value) => value + 1)),
+                            [ctx, path],
+                        );
+                        tick;
+                        const history = visibleHistory(ctx);
+                        return getMetaAtPath(history.doc.meta, crdtPathForExisting(history.doc, path));
                     },
                     $,
                     dispatch,

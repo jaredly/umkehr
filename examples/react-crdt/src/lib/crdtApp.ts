@@ -6,12 +6,15 @@ import {
     type History,
     type MaybeNested,
     type PatchBuilder,
+    type PatchBuilderInternal,
 } from 'umkehr';
 import {
     createCrdtDocument,
     createCrdtLocalHistory,
     hlc,
+    type CrdtMeta,
     type CrdtLocalHistory,
+    type CrdtPathSegment,
     type HlcTimestamp,
 } from 'umkehr/crdt';
 import type {Context} from 'umkehr/react';
@@ -36,6 +39,12 @@ export type CrdtEditorContext<TState, Tag extends string = 'type'> =
     AppEditorContext<TState, Tag> & {
         previewHistory(history: CrdtLocalHistory<TState> | null): void;
         useLocalHistory(): CrdtLocalHistory<TState>;
+        useCrdtPath<Current>(
+            node: PatchBuilderInternal<unknown, Current, Tag, unknown, Context>,
+        ): CrdtPathSegment[];
+        useCrdtMeta<Current>(
+            node: PatchBuilderInternal<unknown, Current, Tag, unknown, Context>,
+        ): CrdtMeta | undefined;
     };
 
 export type HistoryEditorContext<TState, TAnnotations = never> = Omit<

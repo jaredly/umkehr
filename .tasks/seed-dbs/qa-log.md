@@ -62,3 +62,19 @@ Verification:
 Verification:
 
 - `bun run build` in `examples/react-crdt`: passed.
+
+
+## Phase 6: todo render subscriptions
+
+- Removed the parent todo panel subscription to the full `todos` array.
+- Added selector-based list structure subscription with `useValue(editor.$.todos, todos => todos.map(todo => todo.id))`.
+- Moved completed/total count into a small `TodoSummary` subscriber.
+- Added `TodoItemSlot` so each row subscribes to its own `editor.$.todos[index]` value path.
+- Kept drag/reorder index math based on `editor.latest().todos` and the structural id list.
+- Replaced per-row `editor.useLocalHistory()` title blame with path-scoped CRDT helpers: `useCrdtPath` returns the `CrdtPathSegment[]` for a logical path, and `useCrdtMeta` supports the title tooltip without subscribing rows to unrelated CRDT history changes.
+- Avoided `React.memo`.
+
+Verification:
+
+- `npx vitest run src/react-crdt/react-crdt.test.tsx`: passed.
+- `bun run build` in `examples/react-crdt`: passed.

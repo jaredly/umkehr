@@ -1,13 +1,10 @@
 import {
-    crdtPathForExisting,
-    getMetaAtPath,
     hlc,
-    type CrdtLocalHistory,
+    type CrdtMeta,
     type HlcTimestamp,
 } from 'umkehr/crdt';
 import {parseSessionActor} from '../../lib/server/session';
 import type {ServerPresenceUser} from '../../lib/server/types';
-import type {TodoState} from './model';
 
 export type TodoTitleBlame = {
     actor: string;
@@ -17,17 +14,10 @@ export type TodoTitleBlame = {
     timestamp: HlcTimestamp;
 };
 
-export function titleBlameForTodo(
-    history: CrdtLocalHistory<TodoState>,
-    index: number,
+export function titleBlameForTodoMeta(
+    meta: CrdtMeta | undefined,
     users: ServerPresenceUser[] = [],
 ): TodoTitleBlame | null {
-    const path = crdtPathForExisting(history.doc, [
-        {type: 'key', key: 'todos'},
-        {type: 'key', key: index},
-        {type: 'key', key: 'title'},
-    ]);
-    const meta = getMetaAtPath(history.doc.meta, path);
     if (meta?.kind !== 'primitive') return null;
     const actor = hlc.unpack(meta.ts).node;
     const parsed = parseSessionActor(actor);

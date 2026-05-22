@@ -112,6 +112,50 @@ describe('createSyncedContext', () => {
         expect(saved).toEqual(['Published']);
     });
 
+    it('subscribes CRDT path reads to a specific path', () => {
+        const [Provider, useTodos] = createSyncedContext<State>('type');
+        const transport = new TestTransport('local');
+        let titlePathRenders = 0;
+
+        function TitlePath() {
+            const ctx = useTodos();
+            const path = ctx.useCrdtPath(ctx.$.title);
+            titlePathRenders += 1;
+            return <span data-testid="crdt-path">{path.map((segment) => segment.type).join('/')}</span>;
+        }
+
+        function Editor() {
+            const ctx = useTodos();
+            return (
+                <>
+                    <TitlePath />
+                    <button type="button" onClick={() => ctx.$.count(1)}>
+                        count
+                    </button>
+                    <button type="button" onClick={() => ctx.$.title('Scoped')}>
+                        title
+                    </button>
+                </>
+            );
+        }
+
+        const view = render(
+            <Provider initial={createInitialHistory()} transport={transport}>
+                <Editor />
+            </Provider>,
+        );
+
+        expect(view.getByTestId('crdt-path').textContent).toBe('objectField');
+        expect(titlePathRenders).toBe(1);
+
+        fireEvent.click(view.getByText('count'));
+        expect(titlePathRenders).toBe(1);
+
+        fireEvent.click(view.getByText('title'));
+        expect(view.getByTestId('crdt-path').textContent).toBe('objectField');
+        expect(titlePathRenders).toBe(2);
+    });
+
     it('receives remote updates through transport without publishing them again', () => {
         const [Provider, useTodos] = createSyncedContext<State>('type');
         const left = new TestTransport('left');

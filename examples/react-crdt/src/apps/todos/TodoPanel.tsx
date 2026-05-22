@@ -2,7 +2,6 @@ import {
     useCallback,
     useEffect,
     useLayoutEffect,
-    useMemo,
     useRef,
     useState,
     type CSSProperties,
@@ -10,10 +9,10 @@ import {
 } from 'react';
 import {useValue} from 'umkehr/react';
 import {useStatuses} from 'umkehr/react-crdt';
-import type {AppEditorContext, GridSlot} from '../../lib/crdtApp';
+import type {AppEditorContext, CrdtEditorContext, GridSlot} from '../../lib/crdtApp';
 import {initialForNickname, lastEditStatusKind} from '../../lib/server/presence';
 import type {ServerLastEditStatusData} from '../../lib/server/types';
-import {formatTodoTitleBlame, titleBlameForTodo} from './blame';
+import {formatTodoTitleBlame, titleBlameForTodoMeta} from './blame';
 import type {Todo, TodoState} from './model';
 
 const pastelColors = ['#fff', '#fce7f3', '#dbeafe', '#dcfce7', '#fef3c7', '#ede9fe'] as const;
@@ -43,18 +42,17 @@ export function TodoPanel({
     readOnly?: boolean;
 }) {
     const bgcolor = useValue(editor.$.bgcolor);
-    const todos = useValue(editor.$.todos);
+    const todoIds = useValue(editor.$.todos, (todos) => todos.map((todo) => todo.id));
     const [draftTitle, setDraftTitle] = useState('');
     const [draggingId, setDraggingId] = useState<string | null>(null);
     const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
     const rowRefs = useRef(new Map<string, HTMLLIElement>());
     const previousRects = useRef(new Map<string, DOMRect>());
-    const latestTodos = useRef(todos);
+    const latestTodos = useRef(editor.latest().todos);
     const draggingIdRef = useRef<string | null>(null);
     const dropTargetRef = useRef<DropTarget | null>(null);
-    const completed = useMemo(() => todos.filter((todo) => todo.done).length, [todos]);
 
-    latestTodos.current = todos;
+    latestTodos.current = editor.latest().todos;
 
     useEffect(() => {
         draggingIdRef.current = draggingId;
@@ -145,9 +143,9 @@ export function TodoPanel({
     useLayoutEffect(() => {
         const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
         const nextRects = new Map<string, DOMRect>();
-        for (const todo of todos) {
-            const element = rowRefs.current.get(todo.id);
-            if (element) nextRects.set(todo.id, element.getBoundingClientRect());
+        for (const id of todoIds) {
+            const element = rowRefs.current.get(id);
+            if (element) nextRects.set(id, element.getBoundingClientRect());
         }
 
         if (!reduceMotion) {
@@ -168,7 +166,7 @@ export function TodoPanel({
         }
 
         previousRects.current = nextRects;
-    }, [todos]);
+    }, [todoIds]);
 
     const startDrag = useCallback((id: string, event: ReactPointerEvent<HTMLElement>) => {
         if (readOnly) return;
@@ -192,9 +190,7 @@ export function TodoPanel({
             <header className="panelHeader">
                 <div>
                     <h1>{title}</h1>
-                    <p>
-                        {completed}/{todos.length} done
-                    </p>
+                    <TodoSummary editor={editor} />
                 </div>
                 <div className="panelActions">
                     <button
@@ -263,15 +259,15 @@ export function TodoPanel({
                 className={draggingId ? 'todoList draggingList' : 'todoList'}
                 style={{'--task-bg': bgcolor} as CSSProperties}
             >
-                {todos.map((todo, index) => (
-                    <TodoItem
-                        key={todo.id}
+                {todoIds.map((id, index) => (
+                    <TodoItemSlot
+                        key={id}
                         editor={editor}
-                        todo={todo}
+                        id={id}
                         index={index}
-                        isDragging={draggingId === todo.id}
+                        isDragging={draggingId === id}
                         dropPosition={
-                            dropTarget?.id === todo.id
+                            dropTarget?.id === id
                                 ? dropTarget.after
                                     ? 'after'
                                     : 'before'
@@ -284,6 +280,53 @@ export function TodoPanel({
                 ))}
             </ul>
         </section>
+    );
+}
+
+function TodoSummary({editor}: {editor: AppEditorContext<TodoState>}) {
+    const summary = useValue(editor.$.todos, (todos) => ({
+        completed: todos.filter((todo) => todo.done).length,
+        total: todos.length,
+    }));
+    return (
+        <p>
+            {summary.completed}/{summary.total} done
+        </p>
+    );
+}
+
+function TodoItemSlot({
+    editor,
+    id,
+    index,
+    isDragging,
+    dropPosition,
+    onDragStart,
+    registerRow,
+    readOnly,
+}: {
+    editor: AppEditorContext<TodoState>;
+    id: string;
+    index: number;
+    isDragging: boolean;
+    dropPosition: 'before' | 'after' | null;
+    onDragStart(id: string, event: ReactPointerEvent<HTMLElement>): void;
+    registerRow(id: string, element: HTMLLIElement | null): void;
+    readOnly: boolean;
+}) {
+    const todo = useValue(editor.$.todos[index]) as Todo | undefined;
+    if (!todo || todo.id !== id) return null;
+    return (
+        <TodoItem
+            editor={editor}
+            todo={todo}
+            index={index}
+            isDragging={isDragging}
+            dropPosition={dropPosition}
+            onDragStart={onDragStart}
+            registerRow={registerRow}
+            readOnly={readOnly}
+        />
     );
 }
 
@@ -310,11 +353,10 @@ function TodoItem({
     const presenceStatuses = useStatuses(editor.$.todos[index], {
         kinds: [lastEditStatusKind],
     });
-    const crdtHistory =
-        'useLocalHistory' in editor && typeof editor.useLocalHistory === 'function'
-            ? editor.useLocalHistory()
-            : null;
-    const titleBlame = crdtHistory ? titleBlameForTodo(crdtHistory, index) : null;
+    const titleMeta = hasPathScopedCrdtMeta(editor)
+        ? editor.useCrdtMeta(editor.$.todos[index].title)
+        : null;
+    const titleBlame = titleBlameForTodoMeta(titleMeta ?? undefined);
     const titleTooltip = formatTodoTitleBlame(titleBlame);
     const cursors = presenceStatuses
         .map((status) => status.data)
@@ -410,6 +452,12 @@ function TodoItem({
             </div>
         </li>
     );
+}
+
+function hasPathScopedCrdtMeta(
+    editor: AppEditorContext<TodoState>,
+): editor is CrdtEditorContext<TodoState> {
+    return 'useCrdtMeta' in editor && typeof editor.useCrdtMeta === 'function';
 }
 
 function isLastEditStatusData(value: unknown): value is ServerLastEditStatusData {
