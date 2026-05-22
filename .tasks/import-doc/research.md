@@ -341,10 +341,25 @@ End-to-end/manual checks should cover:
 ## Open questions
 
 - Does "full-document" require mode-specific history/logs/branches/vectors, or is current materialized state enough? The architecture strongly suggests mode-specific full exports, but the UX copy should make that explicit.
+  - yes full history etc.
 - Should local simulator export both replicas and outboxes, or only a selected/current replica?
+  - all replicates & outboxes
 - Should PeerJS import be host-only? If client import is allowed, what should happen when the host has a different document?
+  - host-only
 - In server mode, is local browser replica backup sufficient, or is the desired feature an authoritative server document dump/restore API?
+  - local replica export, but on import it needs to be able to replicate to the backend
 - Should server import into a different `docId` be supported? If yes, recorded event indices and branch metadata need remapping or a server import endpoint.
+  - yeah, I think an explicit 'unknown-document' message from the server, and then the client sends a message similar to the 'serverMigrationUpload' message w/ the full contents
 - Should archives include durable identity (`ReplicaIdentity` or server user/session)? Default should probably be no, to avoid duplicated actors, but backup/restore semantics may argue for an explicit advanced option.
+  - it should record the actor who produced the export, but importing the archive wouldn't "recreate the actor"
 - Should imports reload the page in every durable mode for consistency, or should modes hot-swap provider state where possible?
+  - we already have a document-switcher for server mode; hot-swap should be supported generally
 - Should gzip be exposed as a separate button, automatic based on file extension, or postponed until JSON import/export is complete?
+  - postpone
+
+## Additional notes
+
+It occurs to me that the react-crdt-server should store a per-document "appId" indicating what app the given document is associated with.
+Similarly, the for 'server' architecture, the client needs a way to list local documents (not just through the server endpoint) so that offline document switching works. The client should also store a per-document "appId" (so far "todos" and "whiteboard" would be the two appIds)
+
+The proposed ReactCrdtDocumentArchive type is bad. `mode` needs to be tied inextricably to `payload`, where currently they are independent. instead, payload should be a tagged union, and mode should be removed

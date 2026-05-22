@@ -9,8 +9,18 @@ Next things to tackle:
 
 - [x] peerjs example, how can we add vector index stuff, where each peer has its own persisted document and stuff. history compaction, for example.
 
+- [ ] seed E2E dbs for all architectures
+
 
 - [ ] seed db that's behind the client
   - [ ] w/ empty client
   - [ ] w/ client having the old db "loaded into local memory"
 - [ ] seed db that's ahead of the client
+- [ ] what happens if the local indexeddb has a db that the server doesn't have? Do we automatically replicate? Probably should prompt the user first
+
+Testing findings
+- [ ] the merge UI should indicate when a branch has already been merged into the current branch (e.g. merge would have no effect). Also "# of changes that would be brought in"
+- [ ] whiteboard merge state doesn't make sense to me. How did merging "layout" manage to loose the extra sticky note?
+- [ ] whiteboard drag doesn't preventDefault so the browser does selection stuff
+- [ ] whiteboard perf: every noteview updates while dragging one
+- [ ] todo perf: every todo updates when updating a todo
