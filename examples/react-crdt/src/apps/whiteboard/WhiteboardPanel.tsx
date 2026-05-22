@@ -1,7 +1,6 @@
 import {
     useCallback,
     useEffect,
-    useMemo,
     useRef,
     useState,
     type CSSProperties,
@@ -14,8 +13,7 @@ import {initialForNickname, whiteboardSelectionStatusKind} from '../../lib/serve
 import {
     BOARD_HEIGHT,
     BOARD_WIDTH,
-    archivedElements,
-    boardToScreen,
+    byZOrderThenId,
     clamp,
     elementFieldPath,
     elementPath,
@@ -81,14 +79,43 @@ export function WhiteboardPanel({
     readOnly?: boolean;
     setPresenceSelection?: (elementId: string | null) => void;
 }) {
-    const elementsRecord = useValue(editor.$.elements);
-    const state = useMemo<WhiteboardState>(
-        () => ({background: editor.latest().background, elements: elementsRecord}),
-        [editor, elementsRecord],
+    const background = useValue(editor.$.background);
+    const visibleElementIds = useValue(
+        editor.$.elements,
+        (elements) =>
+            Object.values(elements)
+                .filter((element) => !element.archived)
+                .sort(byZOrderThenId)
+                .map((element) => element.id),
     );
-    const elements = useMemo(() => orderedElements(state), [state]);
-    const archived = useMemo(() => archivedElements(state), [state]);
-    const latestState = useRef(state);
+    const visibleStrokeIds = useValue(
+        editor.$.elements,
+        (elements) =>
+            Object.values(elements)
+                .filter((element) => !element.archived && element.type === 'stroke')
+                .sort(byZOrderThenId)
+                .map((element) => element.id),
+    );
+    const visibleSurfaceElementIds = useValue(
+        editor.$.elements,
+        (elements) =>
+            Object.values(elements)
+                .filter((element) => !element.archived && element.type !== 'stroke')
+                .sort(byZOrderThenId)
+                .map((element) => element.id),
+    );
+    const archivedElementIds = useValue(
+        editor.$.elements,
+        (elements) =>
+            Object.values(elements)
+                .filter((element) => element.archived)
+                .sort(
+                    (a, b) =>
+                        (b.archivedAt ?? '').localeCompare(a.archivedAt ?? '') ||
+                        a.id.localeCompare(b.id),
+                )
+                .map((element) => element.id),
+    );
     const viewportRef = useRef<HTMLDivElement | null>(null);
     const [tool, setTool] = useState<Tool>('select');
     const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -101,8 +128,6 @@ export function WhiteboardPanel({
     const [viewportSize, setViewportSize] = useState({width: 1, height: 1});
     const [draggingMinimap, setDraggingMinimap] = useState(false);
     const [focusNoteId, setFocusNoteId] = useState<string | null>(null);
-
-    latestState.current = state;
 
     useEffect(() => {
         if (!readOnly) return;
@@ -146,7 +171,7 @@ export function WhiteboardPanel({
                 return;
             }
             const point = screenToBoard(event.clientX, event.clientY, rect, viewport);
-            const element = latestState.current.elements[drag.id];
+            const element = editor.latest().elements[drag.id];
             if (!element) return;
             if (drag.kind === 'move') {
                 editor.dispatch(
@@ -190,7 +215,7 @@ export function WhiteboardPanel({
                 return;
             }
             const point = screenToBoard(event.clientX, event.clientY, rect, viewport);
-            const element = latestState.current.elements[drag.id];
+            const element = editor.latest().elements[drag.id];
             setDrag(null);
             editor.clearPreview();
             if (!element) return;
@@ -233,13 +258,13 @@ export function WhiteboardPanel({
                 id,
                 position: {x, y},
                 rotation: 0,
-                zOrder: nextTopZOrder(elements),
+                zOrder: nextTopZOrder(orderedElements(editor.latest())),
                 createdBy: actor,
                 createdAt: new Date().toISOString(),
                 archived: false,
             };
         },
-        [actor, elements],
+        [actor, editor],
     );
 
     const addElement = useCallback(
@@ -327,7 +352,7 @@ export function WhiteboardPanel({
     const setLayer = useCallback(
         (placement: 'front' | 'back' | 'forward' | 'backward') => {
             if (readOnly || !selectedId) return;
-            const current = orderedElements(latestState.current);
+            const current = orderedElements(editor.latest());
             const selected = current.find((element) => element.id === selectedId);
             if (!selected) return;
             const without = current.filter((element) => element.id !== selectedId);
@@ -487,7 +512,7 @@ export function WhiteboardPanel({
             <header className="whiteboardHeader">
                 <div>
                     <h1>{title}</h1>
-                    <p>{elements.length} visible</p>
+                    <p>{visibleElementIds.length} visible</p>
                 </div>
                 <div className="whiteboardActions">
                     <button type="button" onClick={() => editor.undo()} disabled={readOnly || !editor.canUndo()}>
@@ -552,7 +577,7 @@ export function WhiteboardPanel({
                     Archive
                 </button>
                 <button type="button" onClick={() => setShowArchive((value) => !value)}>
-                    Recover ({archived.length})
+                    Recover ({archivedElementIds.length})
                 </button>
                 <button type="button" onClick={() => zoomBy(0.9)}>
                     -
@@ -564,16 +589,15 @@ export function WhiteboardPanel({
 
             {showArchive ? (
                 <div className="whiteboardArchive">
-                    {archived.length ? (
-                        archived.map((element) => (
-                            <button
-                                key={element.id}
-                                type="button"
-                                onClick={() => recover(element.id)}
-                                disabled={readOnly}
-                            >
-                                Recover {nameForElement(element)}
-                            </button>
+                    {archivedElementIds.length ? (
+                        archivedElementIds.map((id) => (
+                            <ArchivedElementButton
+                                key={id}
+                                id={id}
+                                editor={editor}
+                                recover={recover}
+                                readOnly={readOnly}
+                            />
                         ))
                     ) : (
                         <span>No archived elements</span>
@@ -603,18 +627,16 @@ export function WhiteboardPanel({
                         height={BOARD_HEIGHT}
                         viewBox={`0 0 ${BOARD_WIDTH} ${BOARD_HEIGHT}`}
                     >
-                        <rect width={BOARD_WIDTH} height={BOARD_HEIGHT} fill={state.background} />
-                        {elements.map((element) =>
-                            element.type === 'stroke' ? (
-                                <StrokeView
-                                    key={element.id}
-                                    element={element}
-                                    selected={selectedId === element.id}
-                                    onPointerDown={(event) => startElementDrag(element, event)}
-                                    editor={editor}
-                                />
-                            ) : null,
-                        )}
+                        <rect width={BOARD_WIDTH} height={BOARD_HEIGHT} fill={background} />
+                        {visibleStrokeIds.map((id) => (
+                            <StrokeSlot
+                                key={id}
+                                id={id}
+                                selected={selectedId === id}
+                                onPointerDown={startElementDrag}
+                                editor={editor}
+                            />
+                        ))}
                         {activeStroke ? (
                             <path
                                 className="whiteboardActiveStroke"
@@ -628,41 +650,31 @@ export function WhiteboardPanel({
                         ) : null}
                     </svg>
 
-                    {elements.map((element) =>
-                        element.type === 'note' ? (
-                            <NoteView
-                                key={element.id}
-                                element={element}
-                                selected={selectedId === element.id}
-                                editor={editor}
-                                readOnly={readOnly}
-                                autoFocus={focusNoteId === element.id}
-                                onAutoFocused={() => setFocusNoteId(null)}
-                                onPointerDown={(event) => startElementDrag(element, event)}
-                                onResizePointerDown={(event) => {
-                                    if (readOnly) return;
-                                    event.preventDefault();
-                                    event.stopPropagation();
-                                    setSelectedId(element.id);
-                                    setDrag({
-                                        kind: 'resize-note',
-                                        id: element.id,
-                                        pointerId: event.pointerId,
-                                        originX: element.position.x,
-                                        originY: element.position.y,
-                                    });
-                                }}
-                            />
-                        ) : element.type === 'emoji' ? (
-                            <EmojiView
-                                key={element.id}
-                                element={element}
-                                selected={selectedId === element.id}
-                                editor={editor}
-                                onPointerDown={(event) => startElementDrag(element, event)}
-                            />
-                        ) : null,
-                    )}
+                    {visibleSurfaceElementIds.map((id) => (
+                        <ElementSlot
+                            key={id}
+                            id={id}
+                            selected={selectedId === id}
+                            editor={editor}
+                            readOnly={readOnly}
+                            autoFocus={focusNoteId === id}
+                            onAutoFocused={() => setFocusNoteId(null)}
+                            onPointerDown={startElementDrag}
+                            onResizePointerDown={(element, event) => {
+                                if (readOnly) return;
+                                event.preventDefault();
+                                event.stopPropagation();
+                                setSelectedId(element.id);
+                                setDrag({
+                                    kind: 'resize-note',
+                                    id: element.id,
+                                    pointerId: event.pointerId,
+                                    originX: element.position.x,
+                                    originY: element.position.y,
+                                });
+                            }}
+                        />
+                    ))}
                 </div>
 
                 <button
@@ -699,15 +711,8 @@ export function WhiteboardPanel({
                 >
                     <svg width={120} height={80} viewBox={`0 0 ${BOARD_WIDTH} ${BOARD_HEIGHT}`}>
                         <rect width={BOARD_WIDTH} height={BOARD_HEIGHT} fill="#f8fafc" />
-                        {elements.map((element) => (
-                            <rect
-                                key={element.id}
-                                x={element.position.x}
-                                y={element.position.y}
-                                width={element.type === 'note' ? element.size.width : element.type === 'emoji' ? element.size : 40}
-                                height={element.type === 'note' ? element.size.height : element.type === 'emoji' ? element.size : 24}
-                                fill={element.type === 'note' ? element.color : '#94a3b8'}
-                            />
+                        {visibleElementIds.map((id) => (
+                            <MinimapElement key={id} id={id} editor={editor} />
                         ))}
                         <rect
                             x={viewRect.x}
@@ -722,6 +727,108 @@ export function WhiteboardPanel({
                 </button>
             </div>
         </section>
+    );
+}
+
+function ElementSlot({
+    id,
+    selected,
+    editor,
+    readOnly,
+    autoFocus,
+    onAutoFocused,
+    onPointerDown,
+    onResizePointerDown,
+}: {
+    id: string;
+    selected: boolean;
+    editor: AppEditorContext<WhiteboardState>;
+    readOnly: boolean;
+    autoFocus: boolean;
+    onAutoFocused(): void;
+    onPointerDown(element: WhiteboardElement, event: ReactPointerEvent<HTMLElement | SVGElement>): void;
+    onResizePointerDown(element: StickyNoteElement, event: ReactPointerEvent<HTMLButtonElement>): void;
+}) {
+    const element = useValue(editor.$.elements[id]);
+    if (!element || element.archived || element.type === 'stroke') return null;
+    if (element.type === 'note') {
+        return (
+            <NoteView
+                element={element}
+                selected={selected}
+                editor={editor}
+                readOnly={readOnly}
+                autoFocus={autoFocus}
+                onAutoFocused={onAutoFocused}
+                onPointerDown={(event) => onPointerDown(element, event)}
+                onResizePointerDown={(event) => onResizePointerDown(element, event)}
+            />
+        );
+    }
+    return (
+        <EmojiView
+            element={element}
+            selected={selected}
+            editor={editor}
+            onPointerDown={(event) => onPointerDown(element, event)}
+        />
+    );
+}
+
+function StrokeSlot({
+    id,
+    selected,
+    editor,
+    onPointerDown,
+}: {
+    id: string;
+    selected: boolean;
+    editor: AppEditorContext<WhiteboardState>;
+    onPointerDown(element: WhiteboardElement, event: ReactPointerEvent<HTMLElement | SVGElement>): void;
+}) {
+    const element = useValue(editor.$.elements[id]);
+    if (!element || element.archived || element.type !== 'stroke') return null;
+    return (
+        <StrokeView
+            element={element}
+            selected={selected}
+            onPointerDown={(event) => onPointerDown(element, event)}
+            editor={editor}
+        />
+    );
+}
+
+function MinimapElement({id, editor}: {id: string; editor: AppEditorContext<WhiteboardState>}) {
+    const element = useValue(editor.$.elements[id]);
+    if (!element || element.archived) return null;
+    return (
+        <rect
+            x={element.position.x}
+            y={element.position.y}
+            width={element.type === 'note' ? element.size.width : element.type === 'emoji' ? element.size : 40}
+            height={element.type === 'note' ? element.size.height : element.type === 'emoji' ? element.size : 24}
+            fill={element.type === 'note' ? element.color : '#94a3b8'}
+        />
+    );
+}
+
+function ArchivedElementButton({
+    id,
+    editor,
+    recover,
+    readOnly,
+}: {
+    id: string;
+    editor: AppEditorContext<WhiteboardState>;
+    recover(id: string): void;
+    readOnly: boolean;
+}) {
+    const element = useValue(editor.$.elements[id]);
+    if (!element || !element.archived) return null;
+    return (
+        <button type="button" onClick={() => recover(element.id)} disabled={readOnly}>
+            Recover {nameForElement(element)}
+        </button>
     );
 }
 

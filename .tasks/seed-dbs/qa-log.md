@@ -11,6 +11,18 @@
 Verification:
 
 - `bun run build` in `examples/react-crdt`: passed.
+
+## Phase 5: whiteboard render subscriptions
+
+- Removed the parent whiteboard subscription to the full `elements` record.
+- Added selector-based structural subscriptions for visible element ids, visible stroke ids, visible surface element ids, and archived element ids.
+- Moved per-element value subscriptions into `StrokeSlot`, `ElementSlot`, `MinimapElement`, and `ArchivedElementButton`.
+- Kept drag/edit logic command-based and avoided `React.memo`.
+- Parent-level operations that need the latest full board state now read from `editor.latest()` at interaction time instead of subscribing the parent to all element values.
+
+Verification:
+
+- `bun run build` in `examples/react-crdt`: passed.
 - `bun run seed:test -- --date 2026-01-02 --size small --db /private/tmp/umkehr-qa-phase1.sqlite` in `examples/react-crdt-server`: passed.
 - `npm run test -- examples/react-crdt/src/lib/seed/generate.test.ts`: blocked by existing Typia transform setup in root Vitest, before tests run.
 
