@@ -327,6 +327,58 @@ describe('crdt', () => {
         expect(result.state.todos.map((todo) => todo.title)).toEqual(['Second', 'Third', 'First']);
     });
 
+    it('handles adjacent CRDT array moves without disturbing unrelated items', () => {
+        let doc = createDoc();
+        for (let index = 1; index < 5; index++) {
+            doc = applyCrdtUpdate(
+                doc,
+                createCrdtUpdates(
+                    doc,
+                    add(
+                        [
+                            {type: 'key', key: 'todos'},
+                            {type: 'key', key: index},
+                        ],
+                        {title: `Item ${index + 1}`, done: false},
+                    ),
+                    `01${index}`,
+                )[0],
+            );
+        }
+
+        const afterSecond = createCrdtUpdates(
+            doc,
+            {
+                op: 'move',
+                path: [{type: 'key', key: 'todos'}],
+                fromIdx: 0,
+                targetIdx: 1,
+                after: true,
+            },
+            '020',
+        )[0];
+        expect(applyCrdtUpdate(doc, afterSecond).state.todos.map((todo) => todo.title)).toEqual([
+            'Item 2',
+            'First',
+            'Item 3',
+            'Item 4',
+            'Item 5',
+        ]);
+
+        const beforeSecond = createCrdtUpdates(
+            doc,
+            {
+                op: 'move',
+                path: [{type: 'key', key: 'todos'}],
+                fromIdx: 0,
+                targetIdx: 1,
+                after: false,
+            },
+            '030',
+        );
+        expect(beforeSecond).toEqual([]);
+    });
+
     it('moves duplicate array values by CRDT item identity', () => {
         let doc = createDoc();
         const appendDuplicate = createCrdtUpdates(

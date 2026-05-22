@@ -79,6 +79,7 @@ Verification:
 - Avoided provider-wide `replaceHistory` for active-branch remote update events; those now flow through `transport.receive` and path-scoped notifications.
 - Active-branch merge events now derive effective source updates from the branch graph and apply them incrementally through `transport.receive`, avoiding a full provider refresh for merges too.
 - Moved todo drag drop-target hover state out of `TodoPanel` React state and into an external store; each row now subscribes to its own derived drop position so pointer hover changes do not rerender the full list.
+- Fixed CRDT array move no-op handling for adjacent boundaries so moving an item before its current next item or after its current previous item does not emit an unnecessary order update.
 - Avoided `React.memo`.
 
 Verification:

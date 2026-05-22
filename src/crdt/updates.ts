@@ -132,7 +132,13 @@ function createMoveUpdates<T>(
     if (targetIdx < 0 || targetIdx >= live.length) {
         throw new Error('Cannot create CRDT move update: targetIdx is out of range.');
     }
-    if (fromIdx === targetIdx) return [];
+    if (
+        fromIdx === targetIdx ||
+        (!after && targetIdx === fromIdx + 1) ||
+        (after && targetIdx === fromIdx - 1)
+    ) {
+        return [];
+    }
 
     const moved = live[fromIdx];
     if (!moved) return [];

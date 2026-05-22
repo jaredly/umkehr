@@ -172,18 +172,21 @@ export function TodoPanel({
         previousRects.current = nextRects;
     }, [todoIds]);
 
-    const startDrag = useCallback((id: string, event: ReactPointerEvent<HTMLElement>) => {
-        if (readOnly) return;
-        if (!event.isPrimary || event.button !== 0) return;
-        event.preventDefault();
-        event.stopPropagation();
-        event.currentTarget.setPointerCapture(event.pointerId);
-        const initialTarget = {id, after: false};
-        draggingIdRef.current = id;
-        dropTargetRef.current = initialTarget;
-        setDraggingId(id);
-        setDropTarget(dropTargetStore, initialTarget);
-    }, [dropTargetStore, readOnly]);
+    const startDrag = useCallback(
+        (id: string, event: ReactPointerEvent<HTMLElement>) => {
+            if (readOnly) return;
+            if (!event.isPrimary || event.button !== 0) return;
+            event.preventDefault();
+            event.stopPropagation();
+            event.currentTarget.setPointerCapture(event.pointerId);
+            const initialTarget = {id, after: false};
+            draggingIdRef.current = id;
+            dropTargetRef.current = initialTarget;
+            setDraggingId(id);
+            setDropTarget(dropTargetStore, initialTarget);
+        },
+        [dropTargetStore, readOnly],
+    );
 
     return (
         <section
@@ -243,7 +246,9 @@ export function TodoPanel({
                     onChange={(event) => setDraftTitle(event.target.value)}
                     disabled={readOnly}
                 />
-                <button type="submit" disabled={readOnly}>Add</button>
+                <button type="submit" disabled={readOnly}>
+                    Add
+                </button>
             </form>
 
             <ul
@@ -321,10 +326,18 @@ function UndoRedoButtonPair({
 }) {
     return (
         <>
-            <button type="button" onClick={() => editor.undo()} disabled={readOnly || !editor.canUndo()}>
+            <button
+                type="button"
+                onClick={() => editor.undo()}
+                disabled={readOnly || !editor.canUndo()}
+            >
                 Undo
             </button>
-            <button type="button" onClick={() => editor.redo()} disabled={readOnly || !editor.canRedo()}>
+            <button
+                type="button"
+                onClick={() => editor.redo()}
+                disabled={readOnly || !editor.canRedo()}
+            >
                 Redo
             </button>
         </>
@@ -363,6 +376,11 @@ function TodoItemSlot({
     readOnly: boolean;
 }) {
     const todo = useValue(editor.$.todos[index]) as Todo | undefined;
+    console.log('slot', todo, todo?.id, id);
+    if (!todo) {
+        console.log('no todo');
+        debugger;
+    }
     const dropPosition = useDropPosition(dropTargetStore, id);
     if (!todo || todo.id !== id) return null;
     return (
@@ -419,9 +437,7 @@ function TodoItem({
         : null;
     const titleBlame = titleBlameForTodoMeta(titleMeta ?? undefined);
     const titleTooltip = formatTodoTitleBlame(titleBlame);
-    const cursors = presenceStatuses
-        .map((status) => status.data)
-        .filter(isLastEditStatusData);
+    const cursors = presenceStatuses.map((status) => status.data).filter(isLastEditStatusData);
 
     const commit = () => {
         if (editingTitle === null) return;
@@ -504,10 +520,18 @@ function TodoItem({
                         ))}
                     </div>
                 ) : null}
-                <button type="button" onClick={() => setEditingTitle(todo.title)} disabled={readOnly}>
+                <button
+                    type="button"
+                    onClick={() => setEditingTitle(todo.title)}
+                    disabled={readOnly}
+                >
                     Edit
                 </button>
-                <button type="button" onClick={() => editor.$.todos[index].$remove()} disabled={readOnly}>
+                <button
+                    type="button"
+                    onClick={() => editor.$.todos[index].$remove()}
+                    disabled={readOnly}
+                >
                     Delete
                 </button>
             </div>
@@ -521,11 +545,15 @@ function hasPathScopedCrdtMeta(
     return 'useCrdtMeta' in editor && typeof editor.useCrdtMeta === 'function';
 }
 
-function hasCrdtHistory(editor: AppEditorContext<TodoState>): editor is CrdtEditorContext<TodoState> {
+function hasCrdtHistory(
+    editor: AppEditorContext<TodoState>,
+): editor is CrdtEditorContext<TodoState> {
     return 'useLocalHistory' in editor && typeof editor.useLocalHistory === 'function';
 }
 
-function hasHistory(editor: AppEditorContext<TodoState>): editor is HistoryEditorContext<TodoState> {
+function hasHistory(
+    editor: AppEditorContext<TodoState>,
+): editor is HistoryEditorContext<TodoState> {
     return 'useHistory' in editor && typeof editor.useHistory === 'function';
 }
 
