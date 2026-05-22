@@ -2,8 +2,10 @@ import {
     useCallback,
     useEffect,
     useLayoutEffect,
+    useMemo,
     useRef,
     useState,
+    useSyncExternalStore,
     type CSSProperties,
     type PointerEvent as ReactPointerEvent,
 } from 'react';
@@ -17,6 +19,7 @@ import type {
 } from '../../lib/crdtApp';
 import {initialForNickname, lastEditStatusKind} from '../../lib/server/presence';
 import type {ServerLastEditStatusData} from '../../lib/server/types';
+import {createExternalStore, type ExternalStore} from '../../lib/store';
 import {formatTodoTitleBlame, titleBlameForTodoMeta} from './blame';
 import type {Todo, TodoState} from './model';
 
@@ -50,7 +53,7 @@ export function TodoPanel({
     const todoIds = useValue(editor.$.todos, (todos) => todos.map((todo) => todo.id));
     const [draftTitle, setDraftTitle] = useState('');
     const [draggingId, setDraggingId] = useState<string | null>(null);
-    const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
+    const dropTargetStore = useMemo(() => createExternalStore<DropTarget | null>(null), []);
     const rowRefs = useRef(new Map<string, HTMLLIElement>());
     const previousRects = useRef(new Map<string, DOMRect>());
     const latestTodos = useRef(editor.latest().todos);
@@ -75,8 +78,8 @@ export function TodoPanel({
         draggingIdRef.current = null;
         dropTargetRef.current = null;
         setDraggingId(null);
-        setDropTarget(null);
-    }, []);
+        dropTargetStore.setSnapshot(null);
+    }, [dropTargetStore]);
 
     const findDropTarget = useCallback((clientY: number): DropTarget | null => {
         const rows = latestTodos.current
@@ -109,11 +112,7 @@ export function TodoPanel({
             event.preventDefault();
             const nextTarget = findDropTarget(event.clientY);
             dropTargetRef.current = nextTarget;
-            setDropTarget((current) =>
-                current?.id === nextTarget?.id && current?.after === nextTarget?.after
-                    ? current
-                    : nextTarget,
-            );
+            setDropTarget(dropTargetStore, nextTarget);
         };
 
         const onPointerUp = (event: PointerEvent) => {
@@ -183,8 +182,8 @@ export function TodoPanel({
         draggingIdRef.current = id;
         dropTargetRef.current = initialTarget;
         setDraggingId(id);
-        setDropTarget(initialTarget);
-    }, [readOnly]);
+        setDropTarget(dropTargetStore, initialTarget);
+    }, [dropTargetStore, readOnly]);
 
     return (
         <section
@@ -258,13 +257,7 @@ export function TodoPanel({
                         id={id}
                         index={index}
                         isDragging={draggingId === id}
-                        dropPosition={
-                            dropTarget?.id === id
-                                ? dropTarget.after
-                                    ? 'after'
-                                    : 'before'
-                                : null
-                        }
+                        dropTargetStore={dropTargetStore}
                         onDragStart={startDrag}
                         registerRow={registerRow}
                         readOnly={readOnly}
@@ -273,6 +266,12 @@ export function TodoPanel({
             </ul>
         </section>
     );
+}
+
+function setDropTarget(store: ExternalStore<DropTarget | null>, next: DropTarget | null) {
+    const current = store.getSnapshot();
+    if (current?.id === next?.id && current?.after === next?.after) return;
+    store.setSnapshot(next);
 }
 
 function UndoRedoButtons({
@@ -349,7 +348,7 @@ function TodoItemSlot({
     id,
     index,
     isDragging,
-    dropPosition,
+    dropTargetStore,
     onDragStart,
     registerRow,
     readOnly,
@@ -358,12 +357,13 @@ function TodoItemSlot({
     id: string;
     index: number;
     isDragging: boolean;
-    dropPosition: 'before' | 'after' | null;
+    dropTargetStore: ExternalStore<DropTarget | null>;
     onDragStart(id: string, event: ReactPointerEvent<HTMLElement>): void;
     registerRow(id: string, element: HTMLLIElement | null): void;
     readOnly: boolean;
 }) {
     const todo = useValue(editor.$.todos[index]) as Todo | undefined;
+    const dropPosition = useDropPosition(dropTargetStore, id);
     if (!todo || todo.id !== id) return null;
     return (
         <TodoItem
@@ -376,6 +376,18 @@ function TodoItemSlot({
             registerRow={registerRow}
             readOnly={readOnly}
         />
+    );
+}
+
+function useDropPosition(store: ExternalStore<DropTarget | null>, id: string) {
+    return useSyncExternalStore(
+        store.subscribe,
+        () => {
+            const target = store.getSnapshot();
+            if (target?.id !== id) return null;
+            return target.after ? 'after' : 'before';
+        },
+        () => null,
     );
 }
 

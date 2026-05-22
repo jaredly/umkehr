@@ -78,6 +78,7 @@ Verification:
 - Removed the server sync `saveHistory -> replaceHistory` feedback loop that updated `ServerReadyApp` state on every local edit and recreated the provider subtree.
 - Avoided provider-wide `replaceHistory` for active-branch remote update events; those now flow through `transport.receive` and path-scoped notifications.
 - Active-branch merge events now derive effective source updates from the branch graph and apply them incrementally through `transport.receive`, avoiding a full provider refresh for merges too.
+- Moved todo drag drop-target hover state out of `TodoPanel` React state and into an external store; each row now subscribes to its own derived drop position so pointer hover changes do not rerender the full list.
 - Avoided `React.memo`.
 
 Verification:
