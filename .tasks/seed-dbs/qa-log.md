@@ -38,3 +38,14 @@ Verification:
 Verification:
 
 - `bun run build` in `examples/react-crdt`: passed.
+
+## Phase 4: whiteboard pointer default handling
+
+- Added `preventDefault()` to whiteboard-owned pointer starts, active drag moves, drag releases, pen drawing moves/releases, note resize starts, and minimap drag interactions.
+- Preserved note textarea pointer behavior by only stopping propagation there and keeping textarea selection/editing enabled.
+- Added targeted `user-select: none` and `touch-action: none` to board, element drag, resize, stroke, emoji, and minimap surfaces.
+- Restored `user-select: text` and normal touch behavior on note textareas.
+
+Verification:
+
+- `bun run build` in `examples/react-crdt`: passed.

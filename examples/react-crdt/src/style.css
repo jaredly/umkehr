@@ -1196,6 +1196,7 @@ p {
         #edf2f7;
     background-size: 32px 32px;
     touch-action: none;
+    user-select: none;
 }
 
 .whiteboardViewport.tool-pen,
@@ -1213,6 +1214,7 @@ p {
     left: 0;
     top: 0;
     transform-origin: 0 0;
+    user-select: none;
 }
 
 .whiteboardSvg {
@@ -1224,6 +1226,7 @@ p {
 .whiteboardStroke {
     pointer-events: stroke;
     cursor: pointer;
+    touch-action: none;
 }
 
 .whiteboardStroke.selected {
@@ -1242,12 +1245,15 @@ p {
     box-shadow: 0 8px 16px rgb(15 23 42 / 16%);
     cursor: move;
     overflow: hidden;
+    touch-action: none;
+    user-select: none;
 }
 
 .whiteboardNoteHandle {
     border-bottom: 1px solid rgb(92 71 0 / 12%);
     background: rgb(255 255 255 / 22%);
     cursor: move;
+    touch-action: none;
 }
 
 .whiteboardNote.selected,
@@ -1267,6 +1273,8 @@ p {
     font: inherit;
     resize: none;
     outline: none;
+    user-select: text;
+    touch-action: auto;
 }
 
 .whiteboardResize {
@@ -1282,6 +1290,8 @@ p {
         linear-gradient(135deg, transparent 48%, #64748b 49%, #64748b 54%, transparent 55%),
         linear-gradient(135deg, transparent 63%, #64748b 64%, #64748b 69%, transparent 70%);
     cursor: nwse-resize;
+    touch-action: none;
+    user-select: none;
 }
 
 .whiteboardEmoji {
@@ -1289,6 +1299,7 @@ p {
     place-items: center;
     line-height: 1;
     cursor: move;
+    touch-action: none;
     user-select: none;
 }
 
@@ -1327,6 +1338,8 @@ p {
     padding: 5px;
     background: #fff;
     box-shadow: 0 8px 18px rgb(15 23 42 / 16%);
+    touch-action: none;
+    user-select: none;
 }
 
 .whiteboardMinimap svg {

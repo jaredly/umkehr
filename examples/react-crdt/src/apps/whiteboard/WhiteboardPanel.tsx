@@ -133,6 +133,7 @@ export function WhiteboardPanel({
         if (!drag) return;
         const onPointerMove = (event: PointerEvent) => {
             if (event.pointerId !== drag.pointerId) return;
+            event.preventDefault();
             if (readOnly && drag.kind !== 'pan') return;
             const rect = viewportRef.current?.getBoundingClientRect();
             if (!rect) return;
@@ -172,6 +173,7 @@ export function WhiteboardPanel({
         };
         const onPointerUp = (event: PointerEvent) => {
             if (event.pointerId !== drag.pointerId) return;
+            event.preventDefault();
             const rect = viewportRef.current?.getBoundingClientRect();
             if (!rect) {
                 setDrag(null);
@@ -356,19 +358,23 @@ export function WhiteboardPanel({
             return;
         }
         if (tool === 'note') {
+            event.preventDefault();
             addNote(point.x, point.y);
             return;
         }
         if (tool === 'emoji') {
+            event.preventDefault();
             addEmoji(point.x, point.y);
             return;
         }
         if (tool === 'pen') {
+            event.preventDefault();
             event.currentTarget.setPointerCapture(event.pointerId);
             setActiveStroke([point]);
             return;
         }
         if (tool === 'pan') {
+            event.preventDefault();
             setDrag({
                 kind: 'pan',
                 pointerId: event.pointerId,
@@ -379,19 +385,22 @@ export function WhiteboardPanel({
             });
             return;
         }
+        event.preventDefault();
         setSelectedId(null);
     };
 
     const onBoardPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
         if (readOnly || !activeStroke) return;
+        event.preventDefault();
         const rect = viewportRef.current?.getBoundingClientRect();
         if (!rect) return;
         const point = screenToBoard(event.clientX, event.clientY, rect, viewport);
         setActiveStroke((current) => (current ? [...current, point] : current));
     };
 
-    const onBoardPointerUp = () => {
+    const onBoardPointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
         if (readOnly || !activeStroke) return;
+        event.preventDefault();
         commitStroke(activeStroke);
         setActiveStroke(null);
     };
@@ -401,6 +410,7 @@ export function WhiteboardPanel({
         event: ReactPointerEvent<HTMLElement | SVGElement>,
     ) => {
         if (event.button !== 0 || !event.isPrimary) return;
+        event.preventDefault();
         event.stopPropagation();
         if (readOnly) {
             setSelectedId(element.id);
@@ -631,6 +641,7 @@ export function WhiteboardPanel({
                                 onPointerDown={(event) => startElementDrag(element, event)}
                                 onResizePointerDown={(event) => {
                                     if (readOnly) return;
+                                    event.preventDefault();
                                     event.stopPropagation();
                                     setSelectedId(element.id);
                                     setDrag({
@@ -658,6 +669,7 @@ export function WhiteboardPanel({
                     type="button"
                     className="whiteboardMinimap"
                     onPointerDown={(event) => {
+                        event.preventDefault();
                         const rect = event.currentTarget.getBoundingClientRect();
                         event.currentTarget.setPointerCapture(event.pointerId);
                         setDraggingMinimap(true);
@@ -665,14 +677,21 @@ export function WhiteboardPanel({
                     }}
                     onPointerMove={(event) => {
                         if (!draggingMinimap) return;
+                        event.preventDefault();
                         recenterFromMinimap(
                             event.clientX,
                             event.clientY,
                             event.currentTarget.getBoundingClientRect(),
                         );
                     }}
-                    onPointerUp={() => setDraggingMinimap(false)}
-                    onPointerCancel={() => setDraggingMinimap(false)}
+                    onPointerUp={(event) => {
+                        event.preventDefault();
+                        setDraggingMinimap(false);
+                    }}
+                    onPointerCancel={(event) => {
+                        event.preventDefault();
+                        setDraggingMinimap(false);
+                    }}
                     onClick={(event) => {
                         event.preventDefault();
                     }}
