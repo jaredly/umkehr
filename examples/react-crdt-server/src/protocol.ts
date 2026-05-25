@@ -8,6 +8,17 @@ import type {
 } from './types';
 
 export const SERVER_PROTOCOL_VERSION = 3;
+const MAX_EPHEMERAL_BYTES = 16_384;
+
+export type EphemeralMessage<Data> = {
+    kind: string;
+    id: string;
+    actor: string;
+    path?: Array<{type: 'key'; key: string | number} | {type: 'tag'; key: string; value: string}>;
+    data: Data;
+    clear?: boolean;
+    expiresAt?: string;
+};
 
 export type ClientServerMessage =
     | {
@@ -91,6 +102,15 @@ export type ClientServerMessage =
           docId: string;
           branchId: string;
           elementId: string | null;
+      }
+    | {
+          kind: 'presenceEvent';
+          version: 3;
+          actor: string;
+          userId: string;
+          docId: string;
+          branchId: string;
+          event: EphemeralMessage<unknown>;
       }
     | {
           kind: 'serverMigrationRequest';
@@ -246,6 +266,13 @@ export type ServerClientMessage =
           elementId: string | null;
           at: string;
       }
+    | {
+          kind: 'presenceEvent';
+          version: 3;
+          docId: string;
+          branchId: string;
+          event: EphemeralMessage<unknown>;
+      }
     | ServerMigrationRequiredMessage
     | WaitForMigrationMessage
     | ClientMigrationRequiredMessage
@@ -275,6 +302,12 @@ export function parseClientMessage(input: unknown): ClientServerMessage | null {
             if (!result.data.branchId) return null;
             if (result.data.elementId !== null && !result.data.elementId.trim()) return null;
             return result.data;
+        case 'presenceEvent':
+            if (!result.data.branchId) return null;
+            if (!isValidEphemeralMessage(result.data.event)) return null;
+            if (result.data.event.actor !== result.data.actor) return null;
+            if (byteSize(result.data.event) > MAX_EPHEMERAL_BYTES) return null;
+            return result.data;
         case 'serverMigrationRequest':
             if (!Number.isSafeInteger(result.data.targetSchemaVersion)) return null;
             if (!result.data.targetSchemaFingerprint.trim()) return null;
@@ -286,9 +319,11 @@ export function parseClientMessage(input: unknown): ClientServerMessage | null {
             if (!result.data.targetSchemaFingerprint.trim()) return null;
             if (!result.data.targetSchemaFingerprintHash.trim()) return null;
             if (!Array.isArray(result.data.migrationIds)) return null;
-            if (!result.data.migrationIds.every((id) => typeof id === 'string' && id.length > 0)) return null;
+            if (!result.data.migrationIds.every((id) => typeof id === 'string' && id.length > 0))
+                return null;
             if (!result.data.migratedAt.trim()) return null;
-            if (!Array.isArray(result.data.branches) || !Array.isArray(result.data.events)) return null;
+            if (!Array.isArray(result.data.branches) || !Array.isArray(result.data.events))
+                return null;
             return result.data;
         case 'branchSubscribe':
             if (!result.data.branchId) return null;
@@ -304,7 +339,8 @@ export function parseClientMessage(input: unknown): ClientServerMessage | null {
             if (!result.data.branchId || !result.data.name.trim()) return null;
             return result.data;
         case 'mergeBranch':
-            if (!result.data.mergeId || !result.data.targetBranchId || !result.data.sourceBranchId) return null;
+            if (!result.data.mergeId || !result.data.targetBranchId || !result.data.sourceBranchId)
+                return null;
             if (!Number.isSafeInteger(result.data.sourceThroughEventIndex)) return null;
             if (result.data.sourceThroughEventIndex < 0) return null;
             return result.data;
@@ -322,6 +358,44 @@ export function parseClientMessage(input: unknown): ClientServerMessage | null {
 
 function isValidPresenceColor(color: string) {
     return /^#[0-9a-fA-F]{6}$/.test(color);
+}
+
+function isValidEphemeralMessage(input: EphemeralMessage<unknown>) {
+    if (typeof input.kind !== 'string' || input.kind.length === 0) return false;
+    if (typeof input.id !== 'string' || input.id.length === 0) return false;
+    if (typeof input.actor !== 'string' || input.actor.length === 0) return false;
+    if (!('data' in input)) return false;
+    if (input.path !== undefined && !isPath(input.path)) return false;
+    if (input.clear !== undefined && typeof input.clear !== 'boolean') return false;
+    if (input.expiresAt !== undefined && typeof input.expiresAt !== 'string') return false;
+    return true;
+}
+
+function isPath(input: unknown): input is EphemeralMessage<unknown>['path'] {
+    if (!Array.isArray(input)) return false;
+    return input.every((segment) => {
+        if (typeof segment !== 'object' || segment === null || Array.isArray(segment)) return false;
+        if (!('type' in segment)) return false;
+        if (segment.type === 'key') {
+            return (
+                'key' in segment &&
+                (typeof segment.key === 'string' || typeof segment.key === 'number')
+            );
+        }
+        if (segment.type === 'tag') {
+            return (
+                'key' in segment &&
+                'value' in segment &&
+                typeof segment.key === 'string' &&
+                typeof segment.value === 'string'
+            );
+        }
+        return false;
+    });
+}
+
+function byteSize(value: unknown) {
+    return new TextEncoder().encode(JSON.stringify(value)).length;
 }
 
 export function actorForSession(userId: string, sessionId: string) {

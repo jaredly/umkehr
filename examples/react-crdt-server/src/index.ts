@@ -88,7 +88,8 @@ const server = Bun.serve<ClientData>({
                 ws.data.sessionId = actor.sessionId;
                 ws.data.docId = parsed.docId;
                 const expiredLock = store.expireMigrationLock(parsed.docId);
-                if (expiredLock) broadcastMigrationCancelled(parsed.docId, 'Server migration lock expired.');
+                if (expiredLock)
+                    broadcastMigrationCancelled(parsed.docId, 'Server migration lock expired.');
 
                 switch (parsed.kind) {
                     case 'hello': {
@@ -96,7 +97,10 @@ const server = Bun.serve<ClientData>({
                         ws.data.schemaFingerprint = parsed.schemaFingerprint;
                         ws.data.schemaFingerprintHash = parsed.schemaFingerprintHash;
                         const existing = store.getDocument(parsed.docId);
-                        if (existing && existing.schemaFingerprintHash !== parsed.schemaFingerprintHash) {
+                        if (
+                            existing &&
+                            existing.schemaFingerprintHash !== parsed.schemaFingerprintHash
+                        ) {
                             const lock = store.activeMigrationLock(parsed.docId);
                             if (lock) {
                                 send(ws, {
@@ -122,9 +126,10 @@ const server = Bun.serve<ClientData>({
                                 return;
                             }
                             send(ws, {
-                                kind: parsed.schemaVersion < existing.schemaVersion
-                                    ? 'clientMigrationRequired'
-                                    : 'schemaMismatch',
+                                kind:
+                                    parsed.schemaVersion < existing.schemaVersion
+                                        ? 'clientMigrationRequired'
+                                        : 'schemaMismatch',
                                 version: SERVER_PROTOCOL_VERSION,
                                 docId: parsed.docId,
                                 schemaVersion: existing.schemaVersion,
@@ -170,7 +175,10 @@ const server = Bun.serve<ClientData>({
                         return;
                     }
                     case 'serverMigrationUpload': {
-                        const completed = store.completeMigration({ownerActor: parsed.actor, upload: parsed});
+                        const completed = store.completeMigration({
+                            ownerActor: parsed.actor,
+                            upload: parsed,
+                        });
                         send(ws, {
                             kind: 'serverMigrationComplete',
                             version: SERVER_PROTOCOL_VERSION,
@@ -178,7 +186,12 @@ const server = Bun.serve<ClientData>({
                             schemaVersion: completed.schemaVersion,
                             schemaFingerprintHash: completed.schemaFingerprintHash,
                         });
-                        broadcastMigrationComplete(parsed.docId, completed.schemaVersion, completed.schemaFingerprintHash, parsed.actor);
+                        broadcastMigrationComplete(
+                            parsed.docId,
+                            completed.schemaVersion,
+                            completed.schemaFingerprintHash,
+                            parsed.actor,
+                        );
                         return;
                     }
                     case 'presenceHello': {
@@ -204,6 +217,16 @@ const server = Bun.serve<ClientData>({
                         ws.data.selectionElementId = parsed.elementId ?? undefined;
                         broadcastPresenceSelection(parsed);
                         broadcastPresenceUpdate(parsed.docId, parsed.actor, parsed.userId);
+                        return;
+                    }
+                    case 'presenceEvent': {
+                        if (!ws.data.presenceReady) throw new Error('Presence is not ready.');
+                        if (ws.data.branchId !== parsed.branchId) {
+                            throw new Error(
+                                'Presence event branch does not match current session branch.',
+                            );
+                        }
+                        broadcastPresenceEvent(parsed);
                         return;
                     }
                     case 'branchSubscribe': {
@@ -261,7 +284,10 @@ const server = Bun.serve<ClientData>({
                             eventIndex: event.eventIndex,
                         });
                         broadcastEvent(event, parsed.actor);
-                        broadcastBranchUpdate(parsed.docId, branchFor(parsed.docId, parsed.targetBranchId));
+                        broadcastBranchUpdate(
+                            parsed.docId,
+                            branchFor(parsed.docId, parsed.targetBranchId),
+                        );
                         return;
                     }
                     case 'clientUpdate': {
@@ -288,7 +314,10 @@ const server = Bun.serve<ClientData>({
                             eventIndex: event.eventIndex,
                         });
                         broadcastEvent(event, parsed.actor);
-                        broadcastBranchUpdate(parsed.docId, branchFor(parsed.docId, parsed.branchId));
+                        broadcastBranchUpdate(
+                            parsed.docId,
+                            branchFor(parsed.docId, parsed.branchId),
+                        );
                     }
                 }
             } catch (error) {
@@ -454,7 +483,8 @@ function branchFor(docId: string, branchId: string) {
 function presenceUsersForDoc(docId: string, excludeActor?: string): ServerPresenceUser[] {
     const byUser = new Map<string, ServerPresenceUser>();
     for (const client of clients) {
-        const {actor, userId, sessionId, nickname, color, branchId, selectionElementId} = client.data;
+        const {actor, userId, sessionId, nickname, color, branchId, selectionElementId} =
+            client.data;
         if (
             !client.data.presenceReady ||
             client.data.docId !== docId ||
@@ -487,7 +517,9 @@ function presenceUsersForDoc(docId: string, excludeActor?: string): ServerPresen
     );
 }
 
-function broadcastPresenceSelection(message: Extract<ReturnType<typeof parseClientMessage>, {kind: 'presenceSelection'}>) {
+function broadcastPresenceSelection(
+    message: Extract<ReturnType<typeof parseClientMessage>, {kind: 'presenceSelection'}>,
+) {
     if (!message) return;
     const actor = parseSessionActor(message.actor);
     if (!actor) return;
@@ -507,6 +539,25 @@ function broadcastPresenceSelection(message: Extract<ReturnType<typeof parseClie
             branchId: message.branchId,
             elementId: message.elementId,
             at,
+        });
+    }
+}
+
+function broadcastPresenceEvent(
+    message: Extract<ReturnType<typeof parseClientMessage>, {kind: 'presenceEvent'}>,
+) {
+    if (!message) return;
+    for (const client of clients) {
+        if (client.data.docId !== message.docId) continue;
+        if (client.data.actor === message.actor) continue;
+        if (!client.data.presenceReady) continue;
+        if (client.data.branchId !== message.branchId) continue;
+        send(client, {
+            kind: 'presenceEvent',
+            version: SERVER_PROTOCOL_VERSION,
+            docId: message.docId,
+            branchId: message.branchId,
+            event: message.event,
         });
     }
 }
@@ -579,12 +630,25 @@ function debugHtml() {
   <h1>React CRDT Server Debug</h1>
   <section>
     <h2>Users</h2>
-    ${table(['User', 'Nickname'], users.map((user) => [user.userId, user.nickname]))}
+    ${table(
+        ['User', 'Nickname'],
+        users.map((user) => [user.userId, user.nickname]),
+    )}
   </section>
   <section>
     <h2>Documents</h2>
     ${table(
-        ['Doc', 'Title', 'Size', 'Last accessed', 'Active hash', 'Archived hashes', 'Migration lock', 'Branches', 'Events'],
+        [
+            'Doc',
+            'Title',
+            'Size',
+            'Last accessed',
+            'Active hash',
+            'Archived hashes',
+            'Migration lock',
+            'Branches',
+            'Events',
+        ],
         documents.map((doc) => [
             doc.docId,
             doc.title,

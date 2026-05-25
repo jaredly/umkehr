@@ -93,4 +93,67 @@ describe('parseServerMessage', () => {
             ),
         ).toBeNull();
     });
+
+    it('parses presence events with valid ephemeral envelopes', () => {
+        expect(
+            parseServerMessage(
+                {
+                    kind: 'presenceEvent',
+                    version: 3,
+                    docId: 'doc',
+                    branchId: 'main',
+                    event: {
+                        kind: 'whiteboard:preview',
+                        id: 'preview-1',
+                        actor: 'user:session',
+                        path: [{type: 'key', key: 'elements'}],
+                        data: {value: 'draft'},
+                    },
+                },
+                {docId: 'doc', schema},
+            ),
+        ).toMatchObject({
+            kind: 'presenceEvent',
+            branchId: 'main',
+            event: {id: 'preview-1'},
+        });
+    });
+
+    it('rejects malformed presence events', () => {
+        expect(
+            parseServerMessage(
+                {
+                    kind: 'presenceEvent',
+                    version: 3,
+                    docId: 'doc',
+                    branchId: 'main',
+                    event: {
+                        kind: 'whiteboard:preview',
+                        id: '',
+                        actor: 'user:session',
+                        data: {value: 'draft'},
+                    },
+                },
+                {docId: 'doc', schema},
+            ),
+        ).toBeNull();
+
+        expect(
+            parseServerMessage(
+                {
+                    kind: 'presenceEvent',
+                    version: 3,
+                    docId: 'other',
+                    branchId: 'main',
+                    event: {
+                        kind: 'whiteboard:preview',
+                        id: 'preview-1',
+                        actor: 'user:session',
+                        data: {value: 'draft'},
+                    },
+                },
+                {docId: 'doc', schema},
+            ),
+        ).toBeNull();
+    });
 });

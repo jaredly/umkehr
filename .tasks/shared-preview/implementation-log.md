@@ -23,3 +23,13 @@
 - Added local simulator tests for publish/receive, disabled-sync drops, and no replay of offline ephemeral messages after sync is re-enabled.
 - Verified Phase 3 with `npx vitest run examples/react-crdt/src/lib/local/useLocalDemoSync.test.ts`, `npm run typecheck`, `npm run typecheck:tests`, and `npm test`.
 - Rechecked `npm run typecheck:examples`; it still fails only on the known unrelated `CrdtUpdate.path` seed test and Vite plugin type mismatches.
+- Started Phase 4.
+- Added `presenceEvent` protocol variants to the example client and Bun server, carrying `EphemeralMessage<unknown>` on the current protocol version.
+- Added client-side parsing for server `presenceEvent` messages with envelope/path validation.
+- Added server-side parsing for client `presenceEvent` messages with envelope validation, actor-match validation, and a 16 KB payload cap.
+- Wired browser server transport `publishEphemeral` to send `presenceEvent` messages and `subscribeEphemeral` to receive same-branch events.
+- Wired server runtime to reject presence events before `presenceHello`, require the sender's current branch, and broadcast only to presence-ready clients on the same doc and branch.
+- Added actor cleanup on `presenceLeave` and branch-switch cleanup through the transport's `clearEphemeralActor` hook.
+- Added client protocol tests for valid and malformed `presenceEvent` messages.
+- Verified Phase 4 with `npx vitest run examples/react-crdt/src/lib/server/protocol.test.ts`, `npm run typecheck`, `npm run typecheck:tests`, `npm test`, `npm run typecheck` in `examples/react-crdt-server`, and `npm test` in `examples/react-crdt-server`.
+- Rechecked `npm run typecheck:examples`; it still fails only on the known unrelated `CrdtUpdate.path` seed test and Vite plugin type mismatches.

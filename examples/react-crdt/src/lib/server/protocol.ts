@@ -1,7 +1,13 @@
 import {createCrdtUpdateValidator, hlc, type CrdtUpdate, type HlcTimestamp} from 'umkehr/crdt';
 import type {IJsonSchemaCollection} from 'typia';
-import type {ServerBranch, ServerBranchEvent, ServerPresenceSession, ServerPresenceUser} from './types';
+import type {
+    ServerBranch,
+    ServerBranchEvent,
+    ServerPresenceSession,
+    ServerPresenceUser,
+} from './types';
 import {parseSessionActor} from './session';
+import type {EphemeralMessage} from 'umkehr/react-crdt';
 
 export const SERVER_PROTOCOL_VERSION = 3;
 export const SERVER_PORT = 8787;
@@ -90,6 +96,15 @@ export type ClientServerMessage =
           docId: string;
           branchId: string;
           elementId: string | null;
+      }
+    | {
+          kind: 'presenceEvent';
+          version: 3;
+          actor: string;
+          userId: string;
+          docId: string;
+          branchId: string;
+          event: EphemeralMessage<unknown>;
       }
     | {
           kind: 'serverMigrationRequest';
@@ -189,6 +204,13 @@ export type ServerClientMessage =
           branchId: string;
           elementId: string | null;
           at: string;
+      }
+    | {
+          kind: 'presenceEvent';
+          version: 3;
+          docId: string;
+          branchId: string;
+          event: EphemeralMessage<unknown>;
       }
     | {
           kind: 'serverMigrationRequired';
@@ -313,7 +335,11 @@ export function parseServerMessage<TState>(
         if (!Array.isArray(input.branches) || !Array.isArray(input.events)) return null;
         const branches = parseBranches(input.branches);
         if (!branches) return null;
-        return {...input, branches, events: input.events as ServerBranchEvent[]} as ServerClientMessage;
+        return {
+            ...input,
+            branches,
+            events: input.events as ServerBranchEvent[],
+        } as ServerClientMessage;
     }
 
     if (
@@ -376,6 +402,14 @@ export function parseServerMessage<TState>(
         return input as ServerClientMessage;
     }
 
+    if (input.kind === 'presenceEvent') {
+        if (input.docId !== docId) return null;
+        if (typeof input.branchId !== 'string' || input.branchId.length === 0) return null;
+        const event = parseEphemeralMessage(input.event);
+        if (!event) return null;
+        return {...input, event} as ServerClientMessage;
+    }
+
     return null;
 }
 
@@ -415,7 +449,8 @@ function parseBranchEvent<TState>(
     if (input.kind === 'update') {
         if (typeof input.docId !== 'string' || input.docId.length === 0) return null;
         if (typeof input.origin !== 'string' || input.origin.length === 0) return null;
-        if (typeof input.hlcTimestamp !== 'string' || !hlc.tryUnpack(input.hlcTimestamp)) return null;
+        if (typeof input.hlcTimestamp !== 'string' || !hlc.tryUnpack(input.hlcTimestamp))
+            return null;
         if (typeof input.receivedAt !== 'string' || input.receivedAt.length === 0) {
             return null;
         }
@@ -470,7 +505,10 @@ function parsePresenceUser(input: unknown): ServerPresenceUser | null {
             return null;
         }
         if (session.branchId !== undefined && typeof session.branchId !== 'string') return null;
-        if (session.selectionElementId !== undefined && typeof session.selectionElementId !== 'string') {
+        if (
+            session.selectionElementId !== undefined &&
+            typeof session.selectionElementId !== 'string'
+        ) {
             return null;
         }
         sessions.push({
@@ -495,6 +533,32 @@ function parsePresenceUser(input: unknown): ServerPresenceUser | null {
 
 function isSafeInteger(value: unknown): value is number {
     return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+function parseEphemeralMessage(input: unknown): EphemeralMessage<unknown> | null {
+    if (!isRecord(input)) return null;
+    if (typeof input.kind !== 'string' || input.kind.length === 0) return null;
+    if (typeof input.id !== 'string' || input.id.length === 0) return null;
+    if (typeof input.actor !== 'string' || input.actor.length === 0) return null;
+    if (!('data' in input)) return null;
+    if (input.path !== undefined && !isPath(input.path)) return null;
+    if (input.clear !== undefined && typeof input.clear !== 'boolean') return null;
+    if (input.expiresAt !== undefined && typeof input.expiresAt !== 'string') return null;
+    return input as EphemeralMessage<unknown>;
+}
+
+function isPath(input: unknown): input is import('umkehr').Path {
+    if (!Array.isArray(input)) return false;
+    return input.every((segment) => {
+        if (!isRecord(segment)) return false;
+        if (segment.type === 'key') {
+            return typeof segment.key === 'string' || typeof segment.key === 'number';
+        }
+        if (segment.type === 'tag') {
+            return typeof segment.key === 'string' && typeof segment.value === 'string';
+        }
+        return false;
+    });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

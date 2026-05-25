@@ -56,6 +56,7 @@ export type SyncedTransport = {
     subscribe(receive: (update: CrdtUpdate) => void): () => void;
     publishEphemeral<Data>(messages: EphemeralMessage<Data>[]): void;
     subscribeEphemeral<Data>(receive: (message: EphemeralMessage<Data>) => void): () => void;
+    clearEphemeralActor?(actor: string): void;
 };
 
 export type SyncedContext<T, Tag extends string = 'type', EphemeralData = never> = {
@@ -307,6 +308,16 @@ function makeProvider<T, Tag extends string, EphemeralData>(
                 ),
             [transport],
         );
+
+        useEffect(() => {
+            const clearActor = (actor: string) => value.current.ephemeralStore.clearActor(actor);
+            transport.clearEphemeralActor = clearActor;
+            return () => {
+                if (transport.clearEphemeralActor === clearActor) {
+                    delete transport.clearEphemeralActor;
+                }
+            };
+        }, [transport]);
 
         return <Ctx.Provider value={value.current} children={children} />;
     };

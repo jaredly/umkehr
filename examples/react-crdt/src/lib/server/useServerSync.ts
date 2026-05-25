@@ -9,7 +9,7 @@ import {
     type CrdtLocalHistory,
     type CrdtUpdate,
 } from 'umkehr/crdt';
-import {createStatusStore, type EphemeralMessage} from 'umkehr/react-crdt';
+import {createStatusStore, type EphemeralMessage, type SyncedTransport} from 'umkehr/react-crdt';
 import {createExternalStore} from '../store';
 import {createInitialCrdtHistory, type AppDefinition} from '../crdtApp';
 import {
@@ -85,6 +85,7 @@ export function useServerSync<TState>({
     const statusTimersRef = useRef(new Map<string, number>());
     const manualOfflineRef = useRef(false);
     const listenersRef = useRef(new Set<(update: CrdtUpdate) => void>());
+    const ephemeralListenersRef = useRef(new Set<(message: EphemeralMessage<unknown>) => void>());
     const clockRef = useRef(initialClock(identity.actor, allEvents(branchesRef.current)));
 
     const stateStore = useMemo(
@@ -556,8 +557,13 @@ export function useServerSync<TState>({
                 );
                 clearLastEditStatus(parsed.actor);
                 statusStore.clear(whiteboardSelectionStatusId(parsed.actor));
+                transport.clearEphemeralActor?.(parsed.actor);
             } else if (parsed.kind === 'presenceSelection') {
                 applySelectionMessage(parsed);
+            } else if (parsed.kind === 'presenceEvent') {
+                if (parsed.branchId === activeBranchIdRef.current) {
+                    for (const listener of ephemeralListenersRef.current) listener(parsed.event);
+                }
             } else if (parsed.kind === 'serverMigrationRequired') {
                 stateStore.setSnapshot(serverMigrationStateForMessage(parsed));
                 if (!window.confirm('Migrate this server document to the current app schema?')) {
@@ -700,7 +706,7 @@ export function useServerSync<TState>({
         [connect, manualOfflineStore, stateStore],
     );
 
-    const transport = useMemo(() => {
+    const transport = useMemo((): SyncedTransport & {receive(update: CrdtUpdate): void} => {
         return {
             actor: identity.actor,
             tick() {
@@ -748,9 +754,26 @@ export function useServerSync<TState>({
                     listenersRef.current.delete(receive);
                 };
             },
-            publishEphemeral<Data>(_messages: EphemeralMessage<Data>[]) {},
-            subscribeEphemeral<Data>(_receive: (message: EphemeralMessage<Data>) => void) {
-                return () => {};
+            publishEphemeral<Data>(messages: EphemeralMessage<Data>[]) {
+                if (!messages.length) return;
+                for (const message of messages) {
+                    send({
+                        kind: 'presenceEvent',
+                        version: SERVER_PROTOCOL_VERSION,
+                        actor: identity.actor,
+                        userId: identity.user.userId,
+                        docId,
+                        branchId: activeBranchIdRef.current,
+                        event: message,
+                    });
+                }
+            },
+            subscribeEphemeral<Data>(receive: (message: EphemeralMessage<Data>) => void) {
+                const listener = receive as (message: EphemeralMessage<unknown>) => void;
+                ephemeralListenersRef.current.add(listener);
+                return () => {
+                    ephemeralListenersRef.current.delete(listener);
+                };
             },
             receive(update: CrdtUpdate) {
                 const timestamp = latestCrdtUpdateTimestamp(update);
@@ -777,6 +800,9 @@ export function useServerSync<TState>({
     function switchBranch(branchId: string) {
         if (!branchesRef.current[branchId])
             ensureBranch(branchesRef.current, branchListRef.current, branchId, app);
+        for (const user of presenceStore.getSnapshot()) {
+            for (const session of user.sessions) transport.clearEphemeralActor?.(session.actor);
+        }
         activeBranchIdRef.current = branchId;
         const branch = branchesRef.current[branchId];
         branch.history = materializeServerBranch({app, branches: branchesRef.current, branchId});
