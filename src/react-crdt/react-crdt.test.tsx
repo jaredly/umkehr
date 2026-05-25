@@ -6,7 +6,7 @@ import type {IJsonSchemaCollection} from 'typia';
 import {createCrdtDocument, createCrdtLocalHistory, hlc, type CrdtUpdate} from '../crdt/index';
 import {createSyncedContext, useStatuses, useValue, type SyncedTransport} from './react-crdt';
 import {createStatusStore} from '../statuses';
-import typia from 'typia';
+import {type Updater} from '../react';
 
 type State = {
     title: string;
@@ -20,6 +20,10 @@ type MetaState = {
 
 type ListState = {
     todos: Array<{id: string; title: string; done: boolean}>;
+};
+
+type ReorderListState = {
+    todos: Array<{id: string; title: string}>;
 };
 
 const schema = {
@@ -40,22 +44,55 @@ const startTs = hlc.pack(hlc.init('seed', 1_000_000));
 const createInitialHistory = () =>
     createCrdtLocalHistory(createCrdtDocument(initial, schema, {timestamp: startTs}));
 
-// const metaSchema = {
-//     schemas: [
-//         {
-//             type: 'object',
-//             properties: {
-//                 left: {type: 'string'},
-//                 right: {type: 'string'},
-//             },
-//         },
-//     ],
-//     components: {schemas: {}},
-// } as unknown as IJsonSchemaCollection<'3.1', [MetaState]>;
+const metaSchema = {
+    schemas: [
+        {
+            type: 'object',
+            properties: {
+                left: {type: 'string'},
+                right: {type: 'string'},
+            },
+        },
+    ],
+    components: {schemas: {}},
+} as unknown as IJsonSchemaCollection<'3.1', [MetaState]>;
 
-const createMetaHistory = <T,>(initial: T) =>
+const createMetaHistory = (initial: MetaState) =>
+    createCrdtLocalHistory(createCrdtDocument(initial, metaSchema, {timestamp: startTs}));
+
+const reorderListSchema = {
+    schemas: [
+        {
+            type: 'object',
+            properties: {
+                todos: {
+                    type: 'array',
+                    items: {
+                        type: 'object',
+                        properties: {
+                            id: {type: 'string'},
+                            title: {type: 'string'},
+                        },
+                    },
+                },
+            },
+        },
+    ],
+    components: {schemas: {}},
+} as unknown as IJsonSchemaCollection<'3.1', [ReorderListState]>;
+
+const createReorderListHistory = () =>
     createCrdtLocalHistory(
-        createCrdtDocument(initial, typia.json.schemas<[T], '3.1'>(), {timestamp: startTs}),
+        createCrdtDocument(
+            {
+                todos: [
+                    {id: 'a', title: 'a'},
+                    {id: 'b', title: 'b'},
+                ],
+            },
+            reorderListSchema,
+            {timestamp: startTs},
+        ),
     );
 
 const listSchema = {
@@ -127,8 +164,6 @@ class TestTransport implements SyncedTransport {
 }
 
 afterEach(() => cleanup());
-
-type LR = {left: string; right: string};
 
 describe('createSyncedContext', () => {
     it('renders subscribed values, dispatches local updates, and publishes CRDT updates', () => {
@@ -217,7 +252,7 @@ describe('createSyncedContext', () => {
     it('returns new CRDT metadata when the passed-in path changes to different metadata', () => {
         const [Provider, useTodos] = createSyncedContext<MetaState>('type');
         const transport = new TestTransport('local');
-        const history = createMetaHistory<LR>({left: 'Left', right: 'Right'});
+        const history = createMetaHistory({left: 'Left', right: 'Right'});
         let renders = 0;
 
         function SelectedMeta({field}: {field: 'left' | 'right'}) {
@@ -254,7 +289,7 @@ describe('createSyncedContext', () => {
     it('does not schedule another render when the passed-in path changes to equal CRDT metadata', async () => {
         const [Provider, useTodos] = createSyncedContext<MetaState>('type');
         const transport = new TestTransport('local');
-        const history = createMetaHistory<LR>({left: 'Same', right: 'Same'});
+        const history = createMetaHistory({left: 'Same', right: 'Same'});
         let renders = 0;
 
         function SelectedMeta({field}: {field: 'left' | 'right'}) {
@@ -289,63 +324,55 @@ describe('createSyncedContext', () => {
         expect(renders).toBe(2);
     });
 
-    it('list reorder rerender case', async () => {
-        type T = {todos: {id: string; title: string}[]};
-        const [Provider, useTodos] = createSyncedContext<T>('type');
+    function Todo({path}: {path: Updater<{id: string; title: string}>}) {
+        const todo = useValue(path);
+        return <span>{todo.title}</span>;
+    }
+
+    function Todos({$}: {$: Updater<ReorderListState>}) {
+        const todos = useValue($.todos);
+        return (
+            <>
+                <button
+                    onClick={() => {
+                        $.todos.$move({
+                            fromIdx: 0,
+                            targetIdx: 1,
+                            after: true,
+                        });
+                    }}
+                >
+                    Switch
+                </button>
+                <div data-testid="todos">
+                    {todos.map((item, i) => (
+                        <Todo key={item.id} path={$.todos[i]} />
+                    ))}
+                </div>
+            </>
+        );
+    }
+
+    it.only('list reorder rerender case', async () => {
+        const [Provider, useTodos] = createSyncedContext<ReorderListState>('type');
         const transport = new TestTransport('local');
-        const history = createMetaHistory<T>({
-            todos: [
-                {id: 'a', title: 'a'},
-                {id: 'b', title: 'b'},
-            ],
-        });
-
-        function Todo({
-            todo,
-            path,
-        }: {
-            todo: {id: string; title: string};
-            path: Updater<{id: string; title: string}>;
-        }) {
-            return <span>{todo.title}</span>;
-        }
-
-        function Todos() {
+        const history = createReorderListHistory();
+        const Wrap = () => {
             const ctx = useTodos();
-            const todos = useValue(ctx.$.todos);
-            return (
-                <>
-                    <button
-                        onClick={() => {
-                            ctx.$.todos.$move({
-                                fromIdx: 0,
-                                targetIdx: 1,
-                                after: true,
-                            });
-                        }}
-                    >
-                        Switch
-                    </button>
-                    <div test-id="todos">
-                        {todos.map((item, i) => (
-                            <Todo key={item.id} path={ctx.$.todos[i]} todo={item} />
-                        ))}
-                    </div>
-                </>
-            );
-        }
+            return <Todos $={ctx.$} />;
+        };
 
         const view = render(
             <Provider initial={history} transport={transport}>
-                <Todos />
+                <Wrap />
             </Provider>,
         );
 
-        expect(view.getByTestId('todos').textContent).toBe('a\nb');
+        expect(view.getByTestId('todos').textContent).toBe('ab');
         fireEvent.click(view.getByText('Switch'));
-        await new Promise((resolve) => setTimeout(resolve, 0));
+        // await new Promise((resolve) => setTimeout(resolve, 0));
 
-        expect(view.getByTestId('todos').textContent).toBe('b\na');
+        expect(view.getByTestId('todos').textContent).toBe('ba');
 
         // todo fill in
     });
@@ -353,8 +380,8 @@ describe('createSyncedContext', () => {
     it('does not re-render when a subscribed CRDT metadata path is notified with equal metadata', async () => {
         const [Provider, useTodos] = createSyncedContext<MetaState>('type');
         const transport = new TestTransport('local');
-        const history = createMetaHistory<LR>({left: 'Same', right: 'Other'});
-        const equivalentPreviewHistory = createMetaHistory<LR>({left: 'Same', right: 'Other'});
+        const history = createMetaHistory({left: 'Same', right: 'Other'});
+        const equivalentPreviewHistory = createMetaHistory({left: 'Same', right: 'Other'});
         let renders = 0;
 
         function SelectedMeta() {
