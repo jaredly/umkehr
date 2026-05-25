@@ -292,6 +292,48 @@ describe('createSyncedContext', () => {
         expect(renders).toBe(2);
     });
 
+    it('does not re-render when a subscribed CRDT metadata path is notified with equal metadata', async () => {
+        const [Provider, useTodos] = createSyncedContext<MetaState>('type');
+        const transport = new TestTransport('local');
+        const history = createMetaHistory({left: 'Same', right: 'Other'});
+        const equivalentPreviewHistory = createMetaHistory({left: 'Same', right: 'Other'});
+        let renders = 0;
+
+        function SelectedMeta() {
+            const ctx = useTodos();
+            const meta = ctx.useCrdtMeta(ctx.$.left);
+            renders += 1;
+            return (
+                <>
+                    <span data-testid="meta">
+                        {meta?.kind === 'primitive' ? String(meta.value) : ''}
+                    </span>
+                    <button
+                        type="button"
+                        onClick={() => ctx.previewHistory(equivalentPreviewHistory)}
+                    >
+                        preview equal history
+                    </button>
+                </>
+            );
+        }
+
+        const view = render(
+            <Provider initial={history} transport={transport}>
+                <SelectedMeta />
+            </Provider>,
+        );
+
+        expect(view.getByTestId('meta').textContent).toBe('Same');
+        expect(renders).toBe(1);
+
+        fireEvent.click(view.getByText('preview equal history'));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(view.getByTestId('meta').textContent).toBe('Same');
+        expect(renders).toBe(1);
+    });
+
     it('does not rerender sibling rows for array item field changes', () => {
         const [Provider, useTodos] = createSyncedContext<ListState>('type');
         const transport = new TestTransport('local');

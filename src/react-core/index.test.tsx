@@ -92,6 +92,35 @@ describe('react-core useValue', () => {
         expect(renders).toBe(1);
     });
 
+    it('does not re-render when the subscribed path is notified with the same value', async () => {
+        const ctx = makeTestContext({
+            title: 'Draft',
+            count: 0,
+            nested: {value: 'Initial'},
+        });
+        let renders = 0;
+
+        function TitleView() {
+            const title = useValue(ctx.$.title);
+            renders += 1;
+            return <span data-testid="title">{title}</span>;
+        }
+
+        const view = render(<TitleView />);
+
+        expect(view.getByTestId('title').textContent).toBe('Draft');
+        expect(renders).toBe(1);
+
+        ctx.set(
+            {title: 'Draft', count: 1, nested: {value: 'Initial'}},
+            [getPath(ctx.$.title)],
+        );
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(view.getByTestId('title').textContent).toBe('Draft');
+        expect(renders).toBe(1);
+    });
+
     it('deduplicates selector results with deep equality by default', async () => {
         const ctx = makeTestContext({
             title: 'Draft',
