@@ -1,8 +1,8 @@
-import {useEffect, useState} from 'react';
+import {useEffect, useRef, useState} from 'react';
 import {deepEqual as equal} from '../deepEqual.js';
 import {getExtra, getPath} from '../helper.js';
 import {type EqualFn} from '../internal.js';
-import type {PatchBuilderInternal} from '../types.js';
+import {pathToString, type PatchBuilderInternal} from '../types.js';
 import {useLatest} from '../react/useLatest.js';
 import type {Context} from '../framework-core/index.js';
 import type {Status, StatusQuery, StatusStore} from '../statuses.js';
@@ -48,17 +48,17 @@ export const useValue: (<Current, Return, Tag extends PropertyKey>(
     const [v, setV] = useState(() => mod(extra.getForPath<Current>(path)));
     const lv = useLatest(v);
     const lmod = useLatest(mod);
-    useEffect(
-        () =>
-            extra.listenToPath(path, () => {
-                const nw = lmod.current(extra.getForPath<Current>(path));
-                if (exact ? !equalFn(lv.current, nw) : lv.current !== nw) {
-                    lv.current = nw;
-                    setV(nw);
-                }
-            }),
-        [extra, path, lv, lmod, exact, equalFn],
-    );
+    useEffect(() => {
+        const f = () => {
+            const nw = lmod.current(extra.getForPath<Current>(path));
+            if (exact ? !equalFn(lv.current, nw) : lv.current !== nw) {
+                lv.current = nw;
+                setV(nw);
+            }
+        };
+        f();
+        return extra.listenToPath(path, f);
+    }, [extra, path, lv, lmod, exact, equalFn]);
     return v;
 };
 
@@ -70,22 +70,19 @@ export function useStatusesFromStore<Current, Tag extends PropertyKey>(
     const path = getPath(node);
     const [statuses, setStatuses] = useState(() => store.get(path, query));
     const latestStatuses = useLatest(statuses);
-    useEffect(
-        () => {
-            const current = store.get(path, query);
-            if (!equal(latestStatuses.current, current)) {
-                latestStatuses.current = current;
-                setStatuses(current);
+    useEffect(() => {
+        const current = store.get(path, query);
+        if (!equal(latestStatuses.current, current)) {
+            latestStatuses.current = current;
+            setStatuses(current);
+        }
+        return store.subscribe(path, query, (next) => {
+            if (!equal(latestStatuses.current, next)) {
+                latestStatuses.current = next;
+                setStatuses(next);
             }
-            return store.subscribe(path, query, (next) => {
-                if (!equal(latestStatuses.current, next)) {
-                    latestStatuses.current = next;
-                    setStatuses(next);
-                }
-            });
-        },
-        [store, path, query, latestStatuses],
-    );
+        });
+    }, [store, path, query, latestStatuses]);
     return statuses;
 }
 

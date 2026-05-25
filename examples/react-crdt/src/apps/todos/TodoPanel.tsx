@@ -9,7 +9,7 @@ import {
     type CSSProperties,
     type PointerEvent as ReactPointerEvent,
 } from 'react';
-import {useValue} from 'umkehr/react';
+import {Updater, useValue} from 'umkehr/react';
 import {useStatuses} from 'umkehr/react-crdt';
 import type {
     AppEditorContext,
@@ -22,6 +22,7 @@ import type {ServerLastEditStatusData} from '../../lib/server/types';
 import {createExternalStore, type ExternalStore} from '../../lib/store';
 import {formatTodoTitleBlame, titleBlameForTodoMeta} from './blame';
 import type {Todo, TodoState} from './model';
+import {getPath} from '../../../../../dist/src/helper';
 
 const pastelColors = ['#fff', '#fce7f3', '#dbeafe', '#dcfce7', '#fef3c7', '#ede9fe'] as const;
 const reorderAnimationMs = 180;
@@ -51,6 +52,7 @@ export function TodoPanel({
 }) {
     const bgcolor = useValue(editor.$.bgcolor);
     const todoIds = useValue(editor.$.todos, (todos) => todos.map((todo) => todo.id));
+    console.log(todoIds);
     const [draftTitle, setDraftTitle] = useState('');
     const [draggingId, setDraggingId] = useState<string | null>(null);
     const dropTargetStore = useMemo(() => createExternalStore<DropTarget | null>(null), []);
@@ -259,8 +261,7 @@ export function TodoPanel({
                     <TodoItemSlot
                         key={id}
                         editor={editor}
-                        id={id}
-                        index={index}
+                        path={editor.$.todos[index]}
                         isDragging={draggingId === id}
                         dropTargetStore={dropTargetStore}
                         onDragStart={startDrag}
@@ -358,8 +359,7 @@ function TodoSummary({editor}: {editor: AppEditorContext<TodoState>}) {
 
 function TodoItemSlot({
     editor,
-    id,
-    index,
+    path,
     isDragging,
     dropTargetStore,
     onDragStart,
@@ -367,27 +367,22 @@ function TodoItemSlot({
     readOnly,
 }: {
     editor: AppEditorContext<TodoState>;
-    id: string;
-    index: number;
+    path: Updater<Todo>;
     isDragging: boolean;
     dropTargetStore: ExternalStore<DropTarget | null>;
     onDragStart(id: string, event: ReactPointerEvent<HTMLElement>): void;
     registerRow(id: string, element: HTMLLIElement | null): void;
     readOnly: boolean;
 }) {
-    const todo = useValue(editor.$.todos[index]) as Todo | undefined;
-    console.log('slot', todo, todo?.id, id);
-    if (!todo) {
-        console.log('no todo');
-        debugger;
-    }
-    const dropPosition = useDropPosition(dropTargetStore, id);
-    if (!todo || todo.id !== id) return null;
+    const todo = useValue(path) as Todo | undefined;
+    console.log('got', todo?.id, getPath(path));
+    const dropPosition = useDropPosition(dropTargetStore, todo?.id);
+    if (!todo) return null;
     return (
         <TodoItem
             editor={editor}
             todo={todo}
-            index={index}
+            path={path}
             isDragging={isDragging}
             dropPosition={dropPosition}
             onDragStart={onDragStart}
@@ -397,12 +392,12 @@ function TodoItemSlot({
     );
 }
 
-function useDropPosition(store: ExternalStore<DropTarget | null>, id: string) {
+function useDropPosition(store: ExternalStore<DropTarget | null>, id?: string) {
     return useSyncExternalStore(
         store.subscribe,
         () => {
             const target = store.getSnapshot();
-            if (target?.id !== id) return null;
+            if (!target || target.id !== id) return null;
             return target.after ? 'after' : 'before';
         },
         () => null,
@@ -412,7 +407,7 @@ function useDropPosition(store: ExternalStore<DropTarget | null>, id: string) {
 function TodoItem({
     editor,
     todo,
-    index,
+    path,
     isDragging,
     dropPosition,
     onDragStart,
@@ -420,8 +415,8 @@ function TodoItem({
     readOnly,
 }: {
     editor: AppEditorContext<TodoState>;
+    path: Updater<Todo>;
     todo: Todo;
-    index: number;
     isDragging: boolean;
     dropPosition: 'before' | 'after' | null;
     onDragStart(id: string, event: ReactPointerEvent<HTMLElement>): void;
@@ -429,12 +424,10 @@ function TodoItem({
     readOnly: boolean;
 }) {
     const [editingTitle, setEditingTitle] = useState<null | string>(null);
-    const presenceStatuses = useStatuses(editor.$.todos[index], {
+    const presenceStatuses = useStatuses(path, {
         kinds: [lastEditStatusKind],
     });
-    const titleMeta = hasPathScopedCrdtMeta(editor)
-        ? editor.useCrdtMeta(editor.$.todos[index].title)
-        : null;
+    const titleMeta = hasPathScopedCrdtMeta(editor) ? editor.useCrdtMeta(path.title) : null;
     const titleBlame = titleBlameForTodoMeta(titleMeta ?? undefined);
     const titleTooltip = formatTodoTitleBlame(titleBlame);
     const cursors = presenceStatuses.map((status) => status.data).filter(isLastEditStatusData);
@@ -446,7 +439,7 @@ function TodoItem({
         if (readOnly || !next || next === todo.title) {
             return;
         }
-        editor.$.todos[index].title(next);
+        path.title(next);
     };
 
     const className = [
@@ -483,7 +476,7 @@ function TodoItem({
                 <input
                     type="checkbox"
                     checked={todo.done}
-                    onChange={(event) => editor.$.todos[index].done(event.target.checked)}
+                    onChange={(event) => path.done(event.target.checked)}
                     disabled={readOnly}
                 />
                 {editingTitle !== null ? (
@@ -527,11 +520,7 @@ function TodoItem({
                 >
                     Edit
                 </button>
-                <button
-                    type="button"
-                    onClick={() => editor.$.todos[index].$remove()}
-                    disabled={readOnly}
-                >
+                <button type="button" onClick={() => path.$remove()} disabled={readOnly}>
                     Delete
                 </button>
             </div>
