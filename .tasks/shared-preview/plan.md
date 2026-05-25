@@ -78,6 +78,12 @@ type EphemeralConfig<Data> = {
 
 Add the shared type surface and a small in-memory store for active ephemeral messages.
 
+Current repo note:
+
+- `src/statuses.ts` already has a path-indexed in-memory `StatusStore` with `add`, `clear`, `clearAll`, exact queries, and descendant queries, and it is exported from `umkehr/react-crdt`.
+- Existing whiteboard selection presence already writes remote selections into per-replica/server `StatusStore`s.
+- The missing part is TTL/staleness, actor-wide clear, and the typed `EphemeralMessage<Data>` lifecycle; do not duplicate the existing path subscription/indexing unless the TTL semantics make a separate store cleaner.
+
 Likely files:
 
 - `src/react-crdt/react-crdt.tsx`
@@ -88,8 +94,9 @@ Work:
 
 - Export `EphemeralMessage<Data>`.
 - Extend `SyncedTransport` with optional `publishEphemeral` and `subscribeEphemeral`.
-- Add a preview/presence store helper that indexes messages by `id`, `actor`, and optional `path`.
+- Add a preview/presence store helper that indexes messages by `id`, `actor`, and optional `path`, either by extending `StatusStore` carefully or by adding a separate `EphemeralStore`.
 - Support `clear: true`.
+- Support clearing all messages for an actor so `presenceLeave`, branch switches, and simulator resets can remove session overlays.
 - Track receipt time and compute staleness:
   - normal for the first 15 seconds;
   - stale/partially transparent after 15 seconds;
@@ -100,7 +107,7 @@ Work:
 Acceptance:
 
 - Existing CRDT update transports continue typechecking without implementing ephemeral methods.
-- Store tests cover add, replace by id, clear, actor/path lookup, stale state after 15 seconds, and removal after 30 seconds.
+- Store tests cover add, replace by id, clear by id, clear by actor, actor/path lookup, stale state after 15 seconds, and removal after 30 seconds.
 - No durable CRDT history, undo/redo, or persistence code sees ephemeral messages.
 
 ## Phase 2: React helper surface
@@ -131,6 +138,7 @@ Work:
 - Ignore local actor messages on receive if the transport echoes them.
 - Clear actor messages when a transport signals disconnect/leave, if available.
 - Do not couple this to `when: 'preview'`.
+- Keep `AppEditorContext` in `examples/react-crdt/src/lib/crdtApp.ts` in sync if whiteboard panels need the helper through the app abstraction.
 
 Acceptance:
 
@@ -141,6 +149,12 @@ Acceptance:
 ## Phase 3: Local simulator transport
 
 Implement ephemeral messages in local simulator mode first because it is the fastest end-to-end test surface.
+
+Current repo note:
+
+- `examples/react-crdt/src/lib/local/useLocalDemoSync.ts` already has per-replica `StatusStore`s and a `setPresenceSelection` helper that broadcasts whiteboard selection while sync is enabled or disabled.
+- Convert or bridge that selection helper to the generic ephemeral channel so selection, drag preview, and stroke preview use one path.
+- Manual sync currently queues durable CRDT updates while disabled. Ephemeral events should be dropped while disabled, including selection changes, so disabled simulator sync behaves consistently for all presence-like data.
 
 Likely files:
 
@@ -155,16 +169,25 @@ Work:
 - Drop ephemeral messages while manual sync is disabled. Do not queue stale previews.
 - Keep durable CRDT outbox behavior unchanged.
 - Clear a replica actor's messages when appropriate, such as unmount/reset if the local simulator has that lifecycle.
+- Retire the bespoke `broadcastPresenceSelection` path or make it a thin wrapper over typed ephemeral `selection` messages.
 
 Acceptance:
 
 - Two local simulator panels can exchange typed ephemeral messages without creating CRDT updates.
 - Disabling sync drops new ephemeral messages and does not enqueue them.
 - Re-enabling sync does not replay old preview positions.
+- Existing local simulator selection presence behavior still works, but now follows the same sync-enabled/drop semantics as other ephemeral events.
 
 ## Phase 4: Server protocol and server runtime
 
 Add server ephemeral presence events. These are broadcast-only and not persisted.
+
+Current repo note:
+
+- Client and server protocol versions are currently `3`.
+- `presenceHello`, `presenceSelection`, `presenceSnapshot`, `presenceUpdate`, and `presenceLeave` already exist.
+- Server mode already clears whiteboard selection statuses on `presenceLeave`; extend that clear to all ephemeral messages for the actor.
+- `presenceSelection` can either remain as a compatibility/specialized message or be replaced by `presenceEvent` selection. Avoid keeping two divergent selection paths long-term.
 
 Likely files:
 
@@ -220,12 +243,19 @@ Acceptance:
 - Server rejects invalid actor/user/doc/branch envelopes.
 - Server does not write ephemeral messages to branch events or persistence.
 - Client clears session-level actor messages on `presenceLeave` and branch switch.
+- Existing `presenceSelection` tests/flows either pass unchanged through a compatibility path or are migrated to assert equivalent `presenceEvent` selection behavior.
 
 ## Phase 5: Whiteboard payloads, validators, and preview store adapter
 
 Add whiteboard-specific ephemeral data and validation.
 
-Likely files, once the whiteboard app exists:
+Current repo note:
+
+- The whiteboard app now exists in `examples/react-crdt/src/apps/whiteboard`.
+- Durable whiteboard state validation already uses typia in `schema.ts`; put ephemeral payload validation beside the whiteboard app, likely in a new `ephemeral.ts`.
+- Selection presence currently uses `whiteboardSelectionStatusKind` and `setPresenceSelection`; migrate this to the typed `selection` payload or keep a short compatibility adapter during the transition.
+
+Likely files:
 
 - `examples/react-crdt/src/apps/whiteboard/model.ts`
 - `examples/react-crdt/src/apps/whiteboard/ephemeral.ts`
@@ -242,6 +272,7 @@ Work:
   - `clearEphemeralMessage(actor, id)`.
 - Adapt path-bearing messages into the local preview/status store.
 - Keep remote preview rendering joined only by actor id; actor color/nickname should come from existing presence data if the UI wants it.
+- Reuse the existing selection badge rendering where possible, but source its data through the generic ephemeral adapter.
 
 Acceptance:
 
@@ -249,10 +280,17 @@ Acceptance:
 - Messages use stable path targets like `elements[id]`.
 - Selection is path-scoped.
 - Session-level actor ids keep two tabs from clobbering each other.
+- Existing remote selection badges still render in local simulator and server modes.
 
 ## Phase 6: Whiteboard interaction integration
 
 Wire shared preview into whiteboard interactions.
+
+Current repo note:
+
+- Element move/resize currently uses local `when: 'preview'` patches during pointer move and commits on pointer up.
+- Freehand drawing already keeps in-progress points in local React state and commits one durable stroke on pointer up.
+- The first implementation can preserve these local paths and add remote overlay publication/rendering. Converting local drag to overlay rendering can be a follow-up unless symmetry is required for the initial acceptance check.
 
 Work:
 
@@ -281,6 +319,7 @@ Acceptance:
 - The final committed element position syncs through normal CRDT updates.
 - Stale overlays fade after 15 seconds and disappear after 30 seconds.
 - Local and remote drags both use overlay rendering, so the interaction model is symmetric.
+- If local drag remains implemented with `when: 'preview'` initially, add a follow-up acceptance item to convert it to overlay rendering after remote overlays land.
 
 ## Phase 7: PeerJS follow-up
 

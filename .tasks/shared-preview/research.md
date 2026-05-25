@@ -222,6 +222,8 @@ A practical compromise is to use generic ephemeral messages at the transport bou
 
 Keep `when: 'preview'` local and add a separate typed shared ephemeral channel for collaborative preview/presence. Use Option 2 as the implementation path.
 
+Current repo adjustment: the whiteboard app and basic selection presence now exist. Whiteboard selection currently flows through bespoke `presenceSelection` messages and per-runtime `StatusStore`s, while local move/resize still uses `when: 'preview'` and active pen strokes use local React state. Shared preview should build on that foundation: generalize the existing selection/status path into typed ephemeral messages rather than adding a second long-term selection mechanism beside it.
+
 For the whiteboard v1:
 
 1. During drag/resize, continue to update local state with `editor.$.elements[id].x(nextX, 'preview')` and related field previews.
@@ -240,6 +242,8 @@ kind: 'whiteboard:selection'
 path: elements[id]
 data: {elementIds: string[], bounds, tool}
 ```
+
+Existing `presenceSelection` can be kept temporarily as a compatibility wrapper, but the target should be one whiteboard ephemeral selection path with the same sync, TTL, branch-switch, and actor-clear behavior as drag and stroke previews.
 
 ## Suggested core/API shape
 
@@ -293,6 +297,8 @@ type EphemeralConfig<Data> = {
 
 Given this is motivated by the whiteboard example, example-local is lower risk. Promote to core once the whiteboard proves the shape across cursor, selection, element drag, stroke preview, and validation.
 
+The current `StatusStore` is already exported from `umkehr/react-crdt` and already supplies path-indexed subscriptions. Reuse it where possible for path-scoped rendering, but add the missing ephemeral semantics explicitly: replacement by message id, clear by actor, receipt time, stale/expired state, and expiry-driven notifications.
+
 ## Transport implementation notes
 
 ### Server mode
@@ -336,9 +342,13 @@ Server behavior:
 
 The current protocol version is `3`. Adding message variants likely means bumping both client and server protocol types together.
 
+Current server/client code already has `presenceHello`, `presenceSelection`, `presenceSnapshot`, `presenceUpdate`, and `presenceLeave`. `presenceEvent` should validate actor/user/doc/branch with the same strictness as those messages, and clients should clear all actor-owned ephemeral messages on `presenceLeave`, not just the existing selection status.
+
 ### Local simulator
 
 Extend `createDemoTransport` with ephemeral listeners and have `useLocalDemoSync` broadcast ephemeral messages immediately when sync is enabled. Decide whether manual offline should queue ephemeral data. For preview, dropping while offline is more natural than queueing stale drag positions.
+
+Current local simulator code already has per-replica `StatusStore`s and `broadcastPresenceSelection`. Convert that helper to a thin adapter over typed ephemeral selection messages, or remove it after whiteboard selection is migrated. Manual sync disabled should drop all ephemeral events, including selection changes, while retaining the current durable CRDT outbox behavior.
 
 ### PeerJS
 
