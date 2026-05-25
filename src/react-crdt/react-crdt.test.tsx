@@ -10,6 +10,7 @@ import type {EphemeralMessage} from '../ephemeral';
 import {type Updater} from '../react';
 import {createContext, useContext} from 'react';
 import React from 'react';
+import {deepEqual as equal} from '../deepEqual';
 
 type State = {
     title: string;
@@ -24,6 +25,8 @@ type MetaState = {
 type ListState = {
     todos: Array<{id: string; title: string; done: boolean}>;
 };
+
+type EphemeralTestData = {value: string};
 
 type ReorderListState = {
     todos: Array<{id: string; title: string}>;
@@ -138,7 +141,9 @@ const createInitialListHistory = () =>
 class TestTransport implements SyncedTransport {
     clock: hlc.HLC;
     published: CrdtUpdate[][] = [];
+    publishedEphemeral: EphemeralMessage<unknown>[][] = [];
     listeners = new Set<(update: CrdtUpdate) => void>();
+    ephemeralListeners = new Set<(message: EphemeralMessage<unknown>) => void>();
 
     constructor(readonly actor: string) {
         this.clock = hlc.init(actor, 2_000_000);
@@ -160,10 +165,16 @@ class TestTransport implements SyncedTransport {
         };
     }
 
-    publishEphemeral<Data>(_messages: EphemeralMessage<Data>[]) {}
+    publishEphemeral<Data>(messages: EphemeralMessage<Data>[]) {
+        this.publishedEphemeral.push(messages);
+    }
 
-    subscribeEphemeral<Data>(_receive: (message: EphemeralMessage<Data>) => void) {
-        return () => {};
+    subscribeEphemeral<Data>(receive: (message: EphemeralMessage<Data>) => void) {
+        const listener = receive as (message: EphemeralMessage<unknown>) => void;
+        this.ephemeralListeners.add(listener);
+        return () => {
+            this.ephemeralListeners.delete(listener);
+        };
     }
 
     emit(update: CrdtUpdate) {
@@ -171,7 +182,25 @@ class TestTransport implements SyncedTransport {
         if (ts) this.clock = hlc.recv(this.clock, hlc.unpack(ts), Date.now());
         for (const listener of this.listeners) listener(update);
     }
+
+    emitEphemeral(message: EphemeralMessage<unknown>) {
+        for (const listener of this.ephemeralListeners) listener(message);
+    }
 }
+
+const isEphemeralTestData = (input: unknown): input is EphemeralTestData =>
+    typeof input === 'object' &&
+    input !== null &&
+    'value' in input &&
+    typeof input.value === 'string';
+
+const [EphemeralProvider, useEphemeralCtx] = createSyncedContext<State, 'type', EphemeralTestData>(
+    'type',
+    equal,
+    {
+        validateEphemeralData: isEphemeralTestData,
+    },
+);
 
 afterEach(() => cleanup());
 
@@ -787,5 +816,156 @@ describe('createSyncedContext', () => {
         );
 
         expect(view.getByTestId('statuses').textContent).toBe('0');
+    });
+
+    it('publishes typed ephemeral messages through the transport', () => {
+        const transport = new TestTransport('local');
+
+        function Editor() {
+            const ctx = useEphemeralCtx();
+            return (
+                <button
+                    type="button"
+                    onClick={() =>
+                        ctx.publishEphemeral([
+                            {
+                                id: 'preview-1',
+                                actor: 'local',
+                                kind: 'preview',
+                                path: [{type: 'key', key: 'title'}],
+                                data: {value: 'draft'},
+                            },
+                        ])
+                    }
+                >
+                    publish ephemeral
+                </button>
+            );
+        }
+
+        const view = render(
+            <EphemeralProvider initial={createInitialHistory()} transport={transport}>
+                <Editor />
+            </EphemeralProvider>,
+        );
+
+        fireEvent.click(view.getByText('publish ephemeral'));
+
+        expect(transport.publishedEphemeral).toEqual([
+            [
+                {
+                    id: 'preview-1',
+                    actor: 'local',
+                    kind: 'preview',
+                    path: [{type: 'key', key: 'title'}],
+                    data: {value: 'draft'},
+                },
+            ],
+        ]);
+    });
+
+    it('subscribes to validated remote ephemeral messages', async () => {
+        const transport = new TestTransport('local');
+
+        function Editor() {
+            const ctx = useEphemeralCtx();
+            const records = ctx.useEphemeral({
+                path: [{type: 'key', key: 'title'}],
+                kinds: ['preview'],
+            });
+            return (
+                <span data-testid="ephemeral">
+                    {records.map((record) => record.message.data.value).join(',')}
+                </span>
+            );
+        }
+
+        const view = render(
+            <EphemeralProvider initial={createInitialHistory()} transport={transport}>
+                <Editor />
+            </EphemeralProvider>,
+        );
+
+        act(() => {
+            transport.emitEphemeral({
+                id: 'invalid',
+                actor: 'remote',
+                kind: 'preview',
+                path: [{type: 'key', key: 'title'}],
+                data: {wrong: 'shape'},
+            });
+            transport.emitEphemeral({
+                id: 'local-echo',
+                actor: 'local',
+                kind: 'preview',
+                path: [{type: 'key', key: 'title'}],
+                data: {value: 'echo'},
+            });
+            transport.emitEphemeral({
+                id: 'remote',
+                actor: 'remote',
+                kind: 'preview',
+                path: [{type: 'key', key: 'title'}],
+                data: {value: 'remote'},
+            });
+        });
+
+        await waitFor(() => {
+            expect(view.getByTestId('ephemeral').textContent).toBe('remote');
+        });
+    });
+
+    it('only rerenders path-scoped ephemeral subscribers for matching paths', async () => {
+        const transport = new TestTransport('local');
+        let renders = 0;
+
+        function Editor() {
+            renders++;
+            const ctx = useEphemeralCtx();
+            const records = ctx.useEphemeral({
+                path: [{type: 'key', key: 'title'}],
+                kinds: ['preview'],
+            });
+            return (
+                <span data-testid="ephemeral">
+                    {records.map((record) => record.message.id).join(',')}
+                </span>
+            );
+        }
+
+        const view = render(
+            <EphemeralProvider initial={createInitialHistory()} transport={transport}>
+                <Editor />
+            </EphemeralProvider>,
+        );
+
+        expect(renders).toBe(1);
+
+        act(() => {
+            transport.emitEphemeral({
+                id: 'other-path',
+                actor: 'remote',
+                kind: 'preview',
+                path: [{type: 'key', key: 'count'}],
+                data: {value: 'ignored'},
+            });
+        });
+
+        expect(renders).toBe(1);
+
+        act(() => {
+            transport.emitEphemeral({
+                id: 'matching-path',
+                actor: 'remote',
+                kind: 'preview',
+                path: [{type: 'key', key: 'title'}],
+                data: {value: 'shown'},
+            });
+        });
+
+        await waitFor(() => {
+            expect(view.getByTestId('ephemeral').textContent).toBe('matching-path');
+        });
+        expect(renders).toBe(2);
     });
 });

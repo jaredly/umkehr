@@ -40,7 +40,14 @@ import {pathToString, type ApplyTiming, type DraftPatch, type Path} from '../typ
 import type {PatchBuilderInternal} from '../types.js';
 import {useLatest} from '../react/useLatest.js';
 import {createStatusStore, type StatusStore} from '../statuses.js';
-import type {EphemeralMessage} from '../ephemeral.js';
+import {
+    createEphemeralStore,
+    type EphemeralConfig,
+    type EphemeralMessage,
+    type EphemeralQuery,
+    type EphemeralRecord,
+    type EphemeralStore,
+} from '../ephemeral.js';
 
 export type SyncedTransport = {
     actor: string;
@@ -51,9 +58,11 @@ export type SyncedTransport = {
     subscribeEphemeral<Data>(receive: (message: EphemeralMessage<Data>) => void): () => void;
 };
 
-export type SyncedContext<T, Tag extends string = 'type'> = {
+export type SyncedContext<T, Tag extends string = 'type', EphemeralData = never> = {
     latest(): T;
     clearPreview(): void;
+    publishEphemeral(messages: EphemeralMessage<EphemeralData>[]): void;
+    useEphemeral(query?: EphemeralQuery): EphemeralRecord<EphemeralData>[];
     previewHistory(history: CrdtLocalHistory<T> | null): void;
     canUndo(): boolean;
     canRedo(): boolean;
@@ -72,9 +81,11 @@ export type SyncedContext<T, Tag extends string = 'type'> = {
 
 type QueuedChanges<T, Tag extends string = 'type'> = DraftPatch<T, Tag, Context>[];
 
-type SyncedContextBase<T, Tag extends string> = {
+type SyncedContextBase<T, Tag extends string, EphemeralData> = {
     history: CrdtLocalHistory<T>;
     transport: SyncedTransport;
+    ephemeralConfig?: EphemeralConfig<EphemeralData>;
+    ephemeralStore: EphemeralStore;
     tag: Tag;
     equalFn: EqualFn;
     save: (history: CrdtLocalHistory<T>) => void;
@@ -90,14 +101,15 @@ type SyncedContextBase<T, Tag extends string> = {
     statuses: StatusStore;
 };
 
-export const createSyncedContext = <T, Tag extends string = 'type'>(
+export const createSyncedContext = <T, Tag extends string = 'type', EphemeralData = never>(
     tag: Tag,
     equalFn: EqualFn = equal,
+    ephemeralConfig?: EphemeralConfig<EphemeralData>,
 ) => {
-    const Ctx = createContext<SyncedContextBase<T, Tag>>(null as any);
+    const Ctx = createContext<SyncedContextBase<T, Tag, EphemeralData>>(null as any);
 
     return [
-        makeProvider(Ctx, tag, equalFn),
+        makeProvider(Ctx, tag, equalFn, ephemeralConfig),
 
         function useSyncedContext() {
             const ctx = useContext(Ctx);
@@ -107,7 +119,7 @@ export const createSyncedContext = <T, Tag extends string = 'type'>(
                 );
             }
 
-            return useMemo((): SyncedContext<T, Tag> => {
+            return useMemo((): SyncedContext<T, Tag, EphemeralData> => {
                 const {dispatch, $} = makeDispatch(ctx, tag, equalFn);
 
                 return {
@@ -116,6 +128,29 @@ export const createSyncedContext = <T, Tag extends string = 'type'>(
                     },
                     clearPreview() {
                         clearSyncedPreview(ctx);
+                    },
+                    publishEphemeral(messages) {
+                        ctx.transport.publishEphemeral(messages);
+                    },
+                    useEphemeral(query) {
+                        const [records, setRecords] = useState(() =>
+                            ctx.ephemeralStore.get<EphemeralData>(query),
+                        );
+                        const latestRecords = useLatest(records);
+                        useEffect(() => {
+                            const current = ctx.ephemeralStore.get<EphemeralData>(query);
+                            if (!equal(latestRecords.current, current)) {
+                                latestRecords.current = current;
+                                setRecords(current);
+                            }
+                            return ctx.ephemeralStore.subscribe<EphemeralData>(query, (next) => {
+                                if (!equal(latestRecords.current, next)) {
+                                    latestRecords.current = next;
+                                    setRecords(next);
+                                }
+                            });
+                        }, [ctx, query, latestRecords]);
+                        return records;
                     },
                     previewHistory(history) {
                         if (history === null) {
@@ -204,10 +239,11 @@ export const createSyncedContext = <T, Tag extends string = 'type'>(
     ] as const;
 };
 
-function makeProvider<T, Tag extends string>(
-    Ctx: React.Context<SyncedContextBase<T, Tag>>,
+function makeProvider<T, Tag extends string, EphemeralData>(
+    Ctx: React.Context<SyncedContextBase<T, Tag, EphemeralData>>,
     tag: Tag,
     equalFn: EqualFn,
+    ephemeralConfig?: EphemeralConfig<EphemeralData>,
 ) {
     return function Provide({
         children,
@@ -224,9 +260,11 @@ function makeProvider<T, Tag extends string>(
     }) {
         const latestSave = useLatest(save);
         const internalStatuses = useRef(statuses ?? createStatusStore());
-        const value = useRef<SyncedContextBase<T, Tag>>({
+        const value = useRef<SyncedContextBase<T, Tag, EphemeralData>>({
             history: initial,
             transport,
+            ephemeralConfig,
+            ephemeralStore: createEphemeralStore(),
             tag,
             equalFn,
             save: (history) => latestSave.current?.(history),
@@ -242,6 +280,7 @@ function makeProvider<T, Tag extends string>(
         });
 
         value.current.statuses = statuses ?? internalStatuses.current;
+        value.current.ephemeralConfig = ephemeralConfig;
 
         useEffect(() => {
             value.current.transport = transport;
@@ -261,12 +300,20 @@ function makeProvider<T, Tag extends string>(
             [transport],
         );
 
+        useEffect(
+            () =>
+                transport.subscribeEphemeral<unknown>((message) =>
+                    receiveRemoteEphemeral(value.current, message),
+                ),
+            [transport],
+        );
+
         return <Ctx.Provider value={value.current} children={children} />;
     };
 }
 
 function makeDispatch<T, Tag extends string>(
-    ctx: SyncedContextBase<T, Tag>,
+    ctx: SyncedContextBase<T, Tag, any>,
     tag: Tag,
     equalFn: EqualFn,
 ) {
@@ -289,7 +336,7 @@ function makeDispatch<T, Tag extends string>(
 }
 
 function queuePreview<T, Tag extends string>(
-    ctx: SyncedContextBase<T, Tag>,
+    ctx: SyncedContextBase<T, Tag, any>,
     v: MaybeNested<DraftPatch<T, Tag, Context>>,
     extra: Context,
     tag: Tag,
@@ -306,7 +353,7 @@ function queuePreview<T, Tag extends string>(
 }
 
 function recomputePreview<T, Tag extends string>(
-    ctx: SyncedContextBase<T, Tag>,
+    ctx: SyncedContextBase<T, Tag, any>,
     extra: Context,
     tag: Tag,
     equalFn: EqualFn,
@@ -332,7 +379,7 @@ function recomputePreview<T, Tag extends string>(
     notifyPaths(ctx.listenersByPath, [...oldPaths, ...paths]);
 }
 
-function clearSyncedPreview<T, Tag extends string>(ctx: SyncedContextBase<T, Tag>) {
+function clearSyncedPreview<T, Tag extends string>(ctx: SyncedContextBase<T, Tag, any>) {
     const previewPaths = Object.values(ctx.previewPaths);
     const hadPreview = ctx.previewState !== null || previewPaths.length > 0;
     ctx.previewState = null;
@@ -349,7 +396,7 @@ function clearSyncedPreview<T, Tag extends string>(ctx: SyncedContextBase<T, Tag
 }
 
 function replaceExternalPreview<T, Tag extends string>(
-    ctx: SyncedContextBase<T, Tag>,
+    ctx: SyncedContextBase<T, Tag, any>,
     history: CrdtLocalHistory<T>,
 ) {
     ctx.externalPreviewHistory = history;
@@ -359,7 +406,7 @@ function replaceExternalPreview<T, Tag extends string>(
     ctx.localHistoryListeners.forEach((f) => f());
 }
 
-function clearExternalPreview<T, Tag extends string>(ctx: SyncedContextBase<T, Tag>) {
+function clearExternalPreview<T, Tag extends string>(ctx: SyncedContextBase<T, Tag, any>) {
     if (ctx.externalPreviewHistory === null) return;
     ctx.externalPreviewHistory = null;
     ctx.listeners.forEach((f) => f());
@@ -367,16 +414,16 @@ function clearExternalPreview<T, Tag extends string>(ctx: SyncedContextBase<T, T
     ctx.localHistoryListeners.forEach((f) => f());
 }
 
-function visibleState<T, Tag extends string>(ctx: SyncedContextBase<T, Tag>) {
+function visibleState<T, Tag extends string>(ctx: SyncedContextBase<T, Tag, any>) {
     return ctx.previewState ?? visibleHistory(ctx).doc.state;
 }
 
-function visibleHistory<T, Tag extends string>(ctx: SyncedContextBase<T, Tag>) {
+function visibleHistory<T, Tag extends string>(ctx: SyncedContextBase<T, Tag, any>) {
     return ctx.externalPreviewHistory ?? ctx.history;
 }
 
 function applyLocalDraft<T, Tag extends string>(
-    ctx: SyncedContextBase<T, Tag>,
+    ctx: SyncedContextBase<T, Tag, any>,
     v: MaybeNested<DraftPatch<T, Tag, Context>>,
     extra: Context,
     tag: Tag,
@@ -396,7 +443,7 @@ function applyLocalDraft<T, Tag extends string>(
 }
 
 function receiveRemoteUpdate<T, Tag extends string>(
-    ctx: SyncedContextBase<T, Tag>,
+    ctx: SyncedContextBase<T, Tag, any>,
     update: CrdtUpdate,
 ) {
     const before = ctx.history.doc;
@@ -420,7 +467,34 @@ function receiveRemoteUpdate<T, Tag extends string>(
     else notifyAll(ctx);
 }
 
-function applyUndo<T, Tag extends string>(ctx: SyncedContextBase<T, Tag>) {
+function receiveRemoteEphemeral<T, Tag extends string, EphemeralData>(
+    ctx: SyncedContextBase<T, Tag, EphemeralData>,
+    message: EphemeralMessage<unknown>,
+) {
+    if (message.actor === ctx.transport.actor) return;
+    if (!isValidEphemeralMessage(ctx, message)) return;
+    ctx.ephemeralStore.add([message as EphemeralMessage<EphemeralData>]);
+}
+
+function isValidEphemeralMessage<T, Tag extends string, EphemeralData>(
+    ctx: SyncedContextBase<T, Tag, EphemeralData>,
+    message: EphemeralMessage<unknown>,
+): message is EphemeralMessage<EphemeralData> {
+    const config = ctx.ephemeralConfig;
+    if (!config) return false;
+    if (config.maxEphemeralBytes !== undefined) {
+        let bytes = 0;
+        try {
+            bytes = new TextEncoder().encode(JSON.stringify(message)).length;
+        } catch {
+            return false;
+        }
+        if (bytes > config.maxEphemeralBytes) return false;
+    }
+    return config.validateEphemeralData(message.data);
+}
+
+function applyUndo<T, Tag extends string>(ctx: SyncedContextBase<T, Tag, any>) {
     clearSyncedPreview(ctx);
     clearExternalPreview(ctx);
     const before = ctx.history.doc;
@@ -432,7 +506,7 @@ function applyUndo<T, Tag extends string>(ctx: SyncedContextBase<T, Tag>) {
     ctx.transport.publish(result.updates);
 }
 
-function applyRedo<T, Tag extends string>(ctx: SyncedContextBase<T, Tag>) {
+function applyRedo<T, Tag extends string>(ctx: SyncedContextBase<T, Tag, any>) {
     clearSyncedPreview(ctx);
     clearExternalPreview(ctx);
     const before = ctx.history.doc;
@@ -445,7 +519,7 @@ function applyRedo<T, Tag extends string>(ctx: SyncedContextBase<T, Tag>) {
 }
 
 function notifyCrdtUpdates<T, Tag extends string>(
-    ctx: SyncedContextBase<T, Tag>,
+    ctx: SyncedContextBase<T, Tag, any>,
     before: CrdtDocument<T>,
     after: CrdtDocument<T>,
     updates: CrdtUpdate[],
@@ -464,13 +538,13 @@ function notifyCrdtUpdates<T, Tag extends string>(
     else notifyChanged(ctx, paths);
 }
 
-function notifyChanged<T, Tag extends string>(ctx: SyncedContextBase<T, Tag>, paths: Path[]) {
+function notifyChanged<T, Tag extends string>(ctx: SyncedContextBase<T, Tag, any>, paths: Path[]) {
     ctx.listeners.forEach((f) => f());
     notifyPaths(ctx.listenersByPath, paths);
     ctx.localHistoryListeners.forEach((f) => f());
 }
 
-function notifyAll<T, Tag extends string>(ctx: SyncedContextBase<T, Tag>) {
+function notifyAll<T, Tag extends string>(ctx: SyncedContextBase<T, Tag, any>) {
     ctx.listeners.forEach((f) => f());
     notifyAllPaths(ctx.listenersByPath);
     ctx.localHistoryListeners.forEach((f) => f());

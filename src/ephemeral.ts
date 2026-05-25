@@ -11,6 +11,11 @@ export type EphemeralMessage<Data> = {
     expiresAt?: string;
 };
 
+export type EphemeralConfig<Data> = {
+    validateEphemeralData(input: unknown): input is Data;
+    maxEphemeralBytes?: number;
+};
+
 export type EphemeralState = 'active' | 'stale';
 
 export type EphemeralRecord<Data = unknown> = {

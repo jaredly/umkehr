@@ -5,6 +5,7 @@ export type {Status, StatusQuery, StatusStore} from '../statuses.js';
 export {createEphemeralStore} from '../ephemeral.js';
 export type {
     EphemeralMessage,
+    EphemeralConfig,
     EphemeralQuery,
     EphemeralRecord,
     EphemeralState,
