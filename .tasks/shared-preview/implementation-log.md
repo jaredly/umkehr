@@ -17,3 +17,9 @@
 - Added `type-tests/ephemeral-context.ts` to assert a context cannot publish a different ephemeral payload type and default contexts cannot publish ephemeral data.
 - Verified Phase 2 with `npx vitest run src/ephemeral.test.ts src/react-crdt/react-crdt.test.tsx`, `npm run typecheck`, `npm run typecheck:tests`, and `npm test`.
 - Rechecked `npm run typecheck:examples`; it still fails only on the known unrelated `CrdtUpdate.path` seed test and Vite plugin type mismatches.
+- Started Phase 3.
+- Implemented real local simulator ephemeral transport delivery in `DemoTransport`, including `publishEphemeral`, `subscribeEphemeral`, and `receiveEphemeral`.
+- Wired `useLocalDemoSync` to broadcast ephemeral messages to other replicas only while sync is enabled; disabled sync drops messages and does not enqueue them.
+- Added local simulator tests for publish/receive, disabled-sync drops, and no replay of offline ephemeral messages after sync is re-enabled.
+- Verified Phase 3 with `npx vitest run examples/react-crdt/src/lib/local/useLocalDemoSync.test.ts`, `npm run typecheck`, `npm run typecheck:tests`, and `npm test`.
+- Rechecked `npm run typecheck:examples`; it still fails only on the known unrelated `CrdtUpdate.path` seed test and Vite plugin type mismatches.

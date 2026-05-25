@@ -1,12 +1,9 @@
 import {useCallback, useMemo, useRef, type MutableRefObject} from 'react';
 import type {CrdtUpdate} from 'umkehr/crdt';
-import {createStatusStore, type StatusStore} from 'umkehr/react-crdt';
+import {createStatusStore, type EphemeralMessage, type StatusStore} from 'umkehr/react-crdt';
 import {createExternalStore, type ExternalStore} from '../store';
 import {createDemoTransport, replicas, type DemoTransport, type ReplicaId} from './model';
-import {
-    statusForWhiteboardSelection,
-    whiteboardSelectionStatusId,
-} from '../server/presence';
+import {statusForWhiteboardSelection, whiteboardSelectionStatusId} from '../server/presence';
 import type {ServerPresenceSession} from '../server/types';
 
 export type TransportState = {
@@ -16,6 +13,7 @@ export type TransportState = {
 
 type SetTransport = (next: TransportState) => void;
 type PublishUpdates = (from: ReplicaId, updates: CrdtUpdate[]) => void;
+type PublishEphemeral = (from: ReplicaId, messages: EphemeralMessage<unknown>[]) => void;
 
 export type DemoSync = {
     stateStore: ExternalStore<TransportState>;
@@ -27,11 +25,12 @@ export type DemoSync = {
 
 export function useLocalDemoSync() {
     const publishRef = useRef<PublishUpdates>(() => {});
+    const publishEphemeralRef = useRef<PublishEphemeral>(() => {});
     const stateStore = useMemo(
         () => createExternalStore<TransportState>({syncEnabled: true, outbox: emptyOutbox()}),
         [],
     );
-    const transports = useMemo(() => createDemoTransports(publishRef), []);
+    const transports = useMemo(() => createDemoTransports(publishRef, publishEphemeralRef), []);
     const statusStores = useMemo(() => createStatusStores(), []);
 
     const setTransport = useCallback(
@@ -59,6 +58,20 @@ export function useLocalDemoSync() {
         [deliverUpdates, setTransport, stateStore],
     );
 
+    const publishEphemeralMessages = useCallback(
+        (from: ReplicaId, messages: EphemeralMessage<unknown>[]) => {
+            broadcastTransportEphemeral(
+                stateStore.getSnapshot(),
+                (source, nextMessages) => {
+                    deliverTransportEphemeral(transports, source, nextMessages);
+                },
+                from,
+                messages,
+            );
+        },
+        [stateStore, transports],
+    );
+
     const toggleSync = useCallback(() => {
         toggleTransportSync(stateStore.getSnapshot(), setTransport, deliverUpdates);
     }, [deliverUpdates, setTransport, stateStore]);
@@ -71,6 +84,7 @@ export function useLocalDemoSync() {
     );
 
     publishRef.current = publishUpdates;
+    publishEphemeralRef.current = publishEphemeralMessages;
 
     return useMemo(
         (): DemoSync => ({
@@ -84,11 +98,18 @@ export function useLocalDemoSync() {
     );
 }
 
-function createDemoTransports(ref: MutableRefObject<PublishUpdates>) {
+function createDemoTransports(
+    ref: MutableRefObject<PublishUpdates>,
+    ephemeralRef: MutableRefObject<PublishEphemeral>,
+) {
     return Object.fromEntries(
         replicas.map((replica) => [
             replica.id,
-            createDemoTransport(replica.id, (from, updates) => ref.current(from, updates)),
+            createDemoTransport(
+                replica.id,
+                (from, updates) => ref.current(from, updates),
+                (from, messages) => ephemeralRef.current(from, messages),
+            ),
         ]),
     ) as Record<ReplicaId, DemoTransport>;
 }
@@ -98,10 +119,9 @@ function emptyOutbox(): Record<ReplicaId, CrdtUpdate[]> {
 }
 
 function createStatusStores() {
-    return Object.fromEntries(replicas.map((replica) => [replica.id, createStatusStore()])) as Record<
-        ReplicaId,
-        StatusStore
-    >;
+    return Object.fromEntries(
+        replicas.map((replica) => [replica.id, createStatusStore()]),
+    ) as Record<ReplicaId, StatusStore>;
 }
 
 function deliverTransportUpdates(
@@ -113,6 +133,18 @@ function deliverTransportUpdates(
         if (replica.id === from) continue;
         const transport = transports[replica.id];
         for (const update of updates) transport.receive(update);
+    }
+}
+
+function deliverTransportEphemeral(
+    transports: Record<ReplicaId, DemoTransport>,
+    from: ReplicaId,
+    messages: EphemeralMessage<unknown>[],
+) {
+    for (const replica of replicas) {
+        if (replica.id === from) continue;
+        const transport = transports[replica.id];
+        for (const message of messages) transport.receiveEphemeral(message);
     }
 }
 
@@ -135,6 +167,16 @@ function broadcastTransportUpdates(
             [from]: [...(current.outbox[from] ?? []), ...updates],
         },
     });
+}
+
+function broadcastTransportEphemeral(
+    current: TransportState,
+    deliverEphemeral: (from: ReplicaId, messages: EphemeralMessage<unknown>[]) => void,
+    from: ReplicaId,
+    messages: EphemeralMessage<unknown>[],
+) {
+    if (!messages.length || !current.syncEnabled) return;
+    deliverEphemeral(from, messages);
 }
 
 function toggleTransportSync(
@@ -175,6 +217,8 @@ function broadcastPresenceSelection(
 
 export const __localDemoSyncTest = {
     broadcastPresenceSelection,
+    broadcastTransportEphemeral,
+    deliverTransportEphemeral,
 };
 
 function sessionForReplica(replicaId: ReplicaId): ServerPresenceSession {
