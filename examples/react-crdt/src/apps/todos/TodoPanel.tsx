@@ -257,7 +257,6 @@ export function TodoPanel({
             >
                 {todoIds.map((id, index) => (
                     <TodoItemSlot
-                        id={id}
                         key={id}
                         editor={editor}
                         path={editor.$.todos[index]}
@@ -359,7 +358,6 @@ function TodoSummary({editor}: {editor: AppEditorContext<TodoState>}) {
 function TodoItemSlot({
     editor,
     path,
-    id,
     isDragging,
     dropTargetStore,
     onDragStart,
@@ -368,7 +366,6 @@ function TodoItemSlot({
 }: {
     editor: AppEditorContext<TodoState>;
     path: Updater<Todo>;
-    id: string;
     isDragging: boolean;
     dropTargetStore: ExternalStore<DropTarget | null>;
     onDragStart(id: string, event: ReactPointerEvent<HTMLElement>): void;
@@ -378,13 +375,11 @@ function TodoItemSlot({
     const todo = useValue(path) as Todo | undefined;
     const dropPosition = useDropPosition(dropTargetStore, todo?.id);
     if (!todo) return null;
-    if (todo.id !== id) console.warn('MISMATCH');
     return (
         <TodoItem
             editor={editor}
             todo={todo}
             path={path}
-            id={id}
             isDragging={isDragging}
             dropPosition={dropPosition}
             onDragStart={onDragStart}
@@ -408,7 +403,6 @@ function useDropPosition(store: ExternalStore<DropTarget | null>, id?: string) {
 
 function TodoItem({
     editor,
-    id,
     todo,
     path,
     isDragging,
@@ -420,16 +414,12 @@ function TodoItem({
     editor: AppEditorContext<TodoState>;
     path: Updater<Todo>;
     todo: Todo;
-    id: string;
     isDragging: boolean;
     dropPosition: 'before' | 'after' | null;
     onDragStart(id: string, event: ReactPointerEvent<HTMLElement>): void;
     registerRow(id: string, element: HTMLLIElement | null): void;
     readOnly: boolean;
 }) {
-    useEffect(() => {
-        console.log('MOUNT', todo.title);
-    }, []);
     const [editingTitle, setEditingTitle] = useState<null | string>(null);
     const presenceStatuses = useStatuses(path, {
         kinds: [lastEditStatusKind],
@@ -460,7 +450,11 @@ function TodoItem({
         .join(' ');
 
     return (
-        <li ref={(element) => registerRow(id, element)} className={className} title={titleTooltip}>
+        <li
+            ref={(element) => registerRow(todo.id, element)}
+            className={className}
+            title={titleTooltip}
+        >
             {editingTitle === null ? (
                 <button
                     type="button"

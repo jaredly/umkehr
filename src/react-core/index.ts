@@ -1,4 +1,4 @@
-import {useEffect, useRef, useState} from 'react';
+import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
 import {deepEqual as equal} from '../deepEqual.js';
 import {getExtra, getPath} from '../helper.js';
 import {type EqualFn} from '../internal.js';
@@ -29,6 +29,16 @@ export {
     type ScheduledTask,
 } from '../framework-core/index.js';
 
+const useResettingState = <T>(f: () => T, r: unknown[]) => {
+    const [_t, setT] = useState(0);
+    const v = useMemo(() => ({current: f()}), r);
+    const setV = useCallback((nv: T) => {
+        v.current = nv;
+        setT((t) => t + 1);
+    }, []);
+    return [v.current, setV] as const;
+};
+
 export const useValue: (<Current, Return, Tag extends PropertyKey>(
     node: PatchBuilderInternal<unknown, Current, Tag, unknown, Context>,
     mod: (v: Current) => Return,
@@ -45,7 +55,7 @@ export const useValue: (<Current, Return, Tag extends PropertyKey>(
 ) => {
     const path = getPath(node);
     const extra = getExtra(node);
-    const [v, setV] = useState(() => mod(extra.getForPath<Current>(path)));
+    const [v, setV] = useResettingState(() => mod(extra.getForPath<Current>(path)), [path]);
     const lv = useLatest(v);
     const lmod = useLatest(mod);
     useEffect(() => {
