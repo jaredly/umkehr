@@ -93,7 +93,7 @@ Likely files:
 Work:
 
 - Export `EphemeralMessage<Data>`.
-- Extend `SyncedTransport` with optional `publishEphemeral` and `subscribeEphemeral`.
+- Extend `SyncedTransport` with required `publishEphemeral` and `subscribeEphemeral`; transports that do not have a live channel yet should implement explicit drop/no-op behavior.
 - Add a preview/presence store helper that indexes messages by `id`, `actor`, and optional `path`, either by extending `StatusStore` carefully or by adding a separate `EphemeralStore`.
 - Support `clear: true`.
 - Support clearing all messages for an actor so `presenceLeave`, branch switches, and simulator resets can remove session overlays.
@@ -106,7 +106,7 @@ Work:
 
 Acceptance:
 
-- Existing CRDT update transports continue typechecking without implementing ephemeral methods.
+- Existing CRDT update transports continue typechecking after adding explicit drop/no-op ephemeral methods.
 - Store tests cover add, replace by id, clear by id, clear by actor, actor/path lookup, stale state after 15 seconds, and removal after 30 seconds.
 - No durable CRDT history, undo/redo, or persistence code sees ephemeral messages.
 
@@ -117,9 +117,29 @@ Expose a small helper from `react-crdt` so app code does not talk directly to tr
 Candidate API:
 
 ```ts
-ctx.publishEphemeral<WhiteboardEphemeralData>(messages);
-ctx.useEphemeral<WhiteboardEphemeralData>(query);
+ctx.publishEphemeral(messages);
+ctx.useEphemeral(query);
 ```
+
+Do not make these method-level generics. `ctx.publishEphemeral<WhiteboardEphemeralData>(...)`
+is not type-safe because the caller can supply any type argument. Bind the ephemeral data type
+when creating the synced context/runtime instead, so the returned `ctx` has one fixed payload type:
+
+```ts
+const [ProvideWhiteboard, useWhiteboard] = createSyncedContext<
+    WhiteboardState,
+    'type',
+    WhiteboardEphemeralData
+>('type', equal, {
+    validateEphemeralData: validateWhiteboardEphemeralData,
+});
+
+ctx.publishEphemeral(messages: EphemeralMessage<WhiteboardEphemeralData>[]);
+ctx.useEphemeral(query): EphemeralRecord<WhiteboardEphemeralData>[];
+```
+
+For apps without ephemeral payloads, the default should be `never` or a similar disabled type,
+forcing those apps to opt in explicitly before publishing typed ephemeral data.
 
 Query shape can start simple:
 
@@ -135,6 +155,8 @@ Work:
 
 - Add `publishEphemeral` to `SyncedContext`.
 - Add `useEphemeral` or an exported hook that subscribes to the store.
+- Bind the ephemeral data type on `createSyncedContext`/runtime creation rather than accepting a method-level generic on `publishEphemeral` or `useEphemeral`.
+- Thread `EphemeralConfig<Data>` through the provider or context factory so receive-side validation has the same fixed data type.
 - Ignore local actor messages on receive if the transport echoes them.
 - Clear actor messages when a transport signals disconnect/leave, if available.
 - Do not couple this to `when: 'preview'`.
@@ -143,6 +165,7 @@ Work:
 Acceptance:
 
 - React tests can publish an `EphemeralMessage<TestData>` and render it in another subscribed component.
+- Type tests or compile-time examples show that a `SyncedContext<State, Tag, TestData>` cannot publish `EphemeralMessage<OtherData>`.
 - Path-scoped subscription only rerenders for matching paths.
 - Existing `when: 'preview'` tests still pass unchanged.
 
@@ -347,7 +370,7 @@ Acceptance:
 Core/react tests:
 
 - `EphemeralMessage<Data>` type export compiles.
-- optional transport methods do not break existing test transports.
+- required transport methods do not break existing test transports once they add explicit drop/no-op ephemeral implementations.
 - publish/subscribe lifecycle works.
 - clear and TTL behavior works.
 - path-scoped subscriptions work.
@@ -386,7 +409,7 @@ Adjust commands to the repo's actual package scripts before running.
 
 ## Implementation order
 
-1. Add shared `EphemeralMessage<Data>` types and optional transport methods.
+1. Add shared `EphemeralMessage<Data>` types and required transport methods.
 2. Add ephemeral store and React helper surface.
 3. Implement local simulator ephemeral transport and tests.
 4. Implement server protocol/runtime ephemeral forwarding and tests.

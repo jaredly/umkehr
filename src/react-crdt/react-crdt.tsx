@@ -40,12 +40,15 @@ import {pathToString, type ApplyTiming, type DraftPatch, type Path} from '../typ
 import type {PatchBuilderInternal} from '../types.js';
 import {useLatest} from '../react/useLatest.js';
 import {createStatusStore, type StatusStore} from '../statuses.js';
+import type {EphemeralMessage} from '../ephemeral.js';
 
 export type SyncedTransport = {
     actor: string;
     tick(): hlc.HLC;
     publish(updates: CrdtUpdate[]): void;
     subscribe(receive: (update: CrdtUpdate) => void): () => void;
+    publishEphemeral<Data>(messages: EphemeralMessage<Data>[]): void;
+    subscribeEphemeral<Data>(receive: (message: EphemeralMessage<Data>) => void): () => void;
 };
 
 export type SyncedContext<T, Tag extends string = 'type'> = {

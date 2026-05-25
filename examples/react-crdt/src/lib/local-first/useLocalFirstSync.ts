@@ -23,18 +23,9 @@ import {
     markReceivedBatch,
     saveReplica,
 } from './persistence';
-import {
-    batchTimestampRange,
-    advanceVector,
-    vectorDominates,
-    vectorForUpdates,
-} from './vector';
+import {batchTimestampRange, advanceVector, vectorDominates, vectorForUpdates} from './vector';
 import {batchKey, createRecentBatchCache} from './recentBatchCache';
-import {
-    buildSnapshotReplayPreview,
-    type PendingSnapshot,
-    type ReplayPreview,
-} from './replay';
+import {buildSnapshotReplayPreview, type PendingSnapshot, type ReplayPreview} from './replay';
 import {type LocalFirstMessage, type LocalFirstProtocolConfig} from './protocol';
 import {
     createMembersMessage,
@@ -189,10 +180,7 @@ export function useLocalFirstSync<TState>({
             }),
         [],
     );
-    const connectionsStore = useMemo(
-        () => createExternalStore<LocalFirstConnectionInfo[]>([]),
-        [],
-    );
+    const connectionsStore = useMemo(() => createExternalStore<LocalFirstConnectionInfo[]>([]), []);
 
     const publishConnections = useCallback(() => {
         connectionsStore.setSnapshot(
@@ -256,7 +244,8 @@ export function useLocalFirstSync<TState>({
             pendingSnapshot: pendingSnapshotRef.current
                 ? {
                       actor: pendingSnapshotRef.current.actor,
-                      compactedActors: Object.keys(pendingSnapshotRef.current.compactedThrough).length,
+                      compactedActors: Object.keys(pendingSnapshotRef.current.compactedThrough)
+                          .length,
                   }
                 : undefined,
             replayPreview: replayPreviewRef.current
@@ -446,11 +435,7 @@ export function useLocalFirstSync<TState>({
     );
 
     const acceptSnapshot = useCallback(
-        async (
-            actor: string,
-            document: CrdtDocument<TState>,
-            compactedThrough: VersionVector,
-        ) => {
+        async (actor: string, document: CrdtDocument<TState>, compactedThrough: VersionVector) => {
             const hasLocalKnowledge = Object.keys(vectorRef.current).length > 0;
             if (hasLocalKnowledge) {
                 pendingSnapshotRef.current = {actor, document, compactedThrough};
@@ -494,12 +479,15 @@ export function useLocalFirstSync<TState>({
             const batches = (await listBatches(docId)).filter(
                 (batch) => !vectorDominates(since, vectorForUpdates(batch.updates)),
             );
-            sendOrQueue(record, createSyncResponseMessage({
-                state: sessionState(),
-                since,
-                batches,
-                requiresSnapshot,
-            }));
+            sendOrQueue(
+                record,
+                createSyncResponseMessage({
+                    state: sessionState(),
+                    since,
+                    batches,
+                    requiresSnapshot,
+                }),
+            );
         },
         [docId, sendOrQueue, sendSnapshot, sessionState],
     );
@@ -784,6 +772,10 @@ export function useLocalFirstSync<TState>({
                     listenersRef.current.delete(receive);
                 };
             },
+            publishEphemeral(_messages) {},
+            subscribeEphemeral(_receive) {
+                return () => {};
+            },
         }),
         [identity.replicaId, publishLocalBatch],
     );
@@ -855,10 +847,7 @@ export function useLocalFirstSync<TState>({
         await refreshCounts();
     }, [buildReplayPreview, docId, persistReplica, refreshCounts, replaceHistory]);
 
-    const exportLocalState = useCallback(
-        () => exportReplicaState<TState>(docId),
-        [docId],
-    );
+    const exportLocalState = useCallback(() => exportReplicaState<TState>(docId), [docId]);
 
     const importLocalState = useCallback(
         async (json: string) => {

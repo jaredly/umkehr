@@ -65,7 +65,7 @@ Shared preview should be:
 - path-aware when possible: renderers should be able to subscribe at `elements[id]` or descendants;
 - throttled/coalesced: dragging should send at most one recent preview per frame or a similar rate limit;
 - self-clearing: pointer cancel, blur, disconnect, branch switch, and durable commit should clear stale previews;
-- optional by transport: durable CRDT sync should keep working when a transport does not implement ephemeral preview.
+- explicit by transport: every `SyncedTransport` should expose the ephemeral methods, with drop/no-op implementations for modes that do not have a live ephemeral channel yet.
 
 The biggest API decision is whether shared preview should replicate draft patches or app-level preview payloads.
 
@@ -247,7 +247,7 @@ Existing `presenceSelection` can be kept temporarily as a compatibility wrapper,
 
 ## Suggested core/API shape
 
-The smallest core-facing change is to define an optional extension on `SyncedTransport`:
+The smallest core-facing change is to define required ephemeral methods on `SyncedTransport`:
 
 ```ts
 export type EphemeralMessage<Data> = {
@@ -265,19 +265,33 @@ export type SyncedTransport = {
     tick(): hlc.HLC;
     publish(updates: CrdtUpdate[]): void;
     subscribe(receive: (update: CrdtUpdate) => void): () => void;
-    publishEphemeral?<Data>(messages: EphemeralMessage<Data>[]): void;
-    subscribeEphemeral?<Data>(
+    publishEphemeral<Data>(messages: EphemeralMessage<Data>[]): void;
+    subscribeEphemeral<Data>(
         receive: (message: EphemeralMessage<Data>) => void,
     ): () => void;
 };
 ```
 
-Then add a small React helper in `umkehr/react-crdt`:
+Then add a small React helper in `umkehr/react-crdt`. The helper should not use method-level
+generics, because callers can lie with `ctx.publishEphemeral<WrongType>(...)`. Bind the data type
+when creating the synced context/runtime:
 
 ```ts
-ctx.publishEphemeral<WhiteboardEphemeralData>(messages)
-ctx.useEphemeral<WhiteboardEphemeralData>(query)
+const [ProvideWhiteboard, useWhiteboard] = createSyncedContext<
+    WhiteboardState,
+    'type',
+    WhiteboardEphemeralData
+>('type', equal, {
+    validateEphemeralData: validateWhiteboardEphemeralData,
+});
+
+ctx.publishEphemeral(messages)
+ctx.useEphemeral(query)
 ```
+
+The returned context should expose `publishEphemeral(messages: EphemeralMessage<Data>[])` and
+`useEphemeral(query): EphemeralRecord<Data>[]`, where `Data` is fixed by the context. Apps that do
+not opt in can default `Data` to `never` or another disabled type.
 
 or keep it example-local first:
 

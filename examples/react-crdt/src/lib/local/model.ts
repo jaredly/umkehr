@@ -1,9 +1,5 @@
-import {
-    hlc,
-    latestCrdtUpdateTimestamp,
-    type CrdtUpdate,
-} from 'umkehr/crdt';
-import type {SyncedTransport} from 'umkehr/react-crdt';
+import {hlc, latestCrdtUpdateTimestamp, type CrdtUpdate} from 'umkehr/crdt';
+import type {EphemeralMessage, SyncedTransport} from 'umkehr/react-crdt';
 
 export type ReplicaId = string;
 export type QueueCount = {label: string; count: number};
@@ -37,6 +33,10 @@ export function createDemoTransport(
             return () => {
                 listeners.delete(receive);
             };
+        },
+        publishEphemeral<Data>(_messages: EphemeralMessage<Data>[]) {},
+        subscribeEphemeral<Data>(_receive: (message: EphemeralMessage<Data>) => void) {
+            return () => {};
         },
         receive(update) {
             const ts = latestCrdtUpdateTimestamp(update);

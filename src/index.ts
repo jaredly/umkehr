@@ -18,3 +18,11 @@ export {
 export {blankHistory, dispatch, jump, type Annotations, type History} from './history/history.js';
 export {createStatusStore} from './statuses.js';
 export type {Status, StatusQuery, StatusStore} from './statuses.js';
+export {createEphemeralStore} from './ephemeral.js';
+export type {
+    EphemeralMessage,
+    EphemeralQuery,
+    EphemeralRecord,
+    EphemeralState,
+    EphemeralStore,
+} from './ephemeral.js';

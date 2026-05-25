@@ -6,6 +6,7 @@ import type {IJsonSchemaCollection} from 'typia';
 import {createCrdtDocument, createCrdtLocalHistory, hlc, type CrdtUpdate} from '../crdt/index';
 import {createSyncedContext, useStatuses, useValue, type SyncedTransport} from './react-crdt';
 import {createStatusStore} from '../statuses';
+import type {EphemeralMessage} from '../ephemeral';
 import {type Updater} from '../react';
 import {createContext, useContext} from 'react';
 import React from 'react';
@@ -157,6 +158,12 @@ class TestTransport implements SyncedTransport {
         return () => {
             this.listeners.delete(receive);
         };
+    }
+
+    publishEphemeral<Data>(_messages: EphemeralMessage<Data>[]) {}
+
+    subscribeEphemeral<Data>(_receive: (message: EphemeralMessage<Data>) => void) {
+        return () => {};
     }
 
     emit(update: CrdtUpdate) {

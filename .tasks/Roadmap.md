@@ -24,3 +24,7 @@ Testing findings
 - [ ] whiteboard drag doesn't preventDefault so the browser does selection stuff
 - [ ] whiteboard perf: every noteview updates while dragging one
 - [ ] todo perf: every todo updates when updating a todo
+
+
+NEEDS TO TEST:
+- migration definiteily

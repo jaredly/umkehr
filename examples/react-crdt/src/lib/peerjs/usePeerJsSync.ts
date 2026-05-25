@@ -1,11 +1,6 @@
 import {useCallback, useEffect, useMemo, useRef} from 'react';
 import Peer, {type DataConnection} from 'peerjs';
-import {
-    hlc,
-    latestCrdtUpdateBatchTimestamp,
-    type CrdtDocument,
-    type CrdtUpdate,
-} from 'umkehr/crdt';
+import {hlc, latestCrdtUpdateBatchTimestamp, type CrdtDocument, type CrdtUpdate} from 'umkehr/crdt';
 import type {SyncedTransport} from 'umkehr/react-crdt';
 import {createExternalStore} from '../store';
 import {
@@ -283,6 +278,10 @@ export function usePeerJsSync<TState>({
                 return () => {
                     listenersRef.current.delete(receive);
                 };
+            },
+            publishEphemeral(_messages) {},
+            subscribeEphemeral(_receive) {
+                return () => {};
             },
         }),
         [actor, broadcastFromHost, sendOrQueue],
