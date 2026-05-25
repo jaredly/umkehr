@@ -33,3 +33,13 @@
 - Added client protocol tests for valid and malformed `presenceEvent` messages.
 - Verified Phase 4 with `npx vitest run examples/react-crdt/src/lib/server/protocol.test.ts`, `npm run typecheck`, `npm run typecheck:tests`, `npm test`, `npm run typecheck` in `examples/react-crdt-server`, and `npm test` in `examples/react-crdt-server`.
 - Rechecked `npm run typecheck:examples`; it still fails only on the known unrelated `CrdtUpdate.path` seed test and Vite plugin type mismatches.
+- Started Phase 5.
+- Added whiteboard-specific `WhiteboardEphemeralData` union covering element previews, stroke previews, and selections.
+- Added `validateWhiteboardEphemeralData` using the existing typia validator pattern.
+- Added stable whiteboard ephemeral message helpers for element previews, stroke previews, selections, clears, and message ids.
+- Scoped element and stroke preview messages to `elements[id]`; scoped single-element selections to `elements[id]`, multi-element selections to `elements`, and empty selections to no path.
+- Bound `useWhiteboard` to `WhiteboardEphemeralData` through `createSyncedContext` with receive-side validation and a 16 KB message cap.
+- Exported the whiteboard ephemeral payload types, validator, and helpers from the whiteboard model module.
+- Added focused whiteboard tests for valid/invalid payload validation, stable helper message shape, path scoping, and clear-message validity.
+- Verified Phase 5 with `npx vitest run examples/react-crdt/src/apps/whiteboard/ephemeral.test.ts`, `npm run typecheck`, `npm run typecheck:tests`, and `npm test`.
+- Rechecked `npm run typecheck:examples`; it still fails only on the known unrelated `CrdtUpdate.path` seed test and Vite plugin type mismatches.

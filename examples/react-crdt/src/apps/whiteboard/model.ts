@@ -1,5 +1,8 @@
 import {createHistoryContext} from 'umkehr/react';
 import {createSyncedContext} from 'umkehr/react-crdt';
+import {validateWhiteboardEphemeralData, type WhiteboardEphemeralData} from './ephemeral';
+import type {WhiteboardState} from './schema';
+
 export {
     WHITEBOARD_DOC_ID,
     initialWhiteboardState,
@@ -17,10 +20,31 @@ export {
     type WhiteboardElementType,
     type WhiteboardState,
 } from './schema';
-import type {WhiteboardState} from './schema';
+export {
+    clearEphemeralMessage,
+    elementPreviewId,
+    elementPreviewMessage,
+    selectionId,
+    selectionMessage,
+    strokePreviewId,
+    strokePreviewMessage,
+    validateWhiteboardEphemeralData,
+    type WhiteboardElementPreviewData,
+    type WhiteboardEphemeralData,
+    type WhiteboardSelectionData,
+    type WhiteboardStrokePreviewData,
+} from './ephemeral';
+
 export const [ProvideWhiteboardHistory, useWhiteboardHistory] = createHistoryContext<
     WhiteboardState,
     never,
     'type'
 >('type');
-export const [ProvideWhiteboard, useWhiteboard] = createSyncedContext<WhiteboardState>('type');
+export const [ProvideWhiteboard, useWhiteboard] = createSyncedContext<
+    WhiteboardState,
+    'type',
+    WhiteboardEphemeralData
+>('type', undefined, {
+    validateEphemeralData: validateWhiteboardEphemeralData,
+    maxEphemeralBytes: 16_384,
+});
