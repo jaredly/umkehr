@@ -7,6 +7,8 @@ import {createCrdtDocument, createCrdtLocalHistory, hlc, type CrdtUpdate} from '
 import {createSyncedContext, useStatuses, useValue, type SyncedTransport} from './react-crdt';
 import {createStatusStore} from '../statuses';
 import {type Updater} from '../react';
+import {createContext, useContext} from 'react';
+import React from 'react';
 
 type State = {
     title: string;
@@ -88,6 +90,7 @@ const createReorderListHistory = () =>
                 todos: [
                     {id: 'a', title: 'a'},
                     {id: 'b', title: 'b'},
+                    {id: 'c', title: 'c'},
                 ],
             },
             reorderListSchema,
@@ -324,13 +327,17 @@ describe('createSyncedContext', () => {
         expect(renders).toBe(2);
     });
 
-    function Todo({path}: {path: Updater<{id: string; title: string}>}) {
+    const RenderCount = createContext({renders: 0});
+
+    const Todo = React.memo(function Todo({path}: {path: Updater<{id: string; title: string}>}) {
         const todo = useValue(path);
+        const v = useContext(RenderCount);
+        v.renders++;
         return <span>{todo.title}</span>;
-    }
+    });
 
     function Todos({$}: {$: Updater<ReorderListState>}) {
-        const todos = useValue($.todos);
+        const todos = useValue($.todos, (t) => t.map((t) => t.id));
         return (
             <>
                 <button
@@ -345,35 +352,41 @@ describe('createSyncedContext', () => {
                     Switch
                 </button>
                 <div data-testid="todos">
-                    {todos.map((item, i) => (
-                        <Todo key={item.id} path={$.todos[i]} />
+                    {todos.map((id, i) => (
+                        <Todo key={id} path={$.todos[i]} />
                     ))}
                 </div>
             </>
         );
     }
 
-    it.only('list reorder rerender case', async () => {
+    it('list reorder rerender case', async () => {
         const [Provider, useTodos] = createSyncedContext<ReorderListState>('type');
         const transport = new TestTransport('local');
         const history = createReorderListHistory();
+        const renders = {renders: 0};
         const Wrap = () => {
             const ctx = useTodos();
             return <Todos $={ctx.$} />;
         };
 
         const view = render(
-            <Provider initial={history} transport={transport}>
-                <Wrap />
-            </Provider>,
+            <RenderCount.Provider value={renders}>
+                <Provider initial={history} transport={transport}>
+                    <Wrap />
+                </Provider>
+            </RenderCount.Provider>,
         );
+        expect(renders.renders).toBe(3);
 
-        expect(view.getByTestId('todos').textContent).toBe('ab');
+        expect(view.getByTestId('todos').textContent).toBe('abc');
         fireEvent.click(view.getByText('Switch'));
         // await new Promise((resolve) => setTimeout(resolve, 0));
 
-        expect(view.getByTestId('todos').textContent).toBe('ba');
+        expect(view.getByTestId('todos').textContent).toBe('bac');
 
+        // c doesn't rerender
+        expect(renders.renders).toBe(5);
         // todo fill in
     });
 

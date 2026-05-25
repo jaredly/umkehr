@@ -34,7 +34,6 @@ export const useResettingState = <T>(f: () => T, r: unknown[]) => {
     const v = useMemo(() => ({current: f()}), r);
     const setV = useCallback((nv: T) => {
         if (!equal(v.current, nv)) {
-            console.log('resetting state', v.current, nv);
             v.current = nv;
             setT((t) => t + 1);
         }
