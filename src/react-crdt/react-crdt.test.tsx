@@ -3,19 +3,10 @@ import '../react/test-dom';
 import {act, cleanup, fireEvent, render, waitFor} from '@testing-library/react';
 import {afterEach, describe, expect, it} from 'vitest';
 import type {IJsonSchemaCollection} from 'typia';
-import {
-    createCrdtDocument,
-    createCrdtLocalHistory,
-    hlc,
-    type CrdtUpdate,
-} from '../crdt/index';
-import {
-    createSyncedContext,
-    useStatuses,
-    useValue,
-    type SyncedTransport,
-} from './react-crdt';
+import {createCrdtDocument, createCrdtLocalHistory, hlc, type CrdtUpdate} from '../crdt/index';
+import {createSyncedContext, useStatuses, useValue, type SyncedTransport} from './react-crdt';
 import {createStatusStore} from '../statuses';
+import typia from 'typia';
 
 type State = {
     title: string;
@@ -49,21 +40,23 @@ const startTs = hlc.pack(hlc.init('seed', 1_000_000));
 const createInitialHistory = () =>
     createCrdtLocalHistory(createCrdtDocument(initial, schema, {timestamp: startTs}));
 
-const metaSchema = {
-    schemas: [
-        {
-            type: 'object',
-            properties: {
-                left: {type: 'string'},
-                right: {type: 'string'},
-            },
-        },
-    ],
-    components: {schemas: {}},
-} as unknown as IJsonSchemaCollection<'3.1', [MetaState]>;
+// const metaSchema = {
+//     schemas: [
+//         {
+//             type: 'object',
+//             properties: {
+//                 left: {type: 'string'},
+//                 right: {type: 'string'},
+//             },
+//         },
+//     ],
+//     components: {schemas: {}},
+// } as unknown as IJsonSchemaCollection<'3.1', [MetaState]>;
 
-const createMetaHistory = (initial: MetaState) =>
-    createCrdtLocalHistory(createCrdtDocument(initial, metaSchema, {timestamp: startTs}));
+const createMetaHistory = <T,>(initial: T) =>
+    createCrdtLocalHistory(
+        createCrdtDocument(initial, typia.json.schemas<[T], '3.1'>(), {timestamp: startTs}),
+    );
 
 const listSchema = {
     schemas: [
@@ -135,6 +128,8 @@ class TestTransport implements SyncedTransport {
 
 afterEach(() => cleanup());
 
+type LR = {left: string; right: string};
+
 describe('createSyncedContext', () => {
     it('renders subscribed values, dispatches local updates, and publishes CRDT updates', () => {
         const [Provider, useTodos] = createSyncedContext<State>('type');
@@ -182,7 +177,9 @@ describe('createSyncedContext', () => {
             const ctx = useTodos();
             const path = ctx.useCrdtPath(ctx.$.title);
             titlePathRenders += 1;
-            return <span data-testid="crdt-path">{path.map((segment) => segment.type).join('/')}</span>;
+            return (
+                <span data-testid="crdt-path">{path.map((segment) => segment.type).join('/')}</span>
+            );
         }
 
         function Editor() {
@@ -220,7 +217,7 @@ describe('createSyncedContext', () => {
     it('returns new CRDT metadata when the passed-in path changes to different metadata', () => {
         const [Provider, useTodos] = createSyncedContext<MetaState>('type');
         const transport = new TestTransport('local');
-        const history = createMetaHistory({left: 'Left', right: 'Right'});
+        const history = createMetaHistory<LR>({left: 'Left', right: 'Right'});
         let renders = 0;
 
         function SelectedMeta({field}: {field: 'left' | 'right'}) {
@@ -257,7 +254,7 @@ describe('createSyncedContext', () => {
     it('does not schedule another render when the passed-in path changes to equal CRDT metadata', async () => {
         const [Provider, useTodos] = createSyncedContext<MetaState>('type');
         const transport = new TestTransport('local');
-        const history = createMetaHistory({left: 'Same', right: 'Same'});
+        const history = createMetaHistory<LR>({left: 'Same', right: 'Same'});
         let renders = 0;
 
         function SelectedMeta({field}: {field: 'left' | 'right'}) {
@@ -292,11 +289,72 @@ describe('createSyncedContext', () => {
         expect(renders).toBe(2);
     });
 
+    it('list reorder rerender case', async () => {
+        type T = {todos: {id: string; title: string}[]};
+        const [Provider, useTodos] = createSyncedContext<T>('type');
+        const transport = new TestTransport('local');
+        const history = createMetaHistory<T>({
+            todos: [
+                {id: 'a', title: 'a'},
+                {id: 'b', title: 'b'},
+            ],
+        });
+
+        function Todo({
+            todo,
+            path,
+        }: {
+            todo: {id: string; title: string};
+            path: Updater<{id: string; title: string}>;
+        }) {
+            return <span>{todo.title}</span>;
+        }
+
+        function Todos() {
+            const ctx = useTodos();
+            const todos = useValue(ctx.$.todos);
+            return (
+                <>
+                    <button
+                        onClick={() => {
+                            ctx.$.todos.$move({
+                                fromIdx: 0,
+                                targetIdx: 1,
+                                after: true,
+                            });
+                        }}
+                    >
+                        Switch
+                    </button>
+                    <div test-id="todos">
+                        {todos.map((item, i) => (
+                            <Todo key={item.id} path={ctx.$.todos[i]} todo={item} />
+                        ))}
+                    </div>
+                </>
+            );
+        }
+
+        const view = render(
+            <Provider initial={history} transport={transport}>
+                <Todos />
+            </Provider>,
+        );
+
+        expect(view.getByTestId('todos').textContent).toBe('a\nb');
+        fireEvent.click(view.getByText('Switch'));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(view.getByTestId('todos').textContent).toBe('b\na');
+
+        // todo fill in
+    });
+
     it('does not re-render when a subscribed CRDT metadata path is notified with equal metadata', async () => {
         const [Provider, useTodos] = createSyncedContext<MetaState>('type');
         const transport = new TestTransport('local');
-        const history = createMetaHistory({left: 'Same', right: 'Other'});
-        const equivalentPreviewHistory = createMetaHistory({left: 'Same', right: 'Other'});
+        const history = createMetaHistory<LR>({left: 'Same', right: 'Other'});
+        const equivalentPreviewHistory = createMetaHistory<LR>({left: 'Same', right: 'Other'});
         let renders = 0;
 
         function SelectedMeta() {
@@ -343,7 +401,11 @@ describe('createSyncedContext', () => {
             const ctx = useTodos();
             const todo = useValue(ctx.$.todos[index]);
             renders[id] += 1;
-            return <span data-testid={id}>{todo.title}:{String(todo.done)}</span>;
+            return (
+                <span data-testid={id}>
+                    {todo.title}:{String(todo.done)}
+                </span>
+            );
         }
 
         function List() {
@@ -420,7 +482,9 @@ describe('createSyncedContext', () => {
             for (const update of left.published.flat()) right.emit(update);
         });
 
-        expect(rightView.container.querySelector('[data-testid="title"]')?.textContent).toBe('Remote');
+        expect(rightView.container.querySelector('[data-testid="title"]')?.textContent).toBe(
+            'Remote',
+        );
         expect(right.published).toEqual([]);
     });
 
@@ -519,7 +583,9 @@ describe('createSyncedContext', () => {
             for (const update of remote.published.flat()) local.emit(update);
         });
 
-        expect(localView.container.querySelector('[data-testid="title"]')?.textContent).toBe('Preview');
+        expect(localView.container.querySelector('[data-testid="title"]')?.textContent).toBe(
+            'Preview',
+        );
         expect(localView.container.querySelector('[data-testid="count"]')?.textContent).toBe('1');
         expect(local.published).toEqual([]);
     });

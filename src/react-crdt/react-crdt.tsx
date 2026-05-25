@@ -185,6 +185,7 @@ export const createSyncedContext = <T, Tag extends string = 'type'>(
                                     );
 
                                     if (!equal(newMeta, lmeta.current)) {
+                                        console.log('new meta', lmeta.current, newMeta);
                                         setMeta(newMeta);
                                     }
                                 }),
