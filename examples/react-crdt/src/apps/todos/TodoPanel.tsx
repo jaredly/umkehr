@@ -22,6 +22,7 @@ import type {ServerLastEditStatusData} from '../../lib/server/types';
 import {createExternalStore, type ExternalStore} from '../../lib/store';
 import {formatTodoTitleBlame, titleBlameForTodoMeta} from './blame';
 import type {Todo, TodoState} from './model';
+import React from 'react';
 
 const pastelColors = ['#fff', '#fce7f3', '#dbeafe', '#dcfce7', '#fef3c7', '#ede9fe'] as const;
 const reorderAnimationMs = 180;
@@ -355,7 +356,7 @@ function TodoSummary({editor}: {editor: AppEditorContext<TodoState>}) {
     );
 }
 
-function TodoItemSlot({
+const TodoItemSlot = React.memo(function TodoItemSlot({
     editor,
     path,
     isDragging,
@@ -387,7 +388,7 @@ function TodoItemSlot({
             readOnly={readOnly}
         />
     );
-}
+});
 
 function useDropPosition(store: ExternalStore<DropTarget | null>, id?: string) {
     return useSyncExternalStore(

@@ -34,8 +34,9 @@ import {
     type Context,
     type PathListenerNode,
     type ScheduledTask,
+    useResettingState,
 } from '../react-core/index.js';
-import type {ApplyTiming, DraftPatch, Path} from '../types.js';
+import {pathToString, type ApplyTiming, type DraftPatch, type Path} from '../types.js';
 import type {PatchBuilderInternal} from '../types.js';
 import {useLatest} from '../react/useLatest.js';
 import {createStatusStore, type StatusStore} from '../statuses.js';
@@ -162,18 +163,35 @@ export const createSyncedContext = <T, Tag extends string = 'type'>(
                     },
                     useCrdtMeta(node) {
                         const path = getPath(node);
-                        const [tick, setTick] = useState(0);
+                        // const [tick, setTick] = useState(0);
+                        const [meta, setMeta] = useResettingState(() => {
+                            const history = visibleHistory(ctx);
+                            return getMetaAtPath(
+                                history.doc.meta,
+                                crdtPathForExisting(history.doc, path),
+                            );
+                        }, [path]);
+                        const lmeta = useLatest(meta);
                         useEffect(
                             () =>
                                 makeContextForPath(
                                     () => visibleState(ctx),
                                     ctx.listenersByPath,
-                                ).listenToPath(path, () => setTick((value) => value + 1)),
+                                ).listenToPath(path, () => {
+                                    const history = visibleHistory(ctx);
+                                    const newMeta = getMetaAtPath(
+                                        history.doc.meta,
+                                        crdtPathForExisting(history.doc, path),
+                                    );
+
+                                    if (!equal(newMeta, lmeta.current)) {
+                                        setMeta(newMeta);
+                                    }
+                                }),
                             [ctx, path],
                         );
-                        tick;
-                        const history = visibleHistory(ctx);
-                        return getMetaAtPath(history.doc.meta, crdtPathForExisting(history.doc, path));
+                        // tick;
+                        return meta;
                     },
                     $,
                     dispatch,
@@ -367,14 +385,7 @@ function applyLocalDraft<T, Tag extends string>(
     const {current, changes} = resolveAndApply(ctx.history.doc.state, v, extra, tag, equalFn);
     if (current === ctx.history.doc.state || !changes.length) return;
 
-    const result = applyLocalCommand(
-        ctx.history,
-        v,
-        ctx.transport.tick(),
-        extra,
-        tag,
-        equalFn,
-    );
+    const result = applyLocalCommand(ctx.history, v, ctx.transport.tick(), extra, tag, equalFn);
     ctx.history = result.history;
     ctx.save(ctx.history);
     notifyChanged(ctx, [...previewPaths, ...changedPaths(changes)]);
@@ -391,10 +402,7 @@ function receiveRemoteUpdate<T, Tag extends string>(
     ctx.save(ctx.history);
 
     const paths = changedNormalPathsForCrdtUpdate(before, history.doc, update);
-    const extra = makeContextForPath(
-        () => visibleState(ctx),
-        ctx.listenersByPath,
-    );
+    const extra = makeContextForPath(() => visibleState(ctx), ctx.listenersByPath);
     if (ctx.activePreviewChanges.length || ctx.queuedChanges.length) {
         if (ctx.scheduled != null) {
             cancelScheduledTask(ctx.scheduled);

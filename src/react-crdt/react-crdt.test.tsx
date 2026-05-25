@@ -22,6 +22,11 @@ type State = {
     count: number;
 };
 
+type MetaState = {
+    left: string;
+    right: string;
+};
+
 type ListState = {
     todos: Array<{id: string; title: string; done: boolean}>;
 };
@@ -43,6 +48,22 @@ const initial: State = {title: 'Draft', count: 0};
 const startTs = hlc.pack(hlc.init('seed', 1_000_000));
 const createInitialHistory = () =>
     createCrdtLocalHistory(createCrdtDocument(initial, schema, {timestamp: startTs}));
+
+const metaSchema = {
+    schemas: [
+        {
+            type: 'object',
+            properties: {
+                left: {type: 'string'},
+                right: {type: 'string'},
+            },
+        },
+    ],
+    components: {schemas: {}},
+} as unknown as IJsonSchemaCollection<'3.1', [MetaState]>;
+
+const createMetaHistory = (initial: MetaState) =>
+    createCrdtLocalHistory(createCrdtDocument(initial, metaSchema, {timestamp: startTs}));
 
 const listSchema = {
     schemas: [
@@ -194,6 +215,81 @@ describe('createSyncedContext', () => {
         fireEvent.click(view.getByText('title'));
         expect(view.getByTestId('crdt-path').textContent).toBe('objectField');
         expect(titlePathRenders).toBe(2);
+    });
+
+    it('returns new CRDT metadata when the passed-in path changes to different metadata', () => {
+        const [Provider, useTodos] = createSyncedContext<MetaState>('type');
+        const transport = new TestTransport('local');
+        const history = createMetaHistory({left: 'Left', right: 'Right'});
+        let renders = 0;
+
+        function SelectedMeta({field}: {field: 'left' | 'right'}) {
+            const ctx = useTodos();
+            const node = field === 'left' ? ctx.$.left : ctx.$.right;
+            const meta = ctx.useCrdtMeta(node);
+            renders += 1;
+            return (
+                <span data-testid="meta">
+                    {meta?.kind === 'primitive' ? String(meta.value) : ''}
+                </span>
+            );
+        }
+
+        const view = render(
+            <Provider initial={history} transport={transport}>
+                <SelectedMeta field="left" />
+            </Provider>,
+        );
+
+        expect(view.getByTestId('meta').textContent).toBe('Left');
+        expect(renders).toBe(1);
+
+        view.rerender(
+            <Provider initial={history} transport={transport}>
+                <SelectedMeta field="right" />
+            </Provider>,
+        );
+
+        expect(view.getByTestId('meta').textContent).toBe('Right');
+        expect(renders).toBe(2);
+    });
+
+    it('does not schedule another render when the passed-in path changes to equal CRDT metadata', async () => {
+        const [Provider, useTodos] = createSyncedContext<MetaState>('type');
+        const transport = new TestTransport('local');
+        const history = createMetaHistory({left: 'Same', right: 'Same'});
+        let renders = 0;
+
+        function SelectedMeta({field}: {field: 'left' | 'right'}) {
+            const ctx = useTodos();
+            const node = field === 'left' ? ctx.$.left : ctx.$.right;
+            const meta = ctx.useCrdtMeta(node);
+            renders += 1;
+            return (
+                <span data-testid="meta">
+                    {meta?.kind === 'primitive' ? String(meta.value) : ''}
+                </span>
+            );
+        }
+
+        const view = render(
+            <Provider initial={history} transport={transport}>
+                <SelectedMeta field="left" />
+            </Provider>,
+        );
+
+        expect(view.getByTestId('meta').textContent).toBe('Same');
+        expect(renders).toBe(1);
+
+        view.rerender(
+            <Provider initial={history} transport={transport}>
+                <SelectedMeta field="right" />
+            </Provider>,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(view.getByTestId('meta').textContent).toBe('Same');
+        expect(renders).toBe(2);
     });
 
     it('does not rerender sibling rows for array item field changes', () => {

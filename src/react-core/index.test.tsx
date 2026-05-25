@@ -1,7 +1,6 @@
 import '../react/test-dom';
 
 import {cleanup, render, waitFor} from '@testing-library/react';
-import {useLayoutEffect} from 'react';
 import {afterEach, describe, expect, it} from 'vitest';
 import {createPatchBuilderWithContext, getPath} from '../helper';
 import {
@@ -35,9 +34,6 @@ const makeTestContext = (initial: State) => {
         set(next: State, paths = [getPath($)]) {
             state = next;
             notifyPaths(listenersByPath, paths);
-        },
-        setSilently(next: State) {
-            state = next;
         },
     };
 };
@@ -129,54 +125,56 @@ describe('react-core useValue', () => {
         expect(renders).toBe(2);
     });
 
-    it('can use referential selector equality when exact is false', async () => {
+    it('returns the new value when the passed-in path changes to a different value', () => {
         const ctx = makeTestContext({
             title: 'Draft',
             count: 0,
-            nested: {value: 'Initial'},
+            nested: {value: 'Published'},
         });
         let renders = 0;
 
-        function ParityView() {
-            const parity = useValue(ctx.$.count, (count) => ({parity: count % 2}), false);
+        function SelectedValue({field}: {field: 'title' | 'nested'}) {
+            const node = field === 'title' ? ctx.$.title : ctx.$.nested.value;
+            const value = useValue(node);
             renders += 1;
-            return <span data-testid="parity">{parity.parity}</span>;
+            return <span data-testid="value">{value}</span>;
         }
 
-        const view = render(<ParityView />);
+        const view = render(<SelectedValue field="title" />);
 
-        await waitFor(() => expect(renders).toBe(2));
+        expect(view.getByTestId('value').textContent).toBe('Draft');
+        expect(renders).toBe(1);
 
-        ctx.set(
-            {title: 'Draft', count: 2, nested: {value: 'Initial'}},
-            [getPath(ctx.$.count)],
-        );
+        view.rerender(<SelectedValue field="nested" />);
 
-        await waitFor(() => expect(view.getByTestId('parity').textContent).toBe('0'));
-        expect(renders).toBe(3);
+        expect(view.getByTestId('value').textContent).toBe('Published');
+        expect(renders).toBe(2);
     });
 
-    it('checks for missed changes when the effect subscribes', async () => {
+    it('does not schedule another render when the passed-in path changes to the same value', async () => {
         const ctx = makeTestContext({
-            title: 'Draft',
+            title: 'Same',
             count: 0,
-            nested: {value: 'Initial'},
+            nested: {value: 'Same'},
         });
+        let renders = 0;
 
-        function TitleView() {
-            const title = useValue(ctx.$.title);
-            useLayoutEffect(() => {
-                ctx.setSilently({
-                    title: 'Published',
-                    count: 0,
-                    nested: {value: 'Initial'},
-                });
-            }, []);
-            return <span data-testid="title">{title}</span>;
+        function SelectedValue({field}: {field: 'title' | 'nested'}) {
+            const node = field === 'title' ? ctx.$.title : ctx.$.nested.value;
+            const value = useValue(node);
+            renders += 1;
+            return <span data-testid="value">{value}</span>;
         }
 
-        const view = render(<TitleView />);
+        const view = render(<SelectedValue field="title" />);
 
-        await waitFor(() => expect(view.getByTestId('title').textContent).toBe('Published'));
+        expect(view.getByTestId('value').textContent).toBe('Same');
+        expect(renders).toBe(1);
+
+        view.rerender(<SelectedValue field="nested" />);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(view.getByTestId('value').textContent).toBe('Same');
+        expect(renders).toBe(2);
     });
 });

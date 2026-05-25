@@ -29,12 +29,14 @@ export {
     type ScheduledTask,
 } from '../framework-core/index.js';
 
-const useResettingState = <T>(f: () => T, r: unknown[]) => {
+export const useResettingState = <T>(f: () => T, r: unknown[]) => {
     const [_t, setT] = useState(0);
     const v = useMemo(() => ({current: f()}), r);
     const setV = useCallback((nv: T) => {
-        v.current = nv;
-        setT((t) => t + 1);
+        if (!equal(v.current, nv)) {
+            v.current = nv;
+            setT((t) => t + 1);
+        }
     }, []);
     return [v.current, setV] as const;
 };
@@ -58,17 +60,17 @@ export const useValue: (<Current, Return, Tag extends PropertyKey>(
     const [v, setV] = useResettingState(() => mod(extra.getForPath<Current>(path)), [path]);
     const lv = useLatest(v);
     const lmod = useLatest(mod);
-    useEffect(() => {
-        const f = () => {
-            const nw = lmod.current(extra.getForPath<Current>(path));
-            if (exact ? !equalFn(lv.current, nw) : lv.current !== nw) {
-                lv.current = nw;
-                setV(nw);
-            }
-        };
-        f();
-        return extra.listenToPath(path, f);
-    }, [extra, path, lv, lmod, exact, equalFn]);
+    useEffect(
+        () =>
+            extra.listenToPath(path, () => {
+                const nw = lmod.current(extra.getForPath<Current>(path));
+                if (exact ? !equalFn(lv.current, nw) : lv.current !== nw) {
+                    lv.current = nw;
+                    setV(nw);
+                }
+            }),
+        [extra, path, lv, lmod, exact, equalFn],
+    );
     return v;
 };
 
