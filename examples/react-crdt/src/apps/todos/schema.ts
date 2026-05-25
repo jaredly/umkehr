@@ -19,8 +19,10 @@ export const validateTodoState = typia.createValidate<TodoState>();
 export const initialTodoState: TodoState = {
     bgcolor: '#fff',
     todos: [
-        {id: 'one', title: 'Write README', done: true},
-        {id: 'two', title: 'Try CRDT sync', done: false},
+        {id: 'one', title: '1. Write README', done: true},
+        {id: 'two', title: '2. Try CRDT sync', done: false},
+        {id: 'three', title: '3. A secret third thing', done: false},
+        {id: 'four', title: '4. horses', done: false},
     ],
 };
 
