@@ -14,7 +14,7 @@ The main target is schema migration behavior across:
 
 ## Recommendation
 
-Use **Playwright** as the primary end-to-end test runner, with dev/test seed helpers for old-schema data and server migration states.
+Use **Playwright** as the primary end-to-end test runner, backed by the checked-in seed database generator/importer that now exists for the React CRDT example and Bun sync server.
 
 Puppeteer would work for simple browser automation, but Playwright is a better fit here because it has first-class support for:
 
@@ -25,7 +25,7 @@ Puppeteer would work for simple browser automation, but Playwright is a better f
 - tracing/screenshots/videos for failure analysis
 - Chromium/WebKit/Firefox if cross-browser coverage becomes useful
 
-An MCP browser server is useful for ad hoc inspection, but it is not a replacement for repeatable checked-in E2E tests. The durable approach is a Playwright suite in the repo.
+An MCP browser server is useful for ad hoc inspection, but it is not a replacement for repeatable checked-in E2E tests. The durable approach is a Playwright suite in the repo. The repo already has `@playwright/test` in `examples/react-crdt`, a starter `examples/react-crdt/playwright.config.ts`, and `examples/react-crdt/tests/example.spec.ts`; the remaining work is to replace the scaffold with migration-focused specs and server fixtures.
 
 ## Required Capabilities
 
@@ -59,13 +59,15 @@ Needed:
 Tooling:
 
 - Playwright `webServer` config for the Vite app
-- Playwright `webServer` config or test fixture for the Bun server
-- environment variable or CLI flag for server SQLite path
+- Playwright fixture for the Bun server, so each worker/test can create and seed an isolated database
+- server CLI database path: `bun --bun src/index.ts --db /tmp/umkehr-e2e.sqlite`
+- seeded server database wrapper: `bun run seed:test -- --db /tmp/umkehr-e2e.sqlite --date 2026-01-02 --size small`
 
 Current gap:
 
-- The server currently defaults to `server-sync.sqlite`.
-- For repeatable E2E tests, the server should accept a test database path from environment, for example `UMKEHR_SERVER_DB=/tmp/...sqlite`.
+- The server now accepts `--db <path>`, so temp SQLite DBs are possible without an environment variable.
+- The server port is still hard-coded to `8787`, so parallel server E2E tests either need one worker or a `--port`/environment override.
+- The migration lock TTL is still hard-coded to 60 seconds in `ServerStore`, so lock-expiry tests still need a test override or a direct store-level helper.
 
 ### Storage Seeding
 
@@ -78,19 +80,42 @@ Needed:
 - seed pending local server events
 - seed malformed migration uploads for negative tests
 
-Best approach:
+Existing seed database setup:
 
-- Add checked-in seed helpers that use the same fixture data as unit tests.
+- `examples/react-crdt/src/lib/seed/generate.ts` is the canonical deterministic fixture catalog.
+- The client script `seed:server` builds that generator with `vite.seed.config.ts` and prints a server-shaped JSON payload.
+- `examples/react-crdt-server/src/seed.ts` imports a seed JSON payload from stdin or `--input`.
+- `examples/react-crdt-server/src/seedTest.ts` runs the client generator and imports it directly into a SQLite file.
+- `examples/react-crdt-server` exposes `bun run seed:test -- --db <path> --date <date> --size small|default|large`.
+- `ServerStore.importSeedDatabase(...)` validates the payload before clearing data, writes in one transaction, inserts users/documents/metadata/branches/events, and clears migration locks/archive rows on overwrite.
+
+Current valid seed documents:
+
+- Todos: `todos-small`, `todos-many-items`, `todos-many-events`, `todos-branches`, `todos-merge-review`, `todos-conflicting-fields`, `todos-array-operations`, `todos-deletes-and-readds`, `todos-recursive-merges`, `todos-partial-repeat-merge`, `todos-wide-branch-list`.
+- Whiteboard: `whiteboard-many-elements`, `whiteboard-branches`, `whiteboard-element-editing`, `whiteboard-dense-overlap`, `whiteboard-conflicting-element-edits`, `whiteboard-many-events`.
+- Migration: `todos-migration-v1-main`, with `appId: "todos-migration-fixture"`, schema version 1, and the v1 fixture fingerprint hash from `examples/migration-fixtures/todos.ts`.
+
+Related projections already exist:
+
+- `createLocalFirstSeedReplica({fixture})` projects branch-free seed fixtures to local-first IndexedDB-shaped replicas and retained batches.
+- `createServerClientSeedReplica({fixture, scenario: "cached" | "pending-uploads"})` projects fixtures to cached or pending server-client browser state.
+- `generateMalformedSeedPayloads(...)` returns malformed server payloads for importer/negative validation tests, separate from the default valid payload.
+
+Best approach from here:
+
+- Reuse `generateSeedFixtureCatalog(...)` and the existing projections instead of inventing separate E2E fixtures.
+- Use `bun run seed:test` for whole-server database setup.
+- Add thin Playwright-side helpers that write existing browser projection shapes into IndexedDB/localStorage.
 - Prefer structured app/server APIs over handwritten IndexedDB mutation inside browser tests.
 - Keep seed helpers test-only or dev-only.
 
 Suggested files:
 
-- `examples/react-crdt/e2e/seed/browserStorage.ts`
-- `examples/react-crdt/e2e/seed/serverData.ts`
-- `examples/react-crdt/e2e/fixtures/todosMigration.ts`
+- `examples/react-crdt/tests/seed/browserStorage.ts`
+- `examples/react-crdt/tests/helpers/server.ts`
+- `examples/react-crdt/tests/helpers/storage.ts`
 
-The existing `examples/migration-fixtures/todos.ts` can be reused as the canonical v1/v2 data shape.
+The existing `examples/migration-fixtures/todos.ts` remains the canonical v1/v2 migration shape; the seed generator already imports it for `todos-migration-v1-main`.
 
 ### Server Test Hooks
 
@@ -104,28 +129,25 @@ Needed:
 - inspect archived schema hashes
 - inspect active branch events
 
-Options:
+Existing:
 
-1. Test-only HTTP endpoints.
-2. A separate seed CLI/script imported by Playwright setup.
-3. Direct SQLite access from tests.
+```sh
+cd examples/react-crdt-server
+bun run seed:test -- --db /tmp/umkehr-e2e.sqlite --date 2026-01-02 --size small
+bun --bun src/index.ts --db /tmp/umkehr-e2e.sqlite
+```
 
 Recommended:
 
-- Use a seed CLI or module for setup.
-- Avoid exposing seed/reset HTTP endpoints in the dev server unless guarded by a clear test environment flag.
-
-Potential helper:
-
-```sh
-bun run src/test-seed.ts --db /tmp/umkehr-e2e.sqlite --scenario old-todos-v1
-```
+- Keep setup as CLI/module-based seeding, not test-only HTTP endpoints.
+- Add small E2E helpers that can query SQLite for assertions such as active schema hash, archived schema hashes, branch event counts, and active migration lock state.
+- Add a test-only way to create or shorten migration locks. This can be a store helper imported by tests or a CLI, but does not need to be a public server endpoint.
 
 ## Proposed Repo Shape
 
 ```text
 examples/react-crdt/
-  e2e/
+  tests/
     migration.spec.ts
     local-first.spec.ts
     server-migration.spec.ts
@@ -136,7 +158,6 @@ examples/react-crdt/
       assertions.ts
     seed/
       browserStorage.ts
-      serverData.ts
   playwright.config.ts
 ```
 
@@ -145,7 +166,8 @@ Server-side helpers:
 ```text
 examples/react-crdt-server/
   src/
-    testSeed.ts
+    seedTest.ts
+    seed.ts
 ```
 
 Root scripts:
@@ -167,9 +189,11 @@ Useful fixtures:
 - `oldAppPage`: old-schema or seeded old-schema page.
 - `serverDbPath`: temporary SQLite file path.
 - `serverProcess`: Bun server process using that DB path.
-- `seedServerScenario(name)`: seeds server DB with a named fixture.
+- `seedServerDatabase(options)`: runs `bun run seed:test -- --db <path> --date <date> --size <size>`.
+- `seedServerFixture(docId)`: starts from the generated catalog and optionally prunes/imports one document if a test needs a smaller DB.
 - `clearBrowserStorage(page)`: clears localStorage and IndexedDB.
-- `seedBrowserStorage(page, scenario)`: writes localStorage/IndexedDB fixture data.
+- `seedBrowserStorage(page, scenario)`: writes localStorage/IndexedDB fixture data from `createLocalFirstSeedReplica(...)` or `createServerClientSeedReplica(...)`.
+- `inspectServerDb(dbPath)`: checks active document schema, archived schemas, branch events, users, and locks.
 
 ## Scenarios To Automate First
 
@@ -181,7 +205,7 @@ Purpose:
 
 Steps:
 
-1. Start server with empty DB.
+1. Start server with an empty temp DB, or with seed DB imported and a new document id.
 2. Open two isolated browser contexts in server mode.
 3. Log in as two users.
 4. Make a todo edit in client A.
@@ -202,8 +226,8 @@ Purpose:
 
 Steps:
 
-1. Seed server with old-schema todos document.
-2. Open current client in server mode.
+1. Seed server with `todos-migration-v1-main`.
+2. Open current client in server mode against that doc id.
 3. Observe migration-required toolbar notice.
 4. Accept migration prompt.
 5. Wait for reconnect.
@@ -225,7 +249,7 @@ Purpose:
 
 Steps:
 
-1. Seed old-schema server document.
+1. Seed server with `todos-migration-v1-main`.
 2. Open client A and begin migration.
 3. Hold or delay A before upload.
 4. Open client B.
@@ -270,7 +294,7 @@ Purpose:
 
 Steps:
 
-1. Seed browser IndexedDB with old-schema local-first replica and retained batches.
+1. Seed browser IndexedDB with an old-schema local-first replica and retained batches.
 2. Open current app in local-first mode.
 3. Observe migration panel.
 4. Create migrated document.
@@ -312,7 +336,7 @@ Purpose:
 
 Steps:
 
-1. Seed old-schema data.
+1. Seed old-schema data, preferably `todos-migration-v1-main` for server tests and the migration fixture projection for browser/local-first tests.
 2. Configure missing migration path or bad migration output.
 3. Load current app.
 4. Trigger migration.
@@ -327,7 +351,7 @@ Expected:
 
 ## Seed Data Requirements
 
-The todos migration fixture should support:
+The todos migration fixture already supports:
 
 - v1 state with `text`, optional `archived`, optional `legacyFilter`
 - v2 state with `title`, required `priority`
@@ -335,18 +359,22 @@ The todos migration fixture should support:
   - rename a todo text
   - drop an archived update
   - add a todo requiring default priority
-- server events with contiguous indexes
-- local-first retained batch with vector metadata
+- server events with contiguous indexes via `todoFixtureServerUpdateEventsV1`
 
 Existing fixture:
 
 - `examples/migration-fixtures/todos.ts`
 
-Additional seed helpers should wrap that fixture for:
+Existing seed wrappers:
 
-- browser `localStorage`
-- browser IndexedDB
-- server SQLite store
+- `todosMigrationV1Main(...)` in `examples/react-crdt/src/lib/seed/generate.ts` emits a valid old-schema server document.
+- `createLocalFirstSeedReplica(...)` emits local-first replica plus retained batches from branch-free seed fixtures.
+- `createServerClientSeedReplica(...)` emits cached/pending server-client browser state from seed fixtures.
+
+Remaining seed-helper work:
+
+- Add a browser-storage projection for the old-schema migration fixture specifically, if local-first migration E2E tests need to start from v1 data.
+- Add an E2E helper for importing only one generated document into SQLite, or accept the full 18-document seeded DB and select the relevant doc id in the UI.
 
 ## Simulating Old Clients
 
@@ -404,8 +432,8 @@ Playwright tests should be split into tiers.
 
 Fast tier:
 
-- no real schema-version split
-- seeded browser/server data
+- seeded browser/server data from `generateSeedFixtureCatalog(...)`
+- one schema-version split using `todos-migration-v1-main`
 - one browser engine
 - runs in CI on every PR touching migration/server/local-first code
 
@@ -420,16 +448,21 @@ Slow tier:
 Suggested timeouts:
 
 - Keep normal tests under 30 seconds each.
-- Use fake or shortened lock timeout in test mode instead of waiting a real minute.
+- Use a fake or shortened lock timeout in test mode instead of waiting the current 60-second server TTL.
 
 ## Test-Mode Server Configuration
 
-Useful environment variables:
+Current test-mode configuration:
 
-- `UMKEHR_SERVER_DB`
-- `UMKEHR_SERVER_PORT`
-- `UMKEHR_MIGRATION_LOCK_MS`
-- `UMKEHR_ENABLE_TEST_SEEDING`
+- Server DB path is available as a CLI flag: `--db <path>`.
+- Seed database import is available through `bun run seed:test -- --db <path> --date <date> --size <size>`.
+- Server port is not configurable yet.
+- Migration lock TTL is not configurable yet.
+
+Useful additions:
+
+- `--port` or `UMKEHR_SERVER_PORT`
+- `--migration-lock-ms` or `UMKEHR_MIGRATION_LOCK_MS`
 
 The lock timeout override is especially important. A one-minute manual timeout is acceptable, but automated tests should use something like 500-2000 ms.
 
@@ -441,7 +474,7 @@ To run these tests autonomously, Codex needs:
 - Permission to start Vite and Bun server processes.
 - Permission to access `localhost`.
 - Permission to create/delete temporary SQLite files.
-- A deterministic seed API or seed scripts.
+- The existing deterministic seed scripts.
 - Stable selectors or accessible names in the UI.
 - A test-mode way to shorten migration lock expiry.
 
@@ -449,19 +482,22 @@ Codex does not need an MCP server if Playwright tests are checked in and runnabl
 
 ## Open Questions
 
-- Should E2E tests live under `examples/react-crdt/e2e` or a root-level `e2e` directory?
-- Should the server expose test-only seed endpoints, or should tests seed SQLite directly?
+- Should migration specs stay in existing `examples/react-crdt/tests`, or should the Playwright config move to `examples/react-crdt/e2e` once the suite grows?
+- Should tests import the full seed DB and select doc ids, or add a focused one-document seed import helper?
 - Do we want schema metadata override flags in the app for simulating old clients?
 - Should the server debug/admin page expose machine-readable JSON for active/archived schema state?
 - How much old-build testing should be automated versus kept as a release checklist?
 - Should local non-CRDT migration have a browser-visible fixture page, or is localStorage seeding enough?
+- Should server `--port` and migration lock TTL overrides be CLI flags, environment variables, or both?
 
 ## Summary
 
 The practical path is:
 
-1. Add Playwright to the React CRDT example.
-2. Add deterministic seed helpers using the existing todos migration fixture.
-3. Add server test configuration for temp DB path and shorter lock timeout.
-4. Automate the highest-risk server and local-first migration flows first.
-5. Keep real old-build testing as a slower release check unless schema churn becomes frequent.
+1. Use the existing Playwright scaffold in `examples/react-crdt`.
+2. Use the existing seed database pipeline for server E2E setup: `seed:server` -> `seedTest.ts` -> SQLite `--db`.
+3. Add Playwright helpers for starting the Bun server with a temp DB, selecting seeded document ids, and inspecting SQLite state.
+4. Add server `--port` and migration lock TTL overrides before parallel/expiry tests.
+5. Add browser-storage seeding wrappers around the existing local-first and server-client seed projections.
+6. Automate the highest-risk server migration and local-first migration flows first.
+7. Keep real old-build testing as a slower release check unless schema churn becomes frequent.
