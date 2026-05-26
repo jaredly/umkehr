@@ -55,3 +55,11 @@ Verification:
   - `npx vitest run src/lib/solo/solo-render.test.tsx`: 3 pass.
   - `pnpm build` in `examples/react-crdt`: passed.
   - Rechecked with normal `useEffect` subscriptions; layout effects are not required for this fix.
+- Fixed local simulator document switching:
+  - Local mode now waits for the requested document to load before mounting replica panels, avoiding the initial default 4-todo flash for seeded `?doc=` URLs.
+  - Replica providers remount per active document so path subscriptions do not leak across document swaps.
+  - Removed the earlier `react-crdt` hook tolerance attempt; the fix is now contained to local simulator lifecycle.
+  - `npx vitest run src/react-crdt/react-crdt.test.tsx`: 18 pass.
+  - `npx vitest run src/react/react.test.tsx`: 15 pass.
+  - `npx vitest run src/lib/solo/solo-render.test.tsx`: 3 pass.
+  - `pnpm build` in `examples/react-crdt`: passed.

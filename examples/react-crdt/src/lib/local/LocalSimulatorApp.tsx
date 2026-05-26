@@ -38,9 +38,7 @@ export function LocalSimulatorApp<TState, EphemeralData = never>({
     const fingerprint = useMemo(() => schemaFingerprint(app), [app]);
     const fingerprintHash = useMemo(() => schemaFingerprintHash(app), [app]);
     const [documents, setDocuments] = useState<LocalDocumentSummary[]>([]);
-    const [histories, setHistories] = useState<ReplicaHistories<TState>>(() =>
-        initialReplicaHistories(app),
-    );
+    const [histories, setHistories] = useState<ReplicaHistories<TState> | null>(null);
     const sync = useLocalDemoSync();
 
     const refreshDocuments = useCallback(() => {
@@ -79,6 +77,7 @@ export function LocalSimulatorApp<TState, EphemeralData = never>({
     const saveReplicaHistory = useCallback(
         (replicaId: string, history: CrdtLocalHistory<TState>) => {
             setHistories((current) => {
+                if (!current) return current;
                 const next = {...current, [replicaId]: history};
                 persist(next);
                 return next;
@@ -88,13 +87,14 @@ export function LocalSimulatorApp<TState, EphemeralData = never>({
     );
 
     const switchDocument = useCallback((docId: string) => {
+        if (docId !== activeDocId) setHistories(null);
         window.history.pushState(
             window.history.state,
             '',
             urlWithActiveDocId(window.location.href, docId),
         );
         setActiveDocId(docId);
-    }, []);
+    }, [activeDocId]);
 
     const importSeedDocument = useCallback(
         async (docId: string) => {
@@ -134,7 +134,7 @@ export function LocalSimulatorApp<TState, EphemeralData = never>({
                     exportedBy: {actor: 'local-simulator'},
                     payload: {
                         kind: 'local-simulator',
-                        replicas: histories as any,
+                        replicas: (histories ?? initialReplicaHistories(app)) as any,
                         transportState: cloneTransportState(sync.exportTransportState()) as any,
                     },
                 };
@@ -191,25 +191,30 @@ export function LocalSimulatorApp<TState, EphemeralData = never>({
                     payloadKind="local-simulator"
                     onImportSeed={importSeedDocument}
                 />
-                <DocumentArchiveControls
-                    adapter={archiveAdapter}
-                    appId={app.id}
-                    docId={activeDocId}
-                    payloadKind="local-simulator"
-                />
+                {histories ? (
+                    <DocumentArchiveControls
+                        adapter={archiveAdapter}
+                        appId={app.id}
+                        docId={activeDocId}
+                        payloadKind="local-simulator"
+                    />
+                ) : null}
             </div>
-            {replicas.map((replica, index) => (
-                <LocalReplicaPanel
-                    key={replica.id}
-                    index={index}
-                    sync={sync}
-                    replica={replica}
-                    initial={histories[replica.id] ?? createInitialCrdtHistory(app)}
-                    app={app}
-                    runtime={runtime}
-                    save={(history) => saveReplicaHistory(replica.id, history)}
-                />
-            ))}
+            {histories
+                ? replicas.map((replica, index) => (
+                      <LocalReplicaPanel
+                          key={`${activeDocId}:${replica.id}`}
+                          index={index}
+                          sync={sync}
+                          replica={replica}
+                          initial={histories[replica.id] ?? createInitialCrdtHistory(app)}
+                          app={app}
+                          runtime={runtime}
+                          save={(history) => saveReplicaHistory(replica.id, history)}
+                      />
+                  ))
+                : null}
+            {histories ? null : <p className="loadingState">Loading document...</p>}
             <LocalSyncControls sync={sync} />
         </main>
     );
