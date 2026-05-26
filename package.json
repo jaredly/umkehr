@@ -68,7 +68,7 @@
         "build": "npm run clean && tsc -p tsconfig.json",
         "test": "npm run build && vitest run",
         "typecheck": "tsc -p tsconfig.json --noEmit",
-        "typecheck:examples": "npm run build && tsc -p examples/tsconfig.json --noEmit",
+        "typecheck:examples": "npm run build && tsc -p examples/react/tsconfig.json --noEmit && tsc -p examples/react-crdt/tsconfig.json --noEmit",
         "typecheck:tests": "tsc -p tsconfig.type-tests.json",
         "prepack": "npm run build",
         "pack:check": "npm --cache /tmp/umkehr-npm-cache pack --dry-run"
