@@ -34,3 +34,5 @@ Verification:
 - Fixed browser `process is not defined` error in `src/lib/seed/generate.ts` by guarding CLI detection behind `globalThis.process`.
   - `npx vitest run src/lib/seed/generate.test.ts`: 13 pass.
   - `pnpm build` in `examples/react-crdt`: passed.
+- Fixed solo archive adapter perf issue by reading latest history from a ref instead of memoizing the adapter on every history change.
+  - `pnpm build` in `examples/react-crdt`: passed.

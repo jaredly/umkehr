@@ -1,4 +1,4 @@
-import {useCallback, useEffect, useMemo, useState} from 'react';
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
     createInitialHistory,
     withDisabledEphemeral,
@@ -110,6 +110,14 @@ export function SoloApp<TState, TAnnotations = never, EphemeralData = never>({
         },
         [app, fingerprintHash, refreshDocuments, switchDocument],
     );
+    const importedDocument = useCallback(
+        (docId: string, history: any) => {
+            setHistorySnapshot(history as any);
+            switchDocument(docId);
+            refreshDocuments();
+        },
+        [refreshDocuments, switchDocument],
+    );
 
     return (
         <main className="soloShell">
@@ -134,11 +142,7 @@ export function SoloApp<TState, TAnnotations = never, EphemeralData = never>({
                     activeDocId={activeDocId}
                     schemaFingerprint={fingerprint}
                     schemaFingerprintHash={fingerprintHash}
-                    onImported={(docId, history) => {
-                        setHistorySnapshot(history as any);
-                        switchDocument(docId);
-                        refreshDocuments();
-                    }}
+                    onImported={importedDocument}
                 />
             </Provider>
         </main>
@@ -162,9 +166,12 @@ function SoloDocument<TState, TAnnotations, EphemeralData>({
 }) {
     const editor = runtime.useEditorContext();
     const history = editor.useHistory();
+    const historyRef = useRef(history);
+    historyRef.current = history;
     const adapter = useMemo(
         () => ({
             async exportArchive(): Promise<DocumentArchive> {
+                const latestHistory = historyRef.current;
                 return {
                     kind: 'umkehr.react-crdt.document',
                     archiveVersion: 1,
@@ -174,7 +181,7 @@ function SoloDocument<TState, TAnnotations, EphemeralData>({
                     schemaFingerprint,
                     schemaFingerprintHash,
                     exportedBy: {actor: 'solo'},
-                    payload: {kind: 'solo', history: history as any},
+                    payload: {kind: 'solo', history: latestHistory as any},
                 };
             },
             async importArchive(archive: DocumentArchive) {
@@ -192,7 +199,7 @@ function SoloDocument<TState, TAnnotations, EphemeralData>({
                 onImported(archive.docId, imported);
             },
         }),
-        [activeDocId, app, history, onImported, schemaFingerprint, schemaFingerprintHash],
+        [activeDocId, app, onImported, schemaFingerprint, schemaFingerprintHash],
     );
 
     return (
