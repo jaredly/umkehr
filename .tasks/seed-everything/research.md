@@ -135,9 +135,13 @@ Useful local-first seed scenarios:
 Open issues:
 
 - Should local-first seeds live in the normal IndexedDB database or a separate seed database name? Normal DB matches production behavior but can overwrite developer data. A separate DB would require database-name plumbing through persistence.
+  - we already support multiple 'documents' via url query param
 - Should seeding overwrite a document by default? `replaceReplicaState` overwrites one doc safely, but a UI seed action needs clear semantics.
+  - each seed should have an associated docId; if a document with that id exists, then it shuold overwrite that
 - How much branch/merge information should be preserved, given local-first has no branch model?
+  - let's actually reject imports/seeds that contain multiple branches or merge events
 - Should seeded identity be deterministic, or should seeds use the browser's existing `identity` store?
+  - let's go deterministic
 
 ### Server Client Replica
 
@@ -158,6 +162,7 @@ Recommended seed approach:
 Open issue:
 
 - Whether "seed everything" includes browser-side server replica seeds, or whether server mode is considered complete because its authoritative SQLite database is seeded.
+  - server mode is mostly complete, but I do want to be able to test different client states
 
 ## Shared Fixture Catalog Direction
 
@@ -238,10 +243,18 @@ For E2E, Playwright can seed IndexedDB using app-exposed helpers or page scripts
 ## Open Questions
 
 - Does "seed databases" require literal IndexedDB fixture files/exports for browser modes, or is a checked-in generator/importer sufficient?
+  - let's deal in real db-backed documents
 - Should local-first seeds overwrite documents automatically, require confirmation in the UI, or write under namespaced ids such as `seed/todos-small`?
+  - if the corresponding docId already exists, overwrite it
 - Should in-memory modes use `?seed=` while durable modes use `?doc=`, or should the UI use `?doc=` consistently?
+  - let's not have in-memory modes. selecting a 'seed document' should create it in the database if it doesn't yet exist
 - Should branch-heavy server fixtures be flattened for local/local-first modes, or should those modes get separate branch-free fixture variants?
+  - branch-free
 - Should local-first retained batches preserve one event per batch, group by actor, or group by generated scenario step?
+  - one event per batch
 - Should seeded users/actors stay shared across all modes, or should each mode use its existing actor names (`replica-a`, `host-*`, local-first replica ids)?
+  - shared across all modes
 - How should seed selection interact with PeerJS clients that have already accepted an initial host snapshot?
+  - PeerJS clients have no persistence, and so have no seed selection. the peerjs host is the one to select the current document
 - Should server client IndexedDB be seeded for offline/stale-client scenarios, or should those remain E2E-only setup helpers?
+  - yes I do want to be able to test that please
