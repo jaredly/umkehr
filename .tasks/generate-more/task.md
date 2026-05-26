@@ -1,0 +1,1 @@
+react-crdt/src/lib/seed/generate.ts contains "seed database generators", and it's a good start, but I'd like it to be rather more comprehensive, to enable me to exercise tricky edge cases. Could you (1) write up a file-level doccomment describine what is currently covered, and (2) come up with more seed generators to better cover the space?

@@ -19,12 +19,13 @@ Next things to tackle:
 - [ ] what happens if the local indexeddb has a db that the server doesn't have? Do we automatically replicate? Probably should prompt the user first
 
 Testing findings
-- [ ] the merge UI should indicate when a branch has already been merged into the current branch (e.g. merge would have no effect). Also "# of changes that would be brought in"
-- [ ] whiteboard merge state doesn't make sense to me. How did merging "layout" manage to loose the extra sticky note?
-- [ ] whiteboard drag doesn't preventDefault so the browser does selection stuff
-- [ ] whiteboard perf: every noteview updates while dragging one
-- [ ] todo perf: every todo updates when updating a todo
+- [x] the merge UI should indicate when a branch has already been merged into the current branch (e.g. merge would have no effect). Also "# of changes that would be brought in"
+- [x] whiteboard merge state doesn't make sense to me. How did merging "layout" manage to loose the extra sticky note?
+- [x] whiteboard drag doesn't preventDefault so the browser does selection stuff
+- [x] whiteboard perf: every noteview updates while dragging one
+- [x] todo perf: every todo updates when updating a todo
 
+- [x] WhiteboardPanel is gigantic, needs much better
 
 NEEDS TO TEST:
 - migration definiteily

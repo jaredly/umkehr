@@ -62,6 +62,7 @@ export type ServerBranchEvent = ServerUpdateEvent | ServerMergeEvent;
 
 export type DocumentSummary = {
     docId: string;
+    appId: string;
     schemaVersion: number;
     schemaFingerprint: string;
     schemaFingerprintHash: string;
@@ -86,6 +87,7 @@ export type DocumentMetadata = {
 export type SeedUser = ServerUser;
 
 export type SeedDocument = DocumentMetadata & {
+    appId?: string;
     schemaVersion: number;
     schemaFingerprint: string;
     schemaFingerprintHash: string;
@@ -101,6 +103,7 @@ export type SeedDatabasePayload = {
 
 export type ServerMigrationDump = {
     docId: string;
+    appId?: string;
     sourceSchemaVersion: number;
     sourceSchemaFingerprint: string;
     sourceSchemaFingerprintHash: string;
@@ -113,12 +116,26 @@ export type ServerMigrationDump = {
 
 export type ServerMigrationUpload = {
     docId: string;
+    appId?: string;
     sourceSchemaFingerprintHash: string;
     targetSchemaVersion: number;
     targetSchemaFingerprint: string;
     targetSchemaFingerprintHash: string;
     migrationIds: string[];
     migratedAt: string;
+    branches: ServerBranch[];
+    events: ServerBranchEvent[];
+};
+
+export type ServerDocumentImportUpload = {
+    appId: string;
+    docId: string;
+    schemaVersion: number;
+    schemaFingerprint: string;
+    schemaFingerprintHash: string;
+    importedAt: string;
+    importedBy: string;
+    replace?: boolean;
     branches: ServerBranch[];
     events: ServerBranchEvent[];
 };

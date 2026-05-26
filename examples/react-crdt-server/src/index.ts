@@ -97,6 +97,14 @@ const server = Bun.serve<ClientData>({
                         ws.data.schemaFingerprint = parsed.schemaFingerprint;
                         ws.data.schemaFingerprintHash = parsed.schemaFingerprintHash;
                         const existing = store.getDocument(parsed.docId);
+                        if (existing?.appId && existing.appId !== parsed.appId) {
+                            send(ws, {
+                                kind: 'error',
+                                version: SERVER_PROTOCOL_VERSION,
+                                message: 'Document belongs to another app.',
+                            });
+                            return;
+                        }
                         if (
                             existing &&
                             existing.schemaFingerprintHash !== parsed.schemaFingerprintHash
@@ -137,8 +145,17 @@ const server = Bun.serve<ClientData>({
                             });
                             return;
                         }
+                        if (!existing) {
+                            send(ws, {
+                                kind: 'unknownDocument',
+                                version: SERVER_PROTOCOL_VERSION,
+                                docId: parsed.docId,
+                            });
+                            return;
+                        }
                         store.ensureDocument(
                             parsed.docId,
+                            parsed.appId,
                             parsed.schemaVersion,
                             parsed.schemaFingerprint,
                             parsed.schemaFingerprintHash,
@@ -192,6 +209,17 @@ const server = Bun.serve<ClientData>({
                             completed.schemaFingerprintHash,
                             parsed.actor,
                         );
+                        return;
+                    }
+                    case 'serverDocumentImport': {
+                        store.importDocument(parsed);
+                        send(ws, {
+                            kind: 'hello',
+                            version: SERVER_PROTOCOL_VERSION,
+                            docId: parsed.docId,
+                            branches: store.listBranches(parsed.docId),
+                        });
+                        broadcastBranchSnapshot(parsed.docId, parsed.actor);
                         return;
                     }
                     case 'presenceHello': {
@@ -294,6 +322,7 @@ const server = Bun.serve<ClientData>({
                         if (rejectLockedWrite(ws, parsed.docId, parsed.actor)) return;
                         store.ensureDocument(
                             parsed.docId,
+                            parsed.appId,
                             parsed.schemaVersion,
                             parsed.schemaFingerprint,
                             parsed.schemaFingerprintHash,
@@ -470,6 +499,20 @@ function broadcastBranchUpdate(docId: string, branch: ServerBranch) {
             version: SERVER_PROTOCOL_VERSION,
             docId,
             branch,
+        });
+    }
+}
+
+function broadcastBranchSnapshot(docId: string, originActor: string) {
+    const branches = store.listBranches(docId);
+    for (const client of clients) {
+        if (client.data.docId !== docId) continue;
+        if (client.data.actor === originActor) continue;
+        send(client, {
+            kind: 'branchSnapshot',
+            version: SERVER_PROTOCOL_VERSION,
+            docId,
+            branches,
         });
     }
 }

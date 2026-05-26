@@ -1,14 +1,25 @@
-import {useState} from 'react';
+import {useCallback, useEffect, useMemo, useState} from 'react';
 import type {CrdtLocalHistory} from 'umkehr/crdt';
+import {createInitialCrdtHistory, type AppDefinition, type CrdtRuntime} from '../crdtApp';
 import {
-    createInitialCrdtHistory,
-    type AppDefinition,
-    type CrdtRuntime,
-} from '../crdtApp';
+    assertArchiveForApp,
+    DocumentArchiveControls,
+    DocumentPicker,
+    readActiveDocIdFromSearch,
+    urlWithActiveDocId,
+    validateCrdtLocalHistoryForApp,
+    validateCrdtUpdatesForApp,
+    type DocumentArchive,
+    type LocalDocumentSummary,
+} from '../documentArchive';
+import {schemaFingerprint, schemaFingerprintHash} from '../local-first/schemaFingerprint';
 import {useStore} from '../store';
-import {replicas} from './model';
+import {cloneTransportState, listLocalSimulatorDocumentSummaries, loadLocalSimulatorDocument, saveLocalSimulatorDocument, type PersistedLocalSimulatorDocument} from './persistence';
+import {replicas, type ReplicaId} from './model';
 import {SyncControls} from './SyncControls';
 import {type DemoSync, useLocalDemoSync} from './useLocalDemoSync';
+
+type ReplicaHistories<TState> = Record<string, CrdtLocalHistory<TState>>;
 
 export function LocalSimulatorApp<TState, EphemeralData = never>({
     app,
@@ -17,20 +28,154 @@ export function LocalSimulatorApp<TState, EphemeralData = never>({
     app: AppDefinition<TState, EphemeralData>;
     runtime: CrdtRuntime<TState, EphemeralData>;
 }) {
-    const [initialHistory] = useState(() => createInitialCrdtHistory(app));
+    const defaultDocId = `${runtime.docId}-local`;
+    const [activeDocId, setActiveDocId] = useState(() =>
+        readActiveDocIdFromSearch(window.location.search, defaultDocId),
+    );
+    const fingerprint = useMemo(() => schemaFingerprint(app), [app]);
+    const fingerprintHash = useMemo(() => schemaFingerprintHash(app), [app]);
+    const [documents, setDocuments] = useState<LocalDocumentSummary[]>([]);
+    const [histories, setHistories] = useState<ReplicaHistories<TState>>(() =>
+        initialReplicaHistories(app),
+    );
     const sync = useLocalDemoSync();
+
+    const refreshDocuments = useCallback(() => {
+        void listLocalSimulatorDocumentSummaries().then(setDocuments);
+    }, []);
+
+    useEffect(() => {
+        let alive = true;
+        loadOrCreateLocalSimulatorDocument(app, activeDocId, fingerprintHash).then((document) => {
+            if (!alive) return;
+            setHistories(document.replicas);
+            sync.replaceTransportState(document.transportState as any);
+            refreshDocuments();
+        });
+        return () => {
+            alive = false;
+        };
+    }, [activeDocId, app, fingerprintHash, refreshDocuments, sync]);
+
+    const persist = useCallback(
+        (nextHistories: ReplicaHistories<TState>) => {
+            const now = new Date().toISOString();
+            void saveLocalSimulatorDocument({
+                docId: activeDocId,
+                appId: app.id,
+                schemaFingerprintHash: fingerprintHash,
+                replicas: nextHistories,
+                transportState: cloneTransportState(sync.exportTransportState()),
+                createdAt: now,
+                updatedAt: now,
+            }).then(refreshDocuments);
+        },
+        [activeDocId, app.id, fingerprintHash, refreshDocuments, sync],
+    );
+
+    const saveReplicaHistory = useCallback(
+        (replicaId: string, history: CrdtLocalHistory<TState>) => {
+            setHistories((current) => {
+                const next = {...current, [replicaId]: history};
+                persist(next);
+                return next;
+            });
+        },
+        [persist],
+    );
+
+    const switchDocument = useCallback((docId: string) => {
+        window.history.pushState(
+            window.history.state,
+            '',
+            urlWithActiveDocId(window.location.href, docId),
+        );
+        setActiveDocId(docId);
+    }, []);
+
+    const archiveAdapter = useMemo(
+        () => ({
+            async exportArchive(): Promise<DocumentArchive> {
+                return {
+                    kind: 'umkehr.react-crdt.document',
+                    archiveVersion: 1,
+                    exportedAt: new Date().toISOString(),
+                    appId: app.id,
+                    docId: activeDocId,
+                    schemaFingerprint: fingerprint,
+                    schemaFingerprintHash: fingerprintHash,
+                    exportedBy: {actor: 'local-simulator'},
+                    payload: {
+                        kind: 'local-simulator',
+                        replicas: histories as any,
+                        transportState: cloneTransportState(sync.exportTransportState()) as any,
+                    },
+                };
+            },
+            async importArchive(archive: DocumentArchive) {
+                assertArchiveForApp(archive, app as any, 'local-simulator');
+                const imported: ReplicaHistories<TState> = {};
+                for (const [replicaId, history] of Object.entries(archive.payload.replicas)) {
+                    imported[replicaId] = validateCrdtLocalHistoryForApp(history, app);
+                }
+                for (const updates of Object.values(archive.payload.transportState.outbox)) {
+                    validateCrdtUpdatesForApp(updates, app);
+                }
+                const now = new Date().toISOString();
+                await saveLocalSimulatorDocument({
+                    docId: archive.docId,
+                    appId: app.id,
+                    schemaFingerprintHash: fingerprintHash,
+                    replicas: imported,
+                    transportState: archive.payload.transportState as any,
+                    createdAt: now,
+                    updatedAt: now,
+                });
+                setHistories(imported);
+                sync.replaceTransportState(archive.payload.transportState);
+                switchDocument(archive.docId);
+                refreshDocuments();
+            },
+        }),
+        [
+            activeDocId,
+            app,
+            fingerprint,
+            fingerprintHash,
+            histories,
+            refreshDocuments,
+            switchDocument,
+            sync,
+        ],
+    );
 
     return (
         <main className="collabShell">
+            <div className="documentToolbar">
+                <DocumentPicker
+                    documents={documents}
+                    activeDocId={activeDocId}
+                    appId={app.id}
+                    payloadKind="local-simulator"
+                    onSwitchDocument={switchDocument}
+                />
+                <DocumentArchiveControls
+                    adapter={archiveAdapter}
+                    appId={app.id}
+                    docId={activeDocId}
+                    payloadKind="local-simulator"
+                />
+            </div>
             {replicas.map((replica, index) => (
                 <LocalReplicaPanel
                     key={replica.id}
                     index={index}
                     sync={sync}
                     replica={replica}
-                    initial={initialHistory}
+                    initial={histories[replica.id] ?? createInitialCrdtHistory(app)}
                     app={app}
                     runtime={runtime}
+                    save={(history) => saveReplicaHistory(replica.id, history)}
                 />
             ))}
             <LocalSyncControls sync={sync} />
@@ -45,6 +190,7 @@ function LocalReplicaPanel<TState, EphemeralData>({
     initial,
     app,
     runtime,
+    save,
 }: {
     index: number;
     sync: DemoSync;
@@ -52,6 +198,7 @@ function LocalReplicaPanel<TState, EphemeralData>({
     initial: CrdtLocalHistory<TState>;
     app: AppDefinition<TState, EphemeralData>;
     runtime: CrdtRuntime<TState, EphemeralData>;
+    save(history: CrdtLocalHistory<TState>): void;
 }) {
     const {Provider} = runtime;
 
@@ -60,6 +207,7 @@ function LocalReplicaPanel<TState, EphemeralData>({
             initial={initial}
             transport={sync.transports[replica.id]}
             statuses={sync.statusStores[replica.id]}
+            save={save}
         >
             <LocalReplicaDocument
                 actor={replica.id}
@@ -112,4 +260,39 @@ function LocalSyncControls({sync}: {sync: DemoSync}) {
             toggleSync={sync.toggleSync}
         />
     );
+}
+
+function initialReplicaHistories<TState, EphemeralData>(
+    app: AppDefinition<TState, EphemeralData>,
+): ReplicaHistories<TState> {
+    return Object.fromEntries(
+        replicas.map((replica) => [replica.id, createInitialCrdtHistory(app)]),
+    );
+}
+
+async function loadOrCreateLocalSimulatorDocument<TState, EphemeralData>(
+    app: AppDefinition<TState, EphemeralData>,
+    docId: string,
+    schemaFingerprintHash: string,
+): Promise<PersistedLocalSimulatorDocument<TState>> {
+    const existing = await loadLocalSimulatorDocument<TState>(docId);
+    if (existing && existing.appId === app.id) return existing;
+    const now = new Date().toISOString();
+    const document: PersistedLocalSimulatorDocument<TState> = {
+        docId,
+        appId: app.id,
+        schemaFingerprintHash,
+        replicas: initialReplicaHistories(app),
+        transportState: {
+            syncEnabled: true,
+            outbox: Object.fromEntries(replicas.map((replica) => [replica.id, []])) as Record<
+                ReplicaId,
+                []
+            >,
+        },
+        createdAt: now,
+        updatedAt: now,
+    };
+    await saveLocalSimulatorDocument(document);
+    return document;
 }

@@ -26,6 +26,7 @@ export class ServerStore {
         this.db.exec(`
             create table if not exists documents (
                 docId text primary key,
+                appId text not null default '',
                 schemaVersion integer not null default 1,
                 schemaFingerprintHash text not null default '',
                 schemaFingerprint text not null
@@ -193,13 +194,25 @@ export class ServerStore {
         return row ? rowToUser(row) : null;
     }
 
-    ensureDocument(docId: string, schemaVersion: number, schemaFingerprint: string, schemaFingerprintHash: string) {
+    ensureDocument(
+        docId: string,
+        appId: string,
+        schemaVersion: number,
+        schemaFingerprint: string,
+        schemaFingerprintHash: string,
+    ) {
         const existing = this.db
-            .query<{schemaVersion: number; schemaFingerprint: string; schemaFingerprintHash: string}, [string]>(
-                'select schemaVersion, schemaFingerprint, schemaFingerprintHash from documents where docId = ?',
+            .query<{appId: string; schemaVersion: number; schemaFingerprint: string; schemaFingerprintHash: string}, [string]>(
+                'select appId, schemaVersion, schemaFingerprint, schemaFingerprintHash from documents where docId = ?',
             )
             .get(docId);
         if (existing) {
+            if (existing.appId && appId && existing.appId !== appId) {
+                throw new Error('Document belongs to another app.');
+            }
+            if (!existing.appId && appId) {
+                this.db.query('update documents set appId = ? where docId = ?').run(appId, docId);
+            }
             const existingHash =
                 existing.schemaFingerprintHash ||
                 (existing.schemaFingerprint === schemaFingerprint ? schemaFingerprintHash : '');
@@ -219,16 +232,16 @@ export class ServerStore {
         }
         this.db
             .query(
-                'insert into documents (docId, schemaVersion, schemaFingerprintHash, schemaFingerprint) values (?, ?, ?, ?)',
+                'insert into documents (docId, appId, schemaVersion, schemaFingerprintHash, schemaFingerprint) values (?, ?, ?, ?, ?)',
             )
-            .run(docId, schemaVersion, schemaFingerprintHash, schemaFingerprint);
+            .run(docId, appId, schemaVersion, schemaFingerprintHash, schemaFingerprint);
         this.ensureMainBranch(docId);
     }
 
-    getDocument(docId: string): {schemaVersion: number; schemaFingerprint: string; schemaFingerprintHash: string} | null {
+    getDocument(docId: string): {appId: string; schemaVersion: number; schemaFingerprint: string; schemaFingerprintHash: string} | null {
         return this.db
-            .query<{schemaVersion: number; schemaFingerprint: string; schemaFingerprintHash: string}, [string]>(
-                'select schemaVersion, schemaFingerprint, schemaFingerprintHash from documents where docId = ?',
+            .query<{appId: string; schemaVersion: number; schemaFingerprint: string; schemaFingerprintHash: string}, [string]>(
+                'select appId, schemaVersion, schemaFingerprint, schemaFingerprintHash from documents where docId = ?',
             )
             .get(docId) ?? null;
     }
@@ -423,6 +436,43 @@ export class ServerStore {
             };
         });
         return tx();
+    }
+
+    importDocument(upload: import('./types').ServerDocumentImportUpload) {
+        validateDocumentImportUpload(upload);
+        const tx = this.db.transaction(() => {
+            const existing = this.getDocument(upload.docId);
+            if (existing && !upload.replace) throw new Error('Document already exists.');
+            if (existing) {
+                this.db.query('delete from branch_events where docId = ?').run(upload.docId);
+                this.db.query('delete from branches where docId = ?').run(upload.docId);
+                this.db.query('delete from document_metadata where docId = ?').run(upload.docId);
+                this.db.query('delete from documents where docId = ?').run(upload.docId);
+            }
+            this.db
+                .query(
+                    `insert into documents (docId, appId, schemaVersion, schemaFingerprintHash, schemaFingerprint)
+                     values (?, ?, ?, ?, ?)`,
+                )
+                .run(
+                    upload.docId,
+                    upload.appId,
+                    upload.schemaVersion,
+                    upload.schemaFingerprintHash,
+                    upload.schemaFingerprint,
+                );
+            this.insertDocumentMetadata({
+                docId: upload.docId,
+                title: upload.docId,
+                sizeLabel: 'imported',
+                sizeRank: 0,
+                createdAt: upload.importedAt,
+                lastAccessedAt: upload.importedAt,
+            });
+            for (const branch of upload.branches) this.insertBranch(branch);
+            for (const event of upload.events) this.insertEvent(event);
+        });
+        tx();
     }
 
     archivedSchemaHashes(docId: string): string[] {
@@ -625,6 +675,7 @@ export class ServerStore {
             .query<DocumentSummary, []>(
                 `select
                     d.docId as docId,
+                    d.appId as appId,
                     d.schemaVersion as schemaVersion,
                     d.schemaFingerprintHash as schemaFingerprintHash,
                     d.schemaFingerprint as schemaFingerprint,
@@ -776,11 +827,12 @@ export class ServerStore {
     private insertSeedDocument(document: SeedDocument) {
         this.db
             .query(
-                `insert into documents (docId, schemaVersion, schemaFingerprintHash, schemaFingerprint)
-                 values (?, ?, ?, ?)`,
+                `insert into documents (docId, appId, schemaVersion, schemaFingerprintHash, schemaFingerprint)
+                 values (?, ?, ?, ?, ?)`,
             )
             .run(
                 document.docId,
+                document.appId ?? '',
                 document.schemaVersion,
                 document.schemaFingerprintHash,
                 document.schemaFingerprint,
@@ -880,12 +932,13 @@ export class ServerStore {
                 alter table documents rename to documents_v2;
                 create table documents (
                     docId text primary key,
+                    appId text not null default '',
                     schemaVersion integer not null default 1,
                     schemaFingerprintHash text not null default '',
                     schemaFingerprint text not null
                 );
-                insert or ignore into documents (docId, schemaVersion, schemaFingerprintHash, schemaFingerprint)
-                    select docId, 1, '', schemaFingerprint from documents_v2;
+                insert or ignore into documents (docId, appId, schemaVersion, schemaFingerprintHash, schemaFingerprint)
+                    select docId, '', 1, '', schemaFingerprint from documents_v2;
             `);
             columns = this.db
                 .query<{name: string}, []>('pragma table_info(documents)')
@@ -894,6 +947,9 @@ export class ServerStore {
         }
         if (!columns.includes('schemaVersion')) {
             this.db.exec('alter table documents add column schemaVersion integer not null default 1');
+        }
+        if (!columns.includes('appId')) {
+            this.db.exec("alter table documents add column appId text not null default ''");
         }
         if (!columns.includes('schemaFingerprintHash')) {
             this.db.exec("alter table documents add column schemaFingerprintHash text not null default ''");
@@ -988,6 +1044,29 @@ function validateSeedDocument(document: SeedDocument) {
         branches: document.branches,
         events: document.events,
     });
+}
+
+function validateDocumentImportUpload(upload: import('./types').ServerDocumentImportUpload) {
+    if (!upload.docId.trim()) throw new Error('Import document id is required.');
+    if (!upload.appId.trim()) throw new Error('Import app id is required.');
+    if (!Number.isSafeInteger(upload.schemaVersion) || upload.schemaVersion < 1) {
+        throw new Error('Import schema version is invalid.');
+    }
+    if (!upload.schemaFingerprint.trim() || !upload.schemaFingerprintHash.trim()) {
+        throw new Error('Import schema fingerprint is required.');
+    }
+    if (!Array.isArray(upload.branches) || upload.branches.length === 0) {
+        throw new Error('Import requires at least one branch.');
+    }
+    if (!Array.isArray(upload.events)) throw new Error('Import events must be an array.');
+    const branchIds = new Set(upload.branches.map((branch) => branch.branchId));
+    for (const branch of upload.branches) {
+        if (branch.docId !== upload.docId) throw new Error('Imported branch doc id mismatch.');
+    }
+    for (const event of upload.events) {
+        if (event.docId !== upload.docId) throw new Error('Imported event doc id mismatch.');
+        if (!branchIds.has(event.branchId)) throw new Error('Imported event references missing branch.');
+    }
 }
 
 function validateDocumentMetadata(metadata: DocumentMetadata) {

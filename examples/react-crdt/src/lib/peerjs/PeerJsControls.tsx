@@ -6,11 +6,13 @@ export function PeerJsControls<TState>({
     role,
     setRole,
     sync,
+    docId,
     initialHostPeerId = '',
 }: {
     role: PeerRole;
     setRole: (role: PeerRole) => void;
     sync: PeerJsSync<TState>;
+    docId: string;
     initialHostPeerId?: string;
 }) {
     const [hostPeerId, setHostPeerId] = useState(initialHostPeerId);
@@ -18,7 +20,7 @@ export function PeerJsControls<TState>({
     const state = useStore(sync.stateStore);
     const connections = useStore(sync.connectionsStore);
     const localPeerId = state.kind === 'ready' || state.kind === 'waiting-for-snapshot' ? state.peerId : '';
-    const inviteUrl = role === 'host' && localPeerId ? createInviteUrl(localPeerId) : '';
+    const inviteUrl = role === 'host' && localPeerId ? createInviteUrl(localPeerId, docId) : '';
     const statusText = useMemo(() => {
         if (state.kind === 'initializing') return 'Initializing PeerJS';
         if (state.kind === 'error') return state.message;
@@ -133,9 +135,10 @@ export function PeerJsControls<TState>({
     );
 }
 
-function createInviteUrl(peerId: string) {
+function createInviteUrl(peerId: string, docId: string) {
     const url = new URL(window.location.href);
     url.searchParams.set('peer', peerId);
+    url.searchParams.set('doc', docId);
     url.hash = 'peerjs';
     return url.toString();
 }

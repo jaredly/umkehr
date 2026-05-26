@@ -3,6 +3,7 @@ import {hlc, latestCrdtUpdateTimestamp, type CrdtUpdate, type HlcTimestamp} from
 import type {
     ServerBranch,
     ServerBranchEvent,
+    ServerDocumentImportUpload,
     ServerMigrationUpload,
     ServerPresenceUser,
 } from './types';
@@ -27,6 +28,7 @@ export type ClientServerMessage =
           actor: string;
           userId: string;
           docId: string;
+          appId: string;
           schemaVersion: number;
           schemaFingerprint: string;
           schemaFingerprintHash: string;
@@ -37,6 +39,7 @@ export type ClientServerMessage =
           actor: string;
           userId: string;
           docId: string;
+          appId: string;
           branchId: string;
           lastSeenEventIndex: number;
       }
@@ -77,6 +80,7 @@ export type ClientServerMessage =
           actor: string;
           userId: string;
           docId: string;
+          appId: string;
           branchId: string;
           schemaVersion: number;
           schemaFingerprint: string;
@@ -118,6 +122,7 @@ export type ClientServerMessage =
           actor: string;
           userId: string;
           docId: string;
+          appId?: string;
           targetSchemaVersion: number;
           targetSchemaFingerprint: string;
           targetSchemaFingerprintHash: string;
@@ -127,7 +132,13 @@ export type ClientServerMessage =
           version: 3;
           actor: string;
           userId: string;
-      } & ServerMigrationUpload);
+      } & ServerMigrationUpload)
+    | ({
+          kind: 'serverDocumentImport';
+          version: 3;
+          actor: string;
+          userId: string;
+      } & ServerDocumentImportUpload);
 
 export type ServerMigrationRequiredMessage = {
     kind: 'serverMigrationRequired';
@@ -194,6 +205,11 @@ export type ServerMigrationCompleteMessage = {
 };
 
 export type ServerClientMessage =
+    | {
+          kind: 'unknownDocument';
+          version: 3;
+          docId: string;
+      }
     | {
           kind: 'hello';
           version: 3;
@@ -289,6 +305,7 @@ export function parseClientMessage(input: unknown): ClientServerMessage | null {
     if (result.data.version !== SERVER_PROTOCOL_VERSION) return null;
     if (result.data.userId.length === 0) return null;
     if (result.data.docId.length === 0) return null;
+    if ('appId' in result.data && typeof result.data.appId === 'string' && result.data.appId.length === 0) return null;
     const actor = parseSessionActor(result.data.actor);
     if (!actor || actor.userId !== result.data.userId) return null;
 
@@ -324,6 +341,14 @@ export function parseClientMessage(input: unknown): ClientServerMessage | null {
             if (!result.data.migratedAt.trim()) return null;
             if (!Array.isArray(result.data.branches) || !Array.isArray(result.data.events))
                 return null;
+            return result.data;
+        case 'serverDocumentImport':
+            if (!result.data.appId.trim()) return null;
+            if (!Number.isSafeInteger(result.data.schemaVersion)) return null;
+            if (!result.data.schemaFingerprint.trim()) return null;
+            if (!result.data.schemaFingerprintHash.trim()) return null;
+            if (!result.data.importedAt.trim() || !result.data.importedBy.trim()) return null;
+            if (!Array.isArray(result.data.branches) || !Array.isArray(result.data.events)) return null;
             return result.data;
         case 'branchSubscribe':
             if (!result.data.branchId) return null;

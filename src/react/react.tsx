@@ -89,8 +89,15 @@ const makeHistoryProvider = <T, An, Tag extends string = 'type'>(
         useEffect(() => {
             if (initial !== value.current.state) {
                 value.current.state = initial;
+                value.current.previewState = null;
+                value.current.previewPaths = {};
+                value.current.queuedChanges = [];
+                cancelScheduledTask(value.current.scheduled);
+                value.current.scheduled = undefined;
                 value.current.listeners.forEach((f) => f());
                 notifyAllPaths(value.current.listenersByPath);
+                value.current.historyListeners.forEach((f) => f());
+                value.current.historyUp.forEach((f) => f());
             }
         }, [initial]);
         return <Ctx.Provider value={value.current} children={children} />;

@@ -9,6 +9,7 @@ export type ServerUser = {
 
 export type ServerDocumentSummary = {
     docId: string;
+    appId: string;
     schemaVersion: number;
     schemaFingerprint: string;
     schemaFingerprintHash: string;
@@ -125,7 +126,8 @@ export type PersistedServerBranch<TState> = {
 
 export type PersistedServerReplica<TState> = {
     docId: string;
-    storageVersion: 3;
+    appId: string;
+    storageVersion: 4;
     protocolVersion: 3;
     schemaVersion: number;
     schemaFingerprint: string;
@@ -210,4 +212,6 @@ export type ServerSync<TState> = {
     buildEventPreview(throughEventIndex: number): CrdtLocalHistory<TState>;
     buildMergePreview(sourceBranchId: string, sourceThroughEventIndex?: number, revertedPathKeys?: Set<string>): ServerMergePreview<TState> | null;
     setPresenceSelection(elementId: string | null): void;
+    exportReplica(): PersistedServerReplica<TState>;
+    replaceReplica(replica: PersistedServerReplica<TState>): void;
 };

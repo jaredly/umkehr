@@ -1,4 +1,5 @@
 import {useState} from 'react';
+import {DocumentArchiveControls, type DocumentArchiveAdapter} from '../documentArchive';
 import {useStore} from '../store';
 import type {LocalFirstSync} from './types';
 
@@ -8,12 +9,16 @@ export function LocalFirstControls<TState>({
     schemaVersion,
     schemaFingerprint,
     schemaFingerprintHash,
+    archiveAdapter,
+    appId,
 }: {
     sync: LocalFirstSync<TState>;
     docId: string;
     schemaVersion: number;
     schemaFingerprint: string;
     schemaFingerprintHash: string;
+    archiveAdapter: DocumentArchiveAdapter;
+    appId: string;
 }) {
     const state = useStore(sync.stateStore);
     const persistence = useStore(sync.persistenceStore);
@@ -199,12 +204,12 @@ export function LocalFirstControls<TState>({
                 Apply preview
             </button>
             <div className="connectionActions">
-                <button type="button" onClick={() => void exportState(sync)}>
-                    Export JSON
-                </button>
-                <button type="button" onClick={() => void importState(sync)}>
-                    Import JSON
-                </button>
+                <DocumentArchiveControls
+                    adapter={archiveAdapter}
+                    appId={appId}
+                    docId={docId}
+                    payloadKind="local-first"
+                />
             </div>
             <section className="connectionList">
                 {connections.map((connection) => (
@@ -300,17 +305,6 @@ async function replaySnapshot<TState>(sync: LocalFirstSync<TState>) {
         return;
     }
     await sync.replayLocalBatchesOnSnapshot();
-}
-
-async function exportState<TState>(sync: LocalFirstSync<TState>) {
-    const json = await sync.exportLocalState();
-    await navigator.clipboard.writeText(json);
-}
-
-async function importState<TState>(sync: LocalFirstSync<TState>) {
-    const json = window.prompt('Paste exported local-first JSON');
-    if (!json) return;
-    await sync.importLocalState(json);
 }
 
 function statusText(status: ReturnType<LocalFirstSync<unknown>['persistenceStore']['getSnapshot']>) {

@@ -9,6 +9,7 @@ import type {ServerDocumentSummary} from './types';
 
 const summary: ServerDocumentSummary = {
     docId: 'todos-small',
+    appId: 'todos',
     schemaVersion: 1,
     schemaFingerprint: 'schema',
     schemaFingerprintHash: 'hash',

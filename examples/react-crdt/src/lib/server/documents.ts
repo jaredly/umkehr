@@ -32,6 +32,7 @@ export function documentsForActiveDoc(
     return [
         {
             docId: activeDocId,
+            appId: '',
             schemaVersion: 0,
             schemaFingerprint: '',
             schemaFingerprintHash: '',
@@ -52,6 +53,7 @@ function isServerDocumentSummary(value: unknown): value is ServerDocumentSummary
         isRecord(value) &&
         typeof value.docId === 'string' &&
         value.docId.length > 0 &&
+        typeof value.appId === 'string' &&
         typeof value.schemaVersion === 'number' &&
         typeof value.schemaFingerprint === 'string' &&
         typeof value.schemaFingerprintHash === 'string' &&

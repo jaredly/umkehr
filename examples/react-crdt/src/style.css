@@ -1359,6 +1359,45 @@ p {
     pointer-events: none;
 }
 
+.documentToolbar,
+.documentArchiveControls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.documentToolbar {
+    margin: 0 0 12px;
+}
+
+.documentPicker {
+    display: inline-grid;
+    grid-template-columns: auto minmax(160px, 1fr);
+    align-items: center;
+    gap: 8px;
+}
+
+.documentPicker span {
+    font-size: 12px;
+    font-weight: 700;
+    color: #526070;
+}
+
+.documentPicker select {
+    min-width: 0;
+}
+
+.documentArchiveInput {
+    display: none;
+}
+
+.documentArchiveMessage {
+    margin: 0;
+    color: #b42318;
+    font-size: 12px;
+}
+
 .whiteboardRemoteSelections span {
     display: inline-grid;
     place-items: center;

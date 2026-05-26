@@ -2,7 +2,7 @@ import {openDB, type DBSchema, type IDBPDatabase} from 'idb';
 import type {PersistedServerReplica, PersistedServerUser, ServerBranchEvent, ServerUser} from './types';
 
 const DB_NAME = 'umkehr-react-crdt-server-sync';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 const IDENTITY_KEY = 'default';
 
 interface ServerSyncDb extends DBSchema {
@@ -53,6 +53,15 @@ export async function loadServerReplica<TState>(
 export async function saveServerReplica<TState>(replica: PersistedServerReplica<TState>) {
     const db = await openServerSyncDb();
     await db.put('replicas', replica as PersistedServerReplica<unknown>, replica.docId);
+}
+
+export async function replaceServerReplica<TState>(replica: PersistedServerReplica<TState>) {
+    await saveServerReplica(replica);
+}
+
+export async function listServerReplicas<TState = unknown>(): Promise<PersistedServerReplica<TState>[]> {
+    const db = await openServerSyncDb();
+    return (await db.getAll('replicas')) as PersistedServerReplica<TState>[];
 }
 
 export function sortServerEvents(events: ServerBranchEvent[]) {

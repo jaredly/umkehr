@@ -118,7 +118,8 @@ export function useServerSync<TState>({
     const persist = useCallback(async () => {
         const replica: PersistedServerReplica<TState> = {
             docId,
-            storageVersion: 3,
+            appId: app.id,
+            storageVersion: 4,
             protocolVersion: SERVER_PROTOCOL_VERSION,
             schemaVersion: initialReplica.schemaVersion ?? 1,
             schemaFingerprint,
@@ -140,6 +141,7 @@ export function useServerSync<TState>({
         });
     }, [
         activeBranchStore,
+        app.id,
         branchesStore,
         docId,
         eventsStore,
@@ -163,10 +165,11 @@ export function useServerSync<TState>({
             actor: identity.actor,
             userId: identity.user.userId,
             docId,
+            appId: app.id,
             branchId: branch.branchId,
             lastSeenEventIndex: branch.lastSeenEventIndex,
         });
-    }, [docId, identity.actor, identity.user.userId, send]);
+    }, [app.id, docId, identity.actor, identity.user.userId, send]);
 
     const sendPresenceHello = useCallback(() => {
         send({
@@ -232,6 +235,7 @@ export function useServerSync<TState>({
                         actor: event.origin,
                         userId: actor.userId,
                         docId,
+                        appId: app.id,
                         branchId: event.branchId,
                         schemaVersion,
                         schemaFingerprint,
@@ -264,6 +268,7 @@ export function useServerSync<TState>({
         }
     }, [
         docId,
+        app.id,
         identity.actor,
         identity.user.userId,
         schemaVersion,
@@ -507,6 +512,7 @@ export function useServerSync<TState>({
                 actor: identity.actor,
                 userId: identity.user.userId,
                 docId,
+                appId: app.id,
                 schemaVersion,
                 schemaFingerprint,
                 schemaFingerprintHash,
@@ -529,6 +535,23 @@ export function useServerSync<TState>({
                 void persist().then(() => {
                     subscribeActiveBranch();
                     flushPending();
+                });
+            } else if (parsed.kind === 'unknownDocument') {
+                const replica = currentReplica();
+                send({
+                    kind: 'serverDocumentImport',
+                    version: SERVER_PROTOCOL_VERSION,
+                    actor: identity.actor,
+                    userId: identity.user.userId,
+                    docId,
+                    appId: app.id,
+                    schemaVersion,
+                    schemaFingerprint,
+                    schemaFingerprintHash,
+                    importedAt: new Date().toISOString(),
+                    importedBy: identity.actor,
+                    branches: replica.branchList,
+                    events: Object.values(replica.branches).flatMap((branch) => branch.events),
                 });
             } else if (parsed.kind === 'branchUpdate') {
                 mergeBranchList([parsed.branch]);
@@ -575,6 +598,7 @@ export function useServerSync<TState>({
                     actor: identity.actor,
                     userId: identity.user.userId,
                     docId,
+                    appId: app.id,
                     targetSchemaVersion: schemaVersion,
                     targetSchemaFingerprint: schemaFingerprint,
                     targetSchemaFingerprintHash: schemaFingerprintHash,
@@ -609,7 +633,7 @@ export function useServerSync<TState>({
                         schemaFingerprint,
                         schemaFingerprintHash,
                     });
-                    send({...upload, actor: identity.actor, userId: identity.user.userId});
+                    send({...upload, actor: identity.actor, userId: identity.user.userId, appId: app.id});
                 } catch (error) {
                     console.error('Server document migration failed.', error);
                     stateStore.setSnapshot({
@@ -645,6 +669,7 @@ export function useServerSync<TState>({
         clearLastEditStatus,
         clearPresenceState,
         docId,
+        app.id,
         flushPending,
         identity.actor,
         identity.user.userId,
@@ -950,6 +975,41 @@ export function useServerSync<TState>({
         });
     }
 
+    function currentReplica(): PersistedServerReplica<TState> {
+        return {
+            docId,
+            appId: app.id,
+            storageVersion: 4,
+            protocolVersion: SERVER_PROTOCOL_VERSION,
+            schemaVersion,
+            schemaFingerprint,
+            schemaFingerprintHash,
+            activeBranchId: activeBranchIdRef.current,
+            branches: branchesRef.current,
+            branchList: branchListRef.current,
+            updatedAt: new Date().toISOString(),
+        };
+    }
+
+    function replaceReplica(replica: PersistedServerReplica<TState>) {
+        activeBranchIdRef.current = replica.activeBranchId;
+        branchesRef.current = replica.branches;
+        branchListRef.current = replica.branchList;
+        const branch = activeBranch(branchesRef.current, activeBranchIdRef.current);
+        replaceHistory(branch.history);
+        void saveServerReplica(replica).then(() =>
+            publishStores({
+                branch,
+                statsStore,
+                eventsStore,
+                branchesStore,
+                activeBranchStore,
+                branchList: branchListRef.current,
+                activeBranchId: activeBranchIdRef.current,
+            }),
+        );
+    }
+
     return {
         transport,
         identity,
@@ -975,6 +1035,8 @@ export function useServerSync<TState>({
         mergeBranch,
         buildEventPreview,
         buildMergePreview,
+        exportReplica: currentReplica,
+        replaceReplica,
     };
 }
 

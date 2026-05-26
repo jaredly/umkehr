@@ -21,6 +21,7 @@ export type ClientServerMessage =
           actor: string;
           userId: string;
           docId: string;
+          appId: string;
           schemaVersion: number;
           schemaFingerprint: string;
           schemaFingerprintHash: string;
@@ -31,6 +32,7 @@ export type ClientServerMessage =
           actor: string;
           userId: string;
           docId: string;
+          appId: string;
           branchId: string;
           lastSeenEventIndex: number;
       }
@@ -71,6 +73,7 @@ export type ClientServerMessage =
           actor: string;
           userId: string;
           docId: string;
+          appId: string;
           branchId: string;
           schemaVersion: number;
           schemaFingerprint: string;
@@ -112,6 +115,7 @@ export type ClientServerMessage =
           actor: string;
           userId: string;
           docId: string;
+          appId: string;
           targetSchemaVersion: number;
           targetSchemaFingerprint: string;
           targetSchemaFingerprintHash: string;
@@ -122,6 +126,7 @@ export type ClientServerMessage =
           actor: string;
           userId: string;
           docId: string;
+          appId: string;
           sourceSchemaFingerprintHash: string;
           targetSchemaVersion: number;
           targetSchemaFingerprint: string;
@@ -130,9 +135,30 @@ export type ClientServerMessage =
           migratedAt: string;
           branches: ServerBranch[];
           events: ServerBranchEvent[];
+      }
+    | {
+          kind: 'serverDocumentImport';
+          version: 3;
+          actor: string;
+          userId: string;
+          docId: string;
+          appId: string;
+          schemaVersion: number;
+          schemaFingerprint: string;
+          schemaFingerprintHash: string;
+          importedAt: string;
+          importedBy: string;
+          replace?: boolean;
+          branches: ServerBranch[];
+          events: ServerBranchEvent[];
       };
 
 export type ServerClientMessage =
+    | {
+          kind: 'unknownDocument';
+          version: 3;
+          docId: string;
+      }
     | {
           kind: 'hello';
           version: 3;
@@ -233,6 +259,7 @@ export type ServerClientMessage =
           kind: 'serverMigrationDump';
           version: 3;
           docId: string;
+          appId?: string;
           sourceSchemaVersion: number;
           sourceSchemaFingerprint: string;
           sourceSchemaFingerprintHash: string;
@@ -268,6 +295,11 @@ export function parseServerMessage<TState>(
 ): ServerClientMessage | null {
     if (!isRecord(input)) return null;
     if (input.version !== SERVER_PROTOCOL_VERSION) return null;
+
+    if (input.kind === 'unknownDocument') {
+        if (input.docId !== docId) return null;
+        return input as ServerClientMessage;
+    }
 
     if (input.kind === 'hello' || input.kind === 'branchSnapshot') {
         if (input.docId !== docId || !Array.isArray(input.branches)) return null;

@@ -8,12 +8,20 @@ import {
 import {LocalFirstControls} from './LocalFirstControls';
 import {
     hasReplica,
+    listReplicas,
     listBatches,
     loadOrCreateIdentity,
     loadReplica,
     replaceReplicaState,
     saveReplica,
 } from './persistence';
+import {
+    DocumentPicker,
+    readActiveDocIdFromSearch,
+    urlWithActiveDocId,
+    type DocumentArchive,
+    type LocalDocumentSummary,
+} from '../documentArchive';
 import {schemaFingerprint, schemaFingerprintHash} from './schemaFingerprint';
 import {acquireReplicaTabLock, type TabLock} from './tabLock';
 import type {DocumentLineage, PersistedReplica, ReplicaIdentity, VersionVector} from './types';
@@ -65,7 +73,7 @@ export function LocalFirstApp<TState, EphemeralData = never>({
     schemaConfig?: LocalFirstSchemaConfig<TState>;
 }) {
     const initialPeerId = readInvitePeerId();
-    const activeDocId = readActiveDocId() ?? runtime.docId;
+    const activeDocId = readActiveDocIdFromSearch(window.location.search, runtime.docId);
     const fingerprint = useMemo(() => schemaFingerprint(app), [app]);
     const fingerprintHash = useMemo(() => schemaFingerprintHash(app), [app]);
     const schemaConfig = useMemo(
@@ -152,6 +160,7 @@ function LocalFirstReadyApp<TState, EphemeralData>({
     initialPeerId: string;
 }) {
     const [currentHistory, setCurrentHistory] = useState(loaded.history);
+    const [documents, setDocuments] = useState<LocalDocumentSummary[]>([]);
     const sync = useLocalFirstSync({
         docId: loaded.docId,
         schema: app.schema,
@@ -177,9 +186,79 @@ function LocalFirstReadyApp<TState, EphemeralData>({
         },
         [sync],
     );
+    const refreshDocuments = useCallback(() => {
+        void listReplicas().then((replicas) =>
+            setDocuments(
+                replicas.map((replica) => ({
+                    docId: replica.docId,
+                    appId: app.id,
+                    title: replica.docId,
+                    payloadKind: 'local-first',
+                    schemaVersion: replica.schemaVersion,
+                    schemaFingerprintHash: replica.schemaFingerprintHash,
+                    createdAt: replica.updatedAt,
+                    updatedAt: replica.updatedAt,
+                })),
+            ),
+        );
+    }, [app.id]);
+    useEffect(() => {
+        refreshDocuments();
+    }, [refreshDocuments]);
+    const switchDocument = useCallback((docId: string) => {
+        window.history.pushState(window.history.state, '', urlWithActiveDocId(window.location.href, docId));
+        window.location.reload();
+    }, []);
+    const archiveAdapter = useMemo(
+        () => ({
+            async exportArchive(): Promise<DocumentArchive> {
+                const state = JSON.parse(await sync.exportLocalState()) as {
+                    replica: unknown;
+                    batches: unknown[];
+                };
+                return {
+                    kind: 'umkehr.react-crdt.document',
+                    archiveVersion: 1,
+                    exportedAt: new Date().toISOString(),
+                    appId: app.id,
+                    docId: loaded.docId,
+                    schemaVersion: loaded.schemaVersion,
+                    schemaFingerprint: loaded.schemaFingerprint,
+                    schemaFingerprintHash: loaded.schemaFingerprintHash,
+                    exportedBy: {actor: loaded.identity.replicaId},
+                    payload: {
+                        kind: 'local-first',
+                        replica: state.replica as any,
+                        batches: state.batches as any,
+                    },
+                };
+            },
+            async importArchive(archive: DocumentArchive) {
+                if (archive.appId !== app.id || archive.payload.kind !== 'local-first') {
+                    throw new Error('Archive cannot be imported into local-first mode.');
+                }
+                await sync.importLocalState(
+                    JSON.stringify({
+                        replica: archive.payload.replica,
+                        batches: archive.payload.batches,
+                    }),
+                );
+            },
+        }),
+        [app.id, loaded, sync],
+    );
 
     return (
         <main className="localFirstShell">
+            <div className="documentToolbar">
+                <DocumentPicker
+                    documents={documents}
+                    activeDocId={loaded.docId}
+                    appId={app.id}
+                    payloadKind="local-first"
+                    onSwitchDocument={switchDocument}
+                />
+            </div>
             <Provider
                 initial={currentHistory}
                 transport={sync.transport}
@@ -193,6 +272,8 @@ function LocalFirstReadyApp<TState, EphemeralData>({
                 schemaVersion={loaded.schemaVersion}
                 schemaFingerprint={loaded.schemaFingerprint}
                 schemaFingerprintHash={loaded.schemaFingerprintHash}
+                archiveAdapter={archiveAdapter}
+                appId={app.id}
             />
         </main>
     );

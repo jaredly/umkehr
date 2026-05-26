@@ -25,10 +25,16 @@ export type NormalizedServerReplica<TState> = PersistedServerReplica<TState> & {
 };
 
 export function normalizeServerReplica<TState>(
-    replica: PersistedServerReplica<TState> | (Omit<PersistedServerReplica<TState>, 'schemaVersion'> & {schemaVersion?: number}),
+    replica:
+        | PersistedServerReplica<TState>
+        | (Omit<PersistedServerReplica<TState>, 'schemaVersion' | 'appId'> & {
+              schemaVersion?: number;
+              appId?: string;
+          }),
 ): NormalizedServerReplica<TState> {
     return {
         ...replica,
+        appId: replica.appId ?? '',
         schemaVersion: replica.schemaVersion ?? 1,
         schemaFingerprintHash: replica.schemaFingerprintHash ?? sha256Hex(replica.schemaFingerprint),
     };
@@ -151,7 +157,8 @@ export function migrateServerDump<TState>({
     );
     const source: PersistedServerReplica<unknown> = {
         docId: dump.docId,
-        storageVersion: 3,
+        appId: dump.appId ?? '',
+        storageVersion: 4,
         protocolVersion: 3,
         schemaVersion: dump.sourceSchemaVersion,
         schemaFingerprint: dump.sourceSchemaFingerprint,
@@ -175,6 +182,7 @@ export function migrateServerDump<TState>({
         actor: '',
         userId: '',
         docId: dump.docId,
+        appId: dump.appId ?? '',
         sourceSchemaFingerprintHash: dump.sourceSchemaFingerprintHash,
         targetSchemaVersion: schemaConfig.version,
         targetSchemaFingerprint: schemaFingerprint,

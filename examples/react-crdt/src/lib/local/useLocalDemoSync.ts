@@ -20,6 +20,8 @@ export type DemoSync = {
     transports: Record<ReplicaId, DemoTransport>;
     statusStores: Record<ReplicaId, StatusStore>;
     toggleSync(): void;
+    exportTransportState(): TransportState;
+    replaceTransportState(state: TransportState): void;
     setPresenceSelection(from: ReplicaId, elementId: string | null): void;
 };
 
@@ -82,6 +84,24 @@ export function useLocalDemoSync() {
         },
         [statusStores],
     );
+    const exportTransportState = useCallback(() => stateStore.getSnapshot(), [stateStore]);
+    const replaceTransportState = useCallback(
+        (state: TransportState) => {
+            stateStore.setSnapshot({
+                syncEnabled: state.syncEnabled,
+                outbox: {
+                    ...emptyOutbox(),
+                    ...Object.fromEntries(
+                        Object.entries(state.outbox).map(([replicaId, updates]) => [
+                            replicaId,
+                            [...updates],
+                        ]),
+                    ),
+                },
+            });
+        },
+        [stateStore],
+    );
 
     publishRef.current = publishUpdates;
     publishEphemeralRef.current = publishEphemeralMessages;
@@ -92,9 +112,19 @@ export function useLocalDemoSync() {
             transports,
             statusStores,
             toggleSync,
+            exportTransportState,
+            replaceTransportState,
             setPresenceSelection,
         }),
-        [setPresenceSelection, stateStore, statusStores, transports, toggleSync],
+        [
+            exportTransportState,
+            replaceTransportState,
+            setPresenceSelection,
+            stateStore,
+            statusStores,
+            transports,
+            toggleSync,
+        ],
     );
 }
 

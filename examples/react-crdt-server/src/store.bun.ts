@@ -119,7 +119,7 @@ function seedPayload(): SeedDatabasePayload {
 describe('ServerStore', () => {
     it('auto-creates main and assigns contiguous update event indexes', () => {
         const store = createStore();
-        store.ensureDocument('doc', 1, 'schema', 'schema-hash');
+        store.ensureDocument('doc', '', 1, 'schema', 'schema-hash');
 
         expect(store.ensureMainBranch('doc').name).toBe('main');
         expect(store.listBranches('doc').map((branch) => branch.branchId)).toEqual(['main']);
@@ -154,7 +154,7 @@ describe('ServerStore', () => {
 
     it('creates and renames branches with unique names', () => {
         const store = createStore();
-        store.ensureDocument('doc', 1, 'schema', 'schema-hash');
+        store.ensureDocument('doc', '', 1, 'schema', 'schema-hash');
 
         const branch = store.createBranch({
             docId: 'doc',
@@ -190,7 +190,7 @@ describe('ServerStore', () => {
 
     it('deduplicates merge events by mergeId', () => {
         const store = createStore();
-        store.ensureDocument('doc', 1, 'schema', 'schema-hash');
+        store.ensureDocument('doc', '', 1, 'schema', 'schema-hash');
 
         const first = store.appendMergeEvent({
             docId: 'doc',
@@ -225,6 +225,7 @@ describe('ServerStore', () => {
             {userId: 'user-ben', nickname: 'Ben'},
         ]);
         expect(store.getDocument('seed-doc')).toEqual({
+            appId: '',
             schemaVersion: 1,
             schemaFingerprint: 'schema',
             schemaFingerprintHash: 'schema-hash',
@@ -232,6 +233,7 @@ describe('ServerStore', () => {
         expect(store.summarizeDocuments()).toEqual([
             {
                 docId: 'seed-doc',
+                appId: '',
                 schemaVersion: 1,
                 schemaFingerprint: 'schema',
                 schemaFingerprintHash: 'schema-hash',
@@ -314,7 +316,7 @@ describe('ServerStore', () => {
 
     it('supports metadata upserts and access touches on normal documents', () => {
         const store = createStore();
-        store.ensureDocument('doc', 1, 'schema', 'schema-hash');
+        store.ensureDocument('doc', '', 1, 'schema', 'schema-hash');
 
         expect(store.summarizeDocuments()).toMatchObject([
             {
@@ -349,7 +351,7 @@ describe('ServerStore', () => {
 
     it('grants a migration lock and dumps all branch data', () => {
         const store = createStore();
-        store.ensureDocument('doc', 1, 'schema-v1', 'hash-v1');
+        store.ensureDocument('doc', '', 1, 'schema-v1', 'hash-v1');
         const event = store.appendUpdateEvent({
             docId: 'doc',
             branchId: 'main',
@@ -383,7 +385,7 @@ describe('ServerStore', () => {
 
     it('blocks competing migration locks until the active lock expires', () => {
         const store = createStore();
-        store.ensureDocument('doc', 1, 'schema-v1', 'hash-v1');
+        store.ensureDocument('doc', '', 1, 'schema-v1', 'hash-v1');
         store.beginMigration({
             docId: 'doc',
             ownerActor: 'user:session',
@@ -413,7 +415,7 @@ describe('ServerStore', () => {
 
     it('archives old data and activates uploaded migrated data atomically', () => {
         const store = createStore();
-        store.ensureDocument('doc', 1, 'schema-v1', 'hash-v1');
+        store.ensureDocument('doc', '', 1, 'schema-v1', 'hash-v1');
         const event = store.appendUpdateEvent({
             docId: 'doc',
             branchId: 'main',
@@ -469,7 +471,7 @@ describe('ServerStore', () => {
 
     it('rejects migration uploads without a matching active lock and source hash', () => {
         const store = createStore();
-        store.ensureDocument('doc', 1, 'schema-v1', 'hash-v1');
+        store.ensureDocument('doc', '', 1, 'schema-v1', 'hash-v1');
         const upload = {
             docId: 'doc',
             sourceSchemaFingerprintHash: 'hash-v1',
@@ -511,7 +513,7 @@ describe('ServerStore', () => {
 
     it('rejects migrated branch events with incoherent indexes', () => {
         const store = createStore();
-        store.ensureDocument('doc', 1, 'schema-v1', 'hash-v1');
+        store.ensureDocument('doc', '', 1, 'schema-v1', 'hash-v1');
         store.beginMigration({
             docId: 'doc',
             ownerActor: 'user:session',
@@ -564,6 +566,7 @@ describe('ServerStore', () => {
         const store = createStore();
         store.ensureDocument(
             TODO_FIXTURE_DOC_ID_V1,
+            '',
             1,
             todoFixtureV1Fingerprint,
             todoFixtureV1FingerprintHash,

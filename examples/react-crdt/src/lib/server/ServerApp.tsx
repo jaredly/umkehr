@@ -1,12 +1,19 @@
 import {useCallback, useEffect, useMemo, useState, type FormEvent} from 'react';
 import {createInitialCrdtHistory, type AppDefinition, type CrdtRuntime} from '../crdtApp';
 import {schemaFingerprint, schemaFingerprintHash} from '../local-first/schemaFingerprint';
+import {
+    assertArchiveForApp,
+    DocumentArchiveControls,
+    validateCrdtUpdatesForApp,
+    type DocumentArchive,
+} from '../documentArchive';
 import {ServerControls} from './ServerControls';
 import {ServerHistoryView} from './ServerHistoryView';
 import {
     clearServerUser,
     loadServerUser,
     loadServerReplica,
+    listServerReplicas,
     saveServerReplica,
     saveServerUser,
 } from './persistence';
@@ -71,8 +78,12 @@ export function ServerApp<TState, EphemeralData = never>({
     useEffect(() => {
         let alive = true;
         setDocumentsState((current) => ({kind: 'loading', documents: current.documents}));
-        fetchServerDocuments()
-            .then((documents) => {
+        Promise.all([
+            fetchServerDocuments().catch(() => []),
+            listLocalServerDocuments(),
+        ])
+            .then(([remoteDocuments, localDocuments]) => {
+                const documents = mergeServerDocuments(remoteDocuments, localDocuments);
                 if (alive) setDocumentsState({kind: 'ready', documents});
             })
             .catch((error) => {
@@ -259,6 +270,46 @@ function ServerReadyApp<TState, EphemeralData>({
                 onSwitchDocument={onSwitchDocument}
                 onLogout={onLogout}
             />
+            <DocumentArchiveControls
+                adapter={{
+                    async exportArchive(): Promise<DocumentArchive> {
+                        return {
+                            kind: 'umkehr.react-crdt.document',
+                            archiveVersion: 1,
+                            exportedAt: new Date().toISOString(),
+                            appId: app.id,
+                            docId,
+                            schemaVersion: schemaConfig.version,
+                            schemaFingerprint,
+                            schemaFingerprintHash,
+                            exportedBy: {actor: loaded.identity.actor},
+                            payload: {kind: 'server', replica: sync.exportReplica() as any},
+                        };
+                    },
+                    async importArchive(archive: DocumentArchive) {
+                        assertArchiveForApp(archive, app as any, 'server');
+                        const replica = archive.payload.replica as PersistedServerReplica<TState>;
+                        if (replica.appId && replica.appId !== app.id) {
+                            throw new Error('Archive server replica belongs to another app.');
+                        }
+                        if (replica.schemaFingerprintHash !== schemaFingerprintHash) {
+                            throw new Error('Archive schema does not match this app version.');
+                        }
+                        for (const branch of Object.values(replica.branches)) {
+                            for (const event of branch.events) {
+                                if (event.kind === 'update') validateCrdtUpdatesForApp([event.update], app);
+                            }
+                        }
+                        const normalized = {...replica, appId: app.id, storageVersion: 4 as const};
+                        await saveServerReplica(normalized);
+                        sync.replaceReplica(normalized);
+                        onSwitchDocument(archive.docId);
+                    },
+                }}
+                appId={app.id}
+                docId={docId}
+                payloadKind="server"
+            />
             <section className="serverDocument">
                 <Provider
                     initial={currentHistory}
@@ -373,7 +424,9 @@ async function loadInitialState<TState>(
     const persisted = await loadServerReplica<TState>(docId);
     if (persisted) {
         const normalized = normalizeServerReplica(persisted);
+        normalized.appId ||= app.id;
         if (normalized.schemaFingerprintHash === fingerprintHash) {
+            if (normalized.appId !== app.id) throw new Error('Persisted document belongs to another app.');
             return {
                 identity,
                 replica: normalized,
@@ -399,7 +452,8 @@ async function loadInitialState<TState>(
     const now = new Date().toISOString();
     const replica: PersistedServerReplica<TState> = {
         docId,
-        storageVersion: 3,
+        appId: app.id,
+        storageVersion: 4,
         protocolVersion: SERVER_PROTOCOL_VERSION,
         schemaVersion: schemaConfig.version,
         schemaFingerprint: fingerprint,
@@ -489,6 +543,36 @@ async function fetchServerDocuments(): Promise<ServerDocumentSummary[]> {
     const response = await fetchWithTimeout(`${SERVER_HTTP_URL}/documents`);
     const body = await parseJsonResponse(response);
     return parseServerDocumentsResponse(body);
+}
+
+async function listLocalServerDocuments(): Promise<ServerDocumentSummary[]> {
+    const replicas = await listServerReplicas();
+    return replicas.map((replica) => ({
+        docId: replica.docId,
+        appId: replica.appId,
+        schemaVersion: replica.schemaVersion,
+        schemaFingerprint: replica.schemaFingerprint,
+        schemaFingerprintHash: replica.schemaFingerprintHash,
+        title: replica.docId,
+        sizeLabel: 'local',
+        sizeRank: 0,
+        createdAt: replica.updatedAt,
+        lastAccessedAt: replica.updatedAt,
+        branchCount: replica.branchList.length,
+        eventCount: Object.values(replica.branches).reduce(
+            (count, branch) => count + branch.events.length,
+            0,
+        ),
+    }));
+}
+
+function mergeServerDocuments(
+    remoteDocuments: ServerDocumentSummary[],
+    localDocuments: ServerDocumentSummary[],
+) {
+    const byId = new Map(localDocuments.map((document) => [document.docId, document]));
+    for (const document of remoteDocuments) byId.set(document.docId, document);
+    return [...byId.values()].sort((a, b) => a.title.localeCompare(b.title));
 }
 
 async function loginServerUser(nickname: string): Promise<ServerUser> {
