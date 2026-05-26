@@ -28,7 +28,7 @@ import {
     readActiveDocIdFromSearch,
     urlWithActiveDocId,
 } from './documents';
-import {loadBranchFreeSeedFixtureForApp} from '../seed/documents';
+import {branchFreeSeedSummariesForApp, loadBranchFreeSeedFixtureForApp} from '../seed/documents';
 import {createServerClientSeedReplica, type ServerClientSeedScenario} from '../seed/serverClient';
 import {ServerClientSeedControls} from './ServerClientSeedControls';
 import type {
@@ -208,7 +208,13 @@ export function ServerApp<TState, EphemeralData = never>({
             app={app}
             runtime={runtime}
             docId={activeDocId}
-            documents={documentsForActiveDoc(documentsState.documents, activeDocId)}
+            documents={documentsForActiveDoc(
+                mergeServerDocuments(
+                    documentsState.documents,
+                    seedDocumentsForServerPicker(app.id),
+                ),
+                activeDocId,
+            )}
             documentsUnavailableMessage={
                 documentsState.kind === 'error' ? documentsState.message : undefined
             }
@@ -279,6 +285,7 @@ function ServerReadyApp<TState, EphemeralData>({
             <div className="documentToolbar">
                 <ServerClientSeedControls
                     appId={app.id}
+                    activeDocId={docId}
                     onImportSeed={importSeedClientReplica}
                 />
             </div>
@@ -593,6 +600,23 @@ function mergeServerDocuments(
     const byId = new Map(localDocuments.map((document) => [document.docId, document]));
     for (const document of remoteDocuments) byId.set(document.docId, document);
     return [...byId.values()].sort((a, b) => a.title.localeCompare(b.title));
+}
+
+function seedDocumentsForServerPicker(appId: string): ServerDocumentSummary[] {
+    return branchFreeSeedSummariesForApp(appId, 'server').map((seed) => ({
+        docId: seed.docId,
+        appId: seed.appId,
+        schemaVersion: seed.schemaVersion ?? 1,
+        schemaFingerprint: '',
+        schemaFingerprintHash: seed.schemaFingerprintHash,
+        title: seed.title,
+        sizeLabel: seed.sizeLabel,
+        sizeRank: seed.sizeRank,
+        createdAt: seed.createdAt,
+        lastAccessedAt: seed.updatedAt,
+        branchCount: 1,
+        eventCount: 0,
+    }));
 }
 
 async function loginServerUser(nickname: string): Promise<ServerUser> {

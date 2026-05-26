@@ -1,5 +1,5 @@
 import {useMemo, useState} from 'react';
-import {branchFreeSeedSummariesForApp, seedSummaryTitle} from '../seed/documents';
+import {branchFreeSeedSummariesForApp} from '../seed/documents';
 import type {ServerClientSeedScenario} from '../seed/serverClient';
 
 const scenarios: {value: ServerClientSeedScenario; label: string}[] = [
@@ -10,23 +10,25 @@ const scenarios: {value: ServerClientSeedScenario; label: string}[] = [
 
 export function ServerClientSeedControls({
     appId,
+    activeDocId,
     onImportSeed,
 }: {
     appId: string;
+    activeDocId: string;
     onImportSeed(docId: string, scenario: ServerClientSeedScenario): Promise<void> | void;
 }) {
     const seeds = useMemo(() => branchFreeSeedSummariesForApp(appId, 'server'), [appId]);
-    const [docId, setDocId] = useState(() => seeds[0]?.docId ?? '');
     const [scenario, setScenario] = useState<ServerClientSeedScenario>('cached');
     const [message, setMessage] = useState<string | null>(null);
+    const selectedSeed = seeds.find((seed) => seed.docId === activeDocId);
 
     if (!seeds.length) return null;
 
     async function importSelected() {
-        if (!docId) return;
+        if (!selectedSeed) return;
         setMessage(null);
         try {
-            await onImportSeed(docId, scenario);
+            await onImportSeed(activeDocId, scenario);
             setMessage('Seeded client state');
         } catch (error) {
             setMessage(error instanceof Error ? error.message : String(error));
@@ -35,20 +37,6 @@ export function ServerClientSeedControls({
 
     return (
         <section className="serverClientSeedControls" aria-label="Server client seed state">
-            <label>
-                <span>Client seed</span>
-                <select
-                    value={docId}
-                    onChange={(event) => setDocId(event.currentTarget.value)}
-                    aria-label="Server client seed document"
-                >
-                    {seeds.map((seed) => (
-                        <option key={seed.docId} value={seed.docId} title={seed.docId}>
-                            {seedSummaryTitle(seed)}
-                        </option>
-                    ))}
-                </select>
-            </label>
             <label>
                 <span>State</span>
                 <select
@@ -65,10 +53,13 @@ export function ServerClientSeedControls({
                     ))}
                 </select>
             </label>
-            <button type="button" disabled={!docId} onClick={() => void importSelected()}>
-                Apply client seed
+            <button type="button" disabled={!selectedSeed} onClick={() => void importSelected()}>
+                Apply seed to current document
             </button>
             {message ? <p className="documentArchiveMessage">{message}</p> : null}
+            {!selectedSeed ? (
+                <p className="documentArchiveMessage">Select a seed document to apply seeded client state.</p>
+            ) : null}
         </section>
     );
 }

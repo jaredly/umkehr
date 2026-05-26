@@ -63,3 +63,7 @@ Verification:
   - `npx vitest run src/react/react.test.tsx`: 15 pass.
   - `npx vitest run src/lib/solo/solo-render.test.tsx`: 3 pass.
   - `pnpm build` in `examples/react-crdt`: passed.
+- Removed the duplicate server document dropdown:
+  - The main server Document dropdown now includes branch-free seed documents.
+  - Server client seed controls now only choose the client-state scenario and apply it to the currently selected document.
+  - `pnpm build` in `examples/react-crdt`: passed.
