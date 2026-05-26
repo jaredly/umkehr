@@ -55,3 +55,11 @@
 - Verified Phase 6 with `npx vitest run examples/react-crdt/src/apps/whiteboard/ephemeral.test.ts examples/react-crdt/src/apps/whiteboard/helpers.test.ts`, `npm run typecheck`, `npm run typecheck:tests`, and `npm test`.
 - Rechecked `npm run typecheck:examples`; it still fails only on the known unrelated `CrdtUpdate.path` seed test and Vite plugin type mismatches.
 - Fixed selected-element drag previews to publish updated `selection` bounds alongside `element-preview` messages during move/resize and after durable pointer-up commit.
+- Started Phase 7.
+- Added PeerJS `ephemeral` protocol messages carrying `EphemeralMessage<unknown>[]`.
+- Added PeerJS ephemeral envelope validation for actor matching, path shape, required data, optional clear/expires fields, and a 16 KB encoded batch cap.
+- Wired PeerJS transport `publishEphemeral` and `subscribeEphemeral`; host peers deliver inbound client ephemeral messages locally and rebroadcast them to other peers.
+- Kept PeerJS snapshots durable-document-only; ephemeral messages are broadcast-only and are not included in snapshot state.
+- Added PeerJS protocol tests for valid ephemeral messages, malformed actor/path envelopes, and oversized batches.
+- Verified Phase 7 with `npx vitest run examples/react-crdt/src/lib/peerjs/protocol.test.ts`, `npm run typecheck`, `npm run typecheck:tests`, and `npm test`.
+- Rechecked `npm run typecheck:examples`; it still fails only on the known unrelated `CrdtUpdate.path` seed test and Vite plugin type mismatches.

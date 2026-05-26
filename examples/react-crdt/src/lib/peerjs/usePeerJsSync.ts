@@ -1,5 +1,6 @@
 import {useCallback, useEffect, useMemo, useRef} from 'react';
 import Peer, {type DataConnection} from 'peerjs';
+import type {EphemeralMessage} from 'umkehr';
 import {hlc, latestCrdtUpdateBatchTimestamp, type CrdtDocument, type CrdtUpdate} from 'umkehr/crdt';
 import type {SyncedTransport} from 'umkehr/react-crdt';
 import {createExternalStore} from '../store';
@@ -38,6 +39,7 @@ export function usePeerJsSync<TState>({
     const clockRef = useRef(hlc.init(actor, Date.now()));
     const snapshotRef = useRef<CrdtDocument<TState> | undefined>(initialDocument);
     const listenersRef = useRef(new Set<(update: CrdtUpdate) => void>());
+    const ephemeralListenersRef = useRef(new Set<(message: EphemeralMessage<unknown>) => void>());
     const connectionsRef = useRef(new Map<string, ConnectionRecord<TState>>());
     const lastHostPeerIdRef = useRef<string | null>(null);
 
@@ -160,6 +162,27 @@ export function usePeerJsSync<TState>({
         [sendOrQueue],
     );
 
+    const deliverEphemeral = useCallback((messages: readonly EphemeralMessage<unknown>[]) => {
+        for (const message of messages) {
+            for (const listener of ephemeralListenersRef.current) listener(message);
+        }
+    }, []);
+
+    const broadcastEphemeralFromHost = useCallback(
+        (messages: EphemeralMessage<unknown>[], exceptPeerId?: string) => {
+            if (!messages.length) return;
+            const peerMessages = createEphemeralMessages<TState>(
+                protocolRef.current.docId,
+                messages,
+            );
+            for (const record of connectionsRef.current.values()) {
+                if (record.conn.peer === exceptPeerId) continue;
+                for (const message of peerMessages) sendOrQueue(record, message);
+            }
+        },
+        [sendOrQueue],
+    );
+
     const handleMessage = useCallback(
         (conn: DataConnection, input: unknown) => {
             const message = parsePeerMessage(input, protocolRef.current);
@@ -199,10 +222,20 @@ export function usePeerJsSync<TState>({
             if (message.kind === 'updates') {
                 deliverUpdates(message.updates);
                 if (roleRef.current === 'host') broadcastFromHost(message.updates, conn.peer);
+                return;
+            }
+
+            if (message.kind === 'ephemeral') {
+                deliverEphemeral(message.messages);
+                if (roleRef.current === 'host') {
+                    broadcastEphemeralFromHost(message.messages, conn.peer);
+                }
             }
         },
         [
+            broadcastEphemeralFromHost,
             broadcastFromHost,
+            deliverEphemeral,
             deliverUpdates,
             flushQueued,
             publishConnections,
@@ -279,12 +312,35 @@ export function usePeerJsSync<TState>({
                     listenersRef.current.delete(receive);
                 };
             },
-            publishEphemeral(_messages) {},
-            subscribeEphemeral(_receive) {
-                return () => {};
+            publishEphemeral<Data>(messages: EphemeralMessage<Data>[]) {
+                if (!messages.length) return;
+                if (roleRef.current === 'host') {
+                    broadcastEphemeralFromHost(messages);
+                    return;
+                }
+
+                const hostPeerId = lastHostPeerIdRef.current;
+                const record = hostPeerId ? connectionsRef.current.get(hostPeerId) : undefined;
+                if (record) {
+                    sendOrQueue(
+                        record,
+                        createEphemeralMessage<TState>(
+                            actorRef.current,
+                            protocolRef.current.docId,
+                            messages,
+                        ),
+                    );
+                }
+            },
+            subscribeEphemeral<Data>(receive: (message: EphemeralMessage<Data>) => void) {
+                const listener = receive as (message: EphemeralMessage<unknown>) => void;
+                ephemeralListenersRef.current.add(listener);
+                return () => {
+                    ephemeralListenersRef.current.delete(listener);
+                };
             },
         }),
-        [actor, broadcastFromHost, sendOrQueue],
+        [actor, broadcastEphemeralFromHost, broadcastFromHost, sendOrQueue],
     );
 
     const connect = useCallback(
@@ -393,4 +449,36 @@ function createUpdatesMessage<TState>(
         batchId: crypto.randomUUID(),
         updates,
     };
+}
+
+function createEphemeralMessage<TState>(
+    actor: string,
+    docId: string,
+    messages: EphemeralMessage<unknown>[],
+): PeerMessage<TState> {
+    return {
+        kind: 'ephemeral',
+        version: PEER_PROTOCOL_VERSION,
+        actor,
+        docId,
+        messages,
+    };
+}
+
+function createEphemeralMessages<TState>(
+    docId: string,
+    messages: EphemeralMessage<unknown>[],
+): PeerMessage<TState>[] {
+    const messagesByActor = new Map<string, EphemeralMessage<unknown>[]>();
+    for (const message of messages) {
+        const group = messagesByActor.get(message.actor);
+        if (group) {
+            group.push(message);
+        } else {
+            messagesByActor.set(message.actor, [message]);
+        }
+    }
+    return [...messagesByActor].map(([actor, group]) =>
+        createEphemeralMessage<TState>(actor, docId, group),
+    );
 }

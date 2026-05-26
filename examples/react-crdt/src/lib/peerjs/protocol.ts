@@ -1,4 +1,5 @@
 import type {IJsonSchemaCollection, IValidation} from 'typia';
+import type {EphemeralMessage, Path} from 'umkehr';
 import {
     createCrdtUpdateValidator,
     type CrdtDocument,
@@ -9,6 +10,7 @@ import {
 import type {PeerRole} from './types';
 
 export const PEER_PROTOCOL_VERSION = 1;
+export const MAX_PEER_EPHEMERAL_BYTES = 16_384;
 
 export type PeerProtocolConfig<TState> = {
     docId: string;
@@ -39,6 +41,13 @@ export type PeerMessage<TState> =
           docId: string;
           batchId: string;
           updates: CrdtUpdate[];
+      }
+    | {
+          kind: 'ephemeral';
+          version: 1;
+          actor: string;
+          docId: string;
+          messages: EphemeralMessage<unknown>[];
       };
 
 export function parsePeerMessage<TState>(
@@ -72,6 +81,17 @@ export function parsePeerMessage<TState>(
             updates.push(result.data);
         }
         return {...input, updates} as PeerMessage<TState>;
+    }
+
+    if (input.kind === 'ephemeral') {
+        if (!Array.isArray(input.messages) || input.messages.length === 0) return null;
+        if (encodedSize(input.messages) > MAX_PEER_EPHEMERAL_BYTES) return null;
+        const messages: EphemeralMessage<unknown>[] = [];
+        for (const message of input.messages) {
+            if (!validateEphemeralMessage(message, input.actor)) return null;
+            messages.push(message);
+        }
+        return {...input, messages} as PeerMessage<TState>;
     }
 
     return null;
@@ -176,6 +196,40 @@ function isJsonPrimitive(input: unknown) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function validateEphemeralMessage(
+    input: unknown,
+    actor: string,
+): input is EphemeralMessage<unknown> {
+    if (!isRecord(input)) return false;
+    if (typeof input.kind !== 'string' || input.kind.length === 0) return false;
+    if (typeof input.id !== 'string' || input.id.length === 0) return false;
+    if (input.actor !== actor) return false;
+    if ('path' in input && !validatePath(input.path)) return false;
+    if (!('data' in input)) return false;
+    if ('clear' in input && typeof input.clear !== 'boolean') return false;
+    if ('expiresAt' in input && typeof input.expiresAt !== 'string') return false;
+    return true;
+}
+
+function validatePath(input: unknown): input is Path {
+    return (
+        Array.isArray(input) &&
+        input.every(
+            (segment) =>
+                isRecord(segment) &&
+                ((segment.type === 'key' &&
+                    (typeof segment.key === 'string' || typeof segment.key === 'number')) ||
+                    (segment.type === 'tag' &&
+                        typeof segment.key === 'string' &&
+                        typeof segment.value === 'string')),
+        )
+    );
+}
+
+function encodedSize(input: unknown) {
+    return new TextEncoder().encode(JSON.stringify(input)).byteLength;
 }
 
 function stableStringify(value: unknown): string {
