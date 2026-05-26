@@ -1,4 +1,4 @@
-import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {deepEqual as equal} from '../deepEqual.js';
 import {getExtra, getPath} from '../helper.js';
 import {type EqualFn} from '../internal.js';
@@ -60,7 +60,7 @@ export const useValue: (<Current, Return, Tag extends PropertyKey>(
     const [v, setV] = useResettingState(() => mod(extra.getForPath<Current>(path)), [path]);
     const lv = useLatest(v);
     const lmod = useLatest(mod);
-    useLayoutEffect(
+    useEffect(
         () =>
             extra.listenToPath(path, () => {
                 const nw = lmod.current(extra.getForPath<Current>(path));
@@ -82,7 +82,7 @@ export function useStatusesFromStore<Current, Tag extends PropertyKey>(
     const path = getPath(node);
     const [statuses, setStatuses] = useState(() => store.get(path, query));
     const latestStatuses = useLatest(statuses);
-    useLayoutEffect(() => {
+    useEffect(() => {
         const current = store.get(path, query);
         if (!equal(latestStatuses.current, current)) {
             latestStatuses.current = current;
