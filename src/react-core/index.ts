@@ -37,7 +37,7 @@ export const useResettingState = <T>(f: () => T, r: unknown[]) => {
             v.current = nv;
             setT((t) => t + 1);
         }
-    }, []);
+    }, [v]);
     return [v.current, setV] as const;
 };
 
@@ -60,7 +60,7 @@ export const useValue: (<Current, Return, Tag extends PropertyKey>(
     const [v, setV] = useResettingState(() => mod(extra.getForPath<Current>(path)), [path]);
     const lv = useLatest(v);
     const lmod = useLatest(mod);
-    useEffect(
+    useLayoutEffect(
         () =>
             extra.listenToPath(path, () => {
                 const nw = lmod.current(extra.getForPath<Current>(path));
@@ -69,7 +69,7 @@ export const useValue: (<Current, Return, Tag extends PropertyKey>(
                     setV(nw);
                 }
             }),
-        [extra, path, lv, lmod, exact, equalFn],
+        [extra, path, lv, lmod, exact, equalFn, setV],
     );
     return v;
 };
@@ -82,7 +82,7 @@ export function useStatusesFromStore<Current, Tag extends PropertyKey>(
     const path = getPath(node);
     const [statuses, setStatuses] = useState(() => store.get(path, query));
     const latestStatuses = useLatest(statuses);
-    useEffect(() => {
+    useLayoutEffect(() => {
         const current = store.get(path, query);
         if (!equal(latestStatuses.current, current)) {
             latestStatuses.current = current;

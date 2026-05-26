@@ -48,3 +48,10 @@ Verification:
 - Added a focused solo render regression test that edits one todo title and verifies only that todo row rerenders while unsubscribed controls and the todo list stay stable.
   - `npx vitest run src/lib/solo/solo-render.test.tsx`: 1 pass.
   - `pnpm build` in `examples/react-crdt`: passed.
+- Fixed stale `useValue` subscriptions after keyed todo rows move between array indices:
+  - `useResettingState` now updates the current memoized value cell instead of a stale cell from the component's first path.
+  - Path/status subscriptions now use layout effects so subscription moves are applied before subsequent input.
+  - Added a regression for title edit -> reorder -> undo reorder -> undo title.
+  - `npx vitest run src/react/react.test.tsx`: 15 pass.
+  - `npx vitest run src/lib/solo/solo-render.test.tsx`: 3 pass.
+  - `pnpm build` in `examples/react-crdt`: passed.
