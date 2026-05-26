@@ -45,3 +45,6 @@ Verification:
   - `npx vitest run src/lib/seed/generate.test.ts`: 13 pass.
   - `pnpm build` in `examples/react-crdt`: passed.
   - After memoizing the panel editor wrapper, `pnpm build` in `examples/react-crdt`: passed.
+- Added a focused solo render regression test that edits one todo title and verifies only that todo row rerenders while unsubscribed controls and the todo list stay stable.
+  - `npx vitest run src/lib/solo/solo-render.test.tsx`: 1 pass.
+  - `pnpm build` in `examples/react-crdt`: passed.
