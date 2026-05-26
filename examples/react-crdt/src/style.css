@@ -1360,7 +1360,9 @@ p {
 }
 
 .documentToolbar,
-.documentArchiveControls {
+.documentArchiveControls,
+.seedDocumentPicker,
+.serverClientSeedControls {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -1378,13 +1380,29 @@ p {
     gap: 8px;
 }
 
-.documentPicker span {
+.seedDocumentPicker label,
+.serverClientSeedControls label {
+    display: inline-grid;
+    grid-template-columns: auto minmax(160px, 1fr);
+    align-items: center;
+    gap: 8px;
+}
+
+.serverClientSeedControls label {
+    grid-template-columns: auto minmax(150px, 1fr);
+}
+
+.documentPicker span,
+.seedDocumentPicker span,
+.serverClientSeedControls span {
     font-size: 12px;
     font-weight: 700;
     color: #526070;
 }
 
-.documentPicker select {
+.documentPicker select,
+.seedDocumentPicker select,
+.serverClientSeedControls select {
     min-width: 0;
 }
 

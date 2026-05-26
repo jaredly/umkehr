@@ -120,8 +120,9 @@ export const seedActors = actors;
 const docClocks = new WeakMap<object, FixtureClock>();
 
 if (isMainModule()) {
-    const payload = generateSeedDatabasePayload(parseArgs(process.argv));
-    process.stdout.write(`${JSON.stringify(payload)}\n`);
+    const nodeProcess = nodeProcessGlobal();
+    const payload = generateSeedDatabasePayload(parseArgs(nodeProcess.argv));
+    nodeProcess.stdout.write(`${JSON.stringify(payload)}\n`);
 }
 
 export function generateSeedDatabasePayload({
@@ -1509,5 +1510,24 @@ function mutateFirstDocument(
 }
 
 function isMainModule() {
-    return process.argv[1] ? import.meta.url === new URL(`file://${process.argv[1]}`).href : false;
+    const nodeProcess = nodeProcessGlobal();
+    return nodeProcess.argv[1]
+        ? import.meta.url === new URL(`file://${nodeProcess.argv[1]}`).href
+        : false;
+}
+
+function nodeProcessGlobal(): {
+    argv: string[];
+    stdout: {write(value: string): void};
+} {
+    const maybeProcess = (globalThis as {
+        process?: {
+            argv?: string[];
+            stdout?: {write(value: string): void};
+        };
+    }).process;
+    return {
+        argv: maybeProcess?.argv ?? [],
+        stdout: maybeProcess?.stdout ?? {write() {}},
+    };
 }

@@ -29,8 +29,8 @@ import {
     urlWithActiveDocId,
 } from './documents';
 import {loadBranchFreeSeedFixtureForApp} from '../seed/documents';
-import {SeedDocumentPicker} from '../seed/SeedDocumentPicker';
-import {createServerClientSeedReplica} from '../seed/serverClient';
+import {createServerClientSeedReplica, type ServerClientSeedScenario} from '../seed/serverClient';
+import {ServerClientSeedControls} from './ServerClientSeedControls';
 import type {
     PersistedServerReplica,
     ServerDocumentSummary,
@@ -263,10 +263,10 @@ function ServerReadyApp<TState, EphemeralData>({
     });
     const {Provider} = runtime;
     const importSeedClientReplica = useCallback(
-        async (seedDocId: string) => {
+        async (seedDocId: string, scenario: ServerClientSeedScenario) => {
             const fixture = loadBranchFreeSeedFixtureForApp(app, seedDocId);
             if (!fixture) throw new Error(`No seed document exists for "${seedDocId}".`);
-            const replica = createServerClientSeedReplica({fixture, scenario: 'cached'});
+            const replica = createServerClientSeedReplica({fixture, scenario});
             await saveServerReplica(replica);
             sync.replaceReplica(replica);
             onSwitchDocument(fixture.docId);
@@ -277,9 +277,8 @@ function ServerReadyApp<TState, EphemeralData>({
     return (
         <main className="serverShell">
             <div className="documentToolbar">
-                <SeedDocumentPicker
+                <ServerClientSeedControls
                     appId={app.id}
-                    payloadKind="server"
                     onImportSeed={importSeedClientReplica}
                 />
             </div>
