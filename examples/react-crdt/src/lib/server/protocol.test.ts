@@ -143,6 +143,44 @@ describe('parseServerMessage', () => {
                 {
                     kind: 'presenceEvent',
                     version: 3,
+                    docId: 'doc',
+                    branchId: 'main',
+                    event: {
+                        kind: 'whiteboard:preview',
+                        id: 'preview-1',
+                        actor: 'user:session',
+                        path: [{type: 'unknown', key: 'elements'}],
+                        data: {value: 'draft'},
+                    },
+                },
+                {docId: 'doc', schema},
+            ),
+        ).toBeNull();
+
+        expect(
+            parseServerMessage(
+                {
+                    kind: 'presenceEvent',
+                    version: 3,
+                    docId: 'doc',
+                    branchId: 'main',
+                    event: {
+                        kind: 'whiteboard:preview',
+                        id: 'preview-1',
+                        actor: 'user:session',
+                        clear: 'yes',
+                        data: {value: 'draft'},
+                    },
+                },
+                {docId: 'doc', schema},
+            ),
+        ).toBeNull();
+
+        expect(
+            parseServerMessage(
+                {
+                    kind: 'presenceEvent',
+                    version: 3,
                     docId: 'other',
                     branchId: 'main',
                     event: {

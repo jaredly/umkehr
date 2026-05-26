@@ -915,6 +915,47 @@ describe('createSyncedContext', () => {
         });
     });
 
+    it('clears remote actor ephemeral messages through the transport cleanup hook', async () => {
+        const transport = new TestTransport('local');
+
+        function Editor() {
+            const ctx = useEphemeralCtx();
+            const records = ctx.useEphemeral({kinds: ['preview']});
+            return (
+                <span data-testid="ephemeral">
+                    {records.map((record) => record.message.id).join(',')}
+                </span>
+            );
+        }
+
+        const view = render(
+            <EphemeralProvider initial={createInitialHistory()} transport={transport}>
+                <Editor />
+            </EphemeralProvider>,
+        );
+
+        act(() => {
+            transport.emitEphemeral({
+                id: 'remote-preview',
+                actor: 'remote',
+                kind: 'preview',
+                data: {value: 'remote'},
+            });
+        });
+
+        await waitFor(() => {
+            expect(view.getByTestId('ephemeral').textContent).toBe('remote-preview');
+        });
+
+        act(() => {
+            transport.clearEphemeralActor?.('remote');
+        });
+
+        await waitFor(() => {
+            expect(view.getByTestId('ephemeral').textContent).toBe('');
+        });
+    });
+
     it('only rerenders path-scoped ephemeral subscribers for matching paths', async () => {
         const transport = new TestTransport('local');
         let renders = 0;

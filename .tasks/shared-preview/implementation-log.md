@@ -63,3 +63,9 @@
 - Added PeerJS protocol tests for valid ephemeral messages, malformed actor/path envelopes, and oversized batches.
 - Verified Phase 7 with `npx vitest run examples/react-crdt/src/lib/peerjs/protocol.test.ts`, `npm run typecheck`, `npm run typecheck:tests`, and `npm test`.
 - Rechecked `npm run typecheck:examples`; it still fails only on the known unrelated `CrdtUpdate.path` seed test and Vite plugin type mismatches.
+- Started Phase 8.
+- Added a React helper test for clearing all ephemeral records for a remote actor through the transport cleanup hook.
+- Expanded browser server-protocol tests to reject malformed `presenceEvent` paths and invalid `clear` fields.
+- Attempted a Bun server protocol test for `presenceEvent`, but importing `src/protocol.ts` in `bun test` still trips typia's no-transform runtime path; reverted that test and left server protocol coverage to browser protocol tests plus server package typecheck.
+- Verified Phase 8 with focused shared-preview tests, `npm run typecheck`, `npm run typecheck:tests`, `npm test`, `npm test` in `examples/react-crdt-server`, and `npm run typecheck` in `examples/react-crdt-server`.
+- Rechecked `npm run typecheck:examples`; it still fails only on the known unrelated `CrdtUpdate.path` seed test and Vite plugin type mismatches.
