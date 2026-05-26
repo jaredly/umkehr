@@ -32,6 +32,12 @@ export type WhiteboardEphemeralData =
     | WhiteboardStrokePreviewData
     | WhiteboardSelectionData;
 
+export const whiteboardEphemeralKinds = [
+    'whiteboard:element-preview',
+    'whiteboard:stroke-preview',
+    'whiteboard:selection',
+] as const;
+
 export const validateWhiteboardEphemeralData = typia.createIs<WhiteboardEphemeralData>();
 
 export function elementPreviewMessage(

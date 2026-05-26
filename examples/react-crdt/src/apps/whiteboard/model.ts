@@ -29,6 +29,7 @@ export {
     strokePreviewId,
     strokePreviewMessage,
     validateWhiteboardEphemeralData,
+    whiteboardEphemeralKinds,
     type WhiteboardElementPreviewData,
     type WhiteboardEphemeralData,
     type WhiteboardSelectionData,

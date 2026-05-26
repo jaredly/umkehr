@@ -43,3 +43,14 @@
 - Added focused whiteboard tests for valid/invalid payload validation, stable helper message shape, path scoping, and clear-message validity.
 - Verified Phase 5 with `npx vitest run examples/react-crdt/src/apps/whiteboard/ephemeral.test.ts`, `npm run typecheck`, `npm run typecheck:tests`, and `npm test`.
 - Rechecked `npm run typecheck:examples`; it still fails only on the known unrelated `CrdtUpdate.path` seed test and Vite plugin type mismatches.
+- Started Phase 6.
+- Replaced whiteboard drag `when: 'preview'` document mutations with local element preview overlay state.
+- Published throttled `element-preview` messages during element move/resize, then committed the durable position/size only on pointer up.
+- Added explicit `clear` messages for element previews on pointer up, cancel, read-only transition, and missing viewport cleanup.
+- Gave freehand strokes stable ids before commit, published throttled `stroke-preview` messages during drawing, and cleared the stroke preview on commit/cancel.
+- Published typed selection messages for the local selection with bounds, and cleared them when selection becomes empty/read-only/unmounted.
+- Rendered remote element, stroke, and selection ephemeral messages as pointer-events-disabled overlays with stale opacity.
+- Suppressed the local durable element visually while its local overlay is active, so dragging does not mutate durable state during pointer movement.
+- Kept history-only whiteboard mode working without an ephemeral channel by detecting the CRDT ephemeral helper surface at runtime.
+- Verified Phase 6 with `npx vitest run examples/react-crdt/src/apps/whiteboard/ephemeral.test.ts examples/react-crdt/src/apps/whiteboard/helpers.test.ts`, `npm run typecheck`, `npm run typecheck:tests`, and `npm test`.
+- Rechecked `npm run typecheck:examples`; it still fails only on the known unrelated `CrdtUpdate.path` seed test and Vite plugin type mismatches.

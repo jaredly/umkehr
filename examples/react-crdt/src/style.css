@@ -1237,6 +1237,52 @@ p {
     pointer-events: none;
 }
 
+.whiteboardPreviewOverlay,
+.whiteboardPreviewSvg,
+.whiteboardSelectionPreview {
+    pointer-events: none;
+}
+
+.whiteboardPreviewOverlay {
+    z-index: 4;
+    opacity: 0.72;
+}
+
+.whiteboardPreviewOverlay.local {
+    opacity: 0.88;
+}
+
+.whiteboardPreviewOverlay.stale,
+.whiteboardPreviewSvg.stale,
+.whiteboardSelectionPreview.stale {
+    opacity: 0.35;
+}
+
+.whiteboardPreviewSvg {
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+}
+
+.whiteboardSelectionPreview {
+    position: absolute;
+    z-index: 5;
+    border: 2px dashed #0f766e;
+    border-radius: 6px;
+    background: rgb(20 184 166 / 8%);
+}
+
+.whiteboardPreviewNoteText {
+    padding: 12px;
+    color: #17202a;
+    overflow: hidden;
+    white-space: pre-wrap;
+}
+
+.previewSuppressed {
+    opacity: 0.18;
+}
+
 .whiteboardNote {
     display: grid;
     grid-template-rows: 20px minmax(0, 1fr) 12px;
