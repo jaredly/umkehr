@@ -28,6 +28,9 @@ import {
     readActiveDocIdFromSearch,
     urlWithActiveDocId,
 } from './documents';
+import {loadBranchFreeSeedFixtureForApp} from '../seed/documents';
+import {SeedDocumentPicker} from '../seed/SeedDocumentPicker';
+import {createServerClientSeedReplica} from '../seed/serverClient';
 import type {
     PersistedServerReplica,
     ServerDocumentSummary,
@@ -259,9 +262,27 @@ function ServerReadyApp<TState, EphemeralData>({
         replaceHistory: setCurrentHistory,
     });
     const {Provider} = runtime;
+    const importSeedClientReplica = useCallback(
+        async (seedDocId: string) => {
+            const fixture = loadBranchFreeSeedFixtureForApp(app, seedDocId);
+            if (!fixture) throw new Error(`No seed document exists for "${seedDocId}".`);
+            const replica = createServerClientSeedReplica({fixture, scenario: 'cached'});
+            await saveServerReplica(replica);
+            sync.replaceReplica(replica);
+            onSwitchDocument(fixture.docId);
+        },
+        [app, onSwitchDocument, sync],
+    );
 
     return (
         <main className="serverShell">
+            <div className="documentToolbar">
+                <SeedDocumentPicker
+                    appId={app.id}
+                    payloadKind="server"
+                    onImportSeed={importSeedClientReplica}
+                />
+            </div>
             <ServerControls
                 sync={sync}
                 documents={documents}

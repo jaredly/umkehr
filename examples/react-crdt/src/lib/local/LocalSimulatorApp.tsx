@@ -13,9 +13,12 @@ import {
     type LocalDocumentSummary,
 } from '../documentArchive';
 import {schemaFingerprint, schemaFingerprintHash} from '../local-first/schemaFingerprint';
+import {loadBranchFreeSeedFixtureForApp, seedCrdtHistoryForApp} from '../seed/documents';
+import type {SeedFixture} from '../seed/generate';
+import {SeedDocumentPicker} from '../seed/SeedDocumentPicker';
 import {useStore} from '../store';
 import {cloneTransportState, listLocalSimulatorDocumentSummaries, loadLocalSimulatorDocument, saveLocalSimulatorDocument, type PersistedLocalSimulatorDocument} from './persistence';
-import {replicas, type ReplicaId} from './model';
+import {replicas} from './model';
 import {SyncControls} from './SyncControls';
 import {type DemoSync, useLocalDemoSync} from './useLocalDemoSync';
 
@@ -93,6 +96,30 @@ export function LocalSimulatorApp<TState, EphemeralData = never>({
         setActiveDocId(docId);
     }, []);
 
+    const importSeedDocument = useCallback(
+        async (docId: string) => {
+            const fixture = loadBranchFreeSeedFixtureForApp(app, docId);
+            if (!fixture) throw new Error(`No seed document exists for "${docId}".`);
+            const now = new Date().toISOString();
+            const replicasForSeed = seededReplicaHistories(app, fixture);
+            const transportState = emptyTransportState();
+            await saveLocalSimulatorDocument({
+                docId: fixture.docId,
+                appId: app.id,
+                schemaFingerprintHash: fingerprintHash,
+                replicas: replicasForSeed,
+                transportState,
+                createdAt: fixture.createdAt || now,
+                updatedAt: now,
+            });
+            setHistories(replicasForSeed);
+            sync.replaceTransportState(transportState);
+            switchDocument(fixture.docId);
+            refreshDocuments();
+        },
+        [app, fingerprintHash, refreshDocuments, switchDocument, sync],
+    );
+
     const archiveAdapter = useMemo(
         () => ({
             async exportArchive(): Promise<DocumentArchive> {
@@ -158,6 +185,11 @@ export function LocalSimulatorApp<TState, EphemeralData = never>({
                     appId={app.id}
                     payloadKind="local-simulator"
                     onSwitchDocument={switchDocument}
+                />
+                <SeedDocumentPicker
+                    appId={app.id}
+                    payloadKind="local-simulator"
+                    onImportSeed={importSeedDocument}
                 />
                 <DocumentArchiveControls
                     adapter={archiveAdapter}
@@ -270,6 +302,23 @@ function initialReplicaHistories<TState, EphemeralData>(
     );
 }
 
+function seededReplicaHistories<TState, EphemeralData>(
+    app: AppDefinition<TState, EphemeralData>,
+    fixture: SeedFixture<TState>,
+): ReplicaHistories<TState> {
+    const history = seedCrdtHistoryForApp(app, fixture);
+    return Object.fromEntries(
+        replicas.map((replica) => [replica.id, structuredClone(history)]),
+    ) as ReplicaHistories<TState>;
+}
+
+function emptyTransportState(): PersistedLocalSimulatorDocument<unknown>['transportState'] {
+    return {
+        syncEnabled: true,
+        outbox: Object.fromEntries(replicas.map((replica) => [replica.id, []])),
+    };
+}
+
 async function loadOrCreateLocalSimulatorDocument<TState, EphemeralData>(
     app: AppDefinition<TState, EphemeralData>,
     docId: string,
@@ -277,19 +326,28 @@ async function loadOrCreateLocalSimulatorDocument<TState, EphemeralData>(
 ): Promise<PersistedLocalSimulatorDocument<TState>> {
     const existing = await loadLocalSimulatorDocument<TState>(docId);
     if (existing && existing.appId === app.id) return existing;
+    const fixture = loadBranchFreeSeedFixtureForApp(app, docId);
+    if (fixture) {
+        const now = new Date().toISOString();
+        const document: PersistedLocalSimulatorDocument<TState> = {
+            docId,
+            appId: app.id,
+            schemaFingerprintHash,
+            replicas: seededReplicaHistories(app, fixture),
+            transportState: emptyTransportState(),
+            createdAt: fixture.createdAt || now,
+            updatedAt: now,
+        };
+        await saveLocalSimulatorDocument(document);
+        return document;
+    }
     const now = new Date().toISOString();
     const document: PersistedLocalSimulatorDocument<TState> = {
         docId,
         appId: app.id,
         schemaFingerprintHash,
         replicas: initialReplicaHistories(app),
-        transportState: {
-            syncEnabled: true,
-            outbox: Object.fromEntries(replicas.map((replica) => [replica.id, []])) as Record<
-                ReplicaId,
-                []
-            >,
-        },
+        transportState: emptyTransportState(),
         createdAt: now,
         updatedAt: now,
     };

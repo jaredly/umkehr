@@ -22,7 +22,11 @@ import {
     generateMalformedSeedPayloads,
     generateSeedDatabasePayload,
     generateSeedFixtureCatalog,
+    assertBranchFreeSeedFixture,
+    isBranchFreeSeedFixture,
 } from './generate';
+import {createLocalFirstSeedReplica} from './localFirst';
+import {createServerClientSeedReplica} from './serverClient';
 import {todoFixtureV1FingerprintHash} from '../../../../migration-fixtures/todos';
 
 const todoSeedApp: AppDefinition<TodoState> = {
@@ -127,6 +131,49 @@ describe('seed database generator', () => {
         expect(catalog.fixtures.find((fixture) => fixture.docId === 'todos-small')?.histories.main)
             .toBeDefined();
         expect(payload.documents[0]).not.toHaveProperty('histories');
+    });
+
+    it('identifies branch-free fixtures for browser document imports', () => {
+        const catalog = generateSeedFixtureCatalog({date: '2026-01-02', size: 'small'});
+        const manyEvents = catalog.fixtures.find((fixture) => fixture.docId === 'todos-many-events');
+        const branches = catalog.fixtures.find((fixture) => fixture.docId === 'todos-branches');
+        if (!manyEvents || !branches) throw new Error('Missing fixtures.');
+
+        expect(isBranchFreeSeedFixture(manyEvents)).toBe(true);
+        expect(() => assertBranchFreeSeedFixture(manyEvents)).not.toThrow();
+        expect(isBranchFreeSeedFixture(branches)).toBe(false);
+        expect(() => assertBranchFreeSeedFixture(branches)).toThrow(/multiple branches/);
+    });
+
+    it('projects branch-free fixtures to deterministic local-first replicas', () => {
+        const catalog = generateSeedFixtureCatalog({date: '2026-01-02', size: 'small'});
+        const fixture = catalog.fixtures.find((candidate) => candidate.docId === 'todos-many-events');
+        if (!fixture) throw new Error('Missing todos-many-events fixture.');
+
+        const projected = createLocalFirstSeedReplica({fixture});
+
+        expect(projected.identity.replicaId).toBe('seed-replica-todos-many-events');
+        expect(projected.replica.docId).toBe('todos-many-events');
+        expect(projected.replica.replicaId).toBe(projected.identity.replicaId);
+        expect(projected.batches).toHaveLength(fixture.events.length);
+        expect(projected.batches[0]?.batchId).toBe('seed-000001');
+        expect(Object.keys(projected.replica.vector).length).toBeGreaterThan(0);
+    });
+
+    it('projects server client seed replicas for cached and pending states', () => {
+        const catalog = generateSeedFixtureCatalog({date: '2026-01-02', size: 'small'});
+        const fixture = catalog.fixtures.find((candidate) => candidate.docId === 'todos-branches');
+        if (!fixture) throw new Error('Missing todos-branches fixture.');
+
+        const cached = createServerClientSeedReplica({fixture, scenario: 'cached'});
+        const pending = createServerClientSeedReplica({fixture, scenario: 'pending-uploads'});
+
+        expect(cached.branches.main?.lastSeenEventIndex).toBe(
+            fixture.branches.find((branch) => branch.branchId === 'main')?.tipEventIndex,
+        );
+        expect(cached.branches.main?.events.every((event) => event.recorded)).toBe(true);
+        expect(pending.branches.main?.lastSeenEventIndex).toBe(0);
+        expect(pending.branches.main?.events.some((event) => event.recorded === false)).toBe(true);
     });
 
     it('emits non-root CRDT paths for branch fixture edits', () => {

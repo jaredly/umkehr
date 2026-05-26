@@ -16,6 +16,8 @@ import {
     type LocalDocumentSummary,
 } from '../documentArchive';
 import {schemaFingerprint, schemaFingerprintHash} from '../local-first/schemaFingerprint';
+import {loadBranchFreeSeedFixtureForApp, seedSoloHistoryForApp} from '../seed/documents';
+import {SeedDocumentPicker} from '../seed/SeedDocumentPicker';
 import {HistoryView} from './HistoryView';
 import {
     listSoloDocumentSummaries,
@@ -88,6 +90,27 @@ export function SoloApp<TState, TAnnotations = never, EphemeralData = never>({
         setActiveDocId(docId);
     }, []);
 
+    const importSeedDocument = useCallback(
+        async (docId: string) => {
+            const fixture = loadBranchFreeSeedFixtureForApp(app, docId);
+            if (!fixture) throw new Error(`No seed document exists for "${docId}".`);
+            const now = new Date().toISOString();
+            const history = seedSoloHistoryForApp<TState, TAnnotations, EphemeralData>(app, fixture);
+            await saveSoloDocument({
+                docId: fixture.docId,
+                appId: app.id,
+                schemaFingerprintHash: fingerprintHash,
+                history: history as any,
+                createdAt: fixture.createdAt || now,
+                updatedAt: now,
+            });
+            setHistorySnapshot(history as any);
+            switchDocument(fixture.docId);
+            refreshDocuments();
+        },
+        [app, fingerprintHash, refreshDocuments, switchDocument],
+    );
+
     return (
         <main className="soloShell">
             <div className="documentToolbar">
@@ -97,6 +120,11 @@ export function SoloApp<TState, TAnnotations = never, EphemeralData = never>({
                     appId={app.id}
                     payloadKind="solo"
                     onSwitchDocument={switchDocument}
+                />
+                <SeedDocumentPicker
+                    appId={app.id}
+                    payloadKind="solo"
+                    onImportSeed={importSeedDocument}
                 />
             </div>
             <Provider initial={historySnapshot} save={saveHistory}>
@@ -197,6 +225,20 @@ async function loadOrCreateSoloDocument<TState, TAnnotations>(
 ): Promise<PersistedSoloDocument<TState>> {
     const existing = await loadSoloDocument<TState>(docId);
     if (existing && existing.appId === app.id) return existing;
+    const fixture = loadBranchFreeSeedFixtureForApp(app, docId);
+    if (fixture) {
+        const now = new Date().toISOString();
+        const document: PersistedSoloDocument<TState> = {
+            docId,
+            appId: app.id,
+            schemaFingerprintHash,
+            history: seedSoloHistoryForApp<TState, TAnnotations, unknown>(app, fixture) as any,
+            createdAt: fixture.createdAt || now,
+            updatedAt: now,
+        };
+        await saveSoloDocument(document);
+        return document;
+    }
     const now = new Date().toISOString();
     const document: PersistedSoloDocument<TState> = {
         docId,

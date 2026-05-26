@@ -45,6 +45,11 @@ export async function loadOrCreateIdentity(): Promise<ReplicaIdentity> {
     return identity;
 }
 
+export async function saveIdentity(identity: ReplicaIdentity): Promise<void> {
+    const db = await openLocalFirstDb();
+    await db.put('identity', identity, IDENTITY_KEY);
+}
+
 export async function loadReplica<TState>(
     docId: string,
 ): Promise<PersistedReplica<TState> | null> {

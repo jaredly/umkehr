@@ -14,6 +14,7 @@ import {
     loadReplica,
     replaceReplicaState,
     saveReplica,
+    saveIdentity,
 } from './persistence';
 import {
     DocumentPicker,
@@ -22,6 +23,9 @@ import {
     type DocumentArchive,
     type LocalDocumentSummary,
 } from '../documentArchive';
+import {loadBranchFreeSeedFixtureForApp} from '../seed/documents';
+import {SeedDocumentPicker} from '../seed/SeedDocumentPicker';
+import {createLocalFirstSeedReplica} from '../seed/localFirst';
 import {schemaFingerprint, schemaFingerprintHash} from './schemaFingerprint';
 import {acquireReplicaTabLock, type TabLock} from './tabLock';
 import type {DocumentLineage, PersistedReplica, ReplicaIdentity, VersionVector} from './types';
@@ -209,6 +213,17 @@ function LocalFirstReadyApp<TState, EphemeralData>({
         window.history.pushState(window.history.state, '', urlWithActiveDocId(window.location.href, docId));
         window.location.reload();
     }, []);
+    const importSeedDocument = useCallback(
+        async (docId: string) => {
+            const fixture = loadBranchFreeSeedFixtureForApp(app, docId);
+            if (!fixture) throw new Error(`No seed document exists for "${docId}".`);
+            const seeded = createLocalFirstSeedReplica({fixture});
+            await saveIdentity(seeded.identity);
+            await replaceReplicaState(seeded.replica, seeded.batches);
+            switchDocument(fixture.docId);
+        },
+        [app, switchDocument],
+    );
     const archiveAdapter = useMemo(
         () => ({
             async exportArchive(): Promise<DocumentArchive> {
@@ -257,6 +272,11 @@ function LocalFirstReadyApp<TState, EphemeralData>({
                     appId={app.id}
                     payloadKind="local-first"
                     onSwitchDocument={switchDocument}
+                />
+                <SeedDocumentPicker
+                    appId={app.id}
+                    payloadKind="local-first"
+                    onImportSeed={importSeedDocument}
                 />
             </div>
             <Provider
@@ -315,7 +335,10 @@ async function loadInitialState<TState>(
     schemaFingerprintHash: string,
     schemaConfig: LocalFirstSchemaConfig<TState>,
 ): Promise<LoadState<TState> & {kind: 'ready' | 'migratable'}> {
-    const identity = await loadOrCreateIdentity();
+    const seedFixture = loadBranchFreeSeedFixtureForApp(app, docId);
+    const seeded = seedFixture ? createLocalFirstSeedReplica({fixture: seedFixture}) : null;
+    const identity = seeded?.identity ?? await loadOrCreateIdentity();
+    if (seeded) await saveIdentity(identity);
     const lock = await acquireReplicaTabLock(docId, identity.replicaId);
     if (lock.kind === 'blocked') {
         throw new Error(lock.message);
@@ -352,6 +375,26 @@ async function loadInitialState<TState>(
                 compactedThrough: normalized.compactedThrough,
                 lineage: normalized.lineage,
                 source: normalized.lineage ? 'migrated' : 'loaded',
+                lock,
+            },
+        };
+    }
+
+    if (seeded) {
+        await replaceReplicaState(seeded.replica, seeded.batches);
+        return {
+            kind: 'ready',
+            loaded: {
+                identity,
+                docId,
+                schemaVersion: seeded.replica.schemaVersion,
+                schemaFingerprint: seeded.replica.schemaFingerprint,
+                schemaFingerprintHash: seeded.replica.schemaFingerprintHash,
+                history: seeded.replica.history,
+                vector: seeded.replica.vector,
+                compactedThrough: seeded.replica.compactedThrough,
+                lineage: seeded.replica.lineage,
+                source: 'created',
                 lock,
             },
         };

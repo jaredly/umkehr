@@ -12,6 +12,8 @@ import {
     type LocalDocumentSummary,
 } from '../documentArchive';
 import {schemaFingerprint, schemaFingerprintHash} from '../local-first/schemaFingerprint';
+import {loadBranchFreeSeedFixtureForApp, seedCrdtHistoryForApp} from '../seed/documents';
+import {SeedDocumentPicker} from '../seed/SeedDocumentPicker';
 import {useStore} from '../store';
 import {PeerJsControls} from './PeerJsControls';
 import {
@@ -85,6 +87,29 @@ export function PeerJsApp<TState, EphemeralData = never>({
         );
         setActiveDocId(docId);
     }, []);
+
+    const importSeedDocument = useCallback(
+        async (docId: string) => {
+            if (role !== 'host') return;
+            const fixture = loadBranchFreeSeedFixtureForApp(app, docId);
+            if (!fixture) throw new Error(`No seed document exists for "${docId}".`);
+            const now = new Date().toISOString();
+            const history = seedCrdtHistoryForApp(app, fixture);
+            await savePeerJsDocument({
+                docId: fixture.docId,
+                appId: app.id,
+                schemaFingerprintHash: fingerprintHash,
+                history,
+                createdAt: fixture.createdAt || now,
+                updatedAt: now,
+            });
+            setHostHistory(history);
+            sync.setSnapshotDocument(history.doc);
+            switchDocument(fixture.docId);
+            refreshDocuments();
+        },
+        [app, fingerprintHash, refreshDocuments, role, switchDocument, sync],
+    );
 
     const saveHostHistory = useCallback(
         (history: CrdtLocalHistory<TState>) => {
@@ -162,6 +187,11 @@ export function PeerJsApp<TState, EphemeralData = never>({
                         appId={app.id}
                         payloadKind="peerjs"
                         onSwitchDocument={switchDocument}
+                    />
+                    <SeedDocumentPicker
+                        appId={app.id}
+                        payloadKind="peerjs"
+                        onImportSeed={importSeedDocument}
                     />
                     <DocumentArchiveControls
                         adapter={archiveAdapter}
@@ -301,6 +331,20 @@ async function loadOrCreatePeerJsDocument<TState, EphemeralData>(
 ): Promise<PersistedPeerJsDocument<TState>> {
     const existing = await loadPeerJsDocument<TState>(docId);
     if (existing && existing.appId === app.id) return existing;
+    const fixture = loadBranchFreeSeedFixtureForApp(app, docId);
+    if (fixture) {
+        const now = new Date().toISOString();
+        const document: PersistedPeerJsDocument<TState> = {
+            docId,
+            appId: app.id,
+            schemaFingerprintHash,
+            history: seedCrdtHistoryForApp(app, fixture),
+            createdAt: fixture.createdAt || now,
+            updatedAt: now,
+        };
+        await savePeerJsDocument(document);
+        return document;
+    }
     const now = new Date().toISOString();
     const document: PersistedPeerJsDocument<TState> = {
         docId,

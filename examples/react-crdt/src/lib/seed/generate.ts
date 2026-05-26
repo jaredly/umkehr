@@ -114,6 +114,9 @@ const actors = {
     dee: 'seed-user-dee:seed-session-dee',
 } as const;
 
+export const seedUsers = users;
+export const seedActors = actors;
+
 const docClocks = new WeakMap<object, FixtureClock>();
 
 if (isMainModule()) {
@@ -166,6 +169,72 @@ export function generateSeedFixtureCatalog({
             todosMigrationV1Main(clock),
         ],
     };
+}
+
+export function listSeedDocumentSummaries({
+    date,
+    size = 'default',
+    appId,
+    branchFreeOnly = false,
+}: SeedGeneratorOptions & {appId?: string; branchFreeOnly?: boolean} = {}) {
+    return generateSeedFixtureCatalog({date, size}).fixtures
+        .filter((fixture) => (appId ? fixture.appId === appId : true))
+        .filter((fixture) => (branchFreeOnly ? isBranchFreeSeedFixture(fixture) : true))
+        .map((fixture) => ({
+            docId: fixture.docId,
+            appId: fixture.appId,
+            title: fixture.title,
+            sizeLabel: fixture.sizeLabel,
+            sizeRank: fixture.sizeRank,
+            schemaVersion: fixture.schemaVersion,
+            schemaFingerprint: fixture.schemaFingerprint,
+            schemaFingerprintHash: fixture.schemaFingerprintHash,
+            createdAt: fixture.createdAt,
+            updatedAt: fixture.lastAccessedAt,
+        }));
+}
+
+export function seedFixtureForDocId(
+    docId: string,
+    options: SeedGeneratorOptions & {appId?: string} = {},
+) {
+    const fixture = generateSeedFixtureCatalog(options).fixtures.find(
+        (candidate) =>
+            candidate.docId === docId && (options.appId ? candidate.appId === options.appId : true),
+    );
+    return fixture ?? null;
+}
+
+export function isBranchFreeSeedFixture(fixture: SeedFixture) {
+    return fixture.branches.length === 1 && fixture.events.every((event) => event.kind === 'update');
+}
+
+export function assertBranchFreeSeedFixture(
+    fixture: SeedFixture,
+): asserts fixture is SeedFixture & {histories: {main: CrdtLocalHistory<unknown>}} {
+    if (fixture.branches.length !== 1 || fixture.branches[0]?.branchId !== 'main') {
+        throw new Error(`Seed fixture "${fixture.docId}" contains multiple branches.`);
+    }
+    if (fixture.events.some((event) => event.kind === 'merge')) {
+        throw new Error(`Seed fixture "${fixture.docId}" contains merge events.`);
+    }
+    if (!fixture.histories.main) {
+        throw new Error(`Seed fixture "${fixture.docId}" does not include a main history.`);
+    }
+}
+
+export function mainBranchHistory<TState>(fixture: SeedFixture<TState>) {
+    const history = fixture.histories.main;
+    if (!history) throw new Error(`Seed fixture "${fixture.docId}" does not include a main history.`);
+    return history;
+}
+
+export function mainBranchEvents(fixture: SeedFixture) {
+    return fixture.events.filter((event) => event.branchId === 'main');
+}
+
+export function mainBranchState<TState>(fixture: SeedFixture<TState>) {
+    return mainBranchHistory(fixture).doc.state;
 }
 
 export function generateMalformedSeedPayloads(
