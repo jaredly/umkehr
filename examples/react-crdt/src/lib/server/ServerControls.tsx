@@ -1,21 +1,13 @@
 import {useStore} from '../store';
 import {colorForUserId, initialForNickname} from './presence';
 import {serverStateNoticeTone} from './states';
-import type {ServerDocumentSummary, ServerSync} from './types';
+import type {ServerSync} from './types';
 
 export function ServerControls<TState>({
     sync,
-    documents,
-    activeDocId,
-    documentsUnavailableMessage,
-    onSwitchDocument,
     onLogout,
 }: {
     sync: ServerSync<TState>;
-    documents: ServerDocumentSummary[];
-    activeDocId: string;
-    documentsUnavailableMessage?: string;
-    onSwitchDocument(docId: string): void;
     onLogout(): void;
 }) {
     const state = useStore(sync.stateStore);
@@ -44,27 +36,6 @@ export function ServerControls<TState>({
                 </span>
                 <strong>{sync.identity.user.nickname}</strong>
             </div>
-            <label
-                className="serverDocumentPicker"
-                title={documentsUnavailableMessage ?? 'Server document'}
-            >
-                <span>Document</span>
-                <select
-                    value={activeDocId}
-                    onChange={(event) => onSwitchDocument(event.currentTarget.value)}
-                    aria-label="Server document"
-                >
-                    {documents.map((document) => (
-                        <option
-                            key={document.docId}
-                            value={document.docId}
-                            title={documentOptionTitle(document)}
-                        >
-                            {documentOptionLabel(document)}
-                        </option>
-                    ))}
-                </select>
-            </label>
             <div className="serverToolbarActions">
                 <span
                     className={
@@ -121,31 +92,8 @@ export function ServerControls<TState>({
                     {state.message}
                 </p>
             ) : null}
-            {documentsUnavailableMessage ? (
-                <p className="serverToolbarNotice info">{documentsUnavailableMessage}</p>
-            ) : null}
         </header>
     );
-}
-
-function documentOptionLabel(document: ServerDocumentSummary) {
-    const facts = [
-        document.sizeLabel,
-        document.eventCount ? `${document.eventCount} events` : '',
-        document.branchCount ? `${document.branchCount} branches` : '',
-    ].filter(Boolean);
-    return facts.length ? `${document.title} (${facts[0]})` : document.title;
-}
-
-function documentOptionTitle(document: ServerDocumentSummary) {
-    return [
-        document.docId,
-        document.sizeLabel,
-        `${document.eventCount} events`,
-        `${document.branchCount} branches`,
-    ]
-        .filter(Boolean)
-        .join(' | ');
 }
 
 function labelForState(state: ReturnType<ServerSync<unknown>['stateStore']['getSnapshot']>) {

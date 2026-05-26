@@ -2,8 +2,6 @@ import {describe, expect, it} from 'vitest';
 import {
     documentsForActiveDoc,
     parseServerDocumentsResponse,
-    readActiveDocIdFromSearch,
-    urlWithActiveDocId,
 } from './documents';
 import type {ServerDocumentSummary} from './types';
 
@@ -30,13 +28,6 @@ describe('server document helpers', () => {
         expect(() => parseServerDocumentsResponse({documents: 'nope'})).toThrow(
             'Server returned an invalid document list.',
         );
-    });
-
-    it('reads and writes the doc query param while preserving other URL parts', () => {
-        expect(readActiveDocIdFromSearch('?doc=todos-small&x=1')).toBe('todos-small');
-        expect(readActiveDocIdFromSearch('?x=1')).toBeUndefined();
-        expect(urlWithActiveDocId('http://localhost:5173/?x=1#mode=server', 'todos-branches'))
-            .toBe('/?x=1&doc=todos-branches#mode=server');
     });
 
     it('keeps a manual active document available when it is missing from discovery', () => {

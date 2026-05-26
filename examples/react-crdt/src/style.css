@@ -46,30 +46,92 @@ button:disabled:hover {
     border-color: #d5dde7;
 }
 
-.modeTabs {
-    width: min(1180px, calc(100vw - 32px));
-    margin: 0 auto;
-    padding-top: 24px;
+.demoTopBar {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    width: 100%;
+    min-height: 58px;
+    border-bottom: 1px solid #d4dde7;
+    padding: 10px max(16px, calc((100vw - 1180px) / 2));
+    background: rgb(248 250 252 / 96%);
+    box-shadow: 0 8px 20px rgb(25 42 62 / 7%);
+    backdrop-filter: blur(10px);
     display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.topBarGroup {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.topBarPrimary {
+    flex: 1 1 auto;
+}
+
+.topBarActions {
+    justify-content: flex-end;
+}
+
+.demoTopBar label,
+.documentPicker,
+.serverDocumentPicker,
+.serverClientSeedControls label {
+    display: inline-grid;
+    grid-template-columns: auto minmax(150px, 1fr);
+    align-items: center;
     gap: 8px;
 }
 
-.appPicker {
-    width: min(1180px, calc(100vw - 32px));
-    margin: 0 auto;
-    padding-top: 24px;
-    display: flex;
-    gap: 8px;
+.demoTopBar label span,
+.documentPicker span,
+.serverDocumentPicker span,
+.serverClientSeedControls span {
+    color: #526070;
+    font-size: 12px;
+    font-weight: 700;
 }
 
-.appPicker + .modeTabs {
-    padding-top: 10px;
+.demoTopBar select,
+.documentPicker select,
+.serverDocumentPicker select,
+.serverClientSeedControls select {
+    min-width: 0;
+    width: 100%;
+    height: 34px;
+    border: 1px solid #c3cfdb;
+    border-radius: 6px;
+    padding: 0 28px 0 10px;
+    color: #17202a;
+    background: #fff;
 }
 
-.modeTabs button,
-.rolePicker button,
-.appPicker button {
+.demoTopBar label:first-child select {
+    min-width: 150px;
+}
+
+.demoTopBar label:nth-child(2) select {
+    min-width: 130px;
+}
+
+.documentPicker {
+    min-width: min(360px, 42vw);
+}
+
+.rolePicker button {
     min-width: 92px;
+}
+
+.topBarMessage {
+    margin: 0;
+    font-size: 13px;
 }
 
 button.active {
@@ -80,7 +142,7 @@ button.active {
 
 .collabShell {
     width: min(1180px, calc(100vw - 32px));
-    min-height: calc(100vh - 72px);
+    min-height: calc(100vh - 58px);
     margin: 0 auto;
     padding: 32px 0;
     display: grid;
@@ -92,7 +154,7 @@ button.active {
 
 .soloShell {
     width: min(760px, calc(100vw - 32px));
-    min-height: calc(100vh - 72px);
+    min-height: calc(100vh - 58px);
     margin: 0 auto;
     padding: 32px 0;
     display: grid;
@@ -391,7 +453,7 @@ p {
 
 .peerShell {
     width: min(1180px, calc(100vw - 32px));
-    min-height: calc(100vh - 72px);
+    min-height: calc(100vh - 58px);
     margin: 0 auto;
     padding: 32px 0;
     display: grid;
@@ -403,7 +465,7 @@ p {
 .localFirstShell,
 .serverShell {
     width: min(1180px, calc(100vw - 32px));
-    min-height: calc(100vh - 72px);
+    min-height: calc(100vh - 58px);
     margin: 0 auto;
     padding: 32px 0;
     display: flex;
@@ -470,33 +532,6 @@ p {
     font-size: 14px;
     text-overflow: ellipsis;
     white-space: nowrap;
-}
-
-.serverDocumentPicker {
-    min-width: min(340px, 38vw);
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    gap: 8px;
-    align-items: center;
-    color: #52616f;
-    font-size: 12px;
-}
-
-.serverDocumentPicker span {
-    font-weight: 700;
-    text-transform: uppercase;
-}
-
-.serverDocumentPicker select {
-    min-width: 0;
-    width: 100%;
-    height: 34px;
-    border: 1px solid #c3cfdb;
-    border-radius: 6px;
-    padding: 0 28px 0 10px;
-    color: #17202a;
-    background: #fff;
-    font: inherit;
 }
 
 .serverDocument {
@@ -1359,7 +1394,6 @@ p {
     pointer-events: none;
 }
 
-.documentToolbar,
 .documentArchiveControls,
 .seedDocumentPicker,
 .serverClientSeedControls {
@@ -1369,41 +1403,8 @@ p {
     flex-wrap: wrap;
 }
 
-.documentToolbar {
-    margin: 0 0 12px;
-}
-
-.documentPicker {
-    display: inline-grid;
-    grid-template-columns: auto minmax(160px, 1fr);
-    align-items: center;
-    gap: 8px;
-}
-
-.seedDocumentPicker label,
-.serverClientSeedControls label {
-    display: inline-grid;
-    grid-template-columns: auto minmax(160px, 1fr);
-    align-items: center;
-    gap: 8px;
-}
-
 .serverClientSeedControls label {
     grid-template-columns: auto minmax(150px, 1fr);
-}
-
-.documentPicker span,
-.seedDocumentPicker span,
-.serverClientSeedControls span {
-    font-size: 12px;
-    font-weight: 700;
-    color: #526070;
-}
-
-.documentPicker select,
-.seedDocumentPicker select,
-.serverClientSeedControls select {
-    min-width: 0;
 }
 
 .documentArchiveInput {
@@ -1477,6 +1478,25 @@ p {
     .peerControls,
     .localFirstControls {
         position: static;
+    }
+
+    .demoTopBar {
+        position: static;
+        align-items: stretch;
+    }
+
+    .topBarGroup,
+    .demoTopBar label,
+    .documentPicker,
+    .serverDocumentPicker,
+    .serverClientSeedControls,
+    .serverClientSeedControls label,
+    .documentArchiveControls {
+        width: 100%;
+    }
+
+    .topBarActions {
+        justify-content: flex-start;
     }
 
     .serverControls {

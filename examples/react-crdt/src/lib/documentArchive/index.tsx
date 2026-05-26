@@ -130,16 +130,6 @@ export function archiveFileName({
     return `${safeFileSegment(appId)}-${safeFileSegment(docId)}-${payloadKind}-${date}.json`;
 }
 
-export function readActiveDocIdFromSearch(search: string, fallbackDocId: string) {
-    return new URLSearchParams(search).get('doc')?.trim() || fallbackDocId;
-}
-
-export function urlWithActiveDocId(href: string, docId: string) {
-    const url = new URL(href);
-    url.searchParams.set('doc', docId);
-    return `${url.pathname}${url.search}${url.hash}`;
-}
-
 export function documentsForActiveDocument(
     documents: LocalDocumentSummary[],
     activeDocId: string,

@@ -13,18 +13,21 @@ import {
     loadOrCreateIdentity,
     loadReplica,
     replaceReplicaState,
-    saveReplica,
     saveIdentity,
+    saveReplica,
 } from './persistence';
 import {
+    DocumentArchiveControls,
     DocumentPicker,
-    readActiveDocIdFromSearch,
-    urlWithActiveDocId,
     type DocumentArchive,
     type LocalDocumentSummary,
 } from '../documentArchive';
-import {loadBranchFreeSeedFixtureForApp} from '../seed/documents';
-import {SeedDocumentPicker} from '../seed/SeedDocumentPicker';
+import {useTopBarControls} from '../chrome/TopBarContext';
+import {
+    loadBranchFreeSeedFixtureForApp,
+    mergeDocumentSummariesWithSeeds,
+} from '../seed/documents';
+import {readActiveDocIdFromSearch, urlWithActiveDocId} from '../useUrlSelection';
 import {createLocalFirstSeedReplica} from '../seed/localFirst';
 import {schemaFingerprint, schemaFingerprintHash} from './schemaFingerprint';
 import {acquireReplicaTabLock, type TabLock} from './tabLock';
@@ -213,17 +216,6 @@ function LocalFirstReadyApp<TState, EphemeralData>({
         window.history.pushState(window.history.state, '', urlWithActiveDocId(window.location.href, docId));
         window.location.reload();
     }, []);
-    const importSeedDocument = useCallback(
-        async (docId: string) => {
-            const fixture = loadBranchFreeSeedFixtureForApp(app, docId);
-            if (!fixture) throw new Error(`No seed document exists for "${docId}".`);
-            const seeded = createLocalFirstSeedReplica({fixture});
-            await saveIdentity(seeded.identity);
-            await replaceReplicaState(seeded.replica, seeded.batches);
-            switchDocument(fixture.docId);
-        },
-        [app, switchDocument],
-    );
     const archiveAdapter = useMemo(
         () => ({
             async exportArchive(): Promise<DocumentArchive> {
@@ -262,23 +254,42 @@ function LocalFirstReadyApp<TState, EphemeralData>({
         }),
         [app.id, loaded, sync],
     );
-
-    return (
-        <main className="localFirstShell">
-            <div className="documentToolbar">
+    const topBarControls = useMemo(
+        () => ({
+            documentPicker: (
                 <DocumentPicker
-                    documents={documents}
+                    documents={mergeDocumentSummariesWithSeeds(
+                        documents,
+                        app.id,
+                        'local-first',
+                    )}
                     activeDocId={loaded.docId}
                     appId={app.id}
                     payloadKind="local-first"
                     onSwitchDocument={switchDocument}
                 />
-                <SeedDocumentPicker
+            ),
+            archiveControls: (
+                <DocumentArchiveControls
+                    adapter={archiveAdapter}
                     appId={app.id}
+                    docId={loaded.docId}
                     payloadKind="local-first"
-                    onImportSeed={importSeedDocument}
                 />
-            </div>
+            ),
+        }),
+        [
+            app.id,
+            archiveAdapter,
+            documents,
+            loaded.docId,
+            switchDocument,
+        ],
+    );
+    useTopBarControls(topBarControls);
+
+    return (
+        <main className="localFirstShell">
             <Provider
                 initial={currentHistory}
                 transport={sync.transport}
@@ -292,8 +303,6 @@ function LocalFirstReadyApp<TState, EphemeralData>({
                 schemaVersion={loaded.schemaVersion}
                 schemaFingerprint={loaded.schemaFingerprint}
                 schemaFingerprintHash={loaded.schemaFingerprintHash}
-                archiveAdapter={archiveAdapter}
-                appId={app.id}
             />
         </main>
     );

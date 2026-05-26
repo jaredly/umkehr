@@ -7,6 +7,7 @@ import {
     validateCrdtUpdatesForApp,
     type DocumentArchive,
 } from '../documentArchive';
+import {useTopBarControls} from '../chrome/TopBarContext';
 import {ServerControls} from './ServerControls';
 import {ServerHistoryView} from './ServerHistoryView';
 import {
@@ -25,12 +26,11 @@ import {defaultServerSchemaConfig, type ServerSchemaConfig} from './schemaConfig
 import {
     documentsForActiveDoc,
     parseServerDocumentsResponse,
-    readActiveDocIdFromSearch,
-    urlWithActiveDocId,
 } from './documents';
 import {branchFreeSeedSummariesForApp, loadBranchFreeSeedFixtureForApp} from '../seed/documents';
 import {createServerClientSeedReplica, type ServerClientSeedScenario} from '../seed/serverClient';
 import {ServerClientSeedControls} from './ServerClientSeedControls';
+import {urlWithActiveDocId} from '../useUrlSelection';
 import type {
     PersistedServerReplica,
     ServerDocumentSummary,
@@ -279,63 +279,96 @@ function ServerReadyApp<TState, EphemeralData>({
         },
         [app, onSwitchDocument, sync],
     );
-
-    return (
-        <main className="serverShell">
-            <div className="documentToolbar">
+    const archiveAdapter = useMemo(
+        () => ({
+            async exportArchive(): Promise<DocumentArchive> {
+                return {
+                    kind: 'umkehr.react-crdt.document',
+                    archiveVersion: 1,
+                    exportedAt: new Date().toISOString(),
+                    appId: app.id,
+                    docId,
+                    schemaVersion: schemaConfig.version,
+                    schemaFingerprint,
+                    schemaFingerprintHash,
+                    exportedBy: {actor: loaded.identity.actor},
+                    payload: {kind: 'server', replica: sync.exportReplica() as any},
+                };
+            },
+            async importArchive(archive: DocumentArchive) {
+                assertArchiveForApp(archive, app as any, 'server');
+                const replica = archive.payload.replica as PersistedServerReplica<TState>;
+                if (replica.appId && replica.appId !== app.id) {
+                    throw new Error('Archive server replica belongs to another app.');
+                }
+                if (replica.schemaFingerprintHash !== schemaFingerprintHash) {
+                    throw new Error('Archive schema does not match this app version.');
+                }
+                for (const branch of Object.values(replica.branches)) {
+                    for (const event of branch.events) {
+                        if (event.kind === 'update') validateCrdtUpdatesForApp([event.update], app);
+                    }
+                }
+                const normalized = {...replica, appId: app.id, storageVersion: 4 as const};
+                await saveServerReplica(normalized);
+                sync.replaceReplica(normalized);
+                onSwitchDocument(archive.docId);
+            },
+        }),
+        [
+            app,
+            docId,
+            loaded.identity.actor,
+            onSwitchDocument,
+            schemaConfig.version,
+            schemaFingerprint,
+            schemaFingerprintHash,
+            sync,
+        ],
+    );
+    const topBarControls = useMemo(
+        () => ({
+            documentPicker: (
+                <ServerDocumentPicker
+                    documents={documents}
+                    activeDocId={docId}
+                    documentsUnavailableMessage={documentsUnavailableMessage}
+                    onSwitchDocument={onSwitchDocument}
+                />
+            ),
+            seedControls: (
                 <ServerClientSeedControls
                     appId={app.id}
                     activeDocId={docId}
                     onImportSeed={importSeedClientReplica}
                 />
-            </div>
+            ),
+            archiveControls: (
+                <DocumentArchiveControls
+                    adapter={archiveAdapter}
+                    appId={app.id}
+                    docId={docId}
+                    payloadKind="server"
+                />
+            ),
+        }),
+        [
+            app.id,
+            archiveAdapter,
+            docId,
+            documents,
+            documentsUnavailableMessage,
+            importSeedClientReplica,
+            onSwitchDocument,
+        ],
+    );
+    useTopBarControls(topBarControls);
+
+    return (
+        <main className="serverShell">
             <ServerControls
                 sync={sync}
-                documents={documents}
-                activeDocId={docId}
-                documentsUnavailableMessage={documentsUnavailableMessage}
-                onSwitchDocument={onSwitchDocument}
                 onLogout={onLogout}
-            />
-            <DocumentArchiveControls
-                adapter={{
-                    async exportArchive(): Promise<DocumentArchive> {
-                        return {
-                            kind: 'umkehr.react-crdt.document',
-                            archiveVersion: 1,
-                            exportedAt: new Date().toISOString(),
-                            appId: app.id,
-                            docId,
-                            schemaVersion: schemaConfig.version,
-                            schemaFingerprint,
-                            schemaFingerprintHash,
-                            exportedBy: {actor: loaded.identity.actor},
-                            payload: {kind: 'server', replica: sync.exportReplica() as any},
-                        };
-                    },
-                    async importArchive(archive: DocumentArchive) {
-                        assertArchiveForApp(archive, app as any, 'server');
-                        const replica = archive.payload.replica as PersistedServerReplica<TState>;
-                        if (replica.appId && replica.appId !== app.id) {
-                            throw new Error('Archive server replica belongs to another app.');
-                        }
-                        if (replica.schemaFingerprintHash !== schemaFingerprintHash) {
-                            throw new Error('Archive schema does not match this app version.');
-                        }
-                        for (const branch of Object.values(replica.branches)) {
-                            for (const event of branch.events) {
-                                if (event.kind === 'update') validateCrdtUpdatesForApp([event.update], app);
-                            }
-                        }
-                        const normalized = {...replica, appId: app.id, storageVersion: 4 as const};
-                        await saveServerReplica(normalized);
-                        sync.replaceReplica(normalized);
-                        onSwitchDocument(archive.docId);
-                    },
-                }}
-                appId={app.id}
-                docId={docId}
-                payloadKind="server"
             />
             <section className="serverDocument">
                 <Provider
@@ -438,6 +471,62 @@ function ServerDocumentWorkspace<TState, EphemeralData>({
             />
         </>
     );
+}
+
+function ServerDocumentPicker({
+    documents,
+    activeDocId,
+    documentsUnavailableMessage,
+    onSwitchDocument,
+}: {
+    documents: ServerDocumentSummary[];
+    activeDocId: string;
+    documentsUnavailableMessage?: string;
+    onSwitchDocument(docId: string): void;
+}) {
+    return (
+        <label
+            className="serverDocumentPicker"
+            title={documentsUnavailableMessage ?? 'Server document'}
+        >
+            <span>Document</span>
+            <select
+                value={activeDocId}
+                onChange={(event) => onSwitchDocument(event.currentTarget.value)}
+                aria-label="Server document"
+            >
+                {documents.map((document) => (
+                    <option
+                        key={document.docId}
+                        value={document.docId}
+                        title={documentOptionTitle(document)}
+                    >
+                        {documentOptionLabel(document)}
+                    </option>
+                ))}
+            </select>
+        </label>
+    );
+}
+
+function documentOptionLabel(document: ServerDocumentSummary) {
+    const facts = [
+        document.sizeLabel,
+        document.eventCount ? `${document.eventCount} events` : '',
+        document.branchCount ? `${document.branchCount} branches` : '',
+    ].filter(Boolean);
+    return facts.length ? `${document.title} (${facts[0]})` : document.title;
+}
+
+function documentOptionTitle(document: ServerDocumentSummary) {
+    return [
+        document.docId,
+        document.sizeLabel,
+        `${document.eventCount} events`,
+        `${document.branchCount} branches`,
+    ]
+        .filter(Boolean)
+        .join(' | ');
 }
 
 async function loadInitialState<TState>(
@@ -676,7 +765,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function readActiveDocId() {
     if (typeof window === 'undefined') return '';
-    return readActiveDocIdFromSearch(window.location.search);
+    return new URLSearchParams(window.location.search).get('doc')?.trim() || undefined;
 }
 
 function writeActiveDocId(docId: string) {

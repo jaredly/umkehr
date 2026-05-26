@@ -14,16 +14,6 @@ export function parseServerDocumentsResponse(body: unknown): ServerDocumentSumma
     return documents;
 }
 
-export function readActiveDocIdFromSearch(search: string) {
-    return new URLSearchParams(search).get('doc')?.trim() || undefined;
-}
-
-export function urlWithActiveDocId(href: string, docId: string) {
-    const url = new URL(href);
-    url.searchParams.set('doc', docId);
-    return `${url.pathname}${url.search}${url.hash}`;
-}
-
 export function documentsForActiveDoc(
     documents: ServerDocumentSummary[],
     activeDocId: string,

@@ -35,6 +35,19 @@ export function branchFreeSeedSummariesForApp(
     }));
 }
 
+export function mergeDocumentSummariesWithSeeds(
+    documents: LocalDocumentSummary[],
+    appId: string,
+    payloadKind: LocalDocumentSummary['payloadKind'],
+    options: SeedGeneratorOptions = {},
+): LocalDocumentSummary[] {
+    const seen = new Set(documents.map((document) => document.docId));
+    const seeds = branchFreeSeedSummariesForApp(appId, payloadKind, options)
+        .filter((seed) => !seen.has(seed.docId))
+        .map(({sizeLabel: _sizeLabel, sizeRank: _sizeRank, ...summary}) => summary);
+    return [...documents, ...seeds];
+}
+
 export function loadBranchFreeSeedFixtureForApp<TState, EphemeralData>(
     app: AppDefinition<TState, EphemeralData>,
     docId: string,

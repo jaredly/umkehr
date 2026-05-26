@@ -5,16 +5,19 @@ import {
     assertArchiveForApp,
     DocumentArchiveControls,
     DocumentPicker,
-    readActiveDocIdFromSearch,
-    urlWithActiveDocId,
     validateCrdtLocalHistoryForApp,
     type DocumentArchive,
     type LocalDocumentSummary,
 } from '../documentArchive';
+import {useTopBarControls} from '../chrome/TopBarContext';
 import {schemaFingerprint, schemaFingerprintHash} from '../local-first/schemaFingerprint';
-import {loadBranchFreeSeedFixtureForApp, seedCrdtHistoryForApp} from '../seed/documents';
-import {SeedDocumentPicker} from '../seed/SeedDocumentPicker';
+import {
+    loadBranchFreeSeedFixtureForApp,
+    mergeDocumentSummariesWithSeeds,
+    seedCrdtHistoryForApp,
+} from '../seed/documents';
 import {useStore} from '../store';
+import {readActiveDocIdFromSearch, urlWithActiveDocId} from '../useUrlSelection';
 import {PeerJsControls} from './PeerJsControls';
 import {
     listPeerJsDocumentSummaries,
@@ -88,29 +91,6 @@ export function PeerJsApp<TState, EphemeralData = never>({
         setActiveDocId(docId);
     }, []);
 
-    const importSeedDocument = useCallback(
-        async (docId: string) => {
-            if (role !== 'host') return;
-            const fixture = loadBranchFreeSeedFixtureForApp(app, docId);
-            if (!fixture) throw new Error(`No seed document exists for "${docId}".`);
-            const now = new Date().toISOString();
-            const history = seedCrdtHistoryForApp(app, fixture);
-            await savePeerJsDocument({
-                docId: fixture.docId,
-                appId: app.id,
-                schemaFingerprintHash: fingerprintHash,
-                history,
-                createdAt: fixture.createdAt || now,
-                updatedAt: now,
-            });
-            setHostHistory(history);
-            sync.setSnapshotDocument(history.doc);
-            switchDocument(fixture.docId);
-            refreshDocuments();
-        },
-        [app, fingerprintHash, refreshDocuments, role, switchDocument, sync],
-    );
-
     const saveHostHistory = useCallback(
         (history: CrdtLocalHistory<TState>) => {
             setHostHistory(history);
@@ -175,32 +155,51 @@ export function PeerJsApp<TState, EphemeralData = never>({
             sync,
         ],
     );
+    const topBarControls = useMemo(
+        () =>
+            role === 'host'
+                ? {
+                      documentPicker: (
+                          <DocumentPicker
+                              documents={mergeDocumentSummariesWithSeeds(
+                                  documents,
+                                  app.id,
+                                  'peerjs',
+                              )}
+                              activeDocId={activeDocId}
+                              appId={app.id}
+                              payloadKind="peerjs"
+                              onSwitchDocument={switchDocument}
+                          />
+                      ),
+                      archiveControls: (
+                          <DocumentArchiveControls
+                              adapter={archiveAdapter}
+                              appId={app.id}
+                              docId={activeDocId}
+                              payloadKind="peerjs"
+                          />
+                      ),
+                  }
+                : {
+                      statusMessage: (
+                          <p className="topBarMessage">PeerJS clients follow the host document.</p>
+                      ),
+                  },
+        [
+            activeDocId,
+            app.id,
+            archiveAdapter,
+            documents,
+            role,
+            switchDocument,
+        ],
+    );
+    useTopBarControls(topBarControls);
 
     return (
         <main className="peerShell">
             <PeerInviteConnector hostPeerId={initialHostPeerId} role={role} sync={sync} />
-            {role === 'host' ? (
-                <div className="documentToolbar">
-                    <DocumentPicker
-                        documents={documents}
-                        activeDocId={activeDocId}
-                        appId={app.id}
-                        payloadKind="peerjs"
-                        onSwitchDocument={switchDocument}
-                    />
-                    <SeedDocumentPicker
-                        appId={app.id}
-                        payloadKind="peerjs"
-                        onImportSeed={importSeedDocument}
-                    />
-                    <DocumentArchiveControls
-                        adapter={archiveAdapter}
-                        appId={app.id}
-                        docId={activeDocId}
-                        payloadKind="peerjs"
-                    />
-                </div>
-            ) : null}
             <PeerJsControls
                 role={role}
                 setRole={setRole}

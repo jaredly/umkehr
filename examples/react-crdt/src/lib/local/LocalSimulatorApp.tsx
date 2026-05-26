@@ -5,18 +5,21 @@ import {
     assertArchiveForApp,
     DocumentArchiveControls,
     DocumentPicker,
-    readActiveDocIdFromSearch,
-    urlWithActiveDocId,
     validateCrdtLocalHistoryForApp,
     validateCrdtUpdatesForApp,
     type DocumentArchive,
     type LocalDocumentSummary,
 } from '../documentArchive';
+import {useTopBarControls} from '../chrome/TopBarContext';
 import {schemaFingerprint, schemaFingerprintHash} from '../local-first/schemaFingerprint';
-import {loadBranchFreeSeedFixtureForApp, seedCrdtHistoryForApp} from '../seed/documents';
+import {
+    loadBranchFreeSeedFixtureForApp,
+    mergeDocumentSummariesWithSeeds,
+    seedCrdtHistoryForApp,
+} from '../seed/documents';
 import type {SeedFixture} from '../seed/generate';
-import {SeedDocumentPicker} from '../seed/SeedDocumentPicker';
 import {useStore} from '../store';
+import {readActiveDocIdFromSearch, urlWithActiveDocId} from '../useUrlSelection';
 import {cloneTransportState, listLocalSimulatorDocumentSummaries, loadLocalSimulatorDocument, saveLocalSimulatorDocument, type PersistedLocalSimulatorDocument} from './persistence';
 import {replicas} from './model';
 import {SyncControls} from './SyncControls';
@@ -96,30 +99,6 @@ export function LocalSimulatorApp<TState, EphemeralData = never>({
         setActiveDocId(docId);
     }, [activeDocId]);
 
-    const importSeedDocument = useCallback(
-        async (docId: string) => {
-            const fixture = loadBranchFreeSeedFixtureForApp(app, docId);
-            if (!fixture) throw new Error(`No seed document exists for "${docId}".`);
-            const now = new Date().toISOString();
-            const replicasForSeed = seededReplicaHistories(app, fixture);
-            const transportState = emptyTransportState();
-            await saveLocalSimulatorDocument({
-                docId: fixture.docId,
-                appId: app.id,
-                schemaFingerprintHash: fingerprintHash,
-                replicas: replicasForSeed,
-                transportState,
-                createdAt: fixture.createdAt || now,
-                updatedAt: now,
-            });
-            setHistories(replicasForSeed);
-            sync.replaceTransportState(transportState);
-            switchDocument(fixture.docId);
-            refreshDocuments();
-        },
-        [app, fingerprintHash, refreshDocuments, switchDocument, sync],
-    );
-
     const archiveAdapter = useMemo(
         () => ({
             async exportArchive(): Promise<DocumentArchive> {
@@ -175,31 +154,43 @@ export function LocalSimulatorApp<TState, EphemeralData = never>({
             sync,
         ],
     );
-
-    return (
-        <main className="collabShell">
-            <div className="documentToolbar">
+    const topBarControls = useMemo(
+        () => ({
+            documentPicker: (
                 <DocumentPicker
-                    documents={documents}
+                    documents={mergeDocumentSummariesWithSeeds(
+                        documents,
+                        app.id,
+                        'local-simulator',
+                    )}
                     activeDocId={activeDocId}
                     appId={app.id}
                     payloadKind="local-simulator"
                     onSwitchDocument={switchDocument}
                 />
-                <SeedDocumentPicker
+            ),
+            archiveControls: histories ? (
+                <DocumentArchiveControls
+                    adapter={archiveAdapter}
                     appId={app.id}
+                    docId={activeDocId}
                     payloadKind="local-simulator"
-                    onImportSeed={importSeedDocument}
                 />
-                {histories ? (
-                    <DocumentArchiveControls
-                        adapter={archiveAdapter}
-                        appId={app.id}
-                        docId={activeDocId}
-                        payloadKind="local-simulator"
-                    />
-                ) : null}
-            </div>
+            ) : null,
+        }),
+        [
+            activeDocId,
+            app.id,
+            archiveAdapter,
+            documents,
+            histories,
+            switchDocument,
+        ],
+    );
+    useTopBarControls(topBarControls);
+
+    return (
+        <main className="collabShell">
             {histories
                 ? replicas.map((replica, index) => (
                       <LocalReplicaPanel

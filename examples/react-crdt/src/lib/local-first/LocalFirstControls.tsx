@@ -1,5 +1,4 @@
 import {useState} from 'react';
-import {DocumentArchiveControls, type DocumentArchiveAdapter} from '../documentArchive';
 import {useStore} from '../store';
 import type {LocalFirstSync} from './types';
 
@@ -9,16 +8,12 @@ export function LocalFirstControls<TState>({
     schemaVersion,
     schemaFingerprint,
     schemaFingerprintHash,
-    archiveAdapter,
-    appId,
 }: {
     sync: LocalFirstSync<TState>;
     docId: string;
     schemaVersion: number;
     schemaFingerprint: string;
     schemaFingerprintHash: string;
-    archiveAdapter: DocumentArchiveAdapter;
-    appId: string;
 }) {
     const state = useStore(sync.stateStore);
     const persistence = useStore(sync.persistenceStore);
@@ -203,14 +198,6 @@ export function LocalFirstControls<TState>({
             >
                 Apply preview
             </button>
-            <div className="connectionActions">
-                <DocumentArchiveControls
-                    adapter={archiveAdapter}
-                    appId={appId}
-                    docId={docId}
-                    payloadKind="local-first"
-                />
-            </div>
             <section className="connectionList">
                 {connections.map((connection) => (
                     <div className="connectionRow" key={connection.peerId}>

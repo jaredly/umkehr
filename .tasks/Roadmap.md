@@ -29,3 +29,7 @@ Testing findings
 
 NEEDS TO TEST:
 - migration definiteily
+
+ok can you write up a plan.md detailing what needs to be done?
+
+Ok, go ahead and implement, keeping a concise log of your progress in implementation-log.md
