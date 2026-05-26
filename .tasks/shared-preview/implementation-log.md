@@ -54,3 +54,4 @@
 - Kept history-only whiteboard mode working without an ephemeral channel by detecting the CRDT ephemeral helper surface at runtime.
 - Verified Phase 6 with `npx vitest run examples/react-crdt/src/apps/whiteboard/ephemeral.test.ts examples/react-crdt/src/apps/whiteboard/helpers.test.ts`, `npm run typecheck`, `npm run typecheck:tests`, and `npm test`.
 - Rechecked `npm run typecheck:examples`; it still fails only on the known unrelated `CrdtUpdate.path` seed test and Vite plugin type mismatches.
+- Fixed selected-element drag previews to publish updated `selection` bounds alongside `element-preview` messages during move/resize and after durable pointer-up commit.

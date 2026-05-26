@@ -252,14 +252,20 @@ export function WhiteboardPanel({
                     y: point.y - drag.offsetY,
                 });
                 setLocalElementPreview(preview);
-                publishEphemeral([elementPreviewMessage(actor, drag.id, preview)], 'frame');
+                publishEphemeral(
+                    elementPreviewMessages(actor, element, preview, selectedId === drag.id),
+                    'frame',
+                );
             } else if (drag.kind === 'resize-note' && element.type === 'note') {
                 const preview = elementPreviewData(element, {
                     width: Math.max(120, point.x - drag.originX),
                     height: Math.max(96, point.y - drag.originY),
                 });
                 setLocalElementPreview(preview);
-                publishEphemeral([elementPreviewMessage(actor, drag.id, preview)], 'frame');
+                publishEphemeral(
+                    elementPreviewMessages(actor, element, preview, selectedId === drag.id),
+                    'frame',
+                );
             }
         };
         const onPointerUp = (event: PointerEvent) => {
@@ -290,23 +296,55 @@ export function WhiteboardPanel({
             const element = editor.latest().elements[drag.id];
             setDrag(null);
             setLocalElementPreview(null);
-            publishEphemeral([clearEphemeralMessage(actor, elementPreviewId(actor, drag.id))]);
-            if (!element) return;
+            if (!element) {
+                publishEphemeral([clearEphemeralMessage(actor, elementPreviewId(actor, drag.id))]);
+                return;
+            }
             if (drag.kind === 'move') {
+                const position = {x: point.x - drag.offsetX, y: point.y - drag.offsetY};
+                const preview = elementPreviewData(element, position);
+                publishEphemeral([
+                    clearEphemeralMessage(actor, elementPreviewId(actor, drag.id)),
+                    ...(selectedId === drag.id
+                        ? [
+                              selectionMessage({
+                                  actor,
+                                  elementIds: [drag.id],
+                                  bounds: boundsForPreview(element, preview),
+                              }),
+                          ]
+                        : []),
+                ]);
                 editor.dispatch({
                     op: 'replace',
                     path: elementFieldPath(drag.id, 'position'),
-                    value: {x: point.x - drag.offsetX, y: point.y - drag.offsetY},
+                    value: position,
                 });
             } else if (drag.kind === 'resize-note' && element.type === 'note') {
+                const size = {
+                    width: Math.max(120, point.x - drag.originX),
+                    height: Math.max(96, point.y - drag.originY),
+                };
+                const preview = elementPreviewData(element, size);
+                publishEphemeral([
+                    clearEphemeralMessage(actor, elementPreviewId(actor, drag.id)),
+                    ...(selectedId === drag.id
+                        ? [
+                              selectionMessage({
+                                  actor,
+                                  elementIds: [drag.id],
+                                  bounds: boundsForPreview(element, preview),
+                              }),
+                          ]
+                        : []),
+                ]);
                 editor.dispatch({
                     op: 'replace',
                     path: elementFieldPath(drag.id, 'size'),
-                    value: {
-                        width: Math.max(120, point.x - drag.originX),
-                        height: Math.max(96, point.y - drag.originY),
-                    },
+                    value: size,
                 });
+            } else {
+                publishEphemeral([clearEphemeralMessage(actor, elementPreviewId(actor, drag.id))]);
             }
         };
         const onCancel = () => {
@@ -324,7 +362,7 @@ export function WhiteboardPanel({
             window.removeEventListener('pointerup', onPointerUp);
             window.removeEventListener('pointercancel', onCancel);
         };
-    }, [actor, drag, editor, publishEphemeral, readOnly, viewport]);
+    }, [actor, drag, editor, publishEphemeral, readOnly, selectedId, viewport]);
 
     const makeBase = useCallback(
         (
@@ -586,7 +624,7 @@ export function WhiteboardPanel({
         const point = screenToBoard(event.clientX, event.clientY, rect, viewport);
         const preview = elementPreviewData(element);
         setLocalElementPreview(preview);
-        publishEphemeral([elementPreviewMessage(actor, element.id, preview)], 'frame');
+        publishEphemeral(elementPreviewMessages(actor, element, preview, true), 'frame');
         setDrag({
             kind: 'move',
             id: element.id,
@@ -818,7 +856,7 @@ export function WhiteboardPanel({
                                 const preview = elementPreviewData(element);
                                 setLocalElementPreview(preview);
                                 publishEphemeral(
-                                    [elementPreviewMessage(actor, element.id, preview)],
+                                    elementPreviewMessages(actor, element, preview, true),
                                     'frame',
                                 );
                                 setDrag({
@@ -1502,6 +1540,26 @@ function elementPreviewData(
     };
 }
 
+function elementPreviewMessages(
+    actor: string,
+    element: WhiteboardElement,
+    preview: WhiteboardElementPreviewData,
+    includeSelection: boolean,
+): EphemeralMessage<WhiteboardEphemeralData>[] {
+    return [
+        elementPreviewMessage(actor, element.id, preview),
+        ...(includeSelection
+            ? [
+                  selectionMessage({
+                      actor,
+                      elementIds: [element.id],
+                      bounds: boundsForPreview(element, preview),
+                  }),
+              ]
+            : []),
+    ];
+}
+
 function strokePreviewPoints(points: StrokePoint[]): [number, number, number?][] {
     return points.map((point) =>
         point.pressure === undefined ? [point.x, point.y] : [point.x, point.y, point.pressure],
@@ -1527,6 +1585,35 @@ function boundsForElement(element: WhiteboardElement) {
     }
     const xs = element.points.map((point) => point.x + element.position.x);
     const ys = element.points.map((point) => point.y + element.position.y);
+    const minX = Math.min(...xs);
+    const minY = Math.min(...ys);
+    return {
+        x: minX,
+        y: minY,
+        width: Math.max(1, Math.max(...xs) - minX),
+        height: Math.max(1, Math.max(...ys) - minY),
+    };
+}
+
+function boundsForPreview(element: WhiteboardElement, preview: WhiteboardElementPreviewData) {
+    if (element.type === 'note') {
+        return {
+            x: preview.x,
+            y: preview.y,
+            width: preview.width ?? element.size.width,
+            height: preview.height ?? element.size.height,
+        };
+    }
+    if (element.type === 'emoji') {
+        return {
+            x: preview.x,
+            y: preview.y,
+            width: preview.width ?? element.size,
+            height: preview.height ?? element.size,
+        };
+    }
+    const xs = element.points.map((point) => point.x + preview.x);
+    const ys = element.points.map((point) => point.y + preview.y);
     const minX = Math.min(...xs);
     const minY = Math.min(...ys);
     return {
