@@ -1,3 +1,23 @@
+/**
+ * Deterministic seed database fixture generator for the React CRDT example.
+ *
+ * The generator builds a reusable in-memory fixture catalog, then projects it
+ * to the server-shaped seed payload used by the Bun SQLite importer. Valid
+ * fixture edits are applied through the real app schemas and CRDT command
+ * pipeline before being serialized as server update or merge events, so the
+ * generated documents exercise normal materialization and sync paths rather
+ * than hand-written storage rows.
+ *
+ * Current fixtures cover small readable todo data, large todo item lists, long
+ * multi-actor todo event logs, todo branch and merge topologies, todo array
+ * deletion/reordering cases, large and dense whiteboards, whiteboard nested
+ * element edits, tagged-union branch conflicts, old-schema migration seeds,
+ * and separate malformed payloads for validation tests.
+ *
+ * `--date` anchors generated timestamps for stable output. `--size` scales the
+ * item/event/element stress fixtures while preserving deterministic ids,
+ * actors, branch names, and schema metadata.
+ */
 import {schemaFingerprint, schemaFingerprintHash} from 'umkehr/migration';
 import type {DraftPatch, MaybeNested} from 'umkehr';
 import {
@@ -24,6 +44,12 @@ import {
     type WhiteboardElement,
     type WhiteboardState,
 } from '../../apps/whiteboard/schema';
+import {
+    todoFixtureV1Fingerprint,
+    todoFixtureV1FingerprintHash,
+    todoFixtureServerUpdateEventsV1,
+    type TodoFixtureStateV1,
+} from '../../../../migration-fixtures/todos';
 import type {
     SeedDatabasePayload,
     SeedDocument,
@@ -36,6 +62,9 @@ import type {
 
 const TODO_SCHEMA_VERSION = 1;
 const WHITEBOARD_SCHEMA_VERSION = 1;
+const TODO_APP_ID = 'todos';
+const WHITEBOARD_APP_ID = 'whiteboard';
+const TODO_MIGRATION_APP_ID = 'todos-migration-fixture';
 
 export type SeedSize = 'small' | 'default' | 'large';
 
@@ -52,6 +81,7 @@ type FixtureClock = {
 
 type BranchBuilder<TState> = {
     docId: string;
+    appId: string;
     title: string;
     sizeLabel: string;
     sizeRank: number;
@@ -64,6 +94,10 @@ type BranchBuilder<TState> = {
     events: ServerBranchEvent[];
     histories: Record<string, CrdtLocalHistory<TState>>;
     state: TState;
+};
+
+export type SeedFixture<TState = unknown> = SeedDocument & {
+    histories: Record<string, CrdtLocalHistory<TState>>;
 };
 
 const users: ServerUser[] = [
@@ -91,23 +125,102 @@ export function generateSeedDatabasePayload({
     date,
     size = 'default',
 }: SeedGeneratorOptions = {}): SeedDatabasePayload {
+    const catalog = generateSeedFixtureCatalog({date, size});
+    return {
+        generatedAt: catalog.generatedAt,
+        users,
+        documents: catalog.fixtures.map(fixtureToDocument),
+    };
+}
+
+export function generateSeedFixtureCatalog({
+    date,
+    size = 'default',
+}: SeedGeneratorOptions = {}): {
+    generatedAt: string;
+    users: ServerUser[];
+    fixtures: SeedFixture[];
+} {
     const clock = createClock(date);
     return {
         generatedAt: clock.generatedAt,
         users,
-        documents: [
+        fixtures: [
             todosSmall(clock),
             todosManyItems(clock, itemCountFor(size)),
             todosManyEvents(clock, eventCountFor(size)),
             todosBranches(clock),
             todosMergeReview(clock),
+            todosConflictingFields(clock),
+            todosArrayOperations(clock),
+            todosDeletesAndReadds(clock),
+            todosRecursiveMerges(clock),
+            todosPartialRepeatMerge(clock),
+            todosWideBranchList(clock),
             whiteboardManyElements(clock, whiteboardElementCountFor(size)),
             whiteboardBranches(clock),
+            whiteboardElementEditing(clock),
+            whiteboardDenseOverlap(clock, denseWhiteboardElementCountFor(size)),
+            whiteboardConflictingElementEdits(clock),
+            whiteboardManyEvents(clock, whiteboardEventCountFor(size)),
+            todosMigrationV1Main(clock),
         ],
     };
 }
 
-function todosSmall(clock: FixtureClock): SeedDocument {
+export function generateMalformedSeedPayloads(
+    options: SeedGeneratorOptions = {},
+): Record<string, SeedDatabasePayload> {
+    const base = generateSeedDatabasePayload({...options, size: options.size ?? 'small'});
+    return {
+        missingSourceBranch: mutateFirstDocument(base, (document) => {
+            document.branches.push({
+                ...document.branches[0],
+                branchId: 'missing-source',
+                name: 'Missing source',
+                sourceBranchId: 'does-not-exist',
+                forkEventIndex: 1,
+                tipEventIndex: 0,
+            });
+        }),
+        duplicateEventIndex: mutateFirstDocument(base, (document) => {
+            const first = document.events.find((event) => event.kind === 'update');
+            if (first) {
+                document.events.push({
+                    ...structuredClone(first),
+                    hlcTimestamp: `${first.hlcTimestamp}-duplicate`,
+                } as ServerBranchEvent);
+            }
+        }),
+        mergePastSourceTip: mutateFirstDocument(base, (document) => {
+            const branch = document.branches.find((candidate) => candidate.branchId !== 'main');
+            if (!branch) return;
+            const main = document.branches.find((candidate) => candidate.branchId === 'main');
+            if (!main) return;
+            main.tipEventIndex += 1;
+            document.events.push({
+                kind: 'merge',
+                mergeId: 'malformed-merge-past-tip',
+                docId: document.docId,
+                branchId: 'main',
+                eventIndex: main.tipEventIndex,
+                sourceBranchId: branch.branchId,
+                sourceThroughEventIndex: branch.tipEventIndex + 100,
+                actor: actors.ada,
+                createdAt: document.lastAccessedAt,
+            });
+        }),
+        mismatchedSchemaHash: mutateFirstDocument(base, (document) => {
+            document.schemaFingerprintHash = 'not-the-real-schema-hash';
+        }),
+        unknownActor: mutateFirstDocument(base, (document) => {
+            const first = document.events.find((event) => event.kind === 'update');
+            if (first?.kind === 'update') first.origin = 'missing-user:missing-session';
+        }),
+    };
+}
+
+function todosSmall(clock: FixtureClock): SeedFixture<TodoState> {
     const doc = createTodoDoc({
         docId: 'todos-small',
         title: 'Todos: small baseline',
@@ -128,7 +241,7 @@ function todosSmall(clock: FixtureClock): SeedDocument {
     return finishDocument(doc);
 }
 
-function todosManyItems(clock: FixtureClock, count: number): SeedDocument {
+function todosManyItems(clock: FixtureClock, count: number): SeedFixture<TodoState> {
     const doc = createTodoDoc({
         docId: 'todos-many-items',
         title: `Todos: ${count} items`,
@@ -147,7 +260,7 @@ function todosManyItems(clock: FixtureClock, count: number): SeedDocument {
     return finishDocument(doc);
 }
 
-function todosManyEvents(clock: FixtureClock, count: number): SeedDocument {
+function todosManyEvents(clock: FixtureClock, count: number): SeedFixture<TodoState> {
     const doc = createTodoDoc({
         docId: 'todos-many-events',
         title: `Todos: ${count} updates`,
@@ -185,7 +298,7 @@ function todosManyEvents(clock: FixtureClock, count: number): SeedDocument {
     return finishDocument(doc);
 }
 
-function todosBranches(clock: FixtureClock): SeedDocument {
+function todosBranches(clock: FixtureClock): SeedFixture<TodoState> {
     const doc = createTodoDoc({
         docId: 'todos-branches',
         title: 'Todos: branch fan-out',
@@ -209,7 +322,7 @@ function todosBranches(clock: FixtureClock): SeedDocument {
     return finishDocument(doc);
 }
 
-function todosMergeReview(clock: FixtureClock): SeedDocument {
+function todosMergeReview(clock: FixtureClock): SeedFixture<TodoState> {
     const doc = createTodoDoc({
         docId: 'todos-merge-review',
         title: 'Todos: merge review',
@@ -233,7 +346,164 @@ function todosMergeReview(clock: FixtureClock): SeedDocument {
     return finishDocument(doc);
 }
 
-function whiteboardManyElements(clock: FixtureClock, count: number): SeedDocument {
+function todosConflictingFields(clock: FixtureClock): SeedFixture<TodoState> {
+    const doc = createTodoDoc({
+        docId: 'todos-conflicting-fields',
+        title: 'Todos: conflicting fields',
+        sizeLabel: '3 branches, same-path edits',
+        sizeRank: 60,
+        clock,
+    });
+    setTodos(doc, actors.ada, {
+        bgcolor: '#fff',
+        todos: [
+            todo('copy', 'Draft release copy'),
+            todo('review', 'Review conflicts'),
+            todo('ship', 'Ship conflict fixture'),
+        ],
+    });
+    createBranchFromTip(doc, 'copy-a', 'Copy A', 'main');
+    createBranchFromTip(doc, 'copy-b', 'Copy B', 'main');
+    updateTodoTitle(doc, actors.ben, 'copy', 'Draft release copy - Ben', 'copy-a');
+    updateTodoDone(doc, actors.ben, 'copy', true, 'copy-a');
+    updateTodoTitle(doc, actors.cy, 'copy', 'Draft release copy - Cy', 'copy-b');
+    updateTodoBgcolor(doc, actors.cy, '#ecfeff', 'copy-b');
+    updateTodoTitle(doc, actors.ada, 'copy', 'Draft release copy - main');
+    mergeBranchThroughTip(doc, actors.dee, 'main', 'copy-a', 'merge-copy-a');
+    mergeBranchThroughTip(doc, actors.dee, 'main', 'copy-b', 'merge-copy-b');
+    return finishDocument(doc);
+}
+
+function todosArrayOperations(clock: FixtureClock): SeedFixture<TodoState> {
+    const doc = createTodoDoc({
+        docId: 'todos-array-operations',
+        title: 'Todos: array operations',
+        sizeLabel: 'insert, move, reorder',
+        sizeRank: 70,
+        clock,
+    });
+    setTodos(doc, actors.ada, {
+        bgcolor: '#f8fafc',
+        todos: [
+            todo('a', 'Alpha'),
+            todo('b', 'Bravo'),
+            todo('c', 'Charlie'),
+            todo('d', 'Delta'),
+        ],
+    });
+    insertTodoAt(doc, actors.ben, 0, todo('front', 'Inserted at front'));
+    insertTodoAt(doc, actors.cy, 3, todo('middle', 'Inserted in middle'));
+    addTodo(doc, actors.dee, todo('end', 'Inserted at end'));
+    insertTodoAt(doc, actors.ada, 2, todo('near-a', 'Adjacent insert A'));
+    insertTodoAt(doc, actors.ben, 3, todo('near-b', 'Adjacent insert B'));
+    moveTodo(doc, actors.cy, 1, branchState(doc).todos.length - 1);
+    reorderTodos(doc, actors.dee, [2, 0, 1, 3, 4, 5, 6, 7, 8]);
+    updateTodoTitle(doc, actors.ada, 'middle', 'Edited after index shifts');
+    return finishDocument(doc);
+}
+
+function todosDeletesAndReadds(clock: FixtureClock): SeedFixture<TodoState> {
+    const doc = createTodoDoc({
+        docId: 'todos-deletes-and-readds',
+        title: 'Todos: deletes and re-adds',
+        sizeLabel: 'remove, branch edit, id reuse',
+        sizeRank: 80,
+        clock,
+    });
+    setTodos(doc, actors.ada, {
+        bgcolor: '#fff7ed',
+        todos: [
+            todo('keep', 'Keep this todo'),
+            todo('reuse', 'Original reusable id'),
+            todo('neighbor', 'Neighbor after delete'),
+            todo('branch-only', 'Branch edit target'),
+        ],
+    });
+    createBranchFromTip(doc, 'stale-edit', 'Stale edit', 'main');
+    updateTodoTitle(doc, actors.ben, 'reuse', 'Branch edited deleted todo', 'stale-edit');
+    removeTodoById(doc, actors.ada, 'reuse');
+    updateTodoTitle(doc, actors.cy, 'neighbor', 'Neighbor edited after delete');
+    addTodo(doc, actors.dee, todo('reuse', 'Re-added reusable id'));
+    updateTodoDone(doc, actors.ada, 'reuse', true);
+    mergeBranchThroughTip(doc, actors.dee, 'main', 'stale-edit', 'merge-stale-edit');
+    return finishDocument(doc);
+}
+
+function todosRecursiveMerges(clock: FixtureClock): SeedFixture<TodoState> {
+    const doc = createTodoDoc({
+        docId: 'todos-recursive-merges',
+        title: 'Todos: recursive merges',
+        sizeLabel: 'recursive merge topology',
+        sizeRank: 90,
+        clock,
+    });
+    setTodos(doc, actors.ada, {
+        bgcolor: '#f0fdf4',
+        todos: [todo('base', 'Base task'), todo('dependency', 'Dependency task')],
+    });
+    createBranchFromTip(doc, 'dependency', 'Dependency', 'main');
+    createBranchFromTip(doc, 'feature', 'Feature', 'main');
+    createBranchFromTip(doc, 'direct', 'Direct dependency', 'main');
+    updateTodoTitle(doc, actors.ben, 'dependency', 'Dependency branch edit', 'dependency');
+    mergeBranchThroughTip(doc, actors.cy, 'feature', 'dependency', 'merge-feature-dependency');
+    addTodo(doc, actors.cy, todo('feature-task', 'Feature task'), 'feature');
+    mergeBranchThroughTip(doc, actors.dee, 'main', 'feature', 'merge-main-feature');
+    mergeBranchThroughTip(doc, actors.dee, 'direct', 'dependency', 'merge-direct-dependency');
+    mergeBranchThroughTip(doc, actors.ada, 'main', 'direct', 'merge-main-direct');
+    return finishDocument(doc);
+}
+
+function todosPartialRepeatMerge(clock: FixtureClock): SeedFixture<TodoState> {
+    const doc = createTodoDoc({
+        docId: 'todos-partial-repeat-merge',
+        title: 'Todos: partial repeat merge',
+        sizeLabel: 'partial and repeated merges',
+        sizeRank: 100,
+        clock,
+    });
+    setTodos(doc, actors.ada, {
+        bgcolor: '#f8fafc',
+        todos: [todo('one', 'One'), todo('two', 'Two'), todo('three', 'Three')],
+    });
+    createBranchFromTip(doc, 'source', 'Source', 'main');
+    updateTodoTitle(doc, actors.ben, 'one', 'Source edit one', 'source');
+    updateTodoDone(doc, actors.ben, 'two', true, 'source');
+    mergeBranch(doc, actors.ada, 'main', 'source', 1, 'merge-source-partial');
+    updateTodoTitle(doc, actors.cy, 'three', 'Source edit three', 'source');
+    mergeBranchThroughTip(doc, actors.dee, 'main', 'source', 'merge-source-rest');
+    mergeBranch(doc, actors.dee, 'main', 'source', 1, 'merge-source-repeat');
+    return finishDocument(doc);
+}
+
+function todosWideBranchList(clock: FixtureClock): SeedFixture<TodoState> {
+    const doc = createTodoDoc({
+        docId: 'todos-wide-branch-list',
+        title: 'Todos: wide branch list',
+        sizeLabel: '26 branches',
+        sizeRank: 110,
+        clock,
+    });
+    setTodos(doc, actors.ada, {
+        bgcolor: '#eef6ff',
+        todos: [todo('base', 'Wide branch base')],
+    });
+    for (let index = 1; index <= 25; index++) {
+        const branchId = `branch-${String(index).padStart(2, '0')}`;
+        createBranchFromTip(doc, branchId, `Branch ${index}`, 'main');
+        addTodo(
+            doc,
+            [actors.ada, actors.ben, actors.cy, actors.dee][index % 4],
+            todo(`branch-${index}`, `Branch ${index} task`),
+            branchId,
+        );
+        if (index <= 5) {
+            mergeBranchThroughTip(doc, actors.dee, 'main', branchId, `merge-${branchId}`);
+        }
+    }
+    return finishDocument(doc);
+}
+
+function whiteboardManyElements(clock: FixtureClock, count: number): SeedFixture<WhiteboardState> {
     const doc = createWhiteboardDoc({
         docId: 'whiteboard-many-elements',
         title: `Whiteboard: ${count} elements`,
@@ -253,7 +523,7 @@ function whiteboardManyElements(clock: FixtureClock, count: number): SeedDocumen
     return finishDocument(doc);
 }
 
-function whiteboardBranches(clock: FixtureClock): SeedDocument {
+function whiteboardBranches(clock: FixtureClock): SeedFixture<WhiteboardState> {
     const doc = createWhiteboardDoc({
         docId: 'whiteboard-branches',
         title: 'Whiteboard: branches',
@@ -289,6 +559,190 @@ function whiteboardBranches(clock: FixtureClock): SeedDocument {
     return finishDocument(doc);
 }
 
+function whiteboardElementEditing(clock: FixtureClock): SeedFixture<WhiteboardState> {
+    const doc = createWhiteboardDoc({
+        docId: 'whiteboard-element-editing',
+        title: 'Whiteboard: element editing',
+        sizeLabel: 'nested edits and archival',
+        sizeRank: 130,
+        clock,
+    });
+    setWhiteboard(doc, actors.ada, {
+        background: '#f8fafc',
+        elements: {
+            note: noteElement(0, actors.ada, clock.generatedAt, 'note', 'Initial note'),
+            stroke: strokeElement(1, actors.ben, clock.generatedAt, 'stroke'),
+            emoji: emojiElement(2, actors.cy, clock.generatedAt, 'emoji'),
+        },
+    });
+    replaceWhiteboardElementField(doc, actors.ben, 'note', 'position', {x: 140, y: 120});
+    replaceWhiteboardElementField(doc, actors.ben, 'note', 'size', {width: 168, height: 96});
+    replaceWhiteboardElementField(doc, actors.cy, 'note', 'text', 'Edited nested note text');
+    replaceWhiteboardElementField(doc, actors.cy, 'note', 'color', '#bfdbfe');
+    replaceWhiteboardElementField(doc, actors.dee, 'stroke', 'points', [
+        {x: 0, y: 0, pressure: 0.3},
+        {x: 48, y: 24, pressure: 0.7},
+        {x: 96, y: 12, pressure: 0.5},
+        {x: 144, y: 36, pressure: 0.8},
+    ]);
+    replaceWhiteboardElementField(doc, actors.dee, 'stroke', 'strokeWidth', 8);
+    replaceWhiteboardElementField(doc, actors.ada, 'emoji', 'position', {x: 420, y: 260});
+    replaceWhiteboardElementField(doc, actors.ada, 'emoji', 'size', 64);
+    archiveWhiteboardElement(doc, actors.ben, 'note');
+    recoverWhiteboardElement(doc, actors.cy, 'note');
+    return finishDocument(doc);
+}
+
+function whiteboardDenseOverlap(
+    clock: FixtureClock,
+    count: number,
+): SeedFixture<WhiteboardState> {
+    const doc = createWhiteboardDoc({
+        docId: 'whiteboard-dense-overlap',
+        title: `Whiteboard: ${count} dense elements`,
+        sizeLabel: `${count} overlapping elements`,
+        sizeRank: 140,
+        clock,
+    });
+    const elements: Record<string, WhiteboardElement> = {};
+    for (let index = 0; index < count; index++) {
+        const actor = [actors.ada, actors.ben, actors.cy, actors.dee][index % 4];
+        const element =
+            index % 3 === 0
+                ? noteElement(index, actor, clock.generatedAt)
+                : index % 3 === 1
+                  ? strokeElement(index, actor, clock.generatedAt)
+                  : emojiElement(index, actor, clock.generatedAt);
+        element.position = {
+            x: -120 + (index % 18) * 24,
+            y: -80 + Math.floor(index / 18) * 18,
+        };
+        element.rotation = (index % 17) * 7 - 56;
+        element.zOrder = zOrder(index % 50);
+        if (index % 11 === 0) {
+            element.archived = true;
+            element.archivedBy = actor;
+            element.archivedAt = clock.generatedAt;
+        }
+        elements[element.id] = element;
+    }
+    setWhiteboard(doc, actors.ada, {background: '#f8fafc', elements});
+    return finishDocument(doc);
+}
+
+function whiteboardConflictingElementEdits(clock: FixtureClock): SeedFixture<WhiteboardState> {
+    const doc = createWhiteboardDoc({
+        docId: 'whiteboard-conflicting-element-edits',
+        title: 'Whiteboard: conflicting element edits',
+        sizeLabel: 'same element branch conflict',
+        sizeRank: 150,
+        clock,
+    });
+    setWhiteboard(doc, actors.ada, {
+        background: '#fff',
+        elements: {
+            shared: noteElement(0, actors.ada, clock.generatedAt, 'shared', 'Shared note'),
+        },
+    });
+    createBranchFromTip(doc, 'move', 'Move', 'main');
+    createBranchFromTip(doc, 'copy', 'Copy', 'main');
+    createBranchFromTip(doc, 'archive', 'Archive', 'main');
+    replaceWhiteboardElementField(doc, actors.ben, 'shared', 'position', {x: 300, y: 180}, 'move');
+    replaceWhiteboardElementField(doc, actors.ben, 'shared', 'text', 'Moved branch text', 'move');
+    replaceWhiteboardElementField(doc, actors.cy, 'shared', 'position', {x: 80, y: 360}, 'copy');
+    replaceWhiteboardElementField(doc, actors.cy, 'shared', 'text', 'Copy branch text', 'copy');
+    archiveWhiteboardElement(doc, actors.dee, 'shared', 'archive');
+    replaceWhiteboardElementField(doc, actors.ada, 'shared', 'text', 'Main branch text');
+    mergeBranchThroughTip(doc, actors.dee, 'main', 'move', 'merge-move');
+    mergeBranchThroughTip(doc, actors.dee, 'main', 'copy', 'merge-copy');
+    mergeBranchThroughTip(doc, actors.dee, 'main', 'archive', 'merge-archive');
+    return finishDocument(doc);
+}
+
+function whiteboardManyEvents(
+    clock: FixtureClock,
+    count: number,
+): SeedFixture<WhiteboardState> {
+    const doc = createWhiteboardDoc({
+        docId: 'whiteboard-many-events',
+        title: `Whiteboard: ${count} updates`,
+        sizeLabel: `${count} events`,
+        sizeRank: 160,
+        clock,
+    });
+    setWhiteboard(doc, actors.ada, {
+        background: '#f8fafc',
+        elements: Object.fromEntries(
+            Array.from({length: 18}, (_, index) => {
+                const actor = [actors.ada, actors.ben, actors.cy, actors.dee][index % 4];
+                const element =
+                    index % 3 === 0
+                        ? noteElement(index, actor, clock.generatedAt)
+                        : index % 3 === 1
+                          ? strokeElement(index, actor, clock.generatedAt)
+                          : emojiElement(index, actor, clock.generatedAt);
+                return [element.id, element];
+            }),
+        ),
+    });
+    const actorList = [actors.ada, actors.ben, actors.cy, actors.dee];
+    for (let index = 1; index < count; index++) {
+        const ids = Object.keys(branchState(doc).elements).sort();
+        const id = ids[index % ids.length];
+        const element = branchState(doc).elements[id];
+        const actor = actorList[index % actorList.length];
+        if (index % 17 === 0) {
+            replaceWhiteboardElementField(doc, actor, id, 'archived', true);
+        } else if (index % 17 === 1 && element.archived) {
+            replaceWhiteboardElementField(doc, actor, id, 'archived', false);
+        } else if (element.type === 'note' && index % 3 === 0) {
+            replaceWhiteboardElementField(doc, actor, id, 'text', `Edited note ${index}`);
+        } else if (element.type === 'stroke' && index % 3 === 1) {
+            replaceWhiteboardElementField(doc, actor, id, 'strokeWidth', 2 + (index % 9));
+        } else if (element.type === 'emoji') {
+            replaceWhiteboardElementField(doc, actor, id, 'size', 32 + (index % 48));
+        } else {
+            replaceWhiteboardElementField(doc, actor, id, 'position', {
+                x: element.position.x + (index % 5) * 3,
+                y: element.position.y + (index % 7) * 2,
+            });
+        }
+    }
+    return finishDocument(doc);
+}
+
+function todosMigrationV1Main(clock: FixtureClock): SeedFixture<TodoFixtureStateV1> {
+    const docId = 'todos-migration-v1-main';
+    const createdAt = clock.iso();
+    const events = todoFixtureServerUpdateEventsV1().map((event) => ({
+        ...event,
+        docId,
+        receivedAt: createdAt,
+    }));
+    return {
+        appId: TODO_MIGRATION_APP_ID,
+        docId,
+        title: 'Migration: todos fixture v1',
+        sizeLabel: 'old schema v1',
+        sizeRank: 170,
+        createdAt,
+        lastAccessedAt: createdAt,
+        schemaVersion: 1,
+        schemaFingerprint: todoFixtureV1Fingerprint,
+        schemaFingerprintHash: todoFixtureV1FingerprintHash,
+        branches: [{
+            docId,
+            branchId: 'main',
+            name: 'main',
+            tipEventIndex: events.length,
+            createdAt,
+            updatedAt: createdAt,
+        }],
+        events,
+        histories: {},
+    };
+}
+
 function createTodoDoc({
     docId,
     title,
@@ -304,6 +758,7 @@ function createTodoDoc({
 }): BranchBuilder<TodoState> {
     return createDoc({
         docId,
+        appId: TODO_APP_ID,
         title,
         sizeLabel,
         sizeRank,
@@ -332,6 +787,7 @@ function createWhiteboardDoc({
 }): BranchBuilder<WhiteboardState> {
     return createDoc({
         docId,
+        appId: WHITEBOARD_APP_ID,
         title,
         sizeLabel,
         sizeRank,
@@ -347,6 +803,7 @@ function createWhiteboardDoc({
 
 function createDoc<TState>({
     docId,
+    appId,
     title,
     sizeLabel,
     sizeRank,
@@ -359,6 +816,7 @@ function createDoc<TState>({
     clock,
 }: {
     docId: string;
+    appId: string;
     title: string;
     sizeLabel: string;
     sizeRank: number;
@@ -376,6 +834,7 @@ function createDoc<TState>({
     );
     return {
         docId,
+        appId,
         title,
         sizeLabel,
         sizeRank,
@@ -465,6 +924,18 @@ function updateTodoBgcolor(
     });
 }
 
+function insertTodoAt(
+    doc: BranchBuilder<TodoState>,
+    actor: string,
+    index: number,
+    todo: Todo,
+    branchId = 'main',
+) {
+    addTodo(doc, actor, todo, branchId);
+    const lastIndex = branchState(doc, branchId).todos.length - 1;
+    if (index < lastIndex) moveTodo(doc, actor, lastIndex, index, branchId);
+}
+
 function addTodo(
     doc: BranchBuilder<TodoState>,
     actor: string,
@@ -475,6 +946,49 @@ function addTodo(
         op: 'push',
         path: [{type: 'key', key: 'todos'}],
         value: todo,
+    });
+}
+
+function removeTodoById(
+    doc: BranchBuilder<TodoState>,
+    actor: string,
+    todoId: string,
+    branchId = 'main',
+) {
+    const index = branchState(doc, branchId).todos.findIndex((todoItem) => todoItem.id === todoId);
+    if (index < 0) throw new Error(`Missing todo ${todoId} in ${doc.docId}/${branchId}.`);
+    appendCommand(doc, branchId, actor, {
+        op: 'remove',
+        path: [{type: 'key', key: 'todos'}, {type: 'key', key: index}],
+    });
+}
+
+function moveTodo(
+    doc: BranchBuilder<TodoState>,
+    actor: string,
+    fromIdx: number,
+    targetIdx: number,
+    branchId = 'main',
+) {
+    appendCommand(doc, branchId, actor, {
+        op: 'move',
+        path: [{type: 'key', key: 'todos'}],
+        fromIdx,
+        targetIdx,
+        after: false,
+    });
+}
+
+function reorderTodos(
+    doc: BranchBuilder<TodoState>,
+    actor: string,
+    indices: number[],
+    branchId = 'main',
+) {
+    appendCommand(doc, branchId, actor, {
+        op: 'reorder',
+        path: [{type: 'key', key: 'todos'}],
+        indices,
     });
 }
 
@@ -489,6 +1003,70 @@ function addWhiteboardElement(
         path: [{type: 'key', key: 'elements'}, {type: 'key', key: element.id}],
         value: element,
     });
+}
+
+function replaceWhiteboardElementField(
+    doc: BranchBuilder<WhiteboardState>,
+    actor: string,
+    elementId: string,
+    field: string,
+    value: unknown,
+    branchId = 'main',
+) {
+    appendCommand(doc, branchId, actor, {
+        op: 'replace',
+        path: [{type: 'key', key: 'elements'}, {type: 'key', key: elementId}, {type: 'key', key: field}],
+        value,
+    });
+}
+
+function removeWhiteboardElementField(
+    doc: BranchBuilder<WhiteboardState>,
+    actor: string,
+    elementId: string,
+    field: string,
+    branchId = 'main',
+) {
+    appendCommand(doc, branchId, actor, {
+        op: 'remove',
+        path: [{type: 'key', key: 'elements'}, {type: 'key', key: elementId}, {type: 'key', key: field}],
+    });
+}
+
+function archiveWhiteboardElement(
+    doc: BranchBuilder<WhiteboardState>,
+    actor: string,
+    elementId: string,
+    branchId = 'main',
+) {
+    appendCommand(doc, branchId, actor, [
+        {
+            op: 'replace',
+            path: [{type: 'key', key: 'elements'}, {type: 'key', key: elementId}, {type: 'key', key: 'archived'}],
+            value: true,
+        },
+        {
+            op: 'replace',
+            path: [{type: 'key', key: 'elements'}, {type: 'key', key: elementId}, {type: 'key', key: 'archivedBy'}],
+            value: actor,
+        },
+        {
+            op: 'replace',
+            path: [{type: 'key', key: 'elements'}, {type: 'key', key: elementId}, {type: 'key', key: 'archivedAt'}],
+            value: nextIso(doc, actor),
+        },
+    ]);
+}
+
+function recoverWhiteboardElement(
+    doc: BranchBuilder<WhiteboardState>,
+    actor: string,
+    elementId: string,
+    branchId = 'main',
+) {
+    replaceWhiteboardElementField(doc, actor, elementId, 'archived', false, branchId);
+    removeWhiteboardElementField(doc, actor, elementId, 'archivedBy', branchId);
+    removeWhiteboardElementField(doc, actor, elementId, 'archivedAt', branchId);
 }
 
 function updateWhiteboardBackground(
@@ -572,6 +1150,15 @@ function createBranch<TState>(
     doc.histories[branchId] = sourceHistory;
 }
 
+function createBranchFromTip<TState>(
+    doc: BranchBuilder<TState>,
+    branchId: string,
+    name: string,
+    sourceBranchId: string,
+) {
+    createBranch(doc, branchId, name, sourceBranchId, branchTip(doc, sourceBranchId));
+}
+
 function mergeBranch<TState>(
     doc: BranchBuilder<TState>,
     actor: string,
@@ -599,8 +1186,19 @@ function mergeBranch<TState>(
     branch.updatedAt = createdAt;
 }
 
-function finishDocument<TState>(doc: BranchBuilder<TState>): SeedDocument {
+function mergeBranchThroughTip<TState>(
+    doc: BranchBuilder<TState>,
+    actor: string,
+    targetBranchId: string,
+    sourceBranchId: string,
+    mergeId: string,
+) {
+    mergeBranch(doc, actor, targetBranchId, sourceBranchId, branchTip(doc, sourceBranchId), mergeId);
+}
+
+function finishDocument<TState>(doc: BranchBuilder<TState>): SeedFixture<TState> {
     return {
+        appId: doc.appId,
         docId: doc.docId,
         title: doc.title,
         sizeLabel: doc.sizeLabel,
@@ -612,6 +1210,24 @@ function finishDocument<TState>(doc: BranchBuilder<TState>): SeedDocument {
         schemaFingerprintHash: doc.schemaFingerprintHash,
         branches: doc.branches,
         events: doc.events,
+        histories: doc.histories,
+    };
+}
+
+function fixtureToDocument(fixture: SeedFixture): SeedDocument {
+    return {
+        appId: fixture.appId,
+        docId: fixture.docId,
+        title: fixture.title,
+        sizeLabel: fixture.sizeLabel,
+        sizeRank: fixture.sizeRank,
+        createdAt: fixture.createdAt,
+        lastAccessedAt: fixture.lastAccessedAt,
+        schemaVersion: fixture.schemaVersion,
+        schemaFingerprint: fixture.schemaFingerprint,
+        schemaFingerprintHash: fixture.schemaFingerprintHash,
+        branches: fixture.branches,
+        events: fixture.events,
     };
 }
 
@@ -619,6 +1235,10 @@ function branchFor<TState>(doc: BranchBuilder<TState>, branchId: string) {
     const branch = doc.branches.find((candidate) => candidate.branchId === branchId);
     if (!branch) throw new Error(`Unknown branch ${branchId} in ${doc.docId}.`);
     return branch;
+}
+
+function branchTip<TState>(doc: BranchBuilder<TState>, branchId: string) {
+    return branchFor(doc, branchId).tipEventIndex;
 }
 
 function branchState<TState>(doc: BranchBuilder<TState>, branchId = 'main') {
@@ -794,6 +1414,29 @@ function whiteboardElementCountFor(size: SeedSize) {
     if (size === 'small') return 60;
     if (size === 'large') return 1000;
     return 400;
+}
+
+function denseWhiteboardElementCountFor(size: SeedSize) {
+    if (size === 'small') return 45;
+    if (size === 'large') return 600;
+    return 180;
+}
+
+function whiteboardEventCountFor(size: SeedSize) {
+    if (size === 'small') return 150;
+    if (size === 'large') return 3000;
+    return 1200;
+}
+
+function mutateFirstDocument(
+    payload: SeedDatabasePayload,
+    mutate: (document: SeedDocument) => void,
+): SeedDatabasePayload {
+    const next = structuredClone(payload);
+    const document = next.documents[0];
+    if (!document) throw new Error('Expected at least one seed document.');
+    mutate(document);
+    return next;
 }
 
 function isMainModule() {
