@@ -70,6 +70,7 @@ export type HistoryEditorContext<TState, TAnnotations = never> = Omit<
     AppEditorBase<TState>,
     'dispatch'
 > & {
+    getHistory(): History<TState, TAnnotations>;
     dispatch(
         v:
             | {op: 'undo' | 'redo'}

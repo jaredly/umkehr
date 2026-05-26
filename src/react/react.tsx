@@ -169,6 +169,9 @@ export const createHistoryContext = <T, An, Tag extends string = 'type'>(
                     latest() {
                         return ctx.state.current;
                     },
+                    getHistory() {
+                        return ctx.state;
+                    },
                     useHistory() {
                         const [tick, setTick] = useState(0);
                         useEffect(() => {

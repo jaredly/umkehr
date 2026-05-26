@@ -36,3 +36,12 @@ Verification:
   - `pnpm build` in `examples/react-crdt`: passed.
 - Fixed solo archive adapter perf issue by reading latest history from a ref instead of memoizing the adapter on every history change.
   - `pnpm build` in `examples/react-crdt`: passed.
+- Reduced solo hot-path rerenders for large seeded documents:
+  - `SoloApp.saveHistory` now persists without mirroring every edit into `historySnapshot` state.
+  - Added non-subscribing `getHistory()` to `createHistoryContext`.
+  - Moved `useHistory()` out of `SoloDocument` into a small `SoloHistoryPanel`, so the app panel/editor subtree is not subscribed to every history graph update.
+  - Memoized the disabled-ephemeral editor wrapper passed to app panels.
+  - `npx vitest run src/react/react.test.tsx`: 15 pass.
+  - `npx vitest run src/lib/seed/generate.test.ts`: 13 pass.
+  - `pnpm build` in `examples/react-crdt`: passed.
+  - After memoizing the panel editor wrapper, `pnpm build` in `examples/react-crdt`: passed.

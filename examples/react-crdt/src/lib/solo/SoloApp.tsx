@@ -1,8 +1,9 @@
-import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import {useCallback, useEffect, useMemo, useState} from 'react';
 import {
     createInitialHistory,
     withDisabledEphemeral,
     type AppDefinition,
+    type HistoryEditorContext,
     type HistoryRuntime,
 } from '../crdtApp';
 import {
@@ -67,7 +68,6 @@ export function SoloApp<TState, TAnnotations = never, EphemeralData = never>({
 
     const saveHistory = useCallback(
         (history: typeof historySnapshot) => {
-            setHistorySnapshot(history);
             const now = new Date().toISOString();
             void saveSoloDocument({
                 docId: activeDocId,
@@ -76,9 +76,9 @@ export function SoloApp<TState, TAnnotations = never, EphemeralData = never>({
                 history: history as any,
                 createdAt: now,
                 updatedAt: now,
-            }).then(refreshDocuments);
+            });
         },
-        [activeDocId, app.id, fingerprintHash, refreshDocuments],
+        [activeDocId, app.id, fingerprintHash],
     );
 
     const switchDocument = useCallback((docId: string) => {
@@ -165,13 +165,10 @@ function SoloDocument<TState, TAnnotations, EphemeralData>({
     onImported(docId: string, history: any): void;
 }) {
     const editor = runtime.useEditorContext();
-    const history = editor.useHistory();
-    const historyRef = useRef(history);
-    historyRef.current = history;
     const adapter = useMemo(
         () => ({
             async exportArchive(): Promise<DocumentArchive> {
-                const latestHistory = historyRef.current;
+                const latestHistory = editor.getHistory();
                 return {
                     kind: 'umkehr.react-crdt.document',
                     archiveVersion: 1,
@@ -199,7 +196,11 @@ function SoloDocument<TState, TAnnotations, EphemeralData>({
                 onImported(archive.docId, imported);
             },
         }),
-        [activeDocId, app, onImported, schemaFingerprint, schemaFingerprintHash],
+        [activeDocId, app, editor, onImported, schemaFingerprint, schemaFingerprintHash],
+    );
+    const panelEditor = useMemo(
+        () => withDisabledEphemeral<TState, typeof editor, EphemeralData>(editor),
+        [editor],
     );
 
     return (
@@ -210,18 +211,29 @@ function SoloDocument<TState, TAnnotations, EphemeralData>({
                 docId={activeDocId}
                 payloadKind="solo"
             />
-            <HistoryView
-                history={history}
-                jump={(id) => editor.dispatch({op: 'jump', id})}
-                previewJump={(id) => editor.previewJump(id)}
-                clearPreview={() => editor.clearPreview()}
-            />
+            <SoloHistoryPanel editor={editor} />
             {app.renderPanel({
                 actor: 'solo',
-                editor: withDisabledEphemeral<TState, typeof editor, EphemeralData>(editor),
+                editor: panelEditor,
                 title: app.title,
             })}
         </div>
+    );
+}
+
+function SoloHistoryPanel<TState, TAnnotations>({
+    editor,
+}: {
+    editor: HistoryEditorContext<TState, TAnnotations>;
+}) {
+    const history = editor.useHistory();
+    return (
+        <HistoryView
+            history={history}
+            jump={(id) => editor.dispatch({op: 'jump', id})}
+            previewJump={(id) => editor.previewJump(id)}
+            clearPreview={() => editor.clearPreview()}
+        />
     );
 }
 
