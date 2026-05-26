@@ -141,8 +141,14 @@ Component-level tests are optional for the first refactor because the current re
 ## Open questions
 
 - How aggressive should this pass be? A conservative extraction can reduce the file substantially without changing state ownership; a full hook-based split will take longer and needs more regression testing.
+  -> aggressive
 - Should the existing `helpers.ts` be renamed or split? It currently contains both data/model helpers and view/coordinate helpers. Moving more into it may make it too broad.
+  -> split sounds good
 - Should `noteColors`, `emojiChoices`, pen color, stroke width, minimum note size, and zoom limits become exported constants? They are currently scattered as literals in the component.
+  -> yeah let's make a constants.ts or something like that
 - Should the refactor also move whiteboard CSS out of the global `examples/react-crdt/src/style.css` file, or is the scope strictly TypeScript/component structure?
+  -> let's leave css alone for now
 - Is preserving every current UI label required, or can the toolbar be cleaned up while it is being extracted?
+  -> yeah cleanup sounds great
 - Should ephemeral capability detection remain whiteboard-local, or should app-level ephemeral support be made easier to consume from the shared React CRDT example infrastructure?
+  -> making it easier that sounds like a great idea
