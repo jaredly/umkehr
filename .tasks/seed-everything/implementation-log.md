@@ -31,3 +31,6 @@ Verification:
 - After server-client seed UI changes:
   - `npx vitest run src/lib/seed/generate.test.ts`: 13 pass.
   - `pnpm build` in `examples/react-crdt`: passed.
+- Fixed browser `process is not defined` error in `src/lib/seed/generate.ts` by guarding CLI detection behind `globalThis.process`.
+  - `npx vitest run src/lib/seed/generate.test.ts`: 13 pass.
+  - `pnpm build` in `examples/react-crdt`: passed.
