@@ -299,7 +299,7 @@ function CrdtUndoRedoButtons({
     editor,
     readOnly,
 }: {
-    editor: CrdtEditorContext<TodoState>;
+    editor: CrdtEditorContext<TodoState, 'type', never>;
     readOnly: boolean;
 }) {
     editor.useLocalHistory();
@@ -310,7 +310,7 @@ function HistoryUndoRedoButtons({
     editor,
     readOnly,
 }: {
-    editor: HistoryEditorContext<TodoState>;
+    editor: AppEditorContext<TodoState> & HistoryEditorContext<TodoState>;
     readOnly: boolean;
 }) {
     editor.useHistory();
@@ -528,19 +528,19 @@ function TodoItem({
 
 function hasPathScopedCrdtMeta(
     editor: AppEditorContext<TodoState>,
-): editor is CrdtEditorContext<TodoState> {
+): editor is CrdtEditorContext<TodoState, 'type', never> {
     return 'useCrdtMeta' in editor && typeof editor.useCrdtMeta === 'function';
 }
 
 function hasCrdtHistory(
     editor: AppEditorContext<TodoState>,
-): editor is CrdtEditorContext<TodoState> {
+): editor is CrdtEditorContext<TodoState, 'type', never> {
     return 'useLocalHistory' in editor && typeof editor.useLocalHistory === 'function';
 }
 
 function hasHistory(
     editor: AppEditorContext<TodoState>,
-): editor is HistoryEditorContext<TodoState> {
+): editor is AppEditorContext<TodoState> & HistoryEditorContext<TodoState> {
     return 'useHistory' in editor && typeof editor.useHistory === 'function';
 }
 

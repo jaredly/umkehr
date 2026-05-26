@@ -1,0 +1,49 @@
+# WhiteboardPanel refactor implementation log
+
+## 2026-05-25
+
+- Started phase-by-phase implementation from `plan.md`.
+- Phase 1 complete:
+  - Added `constants.ts`, `geometry.ts`, and `elementStyles.ts`.
+  - Moved whiteboard constants, preview/bounds helpers, and style helpers out of `WhiteboardPanel.tsx`.
+  - Added `geometry.test.ts` for bounds, preview data, combined bounds, and pressure-preserving stroke preview points.
+  - Verified with `npm run test -- --run examples/react-crdt/src/apps/whiteboard/helpers.test.ts examples/react-crdt/src/apps/whiteboard/ephemeral.test.ts examples/react-crdt/src/apps/whiteboard/geometry.test.ts`.
+- Phase 2 in progress: threading typed ephemeral methods through the example app editor abstraction.
+- Phase 2 complete:
+  - Added typed app-level ephemeral methods to the example app editor context.
+  - Added disabled no-op ephemeral methods for history-mode panels.
+  - Typed whiteboard app/runtime with `WhiteboardEphemeralData`.
+  - Removed whiteboard-local ephemeral capability detection.
+  - `npm run typecheck:examples` now only reports pre-existing unrelated errors in `seed/generate.test.ts` and Vite plugin dependency type mismatches.
+- Phase 3 in progress: extracting presentational whiteboard components.
+- Phase 3 complete:
+  - Added `types.ts` for shared whiteboard editor/gesture types.
+  - Extracted `UndoRedoButtons.tsx`, `Toolbar.tsx`, `ArchiveTray.tsx`, `ElementViews.tsx`, `EphemeralOverlays.tsx`, and `Minimap.tsx`.
+  - Kept CSS class names stable while cleaning up toolbar labels.
+  - Focused tests still pass.
+  - `npm --prefix examples/react-crdt run build` currently fails because `umkehr/migration` declarations are missing after root clean/build; will re-run full verification at the end.
+- Phase 4 in progress: extracting frame-coalesced ephemeral publishing into a hook.
+- Phase 4 complete:
+  - Added `useWhiteboardEphemeral.ts`.
+  - Moved remote ephemeral subscription and animation-frame publish coalescing out of `WhiteboardPanel.tsx`.
+- Phase 5 in progress: extracting editor mutation commands.
+- Phase 5 complete:
+  - Added `useWhiteboardCommands.ts`.
+  - Moved element creation, stroke commit, archive/recover, and layer mutations out of `WhiteboardPanel.tsx`.
+  - Focused tests and root build pass.
+- Phase 6 in progress: extracting pointer, drag, pen, zoom, and minimap viewport behavior.
+- Phase 6 complete:
+  - Added `useWhiteboardGestures.ts`.
+  - Moved viewport ref/state, pointer handlers, drag/resize/pan listeners, pen stroke state, zoom, wheel handling, and minimap recentering out of `WhiteboardPanel.tsx`.
+  - Root build and focused tests pass.
+- Phase 7 complete:
+  - Cleaned `WhiteboardPanel.tsx` down to composition/orchestration.
+  - Final `WhiteboardPanel.tsx` size is 288 lines, down from 1,690.
+- Phase 8 in progress: final verification.
+- Phase 8 complete:
+  - `npm run test -- --run examples/react-crdt/src/apps/whiteboard/helpers.test.ts examples/react-crdt/src/apps/whiteboard/ephemeral.test.ts examples/react-crdt/src/apps/whiteboard/geometry.test.ts` passed.
+  - `npm run build` passed.
+  - `npm --prefix examples/react-crdt run build` passed after running the root build first.
+  - `npm run typecheck:examples` still fails on unrelated existing issues:
+    - `examples/react-crdt/src/lib/seed/generate.test.ts(81,68)` reads `path` on `CrdtUpdate`, which can be `CrdtSetOrderUpdate`.
+    - `examples/react-crdt/vite.config.ts`, `vite.seed.config.ts`, and `vitest.config.ts` report Vite plugin type mismatches between `examples/react` and `examples/react-crdt` dependency copies.

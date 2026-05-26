@@ -55,13 +55,13 @@ type LoadState<TState> =
     | {kind: 'incompatible'; message: string}
     | {kind: 'error'; message: string};
 
-export function LocalFirstApp<TState>({
+export function LocalFirstApp<TState, EphemeralData = never>({
     app,
     runtime,
     schemaConfig: schemaConfigProp,
 }: {
-    app: AppDefinition<TState>;
-    runtime: CrdtRuntime<TState>;
+    app: AppDefinition<TState, EphemeralData>;
+    runtime: CrdtRuntime<TState, EphemeralData>;
     schemaConfig?: LocalFirstSchemaConfig<TState>;
 }) {
     const initialPeerId = readInvitePeerId();
@@ -140,14 +140,14 @@ export function LocalFirstApp<TState>({
     );
 }
 
-function LocalFirstReadyApp<TState>({
+function LocalFirstReadyApp<TState, EphemeralData>({
     app,
     runtime,
     loaded,
     initialPeerId,
 }: {
-    app: AppDefinition<TState>;
-    runtime: CrdtRuntime<TState>;
+    app: AppDefinition<TState, EphemeralData>;
+    runtime: CrdtRuntime<TState, EphemeralData>;
     loaded: Loaded<TState>;
     initialPeerId: string;
 }) {
@@ -208,13 +208,13 @@ function readActiveDocId() {
     return new URLSearchParams(window.location.search).get('doc')?.trim() || undefined;
 }
 
-function LocalFirstDocument<TState>({
+function LocalFirstDocument<TState, EphemeralData>({
     app,
     runtime,
     actor,
 }: {
-    app: AppDefinition<TState>;
-    runtime: CrdtRuntime<TState>;
+    app: AppDefinition<TState, EphemeralData>;
+    runtime: CrdtRuntime<TState, EphemeralData>;
     actor: string;
 }) {
     const editor = runtime.useEditorContext();
@@ -228,7 +228,7 @@ function LocalFirstDocument<TState>({
 }
 
 async function loadInitialState<TState>(
-    app: AppDefinition<TState>,
+    app: AppDefinition<TState, any>,
     docId: string,
     schemaFingerprint: string,
     schemaFingerprintHash: string,
@@ -313,7 +313,7 @@ function MigrationPanel<TState>({
     schemaFingerprint,
     loadState,
 }: {
-    app: AppDefinition<TState>;
+    app: AppDefinition<TState, any>;
     schemaConfig: LocalFirstSchemaConfig<TState>;
     schemaFingerprint: string;
     loadState: Extract<LoadState<TState>, {kind: 'migratable'}>;
@@ -371,7 +371,7 @@ async function createMigratedDocument<TState>({
     loadState,
     setError,
 }: {
-    app: AppDefinition<TState>;
+    app: AppDefinition<TState, any>;
     schemaConfig: LocalFirstSchemaConfig<TState>;
     schemaFingerprint: string;
     loadState: Extract<LoadState<TState>, {kind: 'migratable'}>;

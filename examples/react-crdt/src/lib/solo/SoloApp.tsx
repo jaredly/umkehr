@@ -1,12 +1,17 @@
 import {useState} from 'react';
-import {createInitialHistory, type AppDefinition, type HistoryRuntime} from '../crdtApp';
+import {
+    createInitialHistory,
+    withDisabledEphemeral,
+    type AppDefinition,
+    type HistoryRuntime,
+} from '../crdtApp';
 import {HistoryView} from './HistoryView';
 
-export function SoloApp<TState, TAnnotations = never>({
+export function SoloApp<TState, TAnnotations = never, EphemeralData = never>({
     app,
     runtime,
 }: {
-    app: AppDefinition<TState>;
+    app: AppDefinition<TState, EphemeralData>;
     runtime: HistoryRuntime<TState, TAnnotations>;
 }) {
     const [initialHistory] = useState(() => createInitialHistory<TState, TAnnotations>(app));
@@ -21,11 +26,11 @@ export function SoloApp<TState, TAnnotations = never>({
     );
 }
 
-function SoloDocument<TState, TAnnotations>({
+function SoloDocument<TState, TAnnotations, EphemeralData>({
     app,
     runtime,
 }: {
-    app: AppDefinition<TState>;
+    app: AppDefinition<TState, EphemeralData>;
     runtime: HistoryRuntime<TState, TAnnotations>;
 }) {
     const editor = runtime.useEditorContext();
@@ -41,7 +46,7 @@ function SoloDocument<TState, TAnnotations>({
             />
             {app.renderPanel({
                 actor: 'solo',
-                editor,
+                editor: withDisabledEphemeral<TState, typeof editor, EphemeralData>(editor),
                 title: app.title,
             })}
         </div>

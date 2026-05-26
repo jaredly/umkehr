@@ -46,13 +46,13 @@ type DocumentsState =
     | {kind: 'ready'; documents: ServerDocumentSummary[]}
     | {kind: 'error'; documents: ServerDocumentSummary[]; message: string};
 
-export function ServerApp<TState>({
+export function ServerApp<TState, EphemeralData = never>({
     app,
     runtime,
     schemaConfig: schemaConfigProp,
 }: {
-    app: AppDefinition<TState>;
-    runtime: CrdtRuntime<TState>;
+    app: AppDefinition<TState, EphemeralData>;
+    runtime: CrdtRuntime<TState, EphemeralData>;
     schemaConfig?: ServerSchemaConfig<TState>;
 }) {
     const [activeDocId, setActiveDocId] = useState(() => readActiveDocId() ?? runtime.docId);
@@ -208,7 +208,7 @@ export function ServerApp<TState>({
     );
 }
 
-function ServerReadyApp<TState>({
+function ServerReadyApp<TState, EphemeralData>({
     app,
     runtime,
     docId,
@@ -221,8 +221,8 @@ function ServerReadyApp<TState>({
     loaded,
     onLogout,
 }: {
-    app: AppDefinition<TState>;
-    runtime: CrdtRuntime<TState>;
+    app: AppDefinition<TState, EphemeralData>;
+    runtime: CrdtRuntime<TState, EphemeralData>;
     docId: string;
     documents: ServerDocumentSummary[];
     documentsUnavailableMessage?: string;
@@ -328,14 +328,14 @@ function ServerLogin({
     );
 }
 
-function ServerDocumentWorkspace<TState>({
+function ServerDocumentWorkspace<TState, EphemeralData>({
     app,
     runtime,
     actor,
     sync,
 }: {
-    app: AppDefinition<TState>;
-    runtime: CrdtRuntime<TState>;
+    app: AppDefinition<TState, EphemeralData>;
+    runtime: CrdtRuntime<TState, EphemeralData>;
     actor: string;
     sync: ServerSync<TState>;
 }) {
@@ -363,7 +363,7 @@ function ServerDocumentWorkspace<TState>({
 }
 
 async function loadInitialState<TState>(
-    app: AppDefinition<TState>,
+    app: AppDefinition<TState, any>,
     docId: string,
     fingerprint: string,
     fingerprintHash: string,
@@ -436,7 +436,7 @@ async function loadInitialState<TState>(
 }
 
 async function bootstrapInitialState<TState>(
-    app: AppDefinition<TState>,
+    app: AppDefinition<TState, any>,
     docId: string,
     fingerprint: string,
     fingerprintHash: string,

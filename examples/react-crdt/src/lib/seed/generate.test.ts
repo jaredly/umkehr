@@ -59,8 +59,12 @@ describe('seed database generator', () => {
     it('scales stress fixtures by size', () => {
         const small = generateSeedDatabasePayload({date: '2026-01-02', size: 'small'});
         const large = generateSeedDatabasePayload({date: '2026-01-02', size: 'large'});
-        const smallManyEvents = small.documents.find((document) => document.docId === 'todos-many-events');
-        const largeManyEvents = large.documents.find((document) => document.docId === 'todos-many-events');
+        const smallManyEvents = small.documents.find(
+            (document) => document.docId === 'todos-many-events',
+        );
+        const largeManyEvents = large.documents.find(
+            (document) => document.docId === 'todos-many-events',
+        );
 
         expect(smallManyEvents?.events.length).toBe(200);
         expect(largeManyEvents?.events.length).toBe(5000);
@@ -78,7 +82,10 @@ describe('seed database generator', () => {
         expect(branchUpdates).toHaveLength(2);
         expect(
             branchUpdates?.every(
-                (event) => event.kind === 'update' && event.update.path.length > 0,
+                (event) =>
+                    event.kind === 'update' &&
+                    event.update.op === 'set' &&
+                    event.update.path.length > 0,
             ),
         ).toBe(true);
     });

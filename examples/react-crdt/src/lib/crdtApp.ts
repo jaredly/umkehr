@@ -18,13 +18,18 @@ import {
     type HlcTimestamp,
 } from 'umkehr/crdt';
 import type {Context} from 'umkehr/react';
-import type {SyncedTransport} from 'umkehr/react-crdt';
+import type {
+    EphemeralMessage,
+    EphemeralQuery,
+    EphemeralRecord,
+    SyncedTransport,
+} from 'umkehr/react-crdt';
 import type {StatusStore} from 'umkehr';
 import type {ReactElement} from 'react';
 
 export type GridSlot = 'left' | 'right';
 
-export type AppEditorContext<TState, Tag extends string = 'type'> = {
+export type AppEditorBase<TState, Tag extends string = 'type'> = {
     latest(): TState;
     clearPreview(): void;
     canUndo(): boolean;
@@ -35,8 +40,22 @@ export type AppEditorContext<TState, Tag extends string = 'type'> = {
     dispatch(v: MaybeNested<DraftPatch<TState, Tag, Context>>, when?: ApplyTiming): void;
 };
 
-export type CrdtEditorContext<TState, Tag extends string = 'type'> =
-    AppEditorContext<TState, Tag> & {
+export type AppEphemeralContext<EphemeralData = never> = {
+    publishEphemeral(messages: EphemeralMessage<EphemeralData>[]): void;
+    useEphemeral(query?: EphemeralQuery): EphemeralRecord<EphemeralData>[];
+};
+
+export type AppEditorContext<
+    TState,
+    Tag extends string = 'type',
+    EphemeralData = never,
+> = AppEditorBase<TState, Tag> & AppEphemeralContext<EphemeralData>;
+
+export type CrdtEditorContext<
+    TState,
+    Tag extends string = 'type',
+    EphemeralData = never,
+> = AppEditorContext<TState, Tag, EphemeralData> & {
         previewHistory(history: CrdtLocalHistory<TState> | null): void;
         useLocalHistory(): CrdtLocalHistory<TState>;
         useCrdtPath<Current>(
@@ -48,7 +67,7 @@ export type CrdtEditorContext<TState, Tag extends string = 'type'> =
     };
 
 export type HistoryEditorContext<TState, TAnnotations = never> = Omit<
-    AppEditorContext<TState>,
+    AppEditorBase<TState>,
     'dispatch'
 > & {
     dispatch(
@@ -62,8 +81,8 @@ export type HistoryEditorContext<TState, TAnnotations = never> = Omit<
     previewJump(id: string): void;
 };
 
-export type AppPanelProps<TState> = {
-    editor: AppEditorContext<TState>;
+export type AppPanelProps<TState, EphemeralData = never> = {
+    editor: AppEditorContext<TState, 'type', EphemeralData>;
     actor: string;
     title: string;
     gridSlot?: GridSlot | 'full';
@@ -85,7 +104,7 @@ export type HistoryProvider<TState, TAnnotations> = (props: {
     save?(history: History<TState, TAnnotations>): void;
 }) => ReactElement;
 
-export type AppDefinition<TState> = {
+export type AppDefinition<TState, EphemeralData = never> = {
     id: string;
     title: string;
     tagKey: string;
@@ -93,13 +112,13 @@ export type AppDefinition<TState> = {
     validateState(input: unknown): IValidation<TState>;
     initialState: TState;
     initialTimestamp?: HlcTimestamp;
-    renderPanel(props: AppPanelProps<TState>): ReactElement;
+    renderPanel(props: AppPanelProps<TState, EphemeralData>): ReactElement;
 };
 
-export type CrdtRuntime<TState> = {
+export type CrdtRuntime<TState, EphemeralData = never> = {
     docId: string;
     Provider: SyncedProvider<TState>;
-    useEditorContext(): CrdtEditorContext<TState>;
+    useEditorContext(): CrdtEditorContext<TState, 'type', EphemeralData>;
 };
 
 export type HistoryRuntime<TState, TAnnotations = never> = {
@@ -107,16 +126,16 @@ export type HistoryRuntime<TState, TAnnotations = never> = {
     useEditorContext(): HistoryEditorContext<TState, TAnnotations>;
 };
 
-export type RegisteredApp<TState, TAnnotations = never> = {
-    app: AppDefinition<TState>;
-    crdt?: CrdtRuntime<TState>;
+export type RegisteredApp<TState, TAnnotations = never, EphemeralData = never> = {
+    app: AppDefinition<TState, EphemeralData>;
+    crdt?: CrdtRuntime<TState, EphemeralData>;
     history?: HistoryRuntime<TState, TAnnotations>;
 };
 
 const defaultInitialTimestamp = hlc.pack(hlc.init('seed', 0));
 
-export function createInitialCrdtHistory<TState>(
-    app: AppDefinition<TState>,
+export function createInitialCrdtHistory<TState, EphemeralData = never>(
+    app: AppDefinition<TState, EphemeralData>,
 ): CrdtLocalHistory<TState> {
     return createCrdtLocalHistory(
         createCrdtDocument(app.initialState, app.schema, {
@@ -126,7 +145,19 @@ export function createInitialCrdtHistory<TState>(
 }
 
 export function createInitialHistory<TState, TAnnotations = never>(
-    app: AppDefinition<TState>,
+    app: AppDefinition<TState, any>,
 ): History<TState, TAnnotations> {
     return blankHistory<TState, TAnnotations>(app.initialState);
+}
+
+export function withDisabledEphemeral<TState, TEditor extends AppEditorBase<TState>, EphemeralData>(
+    editor: TEditor,
+): TEditor & AppEphemeralContext<EphemeralData> {
+    return {
+        ...editor,
+        publishEphemeral() {},
+        useEphemeral() {
+            return [];
+        },
+    };
 }

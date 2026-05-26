@@ -10,12 +10,12 @@ import {replicas} from './model';
 import {SyncControls} from './SyncControls';
 import {type DemoSync, useLocalDemoSync} from './useLocalDemoSync';
 
-export function LocalSimulatorApp<TState>({
+export function LocalSimulatorApp<TState, EphemeralData = never>({
     app,
     runtime,
 }: {
-    app: AppDefinition<TState>;
-    runtime: CrdtRuntime<TState>;
+    app: AppDefinition<TState, EphemeralData>;
+    runtime: CrdtRuntime<TState, EphemeralData>;
 }) {
     const [initialHistory] = useState(() => createInitialCrdtHistory(app));
     const sync = useLocalDemoSync();
@@ -38,7 +38,7 @@ export function LocalSimulatorApp<TState>({
     );
 }
 
-function LocalReplicaPanel<TState>({
+function LocalReplicaPanel<TState, EphemeralData>({
     index,
     sync,
     replica,
@@ -50,8 +50,8 @@ function LocalReplicaPanel<TState>({
     sync: DemoSync;
     replica: (typeof replicas)[number];
     initial: CrdtLocalHistory<TState>;
-    app: AppDefinition<TState>;
-    runtime: CrdtRuntime<TState>;
+    app: AppDefinition<TState, EphemeralData>;
+    runtime: CrdtRuntime<TState, EphemeralData>;
 }) {
     const {Provider} = runtime;
 
@@ -73,7 +73,7 @@ function LocalReplicaPanel<TState>({
     );
 }
 
-function LocalReplicaDocument<TState>({
+function LocalReplicaDocument<TState, EphemeralData>({
     actor,
     app,
     gridSlot,
@@ -82,9 +82,9 @@ function LocalReplicaDocument<TState>({
     title,
 }: {
     actor: string;
-    app: AppDefinition<TState>;
+    app: AppDefinition<TState, EphemeralData>;
     gridSlot: 'left' | 'right';
-    runtime: CrdtRuntime<TState>;
+    runtime: CrdtRuntime<TState, EphemeralData>;
     sync: DemoSync;
     title: string;
 }) {

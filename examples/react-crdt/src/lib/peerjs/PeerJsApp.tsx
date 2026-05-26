@@ -11,12 +11,12 @@ import type {PeerProtocolConfig} from './protocol';
 import type {PeerJsSync, PeerRole} from './types';
 import {usePeerJsSync} from './usePeerJsSync';
 
-export function PeerJsApp<TState>({
+export function PeerJsApp<TState, EphemeralData = never>({
     app,
     runtime,
 }: {
-    app: AppDefinition<TState>;
-    runtime: CrdtRuntime<TState>;
+    app: AppDefinition<TState, EphemeralData>;
+    runtime: CrdtRuntime<TState, EphemeralData>;
 }) {
     const initialHostPeerId = readInvitePeerId();
     const [role, setRole] = useState<PeerRole>(() => (initialHostPeerId ? 'client' : 'host'));
@@ -80,7 +80,7 @@ function PeerInviteConnector<TState>({
     return null;
 }
 
-function PeerHostDocument<TState>({
+function PeerHostDocument<TState, EphemeralData>({
     actor,
     sync,
     app,
@@ -88,8 +88,8 @@ function PeerHostDocument<TState>({
 }: {
     actor: string;
     sync: PeerJsSync<TState>;
-    app: AppDefinition<TState>;
-    runtime: CrdtRuntime<TState>;
+    app: AppDefinition<TState, EphemeralData>;
+    runtime: CrdtRuntime<TState, EphemeralData>;
 }) {
     const editor = runtime.useEditorContext();
     const history = editor.useLocalHistory();
@@ -105,7 +105,7 @@ function PeerHostDocument<TState>({
     });
 }
 
-function PeerClientDocument<TState>({
+function PeerClientDocument<TState, EphemeralData>({
     actor,
     sync,
     app,
@@ -113,8 +113,8 @@ function PeerClientDocument<TState>({
 }: {
     actor: string;
     sync: PeerJsSync<TState>;
-    app: AppDefinition<TState>;
-    runtime: CrdtRuntime<TState>;
+    app: AppDefinition<TState, EphemeralData>;
+    runtime: CrdtRuntime<TState, EphemeralData>;
 }) {
     const snapshot = useStore(sync.snapshotStore);
     const state = useStore(sync.stateStore);
@@ -141,14 +141,14 @@ function PeerClientDocument<TState>({
     );
 }
 
-function PeerClientPanel<TState>({
+function PeerClientPanel<TState, EphemeralData>({
     actor,
     app,
     runtime,
 }: {
     actor: string;
-    app: AppDefinition<TState>;
-    runtime: CrdtRuntime<TState>;
+    app: AppDefinition<TState, EphemeralData>;
+    runtime: CrdtRuntime<TState, EphemeralData>;
 }) {
     const editor = runtime.useEditorContext();
 

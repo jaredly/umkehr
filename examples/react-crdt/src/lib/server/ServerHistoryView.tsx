@@ -4,15 +4,15 @@ import type {AppDefinition, CrdtEditorContext} from '../crdtApp';
 import type {ServerSync} from './types';
 import {pathKey, pathLabel} from './materialize';
 
-export function ServerHistoryView<TState>({
+export function ServerHistoryView<TState, EphemeralData = never>({
     app: _app,
     sync,
     editor,
     onPreviewingChange,
 }: {
-    app: AppDefinition<TState>;
+    app: AppDefinition<TState, EphemeralData>;
     sync: ServerSync<TState>;
-    editor: CrdtEditorContext<TState>;
+    editor: CrdtEditorContext<TState, 'type', EphemeralData>;
     onPreviewingChange?(previewing: boolean): void;
 }) {
     const branches = useStore(sync.branchesStore);

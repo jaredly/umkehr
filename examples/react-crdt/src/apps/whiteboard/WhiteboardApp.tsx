@@ -10,10 +10,11 @@ import {
     validateWhiteboardState,
     whiteboardSchema,
     type WhiteboardState,
+    type WhiteboardEphemeralData,
 } from './model';
 import {WhiteboardPanel} from './WhiteboardPanel';
 
-export const whiteboardApp: AppDefinition<WhiteboardState> = {
+export const whiteboardApp: AppDefinition<WhiteboardState, WhiteboardEphemeralData> = {
     id: 'whiteboard',
     title: 'Whiteboard',
     tagKey: 'type',
@@ -35,7 +36,7 @@ export const whiteboardApp: AppDefinition<WhiteboardState> = {
     },
 };
 
-export const whiteboardCrdtRuntime: CrdtRuntime<WhiteboardState> = {
+export const whiteboardCrdtRuntime: CrdtRuntime<WhiteboardState, WhiteboardEphemeralData> = {
     docId: WHITEBOARD_DOC_ID,
     Provider: ProvideWhiteboard,
     useEditorContext: useWhiteboard,
