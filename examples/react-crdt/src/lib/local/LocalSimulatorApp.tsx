@@ -49,7 +49,10 @@ export function LocalSimulatorApp<TState, EphemeralData = never>({
     const activeTitle = documents.find((document) => document.docId === activeDocId)?.title ?? activeDocId;
 
     const refreshDocuments = useCallback(() => {
-        void listLocalSimulatorDocumentSummaries().then(setDocuments);
+        return listLocalSimulatorDocumentSummaries().then((nextDocuments) => {
+            setDocuments(nextDocuments);
+            return nextDocuments;
+        });
     }, []);
 
     useEffect(() => {
@@ -58,7 +61,7 @@ export function LocalSimulatorApp<TState, EphemeralData = never>({
             if (!alive) return;
             setHistories(document.replicas);
             sync.replaceTransportState(document.transportState as any);
-            refreshDocuments();
+            void refreshDocuments();
         });
         return () => {
             alive = false;
@@ -184,7 +187,7 @@ export function LocalSimulatorApp<TState, EphemeralData = never>({
                 createdAt: now,
                 updatedAt: now,
             });
-            refreshDocuments();
+            await refreshDocuments();
         },
         [app, fingerprintHash, refreshDocuments],
     );
@@ -385,7 +388,9 @@ async function loadOrCreateLocalSimulatorDocument<TState, EphemeralData>(
     schemaFingerprintHash: string,
 ): Promise<PersistedLocalSimulatorDocument<TState>> {
     const existing = await loadLocalSimulatorDocument<TState>(docId);
-    if (existing && existing.appId === app.id) return existing;
+    if (existing && existing.appId === app.id && isUsableLocalSimulatorDocument(existing)) {
+        return existing;
+    }
     const fixture = loadBranchFreeSeedFixtureForApp(app, docId);
     if (fixture) {
         const now = new Date().toISOString();
@@ -417,4 +422,21 @@ async function loadOrCreateLocalSimulatorDocument<TState, EphemeralData>(
     };
     await saveLocalSimulatorDocument(document);
     return document;
+}
+
+function isUsableLocalSimulatorDocument<TState>(
+    document: PersistedLocalSimulatorDocument<TState>,
+) {
+    return (
+        isRecord(document.replicas) &&
+        replicas.every((replica) => isRecord(document.replicas[replica.id])) &&
+        isRecord(document.transportState) &&
+        typeof document.transportState.syncEnabled === 'boolean' &&
+        isRecord(document.transportState.outbox) &&
+        replicas.every((replica) => Array.isArray(document.transportState.outbox[replica.id]))
+    );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

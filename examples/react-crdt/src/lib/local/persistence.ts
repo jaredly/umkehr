@@ -3,7 +3,7 @@ import type {CrdtLocalHistory, CrdtUpdate} from 'umkehr/crdt';
 import type {LocalDocumentSummary} from '../documentArchive';
 import type {TransportState} from './useLocalDemoSync';
 
-const DB_NAME = 'umkehr-react-crdt-local-simulator-documents';
+const DB_NAME = 'umkehr-react-crdt-local-simulator-documents-v2';
 const DB_VERSION = 2;
 
 export type PersistedLocalSimulatorDocument<TState> = {
@@ -63,7 +63,9 @@ export async function deleteLocalSimulatorDocument(docId: string) {
     await db.delete('documents', docId);
 }
 
-export function cloneTransportState(state: TransportState): PersistedLocalSimulatorDocument<unknown>['transportState'] {
+export function cloneTransportState(
+    state: TransportState,
+): PersistedLocalSimulatorDocument<unknown>['transportState'] {
     return {
         syncEnabled: state.syncEnabled,
         outbox: Object.fromEntries(

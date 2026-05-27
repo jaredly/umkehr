@@ -220,12 +220,13 @@ export function DocumentManagerModal({
     onCreateDocument?(input: {docId: string; title: string}): Promise<void> | void;
     onCreateSeed?(seed: SeedModalItem): Promise<void> | void;
     onDeleteLocal?(document: DocumentModalItem): Promise<void> | void;
-    onChanged?(): void;
+    onChanged?(): Promise<unknown> | unknown;
 }) {
     const inputRef = useRef<HTMLInputElement | null>(null);
     const [open, setOpen] = useState(false);
     const [message, setMessage] = useState<string | null>(null);
     const [title, setTitle] = useState('');
+    const [creatingSeedDocId, setCreatingSeedDocId] = useState<string | null>(null);
     const activeDocument = useMemo(
         () => documents.find((document) => document.docId === activeDocId),
         [activeDocId, documents],
@@ -240,7 +241,7 @@ export function DocumentManagerModal({
         try {
             await onCreateDocument({docId: crypto.randomUUID(), title: trimmed});
             setTitle('');
-            onChanged?.();
+            await onChanged?.();
             setMessage('Document created');
         } catch (error) {
             setMessage(errorMessage(error));
@@ -250,12 +251,15 @@ export function DocumentManagerModal({
     async function createSeed(seed: SeedModalItem) {
         if (!onCreateSeed) return;
         setMessage(null);
+        setCreatingSeedDocId(seed.docId);
         try {
             await onCreateSeed(seed);
-            onChanged?.();
-            setMessage('Seed created');
+            await onChanged?.();
+            setMessage(`Created ${seed.title || seed.docId}`);
         } catch (error) {
             setMessage(errorMessage(error));
+        } finally {
+            setCreatingSeedDocId(null);
         }
     }
 
@@ -267,7 +271,7 @@ export function DocumentManagerModal({
         setMessage(null);
         try {
             await onDeleteLocal(document);
-            onChanged?.();
+            await onChanged?.();
             setMessage('Local copy deleted');
         } catch (error) {
             setMessage(errorMessage(error));
@@ -291,7 +295,7 @@ export function DocumentManagerModal({
         setMessage(null);
         try {
             await archiveAdapter.importArchive(parseArchive(await file.text()));
-            onChanged?.();
+            await onChanged?.();
             setMessage('Document imported');
         } catch (error) {
             setMessage(errorMessage(error));
@@ -395,6 +399,7 @@ export function DocumentManagerModal({
                                         <SeedRow
                                             key={seed.docId}
                                             seed={seed}
+                                            creating={creatingSeedDocId === seed.docId}
                                             onCreate={onCreateSeed ? () => void createSeed(seed) : undefined}
                                         />
                                     ))}
@@ -458,7 +463,15 @@ function DocumentRow({
     );
 }
 
-function SeedRow({seed, onCreate}: {seed: SeedModalItem; onCreate?: () => void}) {
+function SeedRow({
+    seed,
+    creating,
+    onCreate,
+}: {
+    seed: SeedModalItem;
+    creating: boolean;
+    onCreate?: () => void;
+}) {
     return (
         <article className="documentRow seedRow">
             <div className="documentRowMain">
@@ -475,8 +488,8 @@ function SeedRow({seed, onCreate}: {seed: SeedModalItem; onCreate?: () => void})
             </div>
             <div className="documentRowActions">
                 {onCreate ? (
-                    <button type="button" onClick={onCreate}>
-                        Create
+                    <button type="button" disabled={creating} onClick={onCreate}>
+                        {creating ? 'Creating...' : 'Create'}
                     </button>
                 ) : null}
             </div>
