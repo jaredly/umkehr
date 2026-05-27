@@ -271,11 +271,11 @@ describe('seed database generator', () => {
         const behindClient = requiredDocument(payload, 'todos-migration-v1-main');
         const aheadOfClient = requiredDocument(payload, 'todos-migration-v3-ahead');
 
-        expect(behindClient.appId).toBe('todos-migration-fixture');
+        expect(behindClient.appId).toBe('todos');
         expect(behindClient.schemaVersion).toBe(1);
         expect(behindClient.schemaFingerprintHash).toBe(todoFixtureV1FingerprintHash);
         expect(behindClient.events.length).toBeGreaterThan(0);
-        expect(aheadOfClient.appId).toBe('todos-migration-fixture');
+        expect(aheadOfClient.appId).toBe('todos');
         expect(aheadOfClient.schemaVersion).toBe(3);
         expect(aheadOfClient.schemaFingerprintHash).toBe(todoFixtureV3FingerprintHash);
         expect(aheadOfClient.events.length).toBeGreaterThan(0);

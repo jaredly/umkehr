@@ -16,7 +16,7 @@ import {TodoPanel} from './TodoPanel';
 export const todoApp: AppDefinition<TodoState> = {
     id: 'todos',
     title: 'Todos',
-    schemaVersion: 1,
+    schemaVersion: 2,
     tagKey: 'type',
     schema: todoSchema,
     validateState: validateTodoState,

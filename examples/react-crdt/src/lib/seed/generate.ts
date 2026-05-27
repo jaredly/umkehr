@@ -64,11 +64,10 @@ import type {
     ServerUser,
 } from '../../../../react-crdt-server/src/types';
 
-const TODO_SCHEMA_VERSION = 1;
+const TODO_SCHEMA_VERSION = 2;
 const WHITEBOARD_SCHEMA_VERSION = 1;
 const TODO_APP_ID = 'todos';
 const WHITEBOARD_APP_ID = 'whiteboard';
-const TODO_MIGRATION_APP_ID = 'todos-migration-fixture';
 
 export type SeedSize = 'small' | 'default' | 'large';
 
@@ -306,10 +305,10 @@ function todosSmall(clock: FixtureClock): SeedFixture<TodoState> {
     setTodos(doc, actors.ada, {
         bgcolor: '#fff7ed',
         todos: [
-            {id: 'setup', title: 'Create seed database', done: true},
-            {id: 'review', title: 'Review seeded documents', done: false},
-            {id: 'switch', title: 'Switch documents from the dropdown', done: false},
-            {id: 'notes', title: 'Capture observations', done: false},
+            {id: 'setup', title: 'Create seed database', done: true, priority: 'normal'},
+            {id: 'review', title: 'Review seeded documents', done: false, priority: 'normal'},
+            {id: 'switch', title: 'Switch documents from the dropdown', done: false, priority: 'normal'},
+            {id: 'notes', title: 'Capture observations', done: false, priority: 'normal'},
         ],
     });
     updateTodoDone(doc, actors.ben, 'review', true);
@@ -330,6 +329,7 @@ function todosManyItems(clock: FixtureClock, count: number): SeedFixture<TodoSta
             id: `todo-${index + 1}`,
             title: `Generated todo ${index + 1}`,
             done: index % 3 === 0,
+            priority: 'normal',
         })),
     });
     return finishDocument(doc);
@@ -349,6 +349,7 @@ function todosManyEvents(clock: FixtureClock, count: number): SeedFixture<TodoSt
             id: `slot-${index + 1}`,
             title: `Event target ${index + 1}`,
             done: false,
+            priority: 'normal',
         })),
     });
     const actorList = [actors.ada, actors.ben, actors.cy, actors.dee];
@@ -384,8 +385,8 @@ function todosBranches(clock: FixtureClock): SeedFixture<TodoState> {
     const base: TodoState = {
         bgcolor: '#f7fee7',
         todos: [
-            {id: 'a', title: 'Mainline task', done: false},
-            {id: 'b', title: 'Branch task', done: false},
+            {id: 'a', title: 'Mainline task', done: false, priority: 'normal'},
+            {id: 'b', title: 'Branch task', done: false, priority: 'normal'},
         ],
     };
     setTodos(doc, actors.ada, base);
@@ -795,7 +796,7 @@ function todosMigrationV1Main(clock: FixtureClock): SeedFixture<TodoFixtureState
         receivedAt: createdAt,
     }));
     return {
-        appId: TODO_MIGRATION_APP_ID,
+        appId: TODO_APP_ID,
         docId,
         title: 'Migration: todos fixture v1',
         sizeLabel: 'old schema v1',
@@ -823,7 +824,7 @@ function todosMigrationV3Ahead(clock: FixtureClock): SeedFixture<TodoFixtureStat
     const createdAt = clock.iso();
     const events = todoFixtureServerUpdateEventsV3({docId, receivedAt: createdAt});
     return {
-        appId: TODO_MIGRATION_APP_ID,
+        appId: TODO_APP_ID,
         docId,
         title: 'Migration: todos fixture v3 ahead',
         sizeLabel: 'future schema v3',
@@ -1386,7 +1387,7 @@ function docClock<TState>(doc: BranchBuilder<TState>) {
 }
 
 function todo(id: string, title: string): Todo {
-    return {id, title, done: false};
+    return {id, title, done: false, priority: 'normal'};
 }
 
 function noteElement(

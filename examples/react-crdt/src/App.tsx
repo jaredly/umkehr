@@ -1,4 +1,4 @@
-import {apps, defaultApp, registeredAppForId, visibleAppIdForRegisteredApp} from './lib/appRegistry';
+import {apps, defaultApp, registeredAppForId} from './lib/appRegistry';
 import {LocalSimulatorApp} from './lib/local/LocalSimulatorApp';
 import {LocalFirstApp} from './lib/local-first/LocalFirstApp';
 import {PeerJsApp} from './lib/peerjs/PeerJsApp';
@@ -11,11 +11,10 @@ export function App() {
     const [{mode, appId}, setMode, setAppId] = useUrlSelection(defaultApp.id);
     const registered = registeredAppForId(appId);
     const {app, crdt, history, serverSchemaConfig} = registered;
-    const visibleAppId = visibleAppIdForRegisteredApp(registered);
 
     const topBar = {
         apps: apps as any,
-        activeAppId: visibleAppId,
+        activeAppId: app.id,
         setAppId,
         mode,
         setMode,

@@ -52,8 +52,16 @@ type LoadState<TState> =
     | {kind: 'error'; message: string};
 
 type DocumentsState =
-    | {kind: 'loading'; remoteDocuments: ServerDocumentSummary[]; localDocuments: ServerDocumentSummary[]}
-    | {kind: 'ready'; remoteDocuments: ServerDocumentSummary[]; localDocuments: ServerDocumentSummary[]}
+    | {
+          kind: 'loading';
+          remoteDocuments: ServerDocumentSummary[];
+          localDocuments: ServerDocumentSummary[];
+      }
+    | {
+          kind: 'ready';
+          remoteDocuments: ServerDocumentSummary[];
+          localDocuments: ServerDocumentSummary[];
+      }
     | {
           kind: 'error';
           remoteDocuments: ServerDocumentSummary[];
@@ -93,10 +101,7 @@ export function ServerApp<TState, EphemeralData = never>({
             remoteDocuments: current.remoteDocuments,
             localDocuments: current.localDocuments,
         }));
-        Promise.all([
-            fetchServerDocuments().catch(() => []),
-            listLocalServerDocuments(),
-        ])
+        Promise.all([fetchServerDocuments().catch(() => []), listLocalServerDocuments()])
             .then(([remoteDocuments, localDocuments]) => {
                 if (alive) setDocumentsState({kind: 'ready', remoteDocuments, localDocuments});
             })
@@ -173,12 +178,15 @@ export function ServerApp<TState, EphemeralData = never>({
         setLoadState({kind: 'needsUser', sessionId, users});
     }, []);
 
-    const switchDocument = useCallback((docId: string) => {
-        const nextDocId = docId.trim();
-        if (!nextDocId || nextDocId === activeDocId) return;
-        writeActiveDocId(nextDocId);
-        setActiveDocId(nextDocId);
-    }, [activeDocId]);
+    const switchDocument = useCallback(
+        (docId: string) => {
+            const nextDocId = docId.trim();
+            if (!nextDocId || nextDocId === activeDocId) return;
+            writeActiveDocId(nextDocId);
+            setActiveDocId(nextDocId);
+        },
+        [activeDocId],
+    );
 
     if (loadState.kind === 'loading') {
         return (
@@ -231,7 +239,9 @@ export function ServerApp<TState, EphemeralData = never>({
             docId={activeDocId}
             remoteDocuments={documentsState.remoteDocuments}
             localDocuments={documentsState.localDocuments}
-            documentsUnavailableMessage={documentsState.kind === 'error' ? documentsState.message : undefined}
+            documentsUnavailableMessage={
+                documentsState.kind === 'error' ? documentsState.message : undefined
+            }
             onSwitchDocument={switchDocument}
             onDocumentsChanged={(remoteDocuments, localDocuments) =>
                 setDocumentsState({kind: 'ready', remoteDocuments, localDocuments})
@@ -269,7 +279,10 @@ function ServerReadyApp<TState, EphemeralData>({
     localDocuments: ServerDocumentSummary[];
     documentsUnavailableMessage?: string;
     onSwitchDocument(docId: string): void;
-    onDocumentsChanged(remoteDocuments: ServerDocumentSummary[], localDocuments: ServerDocumentSummary[]): void;
+    onDocumentsChanged(
+        remoteDocuments: ServerDocumentSummary[],
+        localDocuments: ServerDocumentSummary[],
+    ): void;
     schemaFingerprint: string;
     schemaFingerprintHash: string;
     schemaConfig: ServerSchemaConfig<TState>;
@@ -350,11 +363,12 @@ function ServerReadyApp<TState, EphemeralData>({
         ],
     );
     const documentItems = useMemo(
-        () => classifyServerDocumentItems({
-            appId: app.id,
-            remoteDocuments,
-            localDocuments: [...localDocuments, summaryForServerReplica(loaded.replica)],
-        }),
+        () =>
+            classifyServerDocumentItems({
+                appId: app.id,
+                remoteDocuments,
+                localDocuments: [...localDocuments, summaryForServerReplica(loaded.replica)],
+            }),
         [app.id, loaded.replica, localDocuments, remoteDocuments],
     );
     const seedItems = useMemo(
@@ -460,10 +474,7 @@ function ServerReadyApp<TState, EphemeralData>({
         <>
             <DemoTopBar {...topBar} controls={topBarControls} />
             <main className="serverShell">
-                <ServerControls
-                    sync={sync}
-                    onLogout={onLogout}
-                />
+                <ServerControls sync={sync} onLogout={onLogout} />
                 <section className="serverDocument">
                     <Provider
                         initial={currentHistory}
@@ -581,7 +592,10 @@ async function loadInitialState<TState>(
         const normalized = normalizeServerReplica(persisted);
         normalized.appId ||= app.id;
         if (normalized.schemaFingerprintHash === fingerprintHash) {
-            if (normalized.appId !== app.id) throw new Error('Persisted document belongs to another app.');
+            if (normalized.appId !== app.id)
+                throw new Error(
+                    `Persisted document belongs to another app. ${app.id} vs ${normalized.appId}`,
+                );
             return {
                 identity,
                 replica: normalized,
@@ -737,8 +751,12 @@ function classifyServerDocumentItems({
 }): DocumentModalItem[] {
     const relevant = (document: ServerDocumentSummary) =>
         document.appId === appId || document.appId === '';
-    const remoteById = new Map(remoteDocuments.filter(relevant).map((document) => [document.docId, document]));
-    const localById = new Map(localDocuments.filter(relevant).map((document) => [document.docId, document]));
+    const remoteById = new Map(
+        remoteDocuments.filter(relevant).map((document) => [document.docId, document]),
+    );
+    const localById = new Map(
+        localDocuments.filter(relevant).map((document) => [document.docId, document]),
+    );
     const ids = new Set([...remoteById.keys(), ...localById.keys()]);
     return [...ids]
         .map((docId) => {

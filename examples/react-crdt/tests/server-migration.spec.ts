@@ -66,7 +66,6 @@ test('migrates the seeded v1 todos document through the browser and server', asy
     try {
         page.on('dialog', (dialog) => dialog.accept());
         await openServerDocument(page, {
-            appId: 'todos-migration-fixture',
             docId: 'todos-migration-v1-main',
         });
         await login(page, 'Ada');
@@ -97,7 +96,6 @@ test('keeps local edits pending while another client owns the migration lock', a
 
     try {
         await openServerDocument(page, {
-            appId: 'todos-migration-fixture',
             docId: 'todos-migration-v1-main',
         });
         await login(page, 'Ben');
@@ -125,7 +123,6 @@ test('shows a client upgrade notice for a seeded document ahead of the client', 
 
     try {
         await openServerDocument(page, {
-            appId: 'todos-migration-fixture',
             docId: 'todos-migration-v3-ahead',
         });
         await login(page, 'Ada');

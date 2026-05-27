@@ -237,6 +237,7 @@ export function TodoPanel({
                         id: `${replicaId}-${crypto.randomUUID()}`,
                         title: next,
                         done: false,
+                        priority: 'normal',
                     });
                     setDraftTitle('');
                 }}

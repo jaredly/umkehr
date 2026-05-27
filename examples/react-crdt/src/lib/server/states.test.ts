@@ -20,7 +20,7 @@ describe('server migration user-facing states', () => {
         ).toEqual({
             kind: 'migration-required',
             message:
-                "The server's version of this document must be migrated to the latest schema to continue syncing. You will not receive or send updates until this has been completed.",
+                "The server's version of this document must be migrated to the latest schema to continue syncing. You will not receive or send updates until this has been completed. You can continue to make local changes, and they will be synced after server migration has occurred.",
             sourceSchemaVersion: 1,
             sourceSchemaFingerprintHash: 'old-hash',
             targetSchemaVersion: 2,
@@ -58,7 +58,7 @@ describe('server migration user-facing states', () => {
         ).toEqual({
             kind: 'client-migration-required',
             message:
-                "Your version of the app is behind the server's schema version for this document. You must update your app in order to be able to send or receive updates.",
+                "Your version of the app is behind the server's schema version for this document. You must update your app in order to be able to send or receive updates. However, you may still make local changes, which will be synchronized once you upgrade your app.",
             schemaVersion: 2,
             schemaFingerprintHash: 'new-hash',
         });
@@ -93,7 +93,7 @@ describe('server migration user-facing states', () => {
             canFlushPendingServerWrites({
                 kind: 'client-migration-required',
                 message:
-                    "Your version of the app is behind the server's schema version for this document. You must update your app in order to be able to send or receive updates.",
+                    "Your version of the app is behind the server's schema version for this document. You must update your app in order to be able to send or receive updates. However, you may still make local changes, which will be synchronized once you upgrade your app.",
                 schemaVersion: 2,
                 schemaFingerprintHash: 'new-hash',
             }),
@@ -105,7 +105,7 @@ describe('server migration user-facing states', () => {
             serverStateNoticeTone({
                 kind: 'client-migration-required',
                 message:
-                    "Your version of the app is behind the server's schema version for this document. You must update your app in order to be able to send or receive updates.",
+                    "Your version of the app is behind the server's schema version for this document. You must update your app in order to be able to send or receive updates. However, you may still make local changes, which will be synchronized once you upgrade your app.",
                 schemaVersion: 2,
                 schemaFingerprintHash: 'new-hash',
             }),

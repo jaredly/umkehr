@@ -36,7 +36,7 @@ export function serverMigrationStateForMessage(
             return {
                 kind: 'migration-required',
                 message:
-                    "The server's version of this document must be migrated to the latest schema to continue syncing. You will not receive or send updates until this has been completed.",
+                    "The server's version of this document must be migrated to the latest schema to continue syncing. You will not receive or send updates until this has been completed. You can continue to make local changes, and they will be synced after server migration has occurred.",
                 // message: 'Document migration required to sync. This client can migrate the server document to the current app schema.',
                 sourceSchemaVersion: message.sourceSchemaVersion,
                 sourceSchemaFingerprintHash: message.sourceSchemaFingerprintHash,
@@ -56,7 +56,7 @@ export function serverMigrationStateForMessage(
             return {
                 kind: 'client-migration-required',
                 message:
-                    "Your version of the app is behind the server's schema version for this document. You must update your app in order to be able to send or receive updates.",
+                    "Your version of the app is behind the server's schema version for this document. You must update your app in order to be able to send or receive updates. However, you may still make local changes, which will be synchronized once you upgrade your app.",
                 // message: 'Update your app to sync with the server. Local edits will stay pending.',
                 schemaVersion: message.schemaVersion,
                 schemaFingerprintHash: message.schemaFingerprintHash,

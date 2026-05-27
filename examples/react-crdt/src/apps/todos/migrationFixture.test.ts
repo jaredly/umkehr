@@ -1,5 +1,4 @@
 import {describe, expect, it} from 'vitest';
-import type {AppDefinition} from '../../lib/crdtApp';
 import {
     createMigratedReplica,
     findMigrationCandidate,
@@ -29,6 +28,7 @@ import {
     type TodoFixtureStateV2,
 } from '../../../../migration-fixtures/todos';
 import {migrateHistory} from 'umkehr/migration';
+import {todoApp} from './TodoApp';
 
 const fromV1 = {
     schemaVersion: 1,
@@ -43,25 +43,6 @@ const expectedMigratedState: TodoFixtureStateV2 = {
         {id: 'two', title: 'Try CRDT sync', done: false, priority: 'normal'},
         {id: 'three', title: 'Ship fixture', done: false, priority: 'normal'},
     ],
-};
-
-const app: AppDefinition<TodoFixtureStateV2> = {
-    id: 'todos-fixture',
-    title: 'Todos Fixture',
-    schemaVersion: 2,
-    tagKey: TODO_FIXTURE_TAG_KEY,
-    schema: todoFixtureV2Schema,
-    validateState: todoFixtureV2Metadata.validateState,
-    initialState: {
-        bgcolor: '#fff',
-        todos: [
-            {id: 'one', title: 'Write README', done: true, priority: 'normal'},
-            {id: 'two', title: 'Try CRDT sync', done: false, priority: 'normal'},
-        ],
-    },
-    renderPanel() {
-        return null as never;
-    },
 };
 
 describe('todos migration fixture', () => {
@@ -158,7 +139,7 @@ describe('todos migration fixture', () => {
     it('migrates server client local branch data and pending events', () => {
         const source = serverReplica(false);
         const migrated = migrateServerReplica({
-            app,
+            app: todoApp,
             replica: source,
             schemaConfig: {version: 2, previous: todoFixtureMigrationConfig.previous, migrations: [todoFixtureMigration]},
             schemaFingerprint: todoFixtureV2Fingerprint,
@@ -179,7 +160,7 @@ describe('todos migration fixture', () => {
 
         expect(() =>
             migrateServerReplica({
-                app,
+                app: todoApp,
                 replica: source,
                 schemaConfig: {version: 2, previous: todoFixtureMigrationConfig.previous, migrations: []},
                 schemaFingerprint: todoFixtureV2Fingerprint,
@@ -194,7 +175,7 @@ describe('todos migration fixture', () => {
 
     it('builds a migrated server upload fixture from a server dump', () => {
         const upload = migrateServerDump({
-            app,
+            app: todoApp,
             dump: {
                 kind: 'serverMigrationDump',
                 version: 3,
