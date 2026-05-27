@@ -14,30 +14,6 @@ export function parseServerDocumentsResponse(body: unknown): ServerDocumentSumma
     return documents;
 }
 
-export function documentsForActiveDoc(
-    documents: ServerDocumentSummary[],
-    activeDocId: string,
-): ServerDocumentSummary[] {
-    if (documents.some((document) => document.docId === activeDocId)) return documents;
-    return [
-        {
-            docId: activeDocId,
-            appId: '',
-            schemaVersion: 0,
-            schemaFingerprint: '',
-            schemaFingerprintHash: '',
-            title: activeDocId,
-            sizeLabel: 'manual',
-            sizeRank: 0,
-            createdAt: '',
-            lastAccessedAt: '',
-            branchCount: 0,
-            eventCount: 0,
-        },
-        ...documents,
-    ];
-}
-
 function isServerDocumentSummary(value: unknown): value is ServerDocumentSummary {
     return (
         isRecord(value) &&

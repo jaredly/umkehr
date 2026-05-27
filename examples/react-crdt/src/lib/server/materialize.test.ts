@@ -31,6 +31,7 @@ const schema = {
 const app: AppDefinition<State> = {
     id: 'test',
     title: 'Test',
+    schemaVersion: 1,
     tagKey: 'type',
     schema,
     initialState: {title: 'Draft', count: 0},

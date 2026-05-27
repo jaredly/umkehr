@@ -108,6 +108,7 @@ export type HistoryProvider<TState, TAnnotations> = (props: {
 export type AppDefinition<TState, EphemeralData = never> = {
     id: string;
     title: string;
+    schemaVersion: number;
     tagKey: string;
     schema: IJsonSchemaCollection<'3.1', [TState]>;
     validateState(input: unknown): IValidation<TState>;

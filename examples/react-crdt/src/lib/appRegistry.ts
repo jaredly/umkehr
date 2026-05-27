@@ -45,6 +45,7 @@ const [ProvideTodoMigrationFixture, useTodoMigrationFixture] =
 const todoMigrationFixtureApp: AppDefinition<TodoFixtureStateV2> = {
     id: 'todos-migration-fixture',
     title: 'Todos migration',
+    schemaVersion: todoFixtureMigrationConfig.current.version,
     tagKey: TODO_FIXTURE_TAG_KEY,
     schema: todoFixtureV2Metadata.schema,
     validateState: todoFixtureV2Metadata.validateState,

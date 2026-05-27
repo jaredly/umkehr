@@ -3,24 +3,27 @@ import type {CrdtLocalHistory} from 'umkehr/crdt';
 import {createInitialCrdtHistory, type AppDefinition, type CrdtRuntime} from '../crdtApp';
 import {
     assertArchiveForApp,
-    DocumentArchiveControls,
-    DocumentPicker,
+    DocumentManagerModal,
+    filterUnrealizedSeeds,
+    localDocumentModalItems,
     validateCrdtLocalHistoryForApp,
     validateCrdtUpdatesForApp,
     type DocumentArchive,
+    type DocumentModalItem,
     type LocalDocumentSummary,
+    type SeedModalItem,
 } from '../documentArchive';
 import {useTopBarControls} from '../chrome/TopBarContext';
 import {schemaFingerprint, schemaFingerprintHash} from '../local-first/schemaFingerprint';
 import {
     loadBranchFreeSeedFixtureForApp,
-    mergeDocumentSummariesWithSeeds,
+    seedModalItemsForApp,
     seedCrdtHistoryForApp,
 } from '../seed/documents';
 import type {SeedFixture} from '../seed/generate';
 import {useStore} from '../store';
 import {readActiveDocIdFromSearch, urlWithActiveDocId} from '../useUrlSelection';
-import {cloneTransportState, listLocalSimulatorDocumentSummaries, loadLocalSimulatorDocument, saveLocalSimulatorDocument, type PersistedLocalSimulatorDocument} from './persistence';
+import {cloneTransportState, deleteLocalSimulatorDocument, listLocalSimulatorDocumentSummaries, loadLocalSimulatorDocument, saveLocalSimulatorDocument, type PersistedLocalSimulatorDocument} from './persistence';
 import {replicas} from './model';
 import {SyncControls} from './SyncControls';
 import {type DemoSync, useLocalDemoSync} from './useLocalDemoSync';
@@ -43,6 +46,7 @@ export function LocalSimulatorApp<TState, EphemeralData = never>({
     const [documents, setDocuments] = useState<LocalDocumentSummary[]>([]);
     const [histories, setHistories] = useState<ReplicaHistories<TState> | null>(null);
     const sync = useLocalDemoSync();
+    const activeTitle = documents.find((document) => document.docId === activeDocId)?.title ?? activeDocId;
 
     const refreshDocuments = useCallback(() => {
         void listLocalSimulatorDocumentSummaries().then(setDocuments);
@@ -67,6 +71,8 @@ export function LocalSimulatorApp<TState, EphemeralData = never>({
             void saveLocalSimulatorDocument({
                 docId: activeDocId,
                 appId: app.id,
+                title: activeTitle,
+                schemaVersion: app.schemaVersion,
                 schemaFingerprintHash: fingerprintHash,
                 replicas: nextHistories,
                 transportState: cloneTransportState(sync.exportTransportState()),
@@ -74,7 +80,7 @@ export function LocalSimulatorApp<TState, EphemeralData = never>({
                 updatedAt: now,
             }).then(refreshDocuments);
         },
-        [activeDocId, app.id, fingerprintHash, refreshDocuments, sync],
+        [activeDocId, activeTitle, app.id, app.schemaVersion, fingerprintHash, refreshDocuments, sync],
     );
 
     const saveReplicaHistory = useCallback(
@@ -131,6 +137,8 @@ export function LocalSimulatorApp<TState, EphemeralData = never>({
                 await saveLocalSimulatorDocument({
                     docId: archive.docId,
                     appId: app.id,
+                    title: archive.docId,
+                    schemaVersion: app.schemaVersion,
                     schemaFingerprintHash: fingerprintHash,
                     replicas: imported,
                     transportState: archive.payload.transportState as any,
@@ -154,36 +162,92 @@ export function LocalSimulatorApp<TState, EphemeralData = never>({
             sync,
         ],
     );
+    const documentItems = useMemo(
+        () => localDocumentModalItems(documents, app.id, 'local-simulator'),
+        [app.id, documents],
+    );
+    const seedItems = useMemo(
+        () => filterUnrealizedSeeds(seedModalItemsForApp(app.id, 'local-simulator'), documentItems),
+        [app.id, documentItems],
+    );
+    const createBlankDocument = useCallback(
+        async ({docId, title}: {docId: string; title: string}) => {
+            const now = new Date().toISOString();
+            await saveLocalSimulatorDocument({
+                docId,
+                appId: app.id,
+                title,
+                schemaVersion: app.schemaVersion,
+                schemaFingerprintHash: fingerprintHash,
+                replicas: initialReplicaHistories(app),
+                transportState: emptyTransportState(),
+                createdAt: now,
+                updatedAt: now,
+            });
+            refreshDocuments();
+        },
+        [app, fingerprintHash, refreshDocuments],
+    );
+    const createSeedDocument = useCallback(
+        async (seed: SeedModalItem) => {
+            const fixture = loadBranchFreeSeedFixtureForApp(app, seed.docId);
+            if (!fixture) throw new Error(`No seed document exists for "${seed.docId}".`);
+            const now = new Date().toISOString();
+            await saveLocalSimulatorDocument({
+                docId: fixture.docId,
+                appId: app.id,
+                title: fixture.title || fixture.docId,
+                schemaVersion: fixture.schemaVersion,
+                schemaFingerprintHash: fixture.schemaFingerprintHash,
+                replicas: seededReplicaHistories(app, fixture),
+                transportState: emptyTransportState(),
+                createdAt: fixture.createdAt || now,
+                updatedAt: now,
+            });
+            refreshDocuments();
+        },
+        [app, refreshDocuments],
+    );
+    const deleteLocalDocument = useCallback(
+        async (document: DocumentModalItem) => {
+            await deleteLocalSimulatorDocument(document.docId);
+            const remaining = (await listLocalSimulatorDocumentSummaries()).filter(
+                (summary) =>
+                    summary.appId === app.id &&
+                    summary.payloadKind === 'local-simulator' &&
+                    summary.docId !== document.docId,
+            );
+            setDocuments(remaining);
+            if (document.docId === activeDocId) switchDocument(remaining[0]?.docId ?? defaultDocId);
+        },
+        [activeDocId, app.id, defaultDocId, switchDocument],
+    );
     const topBarControls = useMemo(
         () => ({
             documentPicker: (
-                <DocumentPicker
-                    documents={mergeDocumentSummariesWithSeeds(
-                        documents,
-                        app.id,
-                        'local-simulator',
-                    )}
+                <DocumentManagerModal
+                    documents={documentItems}
+                    seeds={seedItems}
                     activeDocId={activeDocId}
-                    appId={app.id}
-                    payloadKind="local-simulator"
                     onSwitchDocument={switchDocument}
+                    onCreateDocument={createBlankDocument}
+                    onCreateSeed={createSeedDocument}
+                    onDeleteLocal={deleteLocalDocument}
+                    archiveAdapter={histories ? archiveAdapter : undefined}
+                    onChanged={refreshDocuments}
                 />
             ),
-            archiveControls: histories ? (
-                <DocumentArchiveControls
-                    adapter={archiveAdapter}
-                    appId={app.id}
-                    docId={activeDocId}
-                    payloadKind="local-simulator"
-                />
-            ) : null,
         }),
         [
             activeDocId,
-            app.id,
             archiveAdapter,
-            documents,
+            createBlankDocument,
+            createSeedDocument,
+            deleteLocalDocument,
+            documentItems,
             histories,
+            refreshDocuments,
+            seedItems,
             switchDocument,
         ],
     );
@@ -328,7 +392,9 @@ async function loadOrCreateLocalSimulatorDocument<TState, EphemeralData>(
         const document: PersistedLocalSimulatorDocument<TState> = {
             docId,
             appId: app.id,
-            schemaFingerprintHash,
+            title: fixture.title || fixture.docId,
+            schemaVersion: fixture.schemaVersion,
+            schemaFingerprintHash: fixture.schemaFingerprintHash || schemaFingerprintHash,
             replicas: seededReplicaHistories(app, fixture),
             transportState: emptyTransportState(),
             createdAt: fixture.createdAt || now,
@@ -341,6 +407,8 @@ async function loadOrCreateLocalSimulatorDocument<TState, EphemeralData>(
     const document: PersistedLocalSimulatorDocument<TState> = {
         docId,
         appId: app.id,
+        title: docId,
+        schemaVersion: app.schemaVersion,
         schemaFingerprintHash,
         replicas: initialReplicaHistories(app),
         transportState: emptyTransportState(),

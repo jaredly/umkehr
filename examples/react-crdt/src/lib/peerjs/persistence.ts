@@ -3,11 +3,13 @@ import type {CrdtLocalHistory} from 'umkehr/crdt';
 import type {LocalDocumentSummary} from '../documentArchive';
 
 const DB_NAME = 'umkehr-react-crdt-peerjs-documents';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 export type PersistedPeerJsDocument<TState> = {
     docId: string;
     appId: string;
+    title: string;
+    schemaVersion: number;
     schemaFingerprintHash: string;
     history: CrdtLocalHistory<TState>;
     createdAt: string;
@@ -23,7 +25,10 @@ interface PeerJsDocumentsDb extends DBSchema {
 
 export async function loadPeerJsDocument<TState>(docId: string) {
     const db = await openPeerJsDocumentsDb();
-    return ((await db.get('documents', docId)) as PersistedPeerJsDocument<TState> | undefined) ?? null;
+    const document = (await db.get('documents', docId)) as
+        | (PersistedPeerJsDocument<TState> & {title?: string; schemaVersion?: number})
+        | undefined;
+    return document ? normalizePeerJsDocument(document) : null;
 }
 
 export async function savePeerJsDocument<TState>(document: PersistedPeerJsDocument<TState>) {
@@ -37,12 +42,18 @@ export async function listPeerJsDocumentSummaries(): Promise<LocalDocumentSummar
     return documents.map((document) => ({
         docId: document.docId,
         appId: document.appId,
-        title: document.docId,
+        title: document.title || document.docId,
         payloadKind: 'peerjs',
+        schemaVersion: document.schemaVersion ?? 1,
         schemaFingerprintHash: document.schemaFingerprintHash,
         createdAt: document.createdAt,
         updatedAt: document.updatedAt,
     }));
+}
+
+export async function deletePeerJsDocument(docId: string) {
+    const db = await openPeerJsDocumentsDb();
+    await db.delete('documents', docId);
 }
 
 let dbPromise: Promise<IDBPDatabase<PeerJsDocumentsDb>> | null = null;
@@ -54,4 +65,14 @@ function openPeerJsDocumentsDb() {
         },
     });
     return dbPromise;
+}
+
+function normalizePeerJsDocument<TState>(
+    document: PersistedPeerJsDocument<TState> & {title?: string; schemaVersion?: number},
+): PersistedPeerJsDocument<TState> {
+    return {
+        ...document,
+        title: document.title || document.docId,
+        schemaVersion: document.schemaVersion ?? 1,
+    };
 }

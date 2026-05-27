@@ -1,4 +1,4 @@
-import {useRef, useState, type ChangeEvent} from 'react';
+import {useMemo, useRef, useState, type ChangeEvent, type FormEvent} from 'react';
 import {createPatchValidator} from 'umkehr/validation';
 import {
     createCrdtUpdateValidator,
@@ -74,7 +74,7 @@ export type LocalDocumentSummary = {
     appId: string;
     title: string;
     payloadKind: DocumentPayloadKind;
-    schemaVersion?: number;
+    schemaVersion: number;
     schemaFingerprintHash: string;
     createdAt: string;
     updatedAt: string;
@@ -84,6 +84,75 @@ export type DocumentArchiveAdapter = {
     exportArchive(): Promise<DocumentArchive>;
     importArchive(archive: DocumentArchive): Promise<void>;
 };
+
+export type DocumentModalSource = 'local' | 'server' | 'local-and-server';
+
+export type DocumentModalItem = {
+    docId: string;
+    appId: string;
+    title: string;
+    payloadKind: DocumentPayloadKind;
+    schemaVersion: number;
+    schemaFingerprintHash: string;
+    createdAt: string;
+    updatedAt: string;
+    source: DocumentModalSource;
+    canDeleteLocal: boolean;
+    metrics?: {
+        sizeLabel?: string;
+        branchCount?: number;
+        eventCount?: number;
+    };
+};
+
+export type SeedModalItem = {
+    docId: string;
+    appId: string;
+    title: string;
+    payloadKind: DocumentPayloadKind;
+    schemaVersion: number;
+    schemaFingerprintHash: string;
+    createdAt: string;
+    updatedAt: string;
+    sizeLabel: string;
+};
+
+export function localDocumentModalItems(
+    documents: LocalDocumentSummary[],
+    appId: string,
+    payloadKind: DocumentPayloadKind,
+): DocumentModalItem[] {
+    return sortDocumentItems(
+        documents
+            .filter((document) => document.appId === appId && document.payloadKind === payloadKind)
+            .map((document) => ({
+                docId: document.docId,
+                appId: document.appId,
+                title: document.title || document.docId,
+                payloadKind: document.payloadKind,
+                schemaVersion: document.schemaVersion,
+                schemaFingerprintHash: document.schemaFingerprintHash,
+                createdAt: document.createdAt,
+                updatedAt: document.updatedAt,
+                source: 'local',
+                canDeleteLocal: true,
+            })),
+    );
+}
+
+export function filterUnrealizedSeeds(
+    seeds: SeedModalItem[],
+    documents: Pick<DocumentModalItem, 'docId'>[],
+) {
+    const realized = new Set(documents.map((document) => document.docId));
+    return seeds.filter((seed) => !realized.has(seed.docId));
+}
+
+export function sortDocumentItems<T extends Pick<DocumentModalItem, 'title' | 'docId'>>(items: T[]) {
+    return [...items].sort(
+        (a, b) => (a.title || a.docId).localeCompare(b.title || b.docId) || a.docId.localeCompare(b.docId),
+    );
+}
 
 export function serializeArchive(archive: DocumentArchive): string {
     return `${JSON.stringify(archive, null, 2)}\n`;
@@ -130,85 +199,86 @@ export function archiveFileName({
     return `${safeFileSegment(appId)}-${safeFileSegment(docId)}-${payloadKind}-${date}.json`;
 }
 
-export function documentsForActiveDocument(
-    documents: LocalDocumentSummary[],
-    activeDocId: string,
-    appId: string,
-    payloadKind: DocumentPayloadKind,
-): LocalDocumentSummary[] {
-    const filtered = documents.filter(
-        (document) => document.appId === appId && document.payloadKind === payloadKind,
-    );
-    if (filtered.some((document) => document.docId === activeDocId)) return filtered;
-    return [
-        {
-            docId: activeDocId,
-            appId,
-            title: activeDocId,
-            payloadKind,
-            schemaFingerprintHash: '',
-            createdAt: '',
-            updatedAt: '',
-        },
-        ...filtered,
-    ];
-}
-
-export function DocumentPicker({
+export function DocumentManagerModal({
     documents,
+    seeds,
     activeDocId,
-    appId,
-    payloadKind,
     label = 'Document',
+    archiveAdapter,
     onSwitchDocument,
+    onCreateDocument,
+    onCreateSeed,
+    onDeleteLocal,
+    onChanged,
 }: {
-    documents: LocalDocumentSummary[];
+    documents: DocumentModalItem[];
+    seeds: SeedModalItem[];
     activeDocId: string;
-    appId: string;
-    payloadKind: DocumentPayloadKind;
     label?: string;
+    archiveAdapter?: DocumentArchiveAdapter;
     onSwitchDocument(docId: string): void;
-}) {
-    const options = documentsForActiveDocument(documents, activeDocId, appId, payloadKind);
-    return (
-        <label className="documentPicker">
-            <span>{label}</span>
-            <select
-                value={activeDocId}
-                onChange={(event) => onSwitchDocument(event.currentTarget.value)}
-                aria-label={label}
-            >
-                {options.map((document) => (
-                    <option key={document.docId} value={document.docId} title={document.docId}>
-                        {document.title || document.docId}
-                    </option>
-                ))}
-            </select>
-        </label>
-    );
-}
-
-export function DocumentArchiveControls({
-    adapter,
-    appId,
-    docId,
-    payloadKind,
-    disabled,
-}: {
-    adapter: DocumentArchiveAdapter;
-    appId: string;
-    docId: string;
-    payloadKind: DocumentPayloadKind;
-    disabled?: boolean;
+    onCreateDocument?(input: {docId: string; title: string}): Promise<void> | void;
+    onCreateSeed?(seed: SeedModalItem): Promise<void> | void;
+    onDeleteLocal?(document: DocumentModalItem): Promise<void> | void;
+    onChanged?(): void;
 }) {
     const inputRef = useRef<HTMLInputElement | null>(null);
+    const [open, setOpen] = useState(false);
     const [message, setMessage] = useState<string | null>(null);
+    const [title, setTitle] = useState('');
+    const activeDocument = useMemo(
+        () => documents.find((document) => document.docId === activeDocId),
+        [activeDocId, documents],
+    );
+    const triggerTitle = activeDocument?.title || activeDocId;
 
-    async function exportDocument() {
+    async function createDocument(event: FormEvent) {
+        event.preventDefault();
+        const trimmed = title.trim();
+        if (!trimmed || !onCreateDocument) return;
         setMessage(null);
         try {
-            const archive = await adapter.exportArchive();
-            downloadJsonArchive(archive);
+            await onCreateDocument({docId: crypto.randomUUID(), title: trimmed});
+            setTitle('');
+            onChanged?.();
+            setMessage('Document created');
+        } catch (error) {
+            setMessage(errorMessage(error));
+        }
+    }
+
+    async function createSeed(seed: SeedModalItem) {
+        if (!onCreateSeed) return;
+        setMessage(null);
+        try {
+            await onCreateSeed(seed);
+            onChanged?.();
+            setMessage('Seed created');
+        } catch (error) {
+            setMessage(errorMessage(error));
+        }
+    }
+
+    async function deleteLocal(document: DocumentModalItem) {
+        if (!onDeleteLocal) return;
+        if (!window.confirm(`Delete the local copy of "${document.title || document.docId}"?`)) {
+            return;
+        }
+        setMessage(null);
+        try {
+            await onDeleteLocal(document);
+            onChanged?.();
+            setMessage('Local copy deleted');
+        } catch (error) {
+            setMessage(errorMessage(error));
+        }
+    }
+
+    async function exportDocument() {
+        if (!archiveAdapter) return;
+        setMessage(null);
+        try {
+            downloadJsonArchive(await archiveAdapter.exportArchive());
         } catch (error) {
             setMessage(errorMessage(error));
         }
@@ -217,38 +287,207 @@ export function DocumentArchiveControls({
     async function importDocument(event: ChangeEvent<HTMLInputElement>) {
         const file = event.currentTarget.files?.[0];
         event.currentTarget.value = '';
-        if (!file) return;
+        if (!file || !archiveAdapter) return;
         setMessage(null);
         try {
-            const archive = parseArchive(await file.text());
-            await adapter.importArchive(archive);
+            await archiveAdapter.importArchive(parseArchive(await file.text()));
+            onChanged?.();
+            setMessage('Document imported');
         } catch (error) {
             setMessage(errorMessage(error));
         }
     }
 
     return (
-        <div className="documentArchiveControls" aria-label="Document import and export">
-            <button type="button" disabled={disabled} onClick={() => void exportDocument()}>
-                Export
-            </button>
+        <div className="documentManager">
             <button
                 type="button"
-                disabled={disabled}
-                onClick={() => inputRef.current?.click()}
+                className="documentManagerTrigger"
+                aria-haspopup="dialog"
+                aria-expanded={open}
+                onClick={() => setOpen(true)}
             >
-                Import
+                <span>{label}</span>
+                <strong>{triggerTitle}</strong>
+                {activeDocument ? <SourceBadge source={activeDocument.source} /> : null}
             </button>
-            <input
-                ref={inputRef}
-                type="file"
-                accept="application/json,.json"
-                className="documentArchiveInput"
-                onChange={(event) => void importDocument(event)}
-            />
-            {message ? <p className="documentArchiveMessage">{message}</p> : null}
+            {open ? (
+                <div className="documentModalOverlay" onMouseDown={() => setOpen(false)}>
+                    <section
+                        className="documentModal"
+                        role="dialog"
+                        aria-modal="true"
+                        aria-label="Documents"
+                        onMouseDown={(event) => event.stopPropagation()}
+                    >
+                        <header className="documentModalHeader">
+                            <h1>Documents</h1>
+                            <button type="button" onClick={() => setOpen(false)} aria-label="Close documents">
+                                Close
+                            </button>
+                        </header>
+
+                        <div className="documentModalActions">
+                            {archiveAdapter ? (
+                                <>
+                                    <button type="button" onClick={() => void exportDocument()}>
+                                        Export current
+                                    </button>
+                                    <button type="button" onClick={() => inputRef.current?.click()}>
+                                        Import
+                                    </button>
+                                    <input
+                                        ref={inputRef}
+                                        type="file"
+                                        accept="application/json,.json"
+                                        className="documentArchiveInput"
+                                        onChange={(event) => void importDocument(event)}
+                                    />
+                                </>
+                            ) : null}
+                        </div>
+
+                        {onCreateDocument ? (
+                            <form className="documentCreateForm" onSubmit={(event) => void createDocument(event)}>
+                                <input
+                                    value={title}
+                                    onChange={(event) => setTitle(event.currentTarget.value)}
+                                    placeholder="New document title"
+                                    aria-label="New document title"
+                                />
+                                <button type="submit" disabled={!title.trim()}>
+                                    New document
+                                </button>
+                            </form>
+                        ) : null}
+
+                        <section className="documentModalSection">
+                            <h2>Documents</h2>
+                            {documents.length ? (
+                                <div className="documentRows">
+                                    {documents.map((document) => (
+                                        <DocumentRow
+                                            key={document.docId}
+                                            document={document}
+                                            current={document.docId === activeDocId}
+                                            onOpen={() => {
+                                                onSwitchDocument(document.docId);
+                                                setOpen(false);
+                                            }}
+                                            onDeleteLocal={
+                                                document.canDeleteLocal && onDeleteLocal
+                                                    ? () => void deleteLocal(document)
+                                                    : undefined
+                                            }
+                                        />
+                                    ))}
+                                </div>
+                            ) : (
+                                <p className="documentModalMessage">No documents.</p>
+                            )}
+                        </section>
+
+                        <section className="documentModalSection">
+                            <h2>Seed fixtures</h2>
+                            {seeds.length ? (
+                                <div className="documentRows">
+                                    {seeds.map((seed) => (
+                                        <SeedRow
+                                            key={seed.docId}
+                                            seed={seed}
+                                            onCreate={onCreateSeed ? () => void createSeed(seed) : undefined}
+                                        />
+                                    ))}
+                                </div>
+                            ) : (
+                                <p className="documentModalMessage">No unrealized seeds.</p>
+                            )}
+                        </section>
+
+                        {message ? <p className="documentModalStatus">{message}</p> : null}
+                    </section>
+                </div>
+            ) : null}
         </div>
     );
+}
+
+function DocumentRow({
+    document,
+    current,
+    onOpen,
+    onDeleteLocal,
+}: {
+    document: DocumentModalItem;
+    current: boolean;
+    onOpen(): void;
+    onDeleteLocal?: () => void;
+}) {
+    return (
+        <article className="documentRow">
+            <div className="documentRowMain">
+                <div className="documentRowTitle">
+                    <strong>{document.title || document.docId}</strong>
+                    {current ? <span className="documentBadge">current</span> : null}
+                    <SourceBadge source={document.source} />
+                </div>
+                <div className="documentRowMeta">
+                    <span>{document.docId}</span>
+                    <span>v{document.schemaVersion}</span>
+                    <span>{document.schemaFingerprintHash.slice(0, 12)}</span>
+                    {document.metrics?.sizeLabel ? <span>{document.metrics.sizeLabel}</span> : null}
+                    {document.metrics?.eventCount !== undefined ? (
+                        <span>{document.metrics.eventCount} events</span>
+                    ) : null}
+                    {document.metrics?.branchCount !== undefined ? (
+                        <span>{document.metrics.branchCount} branches</span>
+                    ) : null}
+                </div>
+            </div>
+            <div className="documentRowActions">
+                <button type="button" disabled={current} onClick={onOpen}>
+                    Open
+                </button>
+                {onDeleteLocal ? (
+                    <button type="button" className="dangerButton" onClick={onDeleteLocal}>
+                        Delete local
+                    </button>
+                ) : null}
+            </div>
+        </article>
+    );
+}
+
+function SeedRow({seed, onCreate}: {seed: SeedModalItem; onCreate?: () => void}) {
+    return (
+        <article className="documentRow seedRow">
+            <div className="documentRowMain">
+                <div className="documentRowTitle">
+                    <strong>{seed.title || seed.docId}</strong>
+                    <span className="documentBadge">seed</span>
+                </div>
+                <div className="documentRowMeta">
+                    <span>{seed.docId}</span>
+                    <span>v{seed.schemaVersion}</span>
+                    <span>{seed.schemaFingerprintHash.slice(0, 12)}</span>
+                    <span>{seed.sizeLabel}</span>
+                </div>
+            </div>
+            <div className="documentRowActions">
+                {onCreate ? (
+                    <button type="button" onClick={onCreate}>
+                        Create
+                    </button>
+                ) : null}
+            </div>
+        </article>
+    );
+}
+
+function SourceBadge({source}: {source: DocumentModalSource}) {
+    const label =
+        source === 'local-and-server' ? 'local + server' : source === 'server' ? 'server' : 'local';
+    return <span className={`documentBadge source-${source}`}>{label}</span>;
 }
 
 export function downloadJsonArchive(archive: DocumentArchive) {

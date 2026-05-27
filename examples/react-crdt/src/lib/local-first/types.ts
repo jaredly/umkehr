@@ -26,6 +26,7 @@ export type DocumentLineage = {
 
 export type PersistedReplica<TState> = {
     docId: string;
+    title?: string;
     storageVersion: 1;
     protocolVersion: 1;
     schemaVersion: number;

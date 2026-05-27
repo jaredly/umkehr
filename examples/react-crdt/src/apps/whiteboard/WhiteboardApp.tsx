@@ -17,6 +17,7 @@ import {WhiteboardPanel} from './WhiteboardPanel';
 export const whiteboardApp: AppDefinition<WhiteboardState, WhiteboardEphemeralData> = {
     id: 'whiteboard',
     title: 'Whiteboard',
+    schemaVersion: 1,
     tagKey: 'type',
     schema: whiteboardSchema,
     validateState: validateWhiteboardState,

@@ -48,6 +48,7 @@ const expectedMigratedState: TodoFixtureStateV2 = {
 const app: AppDefinition<TodoFixtureStateV2> = {
     id: 'todos-fixture',
     title: 'Todos Fixture',
+    schemaVersion: 2,
     tagKey: TODO_FIXTURE_TAG_KEY,
     schema: todoFixtureV2Schema,
     validateState: todoFixtureV2Metadata.validateState,

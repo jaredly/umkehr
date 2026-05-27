@@ -1,8 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {
-    documentsForActiveDoc,
-    parseServerDocumentsResponse,
-} from './documents';
+import {parseServerDocumentsResponse} from './documents';
 import type {ServerDocumentSummary} from './types';
 
 const summary: ServerDocumentSummary = {
@@ -28,11 +25,5 @@ describe('server document helpers', () => {
         expect(() => parseServerDocumentsResponse({documents: 'nope'})).toThrow(
             'Server returned an invalid document list.',
         );
-    });
-
-    it('keeps a manual active document available when it is missing from discovery', () => {
-        expect(documentsForActiveDoc([summary], 'todos-small')).toEqual([summary]);
-        expect(documentsForActiveDoc([summary], 'manual-doc').map((document) => document.docId))
-            .toEqual(['manual-doc', 'todos-small']);
     });
 });

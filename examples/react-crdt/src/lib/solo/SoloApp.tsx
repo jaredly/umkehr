@@ -8,17 +8,20 @@ import {
 } from '../crdtApp';
 import {
     assertArchiveForApp,
-    DocumentArchiveControls,
-    DocumentPicker,
+    DocumentManagerModal,
+    filterUnrealizedSeeds,
+    localDocumentModalItems,
     validateHistoryForApp,
     type DocumentArchive,
+    type DocumentModalItem,
     type LocalDocumentSummary,
+    type SeedModalItem,
 } from '../documentArchive';
 import {useTopBarControls, type TopBarControls} from '../chrome/TopBarContext';
 import {schemaFingerprint, schemaFingerprintHash} from '../local-first/schemaFingerprint';
 import {
     loadBranchFreeSeedFixtureForApp,
-    mergeDocumentSummariesWithSeeds,
+    seedModalItemsForApp,
     seedSoloHistoryForApp,
 } from '../seed/documents';
 import {readActiveDocIdFromSearch, urlWithActiveDocId} from '../useUrlSelection';
@@ -27,6 +30,7 @@ import {
     listSoloDocumentSummaries,
     loadSoloDocument,
     saveSoloDocument,
+    deleteSoloDocument,
     type PersistedSoloDocument,
 } from './persistence';
 
@@ -48,6 +52,7 @@ export function SoloApp<TState, TAnnotations = never, EphemeralData = never>({
         createInitialHistory<TState, TAnnotations>(app),
     );
     const {Provider} = runtime;
+    const activeTitle = documents.find((document) => document.docId === activeDocId)?.title ?? activeDocId;
 
     const refreshDocuments = useCallback(() => {
         void listSoloDocumentSummaries().then(setDocuments);
@@ -75,13 +80,15 @@ export function SoloApp<TState, TAnnotations = never, EphemeralData = never>({
             void saveSoloDocument({
                 docId: activeDocId,
                 appId: app.id,
+                title: activeTitle,
+                schemaVersion: app.schemaVersion,
                 schemaFingerprintHash: fingerprintHash,
                 history: history as any,
                 createdAt: now,
                 updatedAt: now,
             });
         },
-        [activeDocId, app.id, fingerprintHash],
+        [activeDocId, activeTitle, app.id, app.schemaVersion, fingerprintHash],
     );
 
     const switchDocument = useCallback((docId: string) => {
@@ -101,19 +108,67 @@ export function SoloApp<TState, TAnnotations = never, EphemeralData = never>({
         },
         [refreshDocuments, switchDocument],
     );
+    const documentItems = useMemo(
+        () => localDocumentModalItems(documents, app.id, 'solo'),
+        [app.id, documents],
+    );
+    const seedItems = useMemo(
+        () => filterUnrealizedSeeds(seedModalItemsForApp(app.id, 'solo'), documentItems),
+        [app.id, documentItems],
+    );
+    const createBlankDocument = useCallback(
+        async ({docId, title}: {docId: string; title: string}) => {
+            const now = new Date().toISOString();
+            await saveSoloDocument({
+                docId,
+                appId: app.id,
+                title,
+                schemaVersion: app.schemaVersion,
+                schemaFingerprintHash: fingerprintHash,
+                history: createInitialHistory<TState, TAnnotations>(app) as any,
+                createdAt: now,
+                updatedAt: now,
+            });
+            refreshDocuments();
+        },
+        [app, fingerprintHash, refreshDocuments],
+    );
+    const createSeedDocument = useCallback(
+        async (seed: SeedModalItem) => {
+            const fixture = loadBranchFreeSeedFixtureForApp(app, seed.docId);
+            if (!fixture) throw new Error(`No seed document exists for "${seed.docId}".`);
+            const now = new Date().toISOString();
+            await saveSoloDocument({
+                docId: fixture.docId,
+                appId: app.id,
+                title: fixture.title || fixture.docId,
+                schemaVersion: fixture.schemaVersion,
+                schemaFingerprintHash: fixture.schemaFingerprintHash,
+                history: seedSoloHistoryForApp<TState, TAnnotations, unknown>(app, fixture) as any,
+                createdAt: fixture.createdAt || now,
+                updatedAt: now,
+            });
+            refreshDocuments();
+        },
+        [app, refreshDocuments],
+    );
+    const deleteLocalDocument = useCallback(
+        async (document: DocumentModalItem) => {
+            await deleteSoloDocument(document.docId);
+            const remaining = (await listSoloDocumentSummaries()).filter(
+                (summary) =>
+                    summary.appId === app.id &&
+                    summary.payloadKind === 'solo' &&
+                    summary.docId !== document.docId,
+            );
+            setDocuments(remaining);
+            if (document.docId === activeDocId) switchDocument(remaining[0]?.docId ?? defaultDocId);
+        },
+        [activeDocId, app.id, defaultDocId, switchDocument],
+    );
     const topBarControls = useMemo<TopBarControls>(
-        () => ({
-            documentPicker: (
-                <DocumentPicker
-                    documents={mergeDocumentSummariesWithSeeds(documents, app.id, 'solo')}
-                    activeDocId={activeDocId}
-                    appId={app.id}
-                    payloadKind="solo"
-                    onSwitchDocument={switchDocument}
-                />
-            ),
-        }),
-        [activeDocId, app.id, documents, switchDocument],
+        () => ({}),
+        [],
     );
 
     return (
@@ -126,6 +181,13 @@ export function SoloApp<TState, TAnnotations = never, EphemeralData = never>({
                     schemaFingerprint={fingerprint}
                     schemaFingerprintHash={fingerprintHash}
                     topBarControls={topBarControls}
+                    documents={documentItems}
+                    seeds={seedItems}
+                    onCreateDocument={createBlankDocument}
+                    onCreateSeed={createSeedDocument}
+                    onDeleteLocal={deleteLocalDocument}
+                    onSwitchDocument={switchDocument}
+                    onDocumentsChanged={refreshDocuments}
                     onImported={importedDocument}
                 />
             </Provider>
@@ -140,6 +202,13 @@ function SoloDocument<TState, TAnnotations, EphemeralData>({
     schemaFingerprint,
     schemaFingerprintHash,
     topBarControls,
+    documents,
+    seeds,
+    onCreateDocument,
+    onCreateSeed,
+    onDeleteLocal,
+    onSwitchDocument,
+    onDocumentsChanged,
     onImported,
 }: {
     app: AppDefinition<TState, EphemeralData>;
@@ -148,6 +217,13 @@ function SoloDocument<TState, TAnnotations, EphemeralData>({
     schemaFingerprint: string;
     schemaFingerprintHash: string;
     topBarControls: TopBarControls;
+    documents: DocumentModalItem[];
+    seeds: SeedModalItem[];
+    onCreateDocument(input: {docId: string; title: string}): Promise<void> | void;
+    onCreateSeed(seed: SeedModalItem): Promise<void> | void;
+    onDeleteLocal(document: DocumentModalItem): Promise<void> | void;
+    onSwitchDocument(docId: string): void;
+    onDocumentsChanged(): void;
     onImported(docId: string, history: any): void;
 }) {
     const editor = runtime.useEditorContext();
@@ -174,6 +250,8 @@ function SoloDocument<TState, TAnnotations, EphemeralData>({
                 await saveSoloDocument({
                     docId: archive.docId,
                     appId: app.id,
+                    title: archive.docId,
+                    schemaVersion: app.schemaVersion,
                     schemaFingerprintHash,
                     history: imported as any,
                     createdAt: now,
@@ -191,16 +269,32 @@ function SoloDocument<TState, TAnnotations, EphemeralData>({
     const registeredTopBarControls = useMemo(
         () => ({
             ...topBarControls,
-            archiveControls: (
-                <DocumentArchiveControls
-                    adapter={adapter}
-                    appId={app.id}
-                    docId={activeDocId}
-                    payloadKind="solo"
+            documentPicker: (
+                <DocumentManagerModal
+                    documents={documents}
+                    seeds={seeds}
+                    activeDocId={activeDocId}
+                    archiveAdapter={adapter}
+                    onSwitchDocument={onSwitchDocument}
+                    onCreateDocument={onCreateDocument}
+                    onCreateSeed={onCreateSeed}
+                    onDeleteLocal={onDeleteLocal}
+                    onChanged={onDocumentsChanged}
                 />
             ),
         }),
-        [activeDocId, adapter, app.id, topBarControls],
+        [
+            activeDocId,
+            adapter,
+            documents,
+            onCreateDocument,
+            onCreateSeed,
+            onDeleteLocal,
+            onDocumentsChanged,
+            onSwitchDocument,
+            seeds,
+            topBarControls,
+        ],
     );
     useTopBarControls(registeredTopBarControls);
 
@@ -245,7 +339,9 @@ async function loadOrCreateSoloDocument<TState, TAnnotations>(
         const document: PersistedSoloDocument<TState> = {
             docId,
             appId: app.id,
-            schemaFingerprintHash,
+            title: fixture.title || fixture.docId,
+            schemaVersion: fixture.schemaVersion,
+            schemaFingerprintHash: fixture.schemaFingerprintHash || schemaFingerprintHash,
             history: seedSoloHistoryForApp<TState, TAnnotations, unknown>(app, fixture) as any,
             createdAt: fixture.createdAt || now,
             updatedAt: now,
@@ -257,6 +353,8 @@ async function loadOrCreateSoloDocument<TState, TAnnotations>(
     const document: PersistedSoloDocument<TState> = {
         docId,
         appId: app.id,
+        title: docId,
+        schemaVersion: app.schemaVersion,
         schemaFingerprintHash,
         history: createInitialHistory<TState, TAnnotations>(app) as any,
         createdAt: now,

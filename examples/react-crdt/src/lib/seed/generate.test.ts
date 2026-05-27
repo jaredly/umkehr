@@ -35,6 +35,7 @@ import {
 const todoSeedApp: AppDefinition<TodoState> = {
     id: 'todos',
     title: 'Todos',
+    schemaVersion: 1,
     tagKey: 'type',
     schema: todoSchema,
     initialState: initialTodoState,
@@ -50,6 +51,7 @@ const todoSeedApp: AppDefinition<TodoState> = {
 const whiteboardSeedApp: AppDefinition<WhiteboardState> = {
     id: 'whiteboard',
     title: 'Whiteboard',
+    schemaVersion: 1,
     tagKey: 'type',
     schema: whiteboardSchema,
     initialState: initialWhiteboardState,

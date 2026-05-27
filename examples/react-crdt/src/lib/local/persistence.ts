@@ -4,11 +4,13 @@ import type {LocalDocumentSummary} from '../documentArchive';
 import type {TransportState} from './useLocalDemoSync';
 
 const DB_NAME = 'umkehr-react-crdt-local-simulator-documents';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 export type PersistedLocalSimulatorDocument<TState> = {
     docId: string;
     appId: string;
+    title: string;
+    schemaVersion: number;
     schemaFingerprintHash: string;
     replicas: Record<string, CrdtLocalHistory<TState>>;
     transportState: {
@@ -28,10 +30,10 @@ interface LocalSimulatorDb extends DBSchema {
 
 export async function loadLocalSimulatorDocument<TState>(docId: string) {
     const db = await openLocalSimulatorDb();
-    return (
-        ((await db.get('documents', docId)) as PersistedLocalSimulatorDocument<TState> | undefined) ??
-        null
-    );
+    const document = (await db.get('documents', docId)) as
+        | (PersistedLocalSimulatorDocument<TState> & {title?: string; schemaVersion?: number})
+        | undefined;
+    return document ? normalizeLocalSimulatorDocument(document) : null;
 }
 
 export async function saveLocalSimulatorDocument<TState>(
@@ -47,12 +49,18 @@ export async function listLocalSimulatorDocumentSummaries(): Promise<LocalDocume
     return documents.map((document) => ({
         docId: document.docId,
         appId: document.appId,
-        title: document.docId,
+        title: document.title || document.docId,
         payloadKind: 'local-simulator',
+        schemaVersion: document.schemaVersion ?? 1,
         schemaFingerprintHash: document.schemaFingerprintHash,
         createdAt: document.createdAt,
         updatedAt: document.updatedAt,
     }));
+}
+
+export async function deleteLocalSimulatorDocument(docId: string) {
+    const db = await openLocalSimulatorDb();
+    await db.delete('documents', docId);
 }
 
 export function cloneTransportState(state: TransportState): PersistedLocalSimulatorDocument<unknown>['transportState'] {
@@ -73,4 +81,14 @@ function openLocalSimulatorDb() {
         },
     });
     return dbPromise;
+}
+
+function normalizeLocalSimulatorDocument<TState>(
+    document: PersistedLocalSimulatorDocument<TState> & {title?: string; schemaVersion?: number},
+): PersistedLocalSimulatorDocument<TState> {
+    return {
+        ...document,
+        title: document.title || document.docId,
+        schemaVersion: document.schemaVersion ?? 1,
+    };
 }

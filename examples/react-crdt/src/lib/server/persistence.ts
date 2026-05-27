@@ -55,6 +55,11 @@ export async function saveServerReplica<TState>(replica: PersistedServerReplica<
     await db.put('replicas', replica as PersistedServerReplica<unknown>, replica.docId);
 }
 
+export async function deleteServerReplica(docId: string) {
+    const db = await openServerSyncDb();
+    await db.delete('replicas', docId);
+}
+
 export async function replaceServerReplica<TState>(replica: PersistedServerReplica<TState>) {
     await saveServerReplica(replica);
 }

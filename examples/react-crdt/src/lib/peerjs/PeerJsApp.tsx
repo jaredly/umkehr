@@ -3,23 +3,27 @@ import {createCrdtLocalHistory, type CrdtLocalHistory} from 'umkehr/crdt';
 import {createInitialCrdtHistory, type AppDefinition, type CrdtRuntime} from '../crdtApp';
 import {
     assertArchiveForApp,
-    DocumentArchiveControls,
-    DocumentPicker,
+    DocumentManagerModal,
+    filterUnrealizedSeeds,
+    localDocumentModalItems,
     validateCrdtLocalHistoryForApp,
     type DocumentArchive,
+    type DocumentModalItem,
     type LocalDocumentSummary,
+    type SeedModalItem,
 } from '../documentArchive';
 import {useTopBarControls} from '../chrome/TopBarContext';
 import {schemaFingerprint, schemaFingerprintHash} from '../local-first/schemaFingerprint';
 import {
     loadBranchFreeSeedFixtureForApp,
-    mergeDocumentSummariesWithSeeds,
+    seedModalItemsForApp,
     seedCrdtHistoryForApp,
 } from '../seed/documents';
 import {useStore} from '../store';
 import {readActiveDocIdFromSearch, urlWithActiveDocId} from '../useUrlSelection';
 import {PeerJsControls} from './PeerJsControls';
 import {
+    deletePeerJsDocument,
     listPeerJsDocumentSummaries,
     loadPeerJsDocument,
     savePeerJsDocument,
@@ -46,6 +50,7 @@ export function PeerJsApp<TState, EphemeralData = never>({
     const fingerprintHash = useMemo(() => schemaFingerprintHash(app), [app]);
     const [documents, setDocuments] = useState<LocalDocumentSummary[]>([]);
     const [hostHistory, setHostHistory] = useState(() => createInitialCrdtHistory(app));
+    const activeTitle = documents.find((document) => document.docId === activeDocId)?.title ?? activeDocId;
     const actor = useMemo(() => `${role}-${crypto.randomUUID().slice(0, 8)}`, [role]);
     const protocol = useMemo(
         (): PeerProtocolConfig<TState> => ({
@@ -99,13 +104,15 @@ export function PeerJsApp<TState, EphemeralData = never>({
             void savePeerJsDocument({
                 docId: activeDocId,
                 appId: app.id,
+                title: activeTitle,
+                schemaVersion: app.schemaVersion,
                 schemaFingerprintHash: fingerprintHash,
                 history,
                 createdAt: now,
                 updatedAt: now,
             }).then(refreshDocuments);
         },
-        [activeDocId, app.id, fingerprintHash, refreshDocuments, sync],
+        [activeDocId, activeTitle, app.id, app.schemaVersion, fingerprintHash, refreshDocuments, sync],
     );
 
     const archiveAdapter = useMemo(
@@ -131,6 +138,8 @@ export function PeerJsApp<TState, EphemeralData = never>({
                 await savePeerJsDocument({
                     docId: archive.docId,
                     appId: app.id,
+                    title: archive.docId,
+                    schemaVersion: app.schemaVersion,
                     schemaFingerprintHash: fingerprintHash,
                     history: imported,
                     createdAt: now,
@@ -155,29 +164,79 @@ export function PeerJsApp<TState, EphemeralData = never>({
             sync,
         ],
     );
+    const documentItems = useMemo(
+        () => localDocumentModalItems(documents, app.id, 'peerjs'),
+        [app.id, documents],
+    );
+    const seedItems = useMemo(
+        () => filterUnrealizedSeeds(seedModalItemsForApp(app.id, 'peerjs'), documentItems),
+        [app.id, documentItems],
+    );
+    const createBlankDocument = useCallback(
+        async ({docId, title}: {docId: string; title: string}) => {
+            const now = new Date().toISOString();
+            await savePeerJsDocument({
+                docId,
+                appId: app.id,
+                title,
+                schemaVersion: app.schemaVersion,
+                schemaFingerprintHash: fingerprintHash,
+                history: createInitialCrdtHistory(app),
+                createdAt: now,
+                updatedAt: now,
+            });
+            refreshDocuments();
+        },
+        [app, fingerprintHash, refreshDocuments],
+    );
+    const createSeedDocument = useCallback(
+        async (seed: SeedModalItem) => {
+            const fixture = loadBranchFreeSeedFixtureForApp(app, seed.docId);
+            if (!fixture) throw new Error(`No seed document exists for "${seed.docId}".`);
+            const now = new Date().toISOString();
+            await savePeerJsDocument({
+                docId: fixture.docId,
+                appId: app.id,
+                title: fixture.title || fixture.docId,
+                schemaVersion: fixture.schemaVersion,
+                schemaFingerprintHash: fixture.schemaFingerprintHash,
+                history: seedCrdtHistoryForApp(app, fixture),
+                createdAt: fixture.createdAt || now,
+                updatedAt: now,
+            });
+            refreshDocuments();
+        },
+        [app, refreshDocuments],
+    );
+    const deleteLocalDocument = useCallback(
+        async (document: DocumentModalItem) => {
+            await deletePeerJsDocument(document.docId);
+            const remaining = (await listPeerJsDocumentSummaries()).filter(
+                (summary) =>
+                    summary.appId === app.id &&
+                    summary.payloadKind === 'peerjs' &&
+                    summary.docId !== document.docId,
+            );
+            setDocuments(remaining);
+            if (document.docId === activeDocId) switchDocument(remaining[0]?.docId ?? defaultDocId);
+        },
+        [activeDocId, app.id, defaultDocId, switchDocument],
+    );
     const topBarControls = useMemo(
         () =>
             role === 'host'
                 ? {
                       documentPicker: (
-                          <DocumentPicker
-                              documents={mergeDocumentSummariesWithSeeds(
-                                  documents,
-                                  app.id,
-                                  'peerjs',
-                              )}
+                          <DocumentManagerModal
+                              documents={documentItems}
+                              seeds={seedItems}
                               activeDocId={activeDocId}
-                              appId={app.id}
-                              payloadKind="peerjs"
                               onSwitchDocument={switchDocument}
-                          />
-                      ),
-                      archiveControls: (
-                          <DocumentArchiveControls
-                              adapter={archiveAdapter}
-                              appId={app.id}
-                              docId={activeDocId}
-                              payloadKind="peerjs"
+                              onCreateDocument={createBlankDocument}
+                              onCreateSeed={createSeedDocument}
+                              onDeleteLocal={deleteLocalDocument}
+                              archiveAdapter={archiveAdapter}
+                              onChanged={refreshDocuments}
                           />
                       ),
                   }
@@ -188,10 +247,14 @@ export function PeerJsApp<TState, EphemeralData = never>({
                   },
         [
             activeDocId,
-            app.id,
             archiveAdapter,
-            documents,
+            createBlankDocument,
+            createSeedDocument,
+            deleteLocalDocument,
+            documentItems,
+            refreshDocuments,
             role,
+            seedItems,
             switchDocument,
         ],
     );
@@ -336,7 +399,9 @@ async function loadOrCreatePeerJsDocument<TState, EphemeralData>(
         const document: PersistedPeerJsDocument<TState> = {
             docId,
             appId: app.id,
-            schemaFingerprintHash,
+            title: fixture.title || fixture.docId,
+            schemaVersion: fixture.schemaVersion,
+            schemaFingerprintHash: fixture.schemaFingerprintHash || schemaFingerprintHash,
             history: seedCrdtHistoryForApp(app, fixture),
             createdAt: fixture.createdAt || now,
             updatedAt: now,
@@ -348,6 +413,8 @@ async function loadOrCreatePeerJsDocument<TState, EphemeralData>(
     const document: PersistedPeerJsDocument<TState> = {
         docId,
         appId: app.id,
+        title: docId,
+        schemaVersion: app.schemaVersion,
         schemaFingerprintHash,
         history: createInitialCrdtHistory(app),
         createdAt: now,

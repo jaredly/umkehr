@@ -1,7 +1,7 @@
 import {blankHistory, type History} from 'umkehr';
 import type {CrdtLocalHistory} from 'umkehr/crdt';
 import type {AppDefinition} from '../crdtApp';
-import type {LocalDocumentSummary} from '../documentArchive';
+import type {LocalDocumentSummary, SeedModalItem} from '../documentArchive';
 import {
     assertBranchFreeSeedFixture,
     listSeedDocumentSummaries,
@@ -35,19 +35,6 @@ export function branchFreeSeedSummariesForApp(
     }));
 }
 
-export function mergeDocumentSummariesWithSeeds(
-    documents: LocalDocumentSummary[],
-    appId: string,
-    payloadKind: LocalDocumentSummary['payloadKind'],
-    options: SeedGeneratorOptions = {},
-): LocalDocumentSummary[] {
-    const seen = new Set(documents.map((document) => document.docId));
-    const seeds = branchFreeSeedSummariesForApp(appId, payloadKind, options)
-        .filter((seed) => !seen.has(seed.docId))
-        .map(({sizeLabel: _sizeLabel, sizeRank: _sizeRank, ...summary}) => summary);
-    return [...documents, ...seeds];
-}
-
 export function loadBranchFreeSeedFixtureForApp<TState, EphemeralData>(
     app: AppDefinition<TState, EphemeralData>,
     docId: string,
@@ -79,6 +66,24 @@ export function seedSoloHistoryForApp<TState, TAnnotations, EphemeralData>(
 
 export function seedSummaryTitle(summary: Pick<SeedDocumentSummary, 'title' | 'docId' | 'sizeLabel'>) {
     return `${summary.title || summary.docId} (${summary.sizeLabel})`;
+}
+
+export function seedModalItemsForApp(
+    appId: string,
+    payloadKind: LocalDocumentSummary['payloadKind'],
+    options: SeedGeneratorOptions = {},
+): SeedModalItem[] {
+    return branchFreeSeedSummariesForApp(appId, payloadKind, options).map((seed) => ({
+        docId: seed.docId,
+        appId: seed.appId,
+        title: seed.title,
+        payloadKind,
+        schemaVersion: seed.schemaVersion,
+        schemaFingerprintHash: seed.schemaFingerprintHash,
+        createdAt: seed.createdAt,
+        updatedAt: seed.updatedAt,
+        sizeLabel: seed.sizeLabel,
+    }));
 }
 
 function assertSeedFixtureForApp<TState, EphemeralData>(

@@ -3,15 +3,19 @@ import {createInitialCrdtHistory, type AppDefinition, type CrdtRuntime} from '..
 import {schemaFingerprint, schemaFingerprintHash} from '../local-first/schemaFingerprint';
 import {
     assertArchiveForApp,
-    DocumentArchiveControls,
+    DocumentManagerModal,
+    filterUnrealizedSeeds,
     validateCrdtUpdatesForApp,
     type DocumentArchive,
+    type DocumentModalItem,
+    type SeedModalItem,
 } from '../documentArchive';
 import {useTopBarControls} from '../chrome/TopBarContext';
 import {ServerControls} from './ServerControls';
 import {ServerHistoryView} from './ServerHistoryView';
 import {
     clearServerUser,
+    deleteServerReplica,
     loadServerUser,
     loadServerReplica,
     listServerReplicas,
@@ -23,13 +27,9 @@ import {actorForSession, ensureServerSessionId} from './session';
 import {useServerSync} from './useServerSync';
 import {migrateServerReplica, normalizeServerReplica} from './migration';
 import {defaultServerSchemaConfig, type ServerSchemaConfig} from './schemaConfig';
-import {
-    documentsForActiveDoc,
-    parseServerDocumentsResponse,
-} from './documents';
-import {branchFreeSeedSummariesForApp, loadBranchFreeSeedFixtureForApp} from '../seed/documents';
-import {createServerClientSeedReplica, type ServerClientSeedScenario} from '../seed/serverClient';
-import {ServerClientSeedControls} from './ServerClientSeedControls';
+import {parseServerDocumentsResponse} from './documents';
+import {loadBranchFreeSeedFixtureForApp, seedModalItemsForApp} from '../seed/documents';
+import {createServerClientSeedReplica} from '../seed/serverClient';
 import {urlWithActiveDocId} from '../useUrlSelection';
 import type {
     PersistedServerReplica,
@@ -52,9 +52,14 @@ type LoadState<TState> =
     | {kind: 'error'; message: string};
 
 type DocumentsState =
-    | {kind: 'loading'; documents: ServerDocumentSummary[]}
-    | {kind: 'ready'; documents: ServerDocumentSummary[]}
-    | {kind: 'error'; documents: ServerDocumentSummary[]; message: string};
+    | {kind: 'loading'; remoteDocuments: ServerDocumentSummary[]; localDocuments: ServerDocumentSummary[]}
+    | {kind: 'ready'; remoteDocuments: ServerDocumentSummary[]; localDocuments: ServerDocumentSummary[]}
+    | {
+          kind: 'error';
+          remoteDocuments: ServerDocumentSummary[];
+          localDocuments: ServerDocumentSummary[];
+          message: string;
+      };
 
 export function ServerApp<TState, EphemeralData = never>({
     app,
@@ -75,25 +80,30 @@ export function ServerApp<TState, EphemeralData = never>({
     const [loadState, setLoadState] = useState<LoadState<TState>>({kind: 'loading'});
     const [documentsState, setDocumentsState] = useState<DocumentsState>({
         kind: 'loading',
-        documents: [],
+        remoteDocuments: [],
+        localDocuments: [],
     });
 
     useEffect(() => {
         let alive = true;
-        setDocumentsState((current) => ({kind: 'loading', documents: current.documents}));
+        setDocumentsState((current) => ({
+            kind: 'loading',
+            remoteDocuments: current.remoteDocuments,
+            localDocuments: current.localDocuments,
+        }));
         Promise.all([
             fetchServerDocuments().catch(() => []),
             listLocalServerDocuments(),
         ])
             .then(([remoteDocuments, localDocuments]) => {
-                const documents = mergeServerDocuments(remoteDocuments, localDocuments);
-                if (alive) setDocumentsState({kind: 'ready', documents});
+                if (alive) setDocumentsState({kind: 'ready', remoteDocuments, localDocuments});
             })
             .catch((error) => {
                 if (!alive) return;
                 setDocumentsState((current) => ({
                     kind: 'error',
-                    documents: current.documents,
+                    remoteDocuments: current.remoteDocuments,
+                    localDocuments: current.localDocuments,
                     message: error instanceof Error ? error.message : String(error),
                 }));
             });
@@ -208,17 +218,13 @@ export function ServerApp<TState, EphemeralData = never>({
             app={app}
             runtime={runtime}
             docId={activeDocId}
-            documents={documentsForActiveDoc(
-                mergeServerDocuments(
-                    documentsState.documents,
-                    seedDocumentsForServerPicker(app.id),
-                ),
-                activeDocId,
-            )}
-            documentsUnavailableMessage={
-                documentsState.kind === 'error' ? documentsState.message : undefined
-            }
+            remoteDocuments={documentsState.remoteDocuments}
+            localDocuments={documentsState.localDocuments}
+            documentsUnavailableMessage={documentsState.kind === 'error' ? documentsState.message : undefined}
             onSwitchDocument={switchDocument}
+            onDocumentsChanged={(remoteDocuments, localDocuments) =>
+                setDocumentsState({kind: 'ready', remoteDocuments, localDocuments})
+            }
             schemaFingerprint={fingerprint}
             schemaFingerprintHash={fingerprintHash}
             schemaConfig={schemaConfig}
@@ -232,9 +238,11 @@ function ServerReadyApp<TState, EphemeralData>({
     app,
     runtime,
     docId,
-    documents,
+    remoteDocuments,
+    localDocuments,
     documentsUnavailableMessage,
     onSwitchDocument,
+    onDocumentsChanged,
     schemaFingerprint,
     schemaFingerprintHash,
     schemaConfig,
@@ -244,9 +252,11 @@ function ServerReadyApp<TState, EphemeralData>({
     app: AppDefinition<TState, EphemeralData>;
     runtime: CrdtRuntime<TState, EphemeralData>;
     docId: string;
-    documents: ServerDocumentSummary[];
+    remoteDocuments: ServerDocumentSummary[];
+    localDocuments: ServerDocumentSummary[];
     documentsUnavailableMessage?: string;
     onSwitchDocument(docId: string): void;
+    onDocumentsChanged(remoteDocuments: ServerDocumentSummary[], localDocuments: ServerDocumentSummary[]): void;
     schemaFingerprint: string;
     schemaFingerprintHash: string;
     schemaConfig: ServerSchemaConfig<TState>;
@@ -258,6 +268,7 @@ function ServerReadyApp<TState, EphemeralData>({
     const sync = useServerSync({
         app,
         docId,
+        title: loaded.replica.title || docId,
         schema: app.schema,
         schemaVersion: loaded.replica.schemaVersion,
         schemaFingerprint,
@@ -268,17 +279,13 @@ function ServerReadyApp<TState, EphemeralData>({
         replaceHistory: setCurrentHistory,
     });
     const {Provider} = runtime;
-    const importSeedClientReplica = useCallback(
-        async (seedDocId: string, scenario: ServerClientSeedScenario) => {
-            const fixture = loadBranchFreeSeedFixtureForApp(app, seedDocId);
-            if (!fixture) throw new Error(`No seed document exists for "${seedDocId}".`);
-            const replica = createServerClientSeedReplica({fixture, scenario});
-            await saveServerReplica(replica);
-            sync.replaceReplica(replica);
-            onSwitchDocument(fixture.docId);
-        },
-        [app, onSwitchDocument, sync],
-    );
+    const refreshDocuments = useCallback(async () => {
+        const [nextRemoteDocuments, nextLocalDocuments] = await Promise.all([
+            fetchServerDocuments().catch(() => remoteDocuments),
+            listLocalServerDocuments(),
+        ]);
+        onDocumentsChanged(nextRemoteDocuments, nextLocalDocuments);
+    }, [onDocumentsChanged, remoteDocuments]);
     const archiveAdapter = useMemo(
         () => ({
             async exportArchive(): Promise<DocumentArchive> {
@@ -313,6 +320,7 @@ function ServerReadyApp<TState, EphemeralData>({
                 await saveServerReplica(normalized);
                 sync.replaceReplica(normalized);
                 onSwitchDocument(archive.docId);
+                await refreshDocuments();
             },
         }),
         [
@@ -320,46 +328,118 @@ function ServerReadyApp<TState, EphemeralData>({
             docId,
             loaded.identity.actor,
             onSwitchDocument,
+            refreshDocuments,
             schemaConfig.version,
             schemaFingerprint,
             schemaFingerprintHash,
             sync,
         ],
     );
+    const documentItems = useMemo(
+        () => classifyServerDocumentItems({
+            appId: app.id,
+            remoteDocuments,
+            localDocuments: [...localDocuments, summaryForServerReplica(loaded.replica)],
+        }),
+        [app.id, loaded.replica, localDocuments, remoteDocuments],
+    );
+    const seedItems = useMemo(
+        () => filterUnrealizedSeeds(seedModalItemsForApp(app.id, 'server'), documentItems),
+        [app.id, documentItems],
+    );
+    const createBlankDocument = useCallback(
+        async ({docId: nextDocId, title}: {docId: string; title: string}) => {
+            const history = createInitialCrdtHistory(app);
+            const now = new Date().toISOString();
+            await saveServerReplica({
+                docId: nextDocId,
+                appId: app.id,
+                title,
+                storageVersion: 4,
+                protocolVersion: SERVER_PROTOCOL_VERSION,
+                schemaVersion: schemaConfig.version,
+                schemaFingerprint,
+                schemaFingerprintHash,
+                activeBranchId: 'main',
+                branchList: [
+                    {
+                        docId: nextDocId,
+                        branchId: 'main',
+                        name: 'main',
+                        tipEventIndex: 0,
+                        createdAt: now,
+                        updatedAt: now,
+                    },
+                ],
+                branches: {
+                    main: {
+                        branchId: 'main',
+                        history,
+                        lastSeenEventIndex: 0,
+                        undoCheckpointEventIndex: 0,
+                        events: [],
+                        mirrored: true,
+                    },
+                },
+                updatedAt: now,
+            });
+            await refreshDocuments();
+        },
+        [app, refreshDocuments, schemaConfig.version, schemaFingerprint, schemaFingerprintHash],
+    );
+    const createSeedDocument = useCallback(
+        async (seed: SeedModalItem) => {
+            const fixture = loadBranchFreeSeedFixtureForApp(app, seed.docId);
+            if (!fixture) throw new Error(`No seed document exists for "${seed.docId}".`);
+            await saveServerReplica({
+                ...createServerClientSeedReplica({fixture, scenario: 'cached'}),
+                title: fixture.title || fixture.docId,
+            });
+            await refreshDocuments();
+        },
+        [app, refreshDocuments],
+    );
+    const deleteLocalDocument = useCallback(
+        async (document: DocumentModalItem) => {
+            await deleteServerReplica(document.docId);
+            await refreshDocuments();
+            if (document.docId === docId) {
+                const fallback = documentItems.find((item) => item.docId !== document.docId);
+                onSwitchDocument(fallback?.docId ?? runtime.docId);
+            }
+        },
+        [docId, documentItems, onSwitchDocument, refreshDocuments, runtime.docId],
+    );
     const topBarControls = useMemo(
         () => ({
             documentPicker: (
-                <ServerDocumentPicker
-                    documents={documents}
+                <DocumentManagerModal
+                    documents={documentItems}
+                    seeds={seedItems}
                     activeDocId={docId}
-                    documentsUnavailableMessage={documentsUnavailableMessage}
                     onSwitchDocument={onSwitchDocument}
+                    onCreateDocument={createBlankDocument}
+                    onCreateSeed={createSeedDocument}
+                    onDeleteLocal={deleteLocalDocument}
+                    archiveAdapter={archiveAdapter}
+                    onChanged={() => void refreshDocuments()}
                 />
             ),
-            seedControls: (
-                <ServerClientSeedControls
-                    appId={app.id}
-                    activeDocId={docId}
-                    onImportSeed={importSeedClientReplica}
-                />
-            ),
-            archiveControls: (
-                <DocumentArchiveControls
-                    adapter={archiveAdapter}
-                    appId={app.id}
-                    docId={docId}
-                    payloadKind="server"
-                />
-            ),
+            statusMessage: documentsUnavailableMessage ? (
+                <p className="topBarMessage">{documentsUnavailableMessage}</p>
+            ) : null,
         }),
         [
-            app.id,
             archiveAdapter,
+            createBlankDocument,
+            createSeedDocument,
+            deleteLocalDocument,
             docId,
-            documents,
+            documentItems,
             documentsUnavailableMessage,
-            importSeedClientReplica,
             onSwitchDocument,
+            refreshDocuments,
+            seedItems,
         ],
     );
     useTopBarControls(topBarControls);
@@ -473,62 +553,6 @@ function ServerDocumentWorkspace<TState, EphemeralData>({
     );
 }
 
-function ServerDocumentPicker({
-    documents,
-    activeDocId,
-    documentsUnavailableMessage,
-    onSwitchDocument,
-}: {
-    documents: ServerDocumentSummary[];
-    activeDocId: string;
-    documentsUnavailableMessage?: string;
-    onSwitchDocument(docId: string): void;
-}) {
-    return (
-        <label
-            className="serverDocumentPicker"
-            title={documentsUnavailableMessage ?? 'Server document'}
-        >
-            <span>Document</span>
-            <select
-                value={activeDocId}
-                onChange={(event) => onSwitchDocument(event.currentTarget.value)}
-                aria-label="Server document"
-            >
-                {documents.map((document) => (
-                    <option
-                        key={document.docId}
-                        value={document.docId}
-                        title={documentOptionTitle(document)}
-                    >
-                        {documentOptionLabel(document)}
-                    </option>
-                ))}
-            </select>
-        </label>
-    );
-}
-
-function documentOptionLabel(document: ServerDocumentSummary) {
-    const facts = [
-        document.sizeLabel,
-        document.eventCount ? `${document.eventCount} events` : '',
-        document.branchCount ? `${document.branchCount} branches` : '',
-    ].filter(Boolean);
-    return facts.length ? `${document.title} (${facts[0]})` : document.title;
-}
-
-function documentOptionTitle(document: ServerDocumentSummary) {
-    return [
-        document.docId,
-        document.sizeLabel,
-        `${document.eventCount} events`,
-        `${document.branchCount} branches`,
-    ]
-        .filter(Boolean)
-        .join(' | ');
-}
-
 async function loadInitialState<TState>(
     app: AppDefinition<TState, any>,
     docId: string,
@@ -569,6 +593,7 @@ async function loadInitialState<TState>(
     const replica: PersistedServerReplica<TState> = {
         docId,
         appId: app.id,
+        title: docId,
         storageVersion: 4,
         protocolVersion: SERVER_PROTOCOL_VERSION,
         schemaVersion: schemaConfig.version,
@@ -663,13 +688,17 @@ async function fetchServerDocuments(): Promise<ServerDocumentSummary[]> {
 
 async function listLocalServerDocuments(): Promise<ServerDocumentSummary[]> {
     const replicas = await listServerReplicas();
-    return replicas.map((replica) => ({
+    return replicas.map(summaryForServerReplica);
+}
+
+function summaryForServerReplica(replica: PersistedServerReplica<unknown>): ServerDocumentSummary {
+    return {
         docId: replica.docId,
         appId: replica.appId,
         schemaVersion: replica.schemaVersion,
         schemaFingerprint: replica.schemaFingerprint,
         schemaFingerprintHash: replica.schemaFingerprintHash,
-        title: replica.docId,
+        title: replica.title || replica.docId,
         sizeLabel: 'local',
         sizeRank: 0,
         createdAt: replica.updatedAt,
@@ -679,33 +708,48 @@ async function listLocalServerDocuments(): Promise<ServerDocumentSummary[]> {
             (count, branch) => count + branch.events.length,
             0,
         ),
-    }));
+    };
 }
 
-function mergeServerDocuments(
-    remoteDocuments: ServerDocumentSummary[],
-    localDocuments: ServerDocumentSummary[],
-) {
-    const byId = new Map(localDocuments.map((document) => [document.docId, document]));
-    for (const document of remoteDocuments) byId.set(document.docId, document);
-    return [...byId.values()].sort((a, b) => a.title.localeCompare(b.title));
-}
-
-function seedDocumentsForServerPicker(appId: string): ServerDocumentSummary[] {
-    return branchFreeSeedSummariesForApp(appId, 'server').map((seed) => ({
-        docId: seed.docId,
-        appId: seed.appId,
-        schemaVersion: seed.schemaVersion ?? 1,
-        schemaFingerprint: '',
-        schemaFingerprintHash: seed.schemaFingerprintHash,
-        title: seed.title,
-        sizeLabel: seed.sizeLabel,
-        sizeRank: seed.sizeRank,
-        createdAt: seed.createdAt,
-        lastAccessedAt: seed.updatedAt,
-        branchCount: 1,
-        eventCount: 0,
-    }));
+function classifyServerDocumentItems({
+    appId,
+    remoteDocuments,
+    localDocuments,
+}: {
+    appId: string;
+    remoteDocuments: ServerDocumentSummary[];
+    localDocuments: ServerDocumentSummary[];
+}): DocumentModalItem[] {
+    const relevant = (document: ServerDocumentSummary) =>
+        document.appId === appId || document.appId === '';
+    const remoteById = new Map(remoteDocuments.filter(relevant).map((document) => [document.docId, document]));
+    const localById = new Map(localDocuments.filter(relevant).map((document) => [document.docId, document]));
+    const ids = new Set([...remoteById.keys(), ...localById.keys()]);
+    return [...ids]
+        .map((docId) => {
+            const remote = remoteById.get(docId);
+            const local = localById.get(docId);
+            const primary = remote ?? local;
+            if (!primary) throw new Error('Missing server document summary.');
+            return {
+                docId,
+                appId: primary.appId || appId,
+                title: primary.title || docId,
+                payloadKind: 'server' as const,
+                schemaVersion: primary.schemaVersion,
+                schemaFingerprintHash: primary.schemaFingerprintHash,
+                createdAt: primary.createdAt,
+                updatedAt: primary.lastAccessedAt,
+                source: remote && local ? 'local-and-server' : remote ? 'server' : 'local',
+                canDeleteLocal: Boolean(local),
+                metrics: {
+                    sizeLabel: primary.sizeLabel,
+                    branchCount: primary.branchCount,
+                    eventCount: primary.eventCount,
+                },
+            } satisfies DocumentModalItem;
+        })
+        .sort((a, b) => a.title.localeCompare(b.title) || a.docId.localeCompare(b.docId));
 }
 
 async function loginServerUser(nickname: string): Promise<ServerUser> {

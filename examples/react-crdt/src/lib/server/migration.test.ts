@@ -27,6 +27,7 @@ const newFingerprintHash = sha256Hex(newFingerprint);
 const v1App: AppDefinition<V1> = {
     id: 'test',
     title: 'Test',
+    schemaVersion: 1,
     tagKey: 'type',
     schema: v1Schema,
     initialState: {title: 'Draft'},
@@ -39,6 +40,7 @@ const v1App: AppDefinition<V1> = {
 const v2App: AppDefinition<V2> = {
     id: 'test',
     title: 'Test',
+    schemaVersion: 2,
     tagKey: 'type',
     schema: v2Schema,
     initialState: {label: 'Draft'},

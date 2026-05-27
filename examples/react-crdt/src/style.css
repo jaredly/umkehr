@@ -80,29 +80,20 @@ button:disabled:hover {
     justify-content: flex-end;
 }
 
-.demoTopBar label,
-.documentPicker,
-.serverDocumentPicker,
-.serverClientSeedControls label {
+.demoTopBar label {
     display: inline-grid;
     grid-template-columns: auto minmax(150px, 1fr);
     align-items: center;
     gap: 8px;
 }
 
-.demoTopBar label span,
-.documentPicker span,
-.serverDocumentPicker span,
-.serverClientSeedControls span {
+.demoTopBar label span {
     color: #526070;
     font-size: 12px;
     font-weight: 700;
 }
 
-.demoTopBar select,
-.documentPicker select,
-.serverDocumentPicker select,
-.serverClientSeedControls select {
+.demoTopBar select {
     min-width: 0;
     width: 100%;
     height: 34px;
@@ -121,8 +112,206 @@ button:disabled:hover {
     min-width: 130px;
 }
 
-.documentPicker {
+.documentManager {
     min-width: min(360px, 42vw);
+}
+
+.documentManagerTrigger {
+    min-width: 240px;
+    height: 38px;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+    text-align: left;
+}
+
+.documentManagerTrigger span:first-child {
+    color: #526070;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.documentManagerTrigger strong {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 14px;
+}
+
+.documentModalOverlay {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    padding: 72px 16px 24px;
+    background: rgb(15 23 42 / 42%);
+    display: grid;
+    align-items: start;
+    justify-items: center;
+}
+
+.documentModal {
+    width: min(920px, 100%);
+    max-height: calc(100vh - 96px);
+    overflow: auto;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    background: #f8fafc;
+    box-shadow: 0 24px 60px rgb(15 23 42 / 28%);
+}
+
+.documentModalHeader,
+.documentModalActions,
+.documentCreateForm,
+.documentModalSection {
+    padding: 14px 16px;
+}
+
+.documentModalHeader {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    border-bottom: 1px solid #d7e0ea;
+    background: #f8fafc;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.documentModalHeader h1 {
+    font-size: 20px;
+}
+
+.documentModalActions,
+.documentCreateForm {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.documentCreateForm input {
+    min-width: min(360px, 100%);
+    flex: 1 1 240px;
+    height: 38px;
+    border: 1px solid #c3cfdb;
+    border-radius: 6px;
+    padding: 0 10px;
+    background: #fff;
+}
+
+.documentModalSection h2 {
+    margin: 0 0 10px;
+    font-size: 14px;
+    color: #334155;
+}
+
+.documentRows {
+    display: grid;
+    gap: 8px;
+}
+
+.documentRow {
+    min-width: 0;
+    border: 1px solid #d7e0ea;
+    border-radius: 8px;
+    padding: 12px;
+    background: #fff;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: center;
+}
+
+.documentRowMain {
+    min-width: 0;
+    display: grid;
+    gap: 6px;
+}
+
+.documentRowTitle,
+.documentRowMeta,
+.documentRowActions {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.documentRowTitle strong {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.documentRowMeta {
+    color: #64748b;
+    font-size: 12px;
+}
+
+.documentRowMeta span {
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.documentBadge {
+    border: 1px solid #cbd5e1;
+    border-radius: 999px;
+    padding: 2px 7px;
+    color: #334155;
+    background: #f1f5f9;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.source-local {
+    border-color: #a7d7c5;
+    color: #176149;
+    background: #e8f7f1;
+}
+
+.source-server {
+    border-color: #b7c7ee;
+    color: #244d98;
+    background: #eaf0ff;
+}
+
+.source-local-and-server {
+    border-color: #c9b6ee;
+    color: #583b92;
+    background: #f2ecff;
+}
+
+.documentRowActions {
+    justify-content: flex-end;
+}
+
+.dangerButton {
+    border-color: #e2a8a8;
+    color: #9f1d1d;
+    background: #fff7f7;
+}
+
+.dangerButton:hover {
+    border-color: #ba3b3b;
+}
+
+.documentModalMessage,
+.documentModalStatus {
+    margin: 0;
+    color: #64748b;
+    font-size: 13px;
+}
+
+.documentModalStatus {
+    padding: 0 16px 16px;
 }
 
 .rolePicker button {
@@ -1394,27 +1583,8 @@ p {
     pointer-events: none;
 }
 
-.documentArchiveControls,
-.seedDocumentPicker,
-.serverClientSeedControls {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-}
-
-.serverClientSeedControls label {
-    grid-template-columns: auto minmax(150px, 1fr);
-}
-
 .documentArchiveInput {
     display: none;
-}
-
-.documentArchiveMessage {
-    margin: 0;
-    color: #b42318;
-    font-size: 12px;
 }
 
 .whiteboardRemoteSelections span {
@@ -1487,11 +1657,8 @@ p {
 
     .topBarGroup,
     .demoTopBar label,
-    .documentPicker,
-    .serverDocumentPicker,
-    .serverClientSeedControls,
-    .serverClientSeedControls label,
-    .documentArchiveControls {
+    .documentManager,
+    .documentManagerTrigger {
         width: 100%;
     }
 
@@ -1502,11 +1669,5 @@ p {
     .serverControls {
         position: static;
         flex-wrap: wrap;
-    }
-
-    .serverDocumentPicker {
-        order: 3;
-        min-width: 100%;
-        grid-template-columns: 1fr;
     }
 }

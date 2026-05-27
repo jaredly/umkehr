@@ -75,6 +75,7 @@ type DiscoveredMember = LocalFirstMember & {
 
 export function useLocalFirstSync<TState>({
     docId,
+    title,
     schema,
     tagKey,
     validateState,
@@ -91,6 +92,7 @@ export function useLocalFirstSync<TState>({
     replaceHistory,
 }: {
     docId: string;
+    title: string;
     schema: IJsonSchemaCollection<'3.1', [TState]>;
     tagKey: string;
     validateState(input: unknown): IValidation<TState>;
@@ -275,6 +277,7 @@ export function useLocalFirstSync<TState>({
                 const savedAt = new Date().toISOString();
                 await saveReplica<TState>({
                     docId,
+                    title,
                     storageVersion: 1,
                     protocolVersion: 1,
                     schemaVersion,
@@ -302,6 +305,7 @@ export function useLocalFirstSync<TState>({
         },
         [
             docId,
+            title,
             identity.replicaId,
             lineage,
             persistenceStore,

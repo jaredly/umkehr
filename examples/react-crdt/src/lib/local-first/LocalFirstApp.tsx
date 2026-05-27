@@ -7,6 +7,7 @@ import {
 } from '../crdtApp';
 import {LocalFirstControls} from './LocalFirstControls';
 import {
+    clearReplica,
     hasReplica,
     listReplicas,
     listBatches,
@@ -17,15 +18,18 @@ import {
     saveReplica,
 } from './persistence';
 import {
-    DocumentArchiveControls,
-    DocumentPicker,
+    DocumentManagerModal,
+    filterUnrealizedSeeds,
+    localDocumentModalItems,
     type DocumentArchive,
+    type DocumentModalItem,
     type LocalDocumentSummary,
+    type SeedModalItem,
 } from '../documentArchive';
 import {useTopBarControls} from '../chrome/TopBarContext';
 import {
     loadBranchFreeSeedFixtureForApp,
-    mergeDocumentSummariesWithSeeds,
+    seedModalItemsForApp,
 } from '../seed/documents';
 import {readActiveDocIdFromSearch, urlWithActiveDocId} from '../useUrlSelection';
 import {createLocalFirstSeedReplica} from '../seed/localFirst';
@@ -46,6 +50,7 @@ import {
 type Loaded<TState> = {
     identity: ReplicaIdentity;
     docId: string;
+    title: string;
     schemaVersion: number;
     schemaFingerprint: string;
     schemaFingerprintHash: string;
@@ -170,6 +175,7 @@ function LocalFirstReadyApp<TState, EphemeralData>({
     const [documents, setDocuments] = useState<LocalDocumentSummary[]>([]);
     const sync = useLocalFirstSync({
         docId: loaded.docId,
+        title: loaded.title,
         schema: app.schema,
         tagKey: app.tagKey,
         validateState: app.validateState,
@@ -199,7 +205,7 @@ function LocalFirstReadyApp<TState, EphemeralData>({
                 replicas.map((replica) => ({
                     docId: replica.docId,
                     appId: app.id,
-                    title: replica.docId,
+                    title: replica.title || replica.docId,
                     payloadKind: 'local-first',
                     schemaVersion: replica.schemaVersion,
                     schemaFingerprintHash: replica.schemaFingerprintHash,
@@ -254,35 +260,92 @@ function LocalFirstReadyApp<TState, EphemeralData>({
         }),
         [app.id, loaded, sync],
     );
+    const documentItems = useMemo(
+        () => localDocumentModalItems(documents, app.id, 'local-first'),
+        [app.id, documents],
+    );
+    const seedItems = useMemo(
+        () => filterUnrealizedSeeds(seedModalItemsForApp(app.id, 'local-first'), documentItems),
+        [app.id, documentItems],
+    );
+    const createBlankDocument = useCallback(
+        async ({docId, title}: {docId: string; title: string}) => {
+            const now = new Date().toISOString();
+            await saveReplica({
+                docId,
+                title,
+                storageVersion: 1,
+                protocolVersion: 1,
+                schemaVersion: loaded.schemaVersion,
+                schemaFingerprint: loaded.schemaFingerprint,
+                schemaFingerprintHash: loaded.schemaFingerprintHash,
+                replicaId: loaded.identity.replicaId,
+                history: createInitialCrdtHistory(app),
+                vector: {},
+                updatedAt: now,
+            });
+            refreshDocuments();
+        },
+        [app, loaded, refreshDocuments],
+    );
+    const createSeedDocument = useCallback(
+        async (seed: SeedModalItem) => {
+            const fixture = loadBranchFreeSeedFixtureForApp(app, seed.docId);
+            if (!fixture) throw new Error(`No seed document exists for "${seed.docId}".`);
+            const seeded = createLocalFirstSeedReplica({fixture});
+            await replaceReplicaState(
+                {...seeded.replica, title: fixture.title || fixture.docId},
+                seeded.batches,
+            );
+            refreshDocuments();
+        },
+        [app, refreshDocuments],
+    );
+    const deleteLocalDocument = useCallback(
+        async (document: DocumentModalItem) => {
+            await clearReplica(document.docId);
+            const remaining = (await listReplicas()).filter((replica) => replica.docId !== document.docId);
+            setDocuments(
+                remaining.map((replica) => ({
+                    docId: replica.docId,
+                    appId: app.id,
+                    title: replica.title || replica.docId,
+                    payloadKind: 'local-first',
+                    schemaVersion: replica.schemaVersion,
+                    schemaFingerprintHash: replica.schemaFingerprintHash,
+                    createdAt: replica.updatedAt,
+                    updatedAt: replica.updatedAt,
+                })),
+            );
+            if (document.docId === loaded.docId) switchDocument(remaining[0]?.docId ?? runtime.docId);
+        },
+        [app.id, loaded.docId, runtime.docId, switchDocument],
+    );
     const topBarControls = useMemo(
         () => ({
             documentPicker: (
-                <DocumentPicker
-                    documents={mergeDocumentSummariesWithSeeds(
-                        documents,
-                        app.id,
-                        'local-first',
-                    )}
+                <DocumentManagerModal
+                    documents={documentItems}
+                    seeds={seedItems}
                     activeDocId={loaded.docId}
-                    appId={app.id}
-                    payloadKind="local-first"
                     onSwitchDocument={switchDocument}
-                />
-            ),
-            archiveControls: (
-                <DocumentArchiveControls
-                    adapter={archiveAdapter}
-                    appId={app.id}
-                    docId={loaded.docId}
-                    payloadKind="local-first"
+                    onCreateDocument={createBlankDocument}
+                    onCreateSeed={createSeedDocument}
+                    onDeleteLocal={deleteLocalDocument}
+                    archiveAdapter={archiveAdapter}
+                    onChanged={refreshDocuments}
                 />
             ),
         }),
         [
-            app.id,
             archiveAdapter,
-            documents,
+            createBlankDocument,
+            createSeedDocument,
+            deleteLocalDocument,
+            documentItems,
             loaded.docId,
+            refreshDocuments,
+            seedItems,
             switchDocument,
         ],
     );
@@ -376,6 +439,7 @@ async function loadInitialState<TState>(
             loaded: {
                 identity,
                 docId,
+                title: normalized.title || docId,
                 schemaVersion: normalized.schemaVersion,
                 schemaFingerprint,
                 schemaFingerprintHash,
@@ -390,12 +454,16 @@ async function loadInitialState<TState>(
     }
 
     if (seeded) {
-        await replaceReplicaState(seeded.replica, seeded.batches);
+        await replaceReplicaState(
+            {...seeded.replica, title: seedFixture?.title || seeded.replica.docId},
+            seeded.batches,
+        );
         return {
             kind: 'ready',
             loaded: {
                 identity,
                 docId,
+                title: seeded.replica.title || seedFixture?.title || docId,
                 schemaVersion: seeded.replica.schemaVersion,
                 schemaFingerprint: seeded.replica.schemaFingerprint,
                 schemaFingerprintHash: seeded.replica.schemaFingerprintHash,
@@ -413,6 +481,7 @@ async function loadInitialState<TState>(
     const vector: VersionVector = {};
     await saveReplica({
         docId,
+        title: docId,
         storageVersion: 1,
         protocolVersion: 1,
         schemaVersion: schemaConfig.version,
@@ -428,6 +497,7 @@ async function loadInitialState<TState>(
         loaded: {
             identity,
             docId,
+            title: docId,
             schemaVersion: schemaConfig.version,
             schemaFingerprint,
             schemaFingerprintHash,

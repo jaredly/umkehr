@@ -57,6 +57,7 @@ import type {IJsonSchemaCollection} from 'typia';
 export function useServerSync<TState>({
     app,
     docId,
+    title,
     schema,
     schemaVersion,
     schemaFingerprint,
@@ -68,6 +69,7 @@ export function useServerSync<TState>({
 }: {
     app: AppDefinition<TState>;
     docId: string;
+    title: string;
     schema: IJsonSchemaCollection<'3.1', [TState]>;
     schemaVersion: number;
     schemaFingerprint: string;
@@ -979,6 +981,7 @@ export function useServerSync<TState>({
         return {
             docId,
             appId: app.id,
+            title,
             storageVersion: 4,
             protocolVersion: SERVER_PROTOCOL_VERSION,
             schemaVersion,

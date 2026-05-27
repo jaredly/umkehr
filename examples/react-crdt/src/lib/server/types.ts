@@ -127,6 +127,7 @@ export type PersistedServerBranch<TState> = {
 export type PersistedServerReplica<TState> = {
     docId: string;
     appId: string;
+    title?: string;
     storageVersion: 4;
     protocolVersion: 3;
     schemaVersion: number;
