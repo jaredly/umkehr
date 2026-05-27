@@ -1,0 +1,71 @@
+# Shared Preview Implementation Log
+
+- Started Phase 1.
+- Added `EphemeralMessage<Data>` plus `EphemeralStore` types and `createEphemeralStore` in `src/ephemeral.ts`.
+- Extended `SyncedTransport` with required `publishEphemeral` and `subscribeEphemeral` methods.
+- Added explicit drop/no-op ephemeral methods to existing test, local simulator, server, PeerJS, and local-first transports.
+- Exported ephemeral types/store from `umkehr` and `umkehr/react-crdt`.
+- Added focused store tests for replace, clear, actor/path/kind queries, stale state after 15s, stale sweep notifications, removal after 30s, expiry sweep notifications, and `expiresAt`.
+- Verified with `npx vitest run src/ephemeral.test.ts`, `npm run typecheck`, and `npm test`.
+- Re-verified after making transport ephemeral methods required with `npx vitest run src/ephemeral.test.ts src/react-crdt/react-crdt.test.tsx`, `npm run typecheck`, and `npm test`.
+- `npm run typecheck:examples` still fails on pre-existing example issues in `examples/react-crdt/src/lib/seed/generate.test.ts` and Vite plugin type mismatches; the new server placeholder implicit-any errors were fixed.
+- Started Phase 2.
+- Added `EphemeralConfig<Data>` and bound the ephemeral payload type to `createSyncedContext<T, Tag, EphemeralData>` rather than method-level generics.
+- Added fixed-type `ctx.publishEphemeral(messages)` and `ctx.useEphemeral(query)` helpers.
+- Added per-provider `EphemeralStore`, inbound `transport.subscribeEphemeral` handling, receive-side data validation, local-actor echo suppression, and optional max-message-byte enforcement.
+- Added React tests for publishing, validated remote receipt, ignored invalid/local echo messages, and path-scoped rerender behavior.
+- Added `type-tests/ephemeral-context.ts` to assert a context cannot publish a different ephemeral payload type and default contexts cannot publish ephemeral data.
+- Verified Phase 2 with `npx vitest run src/ephemeral.test.ts src/react-crdt/react-crdt.test.tsx`, `npm run typecheck`, `npm run typecheck:tests`, and `npm test`.
+- Rechecked `npm run typecheck:examples`; it still fails only on the known unrelated `CrdtUpdate.path` seed test and Vite plugin type mismatches.
+- Started Phase 3.
+- Implemented real local simulator ephemeral transport delivery in `DemoTransport`, including `publishEphemeral`, `subscribeEphemeral`, and `receiveEphemeral`.
+- Wired `useLocalDemoSync` to broadcast ephemeral messages to other replicas only while sync is enabled; disabled sync drops messages and does not enqueue them.
+- Added local simulator tests for publish/receive, disabled-sync drops, and no replay of offline ephemeral messages after sync is re-enabled.
+- Verified Phase 3 with `npx vitest run examples/react-crdt/src/lib/local/useLocalDemoSync.test.ts`, `npm run typecheck`, `npm run typecheck:tests`, and `npm test`.
+- Rechecked `npm run typecheck:examples`; it still fails only on the known unrelated `CrdtUpdate.path` seed test and Vite plugin type mismatches.
+- Started Phase 4.
+- Added `presenceEvent` protocol variants to the example client and Bun server, carrying `EphemeralMessage<unknown>` on the current protocol version.
+- Added client-side parsing for server `presenceEvent` messages with envelope/path validation.
+- Added server-side parsing for client `presenceEvent` messages with envelope validation, actor-match validation, and a 16 KB payload cap.
+- Wired browser server transport `publishEphemeral` to send `presenceEvent` messages and `subscribeEphemeral` to receive same-branch events.
+- Wired server runtime to reject presence events before `presenceHello`, require the sender's current branch, and broadcast only to presence-ready clients on the same doc and branch.
+- Added actor cleanup on `presenceLeave` and branch-switch cleanup through the transport's `clearEphemeralActor` hook.
+- Added client protocol tests for valid and malformed `presenceEvent` messages.
+- Verified Phase 4 with `npx vitest run examples/react-crdt/src/lib/server/protocol.test.ts`, `npm run typecheck`, `npm run typecheck:tests`, `npm test`, `npm run typecheck` in `examples/react-crdt-server`, and `npm test` in `examples/react-crdt-server`.
+- Rechecked `npm run typecheck:examples`; it still fails only on the known unrelated `CrdtUpdate.path` seed test and Vite plugin type mismatches.
+- Started Phase 5.
+- Added whiteboard-specific `WhiteboardEphemeralData` union covering element previews, stroke previews, and selections.
+- Added `validateWhiteboardEphemeralData` using the existing typia validator pattern.
+- Added stable whiteboard ephemeral message helpers for element previews, stroke previews, selections, clears, and message ids.
+- Scoped element and stroke preview messages to `elements[id]`; scoped single-element selections to `elements[id]`, multi-element selections to `elements`, and empty selections to no path.
+- Bound `useWhiteboard` to `WhiteboardEphemeralData` through `createSyncedContext` with receive-side validation and a 16 KB message cap.
+- Exported the whiteboard ephemeral payload types, validator, and helpers from the whiteboard model module.
+- Added focused whiteboard tests for valid/invalid payload validation, stable helper message shape, path scoping, and clear-message validity.
+- Verified Phase 5 with `npx vitest run examples/react-crdt/src/apps/whiteboard/ephemeral.test.ts`, `npm run typecheck`, `npm run typecheck:tests`, and `npm test`.
+- Rechecked `npm run typecheck:examples`; it still fails only on the known unrelated `CrdtUpdate.path` seed test and Vite plugin type mismatches.
+- Started Phase 6.
+- Replaced whiteboard drag `when: 'preview'` document mutations with local element preview overlay state.
+- Published throttled `element-preview` messages during element move/resize, then committed the durable position/size only on pointer up.
+- Added explicit `clear` messages for element previews on pointer up, cancel, read-only transition, and missing viewport cleanup.
+- Gave freehand strokes stable ids before commit, published throttled `stroke-preview` messages during drawing, and cleared the stroke preview on commit/cancel.
+- Published typed selection messages for the local selection with bounds, and cleared them when selection becomes empty/read-only/unmounted.
+- Rendered remote element, stroke, and selection ephemeral messages as pointer-events-disabled overlays with stale opacity.
+- Suppressed the local durable element visually while its local overlay is active, so dragging does not mutate durable state during pointer movement.
+- Kept history-only whiteboard mode working without an ephemeral channel by detecting the CRDT ephemeral helper surface at runtime.
+- Verified Phase 6 with `npx vitest run examples/react-crdt/src/apps/whiteboard/ephemeral.test.ts examples/react-crdt/src/apps/whiteboard/helpers.test.ts`, `npm run typecheck`, `npm run typecheck:tests`, and `npm test`.
+- Rechecked `npm run typecheck:examples`; it still fails only on the known unrelated `CrdtUpdate.path` seed test and Vite plugin type mismatches.
+- Fixed selected-element drag previews to publish updated `selection` bounds alongside `element-preview` messages during move/resize and after durable pointer-up commit.
+- Started Phase 7.
+- Added PeerJS `ephemeral` protocol messages carrying `EphemeralMessage<unknown>[]`.
+- Added PeerJS ephemeral envelope validation for actor matching, path shape, required data, optional clear/expires fields, and a 16 KB encoded batch cap.
+- Wired PeerJS transport `publishEphemeral` and `subscribeEphemeral`; host peers deliver inbound client ephemeral messages locally and rebroadcast them to other peers.
+- Kept PeerJS snapshots durable-document-only; ephemeral messages are broadcast-only and are not included in snapshot state.
+- Added PeerJS protocol tests for valid ephemeral messages, malformed actor/path envelopes, and oversized batches.
+- Verified Phase 7 with `npx vitest run examples/react-crdt/src/lib/peerjs/protocol.test.ts`, `npm run typecheck`, `npm run typecheck:tests`, and `npm test`.
+- Rechecked `npm run typecheck:examples`; it still fails only on the known unrelated `CrdtUpdate.path` seed test and Vite plugin type mismatches.
+- Started Phase 8.
+- Added a React helper test for clearing all ephemeral records for a remote actor through the transport cleanup hook.
+- Expanded browser server-protocol tests to reject malformed `presenceEvent` paths and invalid `clear` fields.
+- Attempted a Bun server protocol test for `presenceEvent`, but importing `src/protocol.ts` in `bun test` still trips typia's no-transform runtime path; reverted that test and left server protocol coverage to browser protocol tests plus server package typecheck.
+- Verified Phase 8 with focused shared-preview tests, `npm run typecheck`, `npm run typecheck:tests`, `npm test`, `npm test` in `examples/react-crdt-server`, and `npm run typecheck` in `examples/react-crdt-server`.
+- Rechecked `npm run typecheck:examples`; it still fails only on the known unrelated `CrdtUpdate.path` seed test and Vite plugin type mismatches.

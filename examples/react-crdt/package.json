@@ -1,0 +1,25 @@
+{
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "seed:server": "vite build --configLoader runner --config vite.seed.config.ts 1>&2 && node /private/tmp/umkehr-react-crdt-seed-build/generate.js",
+    "build": "tsc -p tsconfig.json --noEmit && vite build",
+    "test:e2e": "playwright test -c playwright.config.ts"
+  },
+  "dependencies": {
+    "idb": "^8.0.3",
+    "peerjs": "^1.5.5",
+    "typia": "^12.1.1",
+    "umkehr": "link:../..",
+    "vite": "^7.2.7"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.60.0",
+    "@types/node": "^25.9.1",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.3",
+    "@typia/unplugin": "^12.1.1",
+    "typescript": "^5.9.3"
+  }
+}

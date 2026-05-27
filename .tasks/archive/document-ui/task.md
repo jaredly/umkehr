@@ -1,0 +1,1 @@
+Now that we have import/export and 'document seeds' across architectures in our examples/react-crdt app, we need a more coherent approach to the UI. I want a top bar that has dropdowns for (1) the app (todo vs whiteboard), (2) the architecture (solo, local, etc.), and (3) the document, as well as import/export buttons.

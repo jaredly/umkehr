@@ -25,7 +25,11 @@ const maybePatch: DraftPatch<State, 'type', undefined> = builder.maybe.$remove()
 const maybeNestedPatch: DraftPatch<State, 'type', undefined> = builder.maybeNested.label('Label');
 const pushPatch: DraftPatch<State, 'type', undefined> = builder.items.$push({id: 'a', done: false});
 const itemPatch: DraftPatch<State, 'type', undefined> = builder.items[0].done(true);
-const movePatch: DraftPatch<State, 'type', undefined> = builder.items.$move(0, 1);
+const movePatch: DraftPatch<State, 'type', undefined> = builder.items.$move({
+    fromIdx: 0,
+    targetIdx: 1,
+    after: true,
+});
 const reorderPatch: DraftPatch<State, 'type', undefined> = builder.items.$reorder([1, 0]);
 const recordPatch: DraftPatch<State, 'type', undefined> = builder.byId.someKey(1);
 const circlePatch: DraftPatch<State, 'type', undefined> = builder.shape.$variant('circle').radius(2);
@@ -59,6 +63,9 @@ builder.items.$push({id: 'a'});
 
 // @ts-expect-error array indices must expose item fields, not arbitrary fields
 builder.items[0].missing(true);
+
+// @ts-expect-error object builders do not expose array move
+builder.byId.$move({fromIdx: 0, targetIdx: 1, after: true});
 
 // @ts-expect-error circle variant does not expose rect-only fields
 builder.shape.$variant('circle').width(2);

@@ -1,0 +1,4 @@
+preload = ["./typiaPlugin.ts"]
+
+[test]
+preload = ["./typiaPlugin.ts"]

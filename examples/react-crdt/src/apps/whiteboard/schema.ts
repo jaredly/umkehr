@@ -1,0 +1,71 @@
+import typia from 'typia';
+import {hlc} from 'umkehr/crdt';
+
+export type WhiteboardElementType = 'note' | 'stroke' | 'emoji';
+
+export type StrokePoint = {
+    x: number;
+    y: number;
+    pressure?: number;
+};
+
+export type BoardPoint = {
+    x: number;
+    y: number;
+};
+
+export type ElementSize = {
+    width: number;
+    height: number;
+};
+
+export type BaseWhiteboardElement = {
+    type: WhiteboardElementType;
+    id: string;
+    position: BoardPoint;
+    rotation: number;
+    zOrder: string;
+    createdBy: string;
+    createdAt: string;
+    archived: boolean;
+    archivedBy?: string;
+    archivedAt?: string;
+};
+
+export type StickyNoteElement = BaseWhiteboardElement & {
+    type: 'note';
+    size: ElementSize;
+    color: string;
+    text: string;
+};
+
+export type StrokeElement = BaseWhiteboardElement & {
+    type: 'stroke';
+    color: string;
+    strokeWidth: number;
+    points: StrokePoint[];
+};
+
+export type EmojiStampElement = BaseWhiteboardElement & {
+    type: 'emoji';
+    emoji: string;
+    size: number;
+};
+
+export type WhiteboardElement = StickyNoteElement | StrokeElement | EmojiStampElement;
+
+export type WhiteboardState = {
+    background: string;
+    elements: Record<string, WhiteboardElement>;
+};
+
+export const WHITEBOARD_DOC_ID = 'umkehr-react-crdt-whiteboard-v3';
+export const whiteboardSchema = typia.json.schemas<[WhiteboardState], '3.1'>();
+export const validateWhiteboardState = typia.createValidate<WhiteboardState>();
+
+export const initialWhiteboardState: WhiteboardState = {
+    background: '#f8fafc',
+    elements: {},
+};
+
+export const initialWhiteboardTimestamp = hlc.pack(hlc.init('seed', 0));

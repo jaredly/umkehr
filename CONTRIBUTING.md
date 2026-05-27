@@ -4,13 +4,15 @@ This document is a quick map of Umkehr's internals. The README explains how to u
 
 ## Project Shape
 
-The package has three public entry points:
+The package has five public entry points:
 
 - `umkehr`: core patch builders, patch realization/application, and history helpers.
+- `umkehr/crdt`: CRDT documents, update generation/application, CRDT-local undo/redo, and CRDT update validation.
 - `umkehr/react`: React context helpers and path subscriptions.
+- `umkehr/react-crdt`: React bindings for CRDT-backed synced contexts.
 - `umkehr/validation`: optional patch validation helpers for untrusted persisted or remote data.
 
-Keep optional integrations out of the root entry point. React is exposed only through `umkehr/react`, and validation is exposed only through `umkehr/validation`. `typia` is an optional peer dependency because only validation users need it.
+Keep optional integrations out of the root entry point. React is exposed only through `umkehr/react` and `umkehr/react-crdt`, validation is exposed through `umkehr/validation` and the CRDT validator exports, and CRDT behavior is exposed only through `umkehr/crdt`. `react` and `typia` are optional peer dependencies because only those integrations need them.
 
 ## Core Concepts
 
@@ -55,7 +57,7 @@ Important runtime details:
 - Calling a builder node as a function is shorthand for `$replace(...)`.
 - Passing a function to a builder node creates a `nested` draft update.
 - `$variant(value)` adds a tag path segment.
-- `$move(from, to)` creates a sibling move by appending key segments under the current path.
+- `$move({fromIdx, targetIdx, after})` creates an array-local move at the current path.
 - Numeric-looking property names are normalized to numbers so array paths use numeric indices.
 - `createPatchDispatcher(...)` is the underlying primitive. The React bindings use it to dispatch immediately instead of returning drafts.
 
@@ -88,7 +90,7 @@ Patch application lives in two layers:
 - `add` inserts into arrays or assigns missing object keys;
 - `replace` requires `previous` to match the current value;
 - `remove` requires the expected removed value to match;
-- `move` reads from `from`, removes it, then adds it at `path`;
+- `move` reorders one array item before or after another index at `path`;
 - `reorder` replaces an array with a permutation.
 
 The low-level helpers clone only changed ancestors. Unchanged branches retain reference identity, which is important for React path subscriptions and general performance.
@@ -113,6 +115,36 @@ Each non-root history node stores realized `changes: Patch<T>[]`. Undo applies i
 
 `dispatchWithChangedPaths(...)` returns both the next history and the paths touched by the operation. React uses those paths for targeted subscriptions.
 
+## CRDT Layer
+
+CRDT code lives in `src/crdt/*` and is exported as `umkehr/crdt`.
+
+The CRDT layer converts realized patches into commutative updates that can be exchanged between replicas:
+
+- `document.ts` creates a `CrdtDocument<T>` from initial state plus a typia OpenAPI schema collection.
+- `metadata.ts` builds and clones the metadata tree that tracks per-value versions, array item ids, tagged-union incarnations, and tombstones.
+- `updates.ts` converts realized local `Patch<T>` values into CRDT updates.
+- `apply.ts` applies incoming CRDT updates, queues updates whose parents have not arrived yet, and retries pending updates after successful applies.
+- `materialize.ts` turns metadata back into the public state shape.
+- `path.ts`, `schema.ts`, and `traversal.ts` translate between normal Umkehr paths, CRDT paths, schema nodes, and metadata parents.
+- `history.ts` maintains CRDT-local undo/redo stacks by recording local effects and generating fresh CRDT updates for undo and redo.
+- `validation.ts` validates serialized CRDT updates against the document schema.
+- `clock.ts`, `hlc.ts`, and `fractionalIndex.ts` provide timestamp ordering, replica clocks, and array ordering.
+
+CRDT paths are not the same as normal `Path` values. They include stable array item ids, parent incarnation timestamps, tagged-union branch metadata, and optional array order values. These fields are what let remote updates target the right logical value even after array reordering, deletion, or recreation.
+
+Important behavior to preserve:
+
+- CRDT updates are timestamped and last-writer-wins at each metadata node.
+- Deletions leave tombstones so older or out-of-order updates can be discarded correctly.
+- Array inserts use stable item ids and fractional order values instead of numeric indices.
+- Array `move` translates to a narrow `setOrder` update for the moved item.
+- Remote updates apply to the CRDT document but do not enter local undo/redo history.
+- Undo and redo generate fresh CRDT updates only when the recorded local effects are still applicable.
+- Pending remote updates should stay queued only while a missing parent, missing tag branch, or future incarnation can still arrive.
+
+Because CRDT document creation and update validation depend on typia schemas, `typia` remains optional. Do not import CRDT code from the root entry point.
+
 ## React Bindings
 
 React code lives in `src/react/react.tsx`.
@@ -127,6 +159,27 @@ The React layer is built around mutable context objects plus explicit listener l
 Preview updates use `ApplyTiming = 'preview'`. Preview changes are applied to a temporary preview state and can be cleared without committing to history. This powers interactions like hovering over color swatches.
 
 The providers accept a `save` callback. Examples use this for persistence; the core React binding does not know about localStorage or storage formats.
+
+Shared React subscription utilities live in `src/react-core/index.ts`. Keep generic path-listener behavior there when it is needed by both `src/react` and `src/react-crdt`.
+
+## React CRDT Bindings
+
+React CRDT code lives in `src/react-crdt/react-crdt.tsx` and is exported as `umkehr/react-crdt`.
+
+`createSyncedContext(...)` has the same path-subscription shape as the regular React binding, but the backing state is a `CrdtLocalHistory<T>` instead of a plain `History<T, An>`. The provider receives a `SyncedTransport`:
+
+```ts
+type SyncedTransport = {
+    actor: string;
+    tick(): hlc.HLC;
+    publish(updates: CrdtUpdate[]): void;
+    subscribe(receive: (update: CrdtUpdate) => void): () => void;
+};
+```
+
+Local dispatch resolves normal drafts through the core patch layer, converts the realized patches into CRDT updates, updates local CRDT history, publishes the updates, and notifies only affected paths when possible. Remote updates are applied through CRDT history, saved, and then mapped back to normal paths for targeted React subscriptions. If a remote update cannot be mapped cleanly, notify all path listeners.
+
+Preview behavior mirrors the regular React binding: preview drafts are held outside committed history, cleared before local commit/undo/redo, and recomputed when remote updates arrive while a preview is active.
 
 ## Validation
 
@@ -144,7 +197,7 @@ The validator checks:
 - path legality against the schema;
 - `value` and `previous` payloads at the target path;
 - tagged-union path segments;
-- `move` source/destination compatibility;
+- `move` array targets;
 - `reorder` targets.
 
 It does not validate a whole history object and it does not prove state-level preconditions like `replace.previous` matching the current state. Callers that persist a full history should validate the history envelope themselves, validate states with typia, and validate stored patches with `createPatchValidator`.
@@ -163,11 +216,19 @@ npm run typecheck:examples
 ```
 
 Use focused tests while developing, but run `npm test` before considering a change complete. The package smoke test checks that root, React, and validation entry points stay separated.
+It also checks the separate CRDT and React CRDT entry points.
 
 The React example has its own build:
 
 ```sh
 cd examples/react
+pnpm run build
+```
+
+The React CRDT example has its own build:
+
+```sh
+cd examples/react-crdt
 pnpm run build
 ```
 
@@ -180,8 +241,11 @@ Keep changes local to the layer they affect:
 - Patch semantics should usually touch `src/make.ts`, `src/ops.ts`, or `src/internal.ts` plus core/internal tests.
 - History behavior should usually touch `src/history/*` plus history tests.
 - React subscription or preview behavior should usually touch `src/react/react.tsx` plus React tests.
+- Shared React subscription behavior should usually touch `src/react-core/index.ts` plus both React and React CRDT tests when behavior changes for both bindings.
+- CRDT document/update semantics should usually touch `src/crdt/*` plus `src/crdt/crdt.test.ts` or the focused CRDT history/validation tests.
+- React CRDT subscription, transport, preview, or undo/redo behavior should usually touch `src/react-crdt/react-crdt.tsx` plus `src/react-crdt/react-crdt.test.tsx`.
 - Validation behavior should usually touch `src/validation/*` plus validation tests.
 
 Avoid broad refactors while changing semantics. The library depends on a small number of invariants being easy to reason about: drafts are produced by typed builders, realized patches are invertible, patch application clones changed ancestors only, and history nodes store realized patches.
 
-When adding a new operation or path behavior, update all relevant layers: types, builder proxy, draft realization, patch application, inversion, history changed-path reporting, validation, tests, and README/docs if it is public.
+When adding a new operation or path behavior, update all relevant layers: types, builder proxy, draft realization, patch application, inversion, history changed-path reporting, CRDT update generation/application/path mapping, validation, React and React CRDT subscriptions, tests, and README/docs if it is public.

@@ -1,5 +1,14 @@
 import {_add, _get, _remove, _replace, type EqualFn} from './internal.js';
-import type {AddOp, Patch, MoveOp, Path, DraftPatch, RemoveOp, ReplaceOp, ReorderOp} from './types.js';
+import type {
+    AddOp,
+    Patch,
+    MoveOp,
+    Path,
+    DraftPatch,
+    RemoveOp,
+    ReplaceOp,
+    ReorderOp,
+} from './types.js';
 
 function add<T, V>(base: T, op: AddOp<V>) {
     return _add(base, op.path, op.value);
@@ -10,10 +19,33 @@ function remove<T, V>(base: T, op: RemoveOp<V>, equal: EqualFn) {
 function replace<T, V>(base: T, op: ReplaceOp<V>, equal: EqualFn) {
     return _replace(base, op.path, op.previous, op.value, equal);
 }
+function moveIndices(length: number, fromIdx: number, targetIdx: number, after: boolean) {
+    if (!Number.isInteger(fromIdx)) throw new Error('move fromIdx must be an integer');
+    if (!Number.isInteger(targetIdx)) throw new Error('move targetIdx must be an integer');
+    if (fromIdx < 0 || fromIdx >= length) throw new Error('move fromIdx is out of range');
+    if (targetIdx < 0 || targetIdx >= length) throw new Error('move targetIdx is out of range');
+
+    const indices = Array.from({length}, (_, index) => index);
+    if (fromIdx === targetIdx) return indices;
+
+    const [moved] = indices.splice(fromIdx, 1);
+    const targetPosition = targetIdx > fromIdx ? targetIdx - 1 : targetIdx;
+    indices.splice(targetPosition + (after ? 1 : 0), 0, moved);
+    return indices;
+}
 function move<T>(base: T, op: MoveOp<T>, equal: EqualFn) {
-    const value = _get(base, op.from);
-    const removed = _remove(base, op.from, value, equal);
-    return _add(removed, op.path, value);
+    const value = _get(base, op.path);
+    if (!Array.isArray(value)) {
+        throw new Error('move path must point to an array');
+    }
+    const indices = moveIndices(value.length, op.fromIdx, op.targetIdx, op.after);
+    return _replace(
+        base,
+        op.path,
+        value,
+        indices.map((index) => value[index]),
+        equal,
+    );
 }
 function reorder<T, V>(base: T, op: ReorderOp<V>, equal: EqualFn) {
     const value = _get(base, op.path);
@@ -48,7 +80,6 @@ export function rebase<T, A extends PropertyKey, B>(
             return {
                 ...op,
                 path: [...path, ...op.path],
-                from: [...path, ...op.from],
             };
         case 'add':
         case 'push':
@@ -71,8 +102,19 @@ export function invertPatch<T>(op: Patch<T>): Patch<T> {
             return {...op, value: op.previous, previous: op.value};
         case 'remove':
             return {op: 'add', path: op.path, value: op.value} as Patch<T>;
-        case 'move':
-            return {op: 'move', from: op.path, path: op.from} as Patch<T>;
+        case 'move': {
+            if (op.fromIdx === op.targetIdx) return op;
+            const movedPostIdx =
+                op.targetIdx > op.fromIdx
+                    ? op.targetIdx - (op.after ? 0 : 1)
+                    : op.targetIdx + (op.after ? 1 : 0);
+            return {
+                ...op,
+                fromIdx: movedPostIdx,
+                targetIdx: op.fromIdx,
+                after: op.fromIdx > movedPostIdx,
+            };
+        }
         case 'reorder': {
             const inverse: number[] = [];
             op.indices.forEach((originalIndex, newIndex) => {

@@ -4,10 +4,14 @@
         "baseUrl": ".",
         "noEmit": true,
         "paths": {
-            "umkehr": ["../dist/src/index.d.ts"],
-            "umkehr/react": ["../dist/src/react/react.d.ts"]
+            "umkehr": ["../src/index.ts"],
+            "umkehr/crdt": ["../src/crdt/index.ts"],
+            "umkehr/migration": ["../src/migration/index.ts"],
+            "umkehr/react": ["../src/react/react.tsx"],
+            "umkehr/react-crdt": ["../src/react-crdt/index.ts"],
+            "umkehr/remix": ["../src/remix/index.ts"]
         }
     },
     "include": ["**/*.ts", "**/*.tsx"],
-    "exclude": ["react/node_modules"]
+    "exclude": ["**/node_modules", "remix3", "react-crdt-server"]
 }

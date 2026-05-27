@@ -37,13 +37,29 @@
             "types": "./dist/src/index.d.ts",
             "import": "./dist/src/index.js"
         },
+        "./crdt": {
+            "types": "./dist/src/crdt/index.d.ts",
+            "import": "./dist/src/crdt/index.js"
+        },
         "./validation": {
             "types": "./dist/src/validation/index.d.ts",
             "import": "./dist/src/validation/index.js"
         },
+        "./migration": {
+            "import": "./dist/src/migration/index.js",
+            "types": "./dist/src/migration/index.d.ts"
+        },
         "./react": {
             "types": "./dist/src/react/react.d.ts",
             "import": "./dist/src/react/react.js"
+        },
+        "./remix": {
+            "types": "./dist/src/remix/index.d.ts",
+            "import": "./dist/src/remix/index.js"
+        },
+        "./react-crdt": {
+            "types": "./dist/src/react-crdt/index.d.ts",
+            "import": "./dist/src/react-crdt/index.js"
         },
         "./package.json": "./package.json"
     },
@@ -51,8 +67,9 @@
         "clean": "rm -rf dist",
         "build": "npm run clean && tsc -p tsconfig.json",
         "test": "npm run build && vitest run",
+        "test:e2e:migration": "cd examples/react-crdt && npm run test:e2e",
         "typecheck": "tsc -p tsconfig.json --noEmit",
-        "typecheck:examples": "npm run build && tsc -p examples/tsconfig.json --noEmit",
+        "typecheck:examples": "npm run build && tsc -p examples/react/tsconfig.json --noEmit && tsc -p examples/react-crdt/tsconfig.json --noEmit",
         "typecheck:tests": "tsc -p tsconfig.type-tests.json",
         "prepack": "npm run build",
         "pack:check": "npm --cache /tmp/umkehr-npm-cache pack --dry-run"
@@ -68,18 +85,23 @@
         "@testing-library/react": "^16.3.2",
         "@types/react": "^19.2.0",
         "@types/react-dom": "^19.2.3",
+        "@typia/unplugin": "^12.1.1",
         "jsdom": "^29.1.1",
         "oxfmt": "^0.49.0",
-        "typia": "^12.1.1",
         "typescript": "^5.9.3",
+        "typia": "^12.1.1",
         "vitest": "^4.1.6"
     },
     "peerDependencies": {
         "react": ">=18",
+        "remix": ">=3.0.0-beta.0 <4",
         "typia": "^12.1.1"
     },
     "peerDependenciesMeta": {
         "react": {
+            "optional": true
+        },
+        "remix": {
             "optional": true
         },
         "typia": {

@@ -1,0 +1,3 @@
+server-sync.sqlite
+server-sync.sqlite-*
+node_modules

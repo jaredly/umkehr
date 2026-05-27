@@ -17,6 +17,7 @@ describe('package exports', () => {
         expect('validatePatch' in pkg).toBe(false);
         expect('createStateContext' in pkg).toBe(false);
         expect('createHistoryContext' in pkg).toBe(false);
+        expect('createSyncedContext' in pkg).toBe(false);
     });
 
     it('imports the built validation entry point separately', async () => {
@@ -29,6 +30,19 @@ describe('package exports', () => {
         expect(typeof validationPkg.PatchValidationError).toBe('function');
     });
 
+    it('imports the built CRDT entry point separately', async () => {
+        expect(existsSync('dist/src/crdt/index.js')).toBe(true);
+
+        const crdtPkg = await import('umkehr/crdt');
+
+        expect(typeof crdtPkg.createCrdtDocument).toBe('function');
+        expect(typeof crdtPkg.createCrdtUpdates).toBe('function');
+        expect(typeof crdtPkg.applyCrdtUpdate).toBe('function');
+        expect(typeof crdtPkg.createCrdtUpdateValidator).toBe('function');
+        expect(typeof crdtPkg.validateCrdtUpdate).toBe('function');
+        expect(typeof crdtPkg.CrdtUpdateValidationError).toBe('function');
+    });
+
     it('imports the built React entry point separately', async () => {
         expect(existsSync('dist/src/react/index.js')).toBe(true);
 
@@ -37,5 +51,23 @@ describe('package exports', () => {
         expect(typeof reactPkg.createStateContext).toBe('function');
         expect(typeof reactPkg.createHistoryContext).toBe('function');
         expect(typeof reactPkg.useValue).toBe('function');
+    });
+
+    it('imports the built React CRDT entry point separately', async () => {
+        expect(existsSync('dist/src/react-crdt/index.js')).toBe(true);
+
+        const reactCrdtPkg = await import('umkehr/react-crdt');
+
+        expect(typeof reactCrdtPkg.createSyncedContext).toBe('function');
+        expect(typeof reactCrdtPkg.useValue).toBe('function');
+    });
+
+    it('imports the built Remix entry point separately', async () => {
+        expect(existsSync('dist/src/remix/index.js')).toBe(true);
+
+        const remixPkg = await import('umkehr/remix');
+
+        expect(typeof remixPkg.createStateContext).toBe('function');
+        expect(typeof remixPkg.createHistoryContext).toBe('function');
     });
 });

@@ -1,0 +1,1 @@
+in @.tasks/archive/seed-dbs we created "seed databases" for the "server" architecture of react-crdt. Now I'd like the other architectures to have similar "seed databases" that we can use to test out different states.

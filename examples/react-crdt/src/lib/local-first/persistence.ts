@@ -1,0 +1,247 @@
+import {openDB, type DBSchema, type IDBPDatabase} from 'idb';
+import type {
+    PersistedBatch,
+    PersistedReplica,
+    ReceivedBatch,
+    ReplicaIdentity,
+} from './types';
+import {batchKey} from './recentBatchCache';
+
+const DB_NAME = 'umkehr-react-crdt-local-first';
+const DB_VERSION = 1;
+const IDENTITY_KEY = 'default';
+
+interface LocalFirstDb extends DBSchema {
+    identity: {
+        key: string;
+        value: ReplicaIdentity;
+    };
+    replicas: {
+        key: string;
+        value: PersistedReplica<unknown>;
+    };
+    batches: {
+        key: string;
+        value: PersistedBatch;
+        indexes: {docId: string};
+    };
+    receivedBatches: {
+        key: string;
+        value: ReceivedBatch;
+        indexes: {docId: string};
+    };
+}
+
+export async function loadOrCreateIdentity(): Promise<ReplicaIdentity> {
+    const db = await openLocalFirstDb();
+    const existing = await db.get('identity', IDENTITY_KEY);
+    if (existing) return existing;
+
+    const identity: ReplicaIdentity = {
+        replicaId: `replica-${crypto.randomUUID()}`,
+        createdAt: new Date().toISOString(),
+    };
+    await db.put('identity', identity, IDENTITY_KEY);
+    return identity;
+}
+
+export async function saveIdentity(identity: ReplicaIdentity): Promise<void> {
+    const db = await openLocalFirstDb();
+    await db.put('identity', identity, IDENTITY_KEY);
+}
+
+export async function loadReplica<TState>(
+    docId: string,
+): Promise<PersistedReplica<TState> | null> {
+    const db = await openLocalFirstDb();
+    return ((await db.get('replicas', docId)) as PersistedReplica<TState> | undefined) ?? null;
+}
+
+export async function listReplicas(): Promise<PersistedReplica<unknown>[]> {
+    const db = await openLocalFirstDb();
+    return db.getAll('replicas');
+}
+
+export async function hasReplica(docId: string) {
+    const db = await openLocalFirstDb();
+    return (await db.getKey('replicas', docId)) !== undefined;
+}
+
+export async function saveReplica<TState>(replica: PersistedReplica<TState>) {
+    const db = await openLocalFirstDb();
+    await db.put('replicas', replica as PersistedReplica<unknown>, replica.docId);
+}
+
+export async function replaceReplicaState<TState>(
+    replica: PersistedReplica<TState>,
+    batches: PersistedBatch[],
+) {
+    const db = await openLocalFirstDb();
+    const [batchKeys, receivedKeys] = await Promise.all([
+        db.getAllKeysFromIndex('batches', 'docId', replica.docId),
+        db.getAllKeysFromIndex('receivedBatches', 'docId', replica.docId),
+    ]);
+    const tx = db.transaction(['replicas', 'batches', 'receivedBatches'], 'readwrite');
+    await tx.objectStore('replicas').put(replica as PersistedReplica<unknown>, replica.docId);
+    await Promise.all([
+        ...batchKeys.map((key) => tx.objectStore('batches').delete(key)),
+        ...receivedKeys.map((key) => tx.objectStore('receivedBatches').delete(key)),
+        ...batches.map(async (batch) => {
+            await tx
+                .objectStore('batches')
+                .put(batch, batchKey(batch.docId, batch.origin, batch.batchId));
+            await tx.objectStore('receivedBatches').put(
+                {
+                    docId: batch.docId,
+                    origin: batch.origin,
+                    batchId: batch.batchId,
+                    receivedAt: batch.receivedAt,
+                } satisfies ReceivedBatch,
+                batchKey(batch.docId, batch.origin, batch.batchId),
+            );
+        }),
+    ]);
+    await tx.done;
+}
+
+export async function clearReplica(docId: string) {
+    const db = await openLocalFirstDb();
+    await Promise.all([
+        db.delete('replicas', docId),
+        deleteByDocId(db, 'batches', docId),
+        deleteByDocId(db, 'receivedBatches', docId),
+    ]);
+}
+
+export async function appendBatch(batch: PersistedBatch) {
+    const db = await openLocalFirstDb();
+    await db.put('batches', batch, batchKey(batch.docId, batch.origin, batch.batchId));
+}
+
+export async function listBatches(docId: string) {
+    const db = await openLocalFirstDb();
+    return db.getAllFromIndex('batches', 'docId', docId);
+}
+
+export async function deleteBatch(batch: PersistedBatch) {
+    const db = await openLocalFirstDb();
+    await db.delete('batches', batchKey(batch.docId, batch.origin, batch.batchId));
+}
+
+export async function countBatches(docId: string) {
+    const db = await openLocalFirstDb();
+    return db.countFromIndex('batches', 'docId', docId);
+}
+
+export async function countReceivedBatches(docId: string) {
+    const db = await openLocalFirstDb();
+    return db.countFromIndex('receivedBatches', 'docId', docId);
+}
+
+export async function hasReceivedBatch(docId: string, origin: string, batchId: string) {
+    const db = await openLocalFirstDb();
+    return (await db.get('receivedBatches', batchKey(docId, origin, batchId))) !== undefined;
+}
+
+export async function markReceivedBatch(received: ReceivedBatch) {
+    const db = await openLocalFirstDb();
+    await db.put(
+        'receivedBatches',
+        received,
+        batchKey(received.docId, received.origin, received.batchId),
+    );
+}
+
+export async function exportReplicaState<TState>(docId: string) {
+    const [replica, batches] = await Promise.all([
+        loadReplica<TState>(docId),
+        listBatches(docId),
+    ]);
+    if (!replica) throw new Error('No persisted local-first replica exists for this document.');
+    return JSON.stringify({replica, batches}, null, 2);
+}
+
+export async function importReplicaState<TState>({
+    docId,
+    schemaVersion,
+    schemaFingerprint,
+    schemaFingerprintHash,
+    json,
+}: {
+    docId: string;
+    schemaVersion: number;
+    schemaFingerprint: string;
+    schemaFingerprintHash: string;
+    json: string;
+}) {
+    const parsed = JSON.parse(json) as {
+        replica?: PersistedReplica<TState>;
+        batches?: PersistedBatch[];
+    };
+    if (!parsed.replica || parsed.replica.docId !== docId) {
+        throw new Error('Imported state does not contain a replica for this document.');
+    }
+    if (parsed.replica.storageVersion !== 1 || parsed.replica.protocolVersion !== 1) {
+        throw new Error('Imported state uses an unsupported storage or protocol version.');
+    }
+    if (parsed.replica.schemaFingerprint !== schemaFingerprint) {
+        throw new Error('Imported state schema does not match this app version.');
+    }
+    if (
+        parsed.replica.schemaFingerprintHash !== undefined &&
+        parsed.replica.schemaFingerprintHash !== schemaFingerprintHash
+    ) {
+        throw new Error('Imported state schema hash does not match this app version.');
+    }
+    if ((parsed.replica.schemaVersion ?? 1) !== schemaVersion) {
+        throw new Error('Imported state schema version does not match this app version.');
+    }
+    if (!Array.isArray(parsed.batches)) {
+        throw new Error('Imported state does not contain a retained batch list.');
+    }
+    for (const batch of parsed.batches) {
+        if (batch.docId !== docId) throw new Error('Imported batch belongs to another document.');
+    }
+    await clearReplica(docId);
+    await saveReplica(parsed.replica);
+    for (const batch of parsed.batches) {
+        await appendBatch(batch);
+        await markReceivedBatch({
+            docId,
+            origin: batch.origin,
+            batchId: batch.batchId,
+            receivedAt: new Date().toISOString(),
+        });
+    }
+}
+
+let dbPromise: Promise<IDBPDatabase<LocalFirstDb>> | null = null;
+
+function openLocalFirstDb() {
+    dbPromise ??= openDB<LocalFirstDb>(DB_NAME, DB_VERSION, {
+        upgrade(db, _oldVersion, _newVersion, tx) {
+            if (!db.objectStoreNames.contains('identity')) db.createObjectStore('identity');
+            if (!db.objectStoreNames.contains('replicas')) db.createObjectStore('replicas');
+            const batches = db.objectStoreNames.contains('batches')
+                ? tx.objectStore('batches')
+                : db.createObjectStore('batches');
+            if (!batches.indexNames.contains('docId')) batches.createIndex('docId', 'docId');
+            const received = db.objectStoreNames.contains('receivedBatches')
+                ? tx.objectStore('receivedBatches')
+                : db.createObjectStore('receivedBatches');
+            if (!received.indexNames.contains('docId')) received.createIndex('docId', 'docId');
+        },
+    });
+    return dbPromise;
+}
+
+async function deleteByDocId(
+    db: IDBPDatabase<LocalFirstDb>,
+    storeName: 'batches' | 'receivedBatches',
+    docId: string,
+) {
+    const keys = await db.getAllKeysFromIndex(storeName, 'docId', docId);
+    const tx = db.transaction(storeName, 'readwrite');
+    await Promise.all(keys.map((key) => tx.store.delete(key)));
+    await tx.done;
+}

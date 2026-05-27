@@ -1,0 +1,45 @@
+# End-to-End Automation Implementation Log
+
+## 2026-05-26
+
+- Started implementation from `.tasks/end-to-end/plan.md`.
+- Confirmed current state:
+  - `examples/react-crdt` has the default Playwright scaffold.
+  - `examples/react-crdt-server` already supports `--db`.
+  - server port is hard-coded to `8787`.
+  - migration lock TTL is hard-coded to 60 seconds.
+  - React server URLs are hard-coded in `src/lib/server/protocol.ts`.
+- Added runtime configuration:
+  - server `--port` / `UMKEHR_SERVER_PORT`;
+  - server `--migration-lock-ms` / `UMKEHR_MIGRATION_LOCK_MS`;
+  - `ServerStore` constructor option for migration lock TTL;
+  - client `VITE_UMKEHR_SERVER_HTTP_URL` override for server HTTP/WS URLs.
+- Added the first Playwright E2E foundation:
+  - configured `examples/react-crdt/playwright.config.ts` for local Vite app startup;
+  - removed the default Playwright internet example spec;
+  - added server helpers for temp DB paths, seed import, server startup, health polling, and DB inspection;
+  - added app helpers for opening server docs, logging in, waiting for sync, adding todos, and asserting visible todos;
+  - added `examples/react-crdt/tests/server-migration.spec.ts` with seeded server sync and migration-fixture browser/server tests.
+- Added `examples/react-crdt-server/src/inspectTest.ts` for test-side SQLite inspection through Bun.
+- Added E2E scripts:
+  - `examples/react-crdt` `test:e2e`;
+  - root `test:e2e:migration`.
+- Added a registered `Todos migration` example app that uses the existing v1->v2 todos migration fixture schema/config. This lets the seeded `todos-migration-v1-main` server document be exercised through the real browser/server migration flow without changing the normal `Todos` app schema.
+- Added a third server migration E2E:
+  - creates an active server migration lock with `examples/react-crdt-server/src/lockTest.ts`;
+  - verifies another browser client sees the migration-running notice;
+  - edits locally while locked;
+  - verifies the edit remains pending and the server event count does not change.
+- Verification:
+  - `bun test ./src/store.bun.ts ./src/cli.bun.ts` in `examples/react-crdt-server`: 19 pass.
+  - `bun run typecheck` in `examples/react-crdt-server`: passed.
+  - `npm run build` in `examples/react-crdt`: passed with the existing Vite chunk-size warning.
+  - `npm run test:e2e` in `examples/react-crdt`: 3 Playwright tests passed.
+- Note: the first `npm run test:e2e` attempt inside the default sandbox could not bind `127.0.0.1:5173` (`EPERM`). Rerunning with localhost/server permission passed.
+- Follow-up cleanup:
+  - removed broad `any` casts from `examples/react-crdt/src/lib/appRegistry.ts`;
+  - gave the migration fixture app its own typed history/synced contexts;
+  - added `TodoMigrationFixturePanel` so the fixture schema with required `priority` can be edited without pretending it is the normal todos schema.
+- Re-verified after cleanup:
+  - `npm run build` in `examples/react-crdt`: passed with the existing Vite chunk-size warning.
+  - `npm run test:e2e` in `examples/react-crdt`: 3 Playwright tests passed.
