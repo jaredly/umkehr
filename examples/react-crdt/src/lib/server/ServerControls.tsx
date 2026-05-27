@@ -15,6 +15,7 @@ export function ServerControls<TState>({
     const presenceUsers = useStore(sync.presenceStore);
     const manualOffline = useStore(sync.manualOfflineStore);
     const isConnected = state.kind === 'connected';
+    const isDisconnected = state.kind === 'offline' || state.kind === 'error';
     const statusLabel = labelForState(state);
     const noticeTone = serverStateNoticeTone(state);
     const hasUnsyncedChanges = stats.pendingUploads > 0;
@@ -25,7 +26,10 @@ export function ServerControls<TState>({
         : 'No unsynced local events';
 
     return (
-        <header className="serverControls" aria-label="Server sync toolbar">
+        <header
+            className={isDisconnected ? 'serverControls disconnected' : 'serverControls'}
+            aria-label="Server sync toolbar"
+        >
             <div className="serverIdentity">
                 <span
                     className="presenceAvatar"
@@ -67,7 +71,9 @@ export function ServerControls<TState>({
                 </button>
             </div>
             <section className="presenceRoster" aria-label="Online users">
-                {presenceUsers.length ? (
+                {isDisconnected ? (
+                    <span className="presenceEmpty disconnected">Disconnected from server</span>
+                ) : presenceUsers.length ? (
                     <ul>
                         {presenceUsers.map((user) => (
                             <li key={user.userId} title={user.nickname}>

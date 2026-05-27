@@ -13,7 +13,7 @@ import {
     type LocalDocumentSummary,
     type SeedModalItem,
 } from '../documentArchive';
-import {useTopBarControls} from '../chrome/TopBarContext';
+import {DemoTopBar, type DemoTopBarProps} from '../chrome/DemoTopBar';
 import {schemaFingerprint, schemaFingerprintHash} from '../local-first/schemaFingerprint';
 import {
     loadBranchFreeSeedFixtureForApp,
@@ -33,9 +33,11 @@ type ReplicaHistories<TState> = Record<string, CrdtLocalHistory<TState>>;
 export function LocalSimulatorApp<TState, EphemeralData = never>({
     app,
     runtime,
+    topBar,
 }: {
     app: AppDefinition<TState, EphemeralData>;
     runtime: CrdtRuntime<TState, EphemeralData>;
+    topBar: DemoTopBarProps;
 }) {
     const defaultDocId = `${runtime.docId}-local`;
     const [activeDocId, setActiveDocId] = useState(() =>
@@ -254,27 +256,28 @@ export function LocalSimulatorApp<TState, EphemeralData = never>({
             switchDocument,
         ],
     );
-    useTopBarControls(topBarControls);
-
     return (
-        <main className="collabShell">
-            {histories
-                ? replicas.map((replica, index) => (
-                      <LocalReplicaPanel
-                          key={`${activeDocId}:${replica.id}`}
-                          index={index}
-                          sync={sync}
-                          replica={replica}
-                          initial={histories[replica.id] ?? createInitialCrdtHistory(app)}
-                          app={app}
-                          runtime={runtime}
-                          save={(history) => saveReplicaHistory(replica.id, history)}
-                      />
-                  ))
-                : null}
-            {histories ? null : <p className="loadingState">Loading document...</p>}
-            <LocalSyncControls sync={sync} />
-        </main>
+        <>
+            <DemoTopBar {...topBar} controls={topBarControls} />
+            <main className="collabShell">
+                {histories
+                    ? replicas.map((replica, index) => (
+                          <LocalReplicaPanel
+                              key={`${activeDocId}:${replica.id}`}
+                              index={index}
+                              sync={sync}
+                              replica={replica}
+                              initial={histories[replica.id] ?? createInitialCrdtHistory(app)}
+                              app={app}
+                              runtime={runtime}
+                              save={(history) => saveReplicaHistory(replica.id, history)}
+                          />
+                      ))
+                    : null}
+                {histories ? null : <p className="loadingState">Loading document...</p>}
+                <LocalSyncControls sync={sync} />
+            </main>
+        </>
     );
 }
 

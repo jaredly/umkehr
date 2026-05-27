@@ -708,6 +708,11 @@ p {
     box-shadow: 0 8px 18px rgb(25 42 62 / 8%);
 }
 
+.serverControls.disconnected {
+    border-color: #f59e0b;
+    background: #ffedd5;
+}
+
 .serverIdentity {
     min-width: 0;
     display: flex;
@@ -810,6 +815,11 @@ p {
     color: #64748b;
     font-size: 13px;
     white-space: nowrap;
+}
+
+.presenceEmpty.disconnected {
+    color: #7c2d12;
+    font-weight: 700;
 }
 
 .serverToolbarNotice {

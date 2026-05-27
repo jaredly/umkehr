@@ -10,7 +10,7 @@ import {
     type DocumentModalItem,
     type SeedModalItem,
 } from '../documentArchive';
-import {useTopBarControls} from '../chrome/TopBarContext';
+import {DemoTopBar, type DemoTopBarProps} from '../chrome/DemoTopBar';
 import {ServerControls} from './ServerControls';
 import {ServerHistoryView} from './ServerHistoryView';
 import {
@@ -65,10 +65,12 @@ export function ServerApp<TState, EphemeralData = never>({
     app,
     runtime,
     schemaConfig: schemaConfigProp,
+    topBar,
 }: {
     app: AppDefinition<TState, EphemeralData>;
     runtime: CrdtRuntime<TState, EphemeralData>;
     schemaConfig?: ServerSchemaConfig<TState>;
+    topBar: DemoTopBarProps;
 }) {
     const [activeDocId, setActiveDocId] = useState(() => readActiveDocId() ?? runtime.docId);
     const fingerprint = useMemo(() => schemaFingerprint(app), [app]);
@@ -180,35 +182,44 @@ export function ServerApp<TState, EphemeralData = never>({
 
     if (loadState.kind === 'loading') {
         return (
-            <main className="serverShell">
-                <section className="waitingPanel">
-                    <h1>Loading server replica</h1>
-                    <p>Reading durable state from this browser.</p>
-                </section>
-            </main>
+            <>
+                <DemoTopBar {...topBar} />
+                <main className="serverShell">
+                    <section className="waitingPanel">
+                        <h1>Loading server replica</h1>
+                        <p>Reading durable state from this browser.</p>
+                    </section>
+                </main>
+            </>
         );
     }
 
     if (loadState.kind === 'error') {
         return (
-            <main className="serverShell">
-                <section className="waitingPanel">
-                    <h1>Server replica unavailable</h1>
-                    <p>{loadState.message}</p>
-                </section>
-            </main>
+            <>
+                <DemoTopBar {...topBar} />
+                <main className="serverShell">
+                    <section className="waitingPanel">
+                        <h1>Server replica unavailable</h1>
+                        <p>{loadState.message}</p>
+                    </section>
+                </main>
+            </>
         );
     }
 
     if (loadState.kind === 'needsUser') {
         return (
-            <main className="serverShell">
-                <ServerLogin
-                    users={loadState.users}
-                    message={loadState.message}
-                    onLogin={(nickname) => void login(loadState.sessionId, nickname)}
-                />
-            </main>
+            <>
+                <DemoTopBar {...topBar} />
+                <main className="serverShell">
+                    <ServerLogin
+                        users={loadState.users}
+                        message={loadState.message}
+                        onLogin={(nickname) => void login(loadState.sessionId, nickname)}
+                    />
+                </main>
+            </>
         );
     }
 
@@ -230,6 +241,7 @@ export function ServerApp<TState, EphemeralData = never>({
             schemaConfig={schemaConfig}
             loaded={loadState.loaded}
             onLogout={() => void logout()}
+            topBar={topBar}
         />
     );
 }
@@ -248,6 +260,7 @@ function ServerReadyApp<TState, EphemeralData>({
     schemaConfig,
     loaded,
     onLogout,
+    topBar,
 }: {
     app: AppDefinition<TState, EphemeralData>;
     runtime: CrdtRuntime<TState, EphemeralData>;
@@ -262,6 +275,7 @@ function ServerReadyApp<TState, EphemeralData>({
     schemaConfig: ServerSchemaConfig<TState>;
     loaded: Loaded<TState>;
     onLogout(): void;
+    topBar: DemoTopBarProps;
 }) {
     const activeBranch = loaded.replica.branches[loaded.replica.activeBranchId];
     const [currentHistory, setCurrentHistory] = useState(activeBranch.history);
@@ -442,30 +456,31 @@ function ServerReadyApp<TState, EphemeralData>({
             seedItems,
         ],
     );
-    useTopBarControls(topBarControls);
-
     return (
-        <main className="serverShell">
-            <ServerControls
-                sync={sync}
-                onLogout={onLogout}
-            />
-            <section className="serverDocument">
-                <Provider
-                    initial={currentHistory}
-                    transport={sync.transport}
-                    save={sync.saveHistory}
-                    statuses={sync.statusStore}
-                >
-                    <ServerDocumentWorkspace
-                        app={app}
-                        runtime={runtime}
-                        actor={loaded.identity.actor}
-                        sync={sync}
-                    />
-                </Provider>
-            </section>
-        </main>
+        <>
+            <DemoTopBar {...topBar} controls={topBarControls} />
+            <main className="serverShell">
+                <ServerControls
+                    sync={sync}
+                    onLogout={onLogout}
+                />
+                <section className="serverDocument">
+                    <Provider
+                        initial={currentHistory}
+                        transport={sync.transport}
+                        save={sync.saveHistory}
+                        statuses={sync.statusStore}
+                    >
+                        <ServerDocumentWorkspace
+                            app={app}
+                            runtime={runtime}
+                            actor={loaded.identity.actor}
+                            sync={sync}
+                        />
+                    </Provider>
+                </section>
+            </main>
+        </>
     );
 }
 

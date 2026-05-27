@@ -1,6 +1,4 @@
-import {apps, defaultApp, registeredAppForId} from './lib/appRegistry';
-import {DemoTopBar} from './lib/chrome/DemoTopBar';
-import {TopBarProvider} from './lib/chrome/TopBarContext';
+import {apps, defaultApp, registeredAppForId, visibleAppIdForRegisteredApp} from './lib/appRegistry';
 import {LocalSimulatorApp} from './lib/local/LocalSimulatorApp';
 import {LocalFirstApp} from './lib/local-first/LocalFirstApp';
 import {PeerJsApp} from './lib/peerjs/PeerJsApp';
@@ -13,32 +11,31 @@ export function App() {
     const [{mode, appId}, setMode, setAppId] = useUrlSelection(defaultApp.id);
     const registered = registeredAppForId(appId);
     const {app, crdt, history, serverSchemaConfig} = registered;
+    const visibleAppId = visibleAppIdForRegisteredApp(registered);
 
-    return (
-        <TopBarProvider key={`${app.id}:${mode}`}>
-            <DemoTopBar
-                apps={apps as any}
-                activeAppId={app.id}
-                setAppId={setAppId}
-                mode={mode}
-                setMode={setMode}
-            />
-            {mode === 'solo' ? (
-                <SoloApp key={app.id} app={app as any} runtime={history as any} />
-            ) : mode === 'local-first' ? (
-                <LocalFirstApp key={app.id} app={app as any} runtime={crdt as any} />
-            ) : mode === 'server' ? (
-                <ServerApp
-                    key={app.id}
-                    app={app as any}
-                    runtime={crdt as any}
-                    schemaConfig={serverSchemaConfig as any}
-                />
-            ) : mode === 'peerjs' ? (
-                <PeerJsApp key={app.id} app={app as any} runtime={crdt as any} />
-            ) : (
-                <LocalSimulatorApp key={app.id} app={app as any} runtime={crdt as any} />
-            )}
-        </TopBarProvider>
+    const topBar = {
+        apps: apps as any,
+        activeAppId: visibleAppId,
+        setAppId,
+        mode,
+        setMode,
+    };
+
+    return mode === 'solo' ? (
+        <SoloApp key={app.id} app={app as any} runtime={history as any} topBar={topBar} />
+    ) : mode === 'local-first' ? (
+        <LocalFirstApp key={app.id} app={app as any} runtime={crdt as any} topBar={topBar} />
+    ) : mode === 'server' ? (
+        <ServerApp
+            key={app.id}
+            app={app as any}
+            runtime={crdt as any}
+            schemaConfig={serverSchemaConfig as any}
+            topBar={topBar}
+        />
+    ) : mode === 'peerjs' ? (
+        <PeerJsApp key={app.id} app={app as any} runtime={crdt as any} topBar={topBar} />
+    ) : (
+        <LocalSimulatorApp key={app.id} app={app as any} runtime={crdt as any} topBar={topBar} />
     );
 }

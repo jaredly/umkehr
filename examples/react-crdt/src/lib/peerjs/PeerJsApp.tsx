@@ -12,7 +12,7 @@ import {
     type LocalDocumentSummary,
     type SeedModalItem,
 } from '../documentArchive';
-import {useTopBarControls} from '../chrome/TopBarContext';
+import {DemoTopBar, type DemoTopBarProps} from '../chrome/DemoTopBar';
 import {schemaFingerprint, schemaFingerprintHash} from '../local-first/schemaFingerprint';
 import {
     loadBranchFreeSeedFixtureForApp,
@@ -36,9 +36,11 @@ import {usePeerJsSync} from './usePeerJsSync';
 export function PeerJsApp<TState, EphemeralData = never>({
     app,
     runtime,
+    topBar,
 }: {
     app: AppDefinition<TState, EphemeralData>;
     runtime: CrdtRuntime<TState, EphemeralData>;
+    topBar: DemoTopBarProps;
 }) {
     const initialHostPeerId = readInvitePeerId();
     const [role, setRole] = useState<PeerRole>(() => (initialHostPeerId ? 'client' : 'host'));
@@ -258,26 +260,27 @@ export function PeerJsApp<TState, EphemeralData = never>({
             switchDocument,
         ],
     );
-    useTopBarControls(topBarControls);
-
     return (
-        <main className="peerShell">
-            <PeerInviteConnector hostPeerId={initialHostPeerId} role={role} sync={sync} />
-            <PeerJsControls
-                role={role}
-                setRole={setRole}
-                sync={sync}
-                docId={activeDocId}
-                initialHostPeerId={initialHostPeerId}
-            />
-            {role === 'host' ? (
-                <Provider initial={hostHistory} transport={sync.transport} save={saveHostHistory}>
-                    <PeerHostDocument actor={actor} sync={sync} app={app} runtime={runtime} />
-                </Provider>
-            ) : (
-                <PeerClientDocument actor={actor} sync={sync} app={app} runtime={runtime} />
-            )}
-        </main>
+        <>
+            <DemoTopBar {...topBar} controls={topBarControls} />
+            <main className="peerShell">
+                <PeerInviteConnector hostPeerId={initialHostPeerId} role={role} sync={sync} />
+                <PeerJsControls
+                    role={role}
+                    setRole={setRole}
+                    sync={sync}
+                    docId={activeDocId}
+                    initialHostPeerId={initialHostPeerId}
+                />
+                {role === 'host' ? (
+                    <Provider initial={hostHistory} transport={sync.transport} save={saveHostHistory}>
+                        <PeerHostDocument actor={actor} sync={sync} app={app} runtime={runtime} />
+                    </Provider>
+                ) : (
+                    <PeerClientDocument actor={actor} sync={sync} app={app} runtime={runtime} />
+                )}
+            </main>
+        </>
     );
 }
 

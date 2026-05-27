@@ -1,7 +1,20 @@
+import type {ReactNode} from 'react';
 import type {AppDefinition} from '../crdtApp';
 import {modeOptions} from '../modeOptions';
 import type {AppMode} from '../useUrlSelection';
-import {useTopBarState} from './TopBarContext';
+
+export type TopBarControls = {
+    documentPicker?: ReactNode;
+    statusMessage?: ReactNode;
+};
+
+export type DemoTopBarProps = {
+    apps: AppDefinition<unknown>[];
+    activeAppId: string;
+    setAppId(appId: string): void;
+    mode: AppMode;
+    setMode(mode: AppMode): void;
+};
 
 export function DemoTopBar({
     apps,
@@ -9,15 +22,8 @@ export function DemoTopBar({
     setAppId,
     mode,
     setMode,
-}: {
-    apps: AppDefinition<unknown>[];
-    activeAppId: string;
-    setAppId(appId: string): void;
-    mode: AppMode;
-    setMode(mode: AppMode): void;
-}) {
-    const controls = useTopBarState();
-
+    controls = {},
+}: DemoTopBarProps & {controls?: TopBarControls}) {
     return (
         <header className="demoTopBar">
             <div className="topBarGroup topBarPrimary">
@@ -52,8 +58,6 @@ export function DemoTopBar({
                 {controls.documentPicker}
             </div>
             <div className="topBarGroup topBarActions">
-                {controls.seedControls}
-                {controls.archiveControls}
                 {controls.statusMessage}
             </div>
         </header>

@@ -27,6 +27,8 @@ type RegisteredApp<TState = unknown> = {
     crdt: CrdtRuntime<TState>;
     history: HistoryRuntime<TState>;
     serverSchemaConfig?: ServerSchemaConfig<TState>;
+    visible?: boolean;
+    visibleAppId?: string;
 };
 
 type RegisteredEphemeralApp<TState, EphemeralData> = Omit<
@@ -44,7 +46,7 @@ const [ProvideTodoMigrationFixture, useTodoMigrationFixture] =
 
 const todoMigrationFixtureApp: AppDefinition<TodoFixtureStateV2> = {
     id: 'todos-migration-fixture',
-    title: 'Todos migration',
+    title: 'Todos',
     schemaVersion: todoFixtureMigrationConfig.current.version,
     tagKey: TODO_FIXTURE_TAG_KEY,
     schema: todoFixtureV2Metadata.schema,
@@ -95,29 +97,41 @@ export const registeredApps = [
         crdt: todoCrdtRuntime,
         history: todoHistoryRuntime,
         serverSchemaConfig: undefined,
+        visible: true,
+        visibleAppId: todoApp.id,
     },
     {
         app: todoMigrationFixtureApp,
         crdt: todoMigrationFixtureRuntime,
         history: todoMigrationFixtureHistoryRuntime,
         serverSchemaConfig: todoMigrationServerSchemaConfig,
+        visible: false,
+        visibleAppId: todoApp.id,
     },
     {
         app: whiteboardApp,
         crdt: whiteboardCrdtRuntime,
         history: whiteboardHistoryRuntime,
         serverSchemaConfig: undefined,
+        visible: true,
+        visibleAppId: whiteboardApp.id,
     },
 ] satisfies [
     RegisteredApp<TodoState>,
     RegisteredApp<TodoFixtureStateV2>,
     RegisteredEphemeralApp<WhiteboardState, WhiteboardEphemeralData>,
 ];
-export const apps = registeredApps.map((entry) => entry.app);
+export const apps = registeredApps
+    .filter((entry) => entry.visible !== false)
+    .map((entry) => entry.app);
 export const defaultApp = todoApp;
 export const defaultCrdtRuntime = todoCrdtRuntime;
 export const defaultHistoryRuntime = todoHistoryRuntime;
 
 export function registeredAppForId(id: string) {
     return registeredApps.find((entry) => entry.app.id === id) ?? registeredApps[0];
+}
+
+export function visibleAppIdForRegisteredApp(entry: (typeof registeredApps)[number]) {
+    return entry.visibleAppId ?? entry.app.id;
 }

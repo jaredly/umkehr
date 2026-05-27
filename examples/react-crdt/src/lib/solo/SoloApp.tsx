@@ -17,7 +17,7 @@ import {
     type LocalDocumentSummary,
     type SeedModalItem,
 } from '../documentArchive';
-import {useTopBarControls, type TopBarControls} from '../chrome/TopBarContext';
+import {DemoTopBar, type DemoTopBarProps, type TopBarControls} from '../chrome/DemoTopBar';
 import {schemaFingerprint, schemaFingerprintHash} from '../local-first/schemaFingerprint';
 import {
     loadBranchFreeSeedFixtureForApp,
@@ -37,9 +37,11 @@ import {
 export function SoloApp<TState, TAnnotations = never, EphemeralData = never>({
     app,
     runtime,
+    topBar,
 }: {
     app: AppDefinition<TState, EphemeralData>;
     runtime: HistoryRuntime<TState, TAnnotations>;
+    topBar: DemoTopBarProps;
 }) {
     const defaultDocId = `${app.id}-solo`;
     const [activeDocId, setActiveDocId] = useState(() =>
@@ -172,26 +174,25 @@ export function SoloApp<TState, TAnnotations = never, EphemeralData = never>({
     );
 
     return (
-        <main className="soloShell">
-            <Provider initial={historySnapshot} save={saveHistory}>
-                <SoloDocument
-                    app={app}
-                    runtime={runtime}
-                    activeDocId={activeDocId}
-                    schemaFingerprint={fingerprint}
-                    schemaFingerprintHash={fingerprintHash}
-                    topBarControls={topBarControls}
-                    documents={documentItems}
-                    seeds={seedItems}
-                    onCreateDocument={createBlankDocument}
-                    onCreateSeed={createSeedDocument}
-                    onDeleteLocal={deleteLocalDocument}
-                    onSwitchDocument={switchDocument}
-                    onDocumentsChanged={refreshDocuments}
-                    onImported={importedDocument}
-                />
-            </Provider>
-        </main>
+        <Provider initial={historySnapshot} save={saveHistory}>
+            <SoloDocument
+                app={app}
+                runtime={runtime}
+                activeDocId={activeDocId}
+                schemaFingerprint={fingerprint}
+                schemaFingerprintHash={fingerprintHash}
+                topBar={topBar}
+                topBarControls={topBarControls}
+                documents={documentItems}
+                seeds={seedItems}
+                onCreateDocument={createBlankDocument}
+                onCreateSeed={createSeedDocument}
+                onDeleteLocal={deleteLocalDocument}
+                onSwitchDocument={switchDocument}
+                onDocumentsChanged={refreshDocuments}
+                onImported={importedDocument}
+            />
+        </Provider>
     );
 }
 
@@ -201,6 +202,7 @@ function SoloDocument<TState, TAnnotations, EphemeralData>({
     activeDocId,
     schemaFingerprint,
     schemaFingerprintHash,
+    topBar,
     topBarControls,
     documents,
     seeds,
@@ -216,6 +218,7 @@ function SoloDocument<TState, TAnnotations, EphemeralData>({
     activeDocId: string;
     schemaFingerprint: string;
     schemaFingerprintHash: string;
+    topBar: DemoTopBarProps;
     topBarControls: TopBarControls;
     documents: DocumentModalItem[];
     seeds: SeedModalItem[];
@@ -296,17 +299,20 @@ function SoloDocument<TState, TAnnotations, EphemeralData>({
             topBarControls,
         ],
     );
-    useTopBarControls(registeredTopBarControls);
-
     return (
-        <div>
-            <SoloHistoryPanel editor={editor} />
-            {app.renderPanel({
-                actor: 'solo',
-                editor: panelEditor,
-                title: app.title,
-            })}
-        </div>
+        <>
+            <DemoTopBar {...topBar} controls={registeredTopBarControls} />
+            <main className="soloShell">
+                <div>
+                    <SoloHistoryPanel editor={editor} />
+                    {app.renderPanel({
+                        actor: 'solo',
+                        editor: panelEditor,
+                        title: app.title,
+                    })}
+                </div>
+            </main>
+        </>
     );
 }
 

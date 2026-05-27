@@ -26,7 +26,7 @@ import {
     type LocalDocumentSummary,
     type SeedModalItem,
 } from '../documentArchive';
-import {useTopBarControls} from '../chrome/TopBarContext';
+import {DemoTopBar, type DemoTopBarProps} from '../chrome/DemoTopBar';
 import {
     loadBranchFreeSeedFixtureForApp,
     seedModalItemsForApp,
@@ -79,10 +79,12 @@ export function LocalFirstApp<TState, EphemeralData = never>({
     app,
     runtime,
     schemaConfig: schemaConfigProp,
+    topBar,
 }: {
     app: AppDefinition<TState, EphemeralData>;
     runtime: CrdtRuntime<TState, EphemeralData>;
     schemaConfig?: LocalFirstSchemaConfig<TState>;
+    topBar: DemoTopBarProps;
 }) {
     const initialPeerId = readInvitePeerId();
     const activeDocId = readActiveDocIdFromSearch(window.location.search, runtime.docId);
@@ -119,12 +121,15 @@ export function LocalFirstApp<TState, EphemeralData = never>({
 
     if (loadState.kind === 'loading') {
         return (
-            <main className="localFirstShell">
-                <section className="waitingPanel">
-                    <h1>Loading local replica</h1>
-                    <p>Reading durable state from this browser.</p>
-                </section>
-            </main>
+            <>
+                <DemoTopBar {...topBar} />
+                <main className="localFirstShell">
+                    <section className="waitingPanel">
+                        <h1>Loading local replica</h1>
+                        <p>Reading durable state from this browser.</p>
+                    </section>
+                </main>
+            </>
         );
     }
 
@@ -135,18 +140,22 @@ export function LocalFirstApp<TState, EphemeralData = never>({
                 schemaConfig={schemaConfig}
                 schemaFingerprint={fingerprint}
                 loadState={loadState}
+                topBar={topBar}
             />
         );
     }
 
     if (loadState.kind === 'incompatible' || loadState.kind === 'error') {
         return (
-            <main className="localFirstShell">
-                <section className="waitingPanel">
-                    <h1>Local replica unavailable</h1>
-                    <p>{loadState.message}</p>
-                </section>
-            </main>
+            <>
+                <DemoTopBar {...topBar} />
+                <main className="localFirstShell">
+                    <section className="waitingPanel">
+                        <h1>Local replica unavailable</h1>
+                        <p>{loadState.message}</p>
+                    </section>
+                </main>
+            </>
         );
     }
 
@@ -156,6 +165,7 @@ export function LocalFirstApp<TState, EphemeralData = never>({
             runtime={runtime}
             loaded={loadState.loaded}
             initialPeerId={initialPeerId}
+            topBar={topBar}
         />
     );
 }
@@ -165,11 +175,13 @@ function LocalFirstReadyApp<TState, EphemeralData>({
     runtime,
     loaded,
     initialPeerId,
+    topBar,
 }: {
     app: AppDefinition<TState, EphemeralData>;
     runtime: CrdtRuntime<TState, EphemeralData>;
     loaded: Loaded<TState>;
     initialPeerId: string;
+    topBar: DemoTopBarProps;
 }) {
     const [currentHistory, setCurrentHistory] = useState(loaded.history);
     const [documents, setDocuments] = useState<LocalDocumentSummary[]>([]);
@@ -349,25 +361,26 @@ function LocalFirstReadyApp<TState, EphemeralData>({
             switchDocument,
         ],
     );
-    useTopBarControls(topBarControls);
-
     return (
-        <main className="localFirstShell">
-            <Provider
-                initial={currentHistory}
-                transport={sync.transport}
-                save={saveHistory}
-            >
-                <LocalFirstDocument app={app} runtime={runtime} actor={loaded.identity.replicaId} />
-            </Provider>
-            <LocalFirstControls
-                sync={sync}
-                docId={loaded.docId}
-                schemaVersion={loaded.schemaVersion}
-                schemaFingerprint={loaded.schemaFingerprint}
-                schemaFingerprintHash={loaded.schemaFingerprintHash}
-            />
-        </main>
+        <>
+            <DemoTopBar {...topBar} controls={topBarControls} />
+            <main className="localFirstShell">
+                <Provider
+                    initial={currentHistory}
+                    transport={sync.transport}
+                    save={saveHistory}
+                >
+                    <LocalFirstDocument app={app} runtime={runtime} actor={loaded.identity.replicaId} />
+                </Provider>
+                <LocalFirstControls
+                    sync={sync}
+                    docId={loaded.docId}
+                    schemaVersion={loaded.schemaVersion}
+                    schemaFingerprint={loaded.schemaFingerprint}
+                    schemaFingerprintHash={loaded.schemaFingerprintHash}
+                />
+            </main>
+        </>
     );
 }
 
@@ -515,55 +528,60 @@ function MigrationPanel<TState>({
     schemaConfig,
     schemaFingerprint,
     loadState,
+    topBar,
 }: {
     app: AppDefinition<TState, any>;
     schemaConfig: LocalFirstSchemaConfig<TState>;
     schemaFingerprint: string;
     loadState: Extract<LoadState<TState>, {kind: 'migratable'}>;
+    topBar: DemoTopBarProps;
 }) {
     const [error, setError] = useState<string | null>(null);
     return (
-        <main className="localFirstShell">
-            <section className="waitingPanel">
-                <h1>Schema migration available</h1>
-                <p>
-                    This browser has a local document on schema version{' '}
-                    {loadState.candidate.sourceSchemaVersion}. A new document can be created on
-                    schema version {loadState.candidate.targetSchemaVersion}; the old document will
-                    remain unchanged.
-                </p>
-                <dl className="localFirstStats">
-                    <dt>Source</dt>
-                    <dd>{loadState.candidate.sourceDocId}</dd>
-                    <dt>Target</dt>
-                    <dd>{loadState.candidate.targetDocId}</dd>
-                    <dt>Migration</dt>
-                    <dd>{loadState.candidate.migrationIds.join(', ')}</dd>
-                    <dt>Current schema</dt>
-                    <dd>{schemaFingerprint.slice(0, 16)}</dd>
-                </dl>
-                {error ? <p>{error}</p> : null}
-                <div className="connectionActions">
-                    <button
-                        type="button"
-                        onClick={() =>
-                            void createMigratedDocument({
-                                app,
-                                schemaConfig,
-                                schemaFingerprint,
-                                loadState,
-                                setError,
-                            })
-                        }
-                    >
-                        Create migrated document
-                    </button>
-                    <button type="button" onClick={() => openDocument(loadState.candidate.targetDocId)}>
-                        Open target document
-                    </button>
-                </div>
-            </section>
-        </main>
+        <>
+            <DemoTopBar {...topBar} />
+            <main className="localFirstShell">
+                <section className="waitingPanel">
+                    <h1>Schema migration available</h1>
+                    <p>
+                        This browser has a local document on schema version{' '}
+                        {loadState.candidate.sourceSchemaVersion}. A new document can be created on
+                        schema version {loadState.candidate.targetSchemaVersion}; the old document will
+                        remain unchanged.
+                    </p>
+                    <dl className="localFirstStats">
+                        <dt>Source</dt>
+                        <dd>{loadState.candidate.sourceDocId}</dd>
+                        <dt>Target</dt>
+                        <dd>{loadState.candidate.targetDocId}</dd>
+                        <dt>Migration</dt>
+                        <dd>{loadState.candidate.migrationIds.join(', ')}</dd>
+                        <dt>Current schema</dt>
+                        <dd>{schemaFingerprint.slice(0, 16)}</dd>
+                    </dl>
+                    {error ? <p>{error}</p> : null}
+                    <div className="connectionActions">
+                        <button
+                            type="button"
+                            onClick={() =>
+                                void createMigratedDocument({
+                                    app,
+                                    schemaConfig,
+                                    schemaFingerprint,
+                                    loadState,
+                                    setError,
+                                })
+                            }
+                        >
+                            Create migrated document
+                        </button>
+                        <button type="button" onClick={() => openDocument(loadState.candidate.targetDocId)}>
+                            Open target document
+                        </button>
+                    </div>
+                </section>
+            </main>
+        </>
     );
 }
 
