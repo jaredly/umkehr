@@ -205,6 +205,7 @@ export type ServerSync<TState> = {
     manualOfflineStore: ExternalStore<boolean>;
     setManualOffline(offline: boolean): void;
     requestSync(): void;
+    requestServerMigration(): void;
     saveHistory(history: CrdtLocalHistory<TState>): void;
     switchBranch(branchId: string): void;
     createBranch(name: string, forkEventIndex?: number): void;

@@ -19,7 +19,8 @@ describe('server migration user-facing states', () => {
             }),
         ).toEqual({
             kind: 'migration-required',
-            message: 'Document migration required. This client can migrate the server document to the current app schema.',
+            message:
+                "The server's version of this document must be migrated to the latest schema to continue syncing. You will not receive or send updates until this has been completed.",
             sourceSchemaVersion: 1,
             sourceSchemaFingerprintHash: 'old-hash',
             targetSchemaVersion: 2,
@@ -40,7 +41,8 @@ describe('server migration user-facing states', () => {
         ).toMatchObject({
             kind: 'migration-running',
             ownerActor: 'other:session',
-            message: 'Document migration is in progress. Sync will resume after the migration finishes or is cancelled.',
+            message:
+                'Document migration is in progress. Sync will resume after the migration finishes or is cancelled.',
         });
     });
 
@@ -55,7 +57,8 @@ describe('server migration user-facing states', () => {
             }),
         ).toEqual({
             kind: 'client-migration-required',
-            message: 'Update your app to sync with the server. Local edits will stay pending.',
+            message:
+                "Your version of the app is behind the server's schema version for this document. You must update your app in order to be able to send or receive updates.",
             schemaVersion: 2,
             schemaFingerprintHash: 'new-hash',
         });
@@ -77,31 +80,41 @@ describe('server migration user-facing states', () => {
 
     it('pauses server writes during migration without blocking local pending edits', () => {
         expect(canFlushPendingServerWrites({kind: 'connected'})).toBe(true);
-        expect(canFlushPendingServerWrites({
-            kind: 'migration-running',
-            message: 'Document migration is in progress.',
-            ownerActor: 'other:session',
-            targetSchemaVersion: 2,
-            targetSchemaFingerprintHash: 'new-hash',
-        })).toBe(false);
-        expect(canFlushPendingServerWrites({
-            kind: 'client-migration-required',
-            message: 'Update your app to sync with the server. Local edits will stay pending.',
-            schemaVersion: 2,
-            schemaFingerprintHash: 'new-hash',
-        })).toBe(false);
+        expect(
+            canFlushPendingServerWrites({
+                kind: 'migration-running',
+                message: 'Document migration is in progress.',
+                ownerActor: 'other:session',
+                targetSchemaVersion: 2,
+                targetSchemaFingerprintHash: 'new-hash',
+            }),
+        ).toBe(false);
+        expect(
+            canFlushPendingServerWrites({
+                kind: 'client-migration-required',
+                message:
+                    "Your version of the app is behind the server's schema version for this document. You must update your app in order to be able to send or receive updates.",
+                schemaVersion: 2,
+                schemaFingerprintHash: 'new-hash',
+            }),
+        ).toBe(false);
     });
 
     it('treats update-your-app as an informational notice', () => {
-        expect(serverStateNoticeTone({
-            kind: 'client-migration-required',
-            message: 'Update your app to sync with the server. Local edits will stay pending.',
-            schemaVersion: 2,
-            schemaFingerprintHash: 'new-hash',
-        })).toBe('info');
-        expect(serverStateNoticeTone({
-            kind: 'error',
-            message: 'WebSocket connection failed.',
-        })).toBe('error');
+        expect(
+            serverStateNoticeTone({
+                kind: 'client-migration-required',
+                message:
+                    "Your version of the app is behind the server's schema version for this document. You must update your app in order to be able to send or receive updates.",
+                schemaVersion: 2,
+                schemaFingerprintHash: 'new-hash',
+            }),
+        ).toBe('info');
+        expect(
+            serverStateNoticeTone({
+                kind: 'error',
+                message: 'WebSocket connection failed.',
+            }),
+        ).toBe('error');
     });
 });

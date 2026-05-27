@@ -39,9 +39,7 @@ export function ServerControls<TState>({
             <div className="serverToolbarActions">
                 <span
                     className={
-                        hasUnsyncedChanges
-                            ? 'serverSyncIndicator active'
-                            : 'serverSyncIndicator'
+                        hasUnsyncedChanges ? 'serverSyncIndicator active' : 'serverSyncIndicator'
                     }
                     role="img"
                     aria-label={unsyncedLabel}
@@ -88,12 +86,32 @@ export function ServerControls<TState>({
                 )}
             </section>
             {'message' in state ? (
-                <p className={`serverToolbarNotice ${noticeTone === 'error' ? 'error' : 'info'}`}>
-                    {state.message}
-                </p>
+                <div className={`serverToolbarNotice ${noticeClassForState(state, noticeTone)}`}>
+                    {state.kind === 'client-migration-required' ||
+                    state.kind === 'migration-required' ? (
+                        <span aria-hidden="true" className="serverToolbarNoticeIcon">
+                            🚨
+                        </span>
+                    ) : null}
+                    <span style={{flex: 1}}>{state.message}</span>
+                    {state.kind === 'migration-required' ? (
+                        <button type="button" onClick={sync.requestServerMigration}>
+                            Migrate document
+                        </button>
+                    ) : null}
+                </div>
             ) : null}
         </header>
     );
+}
+
+function noticeClassForState(
+    state: ReturnType<ServerSync<unknown>['stateStore']['getSnapshot']>,
+    tone: ReturnType<typeof serverStateNoticeTone>,
+) {
+    if (state.kind === 'client-migration-required' || state.kind === 'migration-required')
+        return 'warning';
+    return tone === 'error' ? 'error' : 'info';
 }
 
 function labelForState(state: ReturnType<ServerSync<unknown>['stateStore']['getSnapshot']>) {

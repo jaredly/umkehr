@@ -697,7 +697,8 @@ p {
     position: sticky;
     top: 0;
     z-index: 20;
-    display: flex;
+    display: grid;
+    grid-template-columns: auto auto minmax(0, 1fr);
     gap: 12px;
     align-items: center;
     border: 1px solid #d4dde7;
@@ -812,17 +813,49 @@ p {
 }
 
 .serverToolbarNotice {
+    display: flex;
     grid-column: 1 / -1;
-    margin: -2px 0 0;
+    margin: 0;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    padding: 10px 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
     font-size: 13px;
 }
 
 .serverToolbarNotice.info {
     color: #52616f;
+    background: #f8fafc;
 }
 
 .serverToolbarNotice.error {
+    border-color: #f0b8b8;
     color: #b42318;
+    background: #fff5f5;
+}
+
+.serverToolbarNotice.warning {
+    border-color: #f59e0b;
+    color: #7c2d12;
+    background: #ffedd5;
+    box-shadow: 0 8px 18px rgb(180 83 9 / 16%);
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.serverToolbarNotice.warning .serverToolbarNoticeIcon {
+    font-size: 18px;
+    line-height: 1;
+}
+
+.serverToolbarNotice button {
+    margin-left: auto;
+    border-color: #2f6fbd;
+    color: #0f3d8a;
+    background: #e8f1ff;
 }
 
 .serverLogin {
@@ -1032,13 +1065,7 @@ p {
     text-overflow: ellipsis;
     white-space: nowrap;
     font-family:
-        ui-monospace,
-        SFMono-Regular,
-        Menlo,
-        Monaco,
-        Consolas,
-        'Liberation Mono',
-        monospace;
+        ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
     font-size: 12px;
 }
 
@@ -1416,8 +1443,7 @@ p {
     overflow: hidden;
     background:
         linear-gradient(#e2e8f0 1px, transparent 1px),
-        linear-gradient(90deg, #e2e8f0 1px, transparent 1px),
-        #edf2f7;
+        linear-gradient(90deg, #e2e8f0 1px, transparent 1px), #edf2f7;
     background-size: 32px 32px;
     touch-action: none;
     user-select: none;

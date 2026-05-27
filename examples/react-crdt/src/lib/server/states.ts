@@ -3,37 +3,41 @@ import type {ServerSyncState} from './types';
 type ServerMessageMetadata = {version?: number; docId?: string};
 
 export type ServerMigrationStateMessage =
-    | {
+    | ({
           kind: 'serverMigrationRequired';
           sourceSchemaVersion: number;
           sourceSchemaFingerprintHash: string;
           targetSchemaVersion: number;
           targetSchemaFingerprintHash: string;
-      } & ServerMessageMetadata
-    | {
+      } & ServerMessageMetadata)
+    | ({
           kind: 'waitForMigration';
           ownerActor: string;
           targetSchemaVersion: number;
           targetSchemaFingerprintHash: string;
-      } & ServerMessageMetadata
-    | {
+      } & ServerMessageMetadata)
+    | ({
           kind: 'clientMigrationRequired';
           schemaVersion: number;
           schemaFingerprintHash: string;
-      } & ServerMessageMetadata
-    | {
+      } & ServerMessageMetadata)
+    | ({
           kind: 'schemaMismatch';
           schemaVersion: number;
           schemaFingerprintHash: string;
-      } & ServerMessageMetadata
+      } & ServerMessageMetadata)
     | ({kind: 'migrationCancelled'; reason: string} & ServerMessageMetadata);
 
-export function serverMigrationStateForMessage(message: ServerMigrationStateMessage): ServerSyncState {
+export function serverMigrationStateForMessage(
+    message: ServerMigrationStateMessage,
+): ServerSyncState {
     switch (message.kind) {
         case 'serverMigrationRequired':
             return {
                 kind: 'migration-required',
-                message: 'Document migration required. This client can migrate the server document to the current app schema.',
+                message:
+                    "The server's version of this document must be migrated to the latest schema to continue syncing. You will not receive or send updates until this has been completed.",
+                // message: 'Document migration required to sync. This client can migrate the server document to the current app schema.',
                 sourceSchemaVersion: message.sourceSchemaVersion,
                 sourceSchemaFingerprintHash: message.sourceSchemaFingerprintHash,
                 targetSchemaVersion: message.targetSchemaVersion,
@@ -42,7 +46,8 @@ export function serverMigrationStateForMessage(message: ServerMigrationStateMess
         case 'waitForMigration':
             return {
                 kind: 'migration-running',
-                message: 'Document migration is in progress. Sync will resume after the migration finishes or is cancelled.',
+                message:
+                    'Document migration is in progress. Sync will resume after the migration finishes or is cancelled.',
                 ownerActor: message.ownerActor,
                 targetSchemaVersion: message.targetSchemaVersion,
                 targetSchemaFingerprintHash: message.targetSchemaFingerprintHash,
@@ -50,7 +55,9 @@ export function serverMigrationStateForMessage(message: ServerMigrationStateMess
         case 'clientMigrationRequired':
             return {
                 kind: 'client-migration-required',
-                message: 'Update your app to sync with the server. Local edits will stay pending.',
+                message:
+                    "Your version of the app is behind the server's schema version for this document. You must update your app in order to be able to send or receive updates.",
+                // message: 'Update your app to sync with the server. Local edits will stay pending.',
                 schemaVersion: message.schemaVersion,
                 schemaFingerprintHash: message.schemaFingerprintHash,
             };

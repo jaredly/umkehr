@@ -591,20 +591,6 @@ export function useServerSync<TState>({
                 }
             } else if (parsed.kind === 'serverMigrationRequired') {
                 stateStore.setSnapshot(serverMigrationStateForMessage(parsed));
-                if (!window.confirm('Migrate this server document to the current app schema?')) {
-                    return;
-                }
-                send({
-                    kind: 'serverMigrationRequest',
-                    version: SERVER_PROTOCOL_VERSION,
-                    actor: identity.actor,
-                    userId: identity.user.userId,
-                    docId,
-                    appId: app.id,
-                    targetSchemaVersion: schemaVersion,
-                    targetSchemaFingerprint: schemaFingerprint,
-                    targetSchemaFingerprintHash: schemaFingerprintHash,
-                });
             } else if (parsed.kind === 'waitForMigration') {
                 stateStore.setSnapshot(serverMigrationStateForMessage(parsed));
             } else if (parsed.kind === 'clientMigrationRequired') {
@@ -1026,6 +1012,19 @@ export function useServerSync<TState>({
         manualOfflineStore,
         setManualOffline,
         requestSync,
+        requestServerMigration() {
+            send({
+                kind: 'serverMigrationRequest',
+                version: SERVER_PROTOCOL_VERSION,
+                actor: identity.actor,
+                userId: identity.user.userId,
+                docId,
+                appId: app.id,
+                targetSchemaVersion: schemaVersion,
+                targetSchemaFingerprint: schemaFingerprint,
+                targetSchemaFingerprintHash: schemaFingerprintHash,
+            });
+        },
         saveHistory(history) {
             const branch = activeBranch(branchesRef.current, activeBranchIdRef.current);
             branch.history = history;
