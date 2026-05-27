@@ -173,6 +173,15 @@ export const todoFixtureV2Metadata: VersionedSchema<TodoFixtureStateV2> = {
     validateState: validateTodoFixtureV2,
 };
 
+export const todoFixtureV3Metadata: VersionedSchema<TodoFixtureStateV3> = {
+    version: 3,
+    schema: todoFixtureV3Schema,
+    fingerprint: todoFixtureV3Fingerprint,
+    fingerprintHash: todoFixtureV3FingerprintHash,
+    tagKey: TODO_FIXTURE_TAG_KEY,
+    validateState: validateTodoFixtureV3,
+};
+
 export const todoFixtureMigration: SchemaMigration<unknown, unknown> = {
     id: 'todos-fixture-v1-to-v2',
     fromVersion: 1,
@@ -511,6 +520,12 @@ function validateTodoFixtureV2(input: unknown): IValidation<TodoFixtureStateV2> 
         : {success: false, data: input, errors: []};
 }
 
+function validateTodoFixtureV3(input: unknown): IValidation<TodoFixtureStateV3> {
+    return isTodoFixtureStateV3(input)
+        ? {success: true, data: input}
+        : {success: false, data: input, errors: []};
+}
+
 function isTodoFixtureStateV1(input: unknown): input is TodoFixtureStateV1 {
     return (
         isRecord(input) &&
@@ -527,6 +542,16 @@ function isTodoFixtureStateV2(input: unknown): input is TodoFixtureStateV2 {
         typeof input.bgcolor === 'string' &&
         Array.isArray(input.todos) &&
         input.todos.every(isTodoFixtureTodoV2)
+    );
+}
+
+function isTodoFixtureStateV3(input: unknown): input is TodoFixtureStateV3 {
+    return (
+        isRecord(input) &&
+        typeof input.bgcolor === 'string' &&
+        (input.view === 'all' || input.view === 'active' || input.view === 'done') &&
+        Array.isArray(input.todos) &&
+        input.todos.every(isTodoFixtureTodoV3)
     );
 }
 
@@ -547,6 +572,14 @@ function isTodoFixtureTodoV2(input: unknown): input is TodoFixtureV2 {
         typeof input.title === 'string' &&
         typeof input.done === 'boolean' &&
         (input.priority === 'normal' || input.priority === 'high')
+    );
+}
+
+function isTodoFixtureTodoV3(input: unknown): input is TodoFixtureV3 {
+    return (
+        isTodoFixtureTodoV2(input) &&
+        isRecord(input) &&
+        typeof (input as Record<string, unknown>).notes === 'string'
     );
 }
 

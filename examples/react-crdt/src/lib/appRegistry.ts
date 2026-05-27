@@ -2,6 +2,14 @@ import type {AppDefinition, CrdtRuntime, HistoryRuntime} from './crdtApp';
 import {todoApp, todoCrdtRuntime, todoHistoryRuntime} from '../apps/todos/TodoApp';
 import type {TodoState} from '../apps/todos/model';
 import {
+    todoV1App,
+    todoV1CrdtRuntime,
+    todoV1HistoryRuntime,
+    todoV3App,
+    todoV3CrdtRuntime,
+    todoV3HistoryRuntime,
+} from '../apps/todos/TodoVersionApps';
+import {
     whiteboardApp,
     whiteboardCrdtRuntime,
     whiteboardHistoryRuntime,
@@ -10,10 +18,13 @@ import type {WhiteboardEphemeralData, WhiteboardState} from '../apps/whiteboard/
 import {
     todoFixtureMigration,
     todoFixtureMigrationConfig,
+    type TodoFixtureStateV1,
+    type TodoFixtureStateV3,
 } from '../../../migration-fixtures/todos';
 import type {ServerSchemaConfig} from './server/schemaConfig';
 
 type RegisteredApp<TState = unknown> = {
+    routeId?: string;
     app: AppDefinition<TState>;
     crdt: CrdtRuntime<TState>;
     history: HistoryRuntime<TState>;
@@ -34,12 +45,36 @@ const todoMigrationServerSchemaConfig: ServerSchemaConfig<TodoState> = {
     migrations: [todoFixtureMigration],
 };
 
+const todoV1ServerSchemaConfig: ServerSchemaConfig<TodoFixtureStateV1> = {
+    version: 1,
+    migrations: [],
+};
+
+const todoV3ServerSchemaConfig: ServerSchemaConfig<TodoFixtureStateV3> = {
+    version: 3,
+    migrations: [],
+};
+
 export const registeredApps = [
     {
         app: todoApp,
         crdt: todoCrdtRuntime,
         history: todoHistoryRuntime,
         serverSchemaConfig: todoMigrationServerSchemaConfig,
+    },
+    {
+        routeId: 'todos@1',
+        app: todoV1App,
+        crdt: todoV1CrdtRuntime,
+        history: todoV1HistoryRuntime,
+        serverSchemaConfig: todoV1ServerSchemaConfig,
+    },
+    {
+        routeId: 'todos@3',
+        app: todoV3App,
+        crdt: todoV3CrdtRuntime,
+        history: todoV3HistoryRuntime,
+        serverSchemaConfig: todoV3ServerSchemaConfig,
     },
     {
         app: whiteboardApp,
@@ -49,13 +84,30 @@ export const registeredApps = [
     },
 ] satisfies [
     RegisteredApp<TodoState>,
+    RegisteredApp<TodoFixtureStateV1>,
+    RegisteredApp<TodoFixtureStateV3>,
     RegisteredEphemeralApp<WhiteboardState, WhiteboardEphemeralData>,
 ];
-export const apps = registeredApps.map((entry) => entry.app);
+export type AppOption = {
+    id: string;
+    title: string;
+};
+export const apps: AppOption[] = registeredApps.map((entry) => ({
+    id: routeIdForRegisteredApp(entry),
+    title: entry.app.title,
+}));
 export const defaultApp = todoApp;
 export const defaultCrdtRuntime = todoCrdtRuntime;
 export const defaultHistoryRuntime = todoHistoryRuntime;
+export const defaultAppRouteId = routeIdForRegisteredApp(registeredApps[0]);
 
 export function registeredAppForId(id: string) {
-    return registeredApps.find((entry) => entry.app.id === id) ?? registeredApps[0];
+    const exact = registeredApps.find((entry) => routeIdForRegisteredApp(entry) === id);
+    if (exact) return exact;
+    const appId = id.split('@', 1)[0] || id;
+    return registeredApps.find((entry) => entry.app.id === appId) ?? registeredApps[0];
+}
+
+export function routeIdForRegisteredApp(entry: {routeId?: string; app: {id: string}}) {
+    return entry.routeId ?? entry.app.id;
 }

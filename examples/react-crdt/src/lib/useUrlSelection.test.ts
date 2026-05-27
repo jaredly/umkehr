@@ -5,13 +5,13 @@ describe('url selection', () => {
     it('parses app, mode, and doc from search params', () => {
         expect(
             readUrlSelectionFromSearch(
-                '?mode=solo&app=whiteboard&doc=whiteboard-small',
+                '?mode=solo&app=todos%401&doc=todos-migration-v1-main',
                 'todos',
             ),
         ).toEqual({
             mode: 'solo',
-            appId: 'whiteboard',
-            docId: 'whiteboard-small',
+            appId: 'todos@1',
+            docId: 'todos-migration-v1-main',
         });
     });
 

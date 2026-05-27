@@ -24,3 +24,15 @@ export function ensureServerSessionId() {
     );
     return sessionId;
 }
+
+export function resetServerSessionId() {
+    const url = new URL(window.location.href);
+    const sessionId = `session-${crypto.randomUUID()}`;
+    url.searchParams.set('session', sessionId);
+    window.history.replaceState(
+        window.history.state,
+        '',
+        `${url.pathname}${url.search}${url.hash}`,
+    );
+    window.location.reload();
+}

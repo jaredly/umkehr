@@ -54,6 +54,9 @@ import type {
 } from './types';
 import type {IJsonSchemaCollection} from 'typia';
 
+const DUPLICATE_SESSION_MESSAGE =
+    'This server session is already open in another tab or window. Close the other copy, then reconnect, or open a URL with a different session.';
+
 export function useServerSync<TState>({
     app,
     docId,
@@ -84,6 +87,7 @@ export function useServerSync<TState>({
     const branchListRef = useRef(initialReplica.branchList);
     const socketRef = useRef<WebSocket | null>(null);
     const reconnectTimerRef = useRef<number | undefined>(undefined);
+    const suppressReconnectRef = useRef(false);
     const statusTimersRef = useRef(new Map<string, number>());
     const manualOfflineRef = useRef(false);
     const listenersRef = useRef(new Set<(update: CrdtUpdate) => void>());
@@ -502,6 +506,7 @@ export function useServerSync<TState>({
         if (socketRef.current?.readyState === WebSocket.OPEN) return;
         if (socketRef.current?.readyState === WebSocket.CONNECTING) return;
 
+        suppressReconnectRef.current = false;
         stateStore.setSnapshot({kind: 'connecting'});
         const socket = new WebSocket(SERVER_WS_URL);
         socketRef.current = socket;
@@ -563,6 +568,15 @@ export function useServerSync<TState>({
             } else if (parsed.kind === 'ack') {
                 void markAcknowledged(parsed).then(flushPending);
             } else if (parsed.kind === 'error') {
+                if (parsed.message === 'Session is already connected.') {
+                    suppressReconnectRef.current = true;
+                    stateStore.setSnapshot({
+                        kind: 'error',
+                        message: DUPLICATE_SESSION_MESSAGE,
+                        duplicateSession: true,
+                    });
+                    return;
+                }
                 stateStore.setSnapshot({kind: 'error', message: parsed.message});
             } else if (parsed.kind === 'presenceSnapshot') {
                 const users = sanitizePresenceUsers(parsed.users, identity.actor);
@@ -641,6 +655,7 @@ export function useServerSync<TState>({
         socket.addEventListener('close', () => {
             if (socketRef.current === socket) socketRef.current = null;
             clearPresenceState();
+            if (suppressReconnectRef.current) return;
             if (manualOfflineRef.current) {
                 stateStore.setSnapshot({kind: 'offline', reason: 'manual'});
                 return;
@@ -709,11 +724,13 @@ export function useServerSync<TState>({
             manualOfflineStore.setSnapshot(offline);
             if (offline) {
                 window.clearTimeout(reconnectTimerRef.current);
+                suppressReconnectRef.current = true;
                 socketRef.current?.close();
                 socketRef.current = null;
                 stateStore.setSnapshot({kind: 'offline', reason: 'manual'});
                 return;
             }
+            suppressReconnectRef.current = false;
             connect();
         },
         [connect, manualOfflineStore, stateStore],

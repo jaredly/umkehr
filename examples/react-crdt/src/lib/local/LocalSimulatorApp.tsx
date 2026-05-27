@@ -172,8 +172,8 @@ export function LocalSimulatorApp<TState, EphemeralData = never>({
         [app.id, documents],
     );
     const seedItems = useMemo(
-        () => filterUnrealizedSeeds(seedModalItemsForApp(app.id, 'local-simulator'), documentItems),
-        [app.id, documentItems],
+        () => filterUnrealizedSeeds(seedModalItemsForApp(app, 'local-simulator'), documentItems),
+        [app, documentItems],
     );
     const createBlankDocument = useCallback(
         async ({docId, title}: {docId: string; title: string}) => {
