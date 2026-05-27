@@ -47,8 +47,12 @@ import {
 import {
     todoFixtureV1Fingerprint,
     todoFixtureV1FingerprintHash,
+    todoFixtureV3Fingerprint,
+    todoFixtureV3FingerprintHash,
     todoFixtureServerUpdateEventsV1,
+    todoFixtureServerUpdateEventsV3,
     type TodoFixtureStateV1,
+    type TodoFixtureStateV3,
 } from '../../../../migration-fixtures/todos';
 import type {
     SeedDatabasePayload,
@@ -168,6 +172,7 @@ export function generateSeedFixtureCatalog({
             whiteboardConflictingElementEdits(clock),
             whiteboardManyEvents(clock, whiteboardEventCountFor(size)),
             todosMigrationV1Main(clock),
+            todosMigrationV3Ahead(clock),
         ],
     };
 }
@@ -800,6 +805,34 @@ function todosMigrationV1Main(clock: FixtureClock): SeedFixture<TodoFixtureState
         schemaVersion: 1,
         schemaFingerprint: todoFixtureV1Fingerprint,
         schemaFingerprintHash: todoFixtureV1FingerprintHash,
+        branches: [{
+            docId,
+            branchId: 'main',
+            name: 'main',
+            tipEventIndex: events.length,
+            createdAt,
+            updatedAt: createdAt,
+        }],
+        events,
+        histories: {},
+    };
+}
+
+function todosMigrationV3Ahead(clock: FixtureClock): SeedFixture<TodoFixtureStateV3> {
+    const docId = 'todos-migration-v3-ahead';
+    const createdAt = clock.iso();
+    const events = todoFixtureServerUpdateEventsV3({docId, receivedAt: createdAt});
+    return {
+        appId: TODO_MIGRATION_APP_ID,
+        docId,
+        title: 'Migration: todos fixture v3 ahead',
+        sizeLabel: 'future schema v3',
+        sizeRank: 171,
+        createdAt,
+        lastAccessedAt: createdAt,
+        schemaVersion: 3,
+        schemaFingerprint: todoFixtureV3Fingerprint,
+        schemaFingerprintHash: todoFixtureV3FingerprintHash,
         branches: [{
             docId,
             branchId: 'main',

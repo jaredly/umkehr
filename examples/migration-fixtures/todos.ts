@@ -13,6 +13,7 @@ import {
 import {
     type SchemaMigration,
     type SchemaMigrationConfig,
+    sha256Hex,
     type VersionedSchema,
 } from 'umkehr/migration';
 
@@ -41,8 +42,23 @@ export type TodoFixtureStateV2 = {
     todos: TodoFixtureV2[];
 };
 
+export type TodoFixtureV3 = {
+    id: string;
+    title: string;
+    done: boolean;
+    priority: 'normal' | 'high';
+    notes: string;
+};
+
+export type TodoFixtureStateV3 = {
+    bgcolor: string;
+    todos: TodoFixtureV3[];
+    view: 'all' | 'active' | 'done';
+};
+
 export const TODO_FIXTURE_DOC_ID_V1 = 'todos-fixture-v1';
 export const TODO_FIXTURE_DOC_ID_V2 = 'todos-fixture-v2';
+export const TODO_FIXTURE_DOC_ID_V3 = 'todos-fixture-v3';
 export const TODO_FIXTURE_TAG_KEY = 'type';
 export const TODO_FIXTURE_MIGRATED_AT = '2026-05-20T00:00:00.000Z';
 
@@ -101,12 +117,43 @@ export const todoFixtureV2Schema = {
     components: {schemas: {}},
 } as unknown as IJsonSchemaCollection<'3.1', [TodoFixtureStateV2]>;
 
+export const todoFixtureV3Schema = {
+    version: '3.1',
+    schemas: [
+        {
+            type: 'object',
+            required: ['bgcolor', 'todos', 'view'],
+            properties: {
+                bgcolor: {type: 'string'},
+                view: {type: 'string', enum: ['all', 'active', 'done']},
+                todos: {
+                    type: 'array',
+                    items: {
+                        type: 'object',
+                        required: ['id', 'title', 'done', 'priority', 'notes'],
+                        properties: {
+                            id: {type: 'string'},
+                            title: {type: 'string'},
+                            done: {type: 'boolean'},
+                            priority: {type: 'string', enum: ['normal', 'high']},
+                            notes: {type: 'string'},
+                        },
+                    },
+                },
+            },
+        },
+    ],
+    components: {schemas: {}},
+} as unknown as IJsonSchemaCollection<'3.1', [TodoFixtureStateV3]>;
+
 export const todoFixtureV1Fingerprint = fixtureSchemaFingerprint(todoFixtureV1Schema);
 export const todoFixtureV1FingerprintHash =
     '5138c45a7d7f08608d1d45ebd8f036e7ae7a6af38f742e4c45f7b49ce6638522';
 export const todoFixtureV2Fingerprint = fixtureSchemaFingerprint(todoFixtureV2Schema);
 export const todoFixtureV2FingerprintHash =
     'ce25d2ccf3aa388ac7ced90e75ae333e7853723c7040f7ba86a15efdfe546967';
+export const todoFixtureV3Fingerprint = fixtureSchemaFingerprint(todoFixtureV3Schema);
+export const todoFixtureV3FingerprintHash = sha256Hex(todoFixtureV3Fingerprint);
 
 export const todoFixtureV1Metadata: VersionedSchema<TodoFixtureStateV1> = {
     version: 1,
@@ -155,6 +202,27 @@ export const todoFixtureInitialV1: TodoFixtureStateV1 = {
     todos: [
         {id: 'one', text: 'Write README', done: true, archived: false},
         {id: 'two', text: 'Try CRDT sync', done: false},
+    ],
+};
+
+export const todoFixtureInitialV3: TodoFixtureStateV3 = {
+    bgcolor: '#eef2ff',
+    view: 'active',
+    todos: [
+        {
+            id: 'future-one',
+            title: 'Future schema item',
+            done: false,
+            priority: 'high',
+            notes: 'Requires a client that understands the v3 notes field.',
+        },
+        {
+            id: 'future-two',
+            title: 'Client upgrade prompt',
+            done: false,
+            priority: 'normal',
+            notes: 'Seeded ahead of the current migration fixture client.',
+        },
     ],
 };
 
@@ -306,6 +374,45 @@ export function todoFixtureServerUpdateEventsV1() {
             recorded: true,
         };
     });
+}
+
+export function todoFixtureServerUpdateEventsV3({
+    docId = TODO_FIXTURE_DOC_ID_V3,
+    receivedAt = TODO_FIXTURE_MIGRATED_AT,
+}: {
+    docId?: string;
+    receivedAt?: string;
+} = {}) {
+    const base = createCrdtDocument(todoFixtureInitialV3, todoFixtureV3Schema, {
+        timestamp: todoFixtureTs('seed-v3', 0),
+        tagKey: TODO_FIXTURE_TAG_KEY,
+    });
+    const update = createCrdtUpdates(
+        base,
+        {
+            op: 'replace',
+            path: [
+                {type: 'key', key: 'todos'},
+                {type: 'key', key: 1},
+                {type: 'key', key: 'notes'},
+            ],
+            previous: 'Seeded ahead of the current migration fixture client.',
+            value: 'Opening this document should require a newer client.',
+        },
+        todoFixtureTs('future', 10),
+    )[0];
+    const hlcTimestamp = latestCrdtUpdateTimestamp(update);
+    if (!hlcTimestamp) throw new Error('Expected fixture update timestamp.');
+    return [{
+        kind: 'update' as const,
+        docId,
+        branchId: 'main',
+        eventIndex: 1,
+        origin: 'fixture:future',
+        hlcTimestamp,
+        receivedAt,
+        update,
+    }];
 }
 
 export function todoFixtureTs(node: string, value: number) {

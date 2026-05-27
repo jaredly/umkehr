@@ -27,7 +27,10 @@ import {
 } from './generate';
 import {createLocalFirstSeedReplica} from './localFirst';
 import {createServerClientSeedReplica} from './serverClient';
-import {todoFixtureV1FingerprintHash} from '../../../../migration-fixtures/todos';
+import {
+    todoFixtureV1FingerprintHash,
+    todoFixtureV3FingerprintHash,
+} from '../../../../migration-fixtures/todos';
 
 const todoSeedApp: AppDefinition<TodoState> = {
     id: 'todos',
@@ -88,6 +91,7 @@ describe('seed database generator', () => {
             'whiteboard-conflicting-element-edits',
             'whiteboard-many-events',
             'todos-migration-v1-main',
+            'todos-migration-v3-ahead',
         ]);
     });
 
@@ -262,12 +266,17 @@ describe('seed database generator', () => {
 
     it('emits migration seed schema metadata', () => {
         const payload = generateSeedDatabasePayload({date: '2026-01-02', size: 'small'});
-        const migration = requiredDocument(payload, 'todos-migration-v1-main');
+        const behindClient = requiredDocument(payload, 'todos-migration-v1-main');
+        const aheadOfClient = requiredDocument(payload, 'todos-migration-v3-ahead');
 
-        expect(migration.appId).toBe('todos-migration-fixture');
-        expect(migration.schemaVersion).toBe(1);
-        expect(migration.schemaFingerprintHash).toBe(todoFixtureV1FingerprintHash);
-        expect(migration.events.length).toBeGreaterThan(0);
+        expect(behindClient.appId).toBe('todos-migration-fixture');
+        expect(behindClient.schemaVersion).toBe(1);
+        expect(behindClient.schemaFingerprintHash).toBe(todoFixtureV1FingerprintHash);
+        expect(behindClient.events.length).toBeGreaterThan(0);
+        expect(aheadOfClient.appId).toBe('todos-migration-fixture');
+        expect(aheadOfClient.schemaVersion).toBe(3);
+        expect(aheadOfClient.schemaFingerprintHash).toBe(todoFixtureV3FingerprintHash);
+        expect(aheadOfClient.events.length).toBeGreaterThan(0);
     });
 
     it('generates malformed payloads separately from the valid default payload', () => {

@@ -19,6 +19,7 @@ import {
     todoFixtureV1FingerprintHash,
     todoFixtureV2Fingerprint,
     todoFixtureV2FingerprintHash,
+    todoFixtureV3FingerprintHash,
 } from '../../migration-fixtures/todos';
 
 test('syncs edits through a seeded server database', async ({browser}, testInfo) => {
@@ -112,6 +113,28 @@ test('keeps local edits pending while another client owns the migration lock', a
         const after = await inspectServerDocument(dbPath, 'todos-migration-v1-main');
         expect(after.eventCount).toBe(before.eventCount);
         expect(after.activeMigrationLock?.docId).toBe('todos-migration-v1-main');
+    } finally {
+        await server.stop();
+    }
+});
+
+test('shows a client upgrade notice for a seeded document ahead of the client', async ({page}, testInfo) => {
+    const dbPath = await createTempServerDbPath(testInfo);
+    await seedServerDatabase({dbPath});
+    const server = await startServer({dbPath});
+
+    try {
+        await openServerDocument(page, {
+            appId: 'todos-migration-fixture',
+            docId: 'todos-migration-v3-ahead',
+        });
+        await login(page, 'Ada');
+
+        await expectServerNotice(page, /Update your app to sync with the server/);
+        const inspected = await inspectServerDocument(dbPath, 'todos-migration-v3-ahead');
+        expect(inspected.document?.schemaVersion).toBe(3);
+        expect(inspected.document?.schemaFingerprintHash).toBe(todoFixtureV3FingerprintHash);
+        expect(inspected.activeMigrationLock).toBeNull();
     } finally {
         await server.stop();
     }
