@@ -16,12 +16,14 @@ import type {
 } from './types';
 
 const MAIN_BRANCH_ID = 'main';
-const MIGRATION_LOCK_TTL_MS = 60_000;
+const DEFAULT_MIGRATION_LOCK_TTL_MS = 60_000;
 
 export class ServerStore {
     private db: Database;
+    private migrationLockTtlMs: number;
 
-    constructor(path = 'server-sync.sqlite') {
+    constructor(path = 'server-sync.sqlite', options: {migrationLockTtlMs?: number} = {}) {
+        this.migrationLockTtlMs = options.migrationLockTtlMs ?? DEFAULT_MIGRATION_LOCK_TTL_MS;
         this.db = new Database(path);
         this.db.exec(`
             create table if not exists documents (
@@ -307,7 +309,7 @@ export class ServerStore {
     expireMigrationLock(docId: string, now = new Date()): ServerMigrationLock | null {
         const lock = this.getMigrationLock(docId);
         if (!lock) return null;
-        if (now.getTime() - Date.parse(lock.updatedAt) <= MIGRATION_LOCK_TTL_MS) return null;
+        if (now.getTime() - Date.parse(lock.updatedAt) <= this.migrationLockTtlMs) return null;
         this.db.query('delete from migration_locks where docId = ?').run(docId);
         return lock;
     }

@@ -11,8 +11,9 @@ import type {EphemeralMessage} from 'umkehr/react-crdt';
 
 export const SERVER_PROTOCOL_VERSION = 3;
 export const SERVER_PORT = 8787;
-export const SERVER_HTTP_URL = `http://localhost:${SERVER_PORT}`;
-export const SERVER_WS_URL = `ws://localhost:${SERVER_PORT}/sync`;
+const configuredServerHttpUrl = import.meta.env.VITE_UMKEHR_SERVER_HTTP_URL?.trim();
+export const SERVER_HTTP_URL = configuredServerHttpUrl || `http://localhost:${SERVER_PORT}`;
+export const SERVER_WS_URL = `${SERVER_HTTP_URL.replace(/^http/, 'ws')}/sync`;
 
 export type ClientServerMessage =
     | {

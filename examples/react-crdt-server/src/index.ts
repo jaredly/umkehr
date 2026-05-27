@@ -5,7 +5,7 @@ import {
     parseSessionActor,
 } from './protocol';
 import {ServerStore} from './store';
-import {databasePathFromArgs} from './cli';
+import {databasePathFromArgs, migrationLockMsFromArgs, serverPortFromArgs} from './cli';
 import type {
     ConnectedClient,
     ServerBranch,
@@ -15,18 +15,18 @@ import type {
     ServerPresenceUser,
 } from './types';
 
-export const PORT = 8787;
-
 const dbPath = databasePathFromArgs(Bun.argv);
-const store = new ServerStore(dbPath);
+const port = serverPortFromArgs(Bun.argv);
+const migrationLockTtlMs = migrationLockMsFromArgs(Bun.argv);
+const store = new ServerStore(dbPath, {migrationLockTtlMs});
 const clients = new Set<ServerWebSocket>();
 
 const server = Bun.serve<ClientData>({
-    port: PORT,
+    port,
     async fetch(request, server) {
         const url = new URL(request.url);
         if (request.method === 'OPTIONS') return new Response(null, {headers: corsHeaders()});
-        if (url.pathname === '/health') return json({ok: true, port: PORT});
+        if (url.pathname === '/health') return json({ok: true, port: server.port});
         if (url.pathname === '/documents' && request.method === 'GET') {
             return json({documents: store.summarizeDocuments()});
         }
@@ -376,7 +376,9 @@ const server = Bun.serve<ClientData>({
     },
 });
 
-console.log(`react-crdt server sync listening on http://localhost:${server.port}`);
+console.log(
+    `react-crdt server sync listening on http://localhost:${server.port} using ${dbPath}`,
+);
 console.log(`react-crdt server sync database: ${dbPath}`);
 
 type ClientData = {

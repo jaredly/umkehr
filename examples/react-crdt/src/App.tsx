@@ -12,7 +12,7 @@ import {useUrlSelection} from './lib/useUrlSelection';
 export function App() {
     const [{mode, appId}, setMode, setAppId] = useUrlSelection(defaultApp.id);
     const registered = registeredAppForId(appId);
-    const {app, crdt, history} = registered;
+    const {app, crdt, history, serverSchemaConfig} = registered;
 
     return (
         <TopBarProvider key={`${app.id}:${mode}`}>
@@ -28,7 +28,12 @@ export function App() {
             ) : mode === 'local-first' ? (
                 <LocalFirstApp key={app.id} app={app as any} runtime={crdt as any} />
             ) : mode === 'server' ? (
-                <ServerApp key={app.id} app={app as any} runtime={crdt as any} />
+                <ServerApp
+                    key={app.id}
+                    app={app as any}
+                    runtime={crdt as any}
+                    schemaConfig={serverSchemaConfig as any}
+                />
             ) : mode === 'peerjs' ? (
                 <PeerJsApp key={app.id} app={app as any} runtime={crdt as any} />
             ) : (
