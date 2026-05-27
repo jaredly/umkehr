@@ -16,10 +16,10 @@ export type TopBarControls = {
 
 type TopBarContextValue = {
     controls: TopBarControls;
-    setControls(controls: TopBarControls): void;
 };
 
-const TopBarContext = createContext<TopBarContextValue | null>(null);
+const TopBarStateContext = createContext<TopBarContextValue | null>(null);
+const TopBarDispatchContext = createContext<((controls: TopBarControls) => void) | null>(null);
 
 export function TopBarProvider({
     children,
@@ -27,21 +27,24 @@ export function TopBarProvider({
     children: ReactNode;
 }) {
     const [controls, setControls] = useState<TopBarControls>({});
-    const value = useMemo(() => ({controls, setControls}), [controls]);
+    const stateValue = useMemo(() => ({controls}), [controls]);
 
-    return <TopBarContext.Provider value={value}>{children}</TopBarContext.Provider>;
+    return (
+        <TopBarDispatchContext.Provider value={setControls}>
+            <TopBarStateContext.Provider value={stateValue}>{children}</TopBarStateContext.Provider>
+        </TopBarDispatchContext.Provider>
+    );
 }
 
 export function useTopBarState() {
-    const context = useContext(TopBarContext);
+    const context = useContext(TopBarStateContext);
     if (!context) throw new Error('useTopBarState must be used inside TopBarProvider.');
     return context.controls;
 }
 
 export function useTopBarControls(controls: TopBarControls) {
-    const context = useContext(TopBarContext);
-    if (!context) throw new Error('useTopBarControls must be used inside TopBarProvider.');
-    const {setControls} = context;
+    const setControls = useContext(TopBarDispatchContext);
+    if (!setControls) throw new Error('useTopBarControls must be used inside TopBarProvider.');
 
     useEffect(() => {
         setControls(controls);
