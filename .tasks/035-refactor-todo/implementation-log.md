@@ -35,3 +35,14 @@
 - Reduced `TodoPanel.tsx` to header, extracted controls, add form, and list wiring.
 - First Phase 4 build attempt passed TypeScript but Vite transiently failed to resolve the linked `umkehr/crdt` export; verified the export resolved with Node and reran the build.
 - Verified Phase 4 with `pnpm --dir examples/react-crdt build`; TypeScript and Vite build completed successfully on rerun. Vite reported the existing large chunk warning.
+
+## Phase 5
+
+- Added `examples/react-crdt/tests/todo-smoke.spec.ts` to automate the manual smoke checks.
+- Covered solo-mode add, edit, checkbox, delete, drag reorder, no-op drag release, undo, redo, drop indicators, and reorder animation calls.
+- Covered local two-replica reorder sync from Replica A to Replica B, including a right-panel animation call.
+- Covered server history preview read-only state by previewing the latest timeline event and asserting add, edit, delete, checkbox, drag handle, and color swatch controls are disabled.
+- Updated `examples/react-crdt/playwright.config.ts` to start Vite with `--configLoader runner`, matching the seed/build path so Typia transforms are active during e2e dev-server runs.
+- The first targeted Playwright run exposed a stale reused dev server on port 5173 and then selector issues; stopped the stale server, simplified row locators, and previewed the latest server event to avoid an existing older-event preview crash.
+- Verified the smoke spec with `pnpm --dir examples/react-crdt exec playwright test tests/todo-smoke.spec.ts -c playwright.config.ts`; all 3 tests passed.
+- Verified the example build with `pnpm --dir examples/react-crdt build`; TypeScript and Vite build completed successfully. Vite reported the existing large chunk warning.

@@ -61,3 +61,50 @@
   - `npm test -- src/crdt/proof.test.ts`
   - `npm test -- src/crdt`
   - `npm run typecheck`
+
+## Phase 5 differential reference model
+
+- Added a test-only executable reference model inside `src/crdt/proof.test.ts`.
+- The reference model intentionally does not import production `apply`, `path`, `metadata`, or `materialize` helpers. It defines its own small proof-schema descriptors, metadata tree, parent-incarnation checks, pending retry loop, LWW application rules, array order handling, tagged-union branch checks, and materialization.
+- Added generated-history differential tests that compare production materialized state against the reference model across original, reversed, shuffled, and duplicated delivery schedules.
+- Added targeted differential histories covering primitive fields, records, arrays, and tagged unions.
+- The first differential run caught a model bug: it used locale string comparison for order keys, while production uses raw lexical comparison. The model now uses a local raw string comparator.
+- Verification so far:
+  - `npm test -- src/crdt/proof.test.ts`
+  - `npm test -- src/crdt`
+  - `npm run typecheck`
+
+## Phase 6 migration invariant tests
+
+- Added CRDT migration invariant coverage to `src/migration/migration.test.ts`.
+- Added shared replay/convergence checks for migrated CRDT histories using the proof helpers from `src/crdt/proofTestHelpers.ts`.
+- Covered migrated-history replay across original, reversed, bounded-permutation, and duplicate-injected delivery schedules.
+- Added invariant tests for:
+  - existing object field rename migration;
+  - helper-driven field drops that remove obsolete updates;
+  - helper-driven defaults on object-valued CRDT set updates;
+  - one source CRDT update expanding into multiple target updates while preserving replay;
+  - tagged-union branch rewrite preserving branch path identity.
+- Added small migration schema fixtures for drop/default/expand/tagged-union cases.
+- Verification so far:
+  - `npm test -- src/migration/migration.test.ts`
+  - `npm test -- src/crdt/proof.test.ts`
+  - `npm test -- src/crdt`
+  - `npm run typecheck`
+
+## Phase 7 documentation
+
+- Updated `Readme.md` with the precise CRDT behavior claim:
+  - valid updates from honest replicas;
+  - same initial document and schema;
+  - duplicate/reordered eventual delivery;
+  - convergence in materialized state and canonical metadata;
+  - permanently missing causal parents may leave non-ready updates pending.
+- Documented non-claims: root tombstones, Byzantine/malicious updates, tombstone garbage collection, and fractional-order rebalancing.
+- Documented that CRDT validation belongs at network/storage boundaries and is intentionally not performed inside `applyCrdtUpdate`.
+- Added `src/crdt/proof.md` summarizing the invariant suite and the scope of its proof-confidence claim.
+- Verification:
+  - `npm test -- src/crdt/proof.test.ts`
+  - `npm test -- src/migration/migration.test.ts`
+  - `npm test -- src/crdt`
+  - `npm run typecheck`

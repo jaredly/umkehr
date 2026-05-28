@@ -372,6 +372,20 @@ Umkehr is intended for plain JSON-like data:
 | CRDT behavior | Supported through `umkehr/crdt`; array `move` maps to stable item order updates |
 | Arbitrary object diffing | Not supported |
 
+## CRDT Behavior
+
+`umkehr/crdt` is an operation-based CRDT layer for valid updates produced by honest replicas from
+the same initial document and schema. Under arbitrary duplicate and reordered eventual delivery,
+replicas are expected to converge in both materialized state and canonical CRDT metadata. Updates
+whose causal parents never arrive may remain pending, but no update that is ready to apply should
+remain stuck in `pending`.
+
+CRDT update validation belongs at network and storage boundaries through
+`createCrdtUpdateValidator` or `validateCrdtUpdate`; `applyCrdtUpdate` is intentionally kept fast
+and does not validate every update internally. Root tombstones, Byzantine/malicious updates,
+tombstone garbage collection, and fractional-order rebalancing are not part of the current CRDT
+claim.
+
 ## Limitations
 
 - Umkehr patches are not JSON Patch compatible.

@@ -4,6 +4,13 @@ import {applyCrdtUpdate} from '../crdt/apply.js';
 import {createCrdtDocument} from '../crdt/document.js';
 import type {CrdtLocalHistory} from '../crdt/history.js';
 import type {CrdtUpdate} from '../crdt/types.js';
+import {
+    allPermutationsBounded,
+    applyAll,
+    duplicateUpdates,
+    expectConverged,
+    expectNoReadyPending,
+} from '../crdt/proofTestHelpers.js';
 import type {History} from '../history/history.js';
 import type {Patch} from '../types.js';
 import {
@@ -439,6 +446,279 @@ describe('CRDT history migration core', () => {
     });
 });
 
+describe('CRDT migration invariants', () => {
+    it('replays migrated history to the migrated realized state across delivery schedules', () => {
+        const result = migrateCrdtHistory(config, crdtHistoryV1(), {
+            schemaVersion: 1,
+            schemaFingerprintHash: 'v1-hash',
+        });
+
+        expectCrdtMigrationConverges(result.value);
+    });
+
+    it('preserves convergence for helper-driven object field rename', () => {
+        const history = crdtHistoryV1();
+        const migrated = migrateCrdtHistory(config, history, {
+            schemaVersion: 1,
+            schemaFingerprintHash: 'v1-hash',
+        }).value;
+
+        const [update] = migrated.updates;
+        expect(update.op).toBe('set');
+        if (update.op === 'set') expect(update.path[0]).toMatchObject({type: 'objectField', key: 'label'});
+        expectCrdtMigrationConverges(migrated);
+    });
+
+    it('preserves convergence when helper-driven field drops remove obsolete updates', () => {
+        type DropV1 = {title: string; obsolete: string};
+        type DropV2 = {title: string};
+        const dropV1 = versionedSchema<DropV1>(1, 'drop-v1-hash', (input): input is DropV1 => {
+            return isRecord(input) && typeof input.title === 'string' && typeof input.obsolete === 'string';
+        });
+        const dropV2 = versionedSchema<DropV2>(2, 'drop-v2-hash', (input): input is DropV2 => {
+            return isRecord(input) && typeof input.title === 'string' && !('obsolete' in input);
+        });
+        const dropConfig: SchemaMigrationConfig<DropV2> = {
+            current: dropV2,
+            previous: [dropV1],
+            migrations: [
+                {
+                    id: 'drop-obsolete',
+                    fromVersion: 1,
+                    toVersion: 2,
+                    fromFingerprintHash: 'drop-v1-hash',
+                    toFingerprintHash: 'drop-v2-hash',
+                    migrateState(input) {
+                        return {title: (input as DropV1).title};
+                    },
+                    migrateCrdtUpdate(input) {
+                        return dropCrdtObjectField(input, 'obsolete');
+                    },
+                },
+            ],
+        };
+        const base = createCrdtDocument({title: 'Draft', obsolete: 'old'}, dropV1.schema, {
+            timestamp: baseTs,
+        });
+        const obsoleteUpdate: CrdtUpdate = {
+            op: 'set',
+            path: [{type: 'objectField', key: 'obsolete', parentCreated: baseTs}],
+            value: 'new',
+            ts: updateTs,
+        };
+        const titleUpdate: CrdtUpdate = {
+            op: 'set',
+            path: [{type: 'objectField', key: 'title', parentCreated: baseTs}],
+            value: 'Published',
+            ts: '000000000000003:00000:local',
+        };
+        const history: CrdtLocalHistory<DropV1> = {
+            base,
+            doc: applyCrdtUpdate(applyCrdtUpdate(base, obsoleteUpdate), titleUpdate),
+            updates: [obsoleteUpdate, titleUpdate],
+        };
+
+        const migrated = migrateCrdtHistory(dropConfig, history, {
+            schemaVersion: 1,
+            schemaFingerprintHash: 'drop-v1-hash',
+        }).value;
+
+        expect(migrated.updates).toHaveLength(1);
+        expect(migrated.doc.state).toEqual({title: 'Published'});
+        expectCrdtMigrationConverges(migrated);
+    });
+
+    it('preserves convergence for helper-driven defaults on object-valued updates', () => {
+        type DefaultV1 = {item: {title: string}};
+        type DefaultV2 = {item: {title: string; done: boolean}};
+        const defaultV1 = versionedSchema<DefaultV1>(1, 'default-v1-hash', (input): input is DefaultV1 => {
+            return isRecord(input) && isRecord(input.item) && typeof input.item.title === 'string';
+        });
+        const defaultV2 = versionedSchema<DefaultV2>(2, 'default-v2-hash', (input): input is DefaultV2 => {
+            return (
+                isRecord(input) &&
+                isRecord(input.item) &&
+                typeof input.item.title === 'string' &&
+                typeof input.item.done === 'boolean'
+            );
+        });
+        const defaultConfig: SchemaMigrationConfig<DefaultV2> = {
+            current: defaultV2,
+            previous: [defaultV1],
+            migrations: [
+                {
+                    id: 'default-item-done',
+                    fromVersion: 1,
+                    toVersion: 2,
+                    fromFingerprintHash: 'default-v1-hash',
+                    toFingerprintHash: 'default-v2-hash',
+                    migrateState(input) {
+                        const state = input as DefaultV1;
+                        return {item: {...state.item, done: false}};
+                    },
+                    migrateCrdtUpdate(input) {
+                        return defaultCrdtSetObjectValue(input, {done: false});
+                    },
+                },
+            ],
+        };
+        const base = createCrdtDocument({item: {title: 'Draft'}}, defaultV1.schema, {
+            timestamp: baseTs,
+        });
+        const update: CrdtUpdate = {
+            op: 'set',
+            path: [{type: 'objectField', key: 'item', parentCreated: baseTs}],
+            value: {title: 'Published'},
+            ts: updateTs,
+        };
+        const history: CrdtLocalHistory<DefaultV1> = {
+            base,
+            doc: applyCrdtUpdate(base, update),
+            updates: [update],
+        };
+
+        const migrated = migrateCrdtHistory(defaultConfig, history, {
+            schemaVersion: 1,
+            schemaFingerprintHash: 'default-v1-hash',
+        }).value;
+
+        expect(migrated.doc.state).toEqual({item: {title: 'Published', done: false}});
+        expectCrdtMigrationConverges(migrated);
+    });
+
+    it('preserves replay order and convergence when one source update expands to many target updates', () => {
+        type ExpandV1 = {title: string};
+        type ExpandV2 = {label: string; done: boolean};
+        const expandV1 = versionedSchema<ExpandV1>(1, 'expand-v1-hash', (input): input is ExpandV1 => {
+            return isRecord(input) && typeof input.title === 'string';
+        });
+        const expandV2 = versionedSchema<ExpandV2>(2, 'expand-v2-hash', (input): input is ExpandV2 => {
+            return isRecord(input) && typeof input.label === 'string' && typeof input.done === 'boolean';
+        });
+        const expandConfig: SchemaMigrationConfig<ExpandV2> = {
+            current: expandV2,
+            previous: [expandV1],
+            migrations: [
+                {
+                    id: 'expand-title',
+                    fromVersion: 1,
+                    toVersion: 2,
+                    fromFingerprintHash: 'expand-v1-hash',
+                    toFingerprintHash: 'expand-v2-hash',
+                    migrateState(input) {
+                        return {label: (input as ExpandV1).title, done: false};
+                    },
+                    migrateCrdtUpdate(input) {
+                        if (input.op !== 'set') return input;
+                        return [
+                            {
+                                ...input,
+                                path: [{...input.path[0], key: 'label'}, ...input.path.slice(1)],
+                                value: input.value,
+                            },
+                            {
+                                op: 'set',
+                                path: [{type: 'objectField', key: 'done', parentCreated: baseTs}],
+                                value: false,
+                                ts: '000000000000002:00000:local~migration-default',
+                            },
+                        ];
+                    },
+                },
+            ],
+        };
+        const base = createCrdtDocument({title: 'Draft'}, expandV1.schema, {timestamp: baseTs});
+        const update: CrdtUpdate = {
+            op: 'set',
+            path: [{type: 'objectField', key: 'title', parentCreated: baseTs}],
+            value: 'Published',
+            ts: updateTs,
+        };
+        const history: CrdtLocalHistory<ExpandV1> = {
+            base,
+            doc: applyCrdtUpdate(base, update),
+            updates: [update],
+        };
+
+        const migrated = migrateCrdtHistory(expandConfig, history, {
+            schemaVersion: 1,
+            schemaFingerprintHash: 'expand-v1-hash',
+        }).value;
+
+        expect(migrated.updates).toHaveLength(2);
+        expect(migrated.doc.state).toEqual({label: 'Published', done: false});
+        expectCrdtMigrationConverges(migrated);
+    });
+
+    it('preserves tagged-union branch incarnation safety through helper migration', () => {
+        type TaggedV1 = {shape: {type: 'todo'; title: string} | {type: 'note'; text: string}};
+        type TaggedV2 = {shape: {type: 'task'; title: string} | {type: 'note'; text: string}};
+        const taggedV1 = versionedSchema<TaggedV1>(1, 'tagged-v1-hash', isTaggedV1);
+        const taggedV2 = versionedSchema<TaggedV2>(2, 'tagged-v2-hash', isTaggedV2);
+        const taggedConfig: SchemaMigrationConfig<TaggedV2> = {
+            current: taggedV2,
+            previous: [taggedV1],
+            migrations: [
+                {
+                    id: 'todo-to-task',
+                    fromVersion: 1,
+                    toVersion: 2,
+                    fromFingerprintHash: 'tagged-v1-hash',
+                    toFingerprintHash: 'tagged-v2-hash',
+                    migrateState(input) {
+                        const state = input as TaggedV1;
+                        return state.shape.type === 'todo'
+                            ? {shape: {...state.shape, type: 'task'}}
+                            : state;
+                    },
+                    migrateCrdtUpdate(input) {
+                        return renameCrdtTaggedBranch(input, 'type', 'todo', 'task');
+                    },
+                },
+            ],
+        };
+        const base = createCrdtDocument<TaggedV1>(
+            {shape: {type: 'todo', title: 'Draft'}},
+            taggedV1.schema,
+            {timestamp: baseTs},
+        );
+        const update: CrdtUpdate = {
+            op: 'set',
+            path: [
+                {type: 'objectField', key: 'shape', parentCreated: baseTs},
+                {
+                    type: 'taggedField',
+                    key: 'title',
+                    tagKey: 'type',
+                    tagValue: 'todo',
+                    parentCreated: baseTs,
+                    tagTs: baseTs,
+                },
+            ],
+            value: 'Published',
+            ts: updateTs,
+        };
+        const history: CrdtLocalHistory<TaggedV1> = {
+            base,
+            doc: applyCrdtUpdate(base, update),
+            updates: [update],
+        };
+
+        const migrated = migrateCrdtHistory(taggedConfig, history, {
+            schemaVersion: 1,
+            schemaFingerprintHash: 'tagged-v1-hash',
+        }).value;
+
+        const [migratedUpdate] = migrated.updates;
+        expect(migratedUpdate.op).toBe('set');
+        if (migratedUpdate.op === 'set') {
+            expect(migratedUpdate.path[1]).toMatchObject({type: 'taggedField', tagValue: 'task'});
+        }
+        expect(migrated.doc.state).toEqual({shape: {type: 'task', title: 'Published'}});
+        expectCrdtMigrationConverges(migrated);
+    });
+});
+
 describe('migration rewrite helpers', () => {
     it('rewrites and drops object-field patches and CRDT updates', () => {
         const patch = {
@@ -635,6 +915,39 @@ function schemaForHash(fingerprintHash: string) {
     if (fingerprintHash === 'v1-hash') return v1Schema;
     if (fingerprintHash === 'v2-hash') return v2Schema;
     if (fingerprintHash === 'v3-hash') return v3Schema;
+    if (fingerprintHash === 'drop-v1-hash') {
+        return objectSchema(['title', 'obsolete'], {
+            title: {type: 'string'},
+            obsolete: {type: 'string'},
+        });
+    }
+    if (fingerprintHash === 'drop-v2-hash') {
+        return objectSchema(['title'], {title: {type: 'string'}});
+    }
+    if (fingerprintHash === 'default-v1-hash') {
+        return objectSchema(['item'], {
+            item: objectSchemaValue(['title'], {title: {type: 'string'}}),
+        });
+    }
+    if (fingerprintHash === 'default-v2-hash') {
+        return objectSchema(['item'], {
+            item: objectSchemaValue(['title', 'done'], {
+                title: {type: 'string'},
+                done: {type: 'boolean'},
+            }),
+        });
+    }
+    if (fingerprintHash === 'expand-v1-hash') {
+        return objectSchema(['title'], {title: {type: 'string'}});
+    }
+    if (fingerprintHash === 'expand-v2-hash') {
+        return objectSchema(['label', 'done'], {
+            label: {type: 'string'},
+            done: {type: 'boolean'},
+        });
+    }
+    if (fingerprintHash === 'tagged-v1-hash') return taggedSchema('todo');
+    if (fingerprintHash === 'tagged-v2-hash') return taggedSchema('task');
     return schemaCollection;
 }
 
@@ -653,6 +966,41 @@ function objectSchema(required: string[], properties: Record<string, unknown>) {
     } as IJsonSchemaCollection<'3.1', [unknown]>;
 }
 
+function objectSchemaValue(required: string[], properties: Record<string, unknown>) {
+    return {
+        type: 'object',
+        required,
+        properties,
+        additionalProperties: false,
+    };
+}
+
+function taggedSchema(todoTag: 'todo' | 'task') {
+    return objectSchema(['shape'], {
+        shape: {
+            discriminator: {propertyName: 'type'},
+            oneOf: [
+                {
+                    type: 'object',
+                    required: ['type', 'title'],
+                    properties: {
+                        type: {const: todoTag},
+                        title: {type: 'string'},
+                    },
+                },
+                {
+                    type: 'object',
+                    required: ['type', 'text'],
+                    properties: {
+                        type: {const: 'note'},
+                        text: {type: 'string'},
+                    },
+                },
+            ],
+        },
+    });
+}
+
 function isV1(input: unknown): input is V1 {
     return isRecord(input) && typeof input.title === 'string';
 }
@@ -667,4 +1015,35 @@ function isV3(input: unknown): input is V3 {
 
 function isRecord(input: unknown): input is Record<string, unknown> {
     return typeof input === 'object' && input !== null && !Array.isArray(input);
+}
+
+function isTaggedV1(input: unknown): input is {shape: {type: 'todo'; title: string} | {type: 'note'; text: string}} {
+    if (!isRecord(input) || !isRecord(input.shape)) return false;
+    return (
+        (input.shape.type === 'todo' && typeof input.shape.title === 'string') ||
+        (input.shape.type === 'note' && typeof input.shape.text === 'string')
+    );
+}
+
+function isTaggedV2(input: unknown): input is {shape: {type: 'task'; title: string} | {type: 'note'; text: string}} {
+    if (!isRecord(input) || !isRecord(input.shape)) return false;
+    return (
+        (input.shape.type === 'task' && typeof input.shape.title === 'string') ||
+        (input.shape.type === 'note' && typeof input.shape.text === 'string')
+    );
+}
+
+function expectCrdtMigrationConverges(history: CrdtLocalHistory<unknown>) {
+    const schedules = [
+        history.updates,
+        history.updates.toReversed(),
+        ...allPermutationsBounded(history.updates, 24),
+        duplicateUpdates(history.updates.toReversed(), 'all'),
+    ];
+    const docs = schedules.map((updates) => applyAll(history.base, updates));
+    expectConverged([history.doc, ...docs]);
+    for (const doc of docs) {
+        expectNoReadyPending(doc);
+        expect(doc.pending).toEqual([]);
+    }
 }

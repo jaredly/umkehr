@@ -18,7 +18,7 @@ import {
     expectValidMaterializedState,
     shuffleDeterministically,
 } from './proofTestHelpers';
-import type {CrdtDocument, CrdtUpdate} from './types';
+import type {CrdtDocument, CrdtPathSegment, CrdtUpdate} from './types';
 import type {Patch} from '../types';
 
 type Todo = {id: string; title: string; done: boolean};
@@ -781,6 +781,69 @@ describe('CRDT bounded exhaustive invariants', () => {
     });
 });
 
+describe('CRDT differential reference model', () => {
+    it('matches production for generated histories across delivery schedules', () => {
+        fc.assert(
+            fc.property(initialStateArb(), commandHistoryArb(), fc.integer(), (initialState, commands, seed) => {
+                const {updates} = buildGeneratedHistory(initialState, commands);
+                fc.pre(updates.length > 0);
+
+                const schedules = [
+                    updates,
+                    updates.toReversed(),
+                    shuffleDeterministically(updates, seed),
+                    duplicateUpdates(shuffleDeterministically(updates, seed + 1), {
+                        indices: updates.map((_, index) => index).filter((index) => index % 2 === 0),
+                    }),
+                ];
+
+                for (const schedule of schedules) {
+                    const production = applyAll(createDocFrom(initialState), schedule).state;
+                    const model = applyReferenceUpdates(initialState, schedule);
+                    expect(model).toEqual(production);
+                }
+            }),
+            {numRuns: 50, seed: 0x5245464d},
+        );
+    });
+
+    it('matches production for targeted primitive, record, array, and tagged-union histories', () => {
+        const histories = [
+            buildGeneratedHistory(initial, [
+                {kind: 'setTitle', value: 'Published'},
+                {kind: 'setCount', value: 3},
+            ]).updates,
+            buildGeneratedHistory(initial, [
+                {kind: 'setRecord', key: 'one', value: {name: 'One', child: {}}},
+                {kind: 'setRecordChild', key: 'one', childKey: 'kid', value: 'Kid'},
+                {kind: 'deleteRecord', key: 'one'},
+                {kind: 'setRecord', key: 'one', value: {name: 'One again', child: {}}},
+            ]).updates,
+            buildGeneratedHistory(initial, [
+                {kind: 'appendTodo', value: {id: 'two', title: 'Two', done: false}},
+                {kind: 'editTodoDone', index: 1, value: true},
+                {kind: 'reorderTodos'},
+                {kind: 'deleteTodo', index: 0},
+            ]).updates,
+            buildGeneratedHistory(initial, [
+                {kind: 'setSelected', value: {type: 'text', text: 'draft'}},
+                {kind: 'editSelectedText', value: 'edited'},
+                {kind: 'setSelected', value: {type: 'circle', radius: 5}},
+                {kind: 'editSelectedRadius', value: 8},
+            ]).updates,
+        ];
+
+        for (const updates of histories) {
+            const schedules = [updates, updates.toReversed(), duplicateUpdates(updates.toReversed(), 'all')];
+            for (const schedule of schedules) {
+                expect(applyReferenceUpdates(initial, schedule)).toEqual(
+                    applyAll(createDoc(), schedule).state,
+                );
+            }
+        }
+    });
+});
+
 function oneUpdate(doc: CrdtDocument<State>, patch: Patch<State>, timestamp: string) {
     const updates = createCrdtUpdates(doc, patch, timestamp);
     expect(updates).toHaveLength(1);
@@ -1093,4 +1156,358 @@ function validateShape(input: unknown): input is Shape {
     if (value.type === 'circle') return typeof value.radius === 'number';
     if (value.type === 'text') return typeof value.text === 'string';
     return false;
+}
+
+type RefSchema =
+    | {kind: 'primitive'}
+    | {kind: 'object'; fields: Record<string, RefSchema>}
+    | {kind: 'record'; value: RefSchema}
+    | {kind: 'array'; item: RefSchema}
+    | {kind: 'tagged'; tagKey: string; branches: Record<string, RefSchema>};
+
+type RefMeta =
+    | {kind: 'primitive'; ts: string; value: string | number | boolean | null}
+    | {kind: 'object'; created: string; fields: Record<string, RefMeta>}
+    | {kind: 'record'; created: string; entries: Record<string, RefMeta>}
+    | {kind: 'array'; created: string; items: Record<string, {order: {value: string; ts: string}; value: RefMeta}>}
+    | {
+          kind: 'tagged';
+          created: string;
+          tagKey: string;
+          tagValue: string;
+          tagTs: string;
+          fields: Record<string, RefMeta>;
+      }
+    | {kind: 'tombstone'; deleted: string};
+
+type RefDoc = {
+    meta: RefMeta;
+    pending: CrdtUpdate[];
+};
+
+const primitiveRefSchema: RefSchema = {kind: 'primitive'};
+const childRefSchema: RefSchema = {
+    kind: 'object',
+    fields: {
+        name: primitiveRefSchema,
+    },
+};
+const itemRefSchema: RefSchema = {
+    kind: 'object',
+    fields: {
+        name: primitiveRefSchema,
+        child: {kind: 'record', value: childRefSchema},
+    },
+};
+const todoRefSchema: RefSchema = {
+    kind: 'object',
+    fields: {
+        id: primitiveRefSchema,
+        title: primitiveRefSchema,
+        done: primitiveRefSchema,
+    },
+};
+const shapeRefSchema: RefSchema = {
+    kind: 'tagged',
+    tagKey: 'type',
+    branches: {
+        circle: {kind: 'object', fields: {radius: primitiveRefSchema}},
+        text: {kind: 'object', fields: {text: primitiveRefSchema}},
+    },
+};
+const stateRefSchema: RefSchema = {
+    kind: 'object',
+    fields: {
+        title: primitiveRefSchema,
+        count: primitiveRefSchema,
+        settings: {
+            kind: 'object',
+            fields: {
+                theme: primitiveRefSchema,
+                nested: {kind: 'object', fields: {label: primitiveRefSchema}},
+            },
+        },
+        items: {kind: 'record', value: itemRefSchema},
+        todos: {kind: 'array', item: todoRefSchema},
+        selected: shapeRefSchema,
+    },
+};
+
+function applyReferenceUpdates(initialState: State, updates: readonly CrdtUpdate[]) {
+    const doc: RefDoc = {meta: buildRefMeta(initialState, stateRefSchema, startTs), pending: []};
+    for (const update of updates) applyReferenceUpdate(doc, update);
+    return materializeRef(doc.meta) as State;
+}
+
+function applyReferenceUpdate(doc: RefDoc, update: CrdtUpdate) {
+    const result = applyReferenceOne(doc, update);
+    if (result === 'pending') doc.pending.push(update);
+    if (result === 'applied') retryReferencePending(doc);
+}
+
+function applyReferenceOne(doc: RefDoc, update: CrdtUpdate): 'applied' | 'discarded' | 'pending' {
+    if (update.op === 'setOrder') return applyReferenceSetOrder(doc, update);
+    if (!update.path.length) {
+        if (update.op === 'delete') {
+            if (newerRef(versionRef(doc.meta), update.ts)) return 'discarded';
+            doc.meta = {kind: 'tombstone', deleted: update.ts};
+            return 'applied';
+        }
+        if (!newerRef(update.ts, versionRef(doc.meta))) return 'discarded';
+        doc.meta = buildRefMeta(update.value, stateRefSchema, update.ts);
+        return 'applied';
+    }
+
+    const walked = walkReferenceToLeaf(doc.meta, update.path);
+    if (walked.status !== 'ready') return walked.status;
+    const {parent, target, segment} = walked;
+    if (update.op === 'delete') {
+        if (target && newerRef(versionRef(target), update.ts)) return 'discarded';
+        setReferenceChild(parent, segment, {kind: 'tombstone', deleted: update.ts});
+        return 'applied';
+    }
+    if (target && !newerRef(update.ts, versionRef(target))) return 'discarded';
+    if (segment.type === 'arrayItem' && !target && !segment.order) return 'pending';
+    setReferenceChild(
+        parent,
+        segment,
+        buildRefMeta(update.value, schemaAtReferencePath(update.path), update.ts),
+    );
+    return 'applied';
+}
+
+function applyReferenceSetOrder(doc: RefDoc, update: Extract<CrdtUpdate, {op: 'setOrder'}>) {
+    const target = getReferenceMetaAtPath(doc.meta, update.arrayPath);
+    if (!target) return 'pending';
+    if (target.kind === 'tombstone') return 'discarded';
+    if (target.kind !== 'array') return 'discarded';
+    if (Object.keys(update.orders).some((id) => !target.items[id])) return 'pending';
+    let applied = false;
+    for (const [id, order] of Object.entries(update.orders)) {
+        const item = target.items[id];
+        if (item && newerRef(order.ts, item.order.ts)) {
+            item.order = {...order};
+            applied = true;
+        }
+    }
+    return applied ? 'applied' : 'discarded';
+}
+
+function retryReferencePending(doc: RefDoc) {
+    let changed = true;
+    while (changed) {
+        changed = false;
+        const remaining: CrdtUpdate[] = [];
+        for (const update of doc.pending) {
+            const result = applyReferenceOne(doc, update);
+            if (result === 'applied') {
+                changed = true;
+            } else if (result === 'pending') {
+                remaining.push(update);
+            }
+        }
+        doc.pending = remaining;
+    }
+}
+
+function walkReferenceToLeaf(
+    root: RefMeta,
+    path: CrdtPathSegment[],
+):
+    | {status: 'ready'; parent: RefMeta; target: RefMeta | undefined; segment: CrdtPathSegment}
+    | {status: 'discarded' | 'pending'} {
+    let parent = root;
+    for (let i = 0; i < path.length - 1; i++) {
+        const segment = path[i];
+        const check = checkReferenceParent(parent, segment);
+        if (check !== 'ready') return {status: check};
+        const child = getReferenceChild(parent, segment);
+        if (!child) return {status: 'pending'};
+        if (child.kind === 'tombstone') return {status: 'discarded'};
+        parent = child;
+    }
+    const segment = path[path.length - 1];
+    const check = checkReferenceParent(parent, segment);
+    if (check !== 'ready') return {status: check};
+    return {status: 'ready', parent, segment, target: getReferenceChild(parent, segment)};
+}
+
+function checkReferenceParent(
+    parent: RefMeta,
+    segment: CrdtPathSegment,
+): 'ready' | 'pending' | 'discarded' {
+    if (parent.kind === 'tombstone' || parent.kind === 'primitive') return 'discarded';
+    if (parent.created > segment.parentCreated) return 'discarded';
+    if (parent.created < segment.parentCreated) return 'pending';
+    if (segment.type === 'taggedField') {
+        if (parent.kind !== 'tagged') return 'discarded';
+        if (parent.tagKey !== segment.tagKey || parent.tagValue !== segment.tagValue) return 'discarded';
+        if (parent.tagTs > segment.tagTs) return 'discarded';
+        if (parent.tagTs < segment.tagTs) return 'pending';
+    }
+    return 'ready';
+}
+
+function getReferenceMetaAtPath(root: RefMeta, path: CrdtPathSegment[]) {
+    let meta: RefMeta | undefined = root;
+    for (const segment of path) {
+        if (!meta || meta.kind === 'tombstone') return undefined;
+        if (checkReferenceParent(meta, segment) !== 'ready') return undefined;
+        meta = getReferenceChild(meta, segment);
+    }
+    return meta;
+}
+
+function getReferenceChild(parent: RefMeta, segment: CrdtPathSegment) {
+    switch (segment.type) {
+        case 'objectField':
+            return parent.kind === 'object' ? parent.fields[segment.key] : undefined;
+        case 'recordEntry':
+            return parent.kind === 'record' ? parent.entries[segment.key] : undefined;
+        case 'arrayItem':
+            return parent.kind === 'array' ? parent.items[segment.id]?.value : undefined;
+        case 'taggedField':
+            return parent.kind === 'tagged' ? parent.fields[segment.key] : undefined;
+    }
+}
+
+function setReferenceChild(parent: RefMeta, segment: CrdtPathSegment, value: RefMeta) {
+    switch (segment.type) {
+        case 'objectField':
+            if (parent.kind === 'object') parent.fields[segment.key] = value;
+            return;
+        case 'recordEntry':
+            if (parent.kind === 'record') parent.entries[segment.key] = value;
+            return;
+        case 'arrayItem':
+            if (parent.kind === 'array') {
+                parent.items[segment.id] ??= {
+                    order: segment.order ?? {value: 'U', ts: versionRef(value)},
+                    value: {kind: 'tombstone', deleted: segment.parentCreated},
+                };
+                parent.items[segment.id].value = value;
+            }
+            return;
+        case 'taggedField':
+            if (parent.kind === 'tagged') parent.fields[segment.key] = value;
+            return;
+    }
+}
+
+function buildRefMeta(value: unknown, schema: RefSchema, timestamp: string): RefMeta {
+    if (value === undefined) return {kind: 'tombstone', deleted: timestamp};
+    if (schema.kind === 'primitive' || value === null || typeof value !== 'object') {
+        return {kind: 'primitive', ts: timestamp, value: value as string | number | boolean | null};
+    }
+    if (schema.kind === 'array') {
+        const items: Extract<RefMeta, {kind: 'array'}>['items'] = {};
+        for (const [index, item] of (value as unknown[]).entries()) {
+            items[`${timestamp}:${index}`] = {
+                order: {value: String.fromCharCode(85 + index), ts: timestamp},
+                value: buildRefMeta(item, schema.item, timestamp),
+            };
+        }
+        return {kind: 'array', created: timestamp, items};
+    }
+    if (schema.kind === 'record') {
+        const entries: Record<string, RefMeta> = {};
+        for (const [key, field] of Object.entries(value as Record<string, unknown>)) {
+            if (field !== undefined) entries[key] = buildRefMeta(field, schema.value, timestamp);
+        }
+        return {kind: 'record', created: timestamp, entries};
+    }
+    if (schema.kind === 'tagged') {
+        const record = value as Record<string, unknown>;
+        const tagValue = String(record[schema.tagKey]);
+        const branch = schema.branches[tagValue] ?? {kind: 'object', fields: {}};
+        const fields: Record<string, RefMeta> = {};
+        if (branch.kind === 'object') {
+            for (const [key, fieldSchema] of Object.entries(branch.fields)) {
+                if (record[key] !== undefined) fields[key] = buildRefMeta(record[key], fieldSchema, timestamp);
+            }
+        }
+        return {
+            kind: 'tagged',
+            created: timestamp,
+            tagKey: schema.tagKey,
+            tagValue,
+            tagTs: timestamp,
+            fields,
+        };
+    }
+    const fields: Record<string, RefMeta> = {};
+    const record = value as Record<string, unknown>;
+    for (const [key, fieldSchema] of Object.entries(schema.fields)) {
+        if (record[key] !== undefined) fields[key] = buildRefMeta(record[key], fieldSchema, timestamp);
+    }
+    return {kind: 'object', created: timestamp, fields};
+}
+
+function schemaAtReferencePath(path: CrdtPathSegment[]) {
+    let schema = stateRefSchema;
+    for (const segment of path) {
+        if (segment.type === 'objectField' && schema.kind === 'object') {
+            schema = schema.fields[segment.key] ?? primitiveRefSchema;
+        } else if (segment.type === 'recordEntry' && schema.kind === 'record') {
+            schema = schema.value;
+        } else if (segment.type === 'arrayItem' && schema.kind === 'array') {
+            schema = schema.item;
+        } else if (segment.type === 'taggedField' && schema.kind === 'tagged') {
+            const branch = schema.branches[segment.tagValue] ?? {kind: 'object', fields: {}};
+            schema = branch.kind === 'object' ? (branch.fields[segment.key] ?? primitiveRefSchema) : primitiveRefSchema;
+        }
+    }
+    return schema;
+}
+
+function materializeRef(meta: RefMeta): unknown {
+    switch (meta.kind) {
+        case 'primitive':
+            return meta.value;
+        case 'tombstone':
+            return undefined;
+        case 'object':
+            return materializeObjectRef(meta.fields);
+        case 'record':
+            return materializeObjectRef(meta.entries);
+        case 'array':
+            return Object.entries(meta.items)
+                .filter(([, item]) => item.value.kind !== 'tombstone')
+                .sort(([aId, a], [bId, b]) => compareRefStrings(a.order.value, b.order.value) || compareRefStrings(aId, bId))
+                .map(([, item]) => materializeRef(item.value))
+                .filter((item) => item !== undefined);
+        case 'tagged':
+            return {...materializeObjectRef(meta.fields), [meta.tagKey]: meta.tagValue};
+    }
+}
+
+function materializeObjectRef(fields: Record<string, RefMeta>) {
+    const value: Record<string, unknown> = {};
+    for (const [key, field] of Object.entries(fields)) {
+        const materialized = materializeRef(field);
+        if (materialized !== undefined) value[key] = materialized;
+    }
+    return value;
+}
+
+function versionRef(meta: RefMeta): string {
+    switch (meta.kind) {
+        case 'primitive':
+            return meta.ts;
+        case 'object':
+        case 'record':
+        case 'array':
+        case 'tagged':
+            return meta.created;
+        case 'tombstone':
+            return meta.deleted;
+    }
+}
+
+function newerRef(a: string, b: string) {
+    return a > b;
+}
+
+function compareRefStrings(a: string, b: string) {
+    return a < b ? -1 : a > b ? 1 : 0;
 }
