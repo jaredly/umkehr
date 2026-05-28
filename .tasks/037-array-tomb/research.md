@@ -292,3 +292,185 @@ new array item and validate/delete-generate paths so deletes never include it.
 - Do remote validation rules need to distinguish "path segment is valid" from "this `set` update is
   an array insert and therefore carries order"? Today validation accepts optional order on any
   `arrayItem` path segment.
+
+## Dedicated `insert` op sketch
+
+Given the answers above, a dedicated array insert op is probably cleaner than an `insert` payload on
+`set`. It separates these concepts:
+
+- `insert`: create an array item id with its initial order and value.
+- `set`: update an existing value addressed by a CRDT path.
+- `delete`: delete an existing value addressed by a CRDT path.
+- `setOrder`: update array item order registers.
+
+The path segment can then stop carrying order entirely:
+
+```ts
+type CrdtPathSegment =
+    | {type: 'objectField'; key: string; parentCreated: HlcTimestamp}
+    | {type: 'recordEntry'; key: string; parentCreated: HlcTimestamp}
+    | {type: 'arrayItem'; id: ItemId; parentCreated: HlcTimestamp}
+    | {
+          type: 'taggedField';
+          key: string;
+          tagKey: string;
+          tagValue: string;
+          parentCreated: HlcTimestamp;
+          tagTs: HlcTimestamp;
+      };
+
+type CrdtInsertUpdate = {
+    op: 'insert';
+    arrayPath: CrdtPathSegment[];
+    id: ItemId;
+    order: {value: FractionalIndex; ts: HlcTimestamp};
+    value: JsonValue;
+    ts: HlcTimestamp;
+    command?: CrdtCommandInfo;
+};
+
+type CrdtSetUpdate = {
+    op: 'set';
+    path: CrdtPathSegment[];
+    value: JsonValue;
+    ts: HlcTimestamp;
+    command?: CrdtCommandInfo;
+};
+
+type CrdtUpdate = CrdtInsertUpdate | CrdtSetUpdate | CrdtDeleteUpdate | CrdtSetOrderUpdate;
+```
+
+Related naming decision: rename the existing optional update-level `meta?: CrdtUpdateMeta` field to
+`command?: CrdtCommandInfo`. The current name is overloaded with CRDT document metadata
+(`doc.meta`, `CrdtMeta`) even though the field is only for grouping updates into local edit/undo/redo
+commands. `command` makes the purpose clearer and should be applied to every update variant,
+including the new `insert` op.
+
+`createCrdtUpdates` would map array `add` to `insert`:
+
+```ts
+case 'add': {
+    const arrayAdd = arrayAddTarget(doc, patch.path, ts);
+    if (arrayAdd) {
+        return [{
+            op: 'insert',
+            arrayPath: arrayAdd.parentPath,
+            id: arrayAdd.id,
+            order: {value: arrayAdd.order, ts},
+            value: patch.value as JsonValue,
+            ts,
+        }];
+    }
+    return [{op: 'set', path: crdtPathForExisting(doc, patch.path), value: patch.value, ts}];
+}
+```
+
+Array `remove` becomes a normal delete with no order-bearing path:
+
+```ts
+{
+    op: 'delete',
+    path: crdtPathForExisting(doc, patch.path),
+    ts,
+}
+```
+
+The apply side gets a separate branch:
+
+```ts
+function applyInsert(doc, update): 'applied' | 'discarded' | 'pending' {
+    const array = getMetaAtPath(doc.meta, update.arrayPath);
+    if (!array) return 'pending';
+    if (array.kind === 'tombstone') return 'discarded';
+    if (array.kind !== 'array') return 'discarded';
+
+    const existing = array.items[update.id];
+    const value = buildMeta(
+        update.value,
+        schemaAtArrayPath(doc.schema, update.arrayPath),
+        doc.schema,
+        update.ts,
+    );
+
+    if (!existing) {
+        array.items[update.id] = {kind: 'live', order: update.order, value};
+        return 'applied';
+    }
+
+    // LWW for id reuse / duplicate insert. Honest replicas should not reuse ids, but define it.
+    const existingVersion =
+        existing.kind === 'deleted' ? existing.deleted : versionOf(existing.value);
+    if (existingVersion && !newer(update.ts, existingVersion)) return 'discarded';
+
+    array.items[update.id] = {kind: 'live', order: update.order, value};
+    return 'applied';
+}
+```
+
+That example assumes this array item shape:
+
+```ts
+type ArrayItemMeta =
+    | {kind: 'live'; order: {value: FractionalIndex; ts: HlcTimestamp}; value: CrdtMeta}
+    | {kind: 'deleted'; deleted: HlcTimestamp};
+```
+
+With that shape, `liveArrayItems` and `materialize` filter on `item.kind === 'live'` instead of
+`item.value.kind !== 'tombstone'`, and tombstones have no order field.
+
+Deletes would become array-aware rather than relying on generic `setChild` to synthesize missing
+array item shells:
+
+```ts
+if (update.op === 'delete' && segment.type === 'arrayItem') {
+    if (parent.kind !== 'array') return 'discarded';
+    const item = parent.items[segment.id];
+    if (!item) return 'pending';
+
+    const targetVersion = item.kind === 'deleted' ? item.deleted : versionOf(item.value);
+    if (targetVersion && newer(targetVersion, update.ts)) return 'discarded';
+
+    parent.items[segment.id] = {kind: 'deleted', deleted: update.ts};
+    return 'applied';
+}
+```
+
+`set` no longer creates array items. A `set` targeting a missing array item is pending. That makes
+child edits causally depend on `insert`, which matches the existing proof allowance for permanently
+missing causal parents.
+
+`setOrder` policy needs to be explicit. With order-free tombstones, I think the practical policy is:
+
+- unknown id: pending, as today;
+- live id: apply by LWW to the live item's order;
+- deleted id: return `applied` as an idempotent no-op, or `discarded`, but do not store order on the
+  tombstone.
+
+The no-op choice preserves the idea that the update has been handled without reintroducing order
+into deleted metadata. It also converges: replicas that see `setOrder` before delete will have that
+order cleared by the later delete, while replicas that see delete before `setOrder` will keep the
+order-free tombstone.
+
+Validation becomes simpler in one place and stricter in another:
+
+- `arrayItem` path segments no longer accept `order`.
+- `insert.arrayPath` must walk to an array schema.
+- `insert.value` must validate against that array's item schema.
+- `set.path` can still walk through array items, but only as an address; it cannot create an array
+  item.
+- `delete.path` never carries order.
+
+Migration impact is low if there are no persisted current-format CRDT documents. Wire compatibility
+still changes, so any network peers must be upgraded together or the protocol needs a version gate.
+
+The main implementation cost is touching all places that currently assume `ArrayItemMeta` always
+has `{order, value}`:
+
+- `src/crdt/types.ts`
+- `src/crdt/updates.ts`
+- `src/crdt/apply.ts`
+- `src/crdt/path.ts`
+- `src/crdt/materialize.ts`
+- `src/crdt/validation.ts`
+- `src/crdt/proof.test.ts` reference model
+- CRDT validation and convergence tests

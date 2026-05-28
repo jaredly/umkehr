@@ -2,6 +2,40 @@ import {useState} from 'react';
 import type {AppEditorContext} from '../../lib/crdtApp';
 import type {TodoState} from './model';
 
+export function TodoAddFormView({
+    draftTitle,
+    placeholder = 'New todo',
+    readOnly,
+    onDraftTitleChange,
+    onSubmit,
+}: {
+    draftTitle: string;
+    placeholder?: string;
+    readOnly: boolean;
+    onDraftTitleChange(value: string): void;
+    onSubmit(): void;
+}) {
+    return (
+        <form
+            className="addForm"
+            onSubmit={(event) => {
+                event.preventDefault();
+                onSubmit();
+            }}
+        >
+            <input
+                value={draftTitle}
+                placeholder={placeholder}
+                onChange={(event) => onDraftTitleChange(event.target.value)}
+                disabled={readOnly}
+            />
+            <button type="submit" disabled={readOnly}>
+                Add
+            </button>
+        </form>
+    );
+}
+
 export function TodoAddForm({
     editor,
     replicaId,
@@ -14,10 +48,11 @@ export function TodoAddForm({
     const [draftTitle, setDraftTitle] = useState('');
 
     return (
-        <form
-            className="addForm"
-            onSubmit={(event) => {
-                event.preventDefault();
+        <TodoAddFormView
+            draftTitle={draftTitle}
+            readOnly={readOnly}
+            onDraftTitleChange={setDraftTitle}
+            onSubmit={() => {
                 const next = draftTitle.trim();
                 if (readOnly || !next) return;
                 editor.$.todos.$push({
@@ -28,16 +63,6 @@ export function TodoAddForm({
                 });
                 setDraftTitle('');
             }}
-        >
-            <input
-                value={draftTitle}
-                placeholder="New todo"
-                onChange={(event) => setDraftTitle(event.target.value)}
-                disabled={readOnly}
-            />
-            <button type="submit" disabled={readOnly}>
-                Add
-            </button>
-        </form>
+        />
     );
 }
