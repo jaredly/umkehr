@@ -549,9 +549,20 @@ p {
     align-items: center;
 }
 
+.todoContent {
+    min-width: 0;
+    display: grid;
+    gap: 6px;
+}
+
 .todoTitle {
     min-width: 0;
     overflow-wrap: anywhere;
+}
+
+.todoTitleMeta {
+    color: #64748b;
+    font-size: 13px;
 }
 
 .done .todoTitle {
@@ -559,14 +570,54 @@ p {
     text-decoration: line-through;
 }
 
+.todoDetails {
+    min-width: 0;
+}
+
+.todoNotesInput {
+    width: 100%;
+    min-width: 0;
+    border: 1px solid #c3cfdb;
+    border-radius: 6px;
+    padding: 6px 8px;
+    color: #17202a;
+    background: #fff;
+    font-size: 13px;
+}
+
 .itemActions {
     display: flex;
     align-items: center;
     gap: 6px;
+    flex-wrap: wrap;
 }
 
 .itemActions button {
     padding: 6px 9px;
+}
+
+.todoExtraControl {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: #526070;
+    font-size: 13px;
+}
+
+.todoExtraControl input {
+    margin: 0;
+}
+
+.todoPrioritySelect {
+    min-width: 88px;
+    height: 32px;
+    border: 1px solid #c3cfdb;
+    border-radius: 6px;
+    padding: 0 8px;
+    color: #17202a;
+    background: #fff;
+    font-size: 13px;
 }
 
 .presenceCursorStack {

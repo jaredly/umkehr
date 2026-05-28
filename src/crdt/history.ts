@@ -10,11 +10,11 @@ import {getMetaAtPath} from './path.js';
 import {createCrdtUpdates} from './updates.js';
 import type {
     CrdtDocument,
+    CrdtCommandInfo,
     CrdtMeta,
     CrdtPathSegment,
     CrdtSetOrderUpdate,
     CrdtUpdate,
-    CrdtUpdateMeta,
     FractionalIndex,
     HlcTimestamp,
     ItemId,
@@ -29,7 +29,7 @@ export type CrdtLocalHistory<T> = {
 
 type DerivedCommand = {
     id: HlcTimestamp;
-    intent: CrdtUpdateMeta['intent'];
+    intent: CrdtCommandInfo['intent'];
     targetCommandId?: HlcTimestamp;
     updates: CrdtUpdate[];
     effects: LocalEffect[];
@@ -37,6 +37,16 @@ type DerivedCommand = {
 };
 
 export type LocalEffect =
+    | {
+          kind: 'insert';
+          arrayPath: CrdtPathSegment[];
+          path: CrdtPathSegment[];
+          id: ItemId;
+          order: {value: FractionalIndex; ts: HlcTimestamp};
+          localTs: HlcTimestamp;
+          value: JsonValue;
+          after: CrdtMeta;
+      }
     | {
           kind: 'set';
           path: CrdtPathSegment[];
@@ -181,7 +191,7 @@ export function undoLocalCommand<T>(
     const commandId = undoUpdates[0]
         ? (latestCrdtUpdateTimestamp(undoUpdates[0]) ?? nextTs.currentPacked())
         : nextTs.currentPacked();
-    const updates = withCommandMetadata(undoUpdates, {
+    const updates = withCommand(undoUpdates, {
         commandId,
         intent: 'undo',
         targetCommandId: command.id,
@@ -211,7 +221,7 @@ export function redoLocalCommand<T>(
     const commandId = redoUpdates[0]
         ? (latestCrdtUpdateTimestamp(redoUpdates[0]) ?? nextTs.currentPacked())
         : nextTs.currentPacked();
-    const updates = withCommandMetadata(redoUpdates, {
+    const updates = withCommand(redoUpdates, {
         commandId,
         intent: 'redo',
         targetCommandId: command.id,
@@ -246,7 +256,7 @@ function createLocalCrdtCommand<T>(
     const commandId = updates[0]
         ? (latestCrdtUpdateTimestamp(updates[0]) ?? nextTs.currentPacked())
         : nextTs.currentPacked();
-    const stamped = withCommandMetadata(updates, {commandId, intent: 'edit'});
+    const stamped = withCommand(updates, {commandId, intent: 'edit'});
     const applied = applyGeneratedUpdates(doc, stamped, nextTs.current());
     return {
         doc: applied.doc,
@@ -345,8 +355,8 @@ function appendUpdateToCache<T>(
         commandById: new Map(cache.commandById),
     };
 
-    const meta = update.meta;
-    if (!meta || !isAuthoredBy(update, actor)) return next;
+    const commandInfo = update.command;
+    if (!commandInfo || !isAuthoredBy(update, actor)) return next;
 
     let effect: LocalEffect;
     try {
@@ -358,7 +368,7 @@ function appendUpdateToCache<T>(
     const previous = next.commands.at(-1);
     let isNewCommand = false;
     let command =
-        previous?.id === meta.commandId && previous.intent === meta.intent
+        previous?.id === commandInfo.commandId && previous.intent === commandInfo.intent
             ? {...previous}
             : undefined;
     if (command && previous) {
@@ -371,11 +381,11 @@ function appendUpdateToCache<T>(
         if (redoAt !== -1) next.redoStack[redoAt] = command;
     }
     if (!command) {
-        if (next.commandById.has(meta.commandId)) return next;
+        if (next.commandById.has(commandInfo.commandId)) return next;
         command = {
-            id: meta.commandId,
-            intent: meta.intent,
-            targetCommandId: meta.targetCommandId,
+            id: commandInfo.commandId,
+            intent: commandInfo.intent,
+            targetCommandId: commandInfo.targetCommandId,
             updates: [],
             effects: [],
         };
@@ -456,10 +466,13 @@ function captureBefore<T>(doc: CrdtDocument<T>, update: CrdtUpdate) {
         const before: SetOrderEffect['before'] = {};
         for (const id of Object.keys(update.orders)) {
             before[id] =
-                array?.kind === 'array' && array.items[id] ? {...array.items[id].order} : undefined;
+                array?.kind === 'array' && array.items[id]?.kind === 'live'
+                    ? {...array.items[id].order}
+                    : undefined;
         }
         return before;
     }
+    if (update.op === 'insert') return undefined;
     return cloneEffectMeta(getMetaAtPath(doc.meta, update.path));
 }
 
@@ -473,7 +486,7 @@ function captureEffect<T>(
         const array = getMetaAtPath(afterDoc.meta, update.arrayPath);
         const after: SetOrderEffect['after'] = {};
         for (const id of Object.keys(update.orders)) {
-            if (array?.kind === 'array' && array.items[id]) {
+            if (array?.kind === 'array' && array.items[id]?.kind === 'live') {
                 after[id] = {...array.items[id].order};
             }
         }
@@ -483,6 +496,30 @@ function captureEffect<T>(
             localTs: latestCrdtUpdateTimestamp(update) ?? '',
             before: before as SetOrderEffect['before'],
             after,
+        };
+    }
+
+    if (update.op === 'insert') {
+        const array = getMetaAtPath(afterDoc.meta, update.arrayPath);
+        if (!array || array.kind !== 'array') {
+            throw new Error('Cannot capture local CRDT insert effect: array is missing after apply.');
+        }
+        const item = array.items[update.id];
+        if (!item || item.kind !== 'live') {
+            throw new Error('Cannot capture local CRDT insert effect: item is missing after apply.');
+        }
+        return {
+            kind: 'insert',
+            arrayPath: update.arrayPath,
+            path: [
+                ...update.arrayPath,
+                {type: 'arrayItem', id: update.id, parentCreated: array.created},
+            ],
+            id: update.id,
+            order: update.order,
+            localTs: update.ts,
+            value: update.value,
+            after: item.value,
         };
     }
 
@@ -512,6 +549,9 @@ function createUndoUpdates(command: DerivedCommand, nextTs: ReturnType<typeof ne
     const updates: CrdtUpdate[] = [];
     for (const effect of command.effects.toReversed()) {
         switch (effect.kind) {
+            case 'insert':
+                updates.push({op: 'delete', path: effect.path, ts: nextTs()});
+                break;
             case 'set':
                 updates.push(metaToUpdate(effect.path, effect.before, nextTs()));
                 break;
@@ -540,6 +580,16 @@ function createRedoUpdates(command: DerivedCommand, nextTs: ReturnType<typeof ne
     const updates: CrdtUpdate[] = [];
     for (const effect of command.effects) {
         switch (effect.kind) {
+            case 'insert':
+                updates.push({
+                    op: 'insert',
+                    arrayPath: effect.arrayPath,
+                    id: effect.id,
+                    order: {...effect.order, ts: nextTs()},
+                    value: effect.value,
+                    ts: nextTs.currentPacked(),
+                });
+                break;
             case 'set':
                 updates.push(metaToUpdate(effect.path, effect.after, nextTs()));
                 break;
@@ -593,8 +643,18 @@ function checkEffect<T>(
         for (const id of Object.keys(effect.after)) {
             const item = array.items[id];
             if (!item) return {command, effect, reason: 'missing-target'};
-            if (item.value.kind === 'tombstone') return {command, effect, reason: 'deleted'};
+            if (item.kind === 'deleted') return {command, effect, reason: 'deleted'};
             if (item.order.ts !== effect.localTs) return {command, effect, reason: 'superseded'};
+        }
+        return null;
+    }
+
+    if (effect.kind === 'insert') {
+        const target = getMetaAtPath(doc.meta, effect.path);
+        if (!target) return {command, effect, reason: 'missing-target'};
+        if (target.kind === 'tombstone') return {command, effect, reason: 'deleted'};
+        if (!equal(materialize(target), effect.value)) {
+            return {command, effect, reason: 'superseded'};
         }
         return null;
     }
@@ -612,13 +672,13 @@ function checkEffect<T>(
     return null;
 }
 
-function withCommandMetadata(
+function withCommand(
     updates: CrdtUpdate[],
-    meta: Omit<CrdtUpdateMeta, 'commandSeq'>,
+    command: Omit<CrdtCommandInfo, 'commandSeq'>,
 ): CrdtUpdate[] {
     return updates.map((update, commandSeq) => ({
         ...update,
-        meta: {...meta, commandSeq},
+        command: {...command, commandSeq},
     }));
 }
 

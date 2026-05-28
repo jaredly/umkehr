@@ -101,13 +101,36 @@ function validateEnvelope(input: unknown): CrdtUpdateValidationResult<unknown> {
     if (typeof input.op !== 'string') {
         return fail(input, {path: 'op', message: 'CRDT update op must be a string.', value: input.op});
     }
-    if (!['set', 'delete', 'setOrder'].includes(input.op)) {
+    if (!['insert', 'set', 'delete', 'setOrder'].includes(input.op)) {
         return fail(input, {path: 'op', message: `Unknown CRDT update op "${input.op}".`, value: input.op});
     }
-    const metaIssue = validateMeta(input.meta);
-    if (metaIssue) return fail(input, metaIssue);
+    const commandIssue = validateCommandInfo(input.command);
+    if (commandIssue) return fail(input, commandIssue);
 
     switch (input.op) {
+        case 'insert': {
+            const pathIssue = validateCrdtPathEnvelope(input.arrayPath, 'arrayPath');
+            if (pathIssue) return fail(input, pathIssue);
+            if (typeof input.id !== 'string' || input.id.length === 0) {
+                return fail(input, {path: 'id', message: '"insert" requires a non-empty id.', value: input.id});
+            }
+            if (!isRecord(input.order)) {
+                return fail(input, {path: 'order', message: '"insert" requires order: {value: string; ts: string}.', value: input.order});
+            }
+            if (typeof input.order.value !== 'string' || input.order.value.length === 0) {
+                return fail(input, {
+                    path: 'order/value',
+                    message: 'Order fractional index must be a non-empty string.',
+                    value: input.order.value,
+                });
+            }
+            const orderTsIssue = validateTimestamp(input.order.ts, 'order/ts');
+            if (orderTsIssue) return fail(input, orderTsIssue);
+            if (!('value' in input)) return fail(input, {path: 'value', message: '"insert" requires value.'});
+            const tsIssue = validateTimestamp(input.ts, 'ts');
+            if (tsIssue) return fail(input, tsIssue);
+            return {success: true, data: input as CrdtUpdate};
+        }
         case 'set': {
             const pathIssue = validateCrdtPathEnvelope(input.path, 'path');
             if (pathIssue) return fail(input, pathIssue);
@@ -160,12 +183,12 @@ function validateEnvelope(input: unknown): CrdtUpdateValidationResult<unknown> {
     return fail(input, {path: 'op', message: 'Unknown CRDT update op.', value: input.op});
 }
 
-function validateMeta(input: unknown): CrdtUpdateValidationIssue | null {
+function validateCommandInfo(input: unknown): CrdtUpdateValidationIssue | null {
     if (input === undefined) return null;
     if (!isRecord(input)) {
-        return {path: 'meta', message: 'CRDT update metadata must be an object.', value: input};
+        return {path: 'command', message: 'CRDT update command info must be an object.', value: input};
     }
-    const commandIdIssue = validateTimestamp(input.commandId, 'meta/commandId');
+    const commandIdIssue = validateTimestamp(input.commandId, 'command/commandId');
     if (commandIdIssue) return commandIdIssue;
     if (
         typeof input.commandSeq !== 'number' ||
@@ -173,16 +196,16 @@ function validateMeta(input: unknown): CrdtUpdateValidationIssue | null {
         input.commandSeq < 0
     ) {
         return {
-            path: 'meta/commandSeq',
-            message: 'CRDT update metadata commandSeq must be a non-negative integer.',
+            path: 'command/commandSeq',
+            message: 'CRDT update command info commandSeq must be a non-negative integer.',
             expected: 'non-negative integer',
             value: input.commandSeq,
         };
     }
     if (input.intent !== 'edit' && input.intent !== 'undo' && input.intent !== 'redo') {
         return {
-            path: 'meta/intent',
-            message: 'CRDT update metadata intent must be "edit", "undo", or "redo".',
+            path: 'command/intent',
+            message: 'CRDT update command info intent must be "edit", "undo", or "redo".',
             expected: 'edit | undo | redo',
             value: input.intent,
         };
@@ -190,14 +213,14 @@ function validateMeta(input: unknown): CrdtUpdateValidationIssue | null {
     if (input.intent === 'edit') {
         if (input.targetCommandId !== undefined) {
             return {
-                path: 'meta/targetCommandId',
-                message: 'Edit metadata must not include targetCommandId.',
+                path: 'command/targetCommandId',
+                message: 'Edit command info must not include targetCommandId.',
                 value: input.targetCommandId,
             };
         }
         return null;
     }
-    const targetIssue = validateTimestamp(input.targetCommandId, 'meta/targetCommandId');
+    const targetIssue = validateTimestamp(input.targetCommandId, 'command/targetCommandId');
     if (targetIssue) return targetIssue;
     return null;
 }
@@ -231,18 +254,7 @@ function validateCrdtPathEnvelope(input: unknown, path: string): CrdtUpdateValid
                 const createdIssue = validateTimestamp(segment.parentCreated, `${issuePath}/parentCreated`);
                 if (createdIssue) return createdIssue;
                 if (segment.order !== undefined) {
-                    if (!isRecord(segment.order)) {
-                        return {path: `${issuePath}/order`, message: 'arrayItem order must be an object.', value: segment.order};
-                    }
-                    if (typeof segment.order.value !== 'string' || segment.order.value.length === 0) {
-                        return {
-                            path: `${issuePath}/order/value`,
-                            message: 'arrayItem order value must be a non-empty string.',
-                            value: segment.order.value,
-                        };
-                    }
-                    const orderTsIssue = validateTimestamp(segment.order.ts, `${issuePath}/order/ts`);
-                    if (orderTsIssue) return orderTsIssue;
+                    return {path: `${issuePath}/order`, message: 'arrayItem path segments must not include order.', value: segment.order};
                 }
                 break;
             }
@@ -279,6 +291,34 @@ function validateCrdtPathEnvelope(input: unknown, path: string): CrdtUpdateValid
 
 function validateUpdateSchema(update: CrdtUpdate, ctx: SchemaContext) {
     const errors: CrdtUpdateValidationIssue[] = [];
+    if (update.op === 'insert') {
+        const target = walkCrdtPath(ctx, update.arrayPath, 'arrayPath');
+        if (!target.ok) {
+            errors.push(target.issue);
+            return errors;
+        }
+        const resolved = resolveRef({components: ctx.components, seenRefs: new Set()}, target.schema);
+        if (!resolved.ok) {
+            errors.push(resolved.issue);
+            return errors;
+        }
+        if (!isArraySchema(resolved.schema)) {
+            errors.push({
+                path: 'arrayPath',
+                message: `insert path "${pathToIssuePath(update.arrayPath)}" must point to an array.`,
+                expected: 'array',
+            });
+            return errors;
+        }
+        const issue = validateValue(
+            ctx.components,
+            arrayElementSchema(resolved.schema),
+            update.value,
+            'value',
+        );
+        if (issue) errors.push(issue);
+        return errors;
+    }
     if (update.op === 'setOrder') {
         const target = walkCrdtPath(ctx, update.arrayPath, 'arrayPath');
         if (!target.ok) {

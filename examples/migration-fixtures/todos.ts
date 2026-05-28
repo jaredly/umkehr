@@ -7,6 +7,7 @@ import {
     latestCrdtUpdateTimestamp,
     type CrdtDocument,
     type CrdtLocalHistory,
+    type CrdtPathSegment,
     type CrdtUpdate,
     type JsonValue,
 } from 'umkehr/crdt';
@@ -449,14 +450,17 @@ function migrateTodoFixturePatch(input: Patch<TodoFixtureStateV1>): Patch<TodoFi
 }
 
 function migrateTodoFixtureCrdtUpdate(input: CrdtUpdate): CrdtUpdate | null {
-    const path = input.op === 'setOrder' ? input.arrayPath : input.path;
+    const path = input.op === 'setOrder' || input.op === 'insert' ? input.arrayPath : input.path;
     if (crdtPathHasField(path, 'legacyFilter') || crdtPathHasField(path, 'archived')) return null;
     if (input.op === 'setOrder') return input;
-    const migratedPath = input.path.map((segment) =>
-        segment.type === 'objectField' && segment.key === 'text'
-            ? {...segment, key: 'title'}
-            : segment,
-    );
+    if (input.op === 'insert') {
+        return {
+            ...input,
+            arrayPath: migrateTodoFixtureCrdtPath(input.arrayPath),
+            value: migrateUnknownValue(input.value) as JsonValue,
+        };
+    }
+    const migratedPath = migrateTodoFixtureCrdtPath(input.path);
     if (input.op === 'set') {
         return {
             ...input,
@@ -608,6 +612,14 @@ function patchPathHasKey(path: Patch<unknown>['path'], key: string) {
     return path.some((segment) => segment.type === 'key' && segment.key === key);
 }
 
-function crdtPathHasField(path: Exclude<CrdtUpdate, {op: 'setOrder'}>['path'], key: string) {
+function migrateTodoFixtureCrdtPath(path: CrdtPathSegment[]) {
+    return path.map((segment) =>
+        segment.type === 'objectField' && segment.key === 'text'
+            ? {...segment, key: 'title'}
+            : segment,
+    );
+}
+
+function crdtPathHasField(path: CrdtPathSegment[], key: string) {
     return path.some((segment) => segment.type === 'objectField' && segment.key === key);
 }

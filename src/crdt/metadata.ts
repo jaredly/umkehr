@@ -37,6 +37,7 @@ export function buildMeta(
             previous = order;
             const id = `${ts}:${index}`;
             items[id] = {
+                kind: 'live',
                 order: {value: order, ts},
                 value: buildMeta(item as JsonValue, itemSchema, ctx, ts),
             };

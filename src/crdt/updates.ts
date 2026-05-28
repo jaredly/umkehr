@@ -3,6 +3,7 @@ import {fractionalIndexBetween} from './fractionalIndex.js';
 import {crdtPathForExisting, getMetaAtPath, liveArrayItems} from './path.js';
 import type {
     CrdtDocument,
+    CrdtInsertUpdate,
     CrdtSetOrderUpdate,
     CrdtUpdate,
     FractionalIndex,
@@ -30,7 +31,7 @@ export function createCrdtUpdates<T>(
             return [
                 {
                     op: 'delete',
-                    path: crdtPathForExisting(doc, patch.path, {includeLeafArrayOrder: true}),
+                    path: crdtPathForExisting(doc, patch.path),
                     ts,
                 },
             ];
@@ -59,19 +60,13 @@ function createSetUpdates<T>(
     if (arrayAdd) {
         return [
             {
-                op: 'set',
-                path: [
-                    ...arrayAdd.parentPath,
-                    {
-                        type: 'arrayItem',
-                        id: arrayAdd.id,
-                        parentCreated: arrayAdd.parentCreated,
-                        order: {value: arrayAdd.order, ts},
-                    },
-                ],
+                op: 'insert',
+                arrayPath: arrayAdd.parentPath,
+                id: arrayAdd.id,
+                order: {value: arrayAdd.order, ts},
                 value,
                 ts,
-            },
+            } satisfies CrdtInsertUpdate,
         ];
     }
     return [{op: 'set', path: crdtPathForExisting(doc, path), value, ts}];

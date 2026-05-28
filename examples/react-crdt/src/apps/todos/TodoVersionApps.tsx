@@ -1,5 +1,5 @@
-import type {CSSProperties} from 'react';
-import {createHistoryContext, useValue} from 'umkehr/react';
+import {useState, type CSSProperties} from 'react';
+import {createHistoryContext, useValue, type Updater} from 'umkehr/react';
 import {createSyncedContext} from 'umkehr/react-crdt';
 import type {
     AppDefinition,
@@ -16,9 +16,13 @@ import {
     todoFixtureInitialV3,
     todoFixtureV1Metadata,
     todoFixtureV3Metadata,
+    type TodoFixtureV1,
+    type TodoFixtureV3,
     type TodoFixtureStateV1,
     type TodoFixtureStateV3,
 } from '../../../../migration-fixtures/todos';
+import {TodoAddFormView} from './TodoAddForm';
+import {TodoItemView} from './TodoItem';
 
 const [ProvideTodosV1History, useTodosV1History] =
     createHistoryContext<TodoFixtureStateV1, never, 'type'>('type');
@@ -36,10 +40,11 @@ export const todoV1App: AppDefinition<TodoFixtureStateV1> = {
     schema: todoFixtureV1Metadata.schema,
     validateState: todoFixtureV1Metadata.validateState,
     initialState: todoFixtureInitialV1,
-    renderPanel({editor, title, gridSlot, readOnly}) {
+    renderPanel({editor, actor, title, gridSlot, readOnly}) {
         return (
             <TodoV1Panel
                 editor={editor}
+                actor={actor}
                 title={title}
                 gridSlot={gridSlot}
                 readOnly={readOnly}
@@ -67,10 +72,11 @@ export const todoV3App: AppDefinition<TodoFixtureStateV3> = {
     schema: todoFixtureV3Metadata.schema,
     validateState: todoFixtureV3Metadata.validateState,
     initialState: todoFixtureInitialV3,
-    renderPanel({editor, title, gridSlot, readOnly}) {
+    renderPanel({editor, actor, title, gridSlot, readOnly}) {
         return (
             <TodoV3Panel
                 editor={editor}
+                actor={actor}
                 title={title}
                 gridSlot={gridSlot}
                 readOnly={readOnly}
@@ -92,11 +98,13 @@ export const todoV3HistoryRuntime: HistoryRuntime<TodoFixtureStateV3> = {
 
 function TodoV1Panel({
     editor,
+    actor,
     title,
     gridSlot = 'full',
     readOnly = false,
 }: {
     editor: AppEditorContext<TodoFixtureStateV1>;
+    actor: string;
     title: string;
     gridSlot?: GridSlot | 'full';
     readOnly?: boolean;
@@ -104,6 +112,7 @@ function TodoV1Panel({
     const bgcolor = useValue(editor.$.bgcolor);
     const legacyFilter = useValue(editor.$.legacyFilter);
     const todos = useValue(editor.$.todos);
+    const todoIds = useValue(editor.$.todos, (items) => items.map((todo) => todo.id));
 
     return (
         <section className={`todoPanel ${panelSlotClass(gridSlot)}`}>
@@ -116,18 +125,24 @@ function TodoV1Panel({
                     </p>
                 </div>
             </header>
+            <VersionTodoAddForm
+                readOnly={readOnly}
+                onAdd={(title) => {
+                    editor.$.todos.$push({
+                        id: `${actor}-${crypto.randomUUID()}`,
+                        text: title,
+                        done: false,
+                        archived: false,
+                    });
+                }}
+            />
             <ul className="todoList" style={{'--task-bg': bgcolor} as CSSProperties}>
-                {todos.map((todo) => (
-                    <li key={todo.id} className={todo.done ? 'todoItem done' : 'todoItem'}>
-                        <span className="dragHandleSpacer" aria-hidden="true" />
-                        <label>
-                            <input type="checkbox" checked={todo.done} readOnly disabled={readOnly} />
-                            <span className="todoTitle">
-                                {todo.text}
-                                {todo.archived ? ' (archived)' : ''}
-                            </span>
-                        </label>
-                    </li>
+                {todoIds.map((id, index) => (
+                    <TodoV1ItemSlot
+                        key={id}
+                        path={editor.$.todos[index]}
+                        readOnly={readOnly}
+                    />
                 ))}
             </ul>
         </section>
@@ -136,11 +151,13 @@ function TodoV1Panel({
 
 function TodoV3Panel({
     editor,
+    actor,
     title,
     gridSlot = 'full',
     readOnly = false,
 }: {
     editor: AppEditorContext<TodoFixtureStateV3>;
+    actor: string;
     title: string;
     gridSlot?: GridSlot | 'full';
     readOnly?: boolean;
@@ -148,6 +165,7 @@ function TodoV3Panel({
     const bgcolor = useValue(editor.$.bgcolor);
     const view = useValue(editor.$.view);
     const todos = useValue(editor.$.todos);
+    const todoIds = useValue(editor.$.todos, (items) => items.map((todo) => todo.id));
 
     return (
         <section className={`todoPanel ${panelSlotClass(gridSlot)}`}>
@@ -159,23 +177,162 @@ function TodoV3Panel({
                     </p>
                 </div>
             </header>
+            <VersionTodoAddForm
+                readOnly={readOnly}
+                onAdd={(title) => {
+                    editor.$.todos.$push({
+                        id: `${actor}-${crypto.randomUUID()}`,
+                        title,
+                        done: false,
+                        priority: 'normal',
+                        notes: '',
+                    });
+                }}
+            />
             <ul className="todoList" style={{'--task-bg': bgcolor} as CSSProperties}>
-                {todos.map((todo) => (
-                    <li key={todo.id} className={todo.done ? 'todoItem done' : 'todoItem'}>
-                        <span className="dragHandleSpacer" aria-hidden="true" />
-                        <label>
-                            <input type="checkbox" checked={todo.done} readOnly disabled={readOnly} />
-                            <span className="todoTitle">
-                                {todo.title} [{todo.priority}]
-                            </span>
-                        </label>
-                        <div className="itemActions">
-                            <span className="presenceEmpty">{todo.notes}</span>
-                        </div>
-                    </li>
+                {todoIds.map((id, index) => (
+                    <TodoV3ItemSlot
+                        key={id}
+                        path={editor.$.todos[index]}
+                        readOnly={readOnly}
+                    />
                 ))}
             </ul>
         </section>
+    );
+}
+
+function VersionTodoAddForm({
+    readOnly,
+    onAdd,
+}: {
+    readOnly: boolean;
+    onAdd(title: string): void;
+}) {
+    const [draftTitle, setDraftTitle] = useState('');
+
+    return (
+        <TodoAddFormView
+            draftTitle={draftTitle}
+            readOnly={readOnly}
+            onDraftTitleChange={setDraftTitle}
+            onSubmit={() => {
+                const next = draftTitle.trim();
+                if (readOnly || !next) return;
+                onAdd(next);
+                setDraftTitle('');
+            }}
+        />
+    );
+}
+
+function TodoV1ItemSlot({
+    path,
+    readOnly,
+}: {
+    path: Updater<TodoFixtureV1>;
+    readOnly: boolean;
+}) {
+    const todo = useValue(path) as TodoFixtureV1 | undefined;
+    if (!todo) return null;
+
+    return (
+        <TodoItemView
+            id={todo.id}
+            title={todo.text}
+            done={todo.done}
+            titleSuffix={todo.archived ? <span className="todoTitleMeta"> (archived)</span> : null}
+            readOnly={readOnly}
+            onDoneChange={(next) => {
+                if (readOnly) return;
+                path.done(next);
+            }}
+            onTitleCommit={(next) => {
+                if (readOnly || next === todo.text) return;
+                path.text(next);
+            }}
+            onDelete={() => {
+                if (readOnly) return;
+                path.$remove();
+            }}
+            extraActions={
+                <label className="todoExtraControl">
+                    <input
+                        type="checkbox"
+                        checked={todo.archived ?? false}
+                        onChange={(event) => {
+                            if (readOnly) return;
+                            path.archived(event.target.checked);
+                        }}
+                        disabled={readOnly}
+                    />
+                    <span>Archived</span>
+                </label>
+            }
+        />
+    );
+}
+
+function TodoV3ItemSlot({
+    path,
+    readOnly,
+}: {
+    path: Updater<TodoFixtureV3>;
+    readOnly: boolean;
+}) {
+    const todo = useValue(path) as TodoFixtureV3 | undefined;
+    if (!todo) return null;
+
+    return (
+        <TodoItemView
+            id={todo.id}
+            title={todo.title}
+            done={todo.done}
+            titleSuffix={<span className="todoTitleMeta"> [{todo.priority}]</span>}
+            readOnly={readOnly}
+            onDoneChange={(next) => {
+                if (readOnly) return;
+                path.done(next);
+            }}
+            onTitleCommit={(next) => {
+                if (readOnly || next === todo.title) return;
+                path.title(next);
+            }}
+            onDelete={() => {
+                if (readOnly) return;
+                path.$remove();
+            }}
+            details={
+                <input
+                    className="todoNotesInput"
+                    value={todo.notes}
+                    aria-label={`Notes for ${todo.title}`}
+                    placeholder="Notes"
+                    onChange={(event) => {
+                        if (readOnly) return;
+                        path.notes(event.target.value);
+                    }}
+                    disabled={readOnly}
+                />
+            }
+            extraActions={
+                <label className="todoExtraControl">
+                    <span>Priority</span>
+                    <select
+                        className="todoPrioritySelect"
+                        value={todo.priority}
+                        onChange={(event) => {
+                            if (readOnly) return;
+                            path.priority(event.target.value as TodoFixtureV3['priority']);
+                        }}
+                        disabled={readOnly}
+                    >
+                        <option value="normal">Normal</option>
+                        <option value="high">High</option>
+                    </select>
+                </label>
+            }
+        />
     );
 }
 

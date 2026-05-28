@@ -1169,7 +1169,7 @@ type RefMeta =
     | {kind: 'primitive'; ts: string; value: string | number | boolean | null}
     | {kind: 'object'; created: string; fields: Record<string, RefMeta>}
     | {kind: 'record'; created: string; entries: Record<string, RefMeta>}
-    | {kind: 'array'; created: string; items: Record<string, {order: {value: string; ts: string}; value: RefMeta}>}
+    | {kind: 'array'; created: string; items: Record<string, RefArrayItemMeta>}
     | {
           kind: 'tagged';
           created: string;
@@ -1179,6 +1179,10 @@ type RefMeta =
           fields: Record<string, RefMeta>;
       }
     | {kind: 'tombstone'; deleted: string};
+
+type RefArrayItemMeta =
+    | {kind: 'live'; order: {value: string; ts: string}; value: RefMeta}
+    | {kind: 'deleted'; deleted: string};
 
 type RefDoc = {
     meta: RefMeta;
@@ -1246,6 +1250,7 @@ function applyReferenceUpdate(doc: RefDoc, update: CrdtUpdate) {
 }
 
 function applyReferenceOne(doc: RefDoc, update: CrdtUpdate): 'applied' | 'discarded' | 'pending' {
+    if (update.op === 'insert') return applyReferenceInsert(doc, update);
     if (update.op === 'setOrder') return applyReferenceSetOrder(doc, update);
     if (!update.path.length) {
         if (update.op === 'delete') {
@@ -1262,17 +1267,60 @@ function applyReferenceOne(doc: RefDoc, update: CrdtUpdate): 'applied' | 'discar
     if (walked.status !== 'ready') return walked.status;
     const {parent, target, segment} = walked;
     if (update.op === 'delete') {
+        if (segment.type === 'arrayItem') return applyReferenceArrayItemDelete(parent, segment, update.ts);
         if (target && newerRef(versionRef(target), update.ts)) return 'discarded';
         setReferenceChild(parent, segment, {kind: 'tombstone', deleted: update.ts});
         return 'applied';
     }
     if (target && !newerRef(update.ts, versionRef(target))) return 'discarded';
-    if (segment.type === 'arrayItem' && !target && !segment.order) return 'pending';
+    if (segment.type === 'arrayItem' && (!target || target.kind === 'tombstone')) return 'pending';
     setReferenceChild(
         parent,
         segment,
         buildRefMeta(update.value, schemaAtReferencePath(update.path), update.ts),
     );
+    return 'applied';
+}
+
+function applyReferenceInsert(doc: RefDoc, update: Extract<CrdtUpdate, {op: 'insert'}>) {
+    const target = getReferenceMetaAtPath(doc.meta, update.arrayPath);
+    if (!target) return 'pending';
+    if (target.kind === 'tombstone') return 'discarded';
+    if (target.kind !== 'array') return 'discarded';
+
+    const existing = target.items[update.id];
+    const existingVersion =
+        existing?.kind === 'deleted'
+            ? existing.deleted
+            : existing
+              ? versionRef(existing.value)
+              : undefined;
+    if (existingVersion && !newerRef(update.ts, existingVersion)) return 'discarded';
+
+    const schema = schemaAtReferencePath(update.arrayPath);
+    target.items[update.id] = {
+        kind: 'live',
+        order: {...update.order},
+        value: buildRefMeta(
+            update.value,
+            schema.kind === 'array' ? schema.item : primitiveRefSchema,
+            update.ts,
+        ),
+    };
+    return 'applied';
+}
+
+function applyReferenceArrayItemDelete(
+    parent: RefMeta,
+    segment: Extract<CrdtPathSegment, {type: 'arrayItem'}>,
+    ts: string,
+) {
+    if (parent.kind !== 'array') return 'discarded';
+    const item = parent.items[segment.id];
+    if (!item) return 'pending';
+    const targetVersion = item.kind === 'deleted' ? item.deleted : versionRef(item.value);
+    if (targetVersion && newerRef(targetVersion, ts)) return 'discarded';
+    parent.items[segment.id] = {kind: 'deleted', deleted: ts};
     return 'applied';
 }
 
@@ -1283,14 +1331,19 @@ function applyReferenceSetOrder(doc: RefDoc, update: Extract<CrdtUpdate, {op: 's
     if (target.kind !== 'array') return 'discarded';
     if (Object.keys(update.orders).some((id) => !target.items[id])) return 'pending';
     let applied = false;
+    let handledDeleted = false;
     for (const [id, order] of Object.entries(update.orders)) {
         const item = target.items[id];
+        if (item?.kind === 'deleted') {
+            handledDeleted = true;
+            continue;
+        }
         if (item && newerRef(order.ts, item.order.ts)) {
             item.order = {...order};
             applied = true;
         }
     }
-    return applied ? 'applied' : 'discarded';
+    return applied || handledDeleted ? 'applied' : 'discarded';
 }
 
 function retryReferencePending(doc: RefDoc) {
@@ -1365,7 +1418,10 @@ function getReferenceChild(parent: RefMeta, segment: CrdtPathSegment) {
         case 'recordEntry':
             return parent.kind === 'record' ? parent.entries[segment.key] : undefined;
         case 'arrayItem':
-            return parent.kind === 'array' ? parent.items[segment.id]?.value : undefined;
+            if (parent.kind !== 'array') return undefined;
+            const item = parent.items[segment.id];
+            if (!item) return undefined;
+            return item.kind === 'live' ? item.value : {kind: 'tombstone', deleted: item.deleted};
         case 'taggedField':
             return parent.kind === 'tagged' ? parent.fields[segment.key] : undefined;
     }
@@ -1381,11 +1437,8 @@ function setReferenceChild(parent: RefMeta, segment: CrdtPathSegment, value: Ref
             return;
         case 'arrayItem':
             if (parent.kind === 'array') {
-                parent.items[segment.id] ??= {
-                    order: segment.order ?? {value: 'U', ts: versionRef(value)},
-                    value: {kind: 'tombstone', deleted: segment.parentCreated},
-                };
-                parent.items[segment.id].value = value;
+                const item = parent.items[segment.id];
+                if (item?.kind === 'live') item.value = value;
             }
             return;
         case 'taggedField':
@@ -1403,6 +1456,7 @@ function buildRefMeta(value: unknown, schema: RefSchema, timestamp: string): Ref
         const items: Extract<RefMeta, {kind: 'array'}>['items'] = {};
         for (const [index, item] of (value as unknown[]).entries()) {
             items[`${timestamp}:${index}`] = {
+                kind: 'live',
                 order: {value: String.fromCharCode(85 + index), ts: timestamp},
                 value: buildRefMeta(item, schema.item, timestamp),
             };
@@ -1472,7 +1526,7 @@ function materializeRef(meta: RefMeta): unknown {
             return materializeObjectRef(meta.entries);
         case 'array':
             return Object.entries(meta.items)
-                .filter(([, item]) => item.value.kind !== 'tombstone')
+                .filter((entry): entry is [string, Extract<RefArrayItemMeta, {kind: 'live'}>] => entry[1].kind === 'live')
                 .sort(([aId, a], [bId, b]) => compareRefStrings(a.order.value, b.order.value) || compareRefStrings(aId, bId))
                 .map(([, item]) => materializeRef(item.value))
                 .filter((item) => item !== undefined);
