@@ -30,8 +30,6 @@
   - `npm test -- src/crdt/proof.test.ts`
   - `npm test -- src/crdt`
   - `npm run typecheck`
-  - `npm test -- src/crdt`
-  - `npm run typecheck`
 
 ## Phase 3 property-based tests
 
@@ -47,3 +45,19 @@
 - The property asserts materialized state convergence, canonical metadata convergence, idempotent replay, no ready pending updates, CRDT update validation, and materialized state validation.
 - Verification so far:
   - `npm test -- src/crdt/proof.test.ts`
+  - `npm test -- src/crdt`
+  - `npm run typecheck`
+
+## Phase 4 bounded exhaustive tests
+
+- Added bounded exhaustive convergence tests for small record, array, and tagged-union update spaces.
+- The record case exhausts create, child set, delete, and recreate delivery permutations plus duplicate-injected schedules.
+- The array case exhausts insert, item edit, order change, and delete delivery permutations plus duplicate-injected schedules.
+- The tagged-union case exhausts branch replacement, branch field edit, and branch replacement delivery permutations plus duplicate-injected schedules.
+- The array exhaustive case exposed a metadata convergence bug for array-item deletes delivered before inserts/order changes: the receiver could synthesize a tombstone item with a fallback order instead of the authored item order.
+- Fixed array CRDT delete translation so a leaf array-item delete carries the item's current order metadata. If a delete for a not-yet-seen array item creates a tombstone, it can now preserve the authored item order and converge with replicas that saw the insert/order first.
+- Kept non-delete array item updates unchanged so whole-item replacements and child updates still wait for the item creation instead of creating missing array items from an order-bearing path segment.
+- Verification so far:
+  - `npm test -- src/crdt/proof.test.ts`
+  - `npm test -- src/crdt`
+  - `npm run typecheck`

@@ -4,7 +4,11 @@ import {checkParent} from './traversal.js';
 import {fieldSegmentType, walkSchema} from './schema.js';
 import type {ArrayMeta, CrdtDocument, CrdtMeta, CrdtPathSegment, CrdtUpdate} from './types.js';
 
-export function crdtPathForExisting<T>(doc: CrdtDocument<T>, path: Path) {
+export function crdtPathForExisting<T>(
+    doc: CrdtDocument<T>,
+    path: Path,
+    options: {includeLeafArrayOrder?: boolean} = {},
+) {
     let meta = doc.meta;
     let schema = doc.schema.root;
     const out: CrdtPathSegment[] = [];
@@ -26,7 +30,15 @@ export function crdtPathForExisting<T>(doc: CrdtDocument<T>, path: Path) {
                 throw new Error(
                     `Cannot translate CRDT path: array index ${segment.key} is missing.`,
                 );
-            out.push({type: 'arrayItem', id: item[0], parentCreated: meta.created});
+            const crdtSegment: CrdtPathSegment = {
+                type: 'arrayItem',
+                id: item[0],
+                parentCreated: meta.created,
+            };
+            if (options.includeLeafArrayOrder && i === path.length - 1) {
+                crdtSegment.order = item[1].order;
+            }
+            out.push(crdtSegment);
             meta = item[1].value;
             continue;
         }

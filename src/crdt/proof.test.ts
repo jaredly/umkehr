@@ -9,6 +9,7 @@ import {
     hlc,
 } from './index';
 import {
+    allPermutationsBounded,
     applyAll,
     duplicateUpdates,
     expectConverged,
@@ -640,6 +641,146 @@ describe('CRDT property invariants', () => {
     });
 });
 
+describe('CRDT bounded exhaustive invariants', () => {
+    it('converges for every bounded record create/child/delete/recreate delivery order', () => {
+        let author = createDoc();
+        const createItem = oneUpdate(
+            author,
+            add([{type: 'key', key: 'items'}, {type: 'key', key: 'one'}], {
+                name: 'One',
+                child: {},
+            }),
+            ts(1),
+        );
+        author = applyCrdtUpdate(author, createItem);
+        const setChild = oneUpdate(
+            author,
+            add(
+                [
+                    {type: 'key', key: 'items'},
+                    {type: 'key', key: 'one'},
+                    {type: 'key', key: 'child'},
+                    {type: 'key', key: 'kid'},
+                ],
+                {name: 'Kid'},
+            ),
+            ts(2),
+        );
+        const deleteItem = oneUpdate(
+            author,
+            remove([{type: 'key', key: 'items'}, {type: 'key', key: 'one'}], {
+                name: 'One',
+                child: {},
+            }),
+            ts(3),
+        );
+        const recreateItem = oneUpdate(
+            applyCrdtUpdate(author, deleteItem),
+            add([{type: 'key', key: 'items'}, {type: 'key', key: 'one'}], {
+                name: 'One again',
+                child: {},
+            }),
+            ts(4),
+        );
+
+        assertAllPermutationsConverge(
+            [createItem, setChild, deleteItem, recreateItem],
+            (doc) => expect(doc.state.items.one).toEqual({name: 'One again', child: {}}),
+        );
+    });
+
+    it('converges for every bounded array insert/edit/order/delete delivery order', () => {
+        let author = createDoc();
+        const append = oneUpdate(
+            author,
+            add(
+                [
+                    {type: 'key', key: 'todos'},
+                    {type: 'key', key: 1},
+                ],
+                {id: 'two', title: 'Two', done: false},
+            ),
+            ts(1),
+        );
+        author = applyCrdtUpdate(author, append);
+        const editSecond = oneUpdate(
+            author,
+            replace(
+                [
+                    {type: 'key', key: 'todos'},
+                    {type: 'key', key: 1},
+                    {type: 'key', key: 'done'},
+                ],
+                true,
+                false,
+            ),
+            ts(2),
+        );
+        const reorderTodos = oneUpdate(
+            author,
+            reorder([{type: 'key', key: 'todos'}], [1, 0]),
+            ts(3),
+        );
+        const deleteSecond = oneUpdate(
+            author,
+            remove(
+                [
+                    {type: 'key', key: 'todos'},
+                    {type: 'key', key: 1},
+                ],
+                {id: 'two', title: 'Two', done: false},
+            ),
+            ts(4),
+        );
+
+        assertAllPermutationsConverge(
+            [append, editSecond, reorderTodos, deleteSecond],
+            (doc) => expect(doc.state.todos).toEqual([{id: 'one', title: 'One', done: false}]),
+        );
+    });
+
+    it('converges for every bounded tagged-union branch/edit/rebranch delivery order', () => {
+        let author = createDoc();
+        const setText = oneUpdate(
+            author,
+            replace(
+                [{type: 'key', key: 'selected'}],
+                {type: 'text', text: 'draft'},
+                initial.selected,
+            ),
+            ts(1),
+        );
+        author = applyCrdtUpdate(author, setText);
+        const editText = oneUpdate(
+            author,
+            replace(
+                [
+                    {type: 'key', key: 'selected'},
+                    {type: 'tag', key: 'type', value: 'text'},
+                    {type: 'key', key: 'text'},
+                ],
+                'edited',
+                'draft',
+            ),
+            ts(2),
+        );
+        const setCircle = oneUpdate(
+            author,
+            replace(
+                [{type: 'key', key: 'selected'}],
+                {type: 'circle', radius: 9},
+                {type: 'text', text: 'draft'},
+            ),
+            ts(3),
+        );
+
+        assertAllPermutationsConverge(
+            [setText, editText, setCircle],
+            (doc) => expect(doc.state.selected).toEqual({type: 'circle', radius: 9}),
+        );
+    });
+});
+
 function oneUpdate(doc: CrdtDocument<State>, patch: Patch<State>, timestamp: string) {
     const updates = createCrdtUpdates(doc, patch, timestamp);
     expect(updates).toHaveLength(1);
@@ -780,6 +921,17 @@ function patchForCommand(state: State, command: GeneratedCommand): Patch<State> 
 
 function createDocFrom(state: State) {
     return createCrdtDocument(state, schema, {timestamp: startTs});
+}
+
+function assertAllPermutationsConverge(
+    updates: readonly CrdtUpdate[],
+    check?: (doc: CrdtDocument<State>) => void,
+) {
+    const permutations = allPermutationsBounded(updates, 120);
+    const duplicateSchedules = permutations.map((schedule) =>
+        duplicateUpdates(schedule, {indices: [0, schedule.length - 1]}),
+    );
+    assertConverges([...permutations, ...duplicateSchedules], check);
 }
 
 function initialStateArb() {

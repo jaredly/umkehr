@@ -27,7 +27,13 @@ export function createCrdtUpdates<T>(
                 patch.op === 'add',
             );
         case 'remove':
-            return [{op: 'delete', path: crdtPathForExisting(doc, patch.path), ts}];
+            return [
+                {
+                    op: 'delete',
+                    path: crdtPathForExisting(doc, patch.path, {includeLeafArrayOrder: true}),
+                    ts,
+                },
+            ];
         case 'reorder':
             return [createReorderUpdate(doc, patch.path, patch.indices, ts)];
         case 'move':

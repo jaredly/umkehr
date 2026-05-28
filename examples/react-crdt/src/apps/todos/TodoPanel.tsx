@@ -1,9 +1,10 @@
-import {useState} from 'react';
 import {useValue} from 'umkehr/react';
 import type {AppEditorContext, GridSlot} from '../../lib/crdtApp';
+import {TodoAddForm} from './TodoAddForm';
 import {TodoColorPicker} from './TodoColorPicker';
 import {UndoRedoButtons} from './TodoHistoryControls';
 import {TodoList} from './TodoList';
+import {TodoSummary} from './TodoSummary';
 import type {TodoState} from './model';
 
 export function TodoPanel({
@@ -20,7 +21,6 @@ export function TodoPanel({
     readOnly?: boolean;
 }) {
     const bgcolor = useValue(editor.$.bgcolor);
-    const [draftTitle, setDraftTitle] = useState('');
 
     return (
         <section
@@ -40,45 +40,9 @@ export function TodoPanel({
 
             <TodoColorPicker editor={editor} readOnly={readOnly} />
 
-            <form
-                className="addForm"
-                onSubmit={(event) => {
-                    event.preventDefault();
-                    const next = draftTitle.trim();
-                    if (readOnly || !next) return;
-                    editor.$.todos.$push({
-                        id: `${replicaId}-${crypto.randomUUID()}`,
-                        title: next,
-                        done: false,
-                        priority: 'normal',
-                    });
-                    setDraftTitle('');
-                }}
-            >
-                <input
-                    value={draftTitle}
-                    placeholder="New todo"
-                    onChange={(event) => setDraftTitle(event.target.value)}
-                    disabled={readOnly}
-                />
-                <button type="submit" disabled={readOnly}>
-                    Add
-                </button>
-            </form>
+            <TodoAddForm editor={editor} replicaId={replicaId} readOnly={readOnly} />
 
             <TodoList editor={editor} bgcolor={bgcolor} readOnly={readOnly} />
         </section>
-    );
-}
-
-function TodoSummary({editor}: {editor: AppEditorContext<TodoState>}) {
-    const summary = useValue(editor.$.todos, (todos) => ({
-        completed: todos.filter((todo) => todo.done).length,
-        total: todos.length,
-    }));
-    return (
-        <p>
-            {summary.completed}/{summary.total} done
-        </p>
     );
 }
