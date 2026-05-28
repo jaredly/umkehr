@@ -1,0 +1,1 @@
+I'd like to demonstrate / gain confidence that our "crdt" is actually a crdt, that is it maintains the expected invariants. What are our options? I'm thinking maybe generative/fuzz testing, maybe like a theorem prover like rocq or lean?
