@@ -200,10 +200,35 @@ export const todoFixtureMigration: SchemaMigration<unknown, unknown> = {
     },
 };
 
+export const todoFixtureV1ToV2Migration = todoFixtureMigration;
+
+export const todoFixtureV2ToV3Migration: SchemaMigration<unknown, unknown> = {
+    id: 'todos-fixture-v2-to-v3',
+    fromVersion: 2,
+    toVersion: 3,
+    fromFingerprintHash: todoFixtureV2FingerprintHash,
+    toFingerprintHash: todoFixtureV3FingerprintHash,
+    migrateState(input) {
+        return migrateTodoFixtureStateV2ToV3(input as TodoFixtureStateV2);
+    },
+    migratePatch(input) {
+        return migrateTodoFixturePatchV2ToV3(input as Patch<TodoFixtureStateV2>);
+    },
+    migrateCrdtUpdate(input) {
+        return migrateTodoFixtureCrdtUpdateV2ToV3(input);
+    },
+};
+
 export const todoFixtureMigrationConfig: SchemaMigrationConfig<TodoFixtureStateV2> = {
     current: todoFixtureV2Metadata,
     previous: [todoFixtureV1Metadata],
     migrations: [todoFixtureMigration],
+};
+
+export const todoFixtureV3MigrationConfig: SchemaMigrationConfig<TodoFixtureStateV3> = {
+    current: todoFixtureV3Metadata,
+    previous: [todoFixtureV1Metadata, todoFixtureV2Metadata],
+    migrations: [todoFixtureMigration, todoFixtureV2ToV3Migration],
 };
 
 export const todoFixtureInitialV1: TodoFixtureStateV1 = {
@@ -235,6 +260,9 @@ export const todoFixtureInitialV3: TodoFixtureStateV3 = {
         },
     ],
 };
+
+export const todoFixtureInitialV1MigratedToV3: TodoFixtureStateV3 =
+    migrateTodoFixtureStateV2ToV3(migrateTodoFixtureState(todoFixtureInitialV1));
 
 export function createTodoFixtureHistoryV1(): History<TodoFixtureStateV1, never> {
     const current: TodoFixtureStateV1 = {
@@ -436,6 +464,14 @@ export function migrateTodoFixtureState(input: TodoFixtureStateV1): TodoFixtureS
     };
 }
 
+export function migrateTodoFixtureStateV2ToV3(input: TodoFixtureStateV2): TodoFixtureStateV3 {
+    return {
+        bgcolor: input.bgcolor,
+        view: 'all',
+        todos: input.todos.map(migrateTodoFixtureTodoV2ToV3),
+    };
+}
+
 function migrateTodoFixturePatch(input: Patch<TodoFixtureStateV1>): Patch<TodoFixtureStateV2> | null {
     if (patchPathHasKey(input.path, 'legacyFilter') || patchPathHasKey(input.path, 'archived')) {
         return null;
@@ -474,6 +510,27 @@ function migrateTodoFixtureCrdtUpdate(input: CrdtUpdate): CrdtUpdate | null {
     };
 }
 
+function migrateTodoFixturePatchV2ToV3(input: Patch<TodoFixtureStateV2>): Patch<TodoFixtureStateV3> {
+    return {
+        ...input,
+        ...patchValuesV2ToV3(input),
+    } as Patch<TodoFixtureStateV3>;
+}
+
+function migrateTodoFixtureCrdtUpdateV2ToV3(input: CrdtUpdate): CrdtUpdate {
+    if (input.op === 'setOrder' || input.op === 'delete') return input;
+    if (input.op === 'insert') {
+        return {
+            ...input,
+            value: migrateUnknownValueV2ToV3(input.value) as JsonValue,
+        };
+    }
+    return {
+        ...input,
+        value: migrateUnknownValueV2ToV3(input.value) as JsonValue,
+    };
+}
+
 function patchValues(input: Patch<TodoFixtureStateV1>) {
     switch (input.op) {
         case 'add':
@@ -483,6 +540,22 @@ function patchValues(input: Patch<TodoFixtureStateV1>) {
             return {
                 previous: migrateUnknownValue(input.previous),
                 value: migrateUnknownValue(input.value),
+            };
+        case 'move':
+        case 'reorder':
+            return {};
+    }
+}
+
+function patchValuesV2ToV3(input: Patch<TodoFixtureStateV2>) {
+    switch (input.op) {
+        case 'add':
+        case 'remove':
+            return {value: migrateUnknownValueV2ToV3(input.value)};
+        case 'replace':
+            return {
+                previous: migrateUnknownValueV2ToV3(input.previous),
+                value: migrateUnknownValueV2ToV3(input.value),
             };
         case 'move':
         case 'reorder':
@@ -503,12 +576,32 @@ function migrateUnknownValue(value: unknown): unknown {
     return next;
 }
 
+function migrateUnknownValueV2ToV3(value: unknown): unknown {
+    if (Array.isArray(value)) return value.map(migrateUnknownValueV2ToV3);
+    if (!isRecord(value)) return value;
+    if (isTodoFixtureStateV2(value)) return migrateTodoFixtureStateV2ToV3(value);
+    if (isTodoFixtureTodoV2(value)) return migrateTodoFixtureTodoV2ToV3(value);
+    return Object.fromEntries(
+        Object.entries(value).map(([key, child]) => [key, migrateUnknownValueV2ToV3(child)]),
+    );
+}
+
 function migrateTodoFixtureTodo(input: TodoFixtureV1): TodoFixtureV2 {
     return {
         id: input.id,
         title: input.text,
         done: input.done,
         priority: 'normal',
+    };
+}
+
+function migrateTodoFixtureTodoV2ToV3(input: TodoFixtureV2): TodoFixtureV3 {
+    return {
+        id: input.id,
+        title: input.title,
+        done: input.done,
+        priority: input.priority,
+        notes: '',
     };
 }
 

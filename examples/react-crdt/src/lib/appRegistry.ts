@@ -18,6 +18,7 @@ import type {WhiteboardEphemeralData, WhiteboardState} from '../apps/whiteboard/
 import {
     todoFixtureMigration,
     todoFixtureMigrationConfig,
+    todoFixtureV3MigrationConfig,
     type TodoFixtureStateV1,
     type TodoFixtureStateV3,
 } from '../../../migration-fixtures/todos';
@@ -51,8 +52,9 @@ const todoV1ServerSchemaConfig: ServerSchemaConfig<TodoFixtureStateV1> = {
 };
 
 const todoV3ServerSchemaConfig: ServerSchemaConfig<TodoFixtureStateV3> = {
-    version: 3,
-    migrations: [],
+    version: todoFixtureV3MigrationConfig.current.version,
+    previous: todoFixtureV3MigrationConfig.previous,
+    migrations: todoFixtureV3MigrationConfig.migrations,
 };
 
 export const registeredApps = [

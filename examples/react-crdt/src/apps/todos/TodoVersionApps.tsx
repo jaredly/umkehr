@@ -13,7 +13,7 @@ import {
     TODO_FIXTURE_DOC_ID_V3,
     TODO_FIXTURE_TAG_KEY,
     todoFixtureInitialV1,
-    todoFixtureInitialV3,
+    todoFixtureInitialV1MigratedToV3,
     todoFixtureV1Metadata,
     todoFixtureV3Metadata,
     type TodoFixtureV1,
@@ -71,7 +71,7 @@ export const todoV3App: AppDefinition<TodoFixtureStateV3> = {
     tagKey: TODO_FIXTURE_TAG_KEY,
     schema: todoFixtureV3Metadata.schema,
     validateState: todoFixtureV3Metadata.validateState,
-    initialState: todoFixtureInitialV3,
+    initialState: todoFixtureInitialV1MigratedToV3,
     renderPanel({editor, actor, title, gridSlot, readOnly}) {
         return (
             <TodoV3Panel
