@@ -82,6 +82,16 @@ describe('server migration user-facing states', () => {
         expect(canFlushPendingServerWrites({kind: 'connected'})).toBe(true);
         expect(
             canFlushPendingServerWrites({
+                kind: 'merge-review-required',
+                message: 'Review required.',
+                branchId: 'main',
+                pendingEventCount: 1,
+                oldestPendingAt: '2026-05-28T10:00:00.000Z',
+                blockedBranchCount: 1,
+            }),
+        ).toBe(false);
+        expect(
+            canFlushPendingServerWrites({
                 kind: 'migration-running',
                 message: 'Document migration is in progress.',
                 ownerActor: 'other:session',

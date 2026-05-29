@@ -34,7 +34,8 @@ export function materializeServerBranch<TState>({
         applied: new Set(),
         stack: new Set(),
     };
-    const checkpoint = undoCheckpointEventIndex ?? branches[branchId]?.undoCheckpointEventIndex ?? 0;
+    const checkpoint =
+        undoCheckpointEventIndex ?? branches[branchId]?.undoCheckpointEventIndex ?? 0;
     const baseDoc = applyBranchToDocument(
         createInitialCrdtHistory(app).doc,
         branchId,
@@ -122,7 +123,12 @@ export function buildMergePathPreview<TState>({
     const before = materializeServerBranch({app, branches, branchId: targetBranchId});
     const merged = materializeServerBranch({
         app,
-        branches: withPreviewMerge(branches, targetBranchId, sourceBranchId, sourceThroughEventIndex),
+        branches: withPreviewMerge(
+            branches,
+            targetBranchId,
+            sourceBranchId,
+            sourceThroughEventIndex,
+        ),
         branchId: targetBranchId,
     });
     const changedPaths = pathsForBranchThrough(branches, sourceBranchId, sourceThroughEventIndex);
@@ -411,12 +417,14 @@ function collectMergedSourceCoverage<TState>(
 }
 
 function sameDocumentContents<TState>(left: CrdtDocument<TState>, right: CrdtDocument<TState>) {
-    return JSON.stringify(left.state) === JSON.stringify(right.state) &&
-        JSON.stringify(left.meta) === JSON.stringify(right.meta);
+    return (
+        JSON.stringify(left.state) === JSON.stringify(right.state) &&
+        JSON.stringify(left.meta) === JSON.stringify(right.meta)
+    );
 }
 
 function pathForUpdate(update: CrdtUpdate): CrdtPathSegment[] {
-    return update.op === 'setOrder' ? update.arrayPath : update.path;
+    return update.op === 'set' || update.op === 'delete' ? update.path : update.arrayPath;
 }
 
 function createRestoreUpdates<TState>(

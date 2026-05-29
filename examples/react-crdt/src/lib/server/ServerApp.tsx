@@ -1,5 +1,8 @@
 import {useCallback, useEffect, useMemo, useState, type FormEvent} from 'react';
+import {hlc, type CrdtUpdate} from 'umkehr/crdt';
+import type {SyncedTransport} from 'umkehr/react-crdt';
 import {createInitialCrdtHistory, type AppDefinition, type CrdtRuntime} from '../crdtApp';
+import {useStore} from '../store';
 import {schemaFingerprint, schemaFingerprintHash} from '../local-first/schemaFingerprint';
 import {
     assertArchiveForApp,
@@ -34,6 +37,7 @@ import {urlWithActiveDocId} from '../useUrlSelection';
 import type {
     PersistedServerReplica,
     ServerDocumentSummary,
+    ServerOldPendingChangesPolicy,
     ServerSessionIdentity,
     ServerSync,
     ServerUser,
@@ -73,11 +77,13 @@ export function ServerApp<TState, EphemeralData = never>({
     app,
     runtime,
     schemaConfig: schemaConfigProp,
+    oldPendingChangesPolicy = {kind: 'auto-merge'},
     topBar,
 }: {
     app: AppDefinition<TState, EphemeralData>;
     runtime: CrdtRuntime<TState, EphemeralData>;
     schemaConfig?: ServerSchemaConfig<TState>;
+    oldPendingChangesPolicy?: ServerOldPendingChangesPolicy;
     topBar: DemoTopBarProps;
 }) {
     const [activeDocId, setActiveDocId] = useState(() => readActiveDocId() ?? runtime.docId);
@@ -249,6 +255,7 @@ export function ServerApp<TState, EphemeralData = never>({
             schemaFingerprint={fingerprint}
             schemaFingerprintHash={fingerprintHash}
             schemaConfig={schemaConfig}
+            oldPendingChangesPolicy={oldPendingChangesPolicy}
             loaded={loadState.loaded}
             onLogout={() => void logout()}
             topBar={topBar}
@@ -268,6 +275,7 @@ function ServerReadyApp<TState, EphemeralData>({
     schemaFingerprint,
     schemaFingerprintHash,
     schemaConfig,
+    oldPendingChangesPolicy,
     loaded,
     onLogout,
     topBar,
@@ -286,6 +294,7 @@ function ServerReadyApp<TState, EphemeralData>({
     schemaFingerprint: string;
     schemaFingerprintHash: string;
     schemaConfig: ServerSchemaConfig<TState>;
+    oldPendingChangesPolicy: ServerOldPendingChangesPolicy;
     loaded: Loaded<TState>;
     onLogout(): void;
     topBar: DemoTopBarProps;
@@ -301,10 +310,12 @@ function ServerReadyApp<TState, EphemeralData>({
         schemaFingerprint,
         schemaFingerprintHash,
         schemaConfig,
+        oldPendingChangesPolicy,
         identity: loaded.identity,
         initialReplica: loaded.replica,
         replaceHistory: setCurrentHistory,
     });
+    const syncState = useStore(sync.stateStore);
     const {Provider} = runtime;
     const refreshDocuments = useCallback(async () => {
         const [nextRemoteDocuments, nextLocalDocuments] = await Promise.all([
@@ -476,19 +487,28 @@ function ServerReadyApp<TState, EphemeralData>({
             <main className="serverShell">
                 <ServerControls sync={sync} onLogout={onLogout} />
                 <section className="serverDocument">
-                    <Provider
-                        initial={currentHistory}
-                        transport={sync.transport}
-                        save={sync.saveHistory}
-                        statuses={sync.statusStore}
-                    >
-                        <ServerDocumentWorkspace
+                    {syncState.kind === 'merge-review-required' ? (
+                        <ServerStaleMergeReview
                             app={app}
                             runtime={runtime}
                             actor={loaded.identity.actor}
                             sync={sync}
                         />
-                    </Provider>
+                    ) : (
+                        <Provider
+                            initial={currentHistory}
+                            transport={sync.transport}
+                            save={sync.saveHistory}
+                            statuses={sync.statusStore}
+                        >
+                            <ServerDocumentWorkspace
+                                app={app}
+                                runtime={runtime}
+                                actor={loaded.identity.actor}
+                                sync={sync}
+                            />
+                        </Provider>
+                    )}
                 </section>
             </main>
         </>
@@ -577,6 +597,166 @@ function ServerDocumentWorkspace<TState, EphemeralData>({
             />
         </>
     );
+}
+
+function ServerStaleMergeReview<TState, EphemeralData>({
+    app,
+    runtime,
+    actor,
+    sync,
+}: {
+    app: AppDefinition<TState, EphemeralData>;
+    runtime: CrdtRuntime<TState, EphemeralData>;
+    actor: string;
+    sync: ServerSync<TState>;
+}) {
+    const review = useStore(sync.staleMergeReviewStore);
+    const [resultUpdates, setResultUpdates] = useState<CrdtUpdate[]>([]);
+    const [forkName, setForkName] = useState('');
+
+    useEffect(() => {
+        setResultUpdates([]);
+        setForkName('');
+    }, [review?.sourceBranchId, review?.serverTipEventIndex]);
+
+    const readonlyTransport = useMemo(() => noOpTransport(actor), [actor]);
+    const resultTransport = useMemo(
+        () =>
+            captureTransport(actor, (updates) =>
+                setResultUpdates((current) => [...current, ...updates]),
+            ),
+        [actor],
+    );
+
+    if (!review) {
+        return (
+            <section className="serverStaleReview">
+                <h2>Preparing stale-change review</h2>
+            </section>
+        );
+    }
+
+    const {Provider} = runtime;
+    const pendingLabel = `${review.pendingEventCount} pending ${
+        review.pendingEventCount === 1 ? 'event' : 'events'
+    }`;
+
+    return (
+        <section className="serverStaleReview" aria-label="Stale local changes review">
+            <header className="serverStaleReviewHeader">
+                <div>
+                    <h2>Review local changes before upload</h2>
+                    <p>
+                        Branch {review.sourceBranchId} has {pendingLabel}. Oldest pending change:{' '}
+                        {new Date(review.oldestPendingAt).toLocaleString()}.
+                    </p>
+                </div>
+                <div className="serverStaleReviewActions">
+                    <button type="button" onClick={() => sync.completeStaleMerge(resultUpdates)}>
+                        Complete merge
+                    </button>
+                    <button type="button" onClick={() => sync.forkStaleLocalChanges(forkName)}>
+                        Fork local changes
+                    </button>
+                    <button type="button" onClick={sync.discardStaleLocalChanges}>
+                        Discard local changes
+                    </button>
+                </div>
+            </header>
+            <div className="serverStaleReviewFork">
+                <input
+                    value={forkName}
+                    onChange={(event) => setForkName(event.currentTarget.value)}
+                    placeholder={`${review.sourceBranchId}/sync-review-${Date.now()}`}
+                    aria-label="Fork branch name"
+                />
+            </div>
+            <div className="serverStaleReviewGrid">
+                <Provider initial={review.clientHistory} transport={readonlyTransport}>
+                    <ReviewPanel
+                        app={app}
+                        runtime={runtime}
+                        actor={actor}
+                        title="Your local changes"
+                        readOnly
+                    />
+                </Provider>
+                <Provider initial={review.serverHistory} transport={readonlyTransport}>
+                    <ReviewPanel
+                        app={app}
+                        runtime={runtime}
+                        actor={actor}
+                        title="Server branch"
+                        readOnly
+                    />
+                </Provider>
+                <Provider initial={review.resultHistory} transport={resultTransport}>
+                    <ReviewPanel
+                        app={app}
+                        runtime={runtime}
+                        actor={actor}
+                        title="Merge result"
+                        readOnly={false}
+                    />
+                </Provider>
+            </div>
+        </section>
+    );
+}
+
+function ReviewPanel<TState, EphemeralData>({
+    app,
+    runtime,
+    actor,
+    title,
+    readOnly,
+}: {
+    app: AppDefinition<TState, EphemeralData>;
+    runtime: CrdtRuntime<TState, EphemeralData>;
+    actor: string;
+    title: string;
+    readOnly: boolean;
+}) {
+    const editor = runtime.useEditorContext();
+    return app.renderPanel({
+        actor,
+        editor,
+        title,
+        gridSlot: 'full',
+        readOnly,
+    });
+}
+
+function noOpTransport(actor: string): SyncedTransport {
+    let clock = hlc.init(actor, Date.now());
+    return {
+        actor,
+        tick() {
+            clock = hlc.inc(clock, Date.now());
+            return clock;
+        },
+        publish() {},
+        subscribe() {
+            return () => {};
+        },
+        publishEphemeral() {},
+        subscribeEphemeral() {
+            return () => {};
+        },
+    };
+}
+
+function captureTransport(
+    actor: string,
+    onPublish: (updates: CrdtUpdate[]) => void,
+): SyncedTransport {
+    const transport = noOpTransport(actor);
+    return {
+        ...transport,
+        publish(updates) {
+            if (updates.length) onPublish(updates);
+        },
+    };
 }
 
 async function loadInitialState<TState>(

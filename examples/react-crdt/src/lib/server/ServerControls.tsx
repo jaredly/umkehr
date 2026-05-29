@@ -95,9 +95,10 @@ export function ServerControls<TState>({
             {'message' in state ? (
                 <div className={`serverToolbarNotice ${noticeClassForState(state, noticeTone)}`}>
                     {state.kind === 'client-migration-required' ||
-                    state.kind === 'migration-required' ? (
+                    state.kind === 'migration-required' ||
+                    state.kind === 'merge-review-required' ? (
                         <span aria-hidden="true" className="serverToolbarNoticeIcon">
-                            🚨
+                            !
                         </span>
                     ) : null}
                     <span style={{flex: 1}}>{state.message}</span>
@@ -123,6 +124,7 @@ function noticeClassForState(
 ) {
     if (state.kind === 'client-migration-required' || state.kind === 'migration-required')
         return 'warning';
+    if (state.kind === 'merge-review-required') return 'warning';
     return tone === 'error' ? 'error' : 'info';
 }
 
@@ -142,6 +144,8 @@ function labelForState(state: ReturnType<ServerSync<unknown>['stateStore']['getS
             return 'Migration cancelled';
         case 'client-migration-required':
             return 'Update required';
+        case 'merge-review-required':
+            return 'Review required';
         case 'schema-mismatch':
             return 'Schema mismatch';
         case 'error':

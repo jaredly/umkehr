@@ -1,0 +1,1 @@
+Can you take a look at examples/react-crdt and develop a comprehensive plan for playwright end-to-end testing? There are already some tests, but they're somewhat ad-hoc. I'd like to ensure that testing is comprehensive, and I'd also like there to be some playwright spec files that I can video-record for demo purposes.

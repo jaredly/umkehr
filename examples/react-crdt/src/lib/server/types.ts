@@ -124,6 +124,34 @@ export type PersistedServerBranch<TState> = {
     mirrored: boolean;
 };
 
+export type ServerOldPendingChangesPolicy =
+    | {kind: 'auto-merge'}
+    | {kind: 'manual-review'; thresholdMs?: number};
+
+export type PersistedServerStaleReview = {
+    activeBranchId?: string;
+    queue: string[];
+    blockedBranchIds: string[];
+    allowedBranchIds: string[];
+    reviews: Record<string, ServerStaleMergeReviewMetadata>;
+};
+
+export type ServerStaleMergeReviewMetadata = {
+    sourceBranchId: string;
+    baseEventIndex: number;
+    serverTipEventIndex: number;
+    pendingEventCount: number;
+    oldestPendingAt: string;
+};
+
+export type ServerStaleMergeReview<TState> = ServerStaleMergeReviewMetadata & {
+    pendingEvents: ServerBranchEvent[];
+    baseHistory: CrdtLocalHistory<TState>;
+    clientHistory: CrdtLocalHistory<TState>;
+    serverHistory: CrdtLocalHistory<TState>;
+    resultHistory: CrdtLocalHistory<TState>;
+};
+
 export type PersistedServerReplica<TState> = {
     docId: string;
     appId: string;
@@ -136,6 +164,7 @@ export type PersistedServerReplica<TState> = {
     activeBranchId: string;
     branches: Record<string, PersistedServerBranch<TState>>;
     branchList: ServerBranch[];
+    staleMergeReview?: PersistedServerStaleReview;
     updatedAt: string;
 };
 
@@ -143,6 +172,14 @@ export type ServerSyncState =
     | {kind: 'offline'; reason: 'manual' | 'starting'}
     | {kind: 'connecting'}
     | {kind: 'connected'}
+    | {
+          kind: 'merge-review-required';
+          message: string;
+          branchId: string;
+          pendingEventCount: number;
+          oldestPendingAt: string;
+          blockedBranchCount: number;
+      }
     | {
           kind: 'migration-required';
           message: string;
@@ -203,6 +240,7 @@ export type ServerSync<TState> = {
     presenceStore: ExternalStore<ServerPresenceUser[]>;
     statusStore: StatusStore;
     manualOfflineStore: ExternalStore<boolean>;
+    staleMergeReviewStore: ExternalStore<ServerStaleMergeReview<TState> | null>;
     setManualOffline(offline: boolean): void;
     requestSync(): void;
     requestServerMigration(): void;
@@ -210,9 +248,22 @@ export type ServerSync<TState> = {
     switchBranch(branchId: string): void;
     createBranch(name: string, forkEventIndex?: number): void;
     renameBranch(branchId: string, name: string): void;
-    mergeBranch(sourceBranchId: string, sourceThroughEventIndex?: number, revertedPathKeys?: Set<string>): void;
+    mergeBranch(
+        sourceBranchId: string,
+        sourceThroughEventIndex?: number,
+        revertedPathKeys?: Set<string>,
+    ): void;
     buildEventPreview(throughEventIndex: number): CrdtLocalHistory<TState>;
-    buildMergePreview(sourceBranchId: string, sourceThroughEventIndex?: number, revertedPathKeys?: Set<string>): ServerMergePreview<TState> | null;
+    buildMergePreview(
+        sourceBranchId: string,
+        sourceThroughEventIndex?: number,
+        revertedPathKeys?: Set<string>,
+    ): ServerMergePreview<TState> | null;
+    buildStaleMergeReview(): ServerStaleMergeReview<TState> | null;
+    completeStaleMerge(resultUpdates: CrdtUpdate[]): void;
+    forkStaleLocalChanges(name?: string): void;
+    discardStaleLocalChanges(): void;
+    hasBranchReviewLock(): boolean;
     setPresenceSelection(elementId: string | null): void;
     exportReplica(): PersistedServerReplica<TState>;
     replaceReplica(replica: PersistedServerReplica<TState>): void;

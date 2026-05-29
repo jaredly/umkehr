@@ -1,12 +1,14 @@
 import {expect, test} from '@playwright/test';
 import {
     addTodo,
+    agePendingServerEvents,
     clickMigrateDocument,
     disconnectFromServer,
     editTodo,
     expectClientUpgradeRequired,
     expectMigrationRequired,
     expectMigrationRunning,
+    expectStaleMergeReviewRequired,
     expectTodoVisible,
     expectUnsyncedEvents,
     login,
@@ -65,7 +67,147 @@ test('syncs edits through a seeded server database', async ({browser}, testInfo)
     }
 });
 
-test('migrates the seeded v1 todos document through the browser and server', async ({page}, testInfo) => {
+test('reviews old pending local edits before completing stale server merge', async ({
+    browser,
+}, testInfo) => {
+    const dbPath = await createTempServerDbPath(testInfo);
+    await seedServerDatabase({dbPath});
+    const server = await startServer({dbPath});
+    const docId = 'todos-small';
+
+    try {
+        const contextA = await browser.newContext();
+        const contextB = await browser.newContext();
+        const pageA = await contextA.newPage();
+        const pageB = await contextB.newPage();
+        const localTitle = `Complete local ${Date.now()}`;
+        const serverTitle = `Complete server ${Date.now()}`;
+
+        await createOldPendingAndMovedServer({
+            pageA,
+            pageB,
+            docId,
+            localTitle,
+            serverTitle,
+        });
+        const beforeReconnect = await inspectServerDocument(dbPath, docId);
+
+        await pageA.reload();
+        await expectStaleMergeReviewRequired(pageA);
+        const afterReview = await inspectServerDocument(dbPath, docId);
+        expect(afterReview.eventCount).toBe(beforeReconnect.eventCount);
+
+        await pageA.getByRole('button', {name: 'Complete merge'}).click();
+        await waitForSynced(pageA);
+        await expectTodoVisible(pageB, localTitle);
+        await expectTodoVisible(pageB, serverTitle);
+
+        const afterComplete = await inspectServerDocument(dbPath, docId);
+        expect(afterComplete.eventCount).toBeGreaterThan(beforeReconnect.eventCount);
+
+        await contextA.close();
+        await contextB.close();
+    } finally {
+        await server.stop();
+    }
+});
+
+test('reviews old pending local edits before forking stale changes', async ({
+    browser,
+}, testInfo) => {
+    const dbPath = await createTempServerDbPath(testInfo);
+    await seedServerDatabase({dbPath});
+    const server = await startServer({dbPath});
+    const docId = 'todos-small';
+
+    try {
+        const contextA = await browser.newContext();
+        const contextB = await browser.newContext();
+        const pageA = await contextA.newPage();
+        const pageB = await contextB.newPage();
+        const localTitle = `Fork local ${Date.now()}`;
+        const serverTitle = `Fork server ${Date.now()}`;
+        const forkName = `main/sync-review-e2e-${Date.now()}`;
+
+        await createOldPendingAndMovedServer({
+            pageA,
+            pageB,
+            docId,
+            localTitle,
+            serverTitle,
+        });
+        const beforeReconnect = await inspectServerDocument(dbPath, docId);
+
+        await pageA.reload();
+        await expectStaleMergeReviewRequired(pageA);
+        const afterReview = await inspectServerDocument(dbPath, docId);
+        expect(afterReview.eventCount).toBe(beforeReconnect.eventCount);
+
+        await pageA.getByLabel('Fork branch name').fill(forkName);
+        await pageA.getByRole('button', {name: 'Fork local changes'}).click();
+        await waitForSynced(pageA);
+        await expect(pageA.getByRole('button', {name: forkName})).toBeVisible();
+        await expectTodoVisible(pageA, localTitle);
+
+        const afterFork = await inspectServerDocument(dbPath, docId);
+        expect(afterFork.branches.length).toBeGreaterThan(beforeReconnect.branches.length);
+        expect(afterFork.eventCount).toBeGreaterThan(beforeReconnect.eventCount);
+
+        await contextA.close();
+        await contextB.close();
+    } finally {
+        await server.stop();
+    }
+});
+
+test('reviews old pending local edits before discarding stale changes', async ({
+    browser,
+}, testInfo) => {
+    const dbPath = await createTempServerDbPath(testInfo);
+    await seedServerDatabase({dbPath});
+    const server = await startServer({dbPath});
+    const docId = 'todos-small';
+
+    try {
+        const contextA = await browser.newContext();
+        const contextB = await browser.newContext();
+        const pageA = await contextA.newPage();
+        const pageB = await contextB.newPage();
+        const localTitle = `Discard local ${Date.now()}`;
+        const serverTitle = `Discard server ${Date.now()}`;
+
+        await createOldPendingAndMovedServer({
+            pageA,
+            pageB,
+            docId,
+            localTitle,
+            serverTitle,
+        });
+        const beforeReconnect = await inspectServerDocument(dbPath, docId);
+
+        await pageA.reload();
+        await expectStaleMergeReviewRequired(pageA);
+        const afterReview = await inspectServerDocument(dbPath, docId);
+        expect(afterReview.eventCount).toBe(beforeReconnect.eventCount);
+
+        await pageA.getByRole('button', {name: 'Discard local changes'}).click();
+        await waitForSynced(pageA);
+        await expectTodoVisible(pageA, serverTitle);
+        await expect(pageA.locator('.todoTitle', {hasText: localTitle})).toHaveCount(0);
+
+        const afterDiscard = await inspectServerDocument(dbPath, docId);
+        expect(afterDiscard.eventCount).toBe(beforeReconnect.eventCount);
+
+        await contextA.close();
+        await contextB.close();
+    } finally {
+        await server.stop();
+    }
+});
+
+test('migrates the seeded v1 todos document through the browser and server', async ({
+    page,
+}, testInfo) => {
     const dbPath = await createTempServerDbPath(testInfo);
     await seedServerDatabase({dbPath});
     const server = await startServer({dbPath});
@@ -99,6 +241,35 @@ test('migrates the seeded v1 todos document through the browser and server', asy
         await server.stop();
     }
 });
+
+async function createOldPendingAndMovedServer({
+    pageA,
+    pageB,
+    docId,
+    localTitle,
+    serverTitle,
+}: {
+    pageA: import('@playwright/test').Page;
+    pageB: import('@playwright/test').Page;
+    docId: string;
+    localTitle: string;
+    serverTitle: string;
+}) {
+    await openServerDocument(pageA, {docId});
+    await login(pageA, 'Ada');
+    await waitForSynced(pageA);
+
+    await disconnectFromServer(pageA);
+    await addTodo(pageA, localTitle);
+    await expectUnsyncedEvents(pageA, 1);
+    await agePendingServerEvents(pageA, docId, '2026-01-02T00:00:00.000Z');
+
+    await openServerDocument(pageB, {docId});
+    await login(pageB, 'Ben');
+    await waitForSynced(pageB);
+    await addTodo(pageB, serverTitle);
+    await waitForSynced(pageB);
+}
 
 test('blocks a v1 client from flushing local edits after a v2 client migrates the document', async ({
     browser,
@@ -160,7 +331,9 @@ test('blocks a v1 client from flushing local edits after a v2 client migrates th
     }
 });
 
-test('keeps local edits pending while another client owns the migration lock', async ({page}, testInfo) => {
+test('keeps local edits pending while another client owns the migration lock', async ({
+    page,
+}, testInfo) => {
     const dbPath = await createTempServerDbPath(testInfo);
     await seedServerDatabase({dbPath});
     await createMigrationLock({
@@ -264,7 +437,9 @@ test('flushes pending edits after an expired migration lock is resolved', async 
     }
 });
 
-test('shows a client upgrade notice for a seeded document ahead of the client', async ({page}, testInfo) => {
+test('shows a client upgrade notice for a seeded document ahead of the client', async ({
+    page,
+}, testInfo) => {
     const dbPath = await createTempServerDbPath(testInfo);
     await seedServerDatabase({dbPath});
     const server = await startServer({dbPath});

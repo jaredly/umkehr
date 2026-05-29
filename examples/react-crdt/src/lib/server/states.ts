@@ -77,11 +77,7 @@ export function serverMigrationStateForMessage(
 }
 
 export function canFlushPendingServerWrites(state: ServerSyncState) {
-    return (
-        state.kind === 'connected' ||
-        state.kind === 'connecting' ||
-        state.kind === 'offline'
-    );
+    return state.kind === 'connected' || state.kind === 'connecting' || state.kind === 'offline';
 }
 
 export function serverStateNoticeTone(state: ServerSyncState): 'info' | 'error' | null {
@@ -90,7 +86,8 @@ export function serverStateNoticeTone(state: ServerSyncState): 'info' | 'error' 
         state.kind === 'migration-required' ||
         state.kind === 'migration-running' ||
         state.kind === 'migration-cancelled' ||
-        state.kind === 'client-migration-required'
+        state.kind === 'client-migration-required' ||
+        state.kind === 'merge-review-required'
     ) {
         return 'info';
     }
@@ -102,6 +99,7 @@ export function shouldPauseServerSync(state: ServerSyncState) {
         state.kind === 'migration-required' ||
         state.kind === 'migration-running' ||
         state.kind === 'migration-cancelled' ||
+        state.kind === 'merge-review-required' ||
         state.kind === 'client-migration-required' ||
         state.kind === 'schema-mismatch' ||
         state.kind === 'error'

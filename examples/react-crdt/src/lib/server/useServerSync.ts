@@ -40,14 +40,25 @@ import {
 import {migrateServerDump} from './migration';
 import type {ServerSchemaConfig} from './schemaConfig';
 import {canFlushPendingServerWrites, serverMigrationStateForMessage} from './states';
+import {
+    applyPendingEvents,
+    blockedBranchesForReview,
+    buildStaleMergeReview as buildStaleMergeReviewModel,
+    pendingEventsForBranch,
+    withOnlyRecordedEvents,
+} from './staleReview';
 import type {
     PersistedServerBranch,
+    PersistedServerStaleReview,
     PersistedServerReplica,
     ServerBranch,
     ServerBranchEvent,
+    ServerOldPendingChangesPolicy,
     ServerPresenceUser,
     ServerSessionIdentity,
     ServerSync,
+    ServerStaleMergeReview,
+    ServerStaleMergeReviewMetadata,
     ServerSyncState,
     ServerSyncStats,
     ServerUpdateEvent,
@@ -66,6 +77,7 @@ export function useServerSync<TState>({
     schemaFingerprint,
     schemaFingerprintHash,
     schemaConfig,
+    oldPendingChangesPolicy = {kind: 'auto-merge'},
     identity,
     initialReplica,
     replaceHistory,
@@ -78,6 +90,7 @@ export function useServerSync<TState>({
     schemaFingerprint: string;
     schemaFingerprintHash: string;
     schemaConfig: ServerSchemaConfig<TState>;
+    oldPendingChangesPolicy?: ServerOldPendingChangesPolicy;
     identity: ServerSessionIdentity;
     initialReplica: PersistedServerReplica<TState>;
     replaceHistory(history: CrdtLocalHistory<TState>): void;
@@ -93,6 +106,9 @@ export function useServerSync<TState>({
     const listenersRef = useRef(new Set<(update: CrdtUpdate) => void>());
     const ephemeralListenersRef = useRef(new Set<(message: EphemeralMessage<unknown>) => void>());
     const clockRef = useRef(initialClock(identity.actor, allEvents(branchesRef.current)));
+    const reviewRef = useRef<RuntimeStaleReview>(
+        runtimeReviewFromPersisted(initialReplica.staleMergeReview),
+    );
 
     const stateStore = useMemo(
         () => createExternalStore<ServerSyncState>({kind: 'offline', reason: 'starting'}),
@@ -120,6 +136,13 @@ export function useServerSync<TState>({
     const presenceStore = useMemo(() => createExternalStore<ServerPresenceUser[]>([]), []);
     const statusStore = useMemo(() => createStatusStore(), []);
     const manualOfflineStore = useMemo(() => createExternalStore(false), []);
+    const staleMergeReviewStore = useMemo(
+        () =>
+            createExternalStore<ServerStaleMergeReview<TState> | null>(
+                buildActiveStaleMergeReview(app, branchesRef.current, reviewRef.current),
+            ),
+        [app],
+    );
 
     const persist = useCallback(async () => {
         const replica: PersistedServerReplica<TState> = {
@@ -133,6 +156,7 @@ export function useServerSync<TState>({
             activeBranchId: activeBranchIdRef.current,
             branches: branchesRef.current,
             branchList: branchListRef.current,
+            staleMergeReview: persistedReviewFromRuntime(reviewRef.current),
             updatedAt: new Date().toISOString(),
         };
         await saveServerReplica(replica);
@@ -145,14 +169,17 @@ export function useServerSync<TState>({
             branchList: branchListRef.current,
             activeBranchId: activeBranchIdRef.current,
         });
+        publishReviewStore(app, branchesRef.current, reviewRef.current, staleMergeReviewStore);
     }, [
         activeBranchStore,
         app.id,
+        app,
         branchesStore,
         docId,
         eventsStore,
         schemaFingerprint,
         schemaFingerprintHash,
+        staleMergeReviewStore,
         statsStore,
     ]);
 
@@ -208,8 +235,11 @@ export function useServerSync<TState>({
     );
 
     const flushPending = useCallback(() => {
-        if (!canFlushPendingServerWrites(stateStore.getSnapshot())) return;
+        const state = stateStore.getSnapshot();
+        const reviewAllowsPartialFlush = state.kind === 'merge-review-required';
+        if (!reviewAllowsPartialFlush && !canFlushPendingServerWrites(state)) return;
         for (const branch of Object.values(branchesRef.current)) {
+            if (isReviewBlockedBranch(reviewRef.current, branch.branchId)) continue;
             const listed = branchListRef.current.find(
                 (candidate) => candidate.branchId === branch.branchId,
             );
@@ -427,9 +457,12 @@ export function useServerSync<TState>({
                 }
             }
             if (changed) {
+                const materializeBranches = reviewRef.current.blockedBranchIds.has(branchId)
+                    ? withOnlyRecordedEvents(branchesRef.current, branchId)
+                    : branchesRef.current;
                 branch.history = materializeServerBranch({
                     app,
-                    branches: branchesRef.current,
+                    branches: materializeBranches,
                     branchId,
                 });
                 if (branchId === activeBranchIdRef.current && activeBranchNeedsReplacement) {
@@ -501,6 +534,27 @@ export function useServerSync<TState>({
         [persist],
     );
 
+    const enterOrUpdateStaleReview = useCallback(() => {
+        if (oldPendingChangesPolicy.kind !== 'manual-review') return false;
+        const currentState = stateStore.getSnapshot();
+        if (isMigrationOrErrorState(currentState)) return false;
+        const blocked = blockedBranchesForReview({
+            branches: branchesRef.current,
+            branchList: branchListRef.current,
+            policy: oldPendingChangesPolicy,
+        });
+        mergeBlockedReviewMetadata(reviewRef.current, blocked);
+        publishReviewState(
+            app,
+            branchesRef.current,
+            branchListRef.current,
+            reviewRef.current,
+            stateStore,
+        );
+        publishReviewStore(app, branchesRef.current, reviewRef.current, staleMergeReviewStore);
+        return Boolean(reviewRef.current.activeBranchId);
+    }, [app, oldPendingChangesPolicy, staleMergeReviewStore, stateStore]);
+
     const connect = useCallback(() => {
         if (manualOfflineRef.current) return;
         if (socketRef.current?.readyState === WebSocket.OPEN) return;
@@ -540,6 +594,7 @@ export function useServerSync<TState>({
                 mergeBranchList(parsed.branches);
                 void persist().then(() => {
                     subscribeActiveBranch();
+                    enterOrUpdateStaleReview();
                     flushPending();
                 });
             } else if (parsed.kind === 'unknownDocument') {
@@ -561,7 +616,8 @@ export function useServerSync<TState>({
                 });
             } else if (parsed.kind === 'branchUpdate') {
                 mergeBranchList([parsed.branch]);
-                void persist();
+                enterOrUpdateStaleReview();
+                void persist().then(flushPending);
             } else if (parsed.kind === 'branchEvents') {
                 void receiveServerEvents(parsed.branchId, parsed.events).then(flushPending);
             } else if (parsed.kind === 'ack') {
@@ -647,7 +703,8 @@ export function useServerSync<TState>({
                         console.error('Server document migration failed.', error);
                         stateStore.setSnapshot({
                             kind: 'error',
-                            message: 'Document migration failed. See developer console for details.',
+                            message:
+                                'Document migration failed. See developer console for details.',
                         });
                     }
                 })();
@@ -681,6 +738,7 @@ export function useServerSync<TState>({
         clearPresenceState,
         docId,
         app.id,
+        enterOrUpdateStaleReview,
         flushPending,
         identity.actor,
         identity.user.userId,
@@ -836,6 +894,7 @@ export function useServerSync<TState>({
     }, [clearPresenceState, connect]);
 
     function switchBranch(branchId: string) {
+        if (reviewRef.current.activeBranchId) return;
         if (!branchesRef.current[branchId])
             ensureBranch(branchesRef.current, branchListRef.current, branchId, app);
         for (const user of presenceStore.getSnapshot()) {
@@ -978,6 +1037,137 @@ export function useServerSync<TState>({
         return {...preview, revertedPathKeys};
     }
 
+    function buildStaleMergeReview() {
+        return buildActiveStaleMergeReview(app, branchesRef.current, reviewRef.current);
+    }
+
+    function completeStaleMerge(resultUpdates: CrdtUpdate[]) {
+        const metadata = activeReviewMetadata(reviewRef.current);
+        if (!metadata) return;
+        const branch = branchesRef.current[metadata.sourceBranchId];
+        if (!branch) return;
+        const pending = pendingEventsForBranch(branch);
+        const recorded = branch.events.filter((event) => event.recorded);
+        const reindexedPending = reindexPendingEvents(
+            pending,
+            metadata.sourceBranchId,
+            metadata.serverTipEventIndex,
+        );
+        branch.events = sortServerEvents([
+            ...recorded,
+            ...reindexedPending,
+            ...eventsForUpdates({
+                updates: resultUpdates,
+                docId,
+                branchId: metadata.sourceBranchId,
+                origin: identity.actor,
+                startEventIndex: metadata.serverTipEventIndex + reindexedPending.length + 1,
+            }),
+        ]);
+        branch.history = materializeServerBranch({
+            app,
+            branches: branchesRef.current,
+            branchId: metadata.sourceBranchId,
+        });
+        resolveActiveReview(reviewRef.current, metadata.sourceBranchId);
+        if (activeBranchIdRef.current === metadata.sourceBranchId) replaceHistory(branch.history);
+        publishReviewState(
+            app,
+            branchesRef.current,
+            branchListRef.current,
+            reviewRef.current,
+            stateStore,
+        );
+        void persist().then(flushPending);
+    }
+
+    function forkStaleLocalChanges(name?: string) {
+        const metadata = activeReviewMetadata(reviewRef.current);
+        if (!metadata) return;
+        const source = branchesRef.current[metadata.sourceBranchId];
+        if (!source) return;
+        const sourceMeta = branchListRef.current.find(
+            (branch) => branch.branchId === metadata.sourceBranchId,
+        );
+        const now = new Date().toISOString();
+        const branchId = `branch-${crypto.randomUUID()}`;
+        const branchName =
+            name?.trim() ||
+            `${sourceMeta?.name ?? metadata.sourceBranchId}/sync-review-${Date.now()}`;
+        const pending = pendingEventsForBranch(source);
+        source.events = sortServerEvents(source.events.filter((event) => event.recorded));
+        source.history = materializeServerBranch({
+            app,
+            branches: withOnlyRecordedEvents(branchesRef.current, metadata.sourceBranchId),
+            branchId: metadata.sourceBranchId,
+        });
+        const branchMeta: ServerBranch = {
+            docId,
+            branchId,
+            name: branchName,
+            sourceBranchId: metadata.sourceBranchId,
+            forkEventIndex: metadata.baseEventIndex,
+            tipEventIndex: 0,
+            createdAt: now,
+            updatedAt: now,
+            pending: true,
+        };
+        branchListRef.current = [...branchListRef.current, branchMeta];
+        branchesRef.current[branchId] = {
+            branchId,
+            sourceBranchId: metadata.sourceBranchId,
+            forkEventIndex: metadata.baseEventIndex,
+            history: applyPendingEvents(
+                materializeServerBranch({
+                    app,
+                    branches: withOnlyRecordedEvents(branchesRef.current, metadata.sourceBranchId),
+                    branchId: metadata.sourceBranchId,
+                    throughEventIndex: metadata.baseEventIndex,
+                }),
+                pending,
+            ),
+            lastSeenEventIndex: 0,
+            undoCheckpointEventIndex: 0,
+            events: reindexPendingEvents(pending, branchId, 0),
+            mirrored: true,
+        };
+        reviewRef.current.allowedBranchIds.add(branchId);
+        resolveActiveReview(reviewRef.current, metadata.sourceBranchId);
+        switchBranch(branchId);
+        publishReviewState(
+            app,
+            branchesRef.current,
+            branchListRef.current,
+            reviewRef.current,
+            stateStore,
+        );
+        void persist().then(flushPending);
+    }
+
+    function discardStaleLocalChanges() {
+        const metadata = activeReviewMetadata(reviewRef.current);
+        if (!metadata) return;
+        const branch = branchesRef.current[metadata.sourceBranchId];
+        if (!branch) return;
+        branch.events = sortServerEvents(branch.events.filter((event) => event.recorded));
+        branch.history = materializeServerBranch({
+            app,
+            branches: withOnlyRecordedEvents(branchesRef.current, metadata.sourceBranchId),
+            branchId: metadata.sourceBranchId,
+        });
+        branch.undoCheckpointEventIndex = branch.lastSeenEventIndex;
+        resolveActiveReview(reviewRef.current, metadata.sourceBranchId);
+        if (activeBranchIdRef.current === metadata.sourceBranchId) replaceHistory(branch.history);
+        publishReviewState(
+            app,
+            branchesRef.current,
+            branchListRef.current,
+            reviewRef.current,
+            stateStore,
+        );
+        void persist().then(flushPending);
+    }
+
     function buildEventPreview(throughEventIndex: number) {
         const branch = activeBranch(branchesRef.current, activeBranchIdRef.current);
         return materializeServerBranch({
@@ -1001,6 +1191,7 @@ export function useServerSync<TState>({
             activeBranchId: activeBranchIdRef.current,
             branches: branchesRef.current,
             branchList: branchListRef.current,
+            staleMergeReview: persistedReviewFromRuntime(reviewRef.current),
             updatedAt: new Date().toISOString(),
         };
     }
@@ -1009,6 +1200,7 @@ export function useServerSync<TState>({
         activeBranchIdRef.current = replica.activeBranchId;
         branchesRef.current = replica.branches;
         branchListRef.current = replica.branchList;
+        reviewRef.current = runtimeReviewFromPersisted(replica.staleMergeReview);
         const branch = activeBranch(branchesRef.current, activeBranchIdRef.current);
         replaceHistory(branch.history);
         void saveServerReplica(replica).then(() =>
@@ -1022,6 +1214,14 @@ export function useServerSync<TState>({
                 activeBranchId: activeBranchIdRef.current,
             }),
         );
+        publishReviewState(
+            app,
+            branchesRef.current,
+            branchListRef.current,
+            reviewRef.current,
+            stateStore,
+        );
+        publishReviewStore(app, branchesRef.current, reviewRef.current, staleMergeReviewStore);
     }
 
     return {
@@ -1035,6 +1235,7 @@ export function useServerSync<TState>({
         presenceStore,
         statusStore,
         manualOfflineStore,
+        staleMergeReviewStore,
         setManualOffline,
         requestSync,
         requestServerMigration() {
@@ -1062,6 +1263,13 @@ export function useServerSync<TState>({
         mergeBranch,
         buildEventPreview,
         buildMergePreview,
+        buildStaleMergeReview,
+        completeStaleMerge,
+        forkStaleLocalChanges,
+        discardStaleLocalChanges,
+        hasBranchReviewLock() {
+            return Boolean(reviewRef.current.activeBranchId);
+        },
         exportReplica: currentReplica,
         replaceReplica,
     };
@@ -1096,6 +1304,186 @@ function sameDocumentContents<TState>(
         JSON.stringify(left.state) === JSON.stringify(right.state) &&
         JSON.stringify(left.meta) === JSON.stringify(right.meta)
     );
+}
+
+type RuntimeStaleReview = {
+    activeBranchId?: string;
+    queue: string[];
+    blockedBranchIds: Set<string>;
+    allowedBranchIds: Set<string>;
+    reviews: Map<string, ServerStaleMergeReviewMetadata>;
+};
+
+function runtimeReviewFromPersisted(persisted?: PersistedServerStaleReview): RuntimeStaleReview {
+    return {
+        activeBranchId: persisted?.activeBranchId,
+        queue: persisted?.queue ?? [],
+        blockedBranchIds: new Set(persisted?.blockedBranchIds ?? []),
+        allowedBranchIds: new Set(persisted?.allowedBranchIds ?? []),
+        reviews: new Map(Object.entries(persisted?.reviews ?? {})),
+    };
+}
+
+function persistedReviewFromRuntime(
+    review: RuntimeStaleReview,
+): PersistedServerStaleReview | undefined {
+    if (
+        !review.activeBranchId &&
+        review.queue.length === 0 &&
+        review.blockedBranchIds.size === 0 &&
+        review.allowedBranchIds.size === 0 &&
+        review.reviews.size === 0
+    ) {
+        return undefined;
+    }
+    return {
+        activeBranchId: review.activeBranchId,
+        queue: review.queue,
+        blockedBranchIds: [...review.blockedBranchIds],
+        allowedBranchIds: [...review.allowedBranchIds],
+        reviews: Object.fromEntries(review.reviews),
+    };
+}
+
+function mergeBlockedReviewMetadata(
+    review: RuntimeStaleReview,
+    blocked: ServerStaleMergeReviewMetadata[],
+) {
+    for (const metadata of blocked) {
+        if (review.allowedBranchIds.has(metadata.sourceBranchId)) continue;
+        review.blockedBranchIds.add(metadata.sourceBranchId);
+        review.reviews.set(metadata.sourceBranchId, metadata);
+        if (
+            metadata.sourceBranchId !== review.activeBranchId &&
+            !review.queue.includes(metadata.sourceBranchId)
+        ) {
+            review.queue.push(metadata.sourceBranchId);
+        }
+    }
+    if (!review.activeBranchId) review.activeBranchId = review.queue.shift();
+}
+
+function resolveActiveReview(review: RuntimeStaleReview, branchId: string) {
+    review.blockedBranchIds.delete(branchId);
+    review.reviews.delete(branchId);
+    review.allowedBranchIds.add(branchId);
+    review.queue = review.queue.filter((candidate) => candidate !== branchId);
+    review.activeBranchId = review.queue.shift();
+}
+
+function activeReviewMetadata(review: RuntimeStaleReview) {
+    return review.activeBranchId ? review.reviews.get(review.activeBranchId) : undefined;
+}
+
+function buildActiveStaleMergeReview<TState>(
+    app: AppDefinition<TState>,
+    branches: Record<string, PersistedServerBranch<TState>>,
+    review: RuntimeStaleReview,
+) {
+    const metadata = activeReviewMetadata(review);
+    if (!metadata) return null;
+    return buildStaleMergeReviewModel({app, branches, metadata});
+}
+
+function publishReviewStore<TState>(
+    app: AppDefinition<TState>,
+    branches: Record<string, PersistedServerBranch<TState>>,
+    review: RuntimeStaleReview,
+    store: ReturnType<typeof createExternalStore<ServerStaleMergeReview<TState> | null>>,
+) {
+    store.setSnapshot(buildActiveStaleMergeReview(app, branches, review));
+}
+
+function publishReviewState<TState>(
+    app: AppDefinition<TState>,
+    branches: Record<string, PersistedServerBranch<TState>>,
+    branchList: ServerBranch[],
+    review: RuntimeStaleReview,
+    stateStore: ReturnType<typeof createExternalStore<ServerSyncState>>,
+) {
+    app;
+    branches;
+    const metadata = activeReviewMetadata(review);
+    if (!metadata) {
+        if (stateStore.getSnapshot().kind === 'merge-review-required') {
+            stateStore.setSnapshot({kind: 'connected'});
+        }
+        return;
+    }
+    const branch = branchList.find((candidate) => candidate.branchId === metadata.sourceBranchId);
+    const branchLabel = branch?.name ?? metadata.sourceBranchId;
+    stateStore.setSnapshot({
+        kind: 'merge-review-required',
+        branchId: metadata.sourceBranchId,
+        pendingEventCount: metadata.pendingEventCount,
+        oldestPendingAt: metadata.oldestPendingAt,
+        blockedBranchCount: review.blockedBranchIds.size,
+        message: `${branchLabel} has ${metadata.pendingEventCount} old pending local ${
+            metadata.pendingEventCount === 1 ? 'event' : 'events'
+        } and the server branch moved. Review before uploading.`,
+    });
+}
+
+function isReviewBlockedBranch(review: RuntimeStaleReview, branchId: string) {
+    return review.blockedBranchIds.has(branchId) && !review.allowedBranchIds.has(branchId);
+}
+
+function isMigrationOrErrorState(state: ServerSyncState) {
+    return (
+        state.kind === 'migration-required' ||
+        state.kind === 'migration-running' ||
+        state.kind === 'migration-cancelled' ||
+        state.kind === 'client-migration-required' ||
+        state.kind === 'schema-mismatch' ||
+        state.kind === 'error'
+    );
+}
+
+function reindexPendingEvents(
+    events: ServerBranchEvent[],
+    branchId: string,
+    afterEventIndex: number,
+) {
+    return sortServerEvents(
+        events.map((event, index) => ({
+            ...event,
+            branchId,
+            eventIndex: afterEventIndex + index + 1,
+            recorded: false,
+        })),
+    );
+}
+
+function eventsForUpdates({
+    updates,
+    docId,
+    branchId,
+    origin,
+    startEventIndex,
+}: {
+    updates: CrdtUpdate[];
+    docId: string;
+    branchId: string;
+    origin: string;
+    startEventIndex: number;
+}): ServerBranchEvent[] {
+    return updates
+        .map((update, index): ServerUpdateEvent | null => {
+            const timestamp = latestCrdtUpdateTimestamp(update);
+            if (!timestamp) return null;
+            return {
+                kind: 'update',
+                docId,
+                branchId,
+                eventIndex: startEventIndex + index,
+                origin,
+                hlcTimestamp: timestamp,
+                receivedAt: new Date().toISOString(),
+                update,
+                recorded: false,
+            };
+        })
+        .filter((event): event is ServerUpdateEvent => event !== null);
 }
 
 function publishStores<TState>({

@@ -1,4 +1,9 @@
-import {apps, defaultAppRouteId, registeredAppForId, routeIdForRegisteredApp} from './lib/appRegistry';
+import {
+    apps,
+    defaultAppRouteId,
+    registeredAppForId,
+    routeIdForRegisteredApp,
+} from './lib/appRegistry';
 import {LocalSimulatorApp} from './lib/local/LocalSimulatorApp';
 import {LocalFirstApp} from './lib/local-first/LocalFirstApp';
 import {PeerJsApp} from './lib/peerjs/PeerJsApp';
@@ -11,6 +16,10 @@ export function App() {
     const [{mode, appId}, setMode, setAppId] = useUrlSelection(defaultAppRouteId);
     const registered = registeredAppForId(appId);
     const {app, crdt, history, serverSchemaConfig} = registered;
+    const serverOldPendingChangesPolicy =
+        'serverOldPendingChangesPolicy' in registered
+            ? registered.serverOldPendingChangesPolicy
+            : undefined;
     const routeId = routeIdForRegisteredApp(registered);
 
     const topBar = {
@@ -31,6 +40,7 @@ export function App() {
             app={app as any}
             runtime={crdt as any}
             schemaConfig={serverSchemaConfig as any}
+            oldPendingChangesPolicy={serverOldPendingChangesPolicy}
             topBar={topBar}
         />
     ) : mode === 'peerjs' ? (

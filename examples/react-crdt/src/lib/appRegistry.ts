@@ -23,6 +23,7 @@ import {
     type TodoFixtureStateV3,
 } from '../../../migration-fixtures/todos';
 import type {ServerSchemaConfig} from './server/schemaConfig';
+import type {ServerOldPendingChangesPolicy} from './server/types';
 
 type RegisteredApp<TState = unknown> = {
     routeId?: string;
@@ -30,12 +31,10 @@ type RegisteredApp<TState = unknown> = {
     crdt: CrdtRuntime<TState>;
     history: HistoryRuntime<TState>;
     serverSchemaConfig?: ServerSchemaConfig<TState>;
+    serverOldPendingChangesPolicy?: ServerOldPendingChangesPolicy;
 };
 
-type RegisteredEphemeralApp<TState, EphemeralData> = Omit<
-    RegisteredApp<TState>,
-    'app' | 'crdt'
-> & {
+type RegisteredEphemeralApp<TState, EphemeralData> = Omit<RegisteredApp<TState>, 'app' | 'crdt'> & {
     app: AppDefinition<TState, EphemeralData>;
     crdt: CrdtRuntime<TState, EphemeralData>;
 };
@@ -63,6 +62,7 @@ export const registeredApps = [
         crdt: todoCrdtRuntime,
         history: todoHistoryRuntime,
         serverSchemaConfig: todoMigrationServerSchemaConfig,
+        serverOldPendingChangesPolicy: {kind: 'manual-review', thresholdMs: 300_000},
     },
     {
         routeId: 'todos@1',

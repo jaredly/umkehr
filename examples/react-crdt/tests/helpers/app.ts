@@ -58,6 +58,55 @@ export async function expectUnsyncedEvents(page: Page, count: number) {
     });
 }
 
+export async function expectStaleMergeReviewRequired(page: Page) {
+    await expectServerNotice(page, /Review local changes before upload|Review before uploading/);
+    await expect(
+        page.getByRole('heading', {name: 'Review local changes before upload'}),
+    ).toBeVisible();
+}
+
+export async function agePendingServerEvents(page: Page, docId: string, receivedAt: string) {
+    await page.evaluate(
+        async ({docId, receivedAt}) => {
+            const request = indexedDB.open('umkehr-react-crdt-server-sync');
+            const db = await new Promise<IDBDatabase>((resolve, reject) => {
+                request.onerror = () => reject(request.error);
+                request.onsuccess = () => resolve(request.result);
+            });
+            try {
+                const tx = db.transaction('replicas', 'readwrite');
+                const store = tx.objectStore('replicas');
+                const replica = await new Promise<any>((resolve, reject) => {
+                    const get = store.get(docId);
+                    get.onerror = () => reject(get.error);
+                    get.onsuccess = () => resolve(get.result);
+                });
+                if (!replica) throw new Error(`Replica ${docId} not found.`);
+                for (const branch of Object.values<any>(replica.branches)) {
+                    for (const event of branch.events) {
+                        if (event.kind === 'update' && !event.recorded) {
+                            event.receivedAt = receivedAt;
+                        }
+                    }
+                }
+                await new Promise<void>((resolve, reject) => {
+                    const put = store.put(replica, docId);
+                    put.onerror = () => reject(put.error);
+                    put.onsuccess = () => resolve();
+                });
+                await new Promise<void>((resolve, reject) => {
+                    tx.oncomplete = () => resolve();
+                    tx.onerror = () => reject(tx.error);
+                    tx.onabort = () => reject(tx.error);
+                });
+            } finally {
+                db.close();
+            }
+        },
+        {docId, receivedAt},
+    );
+}
+
 export async function disconnectFromServer(page: Page) {
     await page.getByRole('button', {name: 'Disconnect from server'}).click();
 }
