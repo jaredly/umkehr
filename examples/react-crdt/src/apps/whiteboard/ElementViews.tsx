@@ -140,6 +140,8 @@ function NoteView({
     return (
         <article
             className={elementClassName('whiteboardNote', selected, suppressed)}
+            data-testid="whiteboard-note"
+            data-element-id={element.id}
             style={elementStyle(element, {
                 width: element.size.width,
                 height: element.size.height,
@@ -195,6 +197,8 @@ function EmojiView({
     return (
         <div
             className={elementClassName('whiteboardEmoji', selected, suppressed)}
+            data-testid="whiteboard-emoji"
+            data-element-id={element.id}
             style={elementStyle(element, {
                 width: element.size,
                 height: element.size,
@@ -226,6 +230,8 @@ function StrokeView({
         <g transform={`translate(${element.position.x} ${element.position.y})`}>
             <path
                 className={elementClassName('whiteboardStroke', selected, suppressed)}
+                data-testid="whiteboard-stroke"
+                data-element-id={element.id}
                 d={strokePath(element.points)}
                 fill="none"
                 stroke={element.color}

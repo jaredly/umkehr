@@ -29,7 +29,7 @@ export function PeerJsControls<TState>({
     }, [state]);
 
     return (
-        <aside className="peerControls" aria-label="PeerJS controls">
+        <aside className="peerControls" data-testid="peerjs-controls" aria-label="PeerJS controls">
             <div className="rolePicker">
                 <button
                     type="button"
@@ -96,10 +96,15 @@ export function PeerJsControls<TState>({
                 </form>
             ) : null}
 
-            <div className="connectionList">
+            <div className="connectionList" data-testid="peerjs-connection-list">
                 {connections.length ? (
                     connections.map((connection) => (
-                        <div key={connection.peerId} className="connectionRow">
+                        <div
+                            key={connection.peerId}
+                            className="connectionRow"
+                            data-testid="peerjs-connection-row"
+                            data-peer-id={connection.peerId}
+                        >
                             <div>
                                 <strong>{connection.actor ?? connection.peerId}</strong>
                                 <span>{connection.open ? 'Open' : 'Closed'}</span>

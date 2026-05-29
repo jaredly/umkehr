@@ -15,7 +15,7 @@ import {
     openServerDocument,
     reconnectToServer,
     waitForSynced,
-} from './helpers/app';
+} from '../helpers/app';
 import {
     createTempServerDbPath,
     createMigrationLock,
@@ -23,13 +23,13 @@ import {
     seedServerDatabase,
     startServer,
     waitForServerDocument,
-} from './helpers/server';
+} from '../helpers/server';
 import {
     todoFixtureV1FingerprintHash,
     todoFixtureV2Fingerprint,
     todoFixtureV2FingerprintHash,
     todoFixtureV3FingerprintHash,
-} from '../../migration-fixtures/todos';
+} from '../../../migration-fixtures/todos';
 
 test('syncs edits through a seeded server database', async ({browser}, testInfo) => {
     const dbPath = await createTempServerDbPath(testInfo);

@@ -117,17 +117,19 @@ export function ServerHistoryView<TState, EphemeralData = never>({
     }
 
     return (
-        <section className="serverHistory">
+        <section className="serverHistory" data-testid="server-history">
             <header>
                 <h2>Branches</h2>
                 <p>{activeBranch ? `On ${activeBranch.name}` : 'No active branch'}</p>
             </header>
-            <div className="serverBranchList">
+            <div className="serverBranchList" data-testid="server-branch-list">
                 {branches.map((branch) => (
                     <button
                         key={branch.branchId}
                         type="button"
                         className={branch.branchId === activeBranchId ? 'active' : ''}
+                        data-testid="server-branch-button"
+                        data-branch-id={branch.branchId}
                         onClick={() => {
                             editor.previewHistory(null);
                             setMergeSourceId('');
@@ -215,7 +217,11 @@ export function ServerHistoryView<TState, EphemeralData = never>({
                 </div>
             ) : null}
             {mergePreview ? (
-                <section className="serverMergePanel" aria-label="Merge preview">
+                <section
+                    className="serverMergePanel"
+                    aria-label="Merge preview"
+                    data-testid="server-merge-panel"
+                >
                     <div className="serverMergeHeader">
                         <div>
                             <h3>Merge preview</h3>
@@ -304,7 +310,7 @@ export function ServerHistoryView<TState, EphemeralData = never>({
                                         const key = pathKey(path);
                                         const checked = revertedPathKeys.has(key);
                                         return (
-                                            <li key={key}>
+                                            <li key={key} data-testid="server-merge-path" data-path-key={key}>
                                                 <label className={checked ? 'reverted' : ''}>
                                                     <input
                                                         type="checkbox"
@@ -331,7 +337,7 @@ export function ServerHistoryView<TState, EphemeralData = never>({
                     </div>
                 </section>
             ) : null}
-            <div className="serverTimeline">
+            <div className="serverTimeline" data-testid="server-timeline">
                 {events.length === 0 ? (
                     <p>No events yet.</p>
                 ) : (
@@ -339,6 +345,10 @@ export function ServerHistoryView<TState, EphemeralData = never>({
                         <button
                             key={`${event.branchId}:${event.eventIndex}:${event.kind}`}
                             type="button"
+                            data-testid="server-timeline-event"
+                            data-branch-id={event.branchId}
+                            data-event-index={event.eventIndex}
+                            data-event-kind={event.kind}
                             className={
                                 previewEventIndex === event.eventIndex || forkEventIndex === event.eventIndex
                                     ? 'active'

@@ -24,6 +24,7 @@ import {
 } from '../../../migration-fixtures/todos';
 import type {ServerSchemaConfig} from './server/schemaConfig';
 import type {ServerOldPendingChangesPolicy} from './server/types';
+import type {LocalFirstSchemaConfig} from './local-first/schemaConfig';
 
 type RegisteredApp<TState = unknown> = {
     routeId?: string;
@@ -31,6 +32,7 @@ type RegisteredApp<TState = unknown> = {
     crdt: CrdtRuntime<TState>;
     history: HistoryRuntime<TState>;
     serverSchemaConfig?: ServerSchemaConfig<TState>;
+    localFirstSchemaConfig?: LocalFirstSchemaConfig<TState>;
     serverOldPendingChangesPolicy?: ServerOldPendingChangesPolicy;
 };
 
@@ -43,6 +45,17 @@ const todoMigrationServerSchemaConfig: ServerSchemaConfig<TodoState> = {
     version: todoFixtureMigrationConfig.current.version,
     previous: todoFixtureMigrationConfig.previous,
     migrations: [todoFixtureMigration],
+};
+
+const todoMigrationLocalFirstSchemaConfig: LocalFirstSchemaConfig<TodoState> = {
+    version: todoFixtureMigrationConfig.current.version,
+    previous: todoFixtureMigrationConfig.previous,
+    migrations: [
+        {
+            ...todoFixtureMigration,
+            toDocId: (sourceDocId) => `${sourceDocId}-local-first-v2`,
+        },
+    ],
 };
 
 const todoV1ServerSchemaConfig: ServerSchemaConfig<TodoFixtureStateV1> = {
@@ -62,6 +75,7 @@ export const registeredApps = [
         crdt: todoCrdtRuntime,
         history: todoHistoryRuntime,
         serverSchemaConfig: todoMigrationServerSchemaConfig,
+        localFirstSchemaConfig: todoMigrationLocalFirstSchemaConfig,
         serverOldPendingChangesPolicy: {kind: 'manual-review', thresholdMs: 300_000},
     },
     {

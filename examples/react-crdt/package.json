@@ -5,7 +5,11 @@
     "dev": "vite",
     "seed:server": "vite build --configLoader runner --config vite.seed.config.ts 1>&2 && node /private/tmp/umkehr-react-crdt-seed-build/generate.js",
     "build": "tsc -p tsconfig.json --noEmit && vite build",
-    "test:e2e": "playwright test -c playwright.config.ts"
+    "test:e2e": "playwright test -c playwright.config.ts",
+    "test:e2e:smoke": "playwright test -c playwright.config.ts tests/smoke tests/server/server-history-preview.spec.ts",
+    "test:e2e:server": "playwright test -c playwright.config.ts tests/server",
+    "test:e2e:peerjs": "playwright test -c playwright.config.ts tests/peerjs",
+    "test:e2e:local-first": "playwright test -c playwright.config.ts tests/local-first"
   },
   "dependencies": {
     "idb": "^8.0.3",
@@ -20,6 +24,7 @@
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.3",
     "@typia/unplugin": "^12.1.1",
+    "peer": "1.0.2",
     "typescript": "^5.9.3"
   }
 }

@@ -23,6 +23,7 @@ import {
     markReceivedBatch,
     saveReplica,
 } from './persistence';
+import {peerOptions} from '../peerjs/peerOptions';
 import {batchTimestampRange, advanceVector, vectorDominates, vectorForUpdates} from './vector';
 import {batchKey, createRecentBatchCache} from './recentBatchCache';
 import {buildSnapshotReplayPreview, type PendingSnapshot, type ReplayPreview} from './replay';
@@ -872,7 +873,7 @@ export function useLocalFirstSync<TState>({
     }, [refreshCounts]);
 
     useEffect(() => {
-        const peer = new Peer({debug: 1});
+        const peer = new Peer(peerOptions());
         peerRef.current = peer;
         stateStore.setSnapshot({kind: 'initializing', role: roleRef.current});
 

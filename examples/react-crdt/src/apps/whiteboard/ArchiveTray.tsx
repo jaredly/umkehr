@@ -14,7 +14,7 @@ export function ArchiveTray({
     readOnly: boolean;
 }) {
     return (
-        <div className="whiteboardArchive">
+        <div className="whiteboardArchive" data-testid="whiteboard-archive-tray">
             {archivedElementIds.length ? (
                 archivedElementIds.map((id) => (
                     <ArchivedElementButton
@@ -46,7 +46,13 @@ function ArchivedElementButton({
     const element = useValue(editor.$.elements[id]);
     if (!element || !element.archived) return null;
     return (
-        <button type="button" onClick={() => recover(element.id)} disabled={readOnly}>
+        <button
+            type="button"
+            data-testid="whiteboard-archive-item"
+            data-element-id={element.id}
+            onClick={() => recover(element.id)}
+            disabled={readOnly}
+        >
             Recover {nameForElement(element)}
         </button>
     );

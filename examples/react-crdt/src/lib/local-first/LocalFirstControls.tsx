@@ -24,12 +24,12 @@ export function LocalFirstControls<TState>({
     const [peerId, setPeerId] = useState('');
 
     return (
-        <aside className="localFirstControls">
+        <aside className="localFirstControls" data-testid="local-first-controls">
             <div>
                 <h2>Local-first</h2>
                 <p>{statusText(persistence)}</p>
             </div>
-            <dl className="localFirstStats">
+            <dl className="localFirstStats" data-testid="local-first-stats">
                 <dt>Replica</dt>
                 <dd>{sync.identity.replicaId}</dd>
                 <dt>Network</dt>
@@ -94,7 +94,7 @@ export function LocalFirstControls<TState>({
                 <dt>Peers</dt>
                 <dd>{connections.length}</dd>
             </dl>
-            <section className="inviteBox">
+            <section className="inviteBox" data-testid="local-first-invite-box">
                 <label htmlFor="local-first-invite">Invite link</label>
                 <div>
                     <input
@@ -198,9 +198,14 @@ export function LocalFirstControls<TState>({
             >
                 Apply preview
             </button>
-            <section className="connectionList">
+            <section className="connectionList" data-testid="local-first-connection-list">
                 {connections.map((connection) => (
-                    <div className="connectionRow" key={connection.peerId}>
+                    <div
+                        className="connectionRow"
+                        data-testid="local-first-connection-row"
+                        data-peer-id={connection.peerId}
+                        key={connection.peerId}
+                    >
                         <strong>{connection.actor ?? connection.peerId}</strong>
                         <span>
                             {connection.open ? 'open' : 'closed'}

@@ -16,6 +16,8 @@ export function App() {
     const [{mode, appId}, setMode, setAppId] = useUrlSelection(defaultAppRouteId);
     const registered = registeredAppForId(appId);
     const {app, crdt, history, serverSchemaConfig} = registered;
+    const localFirstSchemaConfig =
+        'localFirstSchemaConfig' in registered ? registered.localFirstSchemaConfig : undefined;
     const serverOldPendingChangesPolicy =
         'serverOldPendingChangesPolicy' in registered
             ? registered.serverOldPendingChangesPolicy
@@ -33,7 +35,13 @@ export function App() {
     return mode === 'solo' ? (
         <SoloApp key={routeId} app={app as any} runtime={history as any} topBar={topBar} />
     ) : mode === 'local-first' ? (
-        <LocalFirstApp key={routeId} app={app as any} runtime={crdt as any} topBar={topBar} />
+        <LocalFirstApp
+            key={routeId}
+            app={app as any}
+            runtime={crdt as any}
+            schemaConfig={localFirstSchemaConfig as any}
+            topBar={topBar}
+        />
     ) : mode === 'server' ? (
         <ServerApp
             key={routeId}

@@ -1,4 +1,34 @@
-import {expect, type Page} from '@playwright/test';
+import {expect, type Page, type TestInfo} from '@playwright/test';
+
+export type AppMode = 'solo' | 'local' | 'peerjs' | 'local-first' | 'server';
+
+export function uniqueTestDocId(testInfo: TestInfo, suffix: string) {
+    const slug = testInfo.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+    return `e2e-${slug}-${suffix}-${Date.now()}`;
+}
+
+export async function openApp(
+    page: Page,
+    {
+        mode = 'local',
+        appId = 'todos',
+        docId,
+    }: {mode?: AppMode; appId?: string; docId?: string} = {},
+) {
+    const params = new URLSearchParams();
+    if (mode !== 'local') params.set('mode', mode);
+    if (appId !== 'todos') params.set('app', appId);
+    if (docId) params.set('doc', docId);
+    await page.goto(`/${params.size ? `?${params.toString()}` : ''}`);
+}
+
+export async function selectArchitecture(page: Page, modeLabel: string | RegExp) {
+    await page.getByLabel('Architecture').selectOption({label: modeLabel});
+}
+
+export async function selectExampleApp(page: Page, appLabel: string | RegExp) {
+    await page.getByLabel('Example app').selectOption({label: appLabel});
+}
 
 export async function openServerDocument(
     page: Page,

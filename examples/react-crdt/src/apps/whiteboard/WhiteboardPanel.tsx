@@ -161,6 +161,8 @@ export function WhiteboardPanel({
             className={`whiteboardPanel ${
                 gridSlot === 'left' ? 'leftPanel' : gridSlot === 'right' ? 'rightPanel' : ''
             }`}
+            data-testid="whiteboard-panel"
+            data-grid-slot={gridSlot}
         >
             <header className="whiteboardHeader">
                 <div>
@@ -201,6 +203,7 @@ export function WhiteboardPanel({
             <div
                 ref={viewportRef}
                 className={`whiteboardViewport tool-${tool}`}
+                data-testid="whiteboard-viewport"
                 onPointerDown={onBoardPointerDown}
                 onPointerMove={onBoardPointerMove}
                 onPointerUp={onBoardPointerUp}
@@ -209,6 +212,7 @@ export function WhiteboardPanel({
             >
                 <div
                     className="whiteboardCanvas"
+                    data-testid="whiteboard-canvas"
                     style={{
                         width: BOARD_WIDTH,
                         height: BOARD_HEIGHT,

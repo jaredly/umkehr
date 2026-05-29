@@ -307,6 +307,7 @@ export function DocumentManagerModal({
             <button
                 type="button"
                 className="documentManagerTrigger"
+                data-testid="document-manager-trigger"
                 aria-haspopup="dialog"
                 aria-expanded={open}
                 onClick={() => setOpen(true)}
@@ -319,6 +320,7 @@ export function DocumentManagerModal({
                 <div className="documentModalOverlay" onMouseDown={() => setOpen(false)}>
                     <section
                         className="documentModal"
+                        data-testid="document-manager-modal"
                         role="dialog"
                         aria-modal="true"
                         aria-label="Documents"
@@ -345,6 +347,7 @@ export function DocumentManagerModal({
                                         type="file"
                                         accept="application/json,.json"
                                         className="documentArchiveInput"
+                                        data-testid="document-archive-input"
                                         onChange={(event) => void importDocument(event)}
                                     />
                                 </>
@@ -429,7 +432,13 @@ function DocumentRow({
     onDeleteLocal?: () => void;
 }) {
     return (
-        <article className="documentRow">
+        <article
+            className="documentRow"
+            data-testid="document-row"
+            data-doc-id={document.docId}
+            data-payload-kind={document.payloadKind}
+            data-source={document.source}
+        >
             <div className="documentRowMain">
                 <div className="documentRowTitle">
                     <strong>{document.title || document.docId}</strong>
@@ -473,7 +482,12 @@ function SeedRow({
     onCreate?: () => void;
 }) {
     return (
-        <article className="documentRow seedRow">
+        <article
+            className="documentRow seedRow"
+            data-testid="seed-document-row"
+            data-doc-id={seed.docId}
+            data-payload-kind={seed.payloadKind}
+        >
             <div className="documentRowMain">
                 <div className="documentRowTitle">
                     <strong>{seed.title || seed.docId}</strong>

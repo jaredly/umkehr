@@ -46,6 +46,7 @@ export function Minimap({
                 event.preventDefault();
             }}
             aria-label="Recenter board"
+            data-testid="whiteboard-minimap"
         >
             <svg
                 width={minimapWidth}

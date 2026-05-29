@@ -10,6 +10,7 @@ import {
     type PeerMessage,
     type PeerProtocolConfig,
 } from './protocol';
+import {peerOptions} from './peerOptions';
 import type {PeerConnectionInfo, PeerJsSync, PeerRole, PeerSyncState} from './types';
 
 type ConnectionRecord<TState> = {
@@ -384,7 +385,7 @@ export function usePeerJsSync<TState>({
     }, []);
 
     useEffect(() => {
-        const peer = new Peer({debug: 1});
+        const peer = new Peer(peerOptions());
         peerRef.current = peer;
         stateStore.setSnapshot({kind: 'initializing', role});
 
