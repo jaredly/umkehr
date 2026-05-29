@@ -2,6 +2,7 @@ import {blankHistory, type History} from 'umkehr';
 import type {CrdtLocalHistory} from 'umkehr/crdt';
 import type {AppDefinition} from '../crdtApp';
 import type {LocalDocumentSummary, SeedModalItem} from '../documentArchive';
+import {schemaFingerprintHash} from '../local-first/schemaFingerprint';
 import {
     assertBranchFreeSeedFixture,
     listSeedDocumentSummaries,
@@ -69,10 +70,12 @@ export function seedSummaryTitle(summary: Pick<SeedDocumentSummary, 'title' | 'd
 }
 
 export function seedModalItemsForApp(
-    appId: string,
+    appOrId: string | Pick<AppDefinition<unknown>, 'id' | 'schema' | 'tagKey'>,
     payloadKind: LocalDocumentSummary['payloadKind'],
     options: SeedGeneratorOptions = {},
 ): SeedModalItem[] {
+    const appId = typeof appOrId === 'string' ? appOrId : appOrId.id;
+    const fingerprintHash = typeof appOrId === 'string' ? null : schemaFingerprintHash(appOrId);
     return branchFreeSeedSummariesForApp(appId, payloadKind, options).map((seed) => ({
         docId: seed.docId,
         appId: seed.appId,
@@ -83,7 +86,7 @@ export function seedModalItemsForApp(
         createdAt: seed.createdAt,
         updatedAt: seed.updatedAt,
         sizeLabel: seed.sizeLabel,
-    }));
+    })).filter((seed) => !fingerprintHash || seed.schemaFingerprintHash === fingerprintHash);
 }
 
 function assertSeedFixtureForApp<TState, EphemeralData>(

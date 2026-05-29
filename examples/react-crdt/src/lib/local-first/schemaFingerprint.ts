@@ -5,11 +5,11 @@ import {
     stableStringify,
 } from 'umkehr/migration';
 
-export function schemaFingerprint<TState>(app: AppDefinition<TState>) {
+export function schemaFingerprint<TState>(app: Pick<AppDefinition<TState>, 'schema' | 'tagKey'>) {
     return createSchemaFingerprint(app.schema, app.tagKey);
 }
 
-export function schemaFingerprintHash<TState>(app: AppDefinition<TState>) {
+export function schemaFingerprintHash<TState>(app: Pick<AppDefinition<TState>, 'schema' | 'tagKey'>) {
     return createSchemaFingerprintHash(app.schema, app.tagKey);
 }
 

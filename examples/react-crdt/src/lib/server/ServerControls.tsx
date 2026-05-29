@@ -1,5 +1,6 @@
 import {useStore} from '../store';
 import {colorForUserId, initialForNickname} from './presence';
+import {resetServerSessionId} from './session';
 import {serverStateNoticeTone} from './states';
 import type {ServerSync} from './types';
 
@@ -103,6 +104,11 @@ export function ServerControls<TState>({
                     {state.kind === 'migration-required' ? (
                         <button type="button" onClick={sync.requestServerMigration}>
                             Migrate document
+                        </button>
+                    ) : null}
+                    {state.kind === 'error' && state.duplicateSession ? (
+                        <button type="button" onClick={resetServerSessionId}>
+                            New session
                         </button>
                     ) : null}
                 </div>

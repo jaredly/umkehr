@@ -1,0 +1,1 @@
+The component TodoPanel in TodoPanel.tsx is getting quite unwieldy. We should refactor things out to make it more readable and maintainable. Some things could also be reusable as well, like the drag&drop machinery.

@@ -171,7 +171,7 @@ export type ServerSyncState =
           schemaVersion: number;
           schemaFingerprintHash: string;
       }
-    | {kind: 'error'; message: string};
+    | {kind: 'error'; message: string; duplicateSession?: boolean};
 
 export type ServerSyncStats = {
     lastSeenEventIndex: number;

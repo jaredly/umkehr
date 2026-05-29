@@ -3,7 +3,13 @@ import {applyCrdtUpdate} from '../crdt/apply.js';
 import {createCrdtDocument} from '../crdt/document.js';
 import type {CrdtLocalHistory} from '../crdt/history.js';
 import {versionOf} from '../crdt/metadata.js';
-import type {CrdtDocument, CrdtUpdate, JsonValue, PendingUpdate} from '../crdt/types.js';
+import type {
+    CrdtDocument,
+    CrdtPathSegment,
+    CrdtUpdate,
+    JsonValue,
+    PendingUpdate,
+} from '../crdt/types.js';
 import {createCrdtUpdateValidator} from '../crdt/validation.js';
 import {deepEqual} from '../deepEqual.js';
 import type {History} from '../history/history.js';
@@ -404,11 +410,12 @@ export function renamePatchTag<T>(patch: Patch<T>, tagKey: string, fromValue: st
 
 export function renameCrdtObjectField(update: CrdtUpdate, fromKey: string, toKey: string): CrdtUpdate {
     if (update.op === 'setOrder') return {...update, arrayPath: renameCrdtPathObjectField(update.arrayPath, fromKey, toKey)};
+    if (update.op === 'insert') return {...update, arrayPath: renameCrdtPathObjectField(update.arrayPath, fromKey, toKey)};
     return {...update, path: renameCrdtPathObjectField(update.path, fromKey, toKey)};
 }
 
 export function dropCrdtObjectField(update: CrdtUpdate, key: string): CrdtUpdate | null {
-    const path = update.op === 'setOrder' ? update.arrayPath : update.path;
+    const path = update.op === 'setOrder' || update.op === 'insert' ? update.arrayPath : update.path;
     return path[0]?.type === 'objectField' && path[0].key === key ? null : update;
 }
 
@@ -422,6 +429,15 @@ export function defaultCrdtSetObjectValue(update: CrdtUpdate, defaults: ObjectDe
 export function renameCrdtTaggedBranch(update: CrdtUpdate, tagKey: string, fromValue: string, toValue: string): CrdtUpdate {
     if (update.op === 'setOrder') {
         return {...update, arrayPath: renameCrdtTaggedPath(update.arrayPath, tagKey, fromValue, toValue)};
+    }
+    if (update.op === 'insert') {
+        return {
+            ...update,
+            arrayPath: renameCrdtTaggedPath(update.arrayPath, tagKey, fromValue, toValue),
+            value: isJsonObject(update.value)
+                ? renameJsonTagValue(update.value, tagKey, fromValue, toValue)
+                : update.value,
+        };
     }
     const path = renameCrdtTaggedPath(update.path, tagKey, fromValue, toValue);
     if (update.op === 'set' && isJsonObject(update.value)) {
@@ -603,7 +619,7 @@ function renameCrdtTaggedPath(path: CrdtUpdatePath, tagKey: string, fromValue: s
     );
 }
 
-type CrdtUpdatePath = Exclude<CrdtUpdate, {op: 'setOrder'}>['path'];
+type CrdtUpdatePath = CrdtPathSegment[];
 
 function withObjectDefaults(value: Record<string, unknown>, defaults: ObjectDefaults): Record<string, unknown> {
     const next = {...value};

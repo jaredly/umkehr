@@ -2,9 +2,21 @@ import type {Path} from '../types.js';
 import {compareStrings} from './fractionalIndex.js';
 import {checkParent} from './traversal.js';
 import {fieldSegmentType, walkSchema} from './schema.js';
-import type {ArrayMeta, CrdtDocument, CrdtMeta, CrdtPathSegment, CrdtUpdate} from './types.js';
+import type {
+    ArrayItemMeta,
+    ArrayMeta,
+    CrdtDocument,
+    CrdtMeta,
+    CrdtPathSegment,
+    CrdtUpdate,
+} from './types.js';
 
-export function crdtPathForExisting<T>(doc: CrdtDocument<T>, path: Path) {
+type LiveArrayItemMeta = Extract<ArrayItemMeta, {kind: 'live'}>;
+
+export function crdtPathForExisting<T>(
+    doc: CrdtDocument<T>,
+    path: Path,
+) {
     let meta = doc.meta;
     let schema = doc.schema.root;
     const out: CrdtPathSegment[] = [];
@@ -26,7 +38,12 @@ export function crdtPathForExisting<T>(doc: CrdtDocument<T>, path: Path) {
                 throw new Error(
                     `Cannot translate CRDT path: array index ${segment.key} is missing.`,
                 );
-            out.push({type: 'arrayItem', id: item[0], parentCreated: meta.created});
+            const crdtSegment: CrdtPathSegment = {
+                type: 'arrayItem',
+                id: item[0],
+                parentCreated: meta.created,
+            };
+            out.push(crdtSegment);
             meta = item[1].value;
             continue;
         }
@@ -79,7 +96,12 @@ export function getChild(parent: CrdtMeta, segment: CrdtPathSegment): CrdtMeta |
         case 'recordEntry':
             return parent.kind === 'record' ? parent.entries[segment.key] : undefined;
         case 'arrayItem':
-            return parent.kind === 'array' ? parent.items[segment.id]?.value : undefined;
+            if (parent.kind !== 'array') return undefined;
+            const item = parent.items[segment.id];
+            if (!item) return undefined;
+            return item.kind === 'live'
+                ? item.value
+                : {kind: 'tombstone', deleted: item.deleted};
         case 'taggedField':
             return parent.kind === 'tagged' ? parent.fields[segment.key] : undefined;
     }
@@ -87,7 +109,7 @@ export function getChild(parent: CrdtMeta, segment: CrdtPathSegment): CrdtMeta |
 
 export function liveArrayItems(meta: ArrayMeta) {
     return Object.entries(meta.items)
-        .filter(([, item]) => item.value.kind !== 'tombstone')
+        .filter((entry): entry is [string, LiveArrayItemMeta] => entry[1].kind === 'live')
         .sort(([aId, a], [bId, b]) => {
             const order = compareStrings(a.order.value, b.order.value);
             return order || compareStrings(aId, bId);
@@ -123,10 +145,11 @@ export function normalPathForCrdtPath<T>(
                 break;
             case 'arrayItem': {
                 if (meta.kind !== 'array') return undefined;
-                const index = liveArrayItems(meta).findIndex(([id]) => id === segment.id);
+                const live = liveArrayItems(meta);
+                const index = live.findIndex(([id]) => id === segment.id);
                 if (index === -1) return undefined;
                 out.push({type: 'key', key: index});
-                meta = meta.items[segment.id]?.value;
+                meta = live[index]?.[1].value;
                 break;
             }
             case 'taggedField':
@@ -150,6 +173,22 @@ export function changedNormalPathsForCrdtUpdate<T>(
         const path =
             normalPathForCrdtPath(after, update.arrayPath) ??
             normalPathForCrdtPath(before, update.arrayPath);
+        return path ? [path] : null;
+    }
+
+    if (update.op === 'insert') {
+        const array = getMetaAtPath(after.meta, update.arrayPath);
+        const itemPath =
+            array?.kind === 'array'
+                ? [
+                      ...update.arrayPath,
+                      {type: 'arrayItem' as const, id: update.id, parentCreated: array.created},
+                  ]
+                : null;
+        const path = itemPath
+            ? (normalPathForCrdtPath(after, itemPath) ?? normalPathForCrdtPath(before, itemPath))
+            : (normalPathForCrdtPath(after, update.arrayPath) ??
+              normalPathForCrdtPath(before, update.arrayPath));
         return path ? [path] : null;
     }
 

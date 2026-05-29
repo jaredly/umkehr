@@ -115,8 +115,8 @@ export function SoloApp<TState, TAnnotations = never, EphemeralData = never>({
         [app.id, documents],
     );
     const seedItems = useMemo(
-        () => filterUnrealizedSeeds(seedModalItemsForApp(app.id, 'solo'), documentItems),
-        [app.id, documentItems],
+        () => filterUnrealizedSeeds(seedModalItemsForApp(app, 'solo'), documentItems),
+        [app, documentItems],
     );
     const createBlankDocument = useCallback(
         async ({docId, title}: {docId: string; title: string}) => {

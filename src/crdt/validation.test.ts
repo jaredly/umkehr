@@ -80,14 +80,14 @@ describe('CRDT update validation', () => {
         ).toBe(true);
     });
 
-    it('accepts update metadata', () => {
+    it('accepts update command info', () => {
         expect(
             validator.is({
                 op: 'set',
                 path: [{type: 'objectField', key: 'title', parentCreated: ts}],
                 value: 'Published',
                 ts,
-                meta: {
+                command: {
                     commandId: ts,
                     commandSeq: 0,
                     intent: 'edit',
@@ -120,13 +120,13 @@ describe('CRDT update validation', () => {
         if (!result.success) expect(result.errors[0].path).toBe('ts');
     });
 
-    it('rejects undo metadata without a target command', () => {
+    it('rejects undo command info without a target command', () => {
         const result = validator.validate({
             op: 'set',
             path: [{type: 'objectField', key: 'title', parentCreated: ts}],
             value: 'Published',
             ts,
-            meta: {
+            command: {
                 commandId: ts,
                 commandSeq: 0,
                 intent: 'undo',
@@ -136,18 +136,18 @@ describe('CRDT update validation', () => {
         expect(result.success).toBe(false);
         if (!result.success) {
             expect(result.errors[0]).toMatchObject({
-                path: 'meta/targetCommandId',
+                path: 'command/targetCommandId',
             });
         }
     });
 
-    it('rejects edit metadata with a target command', () => {
+    it('rejects edit command info with a target command', () => {
         const result = validator.validate({
             op: 'set',
             path: [{type: 'objectField', key: 'title', parentCreated: ts}],
             value: 'Published',
             ts,
-            meta: {
+            command: {
                 commandId: ts,
                 commandSeq: 0,
                 intent: 'edit',
@@ -158,7 +158,7 @@ describe('CRDT update validation', () => {
         expect(result.success).toBe(false);
         if (!result.success) {
             expect(result.errors[0]).toMatchObject({
-                path: 'meta/targetCommandId',
+                path: 'command/targetCommandId',
             });
         }
     });
@@ -190,13 +190,47 @@ describe('CRDT update validation', () => {
                         type: 'arrayItem',
                         id: 'item-a',
                         parentCreated: ts,
-                        order: {value: 'a0', ts},
                     },
                 ],
                 value: {id: 'a', done: false},
                 ts,
             }),
         ).toBe(true);
+    });
+
+    it('accepts insert updates whose value matches the array item schema', () => {
+        expect(
+            validator.is({
+                op: 'insert',
+                arrayPath: [{type: 'objectField', key: 'items', parentCreated: ts}],
+                id: 'item-a',
+                order: {value: 'a0', ts},
+                value: {id: 'a', done: false},
+                ts,
+            }),
+        ).toBe(true);
+    });
+
+    it('rejects array item path order metadata', () => {
+        const result = validator.validate({
+            op: 'set',
+            path: [
+                {type: 'objectField', key: 'items', parentCreated: ts},
+                {
+                    type: 'arrayItem',
+                    id: 'item-a',
+                    parentCreated: ts,
+                    order: {value: 'a0', ts},
+                },
+            ],
+            value: {id: 'a', done: false},
+            ts,
+        });
+
+        expect(result.success).toBe(false);
+        if (!result.success) {
+            expect(result.errors[0]).toMatchObject({path: 'path/1/order'});
+        }
     });
 
     it('walks record value schemas', () => {

@@ -1,0 +1,1 @@
+Can you refactor TodoItem and TodoAddForm each into two components -- one that is jsx-only and knows nothing of editor context or Todo types, and a wrapper that controls it. Then we can use the inner ones in TodoVersionApps to make them fully interactive.

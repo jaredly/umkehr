@@ -372,8 +372,8 @@ function ServerReadyApp<TState, EphemeralData>({
         [app.id, loaded.replica, localDocuments, remoteDocuments],
     );
     const seedItems = useMemo(
-        () => filterUnrealizedSeeds(seedModalItemsForApp(app.id, 'server'), documentItems),
-        [app.id, documentItems],
+        () => filterUnrealizedSeeds(seedModalItemsForApp(app, 'server'), documentItems),
+        [app, documentItems],
     );
     const createBlankDocument = useCallback(
         async ({docId: nextDocId, title}: {docId: string; title: string}) => {

@@ -101,7 +101,7 @@ describe('crdt local history', () => {
 
         expect(applied.history.doc.state.title).toBe('Published');
         expect(applied.updates).toHaveLength(1);
-        expect(applied.updates[0].meta).toMatchObject({
+        expect(applied.updates[0].command).toMatchObject({
             commandId: applied.updates[0].op === 'set' ? applied.updates[0].ts : '',
             commandSeq: 0,
             intent: 'edit',
@@ -114,10 +114,10 @@ describe('crdt local history', () => {
         expect(undone.history.doc.state.title).toBe('Draft');
         expect(undone.updates).toHaveLength(1);
         expect(undone.updates[0]).toMatchObject({op: 'set', value: 'Draft'});
-        expect(undone.updates[0].meta).toMatchObject({
+        expect(undone.updates[0].command).toMatchObject({
             commandSeq: 0,
             intent: 'undo',
-            targetCommandId: applied.updates[0].meta?.commandId,
+            targetCommandId: applied.updates[0].command?.commandId,
         });
         expect(undone.updates[0].op === 'set' ? undone.updates[0].ts : '').not.toBe(
             applied.updates[0].op === 'set' ? applied.updates[0].ts : '',
@@ -129,10 +129,10 @@ describe('crdt local history', () => {
         if (!redone.ok) return;
         expect(redone.history.doc.state.title).toBe('Published');
         expect(redone.updates[0]).toMatchObject({op: 'set', value: 'Published'});
-        expect(redone.updates[0].meta).toMatchObject({
+        expect(redone.updates[0].command).toMatchObject({
             commandSeq: 0,
             intent: 'redo',
-            targetCommandId: applied.updates[0].meta?.commandId,
+            targetCommandId: applied.updates[0].command?.commandId,
         });
         expect(canUndoLocalCommand(redone.history, actor)).toBe(true);
 

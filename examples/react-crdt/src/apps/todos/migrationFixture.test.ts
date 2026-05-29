@@ -11,6 +11,7 @@ import type {PersistedServerBranch, PersistedServerReplica} from '../../lib/serv
 import {
     TODO_FIXTURE_DOC_ID_V1,
     TODO_FIXTURE_DOC_ID_V2,
+    TODO_FIXTURE_DOC_ID_V3,
     TODO_FIXTURE_MIGRATED_AT,
     TODO_FIXTURE_TAG_KEY,
     createTodoFixtureCrdtHistoryV1,
@@ -25,10 +26,18 @@ import {
     todoFixtureV2FingerprintHash,
     todoFixtureV2Metadata,
     todoFixtureV2Schema,
+    todoFixtureV3Fingerprint,
+    todoFixtureV3FingerprintHash,
+    todoFixtureV3Metadata,
+    todoFixtureV3MigrationConfig,
+    todoFixtureV3Schema,
+    todoFixtureV2ToV3Migration,
     type TodoFixtureStateV2,
+    type TodoFixtureStateV3,
 } from '../../../../migration-fixtures/todos';
 import {migrateHistory} from 'umkehr/migration';
 import {todoApp} from './TodoApp';
+import {todoV3App} from './TodoVersionApps';
 
 const fromV1 = {
     schemaVersion: 1,
@@ -42,6 +51,16 @@ const expectedMigratedState: TodoFixtureStateV2 = {
         {id: 'one', title: 'Write migration plan', done: true, priority: 'normal'},
         {id: 'two', title: 'Try CRDT sync', done: false, priority: 'normal'},
         {id: 'three', title: 'Ship fixture', done: false, priority: 'normal'},
+    ],
+};
+
+const expectedMigratedStateV3: TodoFixtureStateV3 = {
+    bgcolor: '#fff',
+    view: 'all',
+    todos: [
+        {id: 'one', title: 'Write migration plan', done: true, priority: 'normal', notes: ''},
+        {id: 'two', title: 'Try CRDT sync', done: false, priority: 'normal', notes: ''},
+        {id: 'three', title: 'Ship fixture', done: false, priority: 'normal', notes: ''},
     ],
 };
 
@@ -67,6 +86,39 @@ describe('todos migration fixture', () => {
         expect(migrated.value.nodes['edit-1'].changes[1]).toMatchObject({
             op: 'add',
             value: {id: 'three', title: 'Ship fixture', done: false, priority: 'normal'},
+        });
+    });
+
+    it('migrates non-CRDT local history fixture data to v3', () => {
+        const migrated = migrateHistory(
+            todoFixtureV3MigrationConfig,
+            createTodoFixtureHistoryV1(),
+            fromV1,
+        );
+
+        expect(migrated.migrationIds).toEqual([
+            'todos-fixture-v1-to-v2',
+            'todos-fixture-v2-to-v3',
+        ]);
+        expect(migrated.value.current).toEqual(expectedMigratedStateV3);
+        expect(migrated.value.nodes['edit-1'].changes).toHaveLength(2);
+        expect(migrated.value.nodes['edit-1'].changes[0]).toMatchObject({
+            op: 'replace',
+            path: [
+                {type: 'key', key: 'todos'},
+                {type: 'key', key: 0},
+                {type: 'key', key: 'title'},
+            ],
+        });
+        expect(migrated.value.nodes['edit-1'].changes[1]).toMatchObject({
+            op: 'add',
+            value: {
+                id: 'three',
+                title: 'Ship fixture',
+                done: false,
+                priority: 'normal',
+                notes: '',
+            },
         });
     });
 
@@ -136,6 +188,85 @@ describe('todos migration fixture', () => {
         expect(migrated.replica.vector).toEqual(vectorForUpdates(migrated.batches[0].updates));
     });
 
+    it('migrates local-first retained batches to v3', () => {
+        const sourceHistory = createTodoFixtureCrdtHistoryV1();
+        const source = normalizePersistedReplica({
+            docId: TODO_FIXTURE_DOC_ID_V1,
+            storageVersion: 1,
+            protocolVersion: 1,
+            schemaVersion: 1,
+            schemaFingerprint: todoFixtureV1Fingerprint,
+            schemaFingerprintHash: todoFixtureV1FingerprintHash,
+            replicaId: 'fixture',
+            history: sourceHistory,
+            vector: vectorForUpdates(sourceHistory.updates),
+            updatedAt: TODO_FIXTURE_MIGRATED_AT,
+        });
+        const batches = [
+            {
+                docId: TODO_FIXTURE_DOC_ID_V1,
+                batchId: 'fixture-batch',
+                origin: 'fixture',
+                updates: createTodoFixtureCrdtUpdatesV1(sourceHistory.base),
+                ...batchTimestampRange(sourceHistory.updates),
+                vectorAfter: vectorForUpdates(sourceHistory.updates),
+                receivedAt: TODO_FIXTURE_MIGRATED_AT,
+            },
+        ];
+        const schemaConfig: LocalFirstSchemaConfig<TodoFixtureStateV3> = {
+            version: 3,
+            previous: todoFixtureV3MigrationConfig.previous,
+            migrations: [
+                {
+                    ...todoFixtureMigration,
+                    fromFingerprint: todoFixtureV1Fingerprint,
+                    toFingerprint: todoFixtureV2Fingerprint,
+                    toDocId: TODO_FIXTURE_DOC_ID_V2,
+                },
+                {
+                    ...todoFixtureV2ToV3Migration,
+                    fromFingerprint: todoFixtureV2Fingerprint,
+                    toFingerprint: todoFixtureV3Fingerprint,
+                    toDocId: TODO_FIXTURE_DOC_ID_V3,
+                },
+            ],
+        };
+        const candidate = findMigrationCandidate({
+            source,
+            current: schemaConfig,
+            currentFingerprint: todoFixtureV3Fingerprint,
+            currentFingerprintHash: todoFixtureV3FingerprintHash,
+        });
+        expect(candidate).not.toBeNull();
+        if (!candidate) return;
+        expect(candidate.targetDocId).toBe(TODO_FIXTURE_DOC_ID_V3);
+
+        const migrated = createMigratedReplica({
+            source,
+            candidate,
+            identity: {replicaId: 'fixture', createdAt: TODO_FIXTURE_MIGRATED_AT},
+            schema: todoFixtureV3Schema,
+            tagKey: TODO_FIXTURE_TAG_KEY,
+            validateState: todoFixtureV3Metadata.validateState,
+            batches,
+            previous: todoFixtureV3MigrationConfig.previous,
+            now: TODO_FIXTURE_MIGRATED_AT,
+        });
+
+        expect(migrated.replica).toMatchObject({
+            docId: TODO_FIXTURE_DOC_ID_V3,
+            schemaVersion: 3,
+            schemaFingerprintHash: todoFixtureV3FingerprintHash,
+        });
+        expect(migrated.replica.history.doc.state).toEqual(expectedMigratedStateV3);
+        expect(migrated.replica.history.updates).toEqual(
+            migrated.batches.flatMap((batch) => batch.updates),
+        );
+        expect(migrated.batches).toHaveLength(1);
+        expect(migrated.batches[0].updates).toHaveLength(2);
+        expect(migrated.replica.vector).toEqual(vectorForUpdates(migrated.batches[0].updates));
+    });
+
     it('migrates server client local branch data and pending events', () => {
         const source = serverReplica(false);
         const migrated = migrateServerReplica({
@@ -149,6 +280,28 @@ describe('todos migration fixture', () => {
 
         expect(migrated.schemaFingerprintHash).toBe(todoFixtureV2FingerprintHash);
         expect(migrated.branches.main.history.doc.state).toEqual(expectedMigratedState);
+        expect(migrated.branches.main.events).toHaveLength(2);
+        expect(migrated.branches.main.events.every((event) => event.kind !== 'update' || event.recorded === false)).toBe(true);
+        expect(migrated.branches.main.lastSeenEventIndex).toBe(2);
+    });
+
+    it('migrates server client local branch data to v3', () => {
+        const source = serverReplica(false);
+        const migrated = migrateServerReplica({
+            app: todoV3App,
+            replica: source,
+            schemaConfig: {
+                version: 3,
+                previous: todoFixtureV3MigrationConfig.previous,
+                migrations: todoFixtureV3MigrationConfig.migrations,
+            },
+            schemaFingerprint: todoFixtureV3Fingerprint,
+            schemaFingerprintHash: todoFixtureV3FingerprintHash,
+            now: TODO_FIXTURE_MIGRATED_AT,
+        });
+
+        expect(migrated.schemaFingerprintHash).toBe(todoFixtureV3FingerprintHash);
+        expect(migrated.branches.main.history.doc.state).toEqual(expectedMigratedStateV3);
         expect(migrated.branches.main.events).toHaveLength(2);
         expect(migrated.branches.main.events.every((event) => event.kind !== 'update' || event.recorded === false)).toBe(true);
         expect(migrated.branches.main.lastSeenEventIndex).toBe(2);
@@ -202,6 +355,45 @@ describe('todos migration fixture', () => {
             targetSchemaVersion: 2,
             targetSchemaFingerprintHash: todoFixtureV2FingerprintHash,
             migrationIds: ['todos-fixture-v1-to-v2'],
+            migratedAt: TODO_FIXTURE_MIGRATED_AT,
+        });
+        expect(upload.events).toHaveLength(2);
+        expect(upload.branches[0].tipEventIndex).toBe(2);
+    });
+
+    it('builds a v3 migrated server upload fixture from a server dump', () => {
+        const upload = migrateServerDump({
+            app: todoV3App,
+            dump: {
+                kind: 'serverMigrationDump',
+                version: 3,
+                docId: TODO_FIXTURE_DOC_ID_V1,
+                sourceSchemaVersion: 1,
+                sourceSchemaFingerprint: todoFixtureV1Fingerprint,
+                sourceSchemaFingerprintHash: todoFixtureV1FingerprintHash,
+                targetSchemaVersion: 3,
+                targetSchemaFingerprint: todoFixtureV3Fingerprint,
+                targetSchemaFingerprintHash: todoFixtureV3FingerprintHash,
+                branches: serverReplica(true).branchList,
+                events: todoFixtureServerUpdateEventsV1(),
+            },
+            schemaConfig: {
+                version: 3,
+                previous: todoFixtureV3MigrationConfig.previous,
+                migrations: todoFixtureV3MigrationConfig.migrations,
+            },
+            schemaFingerprint: todoFixtureV3Fingerprint,
+            schemaFingerprintHash: todoFixtureV3FingerprintHash,
+            now: TODO_FIXTURE_MIGRATED_AT,
+        });
+
+        expect(upload).toMatchObject({
+            kind: 'serverMigrationUpload',
+            docId: TODO_FIXTURE_DOC_ID_V1,
+            sourceSchemaFingerprintHash: todoFixtureV1FingerprintHash,
+            targetSchemaVersion: 3,
+            targetSchemaFingerprintHash: todoFixtureV3FingerprintHash,
+            migrationIds: ['todos-fixture-v1-to-v2', 'todos-fixture-v2-to-v3'],
             migratedAt: TODO_FIXTURE_MIGRATED_AT,
         });
         expect(upload.events).toHaveLength(2);

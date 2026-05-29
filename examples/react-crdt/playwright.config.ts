@@ -22,7 +22,7 @@ export default defineConfig({
         },
     ],
     webServer: {
-        command: `VITE_UMKEHR_SERVER_HTTP_URL=http://localhost:${serverPort} npm run dev -- --host 127.0.0.1 --port ${appPort}`,
+        command: `VITE_UMKEHR_SERVER_HTTP_URL=http://localhost:${serverPort} npm run dev -- --configLoader runner --host 127.0.0.1 --port ${appPort}`,
         url: `http://127.0.0.1:${appPort}`,
         reuseExistingServer: !process.env.CI,
         timeout: 120_000,

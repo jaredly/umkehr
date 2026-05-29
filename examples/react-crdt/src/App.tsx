@@ -1,4 +1,4 @@
-import {apps, defaultApp, registeredAppForId} from './lib/appRegistry';
+import {apps, defaultAppRouteId, registeredAppForId, routeIdForRegisteredApp} from './lib/appRegistry';
 import {LocalSimulatorApp} from './lib/local/LocalSimulatorApp';
 import {LocalFirstApp} from './lib/local-first/LocalFirstApp';
 import {PeerJsApp} from './lib/peerjs/PeerJsApp';
@@ -8,33 +8,34 @@ import './style.css';
 import {useUrlSelection} from './lib/useUrlSelection';
 
 export function App() {
-    const [{mode, appId}, setMode, setAppId] = useUrlSelection(defaultApp.id);
+    const [{mode, appId}, setMode, setAppId] = useUrlSelection(defaultAppRouteId);
     const registered = registeredAppForId(appId);
     const {app, crdt, history, serverSchemaConfig} = registered;
+    const routeId = routeIdForRegisteredApp(registered);
 
     const topBar = {
-        apps: apps as any,
-        activeAppId: app.id,
+        apps,
+        activeAppId: routeId,
         setAppId,
         mode,
         setMode,
     };
 
     return mode === 'solo' ? (
-        <SoloApp key={app.id} app={app as any} runtime={history as any} topBar={topBar} />
+        <SoloApp key={routeId} app={app as any} runtime={history as any} topBar={topBar} />
     ) : mode === 'local-first' ? (
-        <LocalFirstApp key={app.id} app={app as any} runtime={crdt as any} topBar={topBar} />
+        <LocalFirstApp key={routeId} app={app as any} runtime={crdt as any} topBar={topBar} />
     ) : mode === 'server' ? (
         <ServerApp
-            key={app.id}
+            key={routeId}
             app={app as any}
             runtime={crdt as any}
             schemaConfig={serverSchemaConfig as any}
             topBar={topBar}
         />
     ) : mode === 'peerjs' ? (
-        <PeerJsApp key={app.id} app={app as any} runtime={crdt as any} topBar={topBar} />
+        <PeerJsApp key={routeId} app={app as any} runtime={crdt as any} topBar={topBar} />
     ) : (
-        <LocalSimulatorApp key={app.id} app={app as any} runtime={crdt as any} topBar={topBar} />
+        <LocalSimulatorApp key={routeId} app={app as any} runtime={crdt as any} topBar={topBar} />
     );
 }

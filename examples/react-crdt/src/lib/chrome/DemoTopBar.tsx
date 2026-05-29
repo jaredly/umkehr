@@ -1,5 +1,5 @@
 import type {ReactNode} from 'react';
-import type {AppDefinition} from '../crdtApp';
+import type {AppOption} from '../appRegistry';
 import {modeOptions} from '../modeOptions';
 import type {AppMode} from '../useUrlSelection';
 
@@ -9,7 +9,7 @@ export type TopBarControls = {
 };
 
 export type DemoTopBarProps = {
-    apps: AppDefinition<unknown>[];
+    apps: AppOption[];
     activeAppId: string;
     setAppId(appId: string): void;
     mode: AppMode;
@@ -34,9 +34,9 @@ export function DemoTopBar({
                         onChange={(event) => setAppId(event.currentTarget.value)}
                         aria-label="Example app"
                     >
-                        {apps.map((app) => (
-                            <option key={app.id} value={app.id}>
-                                {app.title}
+                        {apps.map((option) => (
+                            <option key={option.id} value={option.id}>
+                                {option.title}
                             </option>
                         ))}
                     </select>

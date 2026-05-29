@@ -46,10 +46,16 @@ export type ArrayMeta = {
     items: Record<ItemId, ArrayItemMeta>;
 };
 
-export type ArrayItemMeta = {
-    order: {value: FractionalIndex; ts: HlcTimestamp};
-    value: CrdtMeta;
-};
+export type ArrayItemMeta =
+    | {
+          kind: 'live';
+          order: {value: FractionalIndex; ts: HlcTimestamp};
+          value: CrdtMeta;
+      }
+    | {
+          kind: 'deleted';
+          deleted: HlcTimestamp;
+      };
 
 export type TaggedUnionMeta = {
     kind: 'tagged';
@@ -80,7 +86,6 @@ export type CrdtPathSegment =
           type: 'arrayItem';
           id: ItemId;
           parentCreated: HlcTimestamp;
-          order?: {value: FractionalIndex; ts: HlcTimestamp};
       }
     | {
           type: 'taggedField';
@@ -91,11 +96,21 @@ export type CrdtPathSegment =
           tagTs: HlcTimestamp;
       };
 
-export type CrdtUpdateMeta = {
+export type CrdtCommandInfo = {
     commandId: HlcTimestamp;
     commandSeq: number;
     intent: 'edit' | 'undo' | 'redo';
     targetCommandId?: HlcTimestamp;
+};
+
+export type CrdtInsertUpdate = {
+    op: 'insert';
+    arrayPath: CrdtPathSegment[];
+    id: ItemId;
+    order: {value: FractionalIndex; ts: HlcTimestamp};
+    value: JsonValue;
+    ts: HlcTimestamp;
+    command?: CrdtCommandInfo;
 };
 
 export type CrdtSetUpdate = {
@@ -103,24 +118,24 @@ export type CrdtSetUpdate = {
     path: CrdtPathSegment[];
     value: JsonValue;
     ts: HlcTimestamp;
-    meta?: CrdtUpdateMeta;
+    command?: CrdtCommandInfo;
 };
 
 export type CrdtDeleteUpdate = {
     op: 'delete';
     path: CrdtPathSegment[];
     ts: HlcTimestamp;
-    meta?: CrdtUpdateMeta;
+    command?: CrdtCommandInfo;
 };
 
 export type CrdtSetOrderUpdate = {
     op: 'setOrder';
     arrayPath: CrdtPathSegment[];
     orders: Record<ItemId, {value: FractionalIndex; ts: HlcTimestamp}>;
-    meta?: CrdtUpdateMeta;
+    command?: CrdtCommandInfo;
 };
 
-export type CrdtUpdate = CrdtSetUpdate | CrdtDeleteUpdate | CrdtSetOrderUpdate;
+export type CrdtUpdate = CrdtInsertUpdate | CrdtSetUpdate | CrdtDeleteUpdate | CrdtSetOrderUpdate;
 
 export type PendingUpdate = {
     update: CrdtUpdate;

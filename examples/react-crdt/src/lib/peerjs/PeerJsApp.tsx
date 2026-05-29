@@ -171,8 +171,8 @@ export function PeerJsApp<TState, EphemeralData = never>({
         [app.id, documents],
     );
     const seedItems = useMemo(
-        () => filterUnrealizedSeeds(seedModalItemsForApp(app.id, 'peerjs'), documentItems),
-        [app.id, documentItems],
+        () => filterUnrealizedSeeds(seedModalItemsForApp(app, 'peerjs'), documentItems),
+        [app, documentItems],
     );
     const createBlankDocument = useCallback(
         async ({docId, title}: {docId: string; title: string}) => {

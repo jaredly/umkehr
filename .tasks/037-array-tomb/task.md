@@ -1,0 +1,1 @@
+Array item tombstones currently store an `order`, which doesn't really make sense. It also means we need crdtPathForExisting to accept a includeLeafArrayOrder option (added by proof/implementation-log.md phase 4), which feels like a code smell to me. Can you reachitect things such that array item tombstones don't track 'order'? Let me know what the options are.

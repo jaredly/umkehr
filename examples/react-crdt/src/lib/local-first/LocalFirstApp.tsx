@@ -277,8 +277,8 @@ function LocalFirstReadyApp<TState, EphemeralData>({
         [app.id, documents],
     );
     const seedItems = useMemo(
-        () => filterUnrealizedSeeds(seedModalItemsForApp(app.id, 'local-first'), documentItems),
-        [app.id, documentItems],
+        () => filterUnrealizedSeeds(seedModalItemsForApp(app, 'local-first'), documentItems),
+        [app, documentItems],
     );
     const createBlankDocument = useCallback(
         async ({docId, title}: {docId: string; title: string}) => {
