@@ -55,6 +55,22 @@ export async function inspectServerDocument(dbPath: string, docId: string) {
     };
 }
 
+export async function waitForServerDocument(
+    dbPath: string,
+    docId: string,
+    predicate: (document: Awaited<ReturnType<typeof inspectServerDocument>>) => boolean,
+) {
+    const deadline = Date.now() + 10_000;
+    let inspected = await inspectServerDocument(dbPath, docId);
+    while (Date.now() < deadline) {
+        if (predicate(inspected)) return inspected;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        inspected = await inspectServerDocument(dbPath, docId);
+    }
+    expect(predicate(inspected), `server document ${docId} reached expected state`).toBe(true);
+    return inspected;
+}
+
 export async function createMigrationLock({
     dbPath,
     docId,

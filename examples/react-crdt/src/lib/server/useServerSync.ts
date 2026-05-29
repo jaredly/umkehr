@@ -627,22 +627,31 @@ export function useServerSync<TState>({
                 stateStore.setSnapshot(serverMigrationStateForMessage(parsed));
                 reconnectTimerRef.current = window.setTimeout(connect, 0);
             } else if (parsed.kind === 'serverMigrationDump') {
-                try {
-                    const upload = migrateServerDump({
-                        app,
-                        dump: parsed,
-                        schemaConfig,
-                        schemaFingerprint,
-                        schemaFingerprintHash,
-                    });
-                    send({...upload, actor: identity.actor, userId: identity.user.userId, appId: app.id});
-                } catch (error) {
-                    console.error('Server document migration failed.', error);
-                    stateStore.setSnapshot({
-                        kind: 'error',
-                        message: 'Document migration failed. See developer console for details.',
-                    });
-                }
+                void (async () => {
+                    try {
+                        const delayMs = serverMigrationDelayMsFromUrl();
+                        if (delayMs > 0) await delay(delayMs);
+                        const upload = migrateServerDump({
+                            app,
+                            dump: parsed,
+                            schemaConfig,
+                            schemaFingerprint,
+                            schemaFingerprintHash,
+                        });
+                        send({
+                            ...upload,
+                            actor: identity.actor,
+                            userId: identity.user.userId,
+                            appId: app.id,
+                        });
+                    } catch (error) {
+                        console.error('Server document migration failed.', error);
+                        stateStore.setSnapshot({
+                            kind: 'error',
+                            message: 'Document migration failed. See developer console for details.',
+                        });
+                    }
+                })();
             } else if (parsed.kind === 'serverMigrationComplete') {
                 stateStore.setSnapshot({kind: 'offline', reason: 'starting'});
                 window.clearTimeout(reconnectTimerRef.current);
@@ -1125,6 +1134,18 @@ function statsFor<TState>(branch: PersistedServerBranch<TState>): ServerSyncStat
                       .receivedAt
                 : undefined,
     };
+}
+
+function serverMigrationDelayMsFromUrl() {
+    const value = new URLSearchParams(window.location.search).get('serverMigrationDelayMs');
+    if (!value) return 0;
+    const delayMs = Number(value);
+    if (!Number.isFinite(delayMs) || delayMs <= 0) return 0;
+    return Math.min(delayMs, 10_000);
+}
+
+function delay(ms: number) {
+    return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 function initialClock(actor: string, events: ServerBranchEvent[]) {
