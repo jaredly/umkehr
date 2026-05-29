@@ -98,6 +98,12 @@ describe('server migration user-facing states', () => {
                 schemaFingerprintHash: 'new-hash',
             }),
         ).toBe(false);
+        expect(
+            canFlushPendingServerWrites({
+                kind: 'migration-cancelled',
+                message: 'Migration lock expired.',
+            }),
+        ).toBe(false);
     });
 
     it('treats update-your-app as an informational notice', () => {

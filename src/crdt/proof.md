@@ -14,6 +14,8 @@ The suite covers:
 
 - targeted regression cases for LWW fields, records, arrays, tagged unions, pending updates,
   duplicate delivery, and HLC suffix ordering;
+- array `insert`, `setOrder`, child edit, delete, and order-free tombstone behavior across
+  reordered delivery;
 - generated histories with `fast-check`;
 - bounded exhaustive permutations for the highest-risk record, array, and tagged-union cases;
 - a test-only reference model that is independent of production `apply`, `path`, `metadata`, and
@@ -23,3 +25,7 @@ The suite covers:
 The suite does not claim Byzantine tolerance, root tombstone support, tombstone garbage collection,
 or fractional-order rebalancing. Update validation is tested at network/storage boundaries and is
 not part of `applyCrdtUpdate` itself.
+
+Array inserts are modeled as their own CRDT update kind. Array item paths carry stable item ids and
+parent incarnation timestamps, but not order values. Deleted array item metadata stores only the
+deletion timestamp.

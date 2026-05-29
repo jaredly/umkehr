@@ -108,3 +108,26 @@
   - `npm test -- src/migration/migration.test.ts`
   - `npm test -- src/crdt`
   - `npm run typecheck`
+
+## 2026-05-28 array tombstone follow-up
+
+- Replaced the Phase 4 array delete workaround with a cleaner array item lifecycle model.
+- Array inserts now use a dedicated `op: 'insert'` CRDT update carrying the target array path, item
+  id, initial order, value, and timestamp.
+- Array item CRDT path segments no longer carry `order`, so `crdtPathForExisting` no longer needs an
+  `includeLeafArrayOrder` option.
+- Array item metadata is now a live/deleted union:
+  - live items carry order and value metadata;
+  - deleted items carry only a deletion timestamp.
+- Delete-before-insert for an array item can remain pending until the insert arrives. This matches
+  the existing proof claim that permanently missing causal parents may leave non-ready updates
+  pending.
+- Renamed update-level edit/undo/redo grouping metadata from `meta` to `command` to avoid confusion
+  with CRDT document metadata.
+- Updated the independent reference model and migration fixtures for `insert`, `command`, and
+  order-free array tombstones.
+- Verification:
+  - `npm run typecheck`
+  - `npm test -- src/crdt`
+  - `npm test -- src/migration/migration.test.ts`
+  - `npm test`

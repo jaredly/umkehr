@@ -369,7 +369,7 @@ Umkehr is intended for plain JSON-like data:
 | Equality | Defaults to `fast-deep-equal` in history and React helpers; lower-level APIs accept a custom equality function |
 | Paths | Structured `PathSegment[]`; no JSON Pointer strings |
 | Tagged unions | Supported through Umkehr-specific tag path segments |
-| CRDT behavior | Supported through `umkehr/crdt`; array `move` maps to stable item order updates |
+| CRDT behavior | Supported through `umkehr/crdt`; array inserts use stable item ids and array `move` maps to stable item order updates |
 | Arbitrary object diffing | Not supported |
 
 ## CRDT Behavior
@@ -385,6 +385,15 @@ CRDT update validation belongs at network and storage boundaries through
 and does not validate every update internally. Root tombstones, Byzantine/malicious updates,
 tombstone garbage collection, and fractional-order rebalancing are not part of the current CRDT
 claim.
+
+Arrays are addressed internally by stable item ids, not numeric indices. A local array add becomes
+an `insert` update that creates the item id, initial fractional order, and value. Later item edits
+use `set`, moves and reorders use `setOrder`, and deletes use order-free item paths. Deleted array
+items retain their deletion timestamp but do not retain an order value.
+
+CRDT updates may optionally include `command` info. This groups updates into local edit/undo/redo
+commands for `CrdtLocalHistory`; it is separate from CRDT document metadata (`doc.meta`) and is not
+required for applying remote updates.
 
 ## Limitations
 

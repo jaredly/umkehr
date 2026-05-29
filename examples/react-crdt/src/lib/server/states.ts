@@ -80,8 +80,7 @@ export function canFlushPendingServerWrites(state: ServerSyncState) {
     return (
         state.kind === 'connected' ||
         state.kind === 'connecting' ||
-        state.kind === 'offline' ||
-        state.kind === 'migration-cancelled'
+        state.kind === 'offline'
     );
 }
 

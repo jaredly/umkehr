@@ -20,3 +20,18 @@
 - First delayed test run observed `migration-running`, but the default 1s migration lock TTL expired before upload completed. Increased the mixed-version test server lock TTL to 5s.
 - Verified the delayed migration flow with `pnpm test:e2e -- server-migration.spec.ts` from `examples/react-crdt`; all 5 tests passed.
 - Removed an accidental lock TTL change from the unrelated seeded sync test and reran `pnpm test:e2e -- server-migration.spec.ts`; all 5 tests passed.
+- Continued Phase 4 by adding an expired-lock pending edit test: v2 opens behind an active lock, makes a local edit that stays unsynced, reconnects after lock expiry, migrates, and verifies the pending edit from a fresh v2 client.
+- First expired-lock run failed because `inspectTest.ts` uses the store default 60s lock TTL, so polling `inspectServerDocument(...)` cannot observe the shorter TTL configured on the running test server. Changed the test to wait just past the 2s server TTL and reconnect, letting the server process expire the lock.
+- The 2s TTL proved too short for browser open/login on the full file run, so the expiry test now uses a 5s TTL and waits just past that after creating the pending local edit.
+- The expiry test then exposed a product bug: `migration-cancelled` allowed pending writes to flush before the server document was migrated, causing a schema fingerprint mismatch. Updated `canFlushPendingServerWrites(...)` so `migration-cancelled` keeps writes paused, with unit coverage.
+- The expiry test still found a reconnect-time bug: `useServerSync` flushed pending writes immediately on WebSocket open before the server had accepted `hello` and schema state. Removed that eager flush so pending writes flush only after server hello/branch data confirms sync can continue.
+- Adjusted the expired-lock DB completion wait to assert migrated schema and no active lock; the fresh-client check remains the server-backed proof of the pending edit because migration upload does not necessarily increase total event count relative to the migrated fixture.
+- Verified Phase 4 expiry coverage with `pnpm test:e2e -- server-migration.spec.ts` from `examples/react-crdt`; all 6 tests passed.
+- Started Phase 5 by extending the future-schema v3-ahead test: while the v2 client is upgrade-required, it makes a local edit, keeps one unsynced event, and the server v3 document event count/schema remain unchanged.
+- Verified the future-schema pending-edit extension with `pnpm test:e2e -- server-migration.spec.ts`; all 6 tests passed.
+- Added a Phase 5 smoke test for `appId: 'todos@3'` migrating the seeded v1 fixture to schema v3.
+- Verified Phase 5 with `pnpm test:e2e -- server-migration.spec.ts`; all 7 tests passed.
+- Continued Phase 6 by adding interrupted-owner coverage using `serverMigrationDelayMs`: one client acquires the migration lock and closes before upload, then a second client reconnects after lock expiry and migrates successfully.
+- Verified Phase 6 interrupted-owner coverage with `pnpm test:e2e -- server-migration.spec.ts`; all 8 tests passed.
+- Re-ran `pnpm exec vitest run examples/react-crdt/src/lib/server/states.test.ts`; all 6 tests passed.
+- Ran final related unit validation with `pnpm exec vitest run examples/react-crdt/src/lib/server/states.test.ts examples/react-crdt/src/lib/server/migration.test.ts`; both files passed, 10 tests total.

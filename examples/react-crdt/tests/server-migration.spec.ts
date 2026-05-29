@@ -2,6 +2,7 @@ import {expect, test} from '@playwright/test';
 import {
     addTodo,
     clickMigrateDocument,
+    disconnectFromServer,
     editTodo,
     expectClientUpgradeRequired,
     expectMigrationRequired,
@@ -10,6 +11,7 @@ import {
     expectUnsyncedEvents,
     login,
     openServerDocument,
+    reconnectToServer,
     waitForSynced,
 } from './helpers/app';
 import {
@@ -191,6 +193,77 @@ test('keeps local edits pending while another client owns the migration lock', a
     }
 });
 
+test('flushes pending edits after an expired migration lock is resolved', async ({
+    browser,
+}, testInfo) => {
+    const dbPath = await createTempServerDbPath(testInfo);
+    await seedServerDatabase({dbPath});
+    await createMigrationLock({
+        dbPath,
+        docId: 'todos-migration-v1-main',
+        targetSchemaVersion: 2,
+        targetSchemaFingerprint: todoFixtureV2Fingerprint,
+        targetSchemaFingerprintHash: todoFixtureV2FingerprintHash,
+    });
+    const server = await startServer({dbPath, migrationLockMs: 5_000});
+
+    try {
+        const context = await browser.newContext();
+        const page = await context.newPage();
+        const pendingTitle = `Pending edit after lock expiry ${Date.now()}`;
+
+        await openServerDocument(page, {
+            appId: 'todos',
+            docId: 'todos-migration-v1-main',
+        });
+        await login(page, 'Ben');
+
+        await expectMigrationRunning(page);
+        const before = await inspectServerDocument(dbPath, 'todos-migration-v1-main');
+        await editTodo(page, 'Write README', pendingTitle);
+        await expectUnsyncedEvents(page, 1);
+        await expectTodoVisible(page, pendingTitle);
+
+        const afterLocalEdit = await inspectServerDocument(dbPath, 'todos-migration-v1-main');
+        expect(afterLocalEdit.eventCount).toBe(before.eventCount);
+        expect(afterLocalEdit.activeMigrationLock?.docId).toBe('todos-migration-v1-main');
+
+        await page.waitForTimeout(5_250);
+        await disconnectFromServer(page);
+        await reconnectToServer(page);
+        await expectMigrationRequired(page);
+
+        await clickMigrateDocument(page);
+        await waitForSynced(page);
+        await expectTodoVisible(page, pendingTitle);
+
+        const migrated = await waitForServerDocument(
+            dbPath,
+            'todos-migration-v1-main',
+            (document) =>
+                document.document?.schemaFingerprintHash === todoFixtureV2FingerprintHash &&
+                document.activeMigrationLock === null,
+        );
+        expect(migrated.document?.schemaVersion).toBe(2);
+        expect(migrated.eventCount).toBeGreaterThan(0);
+
+        const freshContext = await browser.newContext();
+        const freshPage = await freshContext.newPage();
+        await openServerDocument(freshPage, {
+            appId: 'todos',
+            docId: 'todos-migration-v1-main',
+        });
+        await login(freshPage, 'Cy');
+        await waitForSynced(freshPage);
+        await expectTodoVisible(freshPage, pendingTitle);
+
+        await freshContext.close();
+        await context.close();
+    } finally {
+        await server.stop();
+    }
+});
+
 test('shows a client upgrade notice for a seeded document ahead of the client', async ({page}, testInfo) => {
     const dbPath = await createTempServerDbPath(testInfo);
     await seedServerDatabase({dbPath});
@@ -204,10 +277,102 @@ test('shows a client upgrade notice for a seeded document ahead of the client', 
         await login(page, 'Ada');
 
         await expectClientUpgradeRequired(page);
-        const inspected = await inspectServerDocument(dbPath, 'todos-migration-v3-ahead');
+        const before = await inspectServerDocument(dbPath, 'todos-migration-v3-ahead');
+        const localTitle = `Local v2 edit while upgrade required ${Date.now()}`;
+        await addTodo(page, localTitle);
+        await expectUnsyncedEvents(page, 1);
+        await expectTodoVisible(page, localTitle);
+
+        const after = await inspectServerDocument(dbPath, 'todos-migration-v3-ahead');
+        expect(after.document?.schemaVersion).toBe(3);
+        expect(after.document?.schemaFingerprintHash).toBe(todoFixtureV3FingerprintHash);
+        expect(after.activeMigrationLock).toBeNull();
+        expect(after.eventCount).toBe(before.eventCount);
+    } finally {
+        await server.stop();
+    }
+});
+
+test('migrates the seeded v1 todos document with the v3 todos client', async ({page}, testInfo) => {
+    const dbPath = await createTempServerDbPath(testInfo);
+    await seedServerDatabase({dbPath});
+    const server = await startServer({dbPath});
+
+    try {
+        await openServerDocument(page, {
+            appId: 'todos@3',
+            docId: 'todos-migration-v1-main',
+        });
+        await login(page, 'Ada');
+
+        await expectMigrationRequired(page);
+        await clickMigrateDocument(page);
+        await waitForSynced(page);
+        await expectTodoVisible(page, 'Try CRDT sync');
+
+        const inspected = await waitForServerDocument(
+            dbPath,
+            'todos-migration-v1-main',
+            (document) =>
+                document.document?.schemaFingerprintHash === todoFixtureV3FingerprintHash &&
+                document.activeMigrationLock === null,
+        );
         expect(inspected.document?.schemaVersion).toBe(3);
-        expect(inspected.document?.schemaFingerprintHash).toBe(todoFixtureV3FingerprintHash);
-        expect(inspected.activeMigrationLock).toBeNull();
+        expect(inspected.archivedSchemaHashes).toContain(todoFixtureV1FingerprintHash);
+    } finally {
+        await server.stop();
+    }
+});
+
+test('recovers when the migration owner disconnects before upload', async ({browser}, testInfo) => {
+    const dbPath = await createTempServerDbPath(testInfo);
+    await seedServerDatabase({dbPath});
+    const server = await startServer({dbPath, migrationLockMs: 3_000});
+
+    try {
+        const ownerContext = await browser.newContext();
+        const ownerPage = await ownerContext.newPage();
+        await openServerDocument(ownerPage, {
+            appId: 'todos',
+            docId: 'todos-migration-v1-main',
+            serverMigrationDelayMs: 10_000,
+        });
+        await login(ownerPage, 'Ben');
+        await expectMigrationRequired(ownerPage);
+        await clickMigrateDocument(ownerPage);
+
+        const locked = await waitForServerDocument(
+            dbPath,
+            'todos-migration-v1-main',
+            (document) => document.activeMigrationLock !== null,
+        );
+        expect(locked.activeMigrationLock?.docId).toBe('todos-migration-v1-main');
+        await ownerContext.close();
+
+        await new Promise((resolve) => setTimeout(resolve, 3_250));
+
+        const recoveryContext = await browser.newContext();
+        const recoveryPage = await recoveryContext.newPage();
+        await openServerDocument(recoveryPage, {
+            appId: 'todos',
+            docId: 'todos-migration-v1-main',
+        });
+        await login(recoveryPage, 'Cy');
+
+        await expectMigrationRequired(recoveryPage);
+        await clickMigrateDocument(recoveryPage);
+        await waitForSynced(recoveryPage);
+
+        const migrated = await waitForServerDocument(
+            dbPath,
+            'todos-migration-v1-main',
+            (document) =>
+                document.document?.schemaFingerprintHash === todoFixtureV2FingerprintHash &&
+                document.activeMigrationLock === null,
+        );
+        expect(migrated.document?.schemaVersion).toBe(2);
+
+        await recoveryContext.close();
     } finally {
         await server.stop();
     }

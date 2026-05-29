@@ -525,7 +525,6 @@ export function useServerSync<TState>({
                 schemaFingerprintHash,
             });
             sendPresenceHello();
-            flushPending();
         });
 
         socket.addEventListener('message', (event) => {

@@ -122,7 +122,7 @@ CRDT code lives in `src/crdt/*` and is exported as `umkehr/crdt`.
 The CRDT layer converts realized patches into commutative updates that can be exchanged between replicas:
 
 - `document.ts` creates a `CrdtDocument<T>` from initial state plus a typia OpenAPI schema collection.
-- `metadata.ts` builds and clones the metadata tree that tracks per-value versions, array item ids, tagged-union incarnations, and tombstones.
+- `metadata.ts` builds and clones the metadata tree that tracks per-value versions, array item ids, array item lifecycle, tagged-union incarnations, and tombstones.
 - `updates.ts` converts realized local `Patch<T>` values into CRDT updates.
 - `apply.ts` applies incoming CRDT updates, queues updates whose parents have not arrived yet, and retries pending updates after successful applies.
 - `materialize.ts` turns metadata back into the public state shape.
@@ -131,16 +131,17 @@ The CRDT layer converts realized patches into commutative updates that can be ex
 - `validation.ts` validates serialized CRDT updates against the document schema.
 - `clock.ts`, `hlc.ts`, and `fractionalIndex.ts` provide timestamp ordering, replica clocks, and array ordering.
 
-CRDT paths are not the same as normal `Path` values. They include stable array item ids, parent incarnation timestamps, tagged-union branch metadata, and optional array order values. These fields are what let remote updates target the right logical value even after array reordering, deletion, or recreation.
+CRDT paths are not the same as normal `Path` values. They include stable array item ids, parent incarnation timestamps, and tagged-union branch metadata. They do not include array order values; order is carried by `insert` and `setOrder` updates. These fields let remote updates target the right logical value even after array reordering, deletion, or recreation.
 
 Important behavior to preserve:
 
 - CRDT updates are timestamped and last-writer-wins at each metadata node.
 - Deletions leave tombstones so older or out-of-order updates can be discarded correctly.
-- Array inserts use stable item ids and fractional order values instead of numeric indices.
+- Array inserts use a dedicated `insert` update with a stable item id and fractional order value instead of a numeric index.
+- Array item tombstones store deletion timestamps, not order values.
 - Array `move` translates to a narrow `setOrder` update for the moved item.
 - Remote updates apply to the CRDT document but do not enter local undo/redo history.
-- Undo and redo generate fresh CRDT updates only when the recorded local effects are still applicable.
+- Undo and redo use optional update `command` info to group local edit/undo/redo commands, then generate fresh CRDT updates only when the recorded local effects are still applicable.
 - Pending remote updates should stay queued only while a missing parent, missing tag branch, or future incarnation can still arrive.
 
 Because CRDT document creation and update validation depend on typia schemas, `typia` remains optional. Do not import CRDT code from the root entry point.
