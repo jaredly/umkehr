@@ -92,7 +92,7 @@ test('disables todo controls while server history preview is read-only', async (
         await expect(panel.getByRole('button', {name: 'Edit'}).first()).toBeDisabled();
         await expect(panel.getByRole('button', {name: 'Delete'}).first()).toBeDisabled();
         await expect(panel.getByRole('checkbox').first()).toBeDisabled();
-        await expect(panel.getByRole('button', {name: /^Move /}).first()).toBeDisabled();
+        await expect(panel.getByRole('button', {name: /^Move /})).toHaveCount(0);
         await expect(panel.getByRole('button', {name: 'Use #fff'})).toBeDisabled();
     } finally {
         await server.stop();

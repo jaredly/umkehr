@@ -650,24 +650,48 @@ Whiteboard is the strongest candidate for test IDs because pointer-created eleme
 
 1. Should demo specs be committed as normal Playwright specs under `tests/demo`, or should they live outside the CI test tree and be run only manually?
 
+normal tests
+
 2. Should demo videos use real-time pacing (`slowMo`/pauses) or should they be fast specs recorded and edited afterward?
+
+let's try fast
 
 3. Is PeerJS expected to work in CI without external network access, or should we add a local PeerServer/test transport before writing sync E2E?
 
+hm yeah we'll want a local PeerServer
+
 4. Should local-first sync be tested through real PeerJS connections, or is a deterministic mock transport acceptable for E2E-level coverage?
+
+real peerjs connections please
 
 5. Are `data-testid` attributes acceptable in this example app, especially for whiteboard pointer-created elements and server history controls?
 
+yes
+
 6. Which flows are mandatory for CI versus acceptable as slower/nightly/manual suites?
+
+use your judgement
 
 7. Should Playwright run only Chromium, or should the final coverage include WebKit/Firefox and narrow viewport projects?
 
+chromium is fine
+
 8. For archive import/export tests, should the plan validate only the UI result, or also parse and snapshot the downloaded archive shape?
+
+the thing to test is exporting and then importing in a fresh context
 
 9. Should server migration demo specs use the seeded Bun server helpers directly, or should there be a pre-generated static fixture path for easier local recording?
 
+use your judgement
+
 10. Should server branch/merge E2E focus on todos first, or should whiteboard branching be included because it better exercises nested CRDT paths?
+
+whiteboard sounds great
 
 11. What is the desired CI budget for `examples/react-crdt` E2E tests?
 
+let's write a bunch of tests and we can decide on a critical subset if things take too long altogether
+
 12. Should existing unit/component tests be reorganized alongside E2E, or should this task stay strictly Playwright-focused?
+
+this task is about playwright.
