@@ -103,58 +103,41 @@ export type RichTextMeta = {
     kind: 'richText';
     created: HlcTimestamp;
     sentinel: RichCollaborativeText;
-    chars: Record<RichTextCharId, RichTextCharMeta>;
-    marks: Record<RichTextMarkId, RichTextMarkMeta>;
-    blocks: Record<RichTextBlockId, RichTextBlockMeta>;
+    chars: RichTextCharMeta[];
 };
 ```
 
-Start with per-character IDs. Run IDs plus offsets may be more compact, but per-character IDs are much simpler to implement and test.
+Use Peritext character metadata directly: one character per insert opId, plus tombstone state and optional mark op-sets on the before/after gaps.
 
 ```ts
 type RichTextCharMeta = {
-    id: RichTextCharId;
-    value: string;
-    after: RichTextAnchor;
-    ts: HlcTimestamp;
-    deleted?: HlcTimestamp;
+    opId: RichTextOpId;
+    char: string;
+    deleted: boolean;
+    markOpsBefore?: RichTextMarkOperation[];
+    markOpsAfter?: RichTextMarkOperation[];
 };
 
 type RichTextAnchor =
-    | {type: 'start'}
-    | {type: 'end'}
-    | {type: 'char'; id: RichTextCharId; bias: 'before' | 'after'};
+    | {type: 'startOfText'}
+    | {type: 'endOfText'}
+    | {type: 'before' | 'after'; opId: RichTextOpId};
 ```
 
-Formatting should be represented as historical operations, not by mutating every character:
+Formatting should be represented as historical operations stored in the mark op-sets, not by mutating every character:
 
 ```ts
-type RichTextMarkMeta = {
-    id: RichTextMarkId;
-    action: 'add' | 'remove';
-    name: string;
-    value?: JsonValue;
+type RichTextMarkOperation = {
+    action: 'addMark' | 'removeMark';
+    opId: RichTextOpId;
     start: RichTextAnchor;
     end: RichTextAnchor;
-    expand: 'none' | 'start' | 'end' | 'both';
-    ts: HlcTimestamp;
+    markType: string;
+    value?: JsonValue;
 };
 ```
 
-Blocks can initially be anchored markers in the character stream:
-
-```ts
-type RichTextBlockMeta = {
-    id: RichTextBlockId;
-    type: 'paragraph' | 'heading';
-    attrs?: Record<string, JsonValue>;
-    start: RichTextAnchor;
-    ts: HlcTimestamp;
-    deleted?: HlcTimestamp;
-};
-```
-
-Scope for v1 should be paragraphs, simple headings, and inline marks like `strong`, `em`, `code`, and `link`. Lists, tables, comments, suggestions, embeds, nested blocks, and presence should stay out of scope.
+Scope for the faithful v1 core should be inline marks within a single text sequence, matching Peritext. Paragraphs/headings/blocks are an umkehr extension and should be deferred or layered above the core.
 
 ## Operation Shape
 
@@ -174,15 +157,13 @@ The nested operation should be JSON-shaped and anchored:
 
 ```ts
 type RichTextChange =
-    | {kind: 'insert'; after: RichTextAnchor; text: string; marks?: RichTextMarkInput[]}
-    | {kind: 'delete'; range: RichTextRange}
-    | {kind: 'mark'; action: 'add' | 'remove'; range: RichTextRange; name: string; value?: JsonValue; expand: RichTextExpand}
-    | {kind: 'splitBlock'; at: RichTextAnchor; block: RichTextBlockInput}
-    | {kind: 'mergeBlock'; block: RichTextBlockId}
-    | {kind: 'replace'; snapshot: RichTextImportSnapshot};
+    | {action: 'insert'; opId: RichTextOpId; afterId: RichTextOpId | null; char: string}
+    | {action: 'remove'; opId: RichTextOpId; removedId: RichTextOpId}
+    | {action: 'addMark'; opId: RichTextOpId; start: RichTextAnchor; end: RichTextAnchor; markType: string; value?: JsonValue}
+    | {action: 'removeMark'; opId: RichTextOpId; start: RichTextAnchor; end: RichTextAnchor; markType: string};
 ```
 
-`replace` is useful for initialization, imports, migrations, and test setup. It should not be the operation used for ordinary typing. For normal editing, inserts/deletes/marks must preserve intent under concurrency.
+Editor-facing commands can still accept strings, ranges, mark presets, and block/span snapshots. Those commands should compile into the faithful Peritext operations above. `replace` is useful for initialization, imports, migrations, and test setup, but it should be an umkehr helper that expands into Peritext operations in a fresh rich-text field incarnation, not a native Peritext operation.
 
 ## Materialization
 
@@ -196,15 +177,8 @@ Renderable/editor content should be explicit:
 
 ```ts
 type RichTextRenderView = {
-    blocks: RichTextBlock[];
-    plainText: string;
-};
-
-type RichTextBlock = {
-    id: string;
-    type: 'paragraph' | 'heading';
-    attrs?: Record<string, JsonValue>;
     spans: RichTextSpan[];
+    plainText: string;
 };
 
 type RichTextSpan = {
@@ -212,6 +186,8 @@ type RichTextSpan = {
     marks?: Record<string, JsonValue>;
 };
 ```
+
+An umkehr block/span import/export layer can wrap these spans into blocks later. The faithful Peritext core should first produce the current text with inline formatting spans.
 
 Editor views can add mapping helpers and stable view-local positions:
 
@@ -282,6 +258,8 @@ Algorithm tests in `src/peritext`:
 - add/remove marks commute for overlapping ranges.
 - mark conflicts with the same mark name resolve deterministically.
 - link-style non-growing end behavior differs from bold-style growing behavior.
+- tombstones at formatting boundaries preserve link/comment boundary behavior.
+- mark operations create and propagate `markOpsBefore`/`markOpsAfter` op-sets independent of application order.
 - materialization produces compact spans and omits tombstones.
 - randomized operation schedules converge.
 
@@ -303,9 +281,9 @@ Property/fuzz tests should be added earlier than for typical features. Rich-text
 ## Decisions From Open Questions
 
 - Implement marks in v1. Do not stop at plaintext insert/delete, though plaintext operations can still be the first incremental milestone.
-- `replace` should import block/span JSON, not only plain text.
+- `replace` should accept block/span JSON at the public umkehr layer. The faithful Peritext core should still receive ordinary insert/addMark operations produced from that snapshot.
 - `RichCollaborativeText` does not need a stable per-field ID. It can be a singleton-style sentinel; the CRDT path and parent timestamps identify the field incarnation.
-- Mark expansion presets are an implementation-design detail. Recommended defaults:
+- Mark expansion presets are an implementation-design detail. They should compile to Peritext before/after anchors, not be stored as an `expand` field. Recommended defaults:
   - `inclusive`: bold/italic/code-like marks grow when typing at either edge.
   - `exclusive`: link-like marks do not grow at the trailing edge.
   - `none`: useful for exact imported ranges.
@@ -353,6 +331,24 @@ type RichTextOpId = {
 
 The string form is compact and close to Peritext, but the engine should compare IDs by parsed fields rather than relying on raw lexicographic string order.
 
+## Peritext Fidelity Corrections
+
+To stay faithful to the original algorithm, keep the following constraints. These are places where the initial research note was too loose or drifted toward a custom rich-text CRDT.
+
+- Inserts are single-character operations. A user paste/type of `"hello"` is represented as five insert operations with consecutive opIds, not as one string operation with a run ID.
+- Character identity is the insert opId. There is no separate character ID layer.
+- Deletes are single-character remove operations by `removedId`. A range delete is a local/editor convenience that expands to one remove operation per visible character.
+- Rich-text operation ordering and mark conflict resolution use Peritext opId ordering, not umkehr HLC timestamps. HLC timestamps remain useful for the outer CRDT update envelope, history, and command metadata.
+- Formatting operation anchors should use Peritext's exact model: `startOfText`, `endOfText`, or `{type: 'before' | 'after'; opId}`. The earlier generic `bias` anchor wording should be avoided.
+- Mark boundary behavior is encoded by choosing `before` or `after` anchors. It should not be represented as an `expand` field in the replicated operation. Public API presets can exist, but they must compile to the correct Peritext anchors.
+- `addMark` and `removeMark` are separate operation actions. A combined `{kind: 'mark'; action: ...}` draft shape is fine internally, but the stored Peritext operation should preserve the add/remove distinction.
+- The internal mark state should follow the op-set model: each character has optional `markOpsBefore` and `markOpsAfter` sets. Applying a mark operation creates/copies/extends these sets as in Peritext, rather than only storing a global span record and resolving from scratch.
+- Current mark rendering is derived per `markType` from the active op-set. Mutually exclusive mark types use greatest-opId-wins. Multi-value mark types, such as comments, need separate semantics that retain all live values not removed by a corresponding remove operation.
+- Inserted text at tombstone-heavy boundaries needs the Peritext special case: if tombstones at the insertion position carry before/after anchors for formatting operations, insertion may need to happen after the last relevant tombstone so link/comment boundary intent is preserved.
+- Text inserted at the start of a paragraph/start of text may need extra formatting operations to inherit the successor's formatting. Do not assume preceding-character inheritance covers all cases.
+- Peritext's published scope is inline formatting within a single paragraph. Blocks/headings are an umkehr extension and should be deferred or layered outside the faithful core algorithm.
+- `replace` is not a native Peritext operation. It should be a local helper for import/reset that expands into ordinary Peritext insert/addMark operations in a fresh rich-text field incarnation, or it should be clearly marked as an umkehr-level import primitive outside the faithful operation log.
+
 ## Suggested Implementation Order
 
 1. Add `src/peritext` type skeleton, metadata constructors, materializer, and deterministic ID comparison.
@@ -363,10 +359,11 @@ The string form is compact and close to Peritext, but the engine should compare 
 6. Wire `$text.insert/delete/replace` through builder, update creation, apply, and history.
 7. Add render/editor view helpers.
 8. Add mark add/remove operations and Peritext boundary behavior.
-9. Add block split/merge for paragraphs/headings.
-10. Add undo/redo support and batching semantics.
-11. Add a narrow React editor helper.
-12. Add compaction/snapshot design once the metadata profile is visible.
+9. Add undo/redo support and batching semantics.
+10. Add a narrow React editor helper.
+11. Add block/span import/export at the umkehr layer.
+12. Defer block split/merge until after the inline Peritext core is correct.
+13. Add compaction/snapshot design once the metadata profile is visible.
 
 ## Sources
 
