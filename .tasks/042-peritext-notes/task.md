@@ -1,0 +1,16 @@
+Some feedback on the peritext implementation:
+- sequence.ts has some major perf issues.
+  - a no-op applyInsert clones the whole state, which should be unnecessary
+  - doing a re-sort on every applyInsert is extremely expensive an unnecessary
+  - applyRemove also has a needless cloneState in the no-op case
+  - insertionAfterIdForIndex doing a whole `visibleChars` run is wasteful
+  - charsForVisibleIdRance is also wasteful
+  - sortChars should basically never be necessary, as we're always doing incremental inserts
+  - we should have an optimized `insertMany` for a run of sequential inserts
+- apply.ts
+  - it looks like the concept of a `pending` rich-text op is entirely unused
+- boundaries.ts
+  - reifying `visibleChars` is super wasteful here too
+- ids.ts
+  - using thrown exceptions and try/catch seems like a perf issue for something that's probaby very hot path
+  - we need to be caching the `maxOpCounter` hardcore. might want it to live on `RichTextState`

@@ -41,6 +41,10 @@
             "types": "./dist/src/crdt/index.d.ts",
             "import": "./dist/src/crdt/index.js"
         },
+        "./richtext": {
+            "types": "./dist/src/richtext/index.d.ts",
+            "import": "./dist/src/richtext/index.js"
+        },
         "./validation": {
             "types": "./dist/src/validation/index.d.ts",
             "import": "./dist/src/validation/index.js"

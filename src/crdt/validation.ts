@@ -1,5 +1,7 @@
 import type {IJsonSchemaCollection, OpenApi} from 'typia';
+import {validateRichTextOperation} from '../peritext/validation.js';
 import {tryUnpack} from './hlc.js';
+import {isRichTextSchema} from './schema.js';
 import type {CrdtPathSegment, CrdtUpdate, HlcTimestamp, JsonValue} from './types.js';
 
 export type CrdtUpdateValidationIssue = {
@@ -101,7 +103,7 @@ function validateEnvelope(input: unknown): CrdtUpdateValidationResult<unknown> {
     if (typeof input.op !== 'string') {
         return fail(input, {path: 'op', message: 'CRDT update op must be a string.', value: input.op});
     }
-    if (!['insert', 'set', 'delete', 'setOrder'].includes(input.op)) {
+    if (!['insert', 'set', 'delete', 'setOrder', 'richText'].includes(input.op)) {
         return fail(input, {path: 'op', message: `Unknown CRDT update op "${input.op}".`, value: input.op});
     }
     const commandIssue = validateCommandInfo(input.command);
@@ -176,6 +178,21 @@ function validateEnvelope(input: unknown): CrdtUpdateValidationResult<unknown> {
                 }
                 const tsIssue = validateTimestamp(order.ts, `orders/${id}/ts`);
                 if (tsIssue) return fail(input, tsIssue);
+            }
+            return {success: true, data: input as CrdtUpdate};
+        }
+        case 'richText': {
+            const pathIssue = validateCrdtPathEnvelope(input.path, 'path');
+            if (pathIssue) return fail(input, pathIssue);
+            const tsIssue = validateTimestamp(input.ts, 'ts');
+            if (tsIssue) return fail(input, tsIssue);
+            const richText = validateRichTextOperation(input.change);
+            if (!richText.success) {
+                return fail(input, {
+                    path: `change/${richText.errors[0]?.path ?? '<operation>'}`,
+                    message: richText.errors[0]?.message ?? 'Invalid rich text operation.',
+                    value: input.change,
+                });
             }
             return {success: true, data: input as CrdtUpdate};
         }
@@ -328,6 +345,19 @@ function validateUpdateSchema(update: CrdtUpdate, ctx: SchemaContext) {
                 path: 'arrayPath',
                 message: `setOrder path "${pathToIssuePath(update.arrayPath)}" must point to an array.`,
                 expected: 'array',
+            });
+        }
+        return errors;
+    }
+    if (update.op === 'richText') {
+        const target = walkCrdtPath(ctx, update.path, 'path');
+        if (!target.ok) {
+            errors.push(target.issue);
+        } else if (!isRichTextSchema(resolveSchemaForCheck(ctx.components, target.schema))) {
+            errors.push({
+                path: 'path',
+                message: `richText path "${pathToIssuePath(update.path)}" must point to a rich-text field.`,
+                expected: 'rich-text',
             });
         }
         return errors;
@@ -580,6 +610,11 @@ function validateObjectValue(
         }
     }
     return null;
+}
+
+function resolveSchemaForCheck(components: Components, input: Schema): Schema {
+    const resolved = resolveRef({components, seenRefs: new Set()}, input);
+    return resolved.ok ? resolved.schema : input;
 }
 
 function validateTimestamp(input: unknown, path: string): CrdtUpdateValidationIssue | null {

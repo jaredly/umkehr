@@ -1,9 +1,18 @@
 import type {Patch, Path} from '../types.js';
+import {
+    anchorsForMarkRange,
+    allocateOpIds,
+    charIdsForVisibleRange,
+    importRichTextSnapshot,
+    insertionAfterIdForIndexPreservingBoundary,
+} from '../peritext/index.js';
+import {tryUnpack} from './hlc.js';
 import {fractionalIndexBetween} from './fractionalIndex.js';
 import {crdtPathForExisting, getMetaAtPath, liveArrayItems} from './path.js';
 import type {
     CrdtDocument,
     CrdtInsertUpdate,
+    CrdtRichTextUpdate,
     CrdtSetOrderUpdate,
     CrdtUpdate,
     FractionalIndex,
@@ -46,7 +55,87 @@ export function createCrdtUpdates<T>(
                 patch.after,
                 ts,
             );
+        case 'richText':
+            return createRichTextUpdates(doc, patch, ts);
     }
+}
+
+function createRichTextUpdates<T>(
+    doc: CrdtDocument<T>,
+    patch: Extract<Patch<T>, {op: 'richText'}>,
+    ts: HlcTimestamp,
+): CrdtRichTextUpdate[] {
+    const path = crdtPathForExisting(doc, patch.path);
+    const meta = getMetaAtPath(doc.meta, path);
+    if (!meta || meta.kind !== 'richText') {
+        throw new Error('Cannot create rich text CRDT update: path is not a rich-text field.');
+    }
+    const actorId = richTextActorIdFromTimestamp(ts);
+    const make = (change: CrdtRichTextUpdate['change']): CrdtRichTextUpdate => ({
+        op: 'richText',
+        path,
+        change,
+        ts,
+    });
+
+    switch (patch.change.kind) {
+        case 'insert': {
+            let afterId = insertionAfterIdForIndexPreservingBoundary(meta, patch.change.at.index);
+            const chars = Array.from(patch.change.text);
+            const opIds = allocateOpIds(meta, actorId, chars.length);
+            return chars.map((char, index) => {
+                const opId = opIds[index];
+                if (!opId) throw new Error('Cannot create rich text insert: missing allocated opId.');
+                const update = make({action: 'insert', opId, afterId, char});
+                afterId = opId;
+                return update;
+            });
+        }
+        case 'delete': {
+            const ids = charIdsForVisibleRange(meta, patch.change.range);
+            const opIds = allocateOpIds(meta, actorId, ids.length);
+            return ids.map((removedId, index) => {
+                const opId = opIds[index];
+                if (!opId) throw new Error('Cannot create rich text remove: missing allocated opId.');
+                return make({action: 'remove', opId, removedId});
+            });
+        }
+        case 'mark': {
+            const [opId] = allocateOpIds(meta, actorId, 1);
+            if (!opId) return [];
+            return [
+                make({
+                    action: 'addMark',
+                    opId,
+                    ...anchorsForMarkRange(meta, patch.change.range, patch.change.preset ?? 'inclusive'),
+                    markType: patch.change.markType,
+                    value: patch.change.value,
+                }),
+            ];
+        }
+        case 'unmark': {
+            const [opId] = allocateOpIds(meta, actorId, 1);
+            if (!opId) return [];
+            return [
+                make({
+                    action: 'removeMark',
+                    opId,
+                    ...anchorsForMarkRange(meta, patch.change.range, patch.change.preset ?? 'inclusive'),
+                    markType: patch.change.markType,
+                }),
+            ];
+        }
+        case 'replace': {
+            const imported = importRichTextSnapshot(patch.change.snapshot, actorId);
+            return imported.operations.map(make);
+        }
+    }
+}
+
+function richTextActorIdFromTimestamp(ts: HlcTimestamp) {
+    const unpacked = tryUnpack(ts);
+    if (!unpacked) return 'local:main';
+    return `${unpacked.node}:${unpacked.suffix ?? 'main'}` as const;
 }
 
 function createSetUpdates<T>(

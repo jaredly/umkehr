@@ -2,6 +2,7 @@ import {compareTimestamps, newer} from './clock.js';
 import {materialize} from './materialize.js';
 import {buildMeta, cloneMeta, versionOf} from './metadata.js';
 import {getChild, getMetaAtPath} from './path.js';
+import {applyRichTextOperation} from '../peritext/apply.js';
 import {arrayItemSchema, resolveRef, schemaAtCrdtPath} from './schema.js';
 import {checkParent} from './traversal.js';
 import type {
@@ -44,6 +45,7 @@ function applyOne<T>(
 ): 'applied' | 'discarded' | 'pending' {
     if (update.op === 'insert') return applyInsert(doc, update);
     if (update.op === 'setOrder') return applySetOrder(doc, update);
+    if (update.op === 'richText') return applyRichText(doc, update);
     if (!update.path.length) {
         if (update.op === 'delete') {
             const version = versionOf(doc.meta);
@@ -76,6 +78,20 @@ function applyOne<T>(
     if (segment.type === 'arrayItem' && (!target || target.kind === 'tombstone')) return 'pending';
     const schema = schemaAtCrdtPath(doc.schema, update.path);
     setChild(parent, segment, buildMeta(update.value, schema, doc.schema, update.ts));
+    return 'applied';
+}
+
+function applyRichText<T>(
+    doc: CrdtDocument<T>,
+    update: Extract<CrdtUpdate, {op: 'richText'}>,
+): 'applied' | 'discarded' | 'pending' {
+    const meta = getMetaAtPath(doc.meta, update.path);
+    if (!meta) return 'pending';
+    if (meta.kind === 'tombstone') return 'discarded';
+    if (meta.kind !== 'richText') return 'discarded';
+    const next = applyRichTextOperation(meta, update.change);
+    meta.chars = next.chars;
+    meta.pending = next.pending;
     return 'applied';
 }
 
@@ -223,6 +239,7 @@ function retryPending<T>(doc: CrdtDocument<T>) {
 function pendingReason<T>(doc: CrdtDocument<T>, update: CrdtUpdate): PendingUpdate['reason'] {
     if (update.op === 'setOrder') return 'missing-parent';
     if (update.op === 'insert') return 'missing-parent';
+    if (update.op === 'richText') return getMetaAtPath(doc.meta, update.path) ? 'future-incarnation' : 'missing-parent';
     const walked = walkToLeaf(doc.meta, update.path);
     return walked.status === 'pending' ? walked.reason : 'missing-parent';
 }

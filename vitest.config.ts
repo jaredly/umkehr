@@ -9,6 +9,9 @@ export default defineConfig({
     resolve: {
         alias: {
             'umkehr/crdt': fileURLToPath(new URL('./src/crdt/index.ts', import.meta.url)),
+            'umkehr/richtext': fileURLToPath(
+                new URL('./src/richtext/index.ts', import.meta.url),
+            ),
             'umkehr/validation': fileURLToPath(
                 new URL('./src/validation/index.ts', import.meta.url),
             ),

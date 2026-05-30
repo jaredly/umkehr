@@ -56,6 +56,10 @@ export function isArraySchema(schema: Schema): schema is Extract<Schema, {type: 
     return (schema as {type?: string}).type === 'array';
 }
 
+export function isRichTextSchema(schema: Schema) {
+    return (schema as Record<string, unknown>)['x-umkehr-crdt'] === 'rich-text';
+}
+
 export function arrayItemSchema(schema: Schema): Schema {
     return (schema as {items?: Schema}).items ?? {};
 }

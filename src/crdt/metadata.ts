@@ -2,6 +2,7 @@ import {fractionalIndexBetween} from './fractionalIndex.js';
 import {
     arrayItemSchema,
     isRecordSchema,
+    isRichTextSchema,
     isTaggedUnionSchema,
     propertySchema,
     recordValueSchema,
@@ -26,8 +27,16 @@ export function buildMeta(
     ts: HlcTimestamp,
 ): CrdtMeta {
     if (value === undefined) return {kind: 'tombstone', deleted: ts};
-    if (value === null || typeof value !== 'object') return {kind: 'primitive', ts, value};
     const schema = resolveRef(ctx, inputSchema);
+    if (isRichTextSchema(schema)) {
+        return {
+            kind: 'richText',
+            created: ts,
+            sentinel: {kind: 'rich-text', version: 1},
+            chars: [],
+        };
+    }
+    if (value === null || typeof value !== 'object') return {kind: 'primitive', ts, value};
     if (Array.isArray(value)) {
         const itemSchema = arrayItemSchema(schema);
         let previous: FractionalIndex | undefined;
@@ -89,6 +98,7 @@ export function versionOf(meta: CrdtMeta): HlcTimestamp | undefined {
         case 'record':
         case 'array':
         case 'tagged':
+        case 'richText':
             return meta.created;
         case 'tombstone':
             return meta.deleted;
@@ -101,6 +111,7 @@ export function createdOf(meta: CrdtMeta): HlcTimestamp | undefined {
         case 'record':
         case 'array':
         case 'tagged':
+        case 'richText':
             return meta.created;
         default:
             return undefined;

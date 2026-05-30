@@ -169,6 +169,13 @@ export function changedNormalPathsForCrdtUpdate<T>(
     after: CrdtDocument<T>,
     update: CrdtUpdate,
 ): Path[] | null {
+    if (update.op === 'richText') {
+        const path =
+            normalPathForCrdtPath(after, update.path) ??
+            normalPathForCrdtPath(before, update.path);
+        return path ? [path] : null;
+    }
+
     if (update.op === 'setOrder') {
         const path =
             normalPathForCrdtPath(after, update.arrayPath) ??

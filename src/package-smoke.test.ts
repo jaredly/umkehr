@@ -43,6 +43,16 @@ describe('package exports', () => {
         expect(typeof crdtPkg.CrdtUpdateValidationError).toBe('function');
     });
 
+    it('imports the built rich text entry point separately', async () => {
+        expect(existsSync('dist/src/richtext/index.js')).toBe(true);
+
+        const richTextPkg = await import('umkehr/richtext');
+
+        expect(typeof richTextPkg.richText).toBe('function');
+        expect(typeof richTextPkg.richTextFromPlainText).toBe('function');
+        expect(typeof richTextPkg.materializeRichText).toBe('function');
+    });
+
     it('imports the built React entry point separately', async () => {
         expect(existsSync('dist/src/react/index.js')).toBe(true);
 

@@ -10,6 +10,7 @@ import {
     type OpMaker,
     type ArrayMove,
 } from './types.js';
+import type {RichTextImportSnapshot, RichTextJsonValue} from './peritext/types.js';
 
 export type PatchBuilder<
     T,
@@ -184,6 +185,72 @@ export function createPatchDispatcher<T, Extra, Tag extends string = 'type', R =
                                 typeof when === 'string' ? when : undefined,
                             );
                     return cache[k];
+                }
+
+                if (prop === '$text') {
+                    const k = pathString + '/richText';
+                    if (!proxyCache[k]) {
+                        proxyCache[k] = {
+                            insert: (at: {index: number}, text: string, when?: ApplyTiming) =>
+                                apply(
+                                    {op: 'richText', path, change: {kind: 'insert', at, text}, ...ghost},
+                                    when,
+                                ),
+                            delete: (range: {start: number; end: number}, when?: ApplyTiming) =>
+                                apply(
+                                    {op: 'richText', path, change: {kind: 'delete', range}, ...ghost},
+                                    when,
+                                ),
+                            mark: (
+                                range: {start: number; end: number},
+                                markType: string,
+                                value: unknown,
+                                preset?: 'inclusive' | 'exclusive' | 'none',
+                                when?: ApplyTiming,
+                            ) =>
+                                apply(
+                                    {
+                                        op: 'richText',
+                                        path,
+                                        change: {
+                                            kind: 'mark',
+                                            range,
+                                            markType,
+                                            value: value as RichTextJsonValue,
+                                            preset,
+                                        },
+                                        ...ghost,
+                                    },
+                                    when,
+                                ),
+                            unmark: (
+                                range: {start: number; end: number},
+                                markType: string,
+                                preset?: 'inclusive' | 'exclusive' | 'none',
+                                when?: ApplyTiming,
+                            ) =>
+                                apply(
+                                    {
+                                        op: 'richText',
+                                        path,
+                                        change: {kind: 'unmark', range, markType, preset},
+                                        ...ghost,
+                                    },
+                                    when,
+                                ),
+                            replace: (snapshot: unknown, when?: ApplyTiming) =>
+                                apply(
+                                    {
+                                        op: 'richText',
+                                        path,
+                                        change: {kind: 'replace', snapshot: snapshot as RichTextImportSnapshot},
+                                        ...ghost,
+                                    },
+                                    when,
+                                ),
+                        };
+                    }
+                    return proxyCache[k];
                 }
 
                 if (prop === getPathSymbol) {

@@ -152,6 +152,9 @@ export const dispatchWithChangedPaths = <T, An, Extra, Tag extends string = 'typ
         tag,
         equal,
     );
+    if (changes.some((change) => change.op === 'richText')) {
+        throw new Error('Rich text patches require CRDT history.');
+    }
 
     const history = {
         ...state,

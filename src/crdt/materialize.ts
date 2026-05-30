@@ -41,5 +41,7 @@ export function materialize(meta: CrdtMeta): JsonValue | undefined {
             }
             return value;
         }
+        case 'richText':
+            return meta.sentinel;
     }
 }

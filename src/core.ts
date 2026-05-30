@@ -15,6 +15,8 @@ export type {
     RemoveOp,
     ReorderOp,
     ReplaceOp,
+    RichTextPatch,
+    RichTextPatchChange,
 } from './types.js';
 export type {PatchBuilder} from './helper.js';
 export {realizeDraftPatch, resolveAndApply} from './make.js';
