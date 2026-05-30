@@ -6,8 +6,8 @@ import {applyCrdtUpdate} from './apply.js';
 import * as hlc from './hlc.js';
 import {materialize} from './materialize.js';
 import {cloneMeta} from './metadata.js';
-import {getMetaAtPath} from './path.js';
-import {formatOpId, maxOpCounter} from '../peritext/ids.js';
+import {getMetaAtPath, normalPathForCrdtPath} from './path.js';
+import {formatOpId} from '../peritext/ids.js';
 import {materializeRichTextState} from '../peritext/materialize.js';
 import {createCrdtUpdates} from './updates.js';
 import type {
@@ -21,9 +21,8 @@ import type {
     HlcTimestamp,
     ItemId,
     JsonValue,
-    RichTextMeta,
 } from './types.js';
-import type {RichTextOperation} from '../peritext/types.js';
+import type {RichTextOperation, RichTextState} from '../peritext/types.js';
 
 export type CrdtLocalHistory<T> = {
     base: CrdtDocument<T>;
@@ -75,8 +74,8 @@ export type LocalEffect =
           kind: 'richText';
           path: CrdtPathSegment[];
           localTs: HlcTimestamp;
-          before: RichTextMeta | undefined;
-          after: RichTextMeta;
+          before: RichTextState | undefined;
+          after: RichTextState;
           change: RichTextOperation;
       };
 
@@ -484,7 +483,7 @@ function captureBefore<T>(doc: CrdtDocument<T>, update: CrdtUpdate) {
         }
         return before;
     }
-    if (update.op === 'richText') return cloneEffectMeta(getMetaAtPath(doc.meta, update.path));
+    if (update.op === 'richText') return cloneRichTextStateAtCrdtPath(doc, update.path);
     if (update.op === 'insert') return undefined;
     return cloneEffectMeta(getMetaAtPath(doc.meta, update.path));
 }
@@ -493,7 +492,7 @@ function captureEffect<T>(
     beforeDoc: CrdtDocument<T>,
     afterDoc: CrdtDocument<T>,
     update: CrdtUpdate,
-    before: CrdtMeta | undefined | SetOrderEffect['before'],
+    before: CrdtMeta | RichTextState | undefined | SetOrderEffect['before'],
 ): LocalEffect {
     if (update.op === 'setOrder') {
         const array = getMetaAtPath(afterDoc.meta, update.arrayPath);
@@ -537,19 +536,18 @@ function captureEffect<T>(
     }
 
     if (update.op === 'richText') {
-        const after = cloneEffectMeta(getMetaAtPath(afterDoc.meta, update.path));
-        if (!after || after.kind !== 'richText') {
+        const afterMeta = getMetaAtPath(afterDoc.meta, update.path);
+        if (!afterMeta || afterMeta.kind !== 'richText') {
             throw new Error('Cannot capture local CRDT rich text effect: target is missing after apply.');
         }
-        const beforeMeta = before as CrdtMeta | undefined;
-        if (beforeMeta !== undefined && beforeMeta.kind !== 'richText') {
-            throw new Error('Cannot capture local CRDT rich text effect: target was not rich text before apply.');
-        }
+        const beforeState = before as RichTextState | undefined;
+        const after = cloneRichTextStateAtCrdtPath(afterDoc, update.path);
+        if (!after) throw new Error('Cannot capture local CRDT rich text effect: state is missing after apply.');
         return {
             kind: 'richText',
             path: update.path,
             localTs: update.ts,
-            before: beforeMeta,
+            before: beforeState,
             after,
             change: update.change,
         };
@@ -791,7 +789,7 @@ function nextRichTextOpId<T>(
         throw new Error('Cannot create rich text undo/redo update: target is not rich text.');
     }
     const unpacked = hlc.unpack(ts);
-    return formatOpId(maxOpCounter(meta) + 1, `${unpacked.node}:${unpacked.suffix ?? 'main'}`);
+    return formatOpId(meta.maxOpCounter + 1, `${unpacked.node}:${unpacked.suffix ?? 'main'}`);
 }
 
 function richTextMarkValueBefore(effect: Extract<LocalEffect, {kind: 'richText'}>) {
@@ -854,7 +852,7 @@ function checkEffect<T>(
         const target = getMetaAtPath(doc.meta, effect.path);
         if (!target) return {command, effect, reason: 'missing-target'};
         if (target.kind !== 'richText') return {command, effect, reason: 'wrong-incarnation'};
-        return checkRichTextEffectTarget(doc, command, effect, target);
+        return checkRichTextEffectTarget(doc, command, effect);
     }
 
     const target = getMetaAtPath(doc.meta, effect.path);
@@ -871,11 +869,12 @@ function checkEffect<T>(
 }
 
 function checkRichTextEffectTarget<T>(
-    _doc: CrdtDocument<T>,
+    doc: CrdtDocument<T>,
     command: DerivedCommand,
     effect: Extract<LocalEffect, {kind: 'richText'}>,
-    target: RichTextMeta,
 ): BlockedEffect | null {
+    const target = cloneRichTextStateAtCrdtPath(doc, effect.path);
+    if (!target) return {command, effect, reason: 'missing-target'};
     switch (effect.change.action) {
         case 'insert': {
             const char = target.chars.find((candidate) => candidate.opId === effect.change.opId);
@@ -898,8 +897,8 @@ function checkRichTextEffectTarget<T>(
     }
 }
 
-function richTextHasMarkOperation(meta: RichTextMeta, opId: string) {
-    return meta.chars.some(
+function richTextHasMarkOperation(state: RichTextState, opId: string) {
+    return state.chars.some(
         (char) =>
             char.markOpsBefore?.some((operation) => operation.opId === opId) ||
             char.markOpsAfter?.some((operation) => operation.opId === opId),
@@ -930,10 +929,27 @@ function cloneEffectMeta(meta: CrdtMeta | undefined): CrdtMeta | undefined {
     return meta ? cloneMeta(meta) : undefined;
 }
 
+function cloneRichTextStateAtCrdtPath<T>(
+    doc: CrdtDocument<T>,
+    path: CrdtPathSegment[],
+): RichTextState | undefined {
+    const normalPath = normalPathForCrdtPath(doc, path);
+    if (!normalPath) return undefined;
+    let value: unknown = doc.state;
+    for (const segment of normalPath) {
+        if (!value || typeof value !== 'object') return undefined;
+        value = (value as Record<string | number, unknown>)[segment.key];
+    }
+    if (!value || typeof value !== 'object' || !Array.isArray((value as {chars?: unknown}).chars)) {
+        return undefined;
+    }
+    return structuredClone(value) as RichTextState;
+}
+
 function cloneDocumentWithoutPending<T>(doc: CrdtDocument<T>): CrdtDocument<T> {
     const meta = cloneMeta(doc.meta);
     return {
-        state: materialize(meta) as T,
+        state: materialize(meta, doc.state) as T,
         meta,
         pending: [],
         schema: doc.schema,

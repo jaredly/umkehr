@@ -41,7 +41,7 @@ import type {PatchBuilderInternal} from '../types.js';
 import {useLatest} from '../react/useLatest.js';
 import {type RichCollaborativeText, type RichTextImportSnapshot} from '../richtext/index.js';
 import {materializeRichTextState} from '../peritext/materialize.js';
-import type {RichTextJsonValue, RichTextRenderView} from '../peritext/types.js';
+import type {RichTextJsonValue, RichTextRenderView, RichTextState} from '../peritext/types.js';
 import {createStatusStore, type StatusStore} from '../statuses.js';
 import {
     createEphemeralStore,
@@ -257,10 +257,7 @@ export const createSyncedContext = <T, Tag extends string = 'type', EphemeralDat
                     useRichText(node) {
                         const path = getPath(node);
                         const [view, setView] = useResettingState(() => {
-                            const meta = getMetaAtExistingPath(visibleHistory(ctx).doc, path);
-                            return meta?.kind === 'richText'
-                                ? materializeRichTextState(meta)
-                                : {plainText: '', spans: []};
+                            return richTextViewAtPath(visibleHistory(ctx).doc, path);
                         }, [path]);
                         const latestView = useLatest(view);
                         useEffect(
@@ -269,11 +266,7 @@ export const createSyncedContext = <T, Tag extends string = 'type', EphemeralDat
                                     () => visibleState(ctx),
                                     ctx.listenersByPath,
                                 ).listenToPath(path, () => {
-                                    const meta = getMetaAtExistingPath(visibleHistory(ctx).doc, path);
-                                    const next =
-                                        meta?.kind === 'richText'
-                                            ? materializeRichTextState(meta)
-                                            : {plainText: '', spans: []};
+                                    const next = richTextViewAtPath(visibleHistory(ctx).doc, path);
                                     if (!equal(next, latestView.current)) setView(next);
                                 }),
                             [ctx, path, latestView],
@@ -302,6 +295,27 @@ export const createSyncedContext = <T, Tag extends string = 'type', EphemeralDat
 function getMetaAtExistingPath<T>(doc: CrdtDocument<T>, path: Path) {
     const crdtPath = tryCrdtPathForExisting(doc, path);
     return crdtPath ? getMetaAtPath(doc.meta, crdtPath) : undefined;
+}
+
+function richTextViewAtPath<T>(doc: CrdtDocument<T>, path: Path): RichTextRenderView {
+    const meta = getMetaAtExistingPath(doc, path);
+    const value = valueAtPath(doc.state, path);
+    return meta?.kind === 'richText' && isRichTextState(value)
+        ? materializeRichTextState(value)
+        : {plainText: '', spans: []};
+}
+
+function valueAtPath(root: unknown, path: Path) {
+    let current = root;
+    for (const segment of path) {
+        if (!current || typeof current !== 'object') return undefined;
+        current = (current as Record<string | number, unknown>)[segment.key];
+    }
+    return current;
+}
+
+function isRichTextState(value: unknown): value is RichTextState {
+    return Boolean(value && typeof value === 'object' && Array.isArray((value as {chars?: unknown}).chars));
 }
 
 function tryCrdtPathForExisting<T>(doc: CrdtDocument<T>, path: Path) {

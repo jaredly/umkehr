@@ -39,3 +39,25 @@
 - `pnpm test src/crdt/richtext.test.ts` passed.
 - `pnpm test src/crdt` passed.
 - `pnpm test` passed: 50 files, 393 tests.
+
+### Phase 7: rich-text data moved into user-visible state
+
+- Changed `richText()` from a sentinel-only value into an empty durable rich-text value: `{kind: 'rich-text', version: 1, chars: []}`.
+- Changed rich-text CRDT metadata to keep cache/control data only for now: `kind`, `created`, and `maxOpCounter`.
+- Updated CRDT materialization to preserve rich-text values from existing document state instead of reconstructing them from metadata.
+- Updated CRDT rich-text apply to read/write the durable rich-text value at the normal document path and update metadata's cached `maxOpCounter`.
+- Updated rich-text patch generation to read visible text/ranges from `doc.state` while allocating op IDs from metadata's cached counter.
+- Updated undo/redo rich-text effect capture and target checks to use durable rich-text state instead of rich-text metadata.
+- Updated the React rich-text hook to materialize views from document state rather than metadata.
+- Removed the accidental `maxOpCounter` cache from user-visible `RichTextState`; it now lives only in CRDT rich-text metadata.
+
+### Phase 7 issues encountered
+
+- Changing `RichCollaborativeText` to intersect with `RichTextState` caused the generated Typia schema marker to disappear. Rewrote the public type so `chars`/`pending` are explicit properties on the same plugin-marked object.
+- Several tests still asserted the old sentinel-only state shape. Updated those tests to assert the new durable state representation.
+
+### Phase 7 verification
+
+- `pnpm test src/crdt/richtext.test.ts` passed.
+- `pnpm test src/crdt src/react-crdt src/richtext src/peritext` passed.
+- `pnpm test` passed: 50 files, 393 tests.

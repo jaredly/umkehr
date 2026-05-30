@@ -8,8 +8,8 @@ type State = {
 };
 
 describe('richtext public api', () => {
-    it('creates a singleton-style sentinel', () => {
-        expect(richText()).toEqual({kind: 'rich-text', version: 1});
+    it('creates an empty rich-text value', () => {
+        expect(richText()).toEqual({kind: 'rich-text', version: 1, chars: []});
     });
 
     it('creates import snapshots', () => {

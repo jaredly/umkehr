@@ -1,4 +1,4 @@
-import {compareOpIds, maxOpCounterAfterOperation} from './ids.js';
+import {compareOpIds} from './ids.js';
 import type {
     RichTextCharMeta,
     RichTextInsertOperation,
@@ -13,7 +13,7 @@ export type RichTextIndexRange = {
 };
 
 export function emptyRichTextState(): RichTextState {
-    return {chars: [], maxOpCounter: 0};
+    return {chars: []};
 }
 
 export function applyInsert(state: RichTextState, operation: RichTextInsertOperation): RichTextState {
@@ -32,11 +32,7 @@ export function applyInsert(state: RichTextState, operation: RichTextInsertOpera
     };
     const chars = state.chars.slice();
     chars.splice(insertionIndexForInsert(state.chars, inserted), 0, inserted);
-    return {
-        chars,
-        ...(state.pending?.length ? {pending: state.pending.slice()} : {}),
-        maxOpCounter: maxOpCounterAfterOperation(state, operation),
-    };
+    return {...state, chars, ...(state.pending?.length ? {pending: state.pending.slice()} : {})};
 }
 
 export function applyRemove(state: RichTextState, operation: RichTextRemoveOperation): RichTextState {
@@ -48,7 +44,7 @@ export function applyRemove(state: RichTextState, operation: RichTextRemoveOpera
     if (!existing || existing.deleted) return state;
     const chars = state.chars.slice();
     chars[index] = {...existing, deleted: true};
-    return {...state, chars, maxOpCounter: maxOpCounterAfterOperation(state, operation)};
+    return {...state, chars};
 }
 
 export function visibleChars(state: RichTextState) {
@@ -136,7 +132,6 @@ export function cloneState(state: RichTextState): RichTextState {
     return {
         chars: cloneChars(state.chars),
         ...(state.pending?.length ? {pending: state.pending.slice()} : {}),
-        ...(state.maxOpCounter !== undefined ? {maxOpCounter: state.maxOpCounter} : {}),
     };
 }
 

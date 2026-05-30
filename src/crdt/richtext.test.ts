@@ -38,14 +38,14 @@ describe('crdt rich text metadata', () => {
             {timestamp: '001'},
         );
 
-        expect(doc.state).toEqual({title: 'Draft', body: {kind: 'rich-text', version: 1}});
+        expect(doc.state).toEqual({title: 'Draft', body: {kind: 'rich-text', version: 1, chars: []}});
         expect(doc.meta).toMatchObject({
             kind: 'object',
             fields: {
                 body: {
                     kind: 'richText',
                     created: '001',
-                    chars: [],
+                    maxOpCounter: 0,
                 },
             },
         });
@@ -86,7 +86,8 @@ describe('crdt rich text metadata', () => {
 
         for (const update of updates) doc = applyCrdtUpdate(doc, update);
 
-        expect(doc.state.body).toEqual({kind: 'rich-text', version: 1});
+        expect(doc.state.body).toMatchObject({kind: 'rich-text', version: 1});
+        expect(doc.state.body.chars).toHaveLength(2);
         expect(materializeRichText(doc, [{type: 'key', key: 'body'}]).plainText).toBe('hi');
     });
 

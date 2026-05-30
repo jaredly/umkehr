@@ -28,12 +28,10 @@ export function buildMeta(
 ): CrdtMeta {
     if (value === undefined) return {kind: 'tombstone', deleted: ts};
     const schema = resolveRef(ctx, inputSchema);
-    if (isRichTextSchema(schema)) {
+    if (isRichTextSchema(schema) || isRichTextValue(value)) {
         return {
             kind: 'richText',
             created: ts,
-            sentinel: {kind: 'rich-text', version: 1},
-            chars: [],
             maxOpCounter: 0,
         };
     }
@@ -85,6 +83,16 @@ export function buildMeta(
             fields[key] = buildMeta(field, propertySchema(ctx, schema, key), ctx, ts);
     }
     return {kind: 'object', created: ts, fields};
+}
+
+function isRichTextValue(value: JsonValue | undefined) {
+    return Boolean(
+        value &&
+            typeof value === 'object' &&
+            !Array.isArray(value) &&
+            (value as {kind?: unknown}).kind === 'rich-text' &&
+            Array.isArray((value as {chars?: unknown}).chars),
+    );
 }
 
 export function cloneMeta(meta: CrdtMeta): CrdtMeta {

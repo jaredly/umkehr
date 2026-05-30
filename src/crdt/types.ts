@@ -1,6 +1,5 @@
 import type {OpenApi} from 'typia';
-import type {RichCollaborativeText} from '../richtext/index.js';
-import type {RichTextCharMeta, RichTextOperation} from '../peritext/types.js';
+import type {RichTextOperation} from '../peritext/types.js';
 
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | {[key: string]: JsonValue | undefined};
@@ -76,10 +75,7 @@ export type TombstoneMeta = {
 export type RichTextMeta = {
     kind: 'richText';
     created: HlcTimestamp;
-    sentinel: RichCollaborativeText;
-    chars: RichTextCharMeta[];
-    pending?: RichTextOperation[];
-    maxOpCounter?: number;
+    maxOpCounter: number;
 };
 
 export type CrdtMeta =

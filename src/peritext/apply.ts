@@ -1,5 +1,4 @@
 import {applyMarkOperation} from './marks.js';
-import {maxOpCounterAfterOperation} from './ids.js';
 import {applyInsert, applyRemove} from './sequence.js';
 import type {RichTextAnchor, RichTextOperation, RichTextState} from './types.js';
 
@@ -13,7 +12,6 @@ export function applyRichTextOperation(
         return {
             ...state,
             pending: [...(state.pending ?? []), operation],
-            maxOpCounter: maxOpCounterAfterOperation(state, operation),
         };
     }
     return retryPending({
@@ -77,12 +75,9 @@ function retryPending(state: RichTextState): RichTextState {
         }
         current = remaining.length ? {...current, pending: remaining} : {...current, pending: undefined};
     }
-    return current.pending?.length
-        ? current
-        : {
-              chars: current.chars,
-              ...(current.maxOpCounter !== undefined ? {maxOpCounter: current.maxOpCounter} : {}),
-          };
+    if (current.pending?.length) return current;
+    const {pending: _pending, ...settled} = current;
+    return settled;
 }
 
 function hasOperation(state: RichTextState, operation: RichTextOperation) {

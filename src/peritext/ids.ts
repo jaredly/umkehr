@@ -46,7 +46,6 @@ export function compareOpIds(a: RichTextOpId, b: RichTextOpId) {
 }
 
 export function maxOpCounter(state: RichTextState): number {
-    if (state.maxOpCounter !== undefined) return state.maxOpCounter;
     let max = 0;
     for (const char of state.chars) {
         max = Math.max(max, parseOpId(char.opId).counter);
@@ -77,11 +76,8 @@ export function operationOpIds(operation: RichTextOperation): RichTextOpId[] {
     return [operation.opId];
 }
 
-export function maxOpCounterAfterOperation(
-    state: RichTextState,
-    operation: RichTextOperation,
-) {
-    let max = maxOpCounter(state);
+export function maxOpCounterAfterOperation(maxCounter: number, operation: RichTextOperation) {
+    let max = maxCounter;
     for (const opId of operationOpIds(operation)) {
         max = Math.max(max, parseOpId(opId).counter);
     }

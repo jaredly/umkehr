@@ -1,6 +1,6 @@
 import type {tags} from 'typia';
 import {crdtPathForExisting, getMetaAtPath} from '../crdt/path.js';
-import {materializeRichTextState, richTextSnapshotFromPlainText} from '../peritext/index.js';
+import {emptyRichTextState, materializeRichTextState, richTextSnapshotFromPlainText} from '../peritext/index.js';
 import type {CrdtDocument} from '../crdt/types.js';
 import type {
     RichTextImportSnapshot,
@@ -15,6 +15,8 @@ declare const richTextBrand: unique symbol;
 export type RichCollaborativeText = {
     kind: 'rich-text';
     version: 1;
+    chars: RichTextState['chars'];
+    pending?: RichTextState['pending'];
 } & tags.JsonSchemaPlugin<{
     'x-umkehr-crdt': 'rich-text';
     'x-umkehr-rich-text-version': 1;
@@ -25,7 +27,7 @@ export type RichCollaborativeText = {
 export type {RichTextImportSnapshot, RichTextRenderView, RichTextSpan};
 
 export function richText(): RichCollaborativeText {
-    return {kind: 'rich-text', version: 1} as RichCollaborativeText;
+    return {kind: 'rich-text', version: 1, ...emptyRichTextState()} as RichCollaborativeText;
 }
 
 export function richTextFromPlainText(text: string): RichTextImportSnapshot {
@@ -42,9 +44,30 @@ export function materializeRichText<T>(doc: CrdtDocument<T>, path: Path): RichTe
     if (!meta || (meta as {kind?: string}).kind !== 'richText') {
         throw new Error('Cannot materialize rich text: path does not point to a rich-text field.');
     }
-    return materializeRichTextState(meta as unknown as RichTextState);
+    const value = getValueAtPath(doc.state, path);
+    if (!isRichTextState(value)) {
+        throw new Error('Cannot materialize rich text: state value is not rich-text data.');
+    }
+    return materializeRichTextState(value);
 }
 
 export function richTextToPlainText(view: RichTextRenderView) {
     return view.plainText;
+}
+
+function getValueAtPath(root: unknown, path: Path) {
+    let current = root;
+    for (const segment of path) {
+        if (!current || typeof current !== 'object') return undefined;
+        current = (current as Record<string | number, unknown>)[segment.key];
+    }
+    return current;
+}
+
+function isRichTextState(value: unknown): value is RichTextState {
+    return Boolean(
+        value &&
+            typeof value === 'object' &&
+            Array.isArray((value as {chars?: unknown}).chars),
+    );
 }

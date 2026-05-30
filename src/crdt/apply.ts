@@ -1,8 +1,9 @@
 import {compareTimestamps, newer} from './clock.js';
 import {materialize} from './materialize.js';
 import {buildMeta, cloneMeta, versionOf} from './metadata.js';
-import {getChild, getMetaAtPath} from './path.js';
+import {getChild, getMetaAtPath, normalPathForCrdtPath} from './path.js';
 import {applyRichTextOperation} from '../peritext/apply.js';
+import {maxOpCounterAfterOperation} from '../peritext/ids.js';
 import {arrayItemSchema, resolveRef, schemaAtCrdtPath} from './schema.js';
 import {checkParent} from './traversal.js';
 import type {
@@ -14,6 +15,8 @@ import type {
     CrdtUpdate,
     PendingUpdate,
 } from './types.js';
+import type {RichTextState} from '../peritext/types.js';
+import type {Path} from '../types.js';
 
 type WalkResult =
     | {status: 'ready'; parent: CrdtMeta; target?: CrdtMeta; segment?: CrdtPathSegment}
@@ -35,7 +38,7 @@ export function applyCrdtUpdate<T>(doc: CrdtDocument<T>, update: CrdtUpdate): Cr
         });
     }
     if (result === 'applied') retryPending(next);
-    next.state = materialize(next.meta) as T;
+    next.state = materialize(next.meta, next.state) as T;
     return next;
 }
 
@@ -89,10 +92,12 @@ function applyRichText<T>(
     if (!meta) return 'pending';
     if (meta.kind === 'tombstone') return 'discarded';
     if (meta.kind !== 'richText') return 'discarded';
-    const next = applyRichTextOperation(meta, update.change);
-    meta.chars = next.chars;
-    meta.pending = next.pending;
-    meta.maxOpCounter = next.maxOpCounter;
+    const path = normalPathForCrdtPath(doc, update.path);
+    if (!path) return 'pending';
+    const state = richTextStateAtPath(doc.state, path);
+    const next = applyRichTextOperation(state, update.change);
+    doc.state = setValueAtPath(doc.state, path, next) as T;
+    meta.maxOpCounter = maxOpCounterAfterOperation(meta.maxOpCounter, update.change);
     return 'applied';
 }
 
@@ -218,6 +223,43 @@ function setChild(parent: CrdtMeta, segment: CrdtPathSegment, value: CrdtMeta) {
             parent.fields[segment.key] = value;
             return;
     }
+}
+
+function richTextStateAtPath(root: unknown, path: Path): RichTextState {
+    const value = valueAtPath(root, path);
+    if (!isRichTextState(value)) {
+        throw new Error('Cannot apply rich text update: state value is not rich-text data.');
+    }
+    return value;
+}
+
+function valueAtPath(root: unknown, path: Path) {
+    let current = root;
+    for (const segment of path) {
+        if (!current || typeof current !== 'object') return undefined;
+        current = (current as Record<string | number, unknown>)[segment.key];
+    }
+    return current;
+}
+
+function setValueAtPath(root: unknown, path: Path, value: unknown): unknown {
+    if (!path.length) return value;
+    if (!root || typeof root !== 'object') {
+        throw new Error('Cannot set rich text state on non-object root.');
+    }
+    const [head, ...tail] = path;
+    if (!head) return value;
+    const clone = Array.isArray(root) ? root.slice() : {...(root as Record<string, unknown>)};
+    (clone as Record<string | number, unknown>)[head.key] = setValueAtPath(
+        (root as Record<string | number, unknown>)[head.key],
+        tail,
+        value,
+    );
+    return clone;
+}
+
+function isRichTextState(value: unknown): value is RichTextState {
+    return Boolean(value && typeof value === 'object' && Array.isArray((value as {chars?: unknown}).chars));
 }
 
 function retryPending<T>(doc: CrdtDocument<T>) {
