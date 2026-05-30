@@ -32,6 +32,7 @@ NEEDS TO TEST:
 
 ok can you write up a plan.md detailing what needs to be done?
 
-Ok can you write up a plan.md detailing what needs to be done? Split it up into logical phases if helpful.
+Ok I've answered questions inline.
+Can you write up a plan.md detailing what needs to be done? Split it up into logical phases if helpful.
 
-Ok, go ahead and implement, keeping a concise log of your progress in implementation-log.md
+Ok, go ahead and implement phase by phase, keeping a concise log of your progress in implementation-log.md
