@@ -2,10 +2,17 @@ import {describe, expect, it} from 'vitest';
 import typia from 'typia';
 import {
     applyCrdtUpdate,
+    applyLocalCommand,
     changedNormalPathsForCrdtUpdate,
+    canRedoLocalCommand,
+    canUndoLocalCommand,
     createCrdtDocument,
+    createCrdtLocalHistory,
     createCrdtUpdates,
     createCrdtUpdateValidator,
+    hlc,
+    redoLocalCommand,
+    undoLocalCommand,
 } from './index.js';
 import {
     materializeRichText,
@@ -131,5 +138,88 @@ describe('crdt rich text metadata', () => {
                 change: {...update.change, char: 'too long'},
             }),
         ).toMatchObject({success: false});
+    });
+
+    it('undoes and redoes grouped rich-text inserts with fresh operations', () => {
+        const base = createCrdtLocalHistory(
+            createCrdtDocument(
+                {title: 'Draft', body: richText()},
+                schema,
+                {timestamp: ts(0)},
+            ),
+        );
+        const $ = createPatchBuilder<State>();
+        const applied = applyLocalCommand(
+            base,
+            $.body.$text.insert({index: 0}, 'hi'),
+            hlc.init('local', 10),
+        );
+
+        expect(materializeRichText(applied.history.doc, [{type: 'key', key: 'body'}]).plainText).toBe(
+            'hi',
+        );
+        expect(applied.updates).toHaveLength(2);
+        expect(canUndoLocalCommand(applied.history, 'local')).toBe(true);
+
+        const undone = undoLocalCommand(applied.history, 'local', applied.clock);
+        expect(undone.ok).toBe(true);
+        if (!undone.ok) return;
+        expect(materializeRichText(undone.history.doc, [{type: 'key', key: 'body'}]).plainText).toBe(
+            '',
+        );
+        expect(undone.updates).toHaveLength(2);
+        expect(undone.updates.every((update) => update.op === 'richText')).toBe(true);
+        expect(canRedoLocalCommand(undone.history, 'local')).toBe(true);
+
+        const redone = redoLocalCommand(undone.history, 'local', undone.clock);
+        expect(redone.ok).toBe(true);
+        if (!redone.ok) return;
+        expect(materializeRichText(redone.history.doc, [{type: 'key', key: 'body'}]).plainText).toBe(
+            'hi',
+        );
+        expect(redone.updates).toHaveLength(2);
+        expect(redone.updates[0]?.op === 'richText' ? redone.updates[0].change.opId : '').not.toBe(
+            applied.updates[0]?.op === 'richText' ? applied.updates[0].change.opId : '',
+        );
+    });
+
+    it('undoes and redoes rich-text marks with fresh operations', () => {
+        let history = createCrdtLocalHistory(
+            createCrdtDocument(
+                {title: 'Draft', body: richText()},
+                schema,
+                {timestamp: ts(0)},
+            ),
+        );
+        const $ = createPatchBuilder<State>();
+        const inserted = applyLocalCommand(
+            history,
+            $.body.$text.insert({index: 0}, 'hi'),
+            hlc.init('local', 10),
+        );
+        history = inserted.history;
+        const marked = applyLocalCommand(
+            history,
+            $.body.$text.mark({start: 0, end: 2}, 'strong', true),
+            inserted.clock,
+        );
+
+        expect(materializeRichText(marked.history.doc, [{type: 'key', key: 'body'}]).spans).toEqual([
+            {text: 'hi', marks: {strong: true}},
+        ]);
+
+        const undone = undoLocalCommand(marked.history, 'local', marked.clock);
+        expect(undone.ok).toBe(true);
+        if (!undone.ok) return;
+        expect(materializeRichText(undone.history.doc, [{type: 'key', key: 'body'}]).spans).toEqual([
+            {text: 'hi'},
+        ]);
+
+        const redone = redoLocalCommand(undone.history, 'local', undone.clock);
+        expect(redone.ok).toBe(true);
+        if (!redone.ok) return;
+        expect(materializeRichText(redone.history.doc, [{type: 'key', key: 'body'}]).spans).toEqual([
+            {text: 'hi', marks: {strong: true}},
+        ]);
     });
 });

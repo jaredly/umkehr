@@ -4,13 +4,20 @@ import {act, cleanup, fireEvent, render, waitFor} from '@testing-library/react';
 import {afterEach, describe, expect, it} from 'vitest';
 import type {IJsonSchemaCollection} from 'typia';
 import {createCrdtDocument, createCrdtLocalHistory, hlc, type CrdtUpdate} from '../crdt/index';
-import {createSyncedContext, useStatuses, useValue, type SyncedTransport} from './react-crdt';
+import {
+    createSyncedContext,
+    RichTextEditor,
+    useStatuses,
+    useValue,
+    type SyncedTransport,
+} from './react-crdt';
 import {createStatusStore} from '../statuses';
 import type {EphemeralMessage} from '../ephemeral';
 import {type Updater} from '../react';
 import {createContext, useContext} from 'react';
 import React from 'react';
 import {deepEqual as equal} from '../deepEqual';
+import {richText, type RichCollaborativeText} from '../richtext';
 
 type State = {
     title: string;
@@ -30,6 +37,10 @@ type EphemeralTestData = {value: string};
 
 type ReorderListState = {
     todos: Array<{id: string; title: string}>;
+};
+
+type RichTextState = {
+    body: RichCollaborativeText;
 };
 
 const schema = {
@@ -100,6 +111,32 @@ const createReorderListHistory = () =>
             reorderListSchema,
             {timestamp: startTs},
         ),
+    );
+
+const richTextSchema = {
+    schemas: [
+        {
+            type: 'object',
+            properties: {
+                body: {
+                    type: 'object',
+                    properties: {
+                        kind: {const: 'rich-text'},
+                        version: {const: 1},
+                    },
+                    required: ['kind', 'version'],
+                    'x-umkehr-crdt': 'rich-text',
+                    'x-umkehr-rich-text-version': 1,
+                },
+            },
+        },
+    ],
+    components: {schemas: {}},
+} as unknown as IJsonSchemaCollection<'3.1', [RichTextState]>;
+
+const createRichTextHistory = () =>
+    createCrdtLocalHistory(
+        createCrdtDocument({body: richText()}, richTextSchema, {timestamp: startTs}),
     );
 
 const listSchema = {
@@ -205,6 +242,67 @@ const [EphemeralProvider, useEphemeralCtx] = createSyncedContext<State, 'type', 
 afterEach(() => cleanup());
 
 describe('createSyncedContext', () => {
+    it('renders and edits rich text through the synced contenteditable helper', async () => {
+        const [Provider, useDoc] = createSyncedContext<RichTextState>('type');
+        const transport = new TestTransport('local');
+
+        function Editor() {
+            const ctx = useDoc();
+            const body = ctx.useRichText(ctx.$.body);
+            return <RichTextEditor {...body} />;
+        }
+
+        const view = render(
+            <Provider initial={createRichTextHistory()} transport={transport}>
+                <Editor />
+            </Provider>,
+        );
+
+        const editor = view.getByRole('textbox');
+        expect(editor.textContent).toBe('');
+
+        editor.textContent = 'hello';
+        fireEvent.input(editor);
+
+        await waitFor(() => expect(editor.textContent).toBe('hello'));
+        expect(transport.published.at(-1)).toHaveLength(5);
+        expect(transport.published.at(-1)?.every((update) => update.op === 'richText')).toBe(true);
+    });
+
+    it('renders rich text inline marks from the derived view', async () => {
+        const [Provider, useDoc] = createSyncedContext<RichTextState>('type');
+        const transport = new TestTransport('local');
+
+        function Editor() {
+            const ctx = useDoc();
+            const body = ctx.useRichText(ctx.$.body);
+            return (
+                <>
+                    <RichTextEditor {...body} />
+                    <button
+                        type="button"
+                        onClick={() => {
+                            body.commands.insert(0, 'hi');
+                            body.commands.mark(0, 2, 'strong', true);
+                        }}
+                    >
+                        bold
+                    </button>
+                </>
+            );
+        }
+
+        const view = render(
+            <Provider initial={createRichTextHistory()} transport={transport}>
+                <Editor />
+            </Provider>,
+        );
+
+        fireEvent.click(view.getByText('bold'));
+
+        await waitFor(() => expect(view.getByRole('textbox').querySelector('strong')?.textContent).toBe('hi'));
+    });
+
     it('renders subscribed values, dispatches local updates, and publishes CRDT updates', () => {
         const [Provider, useTodos] = createSyncedContext<State>('type');
         const transport = new TestTransport('local');

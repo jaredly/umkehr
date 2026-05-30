@@ -90,3 +90,37 @@
 ## Full-Suite Checkpoint
 
 - Verification: `npm test` passed, including build, package smoke tests, CRDT tests, rich-text tests, and Peritext tests.
+
+## Phase 10: Undo/Redo And Command Grouping
+
+- Added rich-text-specific local effects so rich-text updates are no longer captured as generic field sets.
+- Undo for rich-text insert operations now generates fresh Peritext remove operations.
+- Redo for rich-text insert operations now generates fresh Peritext insert operations.
+- Undo/redo for addMark/removeMark generates corresponding fresh mark operations.
+- Rich-text undo/redo opIds are allocated from the current rich-text metadata counter and current HLC actor.
+- Rich-text undo guards now check operation-level targets instead of whole-document snapshots, allowing multi-character command grouping.
+- Added tests for grouped text insert undo/redo and mark undo/redo.
+- Verification: `npx vitest run src/crdt/richtext.test.ts src/crdt/history.test.ts src/peritext/*.test.ts` passed.
+- Verification: `npm run typecheck` passed.
+
+## Phase 11: React And Custom Contenteditable
+
+- Added `useRichText` to synced contexts, returning a derived rich-text view plus command helpers.
+- Added a minimal `RichTextEditor` contenteditable component that renders inline mark spans and commits text changes through `$text.replace`.
+- Fixed CRDT React dispatch so rich-text patches are not skipped just because public state remains the same sentinel.
+- Exported `RichTextEditor` and `RichTextBinding` from `umkehr/react-crdt`.
+- Added React tests for contenteditable editing and inline mark rendering.
+- Verification: `npx vitest run src/react-crdt/react-crdt.test.tsx src/crdt/richtext.test.ts src/peritext/*.test.ts` passed.
+- Verification: `npm run typecheck` passed.
+
+## Phase 12: Migration And Persistence
+
+- Confirmed existing path-based CRDT migration helpers apply to `op: 'richText'` updates because they use the normal `path` field.
+- Added migration tests proving rich-text update paths are renamed and dropped by the existing object-field helpers.
+- Added an end-to-end `migrateCrdtUpdates` test for a rich-text field rename from `body` to `content`, including source/target validation against rich-text schema markers.
+- Verification: `npx vitest run src/migration/migration.test.ts src/react-crdt/react-crdt.test.tsx src/crdt/richtext.test.ts src/peritext/*.test.ts` passed.
+- Verification: `npm run typecheck` passed.
+
+## Final Full-Suite Checkpoint
+
+- Verification: `npm test` passed, including build and all 47 Vitest files.

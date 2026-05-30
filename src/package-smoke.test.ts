@@ -69,6 +69,7 @@ describe('package exports', () => {
         const reactCrdtPkg = await import('umkehr/react-crdt');
 
         expect(typeof reactCrdtPkg.createSyncedContext).toBe('function');
+        expect(typeof reactCrdtPkg.RichTextEditor).toBe('function');
         expect(typeof reactCrdtPkg.useValue).toBe('function');
     });
 

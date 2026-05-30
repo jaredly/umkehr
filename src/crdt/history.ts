@@ -7,6 +7,8 @@ import * as hlc from './hlc.js';
 import {materialize} from './materialize.js';
 import {cloneMeta} from './metadata.js';
 import {getMetaAtPath} from './path.js';
+import {formatOpId, maxOpCounter} from '../peritext/ids.js';
+import {materializeRichTextState} from '../peritext/materialize.js';
 import {createCrdtUpdates} from './updates.js';
 import type {
     CrdtDocument,
@@ -19,7 +21,9 @@ import type {
     HlcTimestamp,
     ItemId,
     JsonValue,
+    RichTextMeta,
 } from './types.js';
+import type {RichTextOperation} from '../peritext/types.js';
 
 export type CrdtLocalHistory<T> = {
     base: CrdtDocument<T>;
@@ -66,6 +70,14 @@ export type LocalEffect =
           localTs: HlcTimestamp;
           before: Record<ItemId, {value: FractionalIndex; ts: HlcTimestamp} | undefined>;
           after: Record<ItemId, {value: FractionalIndex; ts: HlcTimestamp}>;
+      }
+    | {
+          kind: 'richText';
+          path: CrdtPathSegment[];
+          localTs: HlcTimestamp;
+          before: RichTextMeta | undefined;
+          after: RichTextMeta;
+          change: RichTextOperation;
       };
 
 export type BlockedEffect = {
@@ -187,7 +199,7 @@ export function undoLocalCommand<T>(
     if (blocked.length) return {ok: false, reason: 'blocked', blocked, history, clock};
 
     const nextTs = nextTimestamper(clock);
-    const undoUpdates = createUndoUpdates(command, nextTs);
+    const undoUpdates = createUndoUpdates(history.doc, command, nextTs);
     const commandId = undoUpdates[0]
         ? (latestCrdtUpdateTimestamp(undoUpdates[0]) ?? nextTs.currentPacked())
         : nextTs.currentPacked();
@@ -217,7 +229,7 @@ export function redoLocalCommand<T>(
     if (blocked.length) return {ok: false, reason: 'blocked', blocked, history, clock};
 
     const nextTs = nextTimestamper(clock);
-    const redoUpdates = createRedoUpdates(command, nextTs);
+    const redoUpdates = createRedoUpdates(history.doc, command, nextTs);
     const commandId = redoUpdates[0]
         ? (latestCrdtUpdateTimestamp(redoUpdates[0]) ?? nextTs.currentPacked())
         : nextTs.currentPacked();
@@ -472,6 +484,7 @@ function captureBefore<T>(doc: CrdtDocument<T>, update: CrdtUpdate) {
         }
         return before;
     }
+    if (update.op === 'richText') return cloneEffectMeta(getMetaAtPath(doc.meta, update.path));
     if (update.op === 'insert') return undefined;
     return cloneEffectMeta(getMetaAtPath(doc.meta, update.path));
 }
@@ -523,6 +536,25 @@ function captureEffect<T>(
         };
     }
 
+    if (update.op === 'richText') {
+        const after = cloneEffectMeta(getMetaAtPath(afterDoc.meta, update.path));
+        if (!after || after.kind !== 'richText') {
+            throw new Error('Cannot capture local CRDT rich text effect: target is missing after apply.');
+        }
+        const beforeMeta = before as CrdtMeta | undefined;
+        if (beforeMeta !== undefined && beforeMeta.kind !== 'richText') {
+            throw new Error('Cannot capture local CRDT rich text effect: target was not rich text before apply.');
+        }
+        return {
+            kind: 'richText',
+            path: update.path,
+            localTs: update.ts,
+            before: beforeMeta,
+            after,
+            change: update.change,
+        };
+    }
+
     if (update.op === 'delete') {
         return {
             kind: 'delete',
@@ -545,8 +577,13 @@ function captureEffect<T>(
     };
 }
 
-function createUndoUpdates(command: DerivedCommand, nextTs: ReturnType<typeof nextTimestamper>) {
+function createUndoUpdates<T>(
+    doc: CrdtDocument<T>,
+    command: DerivedCommand,
+    nextTs: ReturnType<typeof nextTimestamper>,
+) {
     const updates: CrdtUpdate[] = [];
+    let current = doc;
     for (const effect of command.effects.toReversed()) {
         switch (effect.kind) {
             case 'insert':
@@ -571,13 +608,26 @@ function createUndoUpdates(command: DerivedCommand, nextTs: ReturnType<typeof ne
                 }
                 break;
             }
+            case 'richText': {
+                const update = createRichTextUndoUpdate(current, effect, nextTs());
+                if (update) {
+                    updates.push(update);
+                    current = applyCrdtUpdate(current, update);
+                }
+                break;
+            }
         }
     }
     return updates;
 }
 
-function createRedoUpdates(command: DerivedCommand, nextTs: ReturnType<typeof nextTimestamper>) {
+function createRedoUpdates<T>(
+    doc: CrdtDocument<T>,
+    command: DerivedCommand,
+    nextTs: ReturnType<typeof nextTimestamper>,
+) {
     const updates: CrdtUpdate[] = [];
+    let current = doc;
     for (const effect of command.effects) {
         switch (effect.kind) {
             case 'insert':
@@ -605,9 +655,150 @@ function createRedoUpdates(command: DerivedCommand, nextTs: ReturnType<typeof ne
                 updates.push({op: 'setOrder', arrayPath: effect.arrayPath, orders});
                 break;
             }
+            case 'richText': {
+                const update = createRichTextRedoUpdate(current, effect, nextTs());
+                if (update) {
+                    updates.push(update);
+                    current = applyCrdtUpdate(current, update);
+                }
+                break;
+            }
         }
     }
     return updates;
+}
+
+function createRichTextUndoUpdate<T>(
+    doc: CrdtDocument<T>,
+    effect: Extract<LocalEffect, {kind: 'richText'}>,
+    ts: HlcTimestamp,
+): CrdtUpdate | null {
+    const opId = nextRichTextOpId(doc, effect.path, ts);
+    switch (effect.change.action) {
+        case 'insert':
+            return {
+                op: 'richText',
+                path: effect.path,
+                ts,
+                change: {action: 'remove', opId, removedId: effect.change.opId},
+            };
+        case 'remove': {
+            const change = effect.change as Extract<RichTextOperation, {action: 'remove'}>;
+            const removed = effect.before?.chars.find((char) => char.opId === change.removedId);
+            if (!removed) return null;
+            return {
+                op: 'richText',
+                path: effect.path,
+                ts,
+                change: {
+                    action: 'insert',
+                    opId,
+                    afterId: removed.afterId,
+                    char: removed.char,
+                },
+            };
+        }
+        case 'addMark':
+            return {
+                op: 'richText',
+                path: effect.path,
+                ts,
+                change: {
+                    action: 'removeMark',
+                    opId,
+                    start: effect.change.start,
+                    end: effect.change.end,
+                    markType: effect.change.markType,
+                },
+            };
+        case 'removeMark':
+            return {
+                op: 'richText',
+                path: effect.path,
+                ts,
+                change: {
+                    action: 'addMark',
+                    opId,
+                    start: effect.change.start,
+                    end: effect.change.end,
+                    markType: effect.change.markType,
+                    value: richTextMarkValueBefore(effect),
+                },
+            };
+    }
+}
+
+function createRichTextRedoUpdate<T>(
+    doc: CrdtDocument<T>,
+    effect: Extract<LocalEffect, {kind: 'richText'}>,
+    ts: HlcTimestamp,
+): CrdtUpdate | null {
+    const opId = nextRichTextOpId(doc, effect.path, ts);
+    switch (effect.change.action) {
+        case 'insert':
+            return {
+                op: 'richText',
+                path: effect.path,
+                ts,
+                change: {
+                    action: 'insert',
+                    opId,
+                    afterId: effect.change.afterId,
+                    char: effect.change.char,
+                },
+            };
+        case 'remove':
+            return {
+                op: 'richText',
+                path: effect.path,
+                ts,
+                change: {
+                    action: 'remove',
+                    opId,
+                    removedId: effect.change.removedId,
+                },
+            };
+        case 'addMark':
+            return {
+                op: 'richText',
+                path: effect.path,
+                ts,
+                change: {
+                    ...effect.change,
+                    opId,
+                },
+            };
+        case 'removeMark':
+            return {
+                op: 'richText',
+                path: effect.path,
+                ts,
+                change: {
+                    ...effect.change,
+                    opId,
+                },
+            };
+    }
+}
+
+function nextRichTextOpId<T>(
+    doc: CrdtDocument<T>,
+    path: CrdtPathSegment[],
+    ts: HlcTimestamp,
+) {
+    const meta = getMetaAtPath(doc.meta, path);
+    if (!meta || meta.kind !== 'richText') {
+        throw new Error('Cannot create rich text undo/redo update: target is not rich text.');
+    }
+    const unpacked = hlc.unpack(ts);
+    return formatOpId(maxOpCounter(meta) + 1, `${unpacked.node}:${unpacked.suffix ?? 'main'}`);
+}
+
+function richTextMarkValueBefore(effect: Extract<LocalEffect, {kind: 'richText'}>) {
+    const markType = effect.change.action === 'removeMark' ? effect.change.markType : undefined;
+    if (!markType || !effect.before) return undefined;
+    return materializeRichTextState(effect.before).spans.find((span) => span.marks?.[markType] !== undefined)
+        ?.marks?.[markType];
 }
 
 function metaToUpdate(
@@ -659,6 +850,13 @@ function checkEffect<T>(
         return null;
     }
 
+    if (effect.kind === 'richText') {
+        const target = getMetaAtPath(doc.meta, effect.path);
+        if (!target) return {command, effect, reason: 'missing-target'};
+        if (target.kind !== 'richText') return {command, effect, reason: 'wrong-incarnation'};
+        return checkRichTextEffectTarget(doc, command, effect, target);
+    }
+
     const target = getMetaAtPath(doc.meta, effect.path);
     if (!target) return {command, effect, reason: 'missing-target'};
     if (effect.kind === 'delete') {
@@ -670,6 +868,42 @@ function checkEffect<T>(
         return {command, effect, reason: 'superseded'};
     }
     return null;
+}
+
+function checkRichTextEffectTarget<T>(
+    _doc: CrdtDocument<T>,
+    command: DerivedCommand,
+    effect: Extract<LocalEffect, {kind: 'richText'}>,
+    target: RichTextMeta,
+): BlockedEffect | null {
+    switch (effect.change.action) {
+        case 'insert': {
+            const char = target.chars.find((candidate) => candidate.opId === effect.change.opId);
+            if (!char) return {command, effect, reason: 'missing-target'};
+            if (char.deleted) return {command, effect, reason: 'deleted'};
+            return null;
+        }
+        case 'remove': {
+            const change = effect.change as Extract<RichTextOperation, {action: 'remove'}>;
+            const char = target.chars.find((candidate) => candidate.opId === change.removedId);
+            if (!char) return {command, effect, reason: 'missing-target'};
+            if (!char.deleted) return {command, effect, reason: 'superseded'};
+            return null;
+        }
+        case 'addMark':
+        case 'removeMark':
+            return richTextHasMarkOperation(target, effect.change.opId)
+                ? null
+                : {command, effect, reason: 'missing-target'};
+    }
+}
+
+function richTextHasMarkOperation(meta: RichTextMeta, opId: string) {
+    return meta.chars.some(
+        (char) =>
+            char.markOpsBefore?.some((operation) => operation.opId === opId) ||
+            char.markOpsAfter?.some((operation) => operation.opId === opId),
+    );
 }
 
 function withCommand(

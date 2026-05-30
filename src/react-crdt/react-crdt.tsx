@@ -39,6 +39,13 @@ import {
 import {pathToString, type ApplyTiming, type DraftPatch, type Path} from '../types.js';
 import type {PatchBuilderInternal} from '../types.js';
 import {useLatest} from '../react/useLatest.js';
+import {
+    richTextFromPlainText,
+    type RichCollaborativeText,
+    type RichTextImportSnapshot,
+} from '../richtext/index.js';
+import {materializeRichTextState} from '../peritext/materialize.js';
+import type {RichTextJsonValue, RichTextRenderView} from '../peritext/types.js';
 import {createStatusStore, type StatusStore} from '../statuses.js';
 import {
     createEphemeralStore,
@@ -76,9 +83,57 @@ export type SyncedContext<T, Tag extends string = 'type', EphemeralData = never>
     useCrdtMeta<Current>(
         node: PatchBuilderInternal<unknown, Current, Tag, unknown, Context>,
     ): CrdtMeta | undefined;
+    useRichText(
+        node: PatchBuilderInternal<unknown, RichCollaborativeText, Tag, void, Context>,
+    ): RichTextBinding;
     $: ReturnType<typeof createPatchDispatcher<T, Context, Tag, void>>;
     dispatch(v: MaybeNested<DraftPatch<T, Tag, Context>>, when?: ApplyTiming): void;
 };
+
+export type RichTextBinding = {
+    view: RichTextRenderView;
+    commands: {
+        insert(index: number, text: string): void;
+        delete(start: number, end: number): void;
+        mark(
+            start: number,
+            end: number,
+            markType: string,
+            value: RichTextJsonValue,
+            preset?: 'inclusive' | 'exclusive' | 'none',
+        ): void;
+        unmark(
+            start: number,
+            end: number,
+            markType: string,
+            preset?: 'inclusive' | 'exclusive' | 'none',
+        ): void;
+        replace(snapshot: RichTextImportSnapshot): void;
+    };
+};
+
+export function RichTextEditor({
+    view,
+    commands,
+    ariaLabel = 'Rich text editor',
+}: RichTextBinding & {ariaLabel?: string}) {
+    return (
+        <div
+            key={`${view.plainText}:${JSON.stringify(view.spans)}`}
+            aria-label={ariaLabel}
+            contentEditable
+            role="textbox"
+            suppressContentEditableWarning
+            onInput={(event) => {
+                commands.replace(richTextFromPlainText(event.currentTarget.textContent ?? ''));
+            }}
+        >
+            {view.spans.map((span, index) => (
+                <RichTextSpanView key={index} span={span} />
+            ))}
+        </div>
+    );
+}
 
 type QueuedChanges<T, Tag extends string = 'type'> = DraftPatch<T, Tag, Context>[];
 
@@ -225,6 +280,43 @@ export const createSyncedContext = <T, Tag extends string = 'type', EphemeralDat
                         );
                         // tick;
                         return meta;
+                    },
+                    useRichText(node) {
+                        const path = getPath(node);
+                        const [view, setView] = useResettingState(() => {
+                            const meta = getMetaAtExistingPath(visibleHistory(ctx).doc, path);
+                            return meta?.kind === 'richText'
+                                ? materializeRichTextState(meta)
+                                : {plainText: '', spans: []};
+                        }, [path]);
+                        const latestView = useLatest(view);
+                        useEffect(
+                            () =>
+                                makeContextForPath(
+                                    () => visibleState(ctx),
+                                    ctx.listenersByPath,
+                                ).listenToPath(path, () => {
+                                    const meta = getMetaAtExistingPath(visibleHistory(ctx).doc, path);
+                                    const next =
+                                        meta?.kind === 'richText'
+                                            ? materializeRichTextState(meta)
+                                            : {plainText: '', spans: []};
+                                    if (!equal(next, latestView.current)) setView(next);
+                                }),
+                            [ctx, path, latestView],
+                        );
+                        return {
+                            view,
+                            commands: {
+                                insert: (index, text) => node.$text.insert({index}, text),
+                                delete: (start, end) => node.$text.delete({start, end}),
+                                mark: (start, end, markType, value, preset) =>
+                                    node.$text.mark({start, end}, markType, value, preset),
+                                unmark: (start, end, markType, preset) =>
+                                    node.$text.unmark({start, end}, markType, preset),
+                                replace: (snapshot) => node.$text.replace(snapshot),
+                            },
+                        };
                     },
                     $,
                     dispatch,
@@ -457,7 +549,7 @@ function applyLocalDraft<T, Tag extends string>(
     clearSyncedPreview(ctx);
     clearExternalPreview(ctx);
     const {current, changes} = resolveAndApply(ctx.history.doc.state, v, extra, tag, equalFn);
-    if (current === ctx.history.doc.state || !changes.length) return;
+    if (!changes.length) return;
 
     const result = applyLocalCommand(ctx.history, v, ctx.transport.tick(), extra, tag, equalFn);
     ctx.history = result.history;
@@ -575,3 +667,12 @@ function notifyAll<T, Tag extends string>(ctx: SyncedContextBase<T, Tag, any>) {
 }
 
 export {useValue, useStatuses};
+
+function RichTextSpanView({span}: {span: RichTextRenderView['spans'][number]}) {
+    let content: React.ReactNode = span.text;
+    if (span.marks?.code) content = <code>{content}</code>;
+    if (span.marks?.em) content = <em>{content}</em>;
+    if (span.marks?.strong) content = <strong>{content}</strong>;
+    if (typeof span.marks?.link === 'string') content = <a href={span.marks.link}>{content}</a>;
+    return <>{content}</>;
+}
