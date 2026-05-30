@@ -20,6 +20,9 @@ export default defineConfig({
             'umkehr/react-crdt': fileURLToPath(
                 new URL('./src/react-crdt/index.ts', import.meta.url),
             ),
+            'umkehr/react-rich-text': fileURLToPath(
+                new URL('./src/react-rich-text/index.ts', import.meta.url),
+            ),
             'umkehr/remix': fileURLToPath(new URL('./src/remix/index.ts', import.meta.url)),
             umkehr: fileURLToPath(new URL('./src/index.ts', import.meta.url)),
         },

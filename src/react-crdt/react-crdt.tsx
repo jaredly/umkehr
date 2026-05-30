@@ -39,11 +39,7 @@ import {
 import {pathToString, type ApplyTiming, type DraftPatch, type Path} from '../types.js';
 import type {PatchBuilderInternal} from '../types.js';
 import {useLatest} from '../react/useLatest.js';
-import {
-    richTextFromPlainText,
-    type RichCollaborativeText,
-    type RichTextImportSnapshot,
-} from '../richtext/index.js';
+import {type RichCollaborativeText, type RichTextImportSnapshot} from '../richtext/index.js';
 import {materializeRichTextState} from '../peritext/materialize.js';
 import type {RichTextJsonValue, RichTextRenderView} from '../peritext/types.js';
 import {createStatusStore, type StatusStore} from '../statuses.js';
@@ -111,29 +107,6 @@ export type RichTextBinding = {
         replace(snapshot: RichTextImportSnapshot): void;
     };
 };
-
-export function RichTextEditor({
-    view,
-    commands,
-    ariaLabel = 'Rich text editor',
-}: RichTextBinding & {ariaLabel?: string}) {
-    return (
-        <div
-            key={`${view.plainText}:${JSON.stringify(view.spans)}`}
-            aria-label={ariaLabel}
-            contentEditable
-            role="textbox"
-            suppressContentEditableWarning
-            onInput={(event) => {
-                commands.replace(richTextFromPlainText(event.currentTarget.textContent ?? ''));
-            }}
-        >
-            {view.spans.map((span, index) => (
-                <RichTextSpanView key={index} span={span} />
-            ))}
-        </div>
-    );
-}
 
 type QueuedChanges<T, Tag extends string = 'type'> = DraftPatch<T, Tag, Context>[];
 
@@ -667,12 +640,4 @@ function notifyAll<T, Tag extends string>(ctx: SyncedContextBase<T, Tag, any>) {
 }
 
 export {useValue, useStatuses};
-
-function RichTextSpanView({span}: {span: RichTextRenderView['spans'][number]}) {
-    let content: React.ReactNode = span.text;
-    if (span.marks?.code) content = <code>{content}</code>;
-    if (span.marks?.em) content = <em>{content}</em>;
-    if (span.marks?.strong) content = <strong>{content}</strong>;
-    if (typeof span.marks?.link === 'string') content = <a href={span.marks.link}>{content}</a>;
-    return <>{content}</>;
-}
+export {RichTextEditor} from '../react-rich-text/index.js';

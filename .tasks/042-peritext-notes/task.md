@@ -14,6 +14,3 @@ Some feedback on the peritext implementation:
 - ids.ts
   - using thrown exceptions and try/catch seems like a perf issue for something that's probaby very hot path
   - we need to be caching the `maxOpCounter` hardcore. might want it to live on `RichTextState`
-
-
-marks with payloads (comments etc.)

@@ -73,6 +73,14 @@ describe('package exports', () => {
         expect(typeof reactCrdtPkg.useValue).toBe('function');
     });
 
+    it('imports the built React rich text entry point separately', async () => {
+        expect(existsSync('dist/src/react-rich-text/index.js')).toBe(true);
+
+        const reactRichTextPkg = await import('umkehr/react-rich-text');
+
+        expect(typeof reactRichTextPkg.RichTextEditor).toBe('function');
+    });
+
     it('imports the built Remix entry point separately', async () => {
         expect(existsSync('dist/src/remix/index.js')).toBe(true);
 
