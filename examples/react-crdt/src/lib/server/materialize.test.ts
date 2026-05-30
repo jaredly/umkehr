@@ -2,17 +2,28 @@ import {describe, expect, it} from 'vitest';
 import type {IJsonSchemaCollection} from 'typia';
 import {
     createCrdtUpdates,
+    getMetaAtPath,
     hlc,
     latestCrdtUpdateTimestamp,
+    type CrdtPathSegment,
     type CrdtUpdate,
 } from 'umkehr/crdt';
 import {createInitialCrdtHistory, type AppDefinition} from '../crdtApp';
-import {buildMergePathPreview, materializeServerBranch} from './materialize';
+import {buildMergePathPreview, materializeServerBranch, pathKey} from './materialize';
 import type {PersistedServerBranch, ServerBranchEvent} from './types';
 
 type State = {
     title: string;
     count: number;
+};
+
+type ListItem = {
+    id: string;
+    title: string;
+};
+
+type ListState = {
+    items: ListItem[];
 };
 
 const schema = {
@@ -28,6 +39,29 @@ const schema = {
     components: {schemas: {}},
 } as unknown as IJsonSchemaCollection<'3.1', [State]>;
 
+const listSchema = {
+    schemas: [
+        {
+            type: 'object',
+            properties: {
+                items: {
+                    type: 'array',
+                    items: {
+                        type: 'object',
+                        properties: {
+                            id: {type: 'string'},
+                            title: {type: 'string'},
+                        },
+                        required: ['id', 'title'],
+                    },
+                },
+            },
+            required: ['items'],
+        },
+    ],
+    components: {schemas: {}},
+} as unknown as IJsonSchemaCollection<'3.1', [ListState]>;
+
 const app: AppDefinition<State> = {
     id: 'test',
     title: 'Test',
@@ -37,6 +71,23 @@ const app: AppDefinition<State> = {
     initialState: {title: 'Draft', count: 0},
     validateState(input) {
         return {success: true, data: input as State};
+    },
+    renderPanel() {
+        return null as never;
+    },
+};
+
+const listApp: AppDefinition<ListState> = {
+    id: 'list-test',
+    title: 'List Test',
+    schemaVersion: 1,
+    tagKey: 'type',
+    schema: listSchema,
+    initialState: {
+        items: [{id: 'one', title: 'One'}],
+    },
+    validateState(input) {
+        return {success: true, data: input as ListState};
     },
     renderPanel() {
         return null as never;
@@ -372,6 +423,74 @@ describe('buildMergePathPreview impact', () => {
     });
 });
 
+describe('buildMergePathPreview array insert paths', () => {
+    it('tracks a branch-side array insert by inserted item CRDT path', () => {
+        const initial = createInitialCrdtHistory(listApp);
+        const [insertUpdate] = createCrdtUpdates(
+            initial.doc,
+            {
+                op: 'add',
+                path: [
+                    {type: 'key', key: 'items'},
+                    {type: 'key', key: 1},
+                ],
+                value: {id: 'two', title: 'Two'},
+            },
+            timestamp('feature', 1),
+        );
+        expect(insertUpdate.op).toBe('insert');
+        if (insertUpdate.op !== 'insert') throw new Error('Expected insert update.');
+        const insertEvent = updateEvent('feature', 1, insertUpdate);
+        const branches = {
+            main: listBranch('main', []),
+            feature: {
+                ...listBranch('feature', [insertEvent]),
+                sourceBranchId: 'main',
+                forkEventIndex: 0,
+            },
+        };
+
+        const preview = buildMergePathPreview({
+            app: listApp,
+            branches,
+            targetBranchId: 'main',
+            sourceBranchId: 'feature',
+            sourceThroughEventIndex: 1,
+            revertedPathKeys: new Set(),
+            clock: hlc.init('preview', 0),
+        });
+        const insertedItemPath = [
+            ...insertUpdate.arrayPath,
+            {
+                type: 'arrayItem' as const,
+                id: insertUpdate.id,
+                parentCreated: arrayCreated(preview.merged.doc.meta, insertUpdate.arrayPath),
+            },
+        ];
+
+        expect(preview.merged.doc.state.items.map((item) => item.id)).toEqual(['one', 'two']);
+        expect(preview.changedPaths).toContainEqual(insertedItemPath);
+
+        const revertedPreview = buildMergePathPreview({
+            app: listApp,
+            branches,
+            targetBranchId: 'main',
+            sourceBranchId: 'feature',
+            sourceThroughEventIndex: 1,
+            revertedPathKeys: new Set([pathKey(insertedItemPath)]),
+            clock: hlc.init('preview', 0),
+        });
+
+        expect(revertedPreview.preview.doc.state.items.map((item) => item.id)).toEqual(['one']);
+    });
+});
+
+function arrayCreated(meta: Parameters<typeof getMetaAtPath>[0], path: CrdtPathSegment[]) {
+    const array = getMetaAtPath(meta, path);
+    if (!array || array.kind !== 'array') throw new Error('Expected array metadata.');
+    return array.created;
+}
+
 function branch(
     branchId: string,
     events: ServerBranchEvent[],
@@ -379,6 +498,20 @@ function branch(
     return {
         branchId,
         history: createInitialCrdtHistory(app),
+        lastSeenEventIndex: Math.max(0, ...events.map((event) => event.eventIndex)),
+        undoCheckpointEventIndex: 0,
+        events,
+        mirrored: true,
+    };
+}
+
+function listBranch(
+    branchId: string,
+    events: ServerBranchEvent[],
+): PersistedServerBranch<ListState> {
+    return {
+        branchId,
+        history: createInitialCrdtHistory(listApp),
         lastSeenEventIndex: Math.max(0, ...events.map((event) => event.eventIndex)),
         undoCheckpointEventIndex: 0,
         events,

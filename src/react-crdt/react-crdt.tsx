@@ -205,10 +205,7 @@ export const createSyncedContext = <T, Tag extends string = 'type', EphemeralDat
                         // const [tick, setTick] = useState(0);
                         const [meta, setMeta] = useResettingState(() => {
                             const history = visibleHistory(ctx);
-                            return getMetaAtPath(
-                                history.doc.meta,
-                                crdtPathForExisting(history.doc, path),
-                            );
+                            return getMetaAtExistingPath(history.doc, path);
                         }, [path]);
                         const lmeta = useLatest(meta);
                         useEffect(
@@ -218,10 +215,7 @@ export const createSyncedContext = <T, Tag extends string = 'type', EphemeralDat
                                     ctx.listenersByPath,
                                 ).listenToPath(path, () => {
                                     const history = visibleHistory(ctx);
-                                    const newMeta = getMetaAtPath(
-                                        history.doc.meta,
-                                        crdtPathForExisting(history.doc, path),
-                                    );
+                                    const newMeta = getMetaAtExistingPath(history.doc, path);
 
                                     if (!equal(newMeta, lmeta.current)) {
                                         setMeta(newMeta);
@@ -239,6 +233,25 @@ export const createSyncedContext = <T, Tag extends string = 'type', EphemeralDat
         },
     ] as const;
 };
+
+function getMetaAtExistingPath<T>(doc: CrdtDocument<T>, path: Path) {
+    const crdtPath = tryCrdtPathForExisting(doc, path);
+    return crdtPath ? getMetaAtPath(doc.meta, crdtPath) : undefined;
+}
+
+function tryCrdtPathForExisting<T>(doc: CrdtDocument<T>, path: Path) {
+    try {
+        return crdtPathForExisting(doc, path);
+    } catch (error) {
+        if (
+            error instanceof Error &&
+            error.message.startsWith('Cannot translate CRDT path:')
+        ) {
+            return null;
+        }
+        throw error;
+    }
+}
 
 function makeProvider<T, Tag extends string, EphemeralData>(
     Ctx: React.Context<SyncedContextBase<T, Tag, EphemeralData>>,

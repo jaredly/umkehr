@@ -9,7 +9,8 @@
     "test:e2e:smoke": "playwright test -c playwright.config.ts tests/smoke tests/server/server-history-preview.spec.ts",
     "test:e2e:server": "playwright test -c playwright.config.ts tests/server",
     "test:e2e:peerjs": "playwright test -c playwright.config.ts tests/peerjs",
-    "test:e2e:local-first": "playwright test -c playwright.config.ts tests/local-first"
+    "test:e2e:local-first": "playwright test -c playwright.config.ts tests/local-first",
+    "test:e2e:demo": "playwright test -c playwright.demo.config.ts"
   },
   "dependencies": {
     "idb": "^8.0.3",

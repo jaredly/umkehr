@@ -131,7 +131,12 @@ export function buildMergePathPreview<TState>({
         ),
         branchId: targetBranchId,
     });
-    const changedPaths = pathsForBranchThrough(branches, sourceBranchId, sourceThroughEventIndex);
+    const changedPaths = pathsForBranchThrough(
+        branches,
+        sourceBranchId,
+        sourceThroughEventIndex,
+        merged.doc,
+    );
     const impact = buildMergeImpact({
         branches,
         before: before.doc,
@@ -258,6 +263,7 @@ function pathsForBranchThrough<TState>(
     branches: Record<string, PersistedServerBranch<TState>>,
     branchId: string,
     throughEventIndex: number,
+    referenceDoc: CrdtDocument<TState>,
     seen = new Set<string>(),
 ): CrdtPathSegment[][] {
     const branch = branches[branchId];
@@ -271,12 +277,13 @@ function pathsForBranchThrough<TState>(
                     branches,
                     event.sourceBranchId,
                     event.sourceThroughEventIndex,
+                    referenceDoc,
                     seen,
                 ),
             );
             continue;
         }
-        const path = pathForUpdate(event.update);
+        const path = pathForUpdate(event.update, referenceDoc);
         const key = pathKey(path);
         if (seen.has(key)) continue;
         seen.add(key);
@@ -423,8 +430,21 @@ function sameDocumentContents<TState>(left: CrdtDocument<TState>, right: CrdtDoc
     );
 }
 
-function pathForUpdate(update: CrdtUpdate): CrdtPathSegment[] {
-    return update.op === 'set' || update.op === 'delete' ? update.path : update.arrayPath;
+function pathForUpdate<TState>(
+    update: CrdtUpdate,
+    referenceDoc: CrdtDocument<TState>,
+): CrdtPathSegment[] {
+    if (update.op === 'set' || update.op === 'delete') return update.path;
+    if (update.op === 'insert') {
+        const array = getMetaAtPath(referenceDoc.meta, update.arrayPath);
+        if (array?.kind === 'array') {
+            return [
+                ...update.arrayPath,
+                {type: 'arrayItem', id: update.id, parentCreated: array.created},
+            ];
+        }
+    }
+    return update.arrayPath;
 }
 
 function createRestoreUpdates<TState>(

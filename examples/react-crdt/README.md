@@ -36,3 +36,28 @@ you are running it from a fresh checkout:
 cd ../..
 pnpm run build
 ```
+
+## Playwright E2E
+
+From `examples/react-crdt`:
+
+```sh
+pnpm test:e2e:smoke
+pnpm test:e2e:server
+pnpm test:e2e:peerjs
+pnpm test:e2e:local-first
+pnpm test:e2e:demo
+```
+
+`test:e2e:smoke` is the critical local UI subset. The server, PeerJS, and
+local-first scripts cover heavier sync paths. `test:e2e:demo` uses
+`playwright.demo.config.ts`, records videos, and writes artifacts under
+`test-results`.
+
+Recent local runtimes on this machine:
+
+- smoke: about 1.1m
+- server: about 2.5m
+- PeerJS: about 20s
+- local-first: about 29s
+- demo: about 32s

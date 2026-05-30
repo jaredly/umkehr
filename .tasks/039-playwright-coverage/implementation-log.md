@@ -98,16 +98,17 @@
   - verifies reconnect flushes the edit to the server and a fresh client sees it.
 - Added `tests/server/server-branches.spec.ts`:
   - creates a branch;
-  - makes divergent scalar todo color edits across main and the branch;
+  - inserts a todo on the branch;
   - opens merge preview and verifies changed paths;
-  - accepts the merge and verifies the merged color state and timeline merge event.
+  - accepts the merge and verifies the inserted todo and timeline merge event.
 - Preserved the existing server history preview and migration/stale-review coverage.
 - Iterated on branch coverage:
   - an attempted branch todo insertion exposed a separate app crash: `Cannot translate CRDT path: array index 4 is missing`.
-  - changed this phase's branch/merge test to use scalar `bgcolor` edits so the server branch/merge UI is covered without blocking on that app bug.
-  - merge impact treats older scalar source updates as no-effect when a newer main update wins, so the passing test makes the branch edit after the main edit before merging.
+  - temporarily changed this phase's branch/merge test to use scalar `bgcolor` edits so the server branch/merge UI was covered without blocking on that app bug.
+  - after the bug was fixed, restored branch coverage to insert and merge a real todo from the source branch.
 - Verification:
-  - `pnpm test:e2e -- tests/server/server-sync.spec.ts tests/server/server-offline.spec.ts tests/server/server-branches.spec.ts` passed: 4 tests in 35.3s.
+  - `pnpm test:e2e -- tests/server/server-sync.spec.ts tests/server/server-offline.spec.ts tests/server/server-branches.spec.ts` passed: 4 tests in 35.3s before restoring insertion coverage.
+  - `pnpm test:e2e -- tests/server/server-branches.spec.ts` passed after restoring insertion coverage: 1 test in 12.4s.
   - `pnpm test:e2e:server` passed: 16 tests in 2.5m.
   - `pnpm build` passed.
 
@@ -135,3 +136,73 @@
 - Verification:
   - `pnpm test:e2e -- tests/peerjs/peerjs-sync.spec.ts` passed: 1 test in 13.4s.
   - `pnpm build` passed.
+
+### Phase 7: PeerJS And Local-First Coverage
+
+- Added PeerJS coverage:
+  - `tests/peerjs/peerjs-ui.spec.ts` verifies host invite UI and host-only document management.
+  - Expanded `tests/peerjs/peerjs-sync.spec.ts` to verify host-to-client sync, client-to-host sync, disconnected client queueing, and reconnect flush.
+- Added stable control selectors:
+  - `data-testid="peerjs-controls"` and `data-peer-id` on PeerJS connection rows.
+  - `data-testid="local-first-controls"`, `local-first-stats`, `local-first-invite-box`, and `data-peer-id` on local-first connection rows.
+- Added local-first coverage:
+  - `tests/local-first/local-first-ui.spec.ts` verifies durable reload persistence, invite readiness, reset confirmation, and same-replica tab locking.
+  - `tests/local-first/local-first-sync.spec.ts` verifies real PeerJS-backed local-first sync in both directions, request sync, and retained log compaction.
+  - `tests/local-first/local-first-migration.spec.ts` creates a real v1 local-first replica and migrates it through the current local-first migration panel.
+- Wired local-first mode to receive app-specific migration config from the app registry.
+- Added `test:e2e:local-first`.
+- Iterated on failures:
+  - PeerJS connection rows display actor names, so tests now target `data-peer-id` instead of row text.
+  - Local-first invite readiness requires a local PeerServer, so the invite UI test starts one explicitly.
+  - Server migration seed fixtures are not branch-free local histories, so the migration spec now creates the old local replica through the v1 local-first UI.
+- Verification:
+  - `pnpm test:e2e:peerjs` passed: 2 tests in 19.9s.
+  - `pnpm test:e2e:local-first` passed: 4 tests in 28.5s.
+  - `pnpm build` passed.
+
+### Phase 8: Demo Specs
+
+- Added `playwright.demo.config.ts`:
+  - demo-only `tests/demo` test directory;
+  - Chromium desktop viewport `1440x1000`;
+  - video recording enabled;
+  - traces disabled for demo runs;
+  - same local app/server/PeerJS environment wiring as the reliability config.
+- Added `tests/helpers/demo.ts` with optional `UMKEHR_E2E_DEMO` pacing.
+- Added committed demo specs:
+  - `tests/demo/todo-local-conflict.demo.spec.ts`
+  - `tests/demo/whiteboard-collaboration.demo.spec.ts`
+  - `tests/demo/server-branch-merge.demo.spec.ts`
+  - `tests/demo/server-migration.demo.spec.ts`
+- Added `test:e2e:demo`.
+- Iterated on demo failures:
+  - fixed a relative import for migration fixture metadata.
+  - moved the whiteboard demo emoji click away from an existing replicated note so the stamp lands reliably in the demo viewport.
+- Verification:
+  - `pnpm test:e2e:demo` passed: 4 tests in 31.9s.
+  - `pnpm build` passed.
+
+### Phase 9: Runtime Review And CI Subset
+
+- Reviewed measured local runtimes from the current implementation:
+  - smoke: about 1.1m after adding the responsive/keyboard smoke.
+  - server: about 2.5m.
+  - PeerJS: about 20s.
+  - local-first: about 29s.
+  - demo: about 32s.
+- Kept the existing split as the practical critical/extended boundary:
+  - `test:e2e:smoke` is the critical local UI subset.
+  - `test:e2e:server`, `test:e2e:peerjs`, `test:e2e:local-first`, and `test:e2e:demo` are focused extended suites.
+- Documented the E2E commands and current runtimes in `examples/react-crdt/README.md`.
+
+### Phase 10: Responsive And Keyboard Smoke
+
+- Added `tests/smoke/responsive-keyboard.spec.ts`.
+- Coverage includes:
+  - narrow mobile-like viewport (`390x844`);
+  - top-bar app and architecture selectors remain visible;
+  - document manager modal opens and creates a document;
+  - todo add form submits with Enter;
+  - todo edit commits with Enter.
+- Verification:
+  - `pnpm test:e2e:smoke` passed: 11 tests in 1.1m.
