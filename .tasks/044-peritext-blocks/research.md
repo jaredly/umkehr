@@ -2,24 +2,20 @@
 
 ## Summary
 
-The best first implementation is to model blocks as structural metadata over the existing
-Peritext character sequence, not as ordinary inline marks and not as a separate tree of
-block nodes.
+Use explicit block nodes as structural boundaries over the existing global Peritext character
+sequence.
 
-Concretely:
+The key constraint is that blocks must not own independent text CRDTs. Character identity should
+stay in the current flat Peritext sequence. Blocks should own structure: stable block IDs,
+parent/child relationships, sibling ordering, block type/attrs, and a start anchor into the global
+text sequence.
 
-- Keep `src/peritext` as one ordered character sequence with tombstones and stable char IDs.
-- Introduce newline characters as explicit structural delimiters for line/block boundaries.
-- Store block attributes on those delimiter characters, Quill-style, for the simple cases.
-- Add a second layer of range-like block container operations only when nested containers are
-  needed, such as blockquotes, lists, or list items.
-- Materialize a block view from the character sequence plus block metadata; do not expose block
-  metadata as normal inline spans.
+For siblings with the same `parentId`, store only each block's start anchor. Do not store both
+start and end. A block's end is derived from the next sibling's start, or from the parent/root end.
+This avoids denormalized sibling boundaries and makes split/join non-destructive.
 
-This preserves the current strengths of the implementation: index-based editor commands compile
-to anchored operations, tombstones keep old anchors resolvable, and rendering is a derived view.
-It also avoids making block split/join a special tree-edit CRDT problem before we know the editor
-requirements.
+This model gives us stable block identity and room for nested structure while preserving
+character-level IDs, inline marks, comments, and old anchors.
 
 ## Existing state
 
@@ -39,18 +35,18 @@ The current rich text model is a faithful inline Peritext core:
 There is no block model yet. Newlines can exist as normal inserted characters, but they have no
 structural meaning beyond being part of `plainText`.
 
-## Goals for blocks
+## Design goals
 
-A block implementation should support these operations naturally:
+A block implementation should support:
 
-- Import/export paragraphs and basic HTML-ish block types.
-- Split a paragraph by pressing Enter.
-- Join blocks by deleting at a block boundary.
-- Change the current block type, for example paragraph to heading or quote.
-- Render a block-oriented view for React/editor use.
-- Preserve CRDT convergence when peers concurrently insert text, split blocks, or change block
+- Stable block identity for comments, presence, selection, future reordering, and nested editing.
+- Non-destructive split/join that does not delete/reinsert text.
+- Import/export for paragraphs and basic HTML-ish block types.
+- Changing the current block type, for example paragraph to heading or quote.
+- Rendering a block-oriented view for React/editor use.
+- CRDT convergence when peers concurrently insert text, split blocks, join blocks, or change block
   attributes.
-- Leave room for nested block structures without forcing a full tree CRDT immediately.
+- Nested structure without forcing character ownership into block-local text sequences.
 
 The model should continue to make editor-facing commands index-based while replicated operations
 use stable anchors.
@@ -77,30 +73,26 @@ With block attributes:
 ]
 ```
 
-In the current implementation this could be represented by adding block-specific operation data
-to delimiter characters instead of treating it as an inline `markType`.
-
 Benefits:
 
-- Split and join are ergonomic. Enter inserts a newline with copied/default block attrs; Backspace
-  at start removes a newline.
+- Split and join are ergonomic. Enter inserts a newline; Backspace at start removes one.
 - It fits the current flat character sequence and stable char ID model.
 - Delayed/concurrent operations can still anchor to characters and tombstones.
 - Materialization can derive blocks by scanning visible characters up to visible newlines.
 - Basic paragraphs, headings, code blocks, and flat list items are straightforward.
-- Adjacent lines with the same block container attrs can be grouped in the render view.
 
 Costs:
 
-- Nested structures are awkward if all structure must live on the newline. A blockquote containing
-  a list item wants at least two structural concepts: the quote container and the item.
+- Block identity is tied to a delimiter character, not to a first-class block node.
+- Nested structure is awkward. A blockquote containing a list item wants separate quote and item
+  identities.
 - A newline delimiter is both text and structure, which creates edge cases for inline marks,
   deletion, copy/paste, and selection offsets.
-- Empty blocks require a visible structural delimiter with no text before it.
-- A document must maintain a trailing newline or equivalent terminal block marker; otherwise the
-  last block has no place for its attrs.
+- Empty blocks require visible structural delimiters.
+- A document likely needs a trailing newline invariant so the last block has a delimiter.
 
-This approach is the best base layer, but it should not be the whole nested-block story.
+This remains a useful comparison point, but it is less attractive if we want stable blocks and
+nested structure as real concepts.
 
 ## Candidate B: block tags as marks over spans
 
@@ -125,65 +117,28 @@ Costs:
 - Current `marksForOperations` resolves one winning value per mark type. That is not expressive
   enough for nested containers such as `blockquote > ul > li`.
 
-This is not a good direct implementation for block identity. It may still be useful for
-container-style annotations later, but block semantics need separate validation and materialization
-rules.
+This is not a good direct implementation for block identity. Block semantics need separate
+validation and materialization rules.
 
-## Candidate C: explicit block tree with text leaves
+## Candidate C: block nodes as start boundaries
 
-This would introduce stable block nodes, probably separate from the character sequence:
+This is the recommended approach.
 
-```ts
-type RichTextBlock = {
-  blockId: RichTextBlockId;
-  parentId: RichTextBlockId | null;
-  afterId: RichTextBlockId | null;
-  type: 'paragraph' | 'blockquote' | 'list' | 'listItem';
-  attrs?: Json;
-};
-```
+Introduce explicit block nodes, but keep all text in the existing global Peritext character
+sequence. A block node identifies a structural boundary and attributes; it does not contain or own
+a separate text sequence.
 
-Text would either live inside each block as separate Peritext sequences, or the current sequence
-would need block membership pointers.
-
-Benefits:
-
-- Nested blocks and DOM-like structure are explicit.
-- Empty blocks are easy.
-- Block identity can survive split/join, drag/reorder, comments on blocks, and outliner-style UI.
-- Materialization does not need to infer as much from newline delimiters.
-
-Costs:
-
-- This is a much larger CRDT design. It needs ordering, parent/child validity, move semantics,
-  delete semantics, and conflict rules for concurrent split/join/reparent operations.
-- Selections spanning blocks become multi-sequence if each block has its own text sequence.
-- The current editor and command surface are flat-index based; a tree model would require a more
-  complex position map.
-- It risks delaying useful paragraph/heading/list support while solving a harder general problem.
-
-This is probably the right long-term model only if Umkehr wants Notion/ProseMirror-like block
-identity and nested block editing as a core feature.
-
-## Recommended model
-
-Use a hybrid, staged model:
-
-1. Represent line/block boundaries with explicit newline characters.
-2. Store the primary block type and attrs on the newline delimiter.
-3. Keep inline marks applying to visible text characters, not to block structure.
-4. Materialize `RichTextBlockView[]` from delimiters and inline spans.
-5. Add optional container range operations later for nested structures that cannot be captured by
-   one delimiter's attrs.
-
-Suggested initial types:
+Suggested shape:
 
 ```ts
+export type RichTextBlockId = `${number}#${RichTextActorId}`;
+
 export type RichTextBlockType =
     | 'paragraph'
     | 'heading'
     | 'codeBlock'
     | 'blockquote'
+    | 'list'
     | 'listItem';
 
 export type RichTextBlockAttrs = {
@@ -193,31 +148,104 @@ export type RichTextBlockAttrs = {
     checked?: boolean;
 };
 
+export type RichTextBlockNode = {
+    blockId: RichTextBlockId;
+    parentId: RichTextBlockId | null;
+    afterId: RichTextBlockId | null;
+    start: RichTextAnchor;
+    attrs: RichTextBlockAttrs;
+    deleted: boolean;
+};
+```
+
+Add this to state:
+
+```ts
+export type RichTextState = {
+    chars: RichTextCharMeta[];
+    blocks: RichTextBlockNode[];
+    pending?: RichTextOperation[];
+};
+```
+
+Block content is derived:
+
+- root children partition `[startOfText, endOfText)`.
+- children of a parent block partition that parent's derived content range.
+- a block's content range is `[block.start, nextSibling.start)`.
+- the last sibling's range ends at the parent range end.
+
+Because sibling blocks only store starts, split and join do not need to mutate or duplicate an
+older block's end anchor.
+
+## Split and join
+
+The central reason to prefer this model is non-destructive split/join.
+
+Naive block-local text CRDTs would split by deleting/reinserting the right side into a new block.
+That would lose character IDs and break anchors/marks/comments tied to those characters.
+
+With start-boundary block nodes:
+
+- Split at index/anchor creates a new sibling block whose `start` is the split anchor.
+- The previous block's derived end automatically becomes the new sibling's start.
+- The new block's derived end is the following sibling's start or the parent end.
+- No character is deleted, moved, or reinserted.
+- Inline marks and comments remain attached to the original characters.
+
+Join is similarly structural:
+
+- Join adjacent blocks by tombstoning the later block boundary.
+- The earlier block's derived end automatically becomes the next surviving sibling's start, or the
+  parent end.
+- No character identity changes.
+
+Equal starts are allowed. If two siblings have the same derived start, sibling ordering decides
+which one is first; one of the resulting ranges is empty. Materialization should handle this
+without treating it as corruption.
+
+If a block start is outside the materialized parent range, clamp it during materialization rather
+than rejecting the whole document. Validation can still flag malformed operations in tests, but the
+view should be robust to concurrent or old data.
+
+## Replicated operations
+
+Add block operations alongside existing insert/remove/mark operations:
+
+```ts
+export type RichTextCreateBlockOperation = {
+    action: 'createBlock';
+    opId: RichTextOpId;
+    blockId: RichTextBlockId;
+    parentId: RichTextBlockId | null;
+    afterId: RichTextBlockId | null;
+    start: RichTextAnchor;
+    attrs: RichTextBlockAttrs;
+};
+
 export type RichTextSetBlockOperation = {
     action: 'setBlock';
     opId: RichTextOpId;
-    delimiter: RichTextAnchor;
-    attrs: RichTextBlockAttrs;
+    blockId: RichTextBlockId;
+    attrs: Partial<RichTextBlockAttrs>;
 };
-```
 
-And extend char metadata:
-
-```ts
-export type RichTextCharMeta = {
+export type RichTextDeleteBlockOperation = {
+    action: 'deleteBlock';
     opId: RichTextOpId;
-    afterId: RichTextOpId | null;
-    char: string;
-    deleted: boolean;
-    markOpsBefore?: RichTextMarkOperation[];
-    markOpsAfter?: RichTextMarkOperation[];
-    blockOps?: RichTextSetBlockOperation[];
+    blockId: RichTextBlockId;
 };
 ```
 
-`blockOps` should only be valid on newline characters. Effective attrs are the greatest op ID per
-block-attribute key, or greatest op ID for the whole block attrs object if we want simpler
-last-writer-wins behavior in v1.
+Questions to settle during implementation:
+
+- Should `setBlock` replace the whole attrs object or merge per key?
+- Should block IDs share the same counter namespace as char/mark operations?
+- Should `deleteBlock` tombstone any descendants, or should descendants remain and be ignored or
+  reparented in materialization?
+
+For v1, whole-object last-writer-wins attrs are simpler. Per-attribute LWW is more ergonomic for
+concurrent edits like one user changing heading level while another changes task checked state.
 
 ## Materialized view
 
@@ -225,12 +253,15 @@ Add a block view alongside the current span view:
 
 ```ts
 export type RichTextBlockView = {
+    blockId: RichTextBlockId;
+    parentId: RichTextBlockId | null;
     type: RichTextBlockType;
-    attrs?: RichTextBlockAttrs;
+    attrs: RichTextBlockAttrs;
     start: number;
     end: number;
     text: string;
     spans: RichTextSpan[];
+    children: RichTextBlockView[];
 };
 
 export type RichTextRenderView = {
@@ -240,23 +271,21 @@ export type RichTextRenderView = {
 };
 ```
 
-For backward compatibility, `spans` can remain the full inline projection. `blocks` should be the
-new editor/rendering surface. `plainText` should continue to include newlines if they are present
-in the visible character sequence.
+For backward compatibility, `spans` can remain the full inline projection. `blocks` should become
+the new editor/rendering surface.
 
 Materialization algorithm:
 
-1. Scan visible characters in order.
-2. Accumulate text and inline spans until a visible `\n`.
-3. Resolve block attrs from the newline delimiter.
-4. Emit one block containing content before the delimiter.
-5. Hide the delimiter from the block's `text` and `spans`, but count it in position mapping.
-6. If there is no trailing visible newline, synthesize a paragraph block for the final run or
-   enforce a trailing delimiter invariant.
+1. Sort visible characters by the existing Peritext sequence rules.
+2. Sort live block nodes by `parentId`, sibling order, and `blockId` as a deterministic tie-breaker.
+3. Derive each parent's range from its own materialized range.
+4. For each sibling group, resolve and clamp starts into the parent range.
+5. Derive `[start, end)` ranges from each start and the next sibling's start.
+6. Build each block's `text` and inline `spans` from visible characters in its range.
+7. Nest child block views under their parent.
 
-The stricter option is to enforce a trailing newline for all non-empty rich text. It makes block
-attrs unambiguous and aligns with the newline-delimiter model. It also requires migration/import
-changes because existing snapshots do not include trailing newlines.
+Clamping is a view concern. A block start before the parent start clamps to the parent start; a
+block start after the parent end clamps to the parent end. Equal starts produce empty blocks.
 
 ## Public import/export
 
@@ -265,8 +294,9 @@ Extend snapshots without breaking existing span imports:
 ```ts
 export type RichTextBlockSnapshot = {
     type?: RichTextBlockType;
-    attrs?: RichTextBlockAttrs;
-    spans: RichTextSpan[];
+    attrs?: Partial<RichTextBlockAttrs>;
+    spans?: RichTextSpan[];
+    children?: RichTextBlockSnapshot[];
 };
 
 export type RichTextImportSnapshot = {
@@ -277,12 +307,15 @@ export type RichTextImportSnapshot = {
 
 Rules:
 
-- Existing `{spans}` imports become a single paragraph block.
-- `{blocks}` imports insert each block's text followed by a newline delimiter.
-- Block attrs compile into `setBlock` operations on the corresponding delimiter.
+- Existing `{spans}` imports become one root paragraph block containing those spans.
+- `{blocks}` imports create block nodes and insert block text into the global sequence.
+- Import can choose whether to insert newline characters between root blocks for plain-text
+  fidelity. Those newlines are text export artifacts, not the source of block identity.
 - Export should prefer `{blocks}` once block support exists.
 
-This lets the old API keep working while giving editor integrations a structural format.
+The hard import question is how to represent block separation in `plainText`. If blocks do not use
+newline delimiters as identity, `plainText` can either include synthesized newlines between blocks
+or remain a raw character projection. The block view should become the canonical rich export.
 
 ## Editing commands
 
@@ -290,126 +323,111 @@ Add block commands to `$text`:
 
 ```ts
 $text.splitBlock(index, attrs?)
-$text.joinBlock(index)
-$text.setBlock(rangeOrIndex, attrs)
+$text.joinBlock(blockId)
+$text.setBlock(blockId, attrs)
+$text.createBlock(parentId, afterId, index, attrs)
+$text.deleteBlock(blockId)
 ```
 
-Initial command compilation:
+Possible command compilation:
 
-- `splitBlock(index)` inserts `\n` at the index and sets attrs on the inserted newline.
-- If splitting in the middle of a block, text after the split naturally belongs to the new
-  delimiter encountered later; materialization must decide whether block attrs before/after the
-  split are copied or defaulted.
-- `joinBlock(index)` removes the visible newline before or at the index.
-- `setBlock(index, attrs)` finds the delimiter for the block containing the index and emits a
-  `setBlock` operation for that delimiter.
-- `setBlock(range, attrs)` applies to every block touched by the range.
+- `splitBlock(index)` finds the block containing the index, creates a sibling after it, and sets
+  the new block's `start` to the anchor at that index.
+- `joinBlock(blockId)` tombstones `blockId` if it can merge into its previous sibling.
+- `setBlock(blockId, attrs)` emits a `setBlock` operation.
+- `createBlock(parentId, afterId, index, attrs)` creates a block boundary at an explicit position.
+- `deleteBlock(blockId)` tombstones the block boundary; text remains in the global sequence unless
+  the caller also deletes the text range.
 
-Plain `insert` and `delete` need guardrails:
-
-- Inserting `\n` through ordinary `insert` should either be rejected or normalized to
-  `splitBlock`, otherwise the newline may lack block attrs.
-- Deleting a newline through ordinary `delete` should either be allowed as `joinBlock` or expanded
-  to block-aware behavior.
-- Paste/import of text containing newlines should create block delimiters with default attrs.
+Plain `insert` and `delete` should not need special newline semantics. Enter and Backspace at a
+block boundary should use block commands, not text newline insertion, unless a specific editor mode
+intentionally stores literal newlines.
 
 ## Concurrency semantics
 
 Important cases:
 
 - Concurrent text inserts inside the same block already use existing char ordering.
-- Concurrent `setBlock` on the same delimiter can use greatest-op-ID-wins for v1.
-- Concurrent split at the same index creates two newline delimiters ordered by existing insert
-  rules; this may materialize as an empty block. That is acceptable but should be tested.
-- Concurrent delete of a delimiter and `setBlock` on that delimiter should be deterministic. If
-  the delimiter is tombstoned, its attrs remain in metadata but do not render.
-- Concurrent split and inline mark at the split boundary should preserve the existing mark
-  boundary behavior; tests should cover whether newline delimiters receive inline marks or are
-  skipped.
+- Concurrent `setBlock` on the same block can use greatest-op-ID-wins for v1.
+- Concurrent split at the same index creates two sibling block starts at the same anchor. That
+  materializes as one empty block plus one non-empty block, ordered deterministically.
+- Concurrent join/delete of a block and `setBlock` on that block is deterministic. A deleted block
+  does not render; its attrs can remain in metadata.
+- Concurrent block start outside its parent range is clamped during materialization.
+- Concurrent parent deletion can either hide descendants or leave them available for future
+  reparenting. V1 should probably hide descendants to keep materialization simple.
 
 The model should not try to merge two concurrently-created blocks into one unless a later explicit
-join operation removes a delimiter.
+join operation removes one boundary.
 
 ## Nested blocks
 
-For v1, avoid true nested containers. Support flat block types:
+This approach supports real nesting earlier than newline-delimited attrs:
 
-- paragraph
-- heading
-- codeBlock
-- blockquote as a flat block type
-- listItem with `listKind` and `indent`
+- `parentId: null` gives root blocks.
+- child blocks partition their parent's derived text range.
+- list containers can be actual `list` blocks with `listItem` children.
+- blockquote can be a container with paragraph/list children.
 
-This is how many editors represent lists internally: each item is a line with list attrs and an
-indent level. The renderer groups adjacent compatible list items into `<ul>` / `<ol>` containers.
+However, v1 can still restrict which trees are produced by editor commands:
 
-This handles common list and quote rendering without requiring explicit container nodes.
+- root paragraphs/headings/code blocks;
+- root blockquotes with paragraph children;
+- lists with list item children;
+- no arbitrary mixed invalid DOM structures from the editor.
 
-True nested block semantics can be added later with container operations:
-
-```ts
-type RichTextBlockContainerOperation = {
-    action: 'addBlockContainer' | 'removeBlockContainer';
-    opId: RichTextOpId;
-    start: RichTextAnchor;
-    end: RichTextAnchor;
-    containerType: 'blockquote' | 'list';
-    attrs?: RichTextJsonValue;
-};
-```
-
-That should be deferred until there are concrete editor requirements, because container overlap
-validation and DOM nesting rules are a separate design problem.
+Materialization should be forgiving even if replicated data is odd. The renderer can normalize or
+drop invalid combinations while preserving metadata.
 
 ## Implementation areas
 
 Likely files to touch:
 
-- `src/peritext/types.ts`: block attrs, block operation, block view, snapshot shape.
-- `src/peritext/sequence.ts`: newline delimiter helpers and maybe trailing-newline invariant.
-- `src/peritext/blocks.ts`: setBlock application, delimiter lookup, block attrs resolution.
-- `src/peritext/apply.ts`: route `setBlock`.
-- `src/peritext/materialize.ts`: emit `blocks`.
+- `src/peritext/types.ts`: block IDs, block nodes, block operations, block view, snapshot shape.
+- `src/peritext/ids.ts`: block ID parsing/comparison/allocation.
+- `src/peritext/blocks.ts`: create/set/delete block operations, sibling ordering, range derivation.
+- `src/peritext/apply.ts`: route block operations.
+- `src/peritext/materialize.ts`: emit `blocks` from global text plus block nodes.
 - `src/peritext/importExport.ts`: import/export block snapshots.
-- `src/peritext/validation.ts`: validate block ops and attrs.
+- `src/peritext/validation.ts`: validate block IDs, parent/after references, attrs, and anchors.
 - `src/types.ts`: add `$text` block commands.
 - `src/crdt/updates.ts`: compile block commands to anchored peritext operations.
-- `src/crdt/history.ts`: undo/redo for block split/join/setBlock.
-- `src/react-rich-text/*`: render block view and translate Enter/Backspace/paste.
+- `src/crdt/history.ts`: undo/redo for createBlock/deleteBlock/setBlock.
+- `src/react-rich-text/*`: render block view and translate Enter/Backspace/block toolbar actions.
 
 ## Suggested implementation order
 
-1. Add block types and a materializer that treats visible newlines as paragraph delimiters.
-2. Extend import/export so `{blocks}` round-trips through inserted text plus newline delimiters.
-3. Add `setBlock` operations on newline delimiters and tests for deterministic conflict behavior.
-4. Add `$text.setBlock` for the block containing a given index.
-5. Add `splitBlock` as newline insertion plus copied/default block attrs.
-6. Add `joinBlock` as delimiter removal.
-7. Update React rendering to use `view.blocks`.
-8. Add Enter, Backspace-at-start, Delete-at-end, and multiline paste handling.
-9. Add flat list-item attrs and renderer grouping.
-10. Revisit nested container operations only after flat block editing works.
+1. Add block node types and initialize a default root paragraph block for imported/non-empty text.
+2. Add block ID allocation and deterministic sibling ordering.
+3. Add block materialization with derived ranges, equal-start empty block handling, and clamping.
+4. Extend import/export so `{blocks}` round-trips through global text plus block nodes.
+5. Add `createBlock`, `setBlock`, and `deleteBlock` operations with deterministic tests.
+6. Add `$text.setBlock` and render block views in React.
+7. Add `splitBlock` as a `createBlock` at the split anchor.
+8. Add `joinBlock` as a `deleteBlock` of the later sibling boundary.
+9. Add editor Enter and Backspace-at-block-start behavior.
+10. Add basic nested structures: blockquote/list containers and list-item children.
+11. Add tests for concurrent splits, equal starts, parent-range clamping, and join vs setBlock.
 
 ## Open questions
 
-- Should rich text enforce a trailing newline delimiter for every document, including empty docs?
-- Should `plainText` include structural newlines exactly as stored, or should the block view become
-  the canonical plain-text export?
+- Should `RichTextState` always contain at least one root paragraph block, even when `chars` is
+  empty?
+- Should `plainText` synthesize newlines between materialized blocks, or remain only the raw
+  visible character sequence?
 - Should block attrs be last-writer-wins as a whole object, or should individual attrs resolve
   independently?
-- What is the minimum block set for the first feature: paragraph/heading only, or paragraph,
-  heading, quote, and list item?
-- Should ordinary `$text.insert` reject `\n`, or should it normalize to block-aware split/import
-  behavior?
+- Should block IDs share the rich-text op counter namespace, or use a separate block counter?
+- Should `deleteBlock` hide descendants, tombstone descendants, or allow descendants to be
+  reparented during materialization?
+- What exact anchor should `splitBlock(index)` use at a caret: `before` the next char, `after` the
+  previous char, or `startOfText` / `endOfText` at edges?
 - When splitting a heading, should the new block inherit heading attrs or default to paragraph?
 - When pressing Enter at the end of a list item, should an empty list item become a paragraph?
-- Can inline marks apply across block delimiters, or should mark commands split per block and skip
-  newline characters?
-- How should comments or other multi-value annotations interact with block delimiters?
-- Do we need stable block IDs for user-facing features such as comments on a block, drag/reorder,
-  backlinks, or presence cursors?
-- Should blockquote/list nesting be represented as flat `indent` attrs first, or do we need true
-  container ranges from the start?
+- Can inline marks span across block boundaries, or should mark commands split per block?
+- How should comments or other multi-value annotations attach to block nodes versus character
+  ranges?
+- What invalid nested structures should the materializer normalize, hide, or expose to callers?
 - How should old span-only snapshots migrate: one paragraph, paragraphs split on `\n`, or preserve
   text exactly in a single block?
 - What HTML paste/export fidelity is required for lists, quotes, headings, and code blocks?
@@ -418,7 +436,7 @@ Likely files to touch:
 
 ## Recommendation
 
-Start with newline-delimited flat blocks and explicit `setBlock` operations on delimiters. It is
-the smallest extension that fits the current Peritext engine and gives the editor real paragraph,
-heading, quote, and flat list behavior. Treat true nested block containers and stable block node IDs
-as follow-up design work, not prerequisites for useful block support.
+Proceed with explicit block nodes as start boundaries over the global Peritext sequence. This keeps
+split/join structural and non-destructive, avoids denormalized sibling start/end ranges, supports
+empty blocks and equal starts, and leaves room for real nested blocks without sacrificing
+character-level identity.
