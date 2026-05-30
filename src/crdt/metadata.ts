@@ -34,6 +34,7 @@ export function buildMeta(
             created: ts,
             sentinel: {kind: 'rich-text', version: 1},
             chars: [],
+            maxOpCounter: 0,
         };
     }
     if (value === null || typeof value !== 'object') return {kind: 'primitive', ts, value};

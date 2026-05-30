@@ -1,4 +1,4 @@
-import {compareOpIds} from './ids.js';
+import {compareOpIds, maxOpCounterAfterOperation} from './ids.js';
 import type {
     RichTextAnchor,
     RichTextCharMeta,
@@ -36,7 +36,7 @@ export function applyMarkOperation(state: RichTextState, operation: RichTextMark
         setOpSetAt(chars, end, endSet);
     }
 
-    return {...state, chars};
+    return {...state, chars, maxOpCounter: maxOpCounterAfterOperation(state, operation)};
 }
 
 export function marksForOperations(operations: readonly RichTextMarkOperation[]) {

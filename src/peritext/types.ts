@@ -62,6 +62,7 @@ export type RichTextCharMeta = {
 export type RichTextState = {
     chars: RichTextCharMeta[];
     pending?: RichTextOperation[];
+    maxOpCounter?: number;
 };
 
 export type RichTextSpan = {

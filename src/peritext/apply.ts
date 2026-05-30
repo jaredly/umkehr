@@ -1,17 +1,19 @@
 import {applyMarkOperation} from './marks.js';
+import {maxOpCounterAfterOperation} from './ids.js';
 import {applyInsert, applyRemove} from './sequence.js';
-import type {RichTextOperation, RichTextState} from './types.js';
+import type {RichTextAnchor, RichTextOperation, RichTextState} from './types.js';
 
 export function applyRichTextOperation(
     state: RichTextState,
     operation: RichTextOperation,
 ): RichTextState {
-    if (hasOperation(state, operation)) return cloneWithPending(state);
+    if (hasOperation(state, operation)) return state;
     const applied = applyOne(state, operation);
     if (applied.status === 'pending') {
         return {
-            ...cloneWithPending(state),
+            ...state,
             pending: [...(state.pending ?? []), operation],
+            maxOpCounter: maxOpCounterAfterOperation(state, operation),
         };
     }
     return retryPending({
@@ -33,40 +35,41 @@ function applyOne(
 ): {status: 'applied'; state: RichTextState} | {status: 'pending'} {
     switch (operation.action) {
         case 'insert':
-            try {
-                return {status: 'applied', state: applyInsert(state, operation)};
-            } catch (error) {
-                if (isMissingDependency(error)) return {status: 'pending'};
-                throw error;
+            if (
+                operation.afterId !== null &&
+                !state.chars.some((char) => char.opId === operation.afterId)
+            ) {
+                return {status: 'pending'};
             }
+            return {status: 'applied', state: applyInsert(state, operation)};
         case 'remove':
-            try {
-                return {status: 'applied', state: applyRemove(state, operation)};
-            } catch (error) {
-                if (isMissingDependency(error)) return {status: 'pending'};
-                throw error;
+            if (!state.chars.some((char) => char.opId === operation.removedId)) {
+                return {status: 'pending'};
             }
+            return {status: 'applied', state: applyRemove(state, operation)};
         case 'addMark':
-        case 'removeMark':
-            try {
-                return {status: 'applied', state: applyMarkOperation(state, operation)};
-            } catch (error) {
-                if (isMissingDependency(error)) return {status: 'pending'};
-                throw error;
+        case 'removeMark': {
+            const start = anchorOrder(state, operation.start);
+            const end = anchorOrder(state, operation.end);
+            if (start === null || end === null) return {status: 'pending'};
+            if (start > end) {
+                throw new Error('Cannot apply rich text mark: start anchor must be before end anchor.');
             }
+            return {status: 'applied', state: applyMarkOperation(state, operation)};
+        }
     }
 }
 
 function retryPending(state: RichTextState): RichTextState {
-    let current = cloneWithPending(state);
+    let current = state;
     let changed = true;
     while (changed && current.pending?.length) {
         changed = false;
         const remaining: RichTextOperation[] = [];
         for (const operation of current.pending) {
-            const applied = applyOne({...current, pending: []}, operation);
+            const applied = applyOne({...current, pending: undefined}, operation);
             if (applied.status === 'applied') {
-                current = {...applied.state, pending: []};
+                current = {...applied.state, pending: undefined};
                 changed = true;
             } else {
                 remaining.push(operation);
@@ -74,7 +77,12 @@ function retryPending(state: RichTextState): RichTextState {
         }
         current = remaining.length ? {...current, pending: remaining} : {...current, pending: undefined};
     }
-    return current.pending?.length ? current : {chars: current.chars};
+    return current.pending?.length
+        ? current
+        : {
+              chars: current.chars,
+              ...(current.maxOpCounter !== undefined ? {maxOpCounter: current.maxOpCounter} : {}),
+          };
 }
 
 function hasOperation(state: RichTextState, operation: RichTextOperation) {
@@ -92,19 +100,10 @@ function hasOperation(state: RichTextState, operation: RichTextOperation) {
     );
 }
 
-function cloneWithPending(state: RichTextState): RichTextState {
-    return {
-        chars: state.chars.map((char) => ({
-            ...char,
-            markOpsBefore: char.markOpsBefore?.slice(),
-            markOpsAfter: char.markOpsAfter?.slice(),
-        })),
-        ...(state.pending?.length ? {pending: state.pending.slice()} : {}),
-    };
-}
-
-function isMissingDependency(error: unknown) {
-    return (
-        error instanceof Error && /\b(afterId|removedId|anchor opId)\b.*\bmissing\b/.test(error.message)
-    );
+function anchorOrder(state: RichTextState, anchor: RichTextAnchor) {
+    if (anchor.type === 'startOfText') return -1;
+    if (anchor.type === 'endOfText') return state.chars.length * 2;
+    const index = state.chars.findIndex((char) => char.opId === anchor.opId);
+    if (index === -1) return null;
+    return index * 2 + (anchor.type === 'after' ? 1 : 0);
 }

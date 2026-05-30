@@ -4,6 +4,7 @@ export {
     formatOpId,
     isRichTextOpId,
     maxOpCounter,
+    maxOpCounterAfterOperation,
     nextOpCounter,
     operationOpIds,
     parseOpId,

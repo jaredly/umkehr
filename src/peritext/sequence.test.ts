@@ -45,7 +45,18 @@ describe('peritext sequence', () => {
         const twice = applyRichTextOperation(once, remove('2@alice:main', '1@alice:main'));
 
         expect(twice).toEqual(once);
+        expect(twice).toBe(once);
         expect(plainText(twice)).toBe('');
+    });
+
+    it('returns the same state for duplicate inserts', () => {
+        const inserted = applyRichTextOperation(
+            emptyRichTextState(),
+            insert('1@alice:main', null, 'x'),
+        );
+        const duplicate = applyRichTextOperation(inserted, insert('1@alice:main', null, 'x'));
+
+        expect(duplicate).toBe(inserted);
     });
 
     it('can insert after a deleted character', () => {
@@ -92,6 +103,27 @@ describe('peritext sequence', () => {
             '4@bob:main',
             '2@alice:main',
         ]);
+        expect(state.pending).toBeUndefined();
+    });
+
+    it('retains inserts until afterId dependencies arrive', () => {
+        const state = applyRichTextOperations(emptyRichTextState(), [
+            insert('2@alice:main', '1@alice:main', 'b'),
+            insert('1@alice:main', null, 'a'),
+        ]);
+
+        expect(plainText(state)).toBe('ab');
+        expect(state.pending).toBeUndefined();
+    });
+
+    it('retains removes until removed chars arrive', () => {
+        const state = applyRichTextOperations(emptyRichTextState(), [
+            remove('2@alice:main', '1@alice:main'),
+            insert('1@alice:main', null, 'a'),
+        ]);
+
+        expect(plainText(state)).toBe('');
+        expect(state.chars.find((char) => char.opId === '1@alice:main')?.deleted).toBe(true);
         expect(state.pending).toBeUndefined();
     });
 

@@ -1,4 +1,4 @@
-import {compareOpIds} from './ids.js';
+import {compareOpIds, maxOpCounterAfterOperation} from './ids.js';
 import type {
     RichTextCharMeta,
     RichTextInsertOperation,
@@ -13,41 +13,42 @@ export type RichTextIndexRange = {
 };
 
 export function emptyRichTextState(): RichTextState {
-    return {chars: []};
+    return {chars: [], maxOpCounter: 0};
 }
 
 export function applyInsert(state: RichTextState, operation: RichTextInsertOperation): RichTextState {
     if (operation.char.length !== 1) {
         throw new Error('Cannot apply rich text insert: operation char must be one character.');
     }
-    if (state.chars.some((char) => char.opId === operation.opId)) return cloneState(state);
+    if (state.chars.some((char) => char.opId === operation.opId)) return state;
     if (operation.afterId !== null && !state.chars.some((char) => char.opId === operation.afterId)) {
         throw new Error(`Cannot apply rich text insert: afterId "${operation.afterId}" is missing.`);
     }
+    const inserted = {
+        opId: operation.opId,
+        afterId: operation.afterId,
+        char: operation.char,
+        deleted: false,
+    };
+    const chars = state.chars.slice();
+    chars.splice(insertionIndexForInsert(state.chars, inserted), 0, inserted);
     return {
-        chars: sortChars([
-            ...cloneChars(state.chars),
-            {
-                opId: operation.opId,
-                afterId: operation.afterId,
-                char: operation.char,
-                deleted: false,
-            },
-        ]),
+        chars,
+        ...(state.pending?.length ? {pending: state.pending.slice()} : {}),
+        maxOpCounter: maxOpCounterAfterOperation(state, operation),
     };
 }
 
 export function applyRemove(state: RichTextState, operation: RichTextRemoveOperation): RichTextState {
-    let changed = false;
-    const chars = cloneChars(state.chars).map((char) => {
-        if (char.opId !== operation.removedId || char.deleted) return char;
-        changed = true;
-        return {...char, deleted: true};
-    });
-    if (!state.chars.some((char) => char.opId === operation.removedId)) {
+    const index = state.chars.findIndex((char) => char.opId === operation.removedId);
+    if (index === -1) {
         throw new Error(`Cannot apply rich text remove: removedId "${operation.removedId}" is missing.`);
     }
-    return changed ? {...state, chars} : cloneState(state);
+    const existing = state.chars[index];
+    if (!existing || existing.deleted) return state;
+    const chars = state.chars.slice();
+    chars[index] = {...existing, deleted: true};
+    return {...state, chars, maxOpCounter: maxOpCounterAfterOperation(state, operation)};
 }
 
 export function visibleChars(state: RichTextState) {
@@ -61,27 +62,45 @@ export function plainText(state: RichTextState) {
 }
 
 export function insertionAfterIdForIndex(state: RichTextState, index: number): RichTextOpId | null {
-    const visible = visibleChars(state);
-    if (!Number.isInteger(index) || index < 0 || index > visible.length) {
+    if (!Number.isInteger(index) || index < 0) {
         throw new Error(`Cannot resolve rich text insertion index ${index}: index is out of range.`);
     }
-    return index === 0 ? null : visible[index - 1]?.opId ?? null;
+    if (index === 0) return null;
+    let visibleIndex = 0;
+    for (const char of state.chars) {
+        if (char.deleted) continue;
+        visibleIndex++;
+        if (visibleIndex === index) return char.opId;
+    }
+    if (visibleIndex === index) return null;
+    throw new Error(`Cannot resolve rich text insertion index ${index}: index is out of range.`);
 }
 
 export function charIdsForVisibleRange(state: RichTextState, range: RichTextIndexRange): RichTextOpId[] {
-    const visible = visibleChars(state);
     if (
         !Number.isInteger(range.start) ||
         !Number.isInteger(range.end) ||
         range.start < 0 ||
-        range.end < range.start ||
-        range.end > visible.length
+        range.end < range.start
     ) {
         throw new Error(
             `Cannot resolve rich text range ${range.start}:${range.end}: range is out of bounds.`,
         );
     }
-    return visible.slice(range.start, range.end).map((char) => char.opId);
+    const ids: RichTextOpId[] = [];
+    let visibleIndex = 0;
+    for (const char of state.chars) {
+        if (char.deleted) continue;
+        if (visibleIndex >= range.start && visibleIndex < range.end) ids.push(char.opId);
+        visibleIndex++;
+        if (visibleIndex >= range.end) break;
+    }
+    if (visibleIndex < range.end) {
+        throw new Error(
+            `Cannot resolve rich text range ${range.start}:${range.end}: range is out of bounds.`,
+        );
+    }
+    return ids;
 }
 
 export function sortChars(chars: RichTextCharMeta[]): RichTextCharMeta[] {
@@ -117,13 +136,56 @@ export function cloneState(state: RichTextState): RichTextState {
     return {
         chars: cloneChars(state.chars),
         ...(state.pending?.length ? {pending: state.pending.slice()} : {}),
+        ...(state.maxOpCounter !== undefined ? {maxOpCounter: state.maxOpCounter} : {}),
     };
 }
 
-function cloneChars(chars: RichTextCharMeta[]) {
+function cloneChars(chars: RichTextCharMeta[]): RichTextCharMeta[] {
     return chars.map((char) => ({
         ...char,
         markOpsBefore: char.markOpsBefore?.slice(),
         markOpsAfter: char.markOpsAfter?.slice(),
     }));
+}
+
+function insertionIndexForInsert(
+    chars: readonly RichTextCharMeta[],
+    inserted: RichTextCharMeta,
+) {
+    let parentIndex = -1;
+    let previousSiblingIndex = -1;
+    for (let index = 0; index < chars.length; index++) {
+        const char = chars[index];
+        if (!char) continue;
+        if (char.opId === inserted.afterId) parentIndex = index;
+        if (char.afterId !== inserted.afterId) continue;
+        if (compareOpIds(inserted.opId, char.opId) > 0) return index;
+        previousSiblingIndex = index;
+    }
+    if (previousSiblingIndex !== -1) {
+        return subtreeEndIndex(chars, previousSiblingIndex);
+    }
+    return inserted.afterId === null ? 0 : parentIndex + 1;
+}
+
+function subtreeEndIndex(chars: readonly RichTextCharMeta[], rootIndex: number) {
+    const root = chars[rootIndex];
+    if (!root) return rootIndex;
+    const byId = new Map(chars.map((char) => [char.opId, char]));
+    let end = rootIndex + 1;
+    while (end < chars.length && isDescendantOf(chars[end], root.opId, byId)) end++;
+    return end;
+}
+
+function isDescendantOf(
+    char: RichTextCharMeta | undefined,
+    ancestorId: RichTextOpId,
+    byId: ReadonlyMap<RichTextOpId, RichTextCharMeta>,
+) {
+    let afterId = char?.afterId;
+    while (afterId !== null && afterId !== undefined) {
+        if (afterId === ancestorId) return true;
+        afterId = byId.get(afterId)?.afterId;
+    }
+    return false;
 }

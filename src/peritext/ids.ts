@@ -8,23 +8,21 @@ export type ParsedRichTextOpId = {
 const OP_ID_RE = /^([0-9]+)@(.+:.+)$/;
 
 export function parseOpId(input: string): ParsedRichTextOpId {
-    const match = OP_ID_RE.exec(input);
-    if (!match) throw new Error(`Invalid rich text opId "${input}".`);
-    const counter = Number(match[1]);
-    if (!Number.isSafeInteger(counter) || counter < 0) {
-        throw new Error(`Invalid rich text opId counter "${match[1]}".`);
-    }
-    const actorId = match[2] as RichTextActorId;
-    if (!isValidActorId(actorId)) throw new Error(`Invalid rich text actor id "${actorId}".`);
-    return {counter, actorId};
+    const parsed = tryParseOpId(input);
+    if (!parsed) throw new Error(`Invalid rich text opId "${input}".`);
+    return parsed;
 }
 
 export function tryParseOpId(input: string): ParsedRichTextOpId | null {
-    try {
-        return parseOpId(input);
-    } catch {
+    const match = OP_ID_RE.exec(input);
+    if (!match) return null;
+    const counter = Number(match[1]);
+    if (!Number.isSafeInteger(counter) || counter < 0) {
         return null;
     }
+    const actorId = match[2] as RichTextActorId;
+    if (!isValidActorId(actorId)) return null;
+    return {counter, actorId};
 }
 
 export function isRichTextOpId(input: string): input is RichTextOpId {
@@ -48,6 +46,7 @@ export function compareOpIds(a: RichTextOpId, b: RichTextOpId) {
 }
 
 export function maxOpCounter(state: RichTextState): number {
+    if (state.maxOpCounter !== undefined) return state.maxOpCounter;
     let max = 0;
     for (const char of state.chars) {
         max = Math.max(max, parseOpId(char.opId).counter);
@@ -76,6 +75,17 @@ export function allocateOpIds(
 
 export function operationOpIds(operation: RichTextOperation): RichTextOpId[] {
     return [operation.opId];
+}
+
+export function maxOpCounterAfterOperation(
+    state: RichTextState,
+    operation: RichTextOperation,
+) {
+    let max = maxOpCounter(state);
+    for (const opId of operationOpIds(operation)) {
+        max = Math.max(max, parseOpId(opId).counter);
+    }
+    return max;
 }
 
 function isValidActorId(input: string): input is RichTextActorId {

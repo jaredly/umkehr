@@ -75,6 +75,24 @@ describe('peritext marks', () => {
         ]);
     });
 
+    it('retains marks until anchor chars arrive', () => {
+        const state = applyRichTextOperations(emptyRichTextState(), [
+            insert('1@alice:main', null, 'a'),
+            addMark(
+                '3@alice:main',
+                {type: 'before', opId: '2@alice:main'},
+                {type: 'after', opId: '2@alice:main'},
+            ),
+            insert('2@alice:main', '1@alice:main', 'b'),
+        ]);
+
+        expect(state.pending).toBeUndefined();
+        expect(materializeRichTextState(state).spans).toEqual([
+            {text: 'a'},
+            {text: 'b', marks: {strong: true}},
+        ]);
+    });
+
     it('resolves add/remove conflicts by greatest op id per mark type', () => {
         const state = applyRichTextOperations(baseText(), [
             addMark(

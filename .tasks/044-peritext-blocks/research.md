@@ -413,26 +413,40 @@ Likely files to touch:
 
 - Should `RichTextState` always contain at least one root paragraph block, even when `chars` is
   empty?
+  - yeah
 - Should `plainText` synthesize newlines between materialized blocks, or remain only the raw
   visible character sequence?
+  - let's synthesize newlines
 - Should block attrs be last-writer-wins as a whole object, or should individual attrs resolve
   independently?
+  - whole object
 - Should block IDs share the rich-text op counter namespace, or use a separate block counter?
+  - shared namespace is fine
 - Should `deleteBlock` hide descendants, tombstone descendants, or allow descendants to be
   reparented during materialization?
+  - deleteBlock is semantically similar to removeMark. it does not remove any text
 - What exact anchor should `splitBlock(index)` use at a caret: `before` the next char, `after` the
   previous char, or `startOfText` / `endOfText` at edges?
+  - after previous char
 - When splitting a heading, should the new block inherit heading attrs or default to paragraph?
+  - inherit heading attrs
 - When pressing Enter at the end of a list item, should an empty list item become a paragraph?
+  - yes, but that's an editor's concern, not the crdt algorithm's
 - Can inline marks span across block boundaries, or should mark commands split per block?
+  - marks can span across block boundaries
 - How should comments or other multi-value annotations attach to block nodes versus character
   ranges?
+  - marks only attach to character ranges
 - What invalid nested structures should the materializer normalize, hide, or expose to callers?
+  - use your judgement
 - How should old span-only snapshots migrate: one paragraph, paragraphs split on `\n`, or preserve
   text exactly in a single block?
+  - no need to migrate, there is no production use
 - What HTML paste/export fidelity is required for lists, quotes, headings, and code blocks?
+  - best effort
 - What should undo batching do for Enter followed by typing: one command group or separate undo
   steps?
+  - separate steps
 
 ## Recommendation
 

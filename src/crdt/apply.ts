@@ -92,6 +92,7 @@ function applyRichText<T>(
     const next = applyRichTextOperation(meta, update.change);
     meta.chars = next.chars;
     meta.pending = next.pending;
+    meta.maxOpCounter = next.maxOpCounter;
     return 'applied';
 }
 

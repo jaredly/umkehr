@@ -79,6 +79,7 @@ export type RichTextMeta = {
     sentinel: RichCollaborativeText;
     chars: RichTextCharMeta[];
     pending?: RichTextOperation[];
+    maxOpCounter?: number;
 };
 
 export type CrdtMeta =
