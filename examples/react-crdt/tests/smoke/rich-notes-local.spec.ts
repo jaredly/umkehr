@@ -29,8 +29,39 @@ test('accepts basic keyboard input in a rich note and syncs locally', async ({pa
     await expect(rightPanel.locator('.richNoteTitle').first()).toHaveText('hello');
 });
 
+test('shows a new blank line after pressing Enter once', async ({page}, testInfo) => {
+    await openApp(page, {
+        mode: 'local',
+        appId: 'rich-notes',
+        docId: uniqueTestDocId(testInfo, 'rich-notes-newline'),
+    });
+
+    const leftEditor = richNoteEditor(page.locator('.richNotesPanel.leftPanel'));
+    await leftEditor.click();
+    await page.keyboard.type('hello');
+    await page.keyboard.press('Enter');
+
+    await expect.poll(() => editorDomState(leftEditor)).toMatchObject({
+        text: 'hello\n',
+        lastChild: 'BR',
+    });
+    await expect.poll(() => selectionState(leftEditor)).toMatchObject({
+        active: true,
+        inside: true,
+        start: 6,
+        end: 6,
+    });
+});
+
 function richNoteEditor(panel: Locator) {
     return panel.locator('.richNotesEditor [contenteditable]');
+}
+
+async function editorDomState(editor: Locator) {
+    return editor.evaluate((element) => ({
+        text: element.textContent,
+        lastChild: element.lastChild?.nodeName ?? null,
+    }));
 }
 
 async function selectionState(editor: Locator) {

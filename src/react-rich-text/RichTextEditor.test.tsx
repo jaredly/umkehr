@@ -46,6 +46,15 @@ describe('RichTextEditor', () => {
         expect(binding.commands.replace).not.toHaveBeenCalled();
     });
 
+    it('renders a trailing line break sentinel for text ending in a newline', () => {
+        const binding = bindingForText('hello\n');
+        const view = render(<RichTextEditor {...binding} />);
+        const editor = view.getByRole('textbox');
+
+        expect(editor.textContent).toBe('hello\n');
+        expect(editor.lastChild?.nodeName).toBe('BR');
+    });
+
     it('keeps focus and advances the caret after local text input', () => {
         let text = '';
         const binding = bindingForText(text);

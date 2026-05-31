@@ -306,7 +306,9 @@ function plainTextAfterEdit(text: string, edit: TextEdit) {
 }
 
 function renderRichTextDom(root: HTMLElement, view: RichTextRenderView) {
-    root.replaceChildren(...view.spans.map((span) => richTextSpanNode(root.ownerDocument, span)));
+    const children = view.spans.map((span) => richTextSpanNode(root.ownerDocument, span));
+    if (view.plainText.endsWith('\n')) children.push(root.ownerDocument.createElement('br'));
+    root.replaceChildren(...children);
 }
 
 function richTextSpanNode(document: Document, span: RichTextRenderView['spans'][number]) {
