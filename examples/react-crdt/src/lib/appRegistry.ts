@@ -16,6 +16,12 @@ import {
 } from '../apps/whiteboard/WhiteboardApp';
 import type {WhiteboardEphemeralData, WhiteboardState} from '../apps/whiteboard/model';
 import {
+    richNotesApp,
+    richNotesCrdtRuntime,
+    richNotesHistoryRuntime,
+} from '../apps/rich-notes/RichNotesApp';
+import type {RichNotesState} from '../apps/rich-notes/model';
+import {
     todoFixtureMigration,
     todoFixtureMigrationConfig,
     todoFixtureV3MigrationConfig,
@@ -98,11 +104,18 @@ export const registeredApps = [
         history: whiteboardHistoryRuntime,
         serverSchemaConfig: undefined,
     },
+    {
+        app: richNotesApp,
+        crdt: richNotesCrdtRuntime,
+        history: richNotesHistoryRuntime,
+        serverSchemaConfig: undefined,
+    },
 ] satisfies [
     RegisteredApp<TodoState>,
     RegisteredApp<TodoFixtureStateV1>,
     RegisteredApp<TodoFixtureStateV3>,
     RegisteredEphemeralApp<WhiteboardState, WhiteboardEphemeralData>,
+    RegisteredApp<RichNotesState>,
 ];
 export type AppOption = {
     id: string;

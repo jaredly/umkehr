@@ -1,6 +1,12 @@
 import {describe, expect, it} from 'vitest';
 import typia from 'typia';
-import {richText, richTextFromPlainText, richTextFromSpans, type RichCollaborativeText} from './index.js';
+import {
+    materializeRichTextValue,
+    richText,
+    richTextFromPlainText,
+    richTextFromSpans,
+    type RichCollaborativeText,
+} from './index.js';
 
 type State = {
     title: string;
@@ -10,6 +16,10 @@ type State = {
 describe('richtext public api', () => {
     it('creates an empty rich-text value', () => {
         expect(richText()).toEqual({kind: 'rich-text', version: 1, chars: []});
+    });
+
+    it('materializes a rich-text value', () => {
+        expect(materializeRichTextValue(richText())).toEqual({plainText: '', spans: []});
     });
 
     it('creates import snapshots', () => {

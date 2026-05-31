@@ -265,15 +265,16 @@ Join is only semantically clean for text-adjacent blocks:
 - with newline sentinels, join deletes/removes the separating newline sentinel;
 - no character identity is lost.
 
-For visual-adjacent but text-disjoint blocks, a "join" cannot mean ordinary paragraph join without
-one of these extra choices:
+For visual-adjacent but text-disjoint blocks, a "join" cannot mean ordinary contiguous paragraph
+join without one of these extra choices:
 
 - move text in the character stream, which violates the non-destructive movement goal;
 - create a new block that claims two disjoint ranges, which complicates rendering and editing;
 - retarget one block's range to cover the gap, which may sweep in unrelated/orphaned text;
+- insert a structural connector that jumps from the first range to the second range;
 - reject the join as not text-adjacent.
 
-Recommended rule:
+The strict rule would be:
 
 - `joinBlock` should require text adjacency.
 - If the previous/next visual block is not text-adjacent, Backspace/Delete at the visual boundary
@@ -281,9 +282,72 @@ Recommended rule:
 - Editor UI can expose this distinction: visual drag order is not the same as underlying text
   adjacency.
 
-This keeps join coherent and non-destructive. It also suggests that moved blocks may need a
-separate "normalize text order" command if we ever want to rewrite the character stream to match
-visual block order.
+That keeps join simple, but it is likely too restrictive for editing. If users can visually reorder
+blocks, they will expect visual-adjacent blocks to join. Connector sentinels are the main
+non-destructive way to support that.
+
+## Option 7: connector sentinel characters
+
+Add a structural sentinel character that links one text span to another. A joined block can then
+become a traversal over multiple spans rather than one contiguous range.
+
+Sketch:
+
+```ts
+type RichTextConnector = {
+    kind: 'blockConnector';
+    opId: RichTextOpId;
+    afterId: RichTextOpId | null;
+    target: RichTextAnchor;
+};
+```
+
+Joining visual-adjacent but text-disjoint blocks A and B would:
+
+1. Insert a connector sentinel at the end of A's included span.
+2. Point the connector at B's start boundary.
+3. Update the surviving block's end to B's end boundary.
+4. Tombstone/delete B's block node.
+
+The surviving block reads as:
+
+```text
+A.start ... connector -> B.start ... B.end
+```
+
+and skips any unrelated character-stream content between A and B.
+
+Benefits:
+
+- Supports visual-adjacent joins after drag-to-reorder without moving text.
+- Preserves character identity for both joined blocks.
+- Avoids retargeting a block range across unrelated text.
+- Keeps connector intent explicit in the operation log.
+
+Costs:
+
+- Block content is no longer always a contiguous range; it becomes a traversal.
+- Materialization needs cycle detection.
+- Selection, plain-text offsets, mark commands, copy/paste, and deletion must understand traversal
+  order.
+- Concurrent joins can create competing connector paths.
+- Deleting a connector needs defined semantics: split the logical block, orphan the later span, or
+  behave like undoing a join.
+- Connectors introduce another kind of structural character that editors must hide/protect.
+
+Materialization with connectors:
+
+1. Start at the block's `start` boundary.
+2. Walk visible characters toward the block's `end`.
+3. When a connector is encountered, append content up to the connector, then jump to
+   `connector.target`.
+4. Continue until the block's final `end`.
+5. Track visited connector IDs and range positions to avoid cycles.
+6. If traversal cycles or reaches an invalid target, stop following that connector and treat it as
+   broken structural metadata.
+
+Connector sentinels make the model closer to a block content graph. That is more complex than pure
+newline-delimited ranges, but it matches the non-destructive visual join requirement.
 
 ## Proposed semantics
 
@@ -343,8 +407,10 @@ Contested text should use parsed block ID ordering, not raw lexical string order
 - Drag-to-reordered blocks keep edge typing inside the active block.
 - Splitting a block inserts a newline sentinel and creates two text-adjacent blocks.
 - Joining text-adjacent blocks removes the separating newline sentinel.
-- Joining visual-adjacent but text-disjoint blocks is rejected or treated as a non-text structural
-  command.
+- Joining visual-adjacent but text-disjoint blocks inserts a connector sentinel and preserves both
+  original text spans.
+- Connector traversal detects and stops cycles.
+- Broken connector targets do not crash materialization.
 - Concurrent inserts at the same block start converge.
 - Concurrent inserts at the same block end converge.
 - Contested text repair still works after applying newline-boundary range resolution.
@@ -356,6 +422,6 @@ Prefer newline-anchored block ranges. They make ordinary start/end typing cheap 
 insert after the start newline or before the end newline, without updating block ranges. Keep
 sticky arbitrary boundaries as a fallback design if newline sentinels become too restrictive.
 
-For split/join, define join in terms of text adjacency, not visual adjacency. Visual-adjacent
-blocks that are far apart in the character stream should not be joined by silently moving or
-retargeting text.
+For split/join, use the simple newline-boundary path for text-adjacent blocks. For visual-adjacent
+but text-disjoint blocks, use connector sentinels if join must be supported without moving text.
+Do not silently retarget a block range across unrelated text.

@@ -18,6 +18,7 @@ import {createContext, useContext} from 'react';
 import React from 'react';
 import {deepEqual as equal} from '../deepEqual';
 import {richText, type RichCollaborativeText} from '../richtext';
+import {restoreSelection} from '../react-rich-text/selection';
 
 type State = {
     title: string;
@@ -269,6 +270,34 @@ describe('createSyncedContext', () => {
         expect(transport.published.at(-1)?.every((update) => update.op === 'richText')).toBe(true);
     });
 
+    it('handles sequential rich text keyboard insertion', async () => {
+        const [Provider, useDoc] = createSyncedContext<RichTextState>('type');
+        const transport = new TestTransport('local');
+
+        function Editor() {
+            const ctx = useDoc();
+            const body = ctx.useRichText(ctx.$.body);
+            return <RichTextEditor {...body} />;
+        }
+
+        const view = render(
+            <Provider initial={createRichTextHistory()} transport={transport}>
+                <Editor />
+            </Provider>,
+        );
+
+        const editor = view.getByRole('textbox');
+        editor.focus();
+        restoreSelection(editor, {start: 0, end: 0});
+
+        for (const char of 'hello') {
+            editor.textContent = `${editor.textContent ?? ''}${char}`;
+            fireEvent.input(editor);
+        }
+
+        await waitFor(() => expect(editor.textContent).toBe('hello'));
+    });
+
     it('renders rich text inline marks from the derived view', async () => {
         const [Provider, useDoc] = createSyncedContext<RichTextState>('type');
         const transport = new TestTransport('local');
@@ -300,7 +329,9 @@ describe('createSyncedContext', () => {
 
         fireEvent.click(view.getByText('bold'));
 
-        await waitFor(() => expect(view.getByRole('textbox').querySelector('strong')?.textContent).toBe('hi'));
+        await waitFor(() =>
+            expect(view.getByRole('textbox').querySelector('strong')?.textContent).toBe('hi'),
+        );
     });
 
     it('renders subscribed values, dispatches local updates, and publishes CRDT updates', () => {

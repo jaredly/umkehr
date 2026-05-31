@@ -32,5 +32,6 @@ pnpm dev
 | `basic` | Draft patches, realized patches, applying and inverting changes |
 | `history` | History dispatch, undo, redo, branching, and jump |
 | `react` | `createHistoryContext`, `useValue`, preview updates, undo, and redo |
+| `react-crdt` | CRDT-backed React demo apps, including todos, whiteboard, and rich-text shared notes |
 | `remix3` | Remix 3 beta client components with `umkehr/remix`, path watches, preview updates, undo, and redo |
 | `tagged-union` | `$variant` with direct and callback forms |

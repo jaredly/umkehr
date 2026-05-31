@@ -1,6 +1,10 @@
 import type {tags} from 'typia';
 import {crdtPathForExisting, getMetaAtPath} from '../crdt/path.js';
-import {emptyRichTextState, materializeRichTextState, richTextSnapshotFromPlainText} from '../peritext/index.js';
+import {
+    emptyRichTextState,
+    materializeRichTextState,
+    richTextSnapshotFromPlainText,
+} from '../peritext/index.js';
 import type {CrdtDocument} from '../crdt/types.js';
 import type {
     RichTextImportSnapshot,
@@ -35,7 +39,9 @@ export function richTextFromPlainText(text: string): RichTextImportSnapshot {
 }
 
 export function richTextFromSpans(spans: RichTextSpan[]): RichTextImportSnapshot {
-    return {spans: spans.map((span) => ({...span, marks: span.marks ? {...span.marks} : undefined}))};
+    return {
+        spans: spans.map((span) => ({...span, marks: span.marks ? {...span.marks} : undefined})),
+    };
 }
 
 export function materializeRichText<T>(doc: CrdtDocument<T>, path: Path): RichTextRenderView {
@@ -47,6 +53,13 @@ export function materializeRichText<T>(doc: CrdtDocument<T>, path: Path): RichTe
     const value = getValueAtPath(doc.state, path);
     if (!isRichTextState(value)) {
         throw new Error('Cannot materialize rich text: state value is not rich-text data.');
+    }
+    return materializeRichTextState(value);
+}
+
+export function materializeRichTextValue(value: RichCollaborativeText): RichTextRenderView {
+    if (!isRichTextState(value)) {
+        throw new Error('Cannot materialize rich text: value is not rich-text data.');
     }
     return materializeRichTextState(value);
 }
@@ -66,8 +79,6 @@ function getValueAtPath(root: unknown, path: Path) {
 
 function isRichTextState(value: unknown): value is RichTextState {
     return Boolean(
-        value &&
-            typeof value === 'object' &&
-            Array.isArray((value as {chars?: unknown}).chars),
+        value && typeof value === 'object' && Array.isArray((value as {chars?: unknown}).chars),
     );
 }

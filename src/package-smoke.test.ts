@@ -51,6 +51,7 @@ describe('package exports', () => {
         expect(typeof richTextPkg.richText).toBe('function');
         expect(typeof richTextPkg.richTextFromPlainText).toBe('function');
         expect(typeof richTextPkg.materializeRichText).toBe('function');
+        expect(typeof richTextPkg.materializeRichTextValue).toBe('function');
     });
 
     it('imports the built React entry point separately', async () => {
