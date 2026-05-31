@@ -2,6 +2,7 @@ import {describe, expect, it} from 'vitest';
 import {
     applyRichTextOperation,
     applyRichTextOperations,
+    applyInsertMany,
     charIdsForVisibleRange,
     emptyRichTextState,
     insertionAfterIdForIndex,
@@ -85,6 +86,21 @@ describe('peritext sequence', () => {
 
         expect(plainText(leftFirst)).toBe('acb');
         expect(leftFirst).toEqual(rightFirst);
+    });
+
+    it('applies sequential insert runs in one batch', () => {
+        const state = applyInsertMany(emptyRichTextState(), [
+            {action: 'insert', opId: '1@alice:main', afterId: null, char: 'h'},
+            {action: 'insert', opId: '2@alice:main', afterId: '1@alice:main', char: 'e'},
+            {action: 'insert', opId: '3@alice:main', afterId: '2@alice:main', char: 'y'},
+        ]);
+
+        expect(plainText(state)).toBe('hey');
+        expect(state.chars.map((char) => char.opId)).toEqual([
+            '1@alice:main',
+            '2@alice:main',
+            '3@alice:main',
+        ]);
     });
 
     it('keeps descendants with their inserted parent when sorting concurrent inserts', () => {

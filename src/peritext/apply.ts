@@ -1,6 +1,11 @@
 import {applyMarkOperation} from './marks.js';
-import {applyInsert, applyRemove} from './sequence.js';
-import type {RichTextAnchor, RichTextOperation, RichTextState} from './types.js';
+import {applyInsert, applyInsertMany, applyRemove} from './sequence.js';
+import type {
+    RichTextAnchor,
+    RichTextInsertOperation,
+    RichTextOperation,
+    RichTextState,
+} from './types.js';
 
 export function applyRichTextOperation(
     state: RichTextState,
@@ -24,7 +29,22 @@ export function applyRichTextOperations(
     state: RichTextState,
     operations: readonly RichTextOperation[],
 ): RichTextState {
-    return operations.reduce((current, operation) => applyRichTextOperation(current, operation), state);
+    let current = state;
+    for (let index = 0; index < operations.length; index++) {
+        const operation = operations[index];
+        if (!operation) continue;
+        const run = insertRunAt(current, operations, index);
+        if (run.length > 1) {
+            current = retryPending({
+                ...applyInsertMany(current, run),
+                ...(current.pending?.length ? {pending: current.pending.slice()} : {}),
+            });
+            index += run.length - 1;
+            continue;
+        }
+        current = applyRichTextOperation(current, operation);
+    }
+    return current;
 }
 
 function applyOne(
@@ -93,6 +113,39 @@ function hasOperation(state: RichTextState, operation: RichTextOperation) {
             char.markOpsBefore?.some((op) => op.opId === operation.opId) ||
             char.markOpsAfter?.some((op) => op.opId === operation.opId),
     );
+}
+
+function insertRunAt(
+    state: RichTextState,
+    operations: readonly RichTextOperation[],
+    start: number,
+): RichTextInsertOperation[] {
+    const first = operations[start];
+    if (!first || first.action !== 'insert' || !canApplyInsertNow(state, first)) return [];
+    const run = [first];
+    const seen = new Set([first.opId]);
+    for (let index = start + 1; index < operations.length; index++) {
+        const operation = operations[index];
+        const previous = run[run.length - 1];
+        if (
+            !operation ||
+            !previous ||
+            operation.action !== 'insert' ||
+            operation.afterId !== previous.opId ||
+            seen.has(operation.opId) ||
+            state.chars.some((char) => char.opId === operation.opId)
+        ) {
+            break;
+        }
+        run.push(operation);
+        seen.add(operation.opId);
+    }
+    return run;
+}
+
+function canApplyInsertNow(state: RichTextState, operation: RichTextInsertOperation) {
+    if (state.chars.some((char) => char.opId === operation.opId)) return false;
+    return operation.afterId === null || state.chars.some((char) => char.opId === operation.afterId);
 }
 
 function anchorOrder(state: RichTextState, anchor: RichTextAnchor) {

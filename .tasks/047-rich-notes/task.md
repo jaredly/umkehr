@@ -1,0 +1,1 @@
+I'd like an app in examples/rich-crdt that exercises the rich-text editor a bit. I'm thinking a basic "shared notepad", kinda like apple notes or something. Sidebar down the left showing title & last modified date, main panel with rich text editor.

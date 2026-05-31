@@ -1,9 +1,10 @@
 import {formatOpId, maxOpCounter} from './ids.js';
 import {applyRichTextOperations} from './apply.js';
-import {emptyRichTextState} from './sequence.js';
+import {applyInsertMany, emptyRichTextState} from './sequence.js';
 import type {
     RichTextActorId,
     RichTextImportSnapshot,
+    RichTextInsertOperation,
     RichTextOperation,
     RichTextRenderView,
     RichTextSpan,
@@ -26,18 +27,20 @@ export function importRichTextSnapshot(
     const spanRanges: {span: RichTextSpan; start: number; end: number}[] = [];
     let visibleIndex = 0;
 
+    const insertOperations: RichTextInsertOperation[] = [];
     for (const span of snapshot.spans) {
         const start = visibleIndex;
         for (const char of Array.from(span.text)) {
             const opId = formatOpId(counter++, actorId);
-            const operation: RichTextOperation = {action: 'insert', opId, afterId, char};
+            const operation: RichTextInsertOperation = {action: 'insert', opId, afterId, char};
             operations.push(operation);
-            state = applyRichTextOperations(state, [operation]);
+            insertOperations.push(operation);
             afterId = opId;
             visibleIndex++;
         }
         spanRanges.push({span, start, end: visibleIndex});
     }
+    state = applyInsertMany(state, insertOperations);
 
     for (const {span, start, end} of spanRanges) {
         if (!span.marks || start === end) continue;

@@ -35,6 +35,25 @@ export function applyInsert(state: RichTextState, operation: RichTextInsertOpera
     return {...state, chars, ...(state.pending?.length ? {pending: state.pending.slice()} : {})};
 }
 
+export function applyInsertMany(
+    state: RichTextState,
+    operations: readonly RichTextInsertOperation[],
+): RichTextState {
+    if (!operations.length) return state;
+    validateInsertRun(state, operations);
+    const inserted = operations.map((operation) => ({
+        opId: operation.opId,
+        afterId: operation.afterId,
+        char: operation.char,
+        deleted: false,
+    }));
+    const first = inserted[0];
+    if (!first) return state;
+    const chars = state.chars.slice();
+    chars.splice(insertionIndexForInsert(state.chars, first), 0, ...inserted);
+    return {...state, chars, ...(state.pending?.length ? {pending: state.pending.slice()} : {})};
+}
+
 export function applyRemove(state: RichTextState, operation: RichTextRemoveOperation): RichTextState {
     const index = state.chars.findIndex((char) => char.opId === operation.removedId);
     if (index === -1) {
@@ -141,6 +160,32 @@ function cloneChars(chars: RichTextCharMeta[]): RichTextCharMeta[] {
         markOpsBefore: char.markOpsBefore?.slice(),
         markOpsAfter: char.markOpsAfter?.slice(),
     }));
+}
+
+function validateInsertRun(
+    state: RichTextState,
+    operations: readonly RichTextInsertOperation[],
+) {
+    const existingIds = new Set(state.chars.map((char) => char.opId));
+    const runIds = new Set<RichTextOpId>();
+    let previousId: RichTextOpId | null = null;
+    operations.forEach((operation, index) => {
+        if (operation.char.length !== 1) {
+            throw new Error('Cannot apply rich text insert: operation char must be one character.');
+        }
+        if (existingIds.has(operation.opId) || runIds.has(operation.opId)) {
+            throw new Error(`Cannot apply rich text insert run: duplicate opId "${operation.opId}".`);
+        }
+        const expectedAfterId = index === 0 ? operation.afterId : previousId;
+        if (operation.afterId !== expectedAfterId) {
+            throw new Error('Cannot apply rich text insert run: operations must be sequential.');
+        }
+        if (index === 0 && operation.afterId !== null && !existingIds.has(operation.afterId)) {
+            throw new Error(`Cannot apply rich text insert: afterId "${operation.afterId}" is missing.`);
+        }
+        runIds.add(operation.opId);
+        previousId = operation.opId;
+    });
 }
 
 function insertionIndexForInsert(

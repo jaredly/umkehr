@@ -61,3 +61,16 @@
 - `pnpm test src/crdt/richtext.test.ts` passed.
 - `pnpm test src/crdt src/react-crdt src/richtext src/peritext` passed.
 - `pnpm test` passed: 50 files, 393 tests.
+
+### Phase 4 follow-up: insert runs
+
+- Added `applyInsertMany` for sequential, ready insert runs. It validates the run once, computes the first insertion point once, and splices the whole run into the char array together.
+- Updated `applyRichTextOperations` to detect conservative insert runs and use `applyInsertMany`; duplicate or unresolved inserts still flow through the single-operation path so pending semantics are preserved.
+- Updated rich-text snapshot import to batch the initial text inserts before applying mark operations.
+- Added a focused sequence test for batched sequential inserts.
+
+### Phase 4 follow-up verification
+
+- `pnpm test src/peritext` passed.
+- `pnpm test src/crdt/richtext.test.ts` passed.
+- `pnpm test` passed: 50 files, 394 tests.

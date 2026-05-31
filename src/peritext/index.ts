@@ -24,6 +24,7 @@ export {materializeRichTextState} from './materialize.js';
 export {applyMarkOperation, marksForOperations, opSetForChar} from './marks.js';
 export {
     applyInsert,
+    applyInsertMany,
     applyRemove,
     charIdsForVisibleRange,
     emptyRichTextState,
