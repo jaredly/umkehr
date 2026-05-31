@@ -20,3 +20,20 @@ Basic idea:
 we expect much more 'contiguous paragraphs' than we expect splits & joins. So splits & joins can a bit more expensive/complex, if it allows normal paragraphs to be tight.
 
 Then we have the 'block tree' layer, which does parentId + fractional ordering.
+
+A join is metadata on the paragraph.
+
+```ts
+type Paragraph = {
+    id: string;
+    chars: RichTextCharMeta[];
+    pending?: RichTextOperation[];
+    join?: string;
+}
+````
+
+Questions:
+can you tombstone a split? I think you probably should not be able to. Because then what happens to a join that's pointing to the virtual block?
+Yeah splits are forever, but can be 'reversed' by a join.
+joins are also forever. split/join/split/join keeps adding new blocks.
+Also splits can't have marks

@@ -34,6 +34,37 @@ describe('RichTextEditor', () => {
         expect(binding.commands.replace).not.toHaveBeenCalled();
     });
 
+    it('inserts a newline on Enter', () => {
+        const binding = bindingForText('hello');
+        const view = render(<RichTextEditor {...binding} />);
+        const editor = view.getByRole('textbox');
+        restoreSelection(editor, {start: 5, end: 5});
+
+        fireEvent.keyDown(editor, {key: 'Enter'});
+
+        expect(binding.commands.insert).toHaveBeenCalledWith(5, '\n');
+        expect(binding.commands.replace).not.toHaveBeenCalled();
+    });
+
+    it('keeps focus and advances the caret after local text input', () => {
+        let text = '';
+        const binding = bindingForText(text);
+        binding.commands.insert = vi.fn((index: number, inserted: string) => {
+            text = text.slice(0, index) + inserted + text.slice(index);
+            view.rerender(<RichTextEditor {...bindingForText(text)} />);
+        });
+        const view = render(<RichTextEditor {...binding} />);
+        const editor = view.getByRole('textbox');
+        editor.focus();
+        restoreSelection(editor, {start: 0, end: 0});
+
+        editor.textContent = 'h';
+        fireEvent.input(editor);
+
+        expect(document.activeElement).toBe(editor);
+        expectSelection(editor, {start: 1, end: 1});
+    });
+
     it('toggles bold with mod-b using the full-selection mark rule', () => {
         const binding = bindingForText('hi');
         const view = render(<RichTextEditor {...binding} />);
@@ -149,4 +180,13 @@ function bindingForSpans(spans: RichTextBinding['view']['spans']): RichTextBindi
             replace: vi.fn(),
         },
     };
+}
+
+function expectSelection(root: HTMLElement, expected: {start: number; end: number}) {
+    const selection = root.ownerDocument.defaultView?.getSelection();
+    expect(selection?.rangeCount).toBe(1);
+    const range = selection?.getRangeAt(0);
+    expect(range?.startContainer.textContent).toBe(root.textContent);
+    expect(range?.startOffset).toBe(expected.start);
+    expect(range?.endOffset).toBe(expected.end);
 }

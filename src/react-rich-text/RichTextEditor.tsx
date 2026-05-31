@@ -1,9 +1,10 @@
 import {useEffect, useLayoutEffect, useRef, useState} from 'react';
+import {flushSync} from 'react-dom';
 import type {RichTextBinding} from '../react-crdt/react-crdt.js';
 import type {RichTextImportSnapshot} from '../richtext/index.js';
+import type {RichTextRenderView} from '../peritext/types.js';
 import {diffPlainText, type TextEdit} from './diff.js';
 import {rangeHasMark} from './marks.js';
-import {RichTextSpanView} from './render.js';
 import {
     restoreSelection,
     selectionInside,
@@ -24,25 +25,60 @@ export function RichTextEditor({
     promptForLink,
 }: RichTextEditorProps) {
     const rootRef = useRef<HTMLDivElement>(null);
+    const inputBase = useRef(view.plainText);
+    const renderedPlainText = useRef(view.plainText);
+    const localSelection = useRef<TextRange | null>(null);
     const pendingSelection = useRef<TextRange | null>(null);
+    const [optimisticText, setOptimisticText] = useState<string | null>(null);
     const [toolbar, setToolbar] = useState<ToolbarState | null>(null);
+    const visibleView =
+        optimisticText === null
+            ? view
+            : {plainText: optimisticText, spans: optimisticText ? [{text: optimisticText}] : []};
+    const contentKey = JSON.stringify(visibleView.spans);
+
+    if (renderedPlainText.current !== view.plainText && optimisticText === null) {
+        renderedPlainText.current = view.plainText;
+        inputBase.current = view.plainText;
+    }
+
+    useEffect(() => {
+        if (optimisticText !== null && view.plainText === optimisticText) {
+            renderedPlainText.current = view.plainText;
+            setOptimisticText(null);
+        }
+    }, [optimisticText, view.plainText]);
+
+    useLayoutEffect(() => {
+        const root = rootRef.current;
+        if (!root) return;
+        renderRichTextDom(root, visibleView);
+    }, [contentKey]);
 
     useLayoutEffect(() => {
         const root = rootRef.current;
         const range = pendingSelection.current;
         if (!root || !range) return;
         pendingSelection.current = null;
-        restoreSelection(root, clampRange(range, view.plainText.length));
-    }, [view.plainText]);
+        const clamped = clampRange(range, visibleView.plainText.length);
+        localSelection.current = clamped;
+        root.focus({preventScroll: true});
+        restoreSelection(root, clamped);
+    }, [visibleView.plainText]);
 
     const applyEdit = (edit: TextEdit, restoreTo: TextRange) => {
-        if (edit.delete && edit.delete.start !== edit.delete.end) {
-            commands.delete(edit.delete.start, edit.delete.end);
-        }
-        if (edit.insert && edit.insert.text) {
-            commands.insert(edit.insert.index, edit.insert.text);
-        }
+        inputBase.current = plainTextAfterEdit(inputBase.current, edit);
+        localSelection.current = restoreTo;
         pendingSelection.current = restoreTo;
+        flushSync(() => {
+            setOptimisticText(inputBase.current);
+            if (edit.delete && edit.delete.start !== edit.delete.end) {
+                commands.delete(edit.delete.start, edit.delete.end);
+            }
+            if (edit.insert && edit.insert.text) {
+                commands.insert(edit.insert.index, edit.insert.text);
+            }
+        });
     };
 
     const replaceSelectionWithText = (range: TextRange, text: string) => {
@@ -78,6 +114,7 @@ export function RichTextEditor({
             return;
         }
         const range = selectionRangeIn(root);
+        if (range) localSelection.current = range;
         const selection = root.ownerDocument.defaultView?.getSelection();
         if (!range || range.start === range.end || !selection || selection.rangeCount === 0) {
             setToolbar(null);
@@ -106,9 +143,10 @@ export function RichTextEditor({
         const root = rootRef.current;
         if (!root) return;
         const range = selectionRangeIn(root);
+        if (range) localSelection.current = range;
         if (!range || range.start === range.end) return;
         const preset = markType === 'link' ? 'exclusive' : 'inclusive';
-        if (rangeHasMark(view, range, markType)) {
+        if (rangeHasMark(visibleView, range, markType)) {
             commands.unmark(range.start, range.end, markType, preset);
         } else {
             commands.mark(range.start, range.end, markType, value, preset);
@@ -143,6 +181,15 @@ export function RichTextEditor({
                 onMouseUp={updateToolbar}
                 onKeyUp={updateToolbar}
                 onKeyDown={(event) => {
+                    if (event.key === 'Enter' && !(event.metaKey || event.ctrlKey || event.altKey)) {
+                        const root = rootRef.current;
+                        if (!root) return;
+                        const range = localSelection.current ?? selectionRangeIn(root);
+                        if (!range) return;
+                        event.preventDefault();
+                        replaceSelectionWithText(range, '\n');
+                        return;
+                    }
                     if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
                     const key = event.key.toLowerCase();
                     if (key === 'b') {
@@ -156,7 +203,8 @@ export function RichTextEditor({
                 onBeforeInput={(event) => {
                 const root = rootRef.current;
                 if (!root) return;
-                const range = selectionRangeIn(root);
+                const domRange = selectionRangeIn(root);
+                const range = localSelection.current ?? domRange;
                 if (!range) return;
                 const native = event.nativeEvent as InputEvent;
                 switch (native.inputType) {
@@ -165,6 +213,12 @@ export function RichTextEditor({
                         if (!native.data) return;
                         event.preventDefault();
                         replaceSelectionWithText(range, native.data);
+                        return;
+                    }
+                    case 'insertLineBreak':
+                    case 'insertParagraph': {
+                        event.preventDefault();
+                        replaceSelectionWithText(range, '\n');
                         return;
                     }
                     case 'deleteContentBackward': {
@@ -180,7 +234,7 @@ export function RichTextEditor({
                     case 'deleteContentForward': {
                         const next =
                             range.start === range.end
-                                ? {start: range.start, end: Math.min(view.plainText.length, range.end + 1)}
+                                ? {start: range.start, end: Math.min(visibleView.plainText.length, range.end + 1)}
                                 : range;
                         if (next.start === next.end) return;
                         event.preventDefault();
@@ -193,6 +247,7 @@ export function RichTextEditor({
                 const root = rootRef.current;
                 if (!root) return;
                 const range = selectionRangeIn(root);
+                if (range) localSelection.current = range;
                 if (!range) return;
                 const html = event.clipboardData.getData('text/html');
                 const text = event.clipboardData.getData('text/plain');
@@ -205,23 +260,21 @@ export function RichTextEditor({
                 }}
                 onInput={(event) => {
                 const after = event.currentTarget.textContent ?? '';
-                const edit = diffPlainText(view.plainText, after);
+                const before = inputBase.current;
+                const edit = diffPlainText(before, after);
                 if (!edit) return;
                 const caret = edit.insert
                     ? edit.insert.index + edit.insert.text.length
                     : (edit.delete?.start ?? after.length);
-                event.currentTarget.textContent = view.plainText;
+                event.currentTarget.textContent = before;
                 applyEdit(edit, {start: caret, end: caret});
                 }}
             >
-                {view.spans.map((span, index) => (
-                    <RichTextSpanView key={index} span={span} />
-                ))}
             </div>
             {toolbar ? (
                 <SelectionToolbar
                     state={toolbar}
-                    view={view}
+                    view={visibleView}
                     onToggleMark={toggleMark}
                     onToggleLink={toggleLink}
                 />
@@ -239,6 +292,40 @@ function clampRange(range: TextRange, length: number): TextRange {
         start: Math.max(0, Math.min(range.start, length)),
         end: Math.max(0, Math.min(range.end, length)),
     };
+}
+
+function plainTextAfterEdit(text: string, edit: TextEdit) {
+    let next = text;
+    if (edit.delete && edit.delete.start !== edit.delete.end) {
+        next = next.slice(0, edit.delete.start) + next.slice(edit.delete.end);
+    }
+    if (edit.insert && edit.insert.text) {
+        next = next.slice(0, edit.insert.index) + edit.insert.text + next.slice(edit.insert.index);
+    }
+    return next;
+}
+
+function renderRichTextDom(root: HTMLElement, view: RichTextRenderView) {
+    root.replaceChildren(...view.spans.map((span) => richTextSpanNode(root.ownerDocument, span)));
+}
+
+function richTextSpanNode(document: Document, span: RichTextRenderView['spans'][number]) {
+    let node: Node = document.createTextNode(span.text);
+    if (span.marks?.code) node = wrapNode(document, 'code', node);
+    if (span.marks?.em) node = wrapNode(document, 'em', node);
+    if (span.marks?.strong) node = wrapNode(document, 'strong', node);
+    if (typeof span.marks?.link === 'string') {
+        const link = wrapNode(document, 'a', node) as HTMLAnchorElement;
+        link.href = span.marks.link;
+        node = link;
+    }
+    return node;
+}
+
+function wrapNode(document: Document, tagName: string, child: Node) {
+    const element = document.createElement(tagName);
+    element.appendChild(child);
+    return element;
 }
 
 export function richTextSnapshotFromHtml(document: Document, html: string): RichTextImportSnapshot {

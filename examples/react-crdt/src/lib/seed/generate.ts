@@ -96,7 +96,6 @@ type BranchBuilder<TState> = {
     branches: ServerBranch[];
     events: ServerBranchEvent[];
     histories: Record<string, CrdtLocalHistory<TState>>;
-    state: TState;
 };
 
 export type SeedFixture<TState = unknown> = SeedDocument & {
@@ -957,7 +956,6 @@ function createDoc<TState>({
         }],
         events: [],
         histories: {main: initialHistory},
-        state: structuredClone(initialState),
     };
 }
 
@@ -1228,7 +1226,6 @@ function appendCommand<TState>(
         branch.updatedAt = receivedAt;
         doc.lastAccessedAt = receivedAt;
     }
-    if (branchId === 'main') doc.state = structuredClone(result.history.doc.state);
 }
 
 function createBranch<TState>(
