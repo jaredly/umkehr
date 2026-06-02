@@ -14,6 +14,7 @@ import {
     redoLocalCommand,
     undoLocalCommand,
 } from './index.js';
+import type {CrdtMeta, ObjectMeta} from './index.js';
 import {
     materializeRichText,
     richText,
@@ -89,6 +90,31 @@ describe('crdt rich text metadata', () => {
         expect(doc.state.body).toMatchObject({kind: 'rich-text', version: 1});
         expect(doc.state.body.chars).toHaveLength(2);
         expect(materializeRichText(doc, [{type: 'key', key: 'body'}]).plainText).toBe('hi');
+    });
+
+    it('applies rich-text updates without mutating previous metadata', () => {
+        const doc = createCrdtDocument(
+            {title: 'Draft', body: richText()},
+            schema,
+            {timestamp: '001'},
+        );
+        const beforeMeta = structuredClone(doc.meta) as CrdtMeta;
+        const titleMeta = objectField(doc.meta, 'title');
+        const bodyMeta = objectField(doc.meta, 'body');
+        const $ = createPatchBuilder<State>();
+        const [insert] = createCrdtUpdates(doc, $.body.$text.insert({index: 0}, 'h'), ts(1));
+        if (!insert) throw new Error('missing rich-text insert update');
+
+        const after = applyCrdtUpdate(doc, insert);
+
+        expect(doc.meta).toEqual(beforeMeta);
+        expect(after.meta).not.toBe(doc.meta);
+        expect(objectField(after.meta, 'title')).toBe(titleMeta);
+        expect(objectField(after.meta, 'body')).not.toBe(bodyMeta);
+        expect(after.state).not.toBe(doc.state);
+        expect(after.state.body).not.toBe(doc.state.body);
+        expect(after.state.title).toBe(doc.state.title);
+        expect(materializeRichText(after, [{type: 'key', key: 'body'}]).plainText).toBe('h');
     });
 
     it('applies marks and reports the rich-text field as changed', () => {
@@ -224,3 +250,8 @@ describe('crdt rich text metadata', () => {
         ]);
     });
 });
+
+function objectField(meta: CrdtMeta, key: string) {
+    expect(meta.kind).toBe('object');
+    return (meta as ObjectMeta).fields[key];
+}

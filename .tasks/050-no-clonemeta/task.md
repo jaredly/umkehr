@@ -1,0 +1,1 @@
+apply.ts calls `cloneMeta` in `applyCrdtUpdate` and it's a gigantic performance issue. it seems like a shortcut to avoid having to do manual book-keeping for immutable updates, but the perf cost is too high. Can you fix this?

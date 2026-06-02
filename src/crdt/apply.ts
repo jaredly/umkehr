@@ -1,6 +1,6 @@
 import {compareTimestamps, newer} from './clock.js';
 import {materialize} from './materialize.js';
-import {buildMeta, cloneMeta, versionOf} from './metadata.js';
+import {buildMeta, versionOf} from './metadata.js';
 import {getChild, getMetaAtPath, normalPathForCrdtPath} from './path.js';
 import {applyRichTextOperation} from '../peritext/apply.js';
 import {maxOpCounterAfterOperation} from '../peritext/ids.js';
@@ -23,92 +23,169 @@ type WalkResult =
     | {status: 'pending'; reason: PendingUpdate['reason']}
     | {status: 'discard'};
 
+type ApplyResult<T> =
+    | {status: 'applied'; meta: CrdtMeta; state?: T}
+    | {status: 'pending'; reason: PendingUpdate['reason']}
+    | {status: 'discarded'};
+
+type CloneLeafResult =
+    | {status: 'ready'; root: CrdtMeta; parent: CrdtMeta; target?: CrdtMeta; segment: CrdtPathSegment}
+    | {status: 'pending'; reason: PendingUpdate['reason']}
+    | {status: 'discard'};
+
+type CloneTargetResult =
+    | {status: 'ready'; root: CrdtMeta; target: CrdtMeta}
+    | {status: 'pending'; reason: PendingUpdate['reason']}
+    | {status: 'discard'};
+
 export function applyCrdtUpdate<T>(doc: CrdtDocument<T>, update: CrdtUpdate): CrdtDocument<T> {
-    const next: CrdtDocument<T> = {
-        ...doc,
-        meta: cloneMeta(doc.meta),
-        pending: doc.pending.slice(),
-    };
-    const result = applyOne(next, update);
-    if (result === 'pending') {
-        next.pending.push({
-            update,
-            reason: pendingReason(next, update),
-            queuedAt: updateTimestamp(update),
-        });
+    const result = applyOne(doc, update);
+    if (result.status === 'discarded') return doc;
+    if (result.status === 'pending') {
+        return {
+            ...doc,
+            pending: [
+                ...doc.pending,
+                {
+                    update,
+                    reason: result.reason,
+                    queuedAt: updateTimestamp(update),
+                },
+            ],
+        };
     }
-    if (result === 'applied') retryPending(next);
-    next.state = materialize(next.meta, next.state) as T;
-    return next;
+
+    const retried = retryPending({
+        ...doc,
+        meta: result.meta,
+        state: (result.state ?? doc.state) as T,
+    });
+    return {
+        ...retried,
+        state: materialize(retried.meta, retried.state) as T,
+    };
+}
+
+function pendingResult(reason: PendingUpdate['reason']): ApplyResult<never> {
+    return {status: 'pending', reason};
 }
 
 function applyOne<T>(
     doc: CrdtDocument<T>,
     update: CrdtUpdate,
-): 'applied' | 'discarded' | 'pending' {
+): ApplyResult<T> {
     if (update.op === 'insert') return applyInsert(doc, update);
     if (update.op === 'setOrder') return applySetOrder(doc, update);
     if (update.op === 'richText') return applyRichText(doc, update);
     if (!update.path.length) {
         if (update.op === 'delete') {
             const version = versionOf(doc.meta);
-            if (version && newer(version, update.ts)) return 'discarded';
-            doc.meta = {kind: 'tombstone', deleted: update.ts};
-            return 'applied';
+            if (version && newer(version, update.ts)) return {status: 'discarded'};
+            return {status: 'applied', meta: {kind: 'tombstone', deleted: update.ts}};
         }
         const version = versionOf(doc.meta);
-        if (version && !newer(update.ts, version)) return 'discarded';
-        doc.meta = buildMeta(update.value, doc.schema.root, doc.schema, update.ts);
-        return 'applied';
+        if (version && !newer(update.ts, version)) return {status: 'discarded'};
+        return {
+            status: 'applied',
+            meta: buildMeta(update.value, doc.schema.root, doc.schema, update.ts),
+        };
     }
 
     const walked = walkToLeaf(doc.meta, update.path);
-    if (walked.status === 'pending') return 'pending';
-    if (walked.status === 'discard') return 'discarded';
-    const {parent, target, segment} = walked;
-    if (!segment) return 'discarded';
+    if (walked.status === 'pending') return pendingResult(walked.reason);
+    if (walked.status === 'discard') return {status: 'discarded'};
+    const {target, segment} = walked;
+    if (!segment) return {status: 'discarded'};
 
     if (update.op === 'delete') {
-        if (segment.type === 'arrayItem') return applyArrayItemDelete(parent, segment, update.ts);
+        if (segment.type === 'arrayItem') return applyArrayItemDelete(doc.meta, update.path, update.ts);
         const targetVersion = target ? versionOf(target) : undefined;
-        if (targetVersion && newer(targetVersion, update.ts)) return 'discarded';
-        setChild(parent, segment, {kind: 'tombstone', deleted: update.ts});
-        return 'applied';
+        if (targetVersion && newer(targetVersion, update.ts)) return {status: 'discarded'};
+        const cloned = clonePathToLeaf(doc.meta, update.path);
+        if (cloned.status === 'pending') return pendingResult(cloned.reason);
+        if (cloned.status === 'discard') return {status: 'discarded'};
+        setChild(cloned.parent, cloned.segment, {kind: 'tombstone', deleted: update.ts});
+        return {status: 'applied', meta: cloned.root};
     }
 
     const targetVersion = target ? versionOf(target) : undefined;
-    if (targetVersion && !newer(update.ts, targetVersion)) return 'discarded';
-    if (segment.type === 'arrayItem' && (!target || target.kind === 'tombstone')) return 'pending';
+    if (targetVersion && !newer(update.ts, targetVersion)) return {status: 'discarded'};
+    if (segment.type === 'arrayItem' && (!target || target.kind === 'tombstone')) {
+        return pendingResult('missing-parent');
+    }
     const schema = schemaAtCrdtPath(doc.schema, update.path);
-    setChild(parent, segment, buildMeta(update.value, schema, doc.schema, update.ts));
-    return 'applied';
+    const cloned = clonePathToLeaf(doc.meta, update.path);
+    if (cloned.status === 'pending') return pendingResult(cloned.reason);
+    if (cloned.status === 'discard') return {status: 'discarded'};
+    setChild(cloned.parent, cloned.segment, buildMeta(update.value, schema, doc.schema, update.ts));
+    return {status: 'applied', meta: cloned.root};
+}
+
+function retryPending<T>(doc: CrdtDocument<T>) {
+    let current: CrdtDocument<T> = {...doc};
+    let changed = true;
+    while (changed) {
+        changed = false;
+        const remaining: PendingUpdate[] = [];
+        for (const pending of current.pending) {
+            const result = applyOne(current, pending.update);
+            if (result.status === 'applied') {
+                current = {
+                    ...current,
+                    meta: result.meta,
+                    state: (result.state ?? current.state) as T,
+                };
+                changed = true;
+            } else if (result.status === 'pending') {
+                remaining.push({
+                    ...pending,
+                    reason: result.reason,
+                });
+            }
+        }
+        current = {
+            ...current,
+            pending: remaining,
+        };
+    }
+    return current;
 }
 
 function applyRichText<T>(
     doc: CrdtDocument<T>,
     update: Extract<CrdtUpdate, {op: 'richText'}>,
-): 'applied' | 'discarded' | 'pending' {
+): ApplyResult<T> {
     const meta = getMetaAtPath(doc.meta, update.path);
-    if (!meta) return 'pending';
-    if (meta.kind === 'tombstone') return 'discarded';
-    if (meta.kind !== 'richText') return 'discarded';
+    if (!meta) return pendingResult(pendingReason(doc, update));
+    if (meta.kind === 'tombstone') return {status: 'discarded'};
+    if (meta.kind !== 'richText') return {status: 'discarded'};
     const path = normalPathForCrdtPath(doc, update.path);
-    if (!path) return 'pending';
+    if (!path) return pendingResult('missing-parent');
     const state = richTextStateAtPath(doc.state, path);
     const next = applyRichTextOperation(state, update.change);
-    doc.state = setValueAtPath(doc.state, path, next) as T;
-    meta.maxOpCounter = maxOpCounterAfterOperation(meta.maxOpCounter, update.change);
-    return 'applied';
+    const cloned = clonePathToTarget(doc.meta, update.path);
+    if (cloned.status === 'pending') return pendingResult(cloned.reason);
+    if (cloned.status === 'discard') return {status: 'discarded'};
+    if (cloned.target.kind !== 'richText') return {status: 'discarded'};
+    cloned.target.maxOpCounter = maxOpCounterAfterOperation(
+        cloned.target.maxOpCounter,
+        update.change,
+    );
+    return {
+        status: 'applied',
+        meta: cloned.root,
+        state: setValueAtPath(doc.state, path, next) as T,
+    };
 }
 
 function applyInsert<T>(
     doc: CrdtDocument<T>,
     update: CrdtInsertUpdate,
-): 'applied' | 'discarded' | 'pending' {
+): ApplyResult<T> {
     const meta = getMetaAtPath(doc.meta, update.arrayPath);
-    if (!meta) return 'pending';
-    if (meta.kind === 'tombstone') return 'discarded';
-    if (meta.kind !== 'array') return 'discarded';
+    if (!meta) return pendingResult('missing-parent');
+    if (meta.kind === 'tombstone') return {status: 'discarded'};
+    if (meta.kind !== 'array') return {status: 'discarded'};
 
     const existing = meta.items[update.id];
     const existingVersion =
@@ -117,10 +194,14 @@ function applyInsert<T>(
             : existing
               ? versionOf(existing.value)
               : undefined;
-    if (existingVersion && !newer(update.ts, existingVersion)) return 'discarded';
+    if (existingVersion && !newer(update.ts, existingVersion)) return {status: 'discarded'};
 
     const arraySchema = schemaAtCrdtPath(doc.schema, update.arrayPath);
-    meta.items[update.id] = {
+    const cloned = clonePathToTarget(doc.meta, update.arrayPath);
+    if (cloned.status === 'pending') return pendingResult(cloned.reason);
+    if (cloned.status === 'discard') return {status: 'discarded'};
+    if (cloned.target.kind !== 'array') return {status: 'discarded'};
+    cloned.target.items[update.id] = {
         kind: 'live',
         order: update.order,
         value: buildMeta(
@@ -130,34 +211,46 @@ function applyInsert<T>(
             update.ts,
         ),
     };
-    return 'applied';
+    return {status: 'applied', meta: cloned.root};
 }
 
 function applyArrayItemDelete(
-    parent: CrdtMeta,
-    segment: Extract<CrdtPathSegment, {type: 'arrayItem'}>,
+    root: CrdtMeta,
+    path: CrdtPathSegment[],
     ts: string,
-): 'applied' | 'discarded' | 'pending' {
-    if (parent.kind !== 'array') return 'discarded';
+): ApplyResult<never> {
+    const parentPath = path.slice(0, -1);
+    const segment = path.at(-1);
+    if (!segment || segment.type !== 'arrayItem') return {status: 'discarded'};
+    const parent = getMetaAtPath(root, parentPath);
+    if (!parent) return pendingResult('missing-parent');
+    if (parent.kind !== 'array') return {status: 'discarded'};
     const item = parent.items[segment.id];
-    if (!item) return 'pending';
+    if (!item) return pendingResult('missing-parent');
     const targetVersion = item.kind === 'deleted' ? item.deleted : versionOf(item.value);
-    if (targetVersion && newer(targetVersion, ts)) return 'discarded';
-    parent.items[segment.id] = {kind: 'deleted', deleted: ts};
-    return 'applied';
+    if (targetVersion && newer(targetVersion, ts)) return {status: 'discarded'};
+    const cloned = clonePathToTarget(root, parentPath);
+    if (cloned.status === 'pending') return pendingResult(cloned.reason);
+    if (cloned.status === 'discard') return {status: 'discarded'};
+    if (cloned.target.kind !== 'array') return {status: 'discarded'};
+    cloned.target.items[segment.id] = {kind: 'deleted', deleted: ts};
+    return {status: 'applied', meta: cloned.root};
 }
 
 function applySetOrder<T>(
     doc: CrdtDocument<T>,
     update: CrdtSetOrderUpdate,
-): 'applied' | 'discarded' | 'pending' {
+): ApplyResult<T> {
     const meta = getMetaAtPath(doc.meta, update.arrayPath);
-    if (!meta) return 'pending';
-    if (meta.kind === 'tombstone') return 'discarded';
-    if (meta.kind !== 'array') return 'discarded';
-    if (Object.keys(update.orders).some((id) => !meta.items[id])) return 'pending';
+    if (!meta) return pendingResult('missing-parent');
+    if (meta.kind === 'tombstone') return {status: 'discarded'};
+    if (meta.kind !== 'array') return {status: 'discarded'};
+    if (Object.keys(update.orders).some((id) => !meta.items[id])) {
+        return pendingResult('missing-parent');
+    }
     let applied = false;
     let handledDeleted = false;
+    const changedOrders: Array<[string, {value: string; ts: string}]> = [];
     for (const [id, order] of Object.entries(update.orders)) {
         const item = meta.items[id];
         if (!item) continue;
@@ -166,11 +259,21 @@ function applySetOrder<T>(
             continue;
         }
         if (newer(order.ts, item.order.ts)) {
-            item.order = order;
+            changedOrders.push([id, order]);
             applied = true;
         }
     }
-    return applied || handledDeleted ? 'applied' : 'discarded';
+    if (!applied && !handledDeleted) return {status: 'discarded'};
+    const cloned = clonePathToTarget(doc.meta, update.arrayPath);
+    if (cloned.status === 'pending') return pendingResult(cloned.reason);
+    if (cloned.status === 'discard') return {status: 'discarded'};
+    if (cloned.target.kind !== 'array') return {status: 'discarded'};
+    for (const [id, order] of changedOrders) {
+        const item = cloned.target.items[id];
+        if (!item || item.kind !== 'live') continue;
+        cloned.target.items[id] = {...item, order};
+    }
+    return {status: 'applied', meta: cloned.root};
 }
 
 function walkToLeaf(root: CrdtMeta, path: CrdtPathSegment[]): WalkResult {
@@ -196,6 +299,77 @@ function walkToLeaf(root: CrdtMeta, path: CrdtPathSegment[]): WalkResult {
     return {status: 'ready', parent, segment, target: getChild(parent, segment)};
 }
 
+function cloneMetaNode(meta: CrdtMeta): CrdtMeta {
+    switch (meta.kind) {
+        case 'object':
+            return {...meta, fields: {...meta.fields}};
+        case 'record':
+            return {...meta, entries: {...meta.entries}};
+        case 'array':
+            return {...meta, items: {...meta.items}};
+        case 'tagged':
+            return {...meta, fields: {...meta.fields}};
+        case 'primitive':
+        case 'tombstone':
+        case 'richText':
+            return {...meta};
+    }
+}
+
+function clonePathToLeaf(root: CrdtMeta, path: CrdtPathSegment[]): CloneLeafResult {
+    if (!path.length) return {status: 'discard'};
+
+    let originalParent = root;
+    const clonedRoot = cloneMetaNode(root);
+    let clonedParent = clonedRoot;
+
+    for (let i = 0; i < path.length - 1; i++) {
+        const segment = path[i];
+        const check = checkParent(originalParent, segment);
+        if (check !== 'ready') {
+            return check === 'pending'
+                ? {status: 'pending', reason: 'future-incarnation'}
+                : {status: 'discard'};
+        }
+        const child = getChild(originalParent, segment);
+        if (!child) return {status: 'pending', reason: 'missing-parent'};
+        if (child.kind === 'tombstone') return {status: 'discard'};
+        const clonedChild = cloneMetaNode(child);
+        setChild(clonedParent, segment, clonedChild);
+        originalParent = child;
+        clonedParent = clonedChild;
+    }
+
+    const segment = path[path.length - 1];
+    const check = checkParent(originalParent, segment);
+    if (check !== 'ready') {
+        return check === 'pending'
+            ? {status: 'pending', reason: 'future-incarnation'}
+            : {status: 'discard'};
+    }
+    return {
+        status: 'ready',
+        root: clonedRoot,
+        parent: clonedParent,
+        segment,
+        target: getChild(originalParent, segment),
+    };
+}
+
+function clonePathToTarget(root: CrdtMeta, path: CrdtPathSegment[]): CloneTargetResult {
+    if (!path.length) {
+        const target = cloneMetaNode(root);
+        return {status: 'ready', root: target, target};
+    }
+
+    const cloned = clonePathToLeaf(root, path);
+    if (cloned.status !== 'ready') return cloned;
+    if (!cloned.target) return {status: 'pending', reason: 'missing-parent'};
+    const target = cloneMetaNode(cloned.target);
+    setChild(cloned.parent, cloned.segment, target);
+    return {status: 'ready', root: cloned.root, target};
+}
+
 function setChild(parent: CrdtMeta, segment: CrdtPathSegment, value: CrdtMeta) {
     switch (segment.type) {
         case 'objectField':
@@ -215,7 +389,7 @@ function setChild(parent: CrdtMeta, segment: CrdtPathSegment, value: CrdtMeta) {
             if (!item || item.kind === 'deleted') {
                 throw new Error('Cannot set missing or deleted array item metadata.');
             }
-            item.value = value;
+            parent.items[segment.id] = {...item, value};
             return;
         case 'taggedField':
             if (parent.kind !== 'tagged')
@@ -260,23 +434,6 @@ function setValueAtPath(root: unknown, path: Path, value: unknown): unknown {
 
 function isRichTextState(value: unknown): value is RichTextState {
     return Boolean(value && typeof value === 'object' && Array.isArray((value as {chars?: unknown}).chars));
-}
-
-function retryPending<T>(doc: CrdtDocument<T>) {
-    let changed = true;
-    while (changed) {
-        changed = false;
-        const remaining: PendingUpdate[] = [];
-        for (const pending of doc.pending) {
-            const result = applyOne(doc, pending.update);
-            if (result === 'applied') {
-                changed = true;
-            } else if (result === 'pending') {
-                remaining.push(pending);
-            }
-        }
-        doc.pending = remaining;
-    }
 }
 
 function pendingReason<T>(doc: CrdtDocument<T>, update: CrdtUpdate): PendingUpdate['reason'] {
