@@ -20,6 +20,7 @@ import {
     dropPatchObjectField,
     MigrationError,
     migrateCrdtHistory,
+    migrateCrdtUpdates,
     migrateHistory,
     migrateValue,
     renameCrdtObjectField,
@@ -340,6 +341,52 @@ describe('CRDT history migration core', () => {
         const [update] = result.value.updates;
         expect(update.op).toBe('set');
         if (update.op === 'set') expect(update.path[0]).toMatchObject({key: 'title'});
+    });
+
+    it('migrates rich-text CRDT update paths through object field renames', () => {
+        const richV1 = versionedSchema<unknown>(1, 'rich-v1-hash', (_): _ is unknown => true);
+        const richV2 = versionedSchema<unknown>(2, 'rich-v2-hash', (_): _ is unknown => true);
+        const update: CrdtUpdate = {
+            op: 'richText',
+            path: [{type: 'objectField', key: 'body', parentCreated: baseTs}],
+            ts: updateTs,
+            change: {
+                action: 'insert',
+                opId: '1@local:main',
+                afterId: null,
+                char: 'h',
+            },
+        };
+
+        const result = migrateCrdtUpdates(
+            {
+                current: richV2,
+                previous: [richV1],
+                migrations: [
+                    {
+                        id: 'rich-v1-to-v2',
+                        fromVersion: 1,
+                        toVersion: 2,
+                        fromFingerprintHash: 'rich-v1-hash',
+                        toFingerprintHash: 'rich-v2-hash',
+                        migrateState(input) {
+                            return input;
+                        },
+                        migrateCrdtUpdate(input) {
+                            return renameCrdtObjectField(input, 'body', 'content');
+                        },
+                    },
+                ],
+            },
+            [update],
+            {schemaVersion: 1, schemaFingerprintHash: 'rich-v1-hash'},
+        );
+
+        expect(result.value).toHaveLength(1);
+        expect(result.value[0]).toMatchObject({
+            op: 'richText',
+            path: [{type: 'objectField', key: 'content'}],
+        });
     });
 
     it('fails when CRDT update migration is missing for renamed paths', () => {
@@ -740,6 +787,23 @@ describe('migration rewrite helpers', () => {
         expect(renamed.op).toBe('set');
         if (renamed.op === 'set') expect(renamed.path[0]).toMatchObject({type: 'objectField', key: 'label'});
         expect(dropCrdtObjectField(update, 'title')).toBeNull();
+
+        const richTextUpdate: CrdtUpdate = {
+            op: 'richText',
+            path: [{type: 'objectField', key: 'title', parentCreated: baseTs}],
+            ts: updateTs,
+            change: {
+                action: 'insert',
+                opId: '1@local:main',
+                afterId: null,
+                char: 'x',
+            },
+        };
+        expect(renameCrdtObjectField(richTextUpdate, 'title', 'label')).toMatchObject({
+            op: 'richText',
+            path: [{type: 'objectField', key: 'label'}],
+        });
+        expect(dropCrdtObjectField(richTextUpdate, 'title')).toBeNull();
     });
 
     it('adds object defaults to object-valued patches and CRDT set updates', () => {
@@ -948,6 +1012,8 @@ function schemaForHash(fingerprintHash: string) {
     }
     if (fingerprintHash === 'tagged-v1-hash') return taggedSchema('todo');
     if (fingerprintHash === 'tagged-v2-hash') return taggedSchema('task');
+    if (fingerprintHash === 'rich-v1-hash') return richTextObjectSchema('body');
+    if (fingerprintHash === 'rich-v2-hash') return richTextObjectSchema('content');
     return schemaCollection;
 }
 
@@ -973,6 +1039,21 @@ function objectSchemaValue(required: string[], properties: Record<string, unknow
         properties,
         additionalProperties: false,
     };
+}
+
+function richTextObjectSchema(field: string) {
+    return objectSchema([field], {
+        [field]: {
+            type: 'object',
+            properties: {
+                kind: {const: 'rich-text'},
+                version: {const: 1},
+            },
+            required: ['kind', 'version'],
+            'x-umkehr-crdt': 'rich-text',
+            'x-umkehr-rich-text-version': 1,
+        },
+    });
 }
 
 function taggedSchema(todoTag: 'todo' | 'task') {

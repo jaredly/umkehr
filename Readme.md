@@ -1,5 +1,7 @@
 # Umkehr
 
+"Because your users deserve a second chance"
+
 The no-nonsense undo/redo library for json state.
 
 Pronounced "oom-care". from the german for "a turning back", "changing one's ways", or "repentance".

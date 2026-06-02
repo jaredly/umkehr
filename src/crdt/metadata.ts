@@ -2,6 +2,7 @@ import {fractionalIndexBetween} from './fractionalIndex.js';
 import {
     arrayItemSchema,
     isRecordSchema,
+    isRichTextSchema,
     isTaggedUnionSchema,
     propertySchema,
     recordValueSchema,
@@ -26,8 +27,15 @@ export function buildMeta(
     ts: HlcTimestamp,
 ): CrdtMeta {
     if (value === undefined) return {kind: 'tombstone', deleted: ts};
-    if (value === null || typeof value !== 'object') return {kind: 'primitive', ts, value};
     const schema = resolveRef(ctx, inputSchema);
+    if (isRichTextSchema(schema) || isRichTextValue(value)) {
+        return {
+            kind: 'richText',
+            created: ts,
+            maxOpCounter: 0,
+        };
+    }
+    if (value === null || typeof value !== 'object') return {kind: 'primitive', ts, value};
     if (Array.isArray(value)) {
         const itemSchema = arrayItemSchema(schema);
         let previous: FractionalIndex | undefined;
@@ -77,6 +85,16 @@ export function buildMeta(
     return {kind: 'object', created: ts, fields};
 }
 
+function isRichTextValue(value: JsonValue | undefined) {
+    return Boolean(
+        value &&
+            typeof value === 'object' &&
+            !Array.isArray(value) &&
+            (value as {kind?: unknown}).kind === 'rich-text' &&
+            Array.isArray((value as {chars?: unknown}).chars),
+    );
+}
+
 export function cloneMeta(meta: CrdtMeta): CrdtMeta {
     return structuredClone(meta) as CrdtMeta;
 }
@@ -89,6 +107,7 @@ export function versionOf(meta: CrdtMeta): HlcTimestamp | undefined {
         case 'record':
         case 'array':
         case 'tagged':
+        case 'richText':
             return meta.created;
         case 'tombstone':
             return meta.deleted;
@@ -101,6 +120,7 @@ export function createdOf(meta: CrdtMeta): HlcTimestamp | undefined {
         case 'record':
         case 'array':
         case 'tagged':
+        case 'richText':
             return meta.created;
         default:
             return undefined;

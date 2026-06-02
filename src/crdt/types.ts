@@ -1,4 +1,5 @@
 import type {OpenApi} from 'typia';
+import type {RichTextOperation} from '../peritext/types.js';
 
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | {[key: string]: JsonValue | undefined};
@@ -71,13 +72,20 @@ export type TombstoneMeta = {
     deleted: HlcTimestamp;
 };
 
+export type RichTextMeta = {
+    kind: 'richText';
+    created: HlcTimestamp;
+    maxOpCounter: number;
+};
+
 export type CrdtMeta =
     | PrimitiveMeta
     | ObjectMeta
     | RecordMeta
     | ArrayMeta
     | TaggedUnionMeta
-    | TombstoneMeta;
+    | TombstoneMeta
+    | RichTextMeta;
 
 export type CrdtPathSegment =
     | {type: 'objectField'; key: string; parentCreated: HlcTimestamp}
@@ -135,7 +143,20 @@ export type CrdtSetOrderUpdate = {
     command?: CrdtCommandInfo;
 };
 
-export type CrdtUpdate = CrdtInsertUpdate | CrdtSetUpdate | CrdtDeleteUpdate | CrdtSetOrderUpdate;
+export type CrdtRichTextUpdate = {
+    op: 'richText';
+    path: CrdtPathSegment[];
+    change: RichTextOperation;
+    ts: HlcTimestamp;
+    command?: CrdtCommandInfo;
+};
+
+export type CrdtUpdate =
+    | CrdtInsertUpdate
+    | CrdtSetUpdate
+    | CrdtDeleteUpdate
+    | CrdtSetOrderUpdate
+    | CrdtRichTextUpdate;
 
 export type PendingUpdate = {
     update: CrdtUpdate;

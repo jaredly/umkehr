@@ -43,6 +43,17 @@ describe('package exports', () => {
         expect(typeof crdtPkg.CrdtUpdateValidationError).toBe('function');
     });
 
+    it('imports the built rich text entry point separately', async () => {
+        expect(existsSync('dist/src/richtext/index.js')).toBe(true);
+
+        const richTextPkg = await import('umkehr/richtext');
+
+        expect(typeof richTextPkg.richText).toBe('function');
+        expect(typeof richTextPkg.richTextFromPlainText).toBe('function');
+        expect(typeof richTextPkg.materializeRichText).toBe('function');
+        expect(typeof richTextPkg.materializeRichTextValue).toBe('function');
+    });
+
     it('imports the built React entry point separately', async () => {
         expect(existsSync('dist/src/react/index.js')).toBe(true);
 
@@ -59,7 +70,16 @@ describe('package exports', () => {
         const reactCrdtPkg = await import('umkehr/react-crdt');
 
         expect(typeof reactCrdtPkg.createSyncedContext).toBe('function');
+        expect(typeof reactCrdtPkg.RichTextEditor).toBe('function');
         expect(typeof reactCrdtPkg.useValue).toBe('function');
+    });
+
+    it('imports the built React rich text entry point separately', async () => {
+        expect(existsSync('dist/src/react-rich-text/index.js')).toBe(true);
+
+        const reactRichTextPkg = await import('umkehr/react-rich-text');
+
+        expect(typeof reactRichTextPkg.RichTextEditor).toBe('function');
     });
 
     it('imports the built Remix entry point separately', async () => {

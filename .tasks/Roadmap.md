@@ -35,4 +35,4 @@ ok can you write up a plan.md detailing what needs to be done?
 Ok I've answered questions inline.
 Can you write up a plan.md detailing what needs to be done? Split it up into logical phases if helpful.
 
-Ok, go ahead and implement phase by phase, keeping a concise log of your progress in implementation-log.md
+Ok, go ahead and implement phase by phase, keeping a concise log of your progress in implementation-log.md. Be sure to call out any issues or bugs encountered.

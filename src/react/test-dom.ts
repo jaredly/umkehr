@@ -11,6 +11,7 @@ Object.defineProperties(globalThis, {
     HTMLElement: {value: dom.window.HTMLElement, configurable: true},
     HTMLButtonElement: {value: dom.window.HTMLButtonElement, configurable: true},
     HTMLInputElement: {value: dom.window.HTMLInputElement, configurable: true},
+    InputEvent: {value: dom.window.InputEvent, configurable: true},
     Node: {value: dom.window.Node, configurable: true},
     MutationObserver: {value: dom.window.MutationObserver, configurable: true},
 });

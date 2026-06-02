@@ -1,0 +1,25 @@
+# Bug Log
+
+- Reproduced the Testing Library failure with `pnpm exec vitest run src/react-crdt/react-crdt.test.tsx -t "handles sequential rich text keyboard insertion"`: editor ended at `hel`.
+- Found that `RichTextEditor` fallback `onInput` diffed against the rendered `view.plainText`, which can lag behind synchronous rich-text CRDT commands during sequential input.
+- Patched `RichTextEditor` to keep a local plain-text input base that advances synchronously when edit commands are dispatched, and stopped resetting the contenteditable DOM back to stale rendered text in the fallback input path.
+- First verification after that patch failed as `hhello`; leaving browser-mutated contenteditable text in place lets React later reconcile controlled children beside it. Updated the fallback reset to use the local input base instead of the stale prop view.
+- Second verification returned to `hel`, showing that resetting to the local base is not enough unless React flushes the resulting CRDT render before the next input reads DOM text. Moved text edit command dispatch into `flushSync` and set `pendingSelection` before dispatch so layout selection restore can run in the same commit.
+- Since React can still commit the CRDT-derived view later than the next DOM read, added an editor-local optimistic plain-text render. Input handlers reset the browser mutation to the local base, synchronously render the next local text, then reconcile back to the CRDT materialized view once it catches up.
+- A diagnostic run showed later synthetic inputs saw stale DOM (`before: he`, `after: hl`), because optimistic text was cleared in a layout effect before the next input. Moved optimistic reconciliation to a normal effect and only clear when the materialized CRDT view exactly equals the optimistic text.
+- Further diagnostics showed the component could have `view: he` while the direct contenteditable text node still read `h` after imperative `textContent` resets. Wrapped rendered spans in a keyed child so the editable content subtree is replaced for each rendered rich-text view while the focused root stays stable.
+- The keyed-child approach conflicted with whole-root `textContent` replacement from fallback input/jsdom (`NotFoundError`). Reworked the editor so React owns only the contenteditable root and a layout effect imperatively renders the rich-text DOM children from the current visible view.
+- Verification passed:
+  - `pnpm exec vitest run src/react-crdt/react-crdt.test.tsx -t "handles sequential rich text keyboard insertion"`
+  - `pnpm exec vitest run src/react-rich-text/RichTextEditor.test.tsx`
+  - `pnpm exec vitest run src/react-crdt/react-crdt.test.tsx`
+- Playwright still failed on Chromium `beforeinput` with `aria-label="Body for hlo"` and DOM text `hel`. Added a local selection ref that advances synchronously with accepted edits and is used as the source range for sequential `beforeinput`; DOM selection still refreshes the ref on explicit selection changes.
+- Noted that the example app imports `umkehr/react-crdt` via package exports, so Playwright uses `dist/` rather than live `src/`. Ran `pnpm exec tsc -p tsconfig.json` successfully to refresh compiled output before re-running the smoke test.
+- Final verification passed:
+  - `pnpm --dir examples/react-crdt exec playwright test -c playwright.config.ts tests/smoke/rich-notes-local.spec.ts`
+  - `pnpm exec vitest run src/react-rich-text/RichTextEditor.test.tsx`
+  - `pnpm exec vitest run src/react-crdt/react-crdt.test.tsx`
+- Follow-up: Enter/newlines were being swallowed because the editor handled `insertText` but not browser newline intents (`insertParagraph`/`insertLineBreak`). Added explicit Enter keydown fallback plus beforeinput newline handling, and added a unit test for newline insertion.
+- Follow-up: after the imperative contenteditable render, Chromium could leave the caret detached when child nodes were replaced during each keystroke. Updated the pending-selection restore path to refocus the editable root before restoring the DOM range and added a regression test for focus/caret preservation after input.
+- Strengthened the Rich Notes Playwright smoke test to assert the left editor remains the active element and the caret is at offset 5 after typing `hello`.
+- Follow-up: pressing Enter once stored `\n`, but a trailing newline rendered as a plain text-node terminator did not visibly create the next blank line in the contenteditable. The renderer now appends a trailing `<br>` sentinel when `plainText` ends in `\n`, with unit and Playwright coverage for Enter once.

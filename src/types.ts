@@ -1,3 +1,6 @@
+import type {RichCollaborativeText} from './richtext/index.js';
+import type {RichTextImportSnapshot, RichTextJsonValue} from './peritext/types.js';
+
 /* -------------- utility types ---------------- */
 
 // Strip null/undefined for navigation
@@ -59,7 +62,41 @@ export type ReorderOp<_T> = {
     indices: number[];
 };
 
-export type Patch<T> = AddOp<T> | ReplaceOp<T> | RemoveOp<T> | MoveOp<T> | ReorderOp<T>;
+export type RichTextIndexPosition = {index: number};
+export type RichTextIndexRange = {start: number; end: number};
+export type RichTextMarkPreset = 'inclusive' | 'exclusive' | 'none';
+
+export type RichTextPatchChange =
+    | {kind: 'insert'; at: RichTextIndexPosition; text: string}
+    | {kind: 'delete'; range: RichTextIndexRange}
+    | {
+          kind: 'mark';
+          range: RichTextIndexRange;
+          markType: string;
+          value: RichTextJsonValue;
+          preset?: RichTextMarkPreset;
+      }
+    | {
+          kind: 'unmark';
+          range: RichTextIndexRange;
+          markType: string;
+          preset?: RichTextMarkPreset;
+      }
+    | {kind: 'replace'; snapshot: RichTextImportSnapshot};
+
+export type RichTextPatch<_T> = {
+    op: 'richText';
+    path: Path;
+    change: RichTextPatchChange;
+};
+
+export type Patch<T> =
+    | AddOp<T>
+    | ReplaceOp<T>
+    | RemoveOp<T>
+    | MoveOp<T>
+    | ReorderOp<T>
+    | RichTextPatch<T>;
 
 export type DraftReplace<_T> = {
     op: 'replace';
@@ -90,6 +127,7 @@ export type DraftPatch<T, Tag extends PropertyKey = 'type', Extra = unknown> =
     | DraftPush<T>
     | ReorderOp<T>
     | DraftRemove<T>
+    | RichTextPatch<T>
     | DraftNested<T, unknown, Tag, Extra>
     | MoveOp<T>;
 
@@ -125,6 +163,27 @@ type UpdateFunction<Value, Tag extends PropertyKey, R, Extra> = (
     when?: ApplyTiming,
 ) => R;
 
+type RichTextBuilderMethods<R> = {
+    $text: {
+        insert(at: RichTextIndexPosition, text: string, when?: ApplyTiming): R;
+        delete(range: RichTextIndexRange, when?: ApplyTiming): R;
+        mark(
+            range: RichTextIndexRange,
+            markType: string,
+            value: RichTextJsonValue,
+            preset?: RichTextMarkPreset,
+            when?: ApplyTiming,
+        ): R;
+        unmark(
+            range: RichTextIndexRange,
+            markType: string,
+            preset?: RichTextMarkPreset,
+            when?: ApplyTiming,
+        ): R;
+        replace(snapshot: RichTextImportSnapshot, when?: ApplyTiming): R;
+    };
+};
+
 export const getPathSymbol = Symbol('get path');
 export const getExtraSymbol = Symbol('get extra');
 
@@ -142,8 +201,10 @@ export type PatchBuilderInternal<
     RemoveMethodsA<R> &
     UpdateFunction<Current, Tag, R, Extra> &
     // navigation
+    (NonNullish<Current> extends RichCollaborativeText
+        ? RichTextBuilderMethods<R>
     // 🔹 tagged union → must choose an arm via variant()
-    (IsTaggedUnion<Current, Tag> extends true
+    : IsTaggedUnion<Current, Tag> extends true
         ? {
               $variant<
                   V extends VariantTags<NonNullish<Current>, Tag> & (string | number | symbol),

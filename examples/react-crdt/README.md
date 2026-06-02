@@ -1,7 +1,9 @@
-# Umkehr React Example
+# Umkehr React CRDT Example
 
-This is a Vite app showing two CRDT-backed TODO replicas side by side. Use the center control to
-pause sync, make independent edits on either side, then resume sync to exchange queued CRDT updates.
+This is a Vite app showing CRDT-backed example apps, including todos, a whiteboard, and a
+rich-text shared notes app. Use the app picker to switch examples. In the local simulator mode,
+use the center control to pause sync, make independent edits on either side, then resume sync to
+exchange queued CRDT updates.
 
 Each replica host has its own CRDT document, HLC clock, and retained CRDT update log. Local undo/redo
 is derived from command metadata on the retained updates. The center transport only routes or queues

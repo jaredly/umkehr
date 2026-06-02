@@ -7,6 +7,7 @@ import {
     createCrdtUpdates,
     normalPathForCrdtPath,
 } from './index';
+import type {ArrayMeta, CrdtMeta, ObjectMeta} from './index';
 import type {Patch} from '../types';
 
 type Person = {name: string};
@@ -106,6 +107,174 @@ const remove = (path: Patch<State>['path'], value: unknown): Patch<State> => ({
 });
 
 describe('crdt', () => {
+    it('returns the same document for discarded stale updates', () => {
+        const doc = createDoc();
+        const newer = createCrdtUpdates(
+            doc,
+            replace([{type: 'key', key: 'title'}], 'Newer', 'Draft'),
+            '020',
+        )[0];
+        const afterNewer = applyCrdtUpdate(doc, newer);
+        const older = createCrdtUpdates(
+            doc,
+            replace([{type: 'key', key: 'title'}], 'Older', 'Draft'),
+            '010',
+        )[0];
+
+        const afterOlder = applyCrdtUpdate(afterNewer, older);
+
+        expect(afterOlder).toBe(afterNewer);
+        expect(afterOlder.meta).toBe(afterNewer.meta);
+        expect(afterOlder.state).toBe(afterNewer.state);
+        expect(afterOlder.pending).toBe(afterNewer.pending);
+    });
+
+    it('shares unchanged metadata while preserving the input document on leaf updates', () => {
+        const doc = createDoc();
+        const beforeMeta = structuredClone(doc.meta) as CrdtMeta;
+        const titleMeta = objectField(doc.meta, 'title');
+        const itemsMeta = objectField(doc.meta, 'items');
+        const todosMeta = objectField(doc.meta, 'todos');
+        const selectedMeta = objectField(doc.meta, 'selected');
+        const update = createCrdtUpdates(
+            doc,
+            replace([{type: 'key', key: 'title'}], 'Published', 'Draft'),
+            '010',
+        )[0];
+
+        const after = applyCrdtUpdate(doc, update);
+
+        expect(doc.meta).toEqual(beforeMeta);
+        expect(after.meta).not.toBe(doc.meta);
+        expect(objectField(after.meta, 'title')).not.toBe(titleMeta);
+        expect(objectField(after.meta, 'items')).toBe(itemsMeta);
+        expect(objectField(after.meta, 'todos')).toBe(todosMeta);
+        expect(objectField(after.meta, 'selected')).toBe(selectedMeta);
+        expect(after.state.title).toBe('Published');
+        expect(doc.state.title).toBe('Draft');
+    });
+
+    it('does not clone metadata or state for pending-only updates', () => {
+        let author = createDoc();
+        const createOne = createCrdtUpdates(
+            author,
+            add(
+                [
+                    {type: 'key', key: 'items'},
+                    {type: 'key', key: 'one'},
+                ],
+                {title: 'One', people: {}},
+            ),
+            '010',
+        )[0];
+        author = applyCrdtUpdate(author, createOne);
+        const addPerson = createCrdtUpdates(
+            author,
+            add(
+                [
+                    {type: 'key', key: 'items'},
+                    {type: 'key', key: 'one'},
+                    {type: 'key', key: 'people'},
+                    {type: 'key', key: 'me'},
+                ],
+                {name: 'Me'},
+            ),
+            '020',
+        )[0];
+        const receiver = createDoc();
+
+        const waiting = applyCrdtUpdate(receiver, addPerson);
+
+        expect(waiting).not.toBe(receiver);
+        expect(waiting.meta).toBe(receiver.meta);
+        expect(waiting.state).toBe(receiver.state);
+        expect(waiting.pending).not.toBe(receiver.pending);
+        expect(receiver.pending).toEqual([]);
+        expect(waiting.pending).toHaveLength(1);
+    });
+
+    it('copies array metadata only along changed branches', () => {
+        let doc = createDoc();
+        const append = createCrdtUpdates(
+            doc,
+            add(
+                [
+                    {type: 'key', key: 'todos'},
+                    {type: 'key', key: 1},
+                ],
+                {title: 'Second', done: false},
+            ),
+            '010',
+        )[0];
+        doc = applyCrdtUpdate(doc, append);
+        const beforeMeta = structuredClone(doc.meta) as CrdtMeta;
+        const beforeTodos = objectField(doc.meta, 'todos');
+        const beforeItems = arrayMeta(beforeTodos).items;
+        const firstItem = beforeItems['001:0'];
+        const secondItem = beforeItems['010'];
+        const updateSecond = createCrdtUpdates(
+            doc,
+            replace(
+                [
+                    {type: 'key', key: 'todos'},
+                    {type: 'key', key: 1},
+                    {type: 'key', key: 'done'},
+                ],
+                true,
+                false,
+            ),
+            '020',
+        )[0];
+
+        const after = applyCrdtUpdate(doc, updateSecond);
+        const afterTodos = arrayMeta(objectField(after.meta, 'todos'));
+
+        expect(doc.meta).toEqual(beforeMeta);
+        expect(afterTodos).not.toBe(beforeTodos);
+        expect(afterTodos.items).not.toBe(beforeItems);
+        expect(afterTodos.items['001:0']).toBe(firstItem);
+        expect(afterTodos.items['010']).not.toBe(secondItem);
+    });
+
+    it('keeps pending retry immutable while applying newly unblocked updates', () => {
+        let author = createDoc();
+        const createOne = createCrdtUpdates(
+            author,
+            add(
+                [
+                    {type: 'key', key: 'items'},
+                    {type: 'key', key: 'one'},
+                ],
+                {title: 'One', people: {}},
+            ),
+            '010',
+        )[0];
+        author = applyCrdtUpdate(author, createOne);
+        const addPerson = createCrdtUpdates(
+            author,
+            add(
+                [
+                    {type: 'key', key: 'items'},
+                    {type: 'key', key: 'one'},
+                    {type: 'key', key: 'people'},
+                    {type: 'key', key: 'me'},
+                ],
+                {name: 'Me'},
+            ),
+            '020',
+        )[0];
+        const waiting = applyCrdtUpdate(createDoc(), addPerson);
+        const waitingMeta = structuredClone(waiting.meta) as CrdtMeta;
+        const waitingPending = waiting.pending.slice();
+
+        const settled = applyCrdtUpdate(waiting, createOne);
+
+        expect(waiting.meta).toEqual(waitingMeta);
+        expect(waiting.pending).toEqual(waitingPending);
+        expect(settled.pending).toEqual([]);
+        expect(settled.state.items.one.people.me).toEqual({name: 'Me'});
+    });
+
     it('applies newer primitive writes with LWW semantics', () => {
         const doc = createDoc();
         const older = createCrdtUpdates(
@@ -665,3 +834,13 @@ describe('crdt', () => {
         expect(receiver.state.selected).toEqual({type: 'text', text: 'hello'});
     });
 });
+
+function objectField(meta: CrdtMeta, key: string) {
+    expect(meta.kind).toBe('object');
+    return (meta as ObjectMeta).fields[key];
+}
+
+function arrayMeta(meta: CrdtMeta | undefined) {
+    expect(meta?.kind).toBe('array');
+    return meta as ArrayMeta;
+}

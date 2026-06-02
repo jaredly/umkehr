@@ -9,6 +9,9 @@ export default defineConfig({
     resolve: {
         alias: {
             'umkehr/crdt': fileURLToPath(new URL('./src/crdt/index.ts', import.meta.url)),
+            'umkehr/richtext': fileURLToPath(
+                new URL('./src/richtext/index.ts', import.meta.url),
+            ),
             'umkehr/validation': fileURLToPath(
                 new URL('./src/validation/index.ts', import.meta.url),
             ),
@@ -16,6 +19,9 @@ export default defineConfig({
             'umkehr/react': fileURLToPath(new URL('./src/react/react.tsx', import.meta.url)),
             'umkehr/react-crdt': fileURLToPath(
                 new URL('./src/react-crdt/index.ts', import.meta.url),
+            ),
+            'umkehr/react-rich-text': fileURLToPath(
+                new URL('./src/react-rich-text/index.ts', import.meta.url),
             ),
             'umkehr/remix': fileURLToPath(new URL('./src/remix/index.ts', import.meta.url)),
             umkehr: fileURLToPath(new URL('./src/index.ts', import.meta.url)),

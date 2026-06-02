@@ -16,5 +16,5 @@ export function createCrdtDocument<T>(
     }
     const schema = {root, components: collection.components, tagKey: options.tagKey ?? 'type'};
     const meta = buildMeta(initial as JsonValue, root, schema, options.timestamp);
-    return {state: materialize(meta) as T, meta, pending: [], schema};
+    return {state: materialize(meta, initial) as T, meta, pending: [], schema};
 }

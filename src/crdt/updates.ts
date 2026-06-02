@@ -1,9 +1,18 @@
 import type {Patch, Path} from '../types.js';
+import {
+    anchorsForMarkRange,
+    charIdsForVisibleRange,
+    formatOpId,
+    importRichTextSnapshot,
+    insertionAfterIdForIndexPreservingBoundary,
+} from '../peritext/index.js';
+import {tryUnpack} from './hlc.js';
 import {fractionalIndexBetween} from './fractionalIndex.js';
 import {crdtPathForExisting, getMetaAtPath, liveArrayItems} from './path.js';
 import type {
     CrdtDocument,
     CrdtInsertUpdate,
+    CrdtRichTextUpdate,
     CrdtSetOrderUpdate,
     CrdtUpdate,
     FractionalIndex,
@@ -11,6 +20,7 @@ import type {
     ItemId,
     JsonValue,
 } from './types.js';
+import type {RichTextActorId, RichTextAnchor, RichTextOpId, RichTextOperation, RichTextState} from '../peritext/types.js';
 
 export function createCrdtUpdates<T>(
     doc: CrdtDocument<T>,
@@ -46,7 +56,155 @@ export function createCrdtUpdates<T>(
                 patch.after,
                 ts,
             );
+        case 'richText':
+            return createRichTextUpdates(doc, patch, ts);
     }
+}
+
+function createRichTextUpdates<T>(
+    doc: CrdtDocument<T>,
+    patch: Extract<Patch<T>, {op: 'richText'}>,
+    ts: HlcTimestamp,
+): CrdtRichTextUpdate[] {
+    const path = crdtPathForExisting(doc, patch.path);
+    const meta = getMetaAtPath(doc.meta, path);
+    if (!meta || meta.kind !== 'richText') {
+        throw new Error('Cannot create rich text CRDT update: path is not a rich-text field.');
+    }
+    const actorId = richTextActorIdFromTimestamp(ts);
+    const make = (change: CrdtRichTextUpdate['change']): CrdtRichTextUpdate => ({
+        op: 'richText',
+        path,
+        change,
+        ts,
+    });
+
+    switch (patch.change.kind) {
+        case 'insert': {
+            const state = richTextStateAtPath(doc.state, patch.path);
+            let afterId = insertionAfterIdForIndexPreservingBoundary(state, patch.change.at.index);
+            const chars = Array.from(patch.change.text);
+            const opIds = allocateOpIdsFromMeta(meta.maxOpCounter, actorId, chars.length);
+            return chars.map((char, index) => {
+                const opId = opIds[index];
+                if (!opId) throw new Error('Cannot create rich text insert: missing allocated opId.');
+                const update = make({action: 'insert', opId, afterId, char});
+                afterId = opId;
+                return update;
+            });
+        }
+        case 'delete': {
+            const state = richTextStateAtPath(doc.state, patch.path);
+            const ids = charIdsForVisibleRange(state, patch.change.range);
+            const opIds = allocateOpIdsFromMeta(meta.maxOpCounter, actorId, ids.length);
+            return ids.map((removedId, index) => {
+                const opId = opIds[index];
+                if (!opId) throw new Error('Cannot create rich text remove: missing allocated opId.');
+                return make({action: 'remove', opId, removedId});
+            });
+        }
+        case 'mark': {
+            const state = richTextStateAtPath(doc.state, patch.path);
+            const [opId] = allocateOpIdsFromMeta(meta.maxOpCounter, actorId, 1);
+            if (!opId) return [];
+            return [
+                make({
+                    action: 'addMark',
+                    opId,
+                    ...anchorsForMarkRange(state, patch.change.range, patch.change.preset ?? 'inclusive'),
+                    markType: patch.change.markType,
+                    value: patch.change.value,
+                }),
+            ];
+        }
+        case 'unmark': {
+            const state = richTextStateAtPath(doc.state, patch.path);
+            const [opId] = allocateOpIdsFromMeta(meta.maxOpCounter, actorId, 1);
+            if (!opId) return [];
+            return [
+                make({
+                    action: 'removeMark',
+                    opId,
+                    ...anchorsForMarkRange(state, patch.change.range, patch.change.preset ?? 'inclusive'),
+                    markType: patch.change.markType,
+                }),
+            ];
+        }
+        case 'replace': {
+            const imported = importRichTextSnapshot(patch.change.snapshot, actorId);
+            const offset = meta.maxOpCounter;
+            return imported.operations.map((operation) => make(remapRichTextOperation(operation, offset)));
+        }
+    }
+}
+
+function allocateOpIdsFromMeta(
+    maxOpCounter: number,
+    actorId: RichTextActorId,
+    count: number,
+) {
+    if (!Number.isInteger(count) || count < 0) {
+        throw new Error(`Cannot allocate rich text opIds: count must be a non-negative integer.`);
+    }
+    return Array.from({length: count}, (_, index) =>
+        formatOpId(maxOpCounter + index + 1, actorId),
+    );
+}
+
+function richTextStateAtPath(root: unknown, path: Path): RichTextState {
+    let current = root;
+    for (const segment of path) {
+        if (!current || typeof current !== 'object') {
+            throw new Error('Cannot create rich text CRDT update: state path is missing.');
+        }
+        current = (current as Record<string | number, unknown>)[segment.key];
+    }
+    if (!current || typeof current !== 'object' || !Array.isArray((current as {chars?: unknown}).chars)) {
+        throw new Error('Cannot create rich text CRDT update: state value is not rich-text data.');
+    }
+    return current as RichTextState;
+}
+
+function remapRichTextOperation(
+    operation: RichTextOperation,
+    offset: number,
+): RichTextOperation {
+    const remapId = (id: RichTextOpId) => {
+        const [counter, actorId] = id.split('@');
+        return formatOpId(Number(counter) + offset, actorId as RichTextActorId);
+    };
+    const remapAnchor = (anchor: RichTextAnchor): RichTextAnchor => {
+        if (anchor.type !== 'before' && anchor.type !== 'after') return anchor;
+        return {...anchor, opId: remapId(anchor.opId)};
+    };
+    switch (operation.action) {
+        case 'insert':
+            return {
+                ...operation,
+                opId: remapId(operation.opId),
+                afterId: operation.afterId ? remapId(operation.afterId) : null,
+            };
+        case 'remove':
+            return {
+                ...operation,
+                opId: remapId(operation.opId),
+                removedId: remapId(operation.removedId),
+            };
+        case 'addMark':
+        case 'removeMark':
+            return {
+                ...operation,
+                opId: remapId(operation.opId),
+                start: remapAnchor(operation.start),
+                end: remapAnchor(operation.end),
+            };
+    }
+}
+
+function richTextActorIdFromTimestamp(ts: HlcTimestamp) {
+    const unpacked = tryUnpack(ts);
+    if (!unpacked) return 'local:main';
+    return `${unpacked.node}:${unpacked.suffix ?? 'main'}` as const;
 }
 
 function createSetUpdates<T>(
