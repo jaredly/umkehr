@@ -17,6 +17,9 @@ export default defineConfig({
         trace: 'retain-on-failure',
         screenshot: 'only-on-failure',
     },
+    expect: {
+        timeout: 10_000,
+    },
     projects: [
         {
             name: 'chromium',

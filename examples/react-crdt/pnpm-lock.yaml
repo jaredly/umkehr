@@ -14,9 +14,12 @@ importers:
       peerjs:
         specifier: ^1.5.5
         version: 1.5.5
+      react:
+        specifier: 19.2.6
+        version: 19.2.6
       react-dom:
         specifier: 19.2.6
-        version: 19.2.6(react@19.2.7)
+        version: 19.2.6(react@19.2.6)
       typia:
         specifier: ^12.1.1
         version: 12.1.1(@types/node@25.9.1)(typescript@5.9.3)
@@ -1001,8 +1004,8 @@ packages:
     peerDependencies:
       react: ^19.2.6
 
-  react@19.2.7:
-    resolution: {integrity: sha512-HNe9WslTbXmFK8o8cmwgAeJFSBvt1bPdHCVKtaaV+WlAN36mpT4hcRpwbf3fY56ar2oIXzsBpOAiIRHAdY0OlQ==}
+  react@19.2.6:
+    resolution: {integrity: sha512-sfWGGfavi0xr8Pg0sVsyHMAOziVYKgPLNrS7ig+ivMNb3wbCBw3KxtflsGBAwD3gYQlE/AEZsTLgToRrSCjb0Q==}
     engines: {node: '>=0.10.0'}
 
   readable-stream@3.6.2:
@@ -2091,12 +2094,12 @@ snapshots:
       iconv-lite: 0.4.24
       unpipe: 1.0.0
 
-  react-dom@19.2.6(react@19.2.7):
+  react-dom@19.2.6(react@19.2.6):
     dependencies:
-      react: 19.2.7
+      react: 19.2.6
       scheduler: 0.27.0
 
-  react@19.2.7: {}
+  react@19.2.6: {}
 
   readable-stream@3.6.2:
     dependencies:
