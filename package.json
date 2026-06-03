@@ -99,17 +99,22 @@
         "fast-check": "^4.8.0",
         "jsdom": "^29.1.1",
         "oxfmt": "^0.49.0",
+        "react-dom": "^19.2.6",
         "typescript": "^5.9.3",
         "typia": "^12.1.1",
         "vitest": "^4.1.6"
     },
     "peerDependencies": {
         "react": ">=18",
+        "react-dom": ">=18",
         "remix": ">=3.0.0-beta.0 <4",
         "typia": "^12.1.1"
     },
     "peerDependenciesMeta": {
         "react": {
+            "optional": true
+        },
+        "react-dom": {
             "optional": true
         },
         "remix": {
