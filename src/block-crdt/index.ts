@@ -29,6 +29,13 @@ export type State = {
     maxSeenCount: number;
 };
 
+export type Cache = {
+    blockChildren: Record<string, string[]>;
+    charContents: Record<string, string[]>;
+};
+
+export type CachedState = {state: State; cache: Cache};
+
 export const initialState: State = {
     chars: {},
     blocks: {
@@ -41,7 +48,12 @@ export const initialState: State = {
     maxSeenCount: 0,
 };
 
-export const addChar = (state: State, text: string, after: Lamport, ts: () => HLC): State => {
+export const addChar = (
+    {state, cache}: CachedState,
+    text: string,
+    after: Lamport,
+    ts: () => HLC,
+): CachedState => {
     const {chars, blocks, maxSeenCount} = state;
     const id = maxSeenCount + 1;
     const charId = lamportToString([id, 'self']);
@@ -51,23 +63,37 @@ export const addChar = (state: State, text: string, after: Lamport, ts: () => HL
         deleted: false,
         parent: {id: after, ts: ts()},
     };
+    const parentId = lamportToString(after);
     return {
-        chars: {...chars, [charId]: newChar},
-        blocks,
-        maxSeenCount: id,
+        state: {
+            chars: {...chars, [charId]: newChar},
+            blocks,
+            maxSeenCount: id,
+        },
+        cache: {
+            ...cache,
+            charContents: {
+                ...cache.charContents,
+                [parentId]: [charId, ...(cache.charContents[parentId] ?? [])],
+            },
+        },
     };
 };
 
-export const selPos = (state: State, block: Lamport, selection: number): Lamport | null => {
-    const {chars, blocks} = state;
-    const {charContents} = organizeState(blocks, chars);
+export const selPos = (
+    {state, cache}: CachedState,
+    block: Lamport,
+    selection: number,
+): Lamport | null => {
+    const {chars} = state;
+    const {charContents} = cache;
     if (selection === 0) {
         return block;
     }
-    const head = charContents[lamportToString(block)].sort((a, b) => b.localeCompare(a));
+    const head = charContents[lamportToString(block)].toSorted((a, b) => b.localeCompare(a));
     selection--;
 
-    const charStack: string[][] = [head];
+    const charStack: string[][] = [head.slice()];
     while (charStack.length) {
         if (!charStack[0].length) {
             charStack.shift();
@@ -79,20 +105,30 @@ export const selPos = (state: State, block: Lamport, selection: number): Lamport
         }
         selection--;
         if (charContents[id]) {
-            charStack.unshift(charContents[id].sort((a, b) => b.localeCompare(a)));
+            charStack.unshift(charContents[id].toSorted((a, b) => b.localeCompare(a)));
         }
     }
     throw new Error('selection out of bounds');
 };
 
-export const addChars = (state: State, text: string, after: Lamport, ts: () => HLC): State => {
+export const addChars = (
+    state: CachedState,
+    text: string,
+    after: Lamport,
+    ts: () => HLC,
+): CachedState => {
     for (let char of new Intl.Segmenter().segment(text)) {
         const newState = addChar(state, char.segment, after, ts);
         state = newState;
-        after = newState.chars[lamportToString([newState.maxSeenCount, 'self'])].id;
+        after = [newState.state.maxSeenCount, 'self'];
     }
     return state;
 };
+
+export const cachedState = (state: State): CachedState => ({
+    state,
+    cache: organizeState(state.blocks, state.chars),
+});
 
 export const lamportToString = (lamport: Lamport) => {
     return `${lamport[0].toString().padStart(4, '0')}-${lamport[1]}`;
@@ -107,9 +143,9 @@ export const lamportFromString = (raw: string) => {
 
 // Blocks ... are created with a single char. but if there happen to be multiple, idk we can handle it.
 
-export const stateToString = (state: State) => {
-    const {chars, blocks} = state;
-    const {blockChildren, charContents} = organizeState(blocks, chars);
+export const stateToString = (state: CachedState) => {
+    const {chars, blocks} = state.state;
+    const {blockChildren, charContents} = state.cache;
     const showBlock = (id: string): string[] => {
         const block = blocks[id];
         const symbol = {paragraph: ' ', bullets: '•', checkboxes: '☐', blockquote: '|'}[
@@ -205,17 +241,17 @@ yeah I like that.
 
 */
 
-type CRDTUpdate =
-    | {
-          type: 'create';
-          char: Char;
-      }
-    | {
-          type: 'move';
-          id: Lamport;
-      };
+// type CRDTUpdate =
+//     | {
+//           type: 'create';
+//           char: Char;
+//       }
+//     | {
+//           type: 'move';
+//           id: Lamport;
+//       };
 
-function organizeState(blocks: Record<string, Block>, chars: Record<string, Char>) {
+export function organizeState(blocks: Record<string, Block>, chars: Record<string, Char>): Cache {
     const blockChildren: Record<string, string[]> = {};
     for (const [id, block] of Object.entries(blocks)) {
         const pid = lamportToString(block.order.parent);
@@ -232,5 +268,8 @@ function organizeState(blocks: Record<string, Block>, chars: Record<string, Char
         }
         charContents[pid].push(id);
     }
+    Object.values(charContents).forEach((items) => {
+        items.sort((a, b) => b.localeCompare(a));
+    });
     return {blockChildren, charContents};
 }
