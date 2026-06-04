@@ -7,6 +7,7 @@ import {
     addChar,
     cachedState,
     CachedState,
+    organizeState,
 } from './index';
 
 it('basic test', () => {
@@ -24,6 +25,7 @@ const run = (state: CachedState, items: [number, string][], ts: () => string) =>
     for (let [pos, text] of items) {
         const at = selPos(state, [0, 'self'], pos);
         state = addChars(state, text, at!, ts);
+        expect(state.cache).toEqual(organizeState(state.state.blocks, state.state.chars));
     }
     return state;
 };

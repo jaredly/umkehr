@@ -90,10 +90,9 @@ export const selPos = (
     if (selection === 0) {
         return block;
     }
-    const head = charContents[lamportToString(block)].toSorted((a, b) => b.localeCompare(a));
     selection--;
 
-    const charStack: string[][] = [head.slice()];
+    const charStack: string[][] = [charContents[lamportToString(block)].slice()];
     while (charStack.length) {
         if (!charStack[0].length) {
             charStack.shift();
@@ -105,7 +104,7 @@ export const selPos = (
         }
         selection--;
         if (charContents[id]) {
-            charStack.unshift(charContents[id].toSorted((a, b) => b.localeCompare(a)));
+            charStack.unshift(charContents[id].slice());
         }
     }
     throw new Error('selection out of bounds');
@@ -152,32 +151,15 @@ export const stateToString = (state: CachedState) => {
             block.meta.type
         ];
         return [
-            id +
-                ': ' +
-                charContents[id]
-                    ?.sort((a, b) => b.localeCompare(a))
-                    .map(showChar)
-                    .join(''),
-            ...(blockChildren[id]
-                ?.sort((a, b) => blocks[a].order.index.localeCompare(blocks[b].order.index))
-                .flatMap(showBlock)
-                .map((line) => symbol + ' ' + line) ?? []),
+            id + ': ' + charContents[id]?.map(showChar).join(''),
+            ...(blockChildren[id]?.flatMap(showBlock).map((line) => symbol + ' ' + line) ?? []),
         ];
     };
     const showChar = (id: string): string => {
         const char = chars[id];
-        return (
-            char.text +
-            (charContents[id]
-                ?.sort((a, b) => b.localeCompare(a))
-                .map(showChar)
-                .join('') ?? '')
-        );
+        return char.text + (charContents[id]?.map(showChar).join('') ?? '');
     };
-    return blockChildren['0000-root']
-        ?.sort((a, b) => blocks[a].order.index.localeCompare(blocks[b].order.index))
-        .map(showBlock)
-        .join('\n');
+    return blockChildren['0000-root']?.map(showBlock).join('\n');
 };
 
 /*
@@ -268,6 +250,9 @@ export function organizeState(blocks: Record<string, Block>, chars: Record<strin
         }
         charContents[pid].push(id);
     }
+    Object.values(blockChildren).forEach((items) => {
+        items.sort((a, b) => blocks[b].order.index.localeCompare(blocks[a].order.index));
+    });
     Object.values(charContents).forEach((items) => {
         items.sort((a, b) => b.localeCompare(a));
     });
