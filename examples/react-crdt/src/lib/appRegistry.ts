@@ -31,6 +31,10 @@ import {
 import type {ServerSchemaConfig} from './server/schemaConfig';
 import type {ServerOldPendingChangesPolicy} from './server/types';
 import type {LocalFirstSchemaConfig} from './local-first/schemaConfig';
+import {
+    schemaFingerprint,
+    schemaFingerprintHash,
+} from './local-first/schemaFingerprint';
 
 type RegisteredApp<TState = unknown> = {
     routeId?: string;
@@ -59,6 +63,10 @@ const todoMigrationLocalFirstSchemaConfig: LocalFirstSchemaConfig<TodoState> = {
     migrations: [
         {
             ...todoFixtureMigration,
+            fromFingerprint: schemaFingerprint(todoV1App),
+            fromFingerprintHash: schemaFingerprintHash(todoV1App),
+            toFingerprint: schemaFingerprint(todoApp),
+            toFingerprintHash: schemaFingerprintHash(todoApp),
             toDocId: (sourceDocId) => `${sourceDocId}-local-first-v2`,
         },
     ],

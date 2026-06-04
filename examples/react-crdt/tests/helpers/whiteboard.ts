@@ -27,6 +27,44 @@ export async function expectVisibleElementCount(panel: Locator, count: number) {
     await expect(panel.getByText(`${count} visible`)).toBeVisible();
 }
 
+export async function expectSoloWhiteboardVisibleCountPersisted(
+    page: Page,
+    docId: string,
+    count: number,
+) {
+    await expect
+        .poll(
+            () =>
+                page.evaluate(
+                    async ({docId, count}) => {
+                        const request = indexedDB.open('umkehr-react-crdt-solo-documents');
+                        const db = await new Promise<IDBDatabase>((resolve, reject) => {
+                            request.onerror = () => reject(request.error);
+                            request.onsuccess = () => resolve(request.result);
+                        });
+                        try {
+                            const tx = db.transaction('documents', 'readonly');
+                            const store = tx.objectStore('documents');
+                            const document = await new Promise<any>((resolve, reject) => {
+                                const get = store.get(docId);
+                                get.onerror = () => reject(get.error);
+                                get.onsuccess = () => resolve(get.result);
+                            });
+                            const elements = Object.values<any>(
+                                document?.history?.current?.elements ?? {},
+                            );
+                            return elements.filter((element) => !element.archived).length === count;
+                        } finally {
+                            db.close();
+                        }
+                    },
+                    {docId, count},
+                ),
+            {timeout: 10_000},
+        )
+        .toBe(true);
+}
+
 export async function addNote(panel: Locator, text: string, point = {x: 260, y: 220}) {
     await panel.getByRole('button', {name: 'Note', exact: true}).click();
     await clickBoardPoint(panel, point.x, point.y);

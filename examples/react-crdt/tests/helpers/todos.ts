@@ -49,6 +49,37 @@ export async function expectTodoOrder(panel: Locator, titles: string[]) {
         .toEqual(titles);
 }
 
+export async function expectSoloDocumentToContain(page: Page, docId: string, text: string) {
+    await expect
+        .poll(
+            () =>
+                page.evaluate(
+                    async ({docId, text}) => {
+                        const request = indexedDB.open('umkehr-react-crdt-solo-documents');
+                        const db = await new Promise<IDBDatabase>((resolve, reject) => {
+                            request.onerror = () => reject(request.error);
+                            request.onsuccess = () => resolve(request.result);
+                        });
+                        try {
+                            const tx = db.transaction('documents', 'readonly');
+                            const store = tx.objectStore('documents');
+                            const document = await new Promise<unknown>((resolve, reject) => {
+                                const get = store.get(docId);
+                                get.onerror = () => reject(get.error);
+                                get.onsuccess = () => resolve(get.result);
+                            });
+                            return JSON.stringify(document).includes(text);
+                        } finally {
+                            db.close();
+                        }
+                    },
+                    {docId, text},
+                ),
+            {timeout: 10_000},
+        )
+        .toBe(true);
+}
+
 export async function dragTodoBefore(panel: Locator, draggedTitle: string, targetTitle: string) {
     await dragTodoTo(panel, draggedTitle, targetTitle, 'before');
 }

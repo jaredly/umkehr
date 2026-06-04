@@ -6,6 +6,7 @@ import {
     editTodoInPanel,
     expectTodoAnimationInPanel,
     expectTodoOrder,
+    expectSoloDocumentToContain,
     installTodoAnimationRecorder,
     openTodoMode,
     resetTodoAnimationRecorder,
@@ -53,11 +54,13 @@ test('supports solo todo CRUD, reorder, and undo/redo smoke flow', async ({page}
 });
 
 test('persists solo todo color changes after reload', async ({page}, testInfo) => {
-    await openTodoMode(page, 'solo', uniqueDocId(testInfo, 'solo-color'));
+    const docId = uniqueDocId(testInfo, 'solo-color');
+    await openTodoMode(page, 'solo', docId);
 
     const panel = todoPanel(page, 'Todos');
     await panel.getByRole('button', {name: 'Use #dbeafe'}).click();
     await expect(panel.getByRole('button', {name: 'Use #dbeafe'})).toHaveClass(/selected/);
+    await expectSoloDocumentToContain(page, docId, '#dbeafe');
 
     await page.reload();
     const reloadedPanel = todoPanel(page, 'Todos');

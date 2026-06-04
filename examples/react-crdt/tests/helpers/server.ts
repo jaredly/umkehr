@@ -1,6 +1,8 @@
 import {expect, type TestInfo} from '@playwright/test';
 import {execFile, spawn} from 'node:child_process';
+import {existsSync} from 'node:fs';
 import {mkdir} from 'node:fs/promises';
+import {homedir} from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {promisify} from 'node:util';
@@ -10,6 +12,8 @@ const execFileAsync = promisify(execFile);
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const reactCrdtDir = path.resolve(testDir, '../..');
 const serverDir = path.resolve(reactCrdtDir, '../react-crdt-server');
+const bunPath = resolveBunPath();
+const bunEnv = envWithBunOnPath(bunPath);
 
 export const E2E_SERVER_PORT = Number(process.env.UMKEHR_E2E_SERVER_PORT ?? 8788);
 export const E2E_SERVER_URL = `http://localhost:${E2E_SERVER_PORT}`;
@@ -29,17 +33,18 @@ export async function seedServerDatabase({
     date?: string;
     size?: 'small' | 'default' | 'large';
 }) {
-    await execFileAsync('bun', ['run', 'seed:test', '--', '--db', dbPath, '--date', date, '--size', size], {
+    await execFileAsync(bunPath, ['--bun', 'src/seedTest.ts', '--db', dbPath, '--date', date, '--size', size], {
         cwd: serverDir,
+        env: bunEnv,
         maxBuffer: 1024 * 1024 * 10,
     });
 }
 
 export async function inspectServerDocument(dbPath: string, docId: string) {
     const {stdout} = await execFileAsync(
-        'bun',
+        bunPath,
         ['--bun', 'src/inspectTest.ts', '--db', dbPath, '--doc', docId],
-        {cwd: serverDir, maxBuffer: 1024 * 1024 * 10},
+        {cwd: serverDir, env: bunEnv, maxBuffer: 1024 * 1024 * 10},
     );
     return JSON.parse(stdout) as {
         document: null | {
@@ -87,7 +92,7 @@ export async function createMigrationLock({
     targetSchemaFingerprintHash: string;
 }) {
     await execFileAsync(
-        'bun',
+        bunPath,
         [
             '--bun',
             'src/lockTest.ts',
@@ -104,7 +109,7 @@ export async function createMigrationLock({
             '--target-fingerprint-hash',
             targetSchemaFingerprintHash,
         ],
-        {cwd: serverDir, maxBuffer: 1024 * 1024 * 10},
+        {cwd: serverDir, env: bunEnv, maxBuffer: 1024 * 1024 * 10},
     );
 }
 
@@ -117,7 +122,7 @@ export async function startServer({
     port?: number;
     migrationLockMs?: number;
 }) {
-    const child = spawn('bun', [
+    const child = spawn(bunPath, [
         '--bun',
         'src/index.ts',
         '--db',
@@ -128,6 +133,7 @@ export async function startServer({
         String(migrationLockMs),
     ], {
         cwd: serverDir,
+        env: bunEnv,
         stdio: 'pipe',
     });
 
@@ -161,4 +167,24 @@ async function waitForHealth(url: string) {
         await new Promise((resolve) => setTimeout(resolve, 100));
     }
     expect(lastError, `server became healthy at ${url}`).toBeUndefined();
+}
+
+function resolveBunPath() {
+    if (process.env.BUN_BIN) return process.env.BUN_BIN;
+    for (const dir of (process.env.PATH ?? '').split(path.delimiter)) {
+        if (!dir) continue;
+        const candidate = path.join(dir, 'bun');
+        if (existsSync(candidate)) return candidate;
+    }
+    const defaultInstall = path.join(homedir(), '.bun/bin/bun');
+    if (existsSync(defaultInstall)) return defaultInstall;
+    return 'bun';
+}
+
+function envWithBunOnPath(binary: string) {
+    const env = {...process.env};
+    if (path.basename(binary) !== binary) {
+        env.PATH = `${path.dirname(binary)}${path.delimiter}${env.PATH ?? ''}`;
+    }
+    return env;
 }

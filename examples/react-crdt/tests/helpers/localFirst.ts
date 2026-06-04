@@ -39,6 +39,37 @@ export async function expectLocalFirstStat(page: Page, label: string, value: str
     await expect(localFirstStat(page, label)).toHaveText(value, {timeout: 10_000});
 }
 
+export async function expectLocalFirstReplicaToContain(page: Page, docId: string, text: string) {
+    await expect
+        .poll(
+            () =>
+                page.evaluate(
+                    async ({docId, text}) => {
+                        const request = indexedDB.open('umkehr-react-crdt-local-first');
+                        const db = await new Promise<IDBDatabase>((resolve, reject) => {
+                            request.onerror = () => reject(request.error);
+                            request.onsuccess = () => resolve(request.result);
+                        });
+                        try {
+                            const tx = db.transaction('replicas', 'readonly');
+                            const store = tx.objectStore('replicas');
+                            const replica = await new Promise<unknown>((resolve, reject) => {
+                                const get = store.get(docId);
+                                get.onerror = () => reject(get.error);
+                                get.onsuccess = () => resolve(get.result);
+                            });
+                            return JSON.stringify(replica).includes(text);
+                        } finally {
+                            db.close();
+                        }
+                    },
+                    {docId, text},
+                ),
+            {timeout: 10_000},
+        )
+        .toBe(true);
+}
+
 export async function localFirstInvitePeerId(input: Locator) {
     return peerIdFromInviteInput(input);
 }

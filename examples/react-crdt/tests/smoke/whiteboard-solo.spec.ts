@@ -5,6 +5,7 @@ import {
     archiveSelected,
     drawStroke,
     expectNoteText,
+    expectSoloWhiteboardVisibleCountPersisted,
     expectVisibleElementCount,
     moveNote,
     openWhiteboardMode,
@@ -17,7 +18,8 @@ import {
 test('supports solo whiteboard note, emoji, stroke, archive, recover, and undo/redo', async ({
     page,
 }, testInfo) => {
-    await openWhiteboardMode(page, 'solo', uniqueWhiteboardDocId(testInfo, 'solo'));
+    const docId = uniqueWhiteboardDocId(testInfo, 'solo');
+    await openWhiteboardMode(page, 'solo', docId);
 
     const panel = whiteboardPanel(page, 'Whiteboard');
     await expectVisibleElementCount(panel, 0);
@@ -44,6 +46,7 @@ test('supports solo whiteboard note, emoji, stroke, archive, recover, and undo/r
 
     await panel.getByRole('button', {name: 'Redo'}).click();
     await expectVisibleElementCount(panel, 3);
+    await expectSoloWhiteboardVisibleCountPersisted(page, docId, 3);
 
     await page.reload();
     const reloadedPanel = whiteboardPanel(page, 'Whiteboard');

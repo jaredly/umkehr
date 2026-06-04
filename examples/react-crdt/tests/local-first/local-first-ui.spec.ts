@@ -2,6 +2,7 @@ import {expect, test} from '@playwright/test';
 import {openApp, uniqueTestDocId} from '../helpers/app';
 import {
     expectLocalFirstStat,
+    expectLocalFirstReplicaToContain,
     localFirstPeerId,
     openLocalFirst,
 } from '../helpers/localFirst';
@@ -24,6 +25,7 @@ test('persists local-first documents, exposes role/invite controls, and resets l
         await localFirstPeerId(page);
 
         await addTodoInPanel(todoPanel(page, 'Todos'), title);
+        await expectLocalFirstReplicaToContain(page, docId, title);
         await page.reload();
         await expect(page.getByTestId('local-first-controls')).toBeVisible({timeout: 10_000});
         await expect(todoPanel(page, 'Todos').locator('.todoTitle', {hasText: title})).toBeVisible();

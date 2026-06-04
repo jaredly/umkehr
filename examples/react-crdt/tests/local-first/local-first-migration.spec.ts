@@ -1,6 +1,6 @@
 import {expect, test} from '@playwright/test';
 import {openApp, uniqueTestDocId} from '../helpers/app';
-import {expectLocalFirstStat} from '../helpers/localFirst';
+import {expectLocalFirstReplicaToContain, expectLocalFirstStat} from '../helpers/localFirst';
 import {addTodoInPanel, todoPanel} from '../helpers/todos';
 
 test('creates a migrated local-first target document from an old local replica', async ({
@@ -13,6 +13,7 @@ test('creates a migrated local-first target document from an old local replica',
     await openApp(page, {mode: 'local-first', appId: 'todos@1', docId: sourceDocId});
     await expect(page.getByTestId('local-first-controls')).toBeVisible({timeout: 10_000});
     await addTodoInPanel(todoPanel(page, 'Todos v1'), migratedTitle);
+    await expectLocalFirstReplicaToContain(page, sourceDocId, migratedTitle);
 
     await openApp(page, {mode: 'local-first', docId: sourceDocId});
     await expect(page.getByRole('heading', {name: 'Schema migration available'})).toBeVisible();
