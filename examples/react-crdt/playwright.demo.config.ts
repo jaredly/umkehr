@@ -19,6 +19,7 @@ export default defineConfig({
         trace: 'off',
         screenshot: 'only-on-failure',
         video: 'on',
+        launchOptions: {slowMo: 500},
     },
     projects: [{name: 'demo-chromium'}],
     webServer: {
