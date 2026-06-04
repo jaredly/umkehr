@@ -30,14 +30,7 @@ export type State = {
 };
 
 export const initialState: State = {
-    chars: {
-        '0001-self': {
-            text: 'A',
-            id: [0, 'self'],
-            deleted: false,
-            parent: {id: [0, 'self'], ts: '0001'},
-        },
-    },
+    chars: {},
     blocks: {
         '0000-self': {
             id: [0, 'self'],
@@ -45,7 +38,7 @@ export const initialState: State = {
             order: {index: '0', ts: '0001', parent: [0, 'root']},
         },
     },
-    maxSeenCount: 1,
+    maxSeenCount: 0,
 };
 
 export const addChar = (state: State, text: string, after: Lamport, ts: () => HLC): State => {
@@ -68,20 +61,26 @@ export const addChar = (state: State, text: string, after: Lamport, ts: () => HL
 export const selPos = (state: State, block: Lamport, selection: number): Lamport | null => {
     const {chars, blocks} = state;
     const {charContents} = organizeState(blocks, chars);
-    const head = charContents[lamportToString(block)];
     if (selection === 0) {
         return block;
     }
+    const head = charContents[lamportToString(block)].sort((a, b) => b.localeCompare(a));
     selection--;
-    for (let id of head) {
+
+    const charStack: string[][] = [head];
+    while (charStack.length) {
+        if (!charStack[0].length) {
+            charStack.shift();
+            continue;
+        }
+        const id = charStack[0].pop()!;
         if (selection === 0) {
             return chars[id].id;
         }
-        const sorted = charContents[head[0]]?.sort((a, b) => b.localeCompare(a)) ?? [];
-        if (selection < sorted.length) {
-            return chars[sorted[selection]].id;
+        selection--;
+        if (charContents[id]) {
+            charStack.unshift(charContents[id].sort((a, b) => b.localeCompare(a)));
         }
-        selection -= sorted.length + 1;
     }
     throw new Error('selection out of bounds');
 };
@@ -117,7 +116,12 @@ export const stateToString = (state: State) => {
             block.meta.type
         ];
         return [
-            id + ': ' + charContents[id].map(showChar).join(''),
+            id +
+                ': ' +
+                charContents[id]
+                    ?.sort((a, b) => b.localeCompare(a))
+                    .map(showChar)
+                    .join(''),
             ...(blockChildren[id]
                 ?.sort((a, b) => blocks[a].order.index.localeCompare(blocks[b].order.index))
                 .flatMap(showBlock)
@@ -127,10 +131,17 @@ export const stateToString = (state: State) => {
     const showChar = (id: string): string => {
         const char = chars[id];
         return (
-            char.text + (charContents[id]?.sort((a, b) => b.localeCompare(a)).map(showChar) ?? '')
+            char.text +
+            (charContents[id]
+                ?.sort((a, b) => b.localeCompare(a))
+                .map(showChar)
+                .join('') ?? '')
         );
     };
-    return blockChildren['0000-root'].map(showBlock).join('\n');
+    return blockChildren['0000-root']
+        ?.sort((a, b) => blocks[a].order.index.localeCompare(blocks[b].order.index))
+        .map(showBlock)
+        .join('\n');
 };
 
 /*
