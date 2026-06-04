@@ -5,25 +5,22 @@ export type Char = {
     id: Lamport;
     text: string;
     deleted: boolean;
-    parent:
-        | {
-              type: 'char';
-              ts: HLC | [HLC, Lamport[], HLC];
-              id: Lamport;
-          }
-        | {type: 'block'; id: string; ts: HLC};
+    parent: {
+        ts: HLC | [HLC, Lamport[], HLC];
+        id: Lamport;
+    };
     // NOTE: getting formatting to be happy will have some 'markOpsBefore/markOpsAfter' stuff going on.
     // as well as privenance for splits or somehting like that
 };
 
 export type Block = {
-    id: string;
+    id: Lamport;
     meta:
         | {type: 'paragraph'; ts: HLC}
         | {type: 'blockquote'; ts: HLC}
         | {type: 'bullets'; ts: HLC}
         | {type: 'checkboxes'; ts: HLC; checked: Record<string, {ts: HLC; checked: boolean}>};
-    order: {index: string; ts: HLC; parent: string}; // fractional index
+    order: {index: string; ts: HLC; parent: Lamport}; // fractional index
 };
 
 export type State = {
@@ -34,21 +31,21 @@ export type State = {
 
 export const initialState: State = {
     chars: {
-        '0-self': {
+        '0001-self': {
             text: 'A',
             id: [0, 'self'],
             deleted: false,
-            parent: {type: 'block', id: 'a', ts: '0001'},
+            parent: {id: [0, 'self'], ts: '0001'},
         },
     },
     blocks: {
-        a: {
-            id: 'a',
+        '0000-self': {
+            id: [0, 'self'],
             meta: {type: 'paragraph', ts: '0001'},
-            order: {index: '0', ts: '0001', parent: 'root'},
+            order: {index: '0', ts: '0001', parent: [0, 'root']},
         },
     },
-    maxSeenCount: 0,
+    maxSeenCount: 1,
 };
 
 export const addChar = (state: State, text: string, after: Lamport, ts: () => HLC): State => {
@@ -59,7 +56,7 @@ export const addChar = (state: State, text: string, after: Lamport, ts: () => HL
         text,
         id: [id, 'self'],
         deleted: false,
-        parent: {type: 'char', id: after, ts: ts()},
+        parent: {id: after, ts: ts()},
     };
     return {
         chars: {...chars, [charId]: newChar},
@@ -68,16 +65,25 @@ export const addChar = (state: State, text: string, after: Lamport, ts: () => HL
     };
 };
 
-export const selPos = (state: State, block: string, selection: number): Lamport | null => {
+export const selPos = (state: State, block: Lamport, selection: number): Lamport | null => {
     const {chars, blocks} = state;
-    const {charContents, blockContents} = organizeState(blocks, chars);
-    const head = blockContents[block];
-    if (head.length !== 1) throw new Error('multiple block children');
-    if (selection === 1) {
-        return chars[head[0]].id;
+    const {charContents} = organizeState(blocks, chars);
+    const head = charContents[lamportToString(block)];
+    if (selection === 0) {
+        return block;
     }
-    const sorted = charContents[head[0]].sort((a, b) => b.localeCompare(a));
-    return sorted[selection] ? chars[sorted[selection]].id : null;
+    selection--;
+    for (let id of head) {
+        if (selection === 0) {
+            return chars[id].id;
+        }
+        const sorted = charContents[head[0]]?.sort((a, b) => b.localeCompare(a)) ?? [];
+        if (selection < sorted.length) {
+            return chars[sorted[selection]].id;
+        }
+        selection -= sorted.length + 1;
+    }
+    throw new Error('selection out of bounds');
 };
 
 export const addChars = (state: State, text: string, after: Lamport, ts: () => HLC): State => {
@@ -90,7 +96,12 @@ export const addChars = (state: State, text: string, after: Lamport, ts: () => H
 };
 
 export const lamportToString = (lamport: Lamport) => {
-    return `${lamport[0]}-${lamport[1]}`;
+    return `${lamport[0].toString().padStart(4, '0')}-${lamport[1]}`;
+};
+
+export const lamportFromString = (raw: string) => {
+    const [count, id] = raw.split('-');
+    return [parseInt(count), id] as Lamport;
 };
 
 // root blocks are those whose parent = 'root'
@@ -99,15 +110,14 @@ export const lamportToString = (lamport: Lamport) => {
 
 export const stateToString = (state: State) => {
     const {chars, blocks} = state;
-    const {blockChildren, charContents, blockContents} = organizeState(blocks, chars);
-    console.log(charContents);
+    const {blockChildren, charContents} = organizeState(blocks, chars);
     const showBlock = (id: string): string[] => {
         const block = blocks[id];
         const symbol = {paragraph: ' ', bullets: '•', checkboxes: '☐', blockquote: '|'}[
             block.meta.type
         ];
         return [
-            id + ': ' + blockContents[id].map(showChar).join(''),
+            id + ': ' + charContents[id].map(showChar).join(''),
             ...(blockChildren[id]
                 ?.sort((a, b) => blocks[a].order.index.localeCompare(blocks[b].order.index))
                 .flatMap(showBlock)
@@ -120,7 +130,7 @@ export const stateToString = (state: State) => {
             char.text + (charContents[id]?.sort((a, b) => b.localeCompare(a)).map(showChar) ?? '')
         );
     };
-    return blockChildren.root.map(showBlock).join('\n');
+    return blockChildren['0000-root'].map(showBlock).join('\n');
 };
 
 /*
@@ -171,6 +181,17 @@ I think that does the trick?
 Ancestry path comparison ... might be like a 'lower wins' instead of a 'higher wins'???? yes because 'lower means later' which is what we want to privilege.
 
 
+
+big news question:
+if I am going to ... insert text at the start of a block
+wait what if I just have an empty-string char be the child of the block.
+that is to say, the block gets a 'char id' lamport number.
+and then insertion is normal
+
+yeah I like that.
+
+
+
 */
 
 type CRDTUpdate =
@@ -186,26 +207,19 @@ type CRDTUpdate =
 function organizeState(blocks: Record<string, Block>, chars: Record<string, Char>) {
     const blockChildren: Record<string, string[]> = {};
     for (const [id, block] of Object.entries(blocks)) {
-        if (!blockChildren[block.order.parent]) {
-            blockChildren[block.order.parent] = [];
+        const pid = lamportToString(block.order.parent);
+        if (!blockChildren[pid]) {
+            blockChildren[pid] = [];
         }
-        blockChildren[block.order.parent].push(id);
+        blockChildren[pid].push(id);
     }
     const charContents: Record<string, string[]> = {};
-    const blockContents: Record<string, string[]> = {};
     for (const [id, char] of Object.entries(chars)) {
-        if (char.parent.type === 'block') {
-            if (!blockContents[char.parent.id]) {
-                blockContents[char.parent.id] = [];
-            }
-            blockContents[char.parent.id].push(id);
-        } else {
-            const pid = lamportToString(char.parent.id);
-            if (!charContents[pid]) {
-                charContents[pid] = [];
-            }
-            charContents[pid].push(id);
+        const pid = lamportToString(char.parent.id);
+        if (!charContents[pid]) {
+            charContents[pid] = [];
         }
+        charContents[pid].push(id);
     }
-    return {blockChildren, charContents, blockContents};
+    return {blockChildren, charContents};
 }
