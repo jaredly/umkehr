@@ -75,7 +75,7 @@ const applyCharDelete = (
     }
     const charContents = {...cache.charContents};
     const ppid = lamportToString(current.parent.id);
-    charContents[ppid] = charContents[ppid].filter((id) => id !== charId);
+    removeFromCache(charContents, ppid, charId);
     current = {...current, deleted: true};
     return {
         state: {
@@ -105,10 +105,12 @@ const applyCharMove = (
     }
     const charContents = {...cache.charContents};
     const ppid = lamportToString(current.parent.id);
-    charContents[ppid] = charContents[ppid].filter((id) => id !== charId);
+    removeFromCache(charContents, ppid, charId);
     current = {...current, parent: op.parent};
     const pid = lamportToString(op.parent.id);
-    charContents[pid] = insertSortedRev(charContents[pid].slice(), charId);
+    if (!current.deleted) {
+        charContents[pid] = insertSortedRev((charContents[pid] ?? []).slice(), charId);
+    }
     return {
         state: {
             chars: {...chars, [charId]: current},
@@ -137,20 +139,20 @@ const applyBlockStatus = (
     if (op.status.ts > current.status.ts) {
         if (current.status.archived && !op.status.archived) {
             blockChildren[pid] = insertSortedBy(
-                blockChildren[pid].slice(),
+                (blockChildren[pid] ?? []).slice(),
                 id,
                 (id) => state.state.blocks[id].order.index,
             );
         }
         if (!current.status.archived && op.status.archived) {
-            blockChildren[pid] = blockChildren[pid].slice().filter((d) => d !== id);
+            removeFromCache(blockChildren, pid, id);
         }
         current.status = op.status;
     }
     return {
         state: {
             ...state.state,
-            blocks: {...state.state.blocks, [id]: {...current, status: op.status}},
+            blocks: {...state.state.blocks, [id]: current},
         },
         cache: {...state.cache, blockChildren},
     };
@@ -172,7 +174,7 @@ const applyBlockMove = (
     const blockChildren = {...cache.blockChildren};
     if (!current.status.archived) {
         const oldParentId = lamportToString(current.order.parent);
-        blockChildren[oldParentId] = (blockChildren[oldParentId] ?? []).filter((d) => d !== id);
+        removeFromCache(blockChildren, oldParentId, id);
 
         const newParentId = lamportToString(op.order.parent);
         const blocks = {...state.blocks, [id]: {...current, order: op.order}};
@@ -218,7 +220,6 @@ const applyBlockMeta = (
 
 const applyBlock = ({state, cache}: CachedState, {block}: Op & {type: 'block'}) => {
     const id = lamportToString(block.id);
-    const parentId = lamportToString(block.order.parent);
     const current = state.blocks[id];
     if (current) {
         if (current.meta.ts > block.meta.ts) {
@@ -233,6 +234,19 @@ const applyBlock = ({state, cache}: CachedState, {block}: Op & {type: 'block'}) 
     }
 
     const blocks = {...state.blocks, [id]: block};
+    const parentId = lamportToString(block.order.parent);
+    const blockChildren = {...cache.blockChildren};
+    if (current) {
+        const currentParentId = lamportToString(current.order.parent);
+        removeFromCache(blockChildren, currentParentId, id);
+    }
+    if (!block.status.archived) {
+        blockChildren[parentId] = insertSortedBy(
+            (blockChildren[parentId] ?? []).slice(),
+            id,
+            (id) => blocks[id].order.index,
+        );
+    }
     return {
         state: {
             ...state,
@@ -241,14 +255,7 @@ const applyBlock = ({state, cache}: CachedState, {block}: Op & {type: 'block'}) 
         },
         cache: {
             ...cache,
-            blockChildren: {
-                ...cache.blockChildren,
-                [parentId]: insertSortedBy(
-                    cache.blockChildren[parentId]?.slice() ?? [],
-                    id,
-                    (id) => blocks[id].order.index,
-                ),
-            },
+            blockChildren,
         },
     };
 };
@@ -275,15 +282,24 @@ const laterTs = (one: Char['parent']['ts'], two: Char['parent']['ts']) => {
 const applyChar = ({state, cache}: CachedState, {char}: Op & {type: 'char'}) => {
     const {chars, blocks, maxSeenCount} = state;
     const charId = lamportToString(char.id);
-    const parentId = lamportToString(char.parent.id);
-    if (state.chars[charId]) {
-        const current = state.chars[charId];
+    const current = state.chars[charId];
+    if (current) {
         if (current.text !== char.text) {
             throw new Error(`re-insert of ${charId} and the text is different`);
         }
         if (laterTs(current.parent.ts, char.parent.ts)) {
             char = {...char, parent: current.parent};
         }
+        char = {...char, deleted: current.deleted};
+    }
+    const parentId = lamportToString(char.parent.id);
+    const charContents = {...cache.charContents};
+    if (current) {
+        const currentParentId = lamportToString(current.parent.id);
+        removeFromCache(charContents, currentParentId, charId);
+    }
+    if (!char.deleted) {
+        charContents[parentId] = insertSortedRev(charContents[parentId]?.slice() ?? [], charId);
     }
     return {
         state: {
@@ -298,10 +314,7 @@ const applyChar = ({state, cache}: CachedState, {char}: Op & {type: 'char'}) => 
         },
         cache: {
             ...cache,
-            charContents: {
-                ...cache.charContents,
-                [parentId]: insertSortedRev(cache.charContents[parentId]?.slice() ?? [], charId),
-            },
+            charContents,
         },
     };
 };
@@ -316,6 +329,15 @@ const insertSortedBy = (array: string[], item: string, order: (id: string) => st
     }
     array.push(item);
     return array;
+};
+
+const removeFromCache = (cache: Record<string, string[]>, parentId: string, id: string) => {
+    const next = (cache[parentId] ?? []).filter((item) => item !== id);
+    if (next.length) {
+        cache[parentId] = next;
+    } else {
+        delete cache[parentId];
+    }
 };
 
 const insertSortedRev = (array: string[], item: string) => {
@@ -389,6 +411,9 @@ export const stateToString = (state: CachedState) => {
 export function organizeState(blocks: Record<string, Block>, chars: Record<string, Char>): Cache {
     const blockChildren: Record<string, string[]> = {};
     for (const [id, block] of Object.entries(blocks)) {
+        if (block.status.archived) {
+            continue;
+        }
         const pid = lamportToString(block.order.parent);
         if (!blockChildren[pid]) {
             blockChildren[pid] = [];
@@ -397,6 +422,9 @@ export function organizeState(blocks: Record<string, Block>, chars: Record<strin
     }
     const charContents: Record<string, string[]> = {};
     for (const [id, char] of Object.entries(chars)) {
+        if (char.deleted) {
+            continue;
+        }
         const pid = lamportToString(char.parent.id);
         if (!charContents[pid]) {
             charContents[pid] = [];
