@@ -54,8 +54,9 @@ export const apply = (state: CachedState, op: Op): CachedState | false => {
         case 'char:delete':
             return applyCharDelete(state, op);
         case 'block:move':
+            return applyBlockMove(state, op);
         case 'block:meta':
-            return state;
+            return applyBlockMeta(state, op);
     }
 };
 
@@ -152,6 +153,66 @@ const applyBlockStatus = (
             blocks: {...state.state.blocks, [id]: {...current, status: op.status}},
         },
         cache: {...state.cache, blockChildren},
+    };
+};
+
+const applyBlockMove = (
+    {state, cache}: CachedState,
+    op: Op & {type: 'block:move'},
+): CachedState | false => {
+    const id = lamportToString(op.id);
+    let current = state.blocks[id];
+    if (!current) {
+        return false;
+    }
+    if (!laterTs(op.order.ts, current.order.ts)) {
+        return {state, cache};
+    }
+
+    const blockChildren = {...cache.blockChildren};
+    if (!current.status.archived) {
+        const oldParentId = lamportToString(current.order.parent);
+        blockChildren[oldParentId] = (blockChildren[oldParentId] ?? []).filter((d) => d !== id);
+
+        const newParentId = lamportToString(op.order.parent);
+        const blocks = {...state.blocks, [id]: {...current, order: op.order}};
+        blockChildren[newParentId] = insertSortedBy(
+            (blockChildren[newParentId] ?? []).slice(),
+            id,
+            (id) => blocks[id].order.index,
+        );
+    }
+
+    current = {...current, order: op.order};
+    return {
+        state: {
+            ...state,
+            blocks: {...state.blocks, [id]: current},
+            maxSeenCount: Math.max(state.maxSeenCount, op.id[0], op.order.parent[0]),
+        },
+        cache: {...cache, blockChildren},
+    };
+};
+
+const applyBlockMeta = (
+    {state, cache}: CachedState,
+    op: Op & {type: 'block:meta'},
+): CachedState | false => {
+    const id = lamportToString(op.id);
+    const current = state.blocks[id];
+    if (!current) {
+        return false;
+    }
+    if (!laterTs(op.meta.ts, current.meta.ts)) {
+        return {state, cache};
+    }
+    return {
+        state: {
+            ...state,
+            blocks: {...state.blocks, [id]: {...current, meta: op.meta}},
+            maxSeenCount: Math.max(state.maxSeenCount, op.id[0]),
+        },
+        cache,
     };
 };
 
@@ -343,7 +404,7 @@ export function organizeState(blocks: Record<string, Block>, chars: Record<strin
         charContents[pid].push(id);
     }
     Object.values(blockChildren).forEach((items) => {
-        items.sort((a, b) => blocks[b].order.index.localeCompare(blocks[a].order.index));
+        items.sort((a, b) => blocks[a].order.index.localeCompare(blocks[b].order.index));
     });
     Object.values(charContents).forEach((items) => {
         items.sort((a, b) => b.localeCompare(a));

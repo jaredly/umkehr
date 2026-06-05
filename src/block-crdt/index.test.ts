@@ -56,3 +56,70 @@ it('single chars', () => {
     const str = stateToString(state);
     expect(str).toBe('0000-self: xyzabc');
 });
+
+it('applies block meta by timestamp', () => {
+    let state = apply(cachedState(init), {
+        type: 'block:meta',
+        id: [0, 'self'],
+        meta: {type: 'bullets', ts: '00002'},
+    }) as CachedState;
+
+    expect(state.state.blocks['0000-self'].meta).toEqual({type: 'bullets', ts: '00002'});
+    expect(state.cache).toEqual(organizeState(state.state.blocks, state.state.chars));
+
+    state = apply(state, {
+        type: 'block:meta',
+        id: [0, 'self'],
+        meta: {type: 'blockquote', ts: '00001'},
+    }) as CachedState;
+
+    expect(state.state.blocks['0000-self'].meta).toEqual({type: 'bullets', ts: '00002'});
+    expect(state.cache).toEqual(organizeState(state.state.blocks, state.state.chars));
+});
+
+it('moves blocks by timestamp and updates child cache', () => {
+    let state = apply(cachedState(init), {
+        type: 'block',
+        block: {
+            id: [1, 'self'],
+            meta: {type: 'paragraph', ts: '00002'},
+            order: {index: '1', ts: '00002', parent: [0, 'root']},
+            status: {archived: false, ts: '00002'},
+        },
+    }) as CachedState;
+    state = apply(state, {
+        type: 'block',
+        block: {
+            id: [2, 'self'],
+            meta: {type: 'paragraph', ts: '00002'},
+            order: {index: '2', ts: '00002', parent: [0, 'root']},
+            status: {archived: false, ts: '00002'},
+        },
+    }) as CachedState;
+
+    state = apply(state, {
+        type: 'block:move',
+        id: [2, 'self'],
+        order: {index: '0', ts: '00003', parent: [1, 'self']},
+    }) as CachedState;
+
+    expect(state.state.blocks['0002-self'].order).toEqual({
+        index: '0',
+        ts: '00003',
+        parent: [1, 'self'],
+    });
+    expect(state.cache).toEqual(organizeState(state.state.blocks, state.state.chars));
+
+    state = apply(state, {
+        type: 'block:move',
+        id: [2, 'self'],
+        order: {index: '9', ts: '00002', parent: [0, 'root']},
+    }) as CachedState;
+
+    expect(state.state.blocks['0002-self'].order).toEqual({
+        index: '0',
+        ts: '00003',
+        parent: [1, 'self'],
+    });
+    expect(state.cache).toEqual(organizeState(state.state.blocks, state.state.chars));
+});
