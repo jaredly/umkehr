@@ -1,0 +1,15 @@
+import {State} from './types';
+import {lamportToString} from './utils';
+
+export const initialState = (session: string, ts: string): State => ({
+    chars: {},
+    blocks: {
+        [lamportToString([0, session])]: {
+            id: [0, session],
+            meta: {type: 'paragraph', ts: ts},
+            order: {index: '0', ts: ts, parent: [0, 'root']},
+            status: {archived: false, ts: ts},
+        },
+    },
+    maxSeenCount: 0,
+});

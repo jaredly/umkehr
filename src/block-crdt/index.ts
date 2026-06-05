@@ -1,54 +1,5 @@
-type Lamport = [number, string];
-type HLC = string;
-
-export type Char = {
-    id: Lamport;
-    text: string;
-    deleted: boolean;
-    parent: {
-        ts: HLC | [HLC, Lamport[], HLC];
-        id: Lamport;
-    };
-    // NOTE: getting formatting to be happy will have some 'markOpsBefore/markOpsAfter' stuff going on.
-    // as well as privenance for splits or somehting like that
-};
-
-export type Block = {
-    id: Lamport;
-    meta:
-        | {type: 'paragraph'; ts: HLC}
-        | {type: 'blockquote'; ts: HLC}
-        | {type: 'bullets'; ts: HLC}
-        | {type: 'checkboxes'; ts: HLC; checked: Record<string, {ts: HLC; checked: boolean}>};
-    order: {index: string; ts: HLC; parent: Lamport}; // fractional index
-    status: {archived: boolean; ts: HLC};
-};
-
-export type State = {
-    chars: Record<string, Char>;
-    blocks: Record<string, Block>;
-    maxSeenCount: number;
-};
-
-export type Cache = {
-    blockChildren: Record<string, string[]>;
-    charContents: Record<string, string[]>;
-};
-
-export type CachedState = {state: State; cache: Cache};
-
-export const initialState: State = {
-    chars: {},
-    blocks: {
-        '0000-self': {
-            id: [0, 'self'],
-            meta: {type: 'paragraph', ts: '0001'},
-            order: {index: '0', ts: '0001', parent: [0, 'root']},
-            status: {archived: false, ts: '0001'},
-        },
-    },
-    maxSeenCount: 0,
-};
+import {State, Lamport, CachedState, Cache, Char, HLC, Block} from './types';
+import {lamportToString} from './utils';
 
 export const split = (
     {state, cache}: CachedState,
@@ -74,28 +25,6 @@ export const split = (
         },
         maxSeenCount: maxSeenCount + 1,
     });
-    // return {
-    //     state: {
-    //         chars: {...chars, [charId]: {...chars[charId]}},
-    //         blocks: {
-    //             ...blocks,
-    //             [lamportToString(block.id)]: block,
-    //         },
-    //         maxSeenCount: maxSeenCount + 1,
-    //     },
-    //     cache: {
-    //         ...cache,
-    //         blockChildren: {
-    //             ...cache.blockChildren,
-    //             [lamportToString(bid)]: [lamportToString(block.id)],
-    //         },
-    //         charContents: {
-    //             ...cache.charContents,
-    //             [pchar]: cache.charContents[pchar].filter((id) => id !== charId),
-    //             [charId]: [lamportToString(block.id)],
-    //         },
-    //     },
-    // };
 };
 
 type Op =
@@ -107,7 +36,7 @@ type Op =
     | {type: 'block:status'; id: Lamport; status: Block['status']}
     | {type: 'block:meta'; id: Lamport; meta: Block['meta']};
 
-export const apply = (state: CachedState, op: Op): CachedState => {
+export const apply = (state: CachedState, op: Op): CachedState | false => {
     switch (op.type) {
         case 'char':
             return applyChar(state, op);
@@ -118,14 +47,47 @@ export const apply = (state: CachedState, op: Op): CachedState => {
         case 'char:move':
             return applyCharMove(state, op);
         case 'char:delete':
-            return state;
+            return applyCharDelete(state, op);
         case 'block:move':
         case 'block:meta':
             return state;
     }
 };
 
-const applyCharMove = ({state, cache}: CachedState, op: Op & {type: 'char:move'}) => {
+const applyCharDelete = (
+    {state, cache}: CachedState,
+    op: Op & {type: 'char:delete'},
+): CachedState | false => {
+    const {chars, blocks, maxSeenCount} = state;
+    const charId = lamportToString(op.id);
+    let current = state.chars[charId];
+    if (!current) {
+        return false;
+    }
+    if (current.deleted) {
+        return {state, cache};
+    }
+    const charContents = {...cache.charContents};
+    const ppid = lamportToString(current.parent.id);
+    charContents[ppid] = charContents[ppid].filter((id) => id !== charId);
+    current = {...current, deleted: true};
+    return {
+        state: {
+            chars: {...chars, [charId]: current},
+            blocks,
+            maxSeenCount: Math.max(maxSeenCount, op.id[0]),
+        },
+        cache: {
+            ...cache,
+            charContents,
+        },
+    };
+};
+
+const applyCharMove = (
+    {state, cache}: CachedState,
+    op: Op & {type: 'char:move'},
+): CachedState | false => {
     const {chars, blocks, maxSeenCount} = state;
     const charId = lamportToString(op.id);
     let current = state.chars[charId];
@@ -154,11 +116,14 @@ const applyCharMove = ({state, cache}: CachedState, op: Op & {type: 'char:move'}
     };
 };
 
-const applyBlockStatus = (state: CachedState, op: Op & {type: 'block:status'}) => {
+const applyBlockStatus = (
+    state: CachedState,
+    op: Op & {type: 'block:status'},
+): CachedState | false => {
     const id = lamportToString(op.id);
     let current = state.state.blocks[id];
     if (!current) {
-        throw new Error(`no current block`);
+        return false;
     }
     const pid = lamportToString(current.order.parent);
     current = {...current};
@@ -298,50 +263,26 @@ const insertSortedRev = (array: string[], item: string) => {
     return array;
 };
 
-export const addChar = (
-    {state, cache}: CachedState,
-    text: string,
-    after: Lamport,
-    ts: () => HLC,
-): CachedState => {
-    const newChar: Char = {
+const applyMany = (state: CachedState, ops: Op[]) => {
+    ops.forEach((op) => {
+        const result = apply(state, op);
+        if (result === false) {
+            throw new Error(`op was pending`);
+        }
+        state = result;
+    });
+    return state;
+};
+
+export const charOp = (text: string, id: Lamport, after: Lamport, ts: string): Op => ({
+    type: 'char',
+    char: {
         text,
-        id: [state.maxSeenCount + 1, 'self'],
+        id,
         deleted: false,
-        parent: {id: after, ts: ts()},
-    };
-    return applyChar({state, cache}, {type: 'char', char: newChar});
-};
-
-export const selPos = (
-    {state, cache}: CachedState,
-    block: Lamport,
-    selection: number,
-): Lamport | null => {
-    const {chars} = state;
-    const {charContents} = cache;
-    if (selection === 0) {
-        return block;
-    }
-    selection--;
-
-    const charStack: string[][] = [charContents[lamportToString(block)].slice()];
-    while (charStack.length) {
-        if (!charStack[0].length) {
-            charStack.shift();
-            continue;
-        }
-        const id = charStack[0].pop()!;
-        if (selection === 0) {
-            return chars[id].id;
-        }
-        selection--;
-        if (charContents[id]) {
-            charStack.unshift(charContents[id].slice());
-        }
-    }
-    throw new Error('selection out of bounds');
-};
+        parent: {id: after, ts},
+    },
+});
 
 export const addChars = (
     state: CachedState,
@@ -349,27 +290,21 @@ export const addChars = (
     after: Lamport,
     ts: () => HLC,
 ): CachedState => {
+    let i = state.state.maxSeenCount + 1;
+    const ops: Op[] = [];
     for (let char of new Intl.Segmenter().segment(text)) {
-        const newState = addChar(state, char.segment, after, ts);
-        state = newState;
-        after = [newState.state.maxSeenCount, 'self'];
+        const id: Lamport = [i, 'self'];
+        ops.push(charOp(char.segment, id, after, ts()));
+        after = id;
+        i++;
     }
-    return state;
+    return applyMany(state, ops);
 };
 
 export const cachedState = (state: State): CachedState => ({
     state,
     cache: organizeState(state.blocks, state.chars),
 });
-
-export const lamportToString = (lamport: Lamport) => {
-    return `${lamport[0].toString().padStart(4, '0')}-${lamport[1]}`;
-};
-
-export const parseLamportString = (raw: string) => {
-    const [count, id] = raw.split('-');
-    return [parseInt(count), id] as Lamport;
-};
 
 // root blocks are those whose parent = 'root'
 
@@ -394,67 +329,6 @@ export const stateToString = (state: CachedState) => {
     };
     return blockChildren['0000-root']?.map(showBlock).join('\n');
 };
-
-/*
-
-Can we try to do a little:
-
-
-
-
-
-realization comes from walking the tree
-also, like let's do smark cache updates
-
-
-*/
-
-/*
-
-In a fight between:
-"reparent for a split from ts X (new ts Y)"
-"reparent for a split from ts X (new ts Z)"
-we ignore new ts, and instead compare ancestry.
-if "from ts X" differs, we use that.
-if ancestry is the same, we use "new ts"
-
-In a fight between:
-"char" vs "block", it's the block's ts vs the char's 'from ts'
-
-
-IF it's not for a split, but rather for an internal move, then we do normal ts resolution probably.
-yeahhh I think that's right.
-SO
-now let's make it an easy lexical comparison.
-
-[parent ts, parent ancestry path, new ts]
-
-block:
-
-[block ts]
-
-creation:
-
-[creation ts]
-
-AND: the "from ts" is the "char's toplevel ts" before it was moved.
-I think that does the trick?
-
-Ancestry path comparison ... might be like a 'lower wins' instead of a 'higher wins'???? yes because 'lower means later' which is what we want to privilege.
-
-
-
-big news question:
-if I am going to ... insert text at the start of a block
-wait what if I just have an empty-string char be the child of the block.
-that is to say, the block gets a 'char id' lamport number.
-and then insertion is normal
-
-yeah I like that.
-
-
-
-*/
 
 export function organizeState(blocks: Record<string, Block>, chars: Record<string, Char>): Cache {
     const blockChildren: Record<string, string[]> = {};

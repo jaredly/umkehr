@@ -1,17 +1,16 @@
 import {it, expect} from 'vitest';
-import {
-    initialState,
-    stateToString,
-    addChars,
-    selPos,
-    addChar,
-    cachedState,
-    CachedState,
-    organizeState,
-} from './index';
+import {stateToString, addChars, cachedState, organizeState, charOp, apply} from './index';
+import {CachedState} from './types';
+import {selPos} from './utils';
+import {initialState} from './initialState';
+
+const init = initialState('self', '00001');
 
 it('basic test', () => {
-    const state = addChar(cachedState(initialState), 'A', [0, 'self'], mts());
+    const state = apply(
+        cachedState(init),
+        charOp('A', [1, 'self'], [0, 'self'], mts()()),
+    ) as CachedState;
     const str = stateToString(state);
     expect(str).toBe('0000-self: A');
 });
@@ -32,7 +31,7 @@ const run = (state: CachedState, items: [number, string][], ts: () => string) =>
 
 it('add chars', () => {
     let state = run(
-        cachedState(initialState),
+        cachedState(init),
         [
             [0, 'bcde'],
             [0, 'xyz'],
@@ -45,7 +44,7 @@ it('add chars', () => {
 
 it('single chars', () => {
     let state = run(
-        cachedState(initialState),
+        cachedState(init),
         [
             [0, 'a'],
             [1, 'b'],
