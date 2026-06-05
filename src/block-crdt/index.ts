@@ -36,6 +36,11 @@ type Op =
     | {type: 'block:status'; id: Lamport; status: Block['status']}
     | {type: 'block:meta'; id: Lamport; meta: Block['meta']};
 
+export const charOp = (text: string, id: Lamport, after: Lamport, ts: string): Op => ({
+    type: 'char',
+    char: {text, id, deleted: false, parent: {id: after, ts}},
+});
+
 export const apply = (state: CachedState, op: Op): CachedState | false => {
     switch (op.type) {
         case 'char':
@@ -273,16 +278,6 @@ const applyMany = (state: CachedState, ops: Op[]) => {
     });
     return state;
 };
-
-export const charOp = (text: string, id: Lamport, after: Lamport, ts: string): Op => ({
-    type: 'char',
-    char: {
-        text,
-        id,
-        deleted: false,
-        parent: {id: after, ts},
-    },
-});
 
 export const addChars = (
     state: CachedState,
