@@ -169,11 +169,13 @@ it('deletes chars idempotently and preserves cache consistency', () => {
 
     state = apply(state, {type: 'char:delete', id: [2, 'self']}) as CachedState;
     expect(state.state.chars['0002-self'].deleted).toBe(true);
+    expect(state.cache.charContents['0001-self']).toEqual(['0002-self']);
     expect(stateToString(state)).toBe('0000-self: a');
     expectCache(state);
 
     state = apply(state, {type: 'char:delete', id: [2, 'self']}) as CachedState;
     expect(state.state.chars['0002-self'].deleted).toBe(true);
+    expect(state.cache.charContents['0001-self']).toEqual(['0002-self']);
     expect(stateToString(state)).toBe('0000-self: a');
     expectCache(state);
 });
@@ -249,7 +251,8 @@ it('archives and restores blocks by status timestamp', () => {
         status: {archived: true, ts: '00003'},
     }) as CachedState;
     expect(state.state.blocks['0001-self'].status).toEqual({archived: true, ts: '00003'});
-    expect(state.cache.blockChildren['0000-root']).not.toContain('0001-self');
+    expect(state.cache.blockChildren['0000-root']).toContain('0001-self');
+    expect(stateToString(state)).not.toContain('0001-self');
     expectCache(state);
 
     state = apply(state, {
@@ -258,7 +261,8 @@ it('archives and restores blocks by status timestamp', () => {
         status: {archived: false, ts: '00002'},
     }) as CachedState;
     expect(state.state.blocks['0001-self'].status).toEqual({archived: true, ts: '00003'});
-    expect(state.cache.blockChildren['0000-root']).not.toContain('0001-self');
+    expect(state.cache.blockChildren['0000-root']).toContain('0001-self');
+    expect(stateToString(state)).not.toContain('0001-self');
     expectCache(state);
 
     state = apply(state, {
