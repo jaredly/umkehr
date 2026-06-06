@@ -133,18 +133,17 @@ export const pastePlainText = (
 ): CommandResult => {
     const lines = text.replace(/\r\n?/g, '\n').split('\n');
     let result = insertText(state, selection, lines[0] ?? '', context);
+    const ops = [...result.ops];
 
     for (let index = 1; index < lines.length; index++) {
-        result = splitBlock(result.state, result.selection, context);
-        const inserted = insertText(result.state, result.selection, lines[index], context);
-        result = {
-            state: inserted.state,
-            ops: [...result.ops, ...inserted.ops],
-            selection: inserted.selection,
-        };
+        const splitResult = splitBlock(result.state, result.selection, context);
+        ops.push(...splitResult.ops);
+        const inserted = insertText(splitResult.state, splitResult.selection, lines[index], context);
+        ops.push(...inserted.ops);
+        result = inserted;
     }
 
-    return result;
+    return {...result, ops};
 };
 
 export const toggleMark = (

@@ -198,6 +198,8 @@ function EditableBlock({
             <div
                 className="editableBlock"
                 contentEditable
+                role="textbox"
+                aria-label="Block text"
                 suppressContentEditableWarning
                 spellCheck
                 data-block-id={block.id}
@@ -207,6 +209,13 @@ function EditableBlock({
                     if (native.isComposing) return;
                     if (native.inputType === 'insertText' && native.data) {
                         event.preventDefault();
+                        onInsertText(native.data);
+                    }
+                }}
+                onInput={(event) => {
+                    const native = event.nativeEvent as InputEvent;
+                    if (native.isComposing) return;
+                    if (native.inputType === 'insertText' && native.data) {
                         onInsertText(native.data);
                     }
                 }}
