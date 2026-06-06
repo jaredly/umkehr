@@ -17,6 +17,8 @@ This plan follows the decisions in `research.md`:
 - split records do not store `leftBlock` or `rightBlock`;
 - archived blocks are not rendered, but mark traversal may need to pass through them;
 - `char:move` is assumed to be generated only by split/join;
+- when mark traversal follows a split record, it walks to the tail of that split's start char before
+  jumping, with an early jump for join-style parents;
 - keep all marks for now, without compaction.
 
 Primary outcomes:
@@ -88,7 +90,46 @@ Completion criteria:
 - Existing block-crdt tests compile after adding empty `marks` and `splits`.
 - Existing cache behavior is unchanged.
 
-## Phase 2: Op Application
+## Phase 2: Parent Provenance
+
+Make parent timestamps distinguish original insertion parents from join-style moved parents.
+
+Current `Char.parent.ts` uses a plain string for both original insertion and direct move parents.
+That is not enough for formatting traversal, because the mark walker needs to recognize when a char
+is attached by a join-style move and jump early.
+
+Recommended encoding:
+
+- original inserted chars use a blank parent timestamp, for example `''`;
+- direct join-style char-to-char moves use a populated string timestamp;
+- direct moves to a block, such as the main right char in `split(...)`, may still use a populated
+  string timestamp, but only char-to-char parents are treated as join-style traversal edges;
+- incidental split/join sibling moves keep the existing tuple timestamp form.
+
+Update:
+
+- `Char.parent.ts` type to allow the blank insertion sentinel if needed;
+- `charOp(...)` so newly inserted characters receive the blank parent timestamp;
+- `laterTs(...)` so populated strings and tuple timestamps still win over blank insertion parents;
+- tests that assert exact parent timestamps, if any.
+
+Formatting-specific helper:
+
+```ts
+const hasJoinStyleParent = (state: CachedState, charId: string): boolean => {
+    const char = state.state.chars[charId];
+    const parentId = lamportToString(char.parent.id);
+    return parentId in state.state.chars && typeof char.parent.ts === 'string' && char.parent.ts !== '';
+};
+```
+
+Completion criteria:
+
+- Existing insert/move/split/join behavior is unchanged.
+- A test proves original inserted char-to-char parents are not join-style parents.
+- A test proves joined first-root chars are join-style parents.
+
+## Phase 3: Op Application
 
 Update `src/block-crdt/index.ts`.
 
@@ -128,7 +169,7 @@ Completion criteria:
 - Duplicate conflicting mark/split-record ops throw clear errors.
 - Existing op behavior is unchanged.
 
-## Phase 3: Split Provenance
+## Phase 4: Split Provenance
 
 Update `split(...)` so every split that separates a left character from a right continuation emits
 a `split-record` op.
@@ -162,7 +203,7 @@ Completion criteria:
 - Split op batches include deterministic split records for character-to-character boundaries.
 - Existing split/join visible behavior remains unchanged.
 
-## Phase 4: Character Traversal Helpers
+## Phase 5: Character Traversal Helpers
 
 Build the reusable traversal layer before formatting resolution.
 
@@ -181,6 +222,9 @@ Needed helpers:
 - `splitRecordsByLeft(state)`
   - maps `left` char string to sorted split records;
   - when multiple records share a left, the record with the oldest `right` is preferred.
+- `hasJoinStyleParent(state, charId)`
+  - returns true for char-to-char parents introduced by join-style moves;
+  - returns false for original insertion parents with blank timestamps.
 
 The traversal should preserve current text order. Do not change `charToString`, `blockContents`, or
 `stateToString` behavior in this phase.
@@ -191,7 +235,7 @@ Completion criteria:
 - New helper tests prove traversal over linear text, tree-shaped text, deleted chars, and split
   blocks.
 
-## Phase 5: Mark Creation Helpers
+## Phase 6: Mark Creation Helpers
 
 Add helper APIs for test and editor-style command construction.
 
@@ -246,7 +290,7 @@ Completion criteria:
 - Tests can create add/remove marks without manually spelling split IDs.
 - Mark creation refuses invalid empty ranges clearly.
 
-## Phase 6: Mark Coverage and Materialization
+## Phase 7: Mark Coverage and Materialization
 
 Add a non-incremental formatter.
 
@@ -279,10 +323,19 @@ Coverage algorithm:
 4. When the walker reaches a split boundary:
    - if the split ID is in the mark's `crossedSplits`, ignore that split and stay in the current
      block order;
-   - otherwise, follow the split from the left tail to `right` and continue.
-5. Record covered visible character IDs for that mark.
-6. For each rendered non-archived block, resolve marks on each visible char.
-7. Merge adjacent visible chars with equal resolved marks into `FormattedRun`s.
+   - otherwise, follow the split.
+5. To follow a split:
+   - treat the split's `left` char as the split start char;
+   - continue through the tail of that start char before jumping to the split's `right` char;
+   - if a char with a join-style parent is encountered while walking that tail, jump early from
+     there to the split's `right` char;
+   - if another split is encountered while looking for the first split's tail, ignore that second
+     split for this tail scan.
+6. This tail scan exists only for a split being followed. It is not applied merely because the mark
+   has a start anchor.
+7. Record covered visible character IDs for that mark.
+8. For each rendered non-archived block, resolve marks on each visible char.
+9. Merge adjacent visible chars with equal resolved marks into `FormattedRun`s.
 
 Resolution rules:
 
@@ -301,13 +354,16 @@ Completion criteria:
 - Formatted materialization produces stable runs for unformatted and formatted text.
 - Archived blocks are omitted from output, but traversal can still pass through their chars.
 
-## Phase 7: Deterministic Tests
+## Phase 8: Deterministic Tests
 
 Add focused tests to a new `src/block-crdt/formatting.test.ts` file.
 
 State/op tests:
 
 - initial state has empty `marks` and `splits`;
+- inserted chars have blank parent timestamps;
+- join-style moved chars have populated string parent timestamps;
+- original inserted char-to-char parents are not detected as join-style parents;
 - mark op applies idempotently;
 - split-record op applies idempotently;
 - conflicting duplicate mark/split IDs throw;
@@ -334,6 +390,9 @@ Split behavior:
 - mark before split follows a later split when the mark's `crossedSplits` does not contain that
   split ID;
 - mark created across an existing split stores that split ID and ignores the split during traversal;
+- following a split walks through the tail of the split's `left` char before jumping to `right`;
+- following a split jumps early when the tail scan sees a join-style parent;
+- following a split ignores any second split encountered while scanning for the first split's tail;
 - mark after split inside the left block does not leak into the right block;
 - concurrent edit after the split-left char lands on the expected side of the formatted range;
 - multiple splits with the same left choose the deterministic oldest-right path.
@@ -341,6 +400,7 @@ Split behavior:
 Join behavior:
 
 - joining blocks preserves marks anchored inside both original blocks;
+- split-following traversal jumps early when it sees a join-style parent during the split tail scan;
 - marks can traverse archived right-block chars when needed;
 - archived blocks are not rendered in formatted output.
 
@@ -355,7 +415,7 @@ Completion criteria:
 - Targeted formatting tests pass.
 - Existing block-crdt tests still pass.
 
-## Phase 8: Property Tests
+## Phase 9: Property Tests
 
 Add bounded `fast-check` coverage after deterministic behavior is clear.
 
@@ -377,7 +437,7 @@ Properties:
 
 Keep bounds low until failures are easy to diagnose.
 
-## Phase 9: Verification
+## Phase 10: Verification
 
 Run targeted tests:
 
@@ -395,14 +455,15 @@ npm run typecheck
 ## Implementation Order
 
 1. Add formatting/split record types and empty state fields.
-2. Add mark and split-record op application.
-3. Add traversal helpers.
-4. Update `split(...)` to emit split records.
-5. Add mark creation helpers.
-6. Add non-incremental formatted materialization.
-7. Add deterministic formatting tests.
-8. Add bounded property tests.
-9. Run targeted and final verification.
+2. Add parent provenance for blank insertion parents and join-style moved parents.
+3. Add mark and split-record op application.
+4. Add traversal helpers.
+5. Update `split(...)` to emit split records.
+6. Add mark creation helpers.
+7. Add non-incremental formatted materialization.
+8. Add deterministic formatting tests.
+9. Add bounded property tests.
+10. Run targeted and final verification.
 
 ## Non-Goals
 
