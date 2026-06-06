@@ -1,0 +1,95 @@
+import {applyMany, cachedState, rootBlockIds, type Op} from 'umkehr/block-crdt';
+import {initialState} from 'umkehr/block-crdt/initialState';
+import type {CachedState} from 'umkehr/block-crdt/types';
+import {caret, clampSelection, type EditorSelection} from './selectionModel';
+
+export type EditorId = 'left' | 'right';
+
+export type Replica = {
+    id: EditorId;
+    actor: EditorId;
+    state: CachedState;
+    selection: EditorSelection;
+    online: boolean;
+    queue: Op[][];
+    clock: number;
+};
+
+export type DemoState = {
+    left: Replica;
+    right: Replica;
+};
+
+export type LocalChange = {
+    editorId: EditorId;
+    state: CachedState;
+    selection: EditorSelection;
+    ops: Op[];
+};
+
+export const createDemoState = (): DemoState => {
+    const state = cachedState(initialState('doc', '00000'));
+    const firstBlock = rootBlockIds(state)[0];
+    return {
+        left: createReplica('left', state, firstBlock),
+        right: createReplica('right', state, firstBlock),
+    };
+};
+
+export const makeCommandContext = (replica: Replica) => ({
+    actor: replica.actor,
+    nextTs: () => `${replica.actor}-${String(replica.clock++).padStart(5, '0')}`,
+});
+
+export const applyLocalChange = (demo: DemoState, change: LocalChange): DemoState => {
+    const source = {...demo[change.editorId], state: change.state, selection: change.selection};
+    const peerId = change.editorId === 'left' ? 'right' : 'left';
+    let peer = demo[peerId];
+
+    if (change.ops.length) {
+        if (source.online && peer.online) {
+            peer = applyRemoteOps(peer, change.ops);
+        } else {
+            source.queue = [...source.queue, change.ops];
+        }
+    }
+
+    return {...demo, [change.editorId]: source, [peerId]: peer};
+};
+
+export const toggleOnline = (demo: DemoState, editorId: EditorId): DemoState => {
+    const next = {...demo, [editorId]: {...demo[editorId], online: !demo[editorId].online}};
+    return flushQueues(next);
+};
+
+export const flushQueues = (demo: DemoState): DemoState => {
+    let next = demo;
+    for (const id of ['left', 'right'] as const) {
+        const peerId = id === 'left' ? 'right' : 'left';
+        let source = next[id];
+        let peer = next[peerId];
+        if (!source.online || !peer.online || source.queue.length === 0) continue;
+
+        for (const ops of source.queue) {
+            peer = applyRemoteOps(peer, ops);
+        }
+        source = {...source, queue: []};
+        next = {...next, [id]: source, [peerId]: peer};
+    }
+    return next;
+};
+
+const createReplica = (id: EditorId, state: CachedState, firstBlock: string): Replica => ({
+    id,
+    actor: id,
+    state,
+    selection: caret(firstBlock, 0),
+    online: true,
+    queue: [],
+    clock: 1,
+});
+
+const applyRemoteOps = (replica: Replica, ops: Op[]): Replica => {
+    const state = applyMany(replica.state, ops);
+    return {...replica, state, selection: clampSelection(state, replica.selection)};
+};

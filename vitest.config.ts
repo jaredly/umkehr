@@ -7,25 +7,40 @@ const root = fileURLToPath(new URL('.', import.meta.url));
 export default defineConfig({
     plugins: [UnpluginTypia()],
     resolve: {
-        alias: {
-            'umkehr/crdt': fileURLToPath(new URL('./src/crdt/index.ts', import.meta.url)),
-            'umkehr/richtext': fileURLToPath(
-                new URL('./src/richtext/index.ts', import.meta.url),
-            ),
-            'umkehr/validation': fileURLToPath(
-                new URL('./src/validation/index.ts', import.meta.url),
-            ),
-            'umkehr/migration': fileURLToPath(new URL('./src/migration/index.ts', import.meta.url)),
-            'umkehr/react': fileURLToPath(new URL('./src/react/react.tsx', import.meta.url)),
-            'umkehr/react-crdt': fileURLToPath(
-                new URL('./src/react-crdt/index.ts', import.meta.url),
-            ),
-            'umkehr/react-rich-text': fileURLToPath(
-                new URL('./src/react-rich-text/index.ts', import.meta.url),
-            ),
-            'umkehr/remix': fileURLToPath(new URL('./src/remix/index.ts', import.meta.url)),
-            umkehr: fileURLToPath(new URL('./src/index.ts', import.meta.url)),
-        },
+        alias: [
+            {
+                find: /^umkehr\/block-crdt\/(.+)$/,
+                replacement: fileURLToPath(new URL('./src/block-crdt/$1.ts', import.meta.url)),
+            },
+            {
+                find: 'umkehr/block-crdt',
+                replacement: fileURLToPath(new URL('./src/block-crdt/index.ts', import.meta.url)),
+            },
+            {find: 'umkehr/crdt', replacement: fileURLToPath(new URL('./src/crdt/index.ts', import.meta.url))},
+            {
+                find: 'umkehr/richtext',
+                replacement: fileURLToPath(new URL('./src/richtext/index.ts', import.meta.url)),
+            },
+            {
+                find: 'umkehr/validation',
+                replacement: fileURLToPath(new URL('./src/validation/index.ts', import.meta.url)),
+            },
+            {
+                find: 'umkehr/migration',
+                replacement: fileURLToPath(new URL('./src/migration/index.ts', import.meta.url)),
+            },
+            {find: 'umkehr/react', replacement: fileURLToPath(new URL('./src/react/react.tsx', import.meta.url))},
+            {
+                find: 'umkehr/react-crdt',
+                replacement: fileURLToPath(new URL('./src/react-crdt/index.ts', import.meta.url)),
+            },
+            {
+                find: 'umkehr/react-rich-text',
+                replacement: fileURLToPath(new URL('./src/react-rich-text/index.ts', import.meta.url)),
+            },
+            {find: 'umkehr/remix', replacement: fileURLToPath(new URL('./src/remix/index.ts', import.meta.url))},
+            {find: 'umkehr', replacement: fileURLToPath(new URL('./src/index.ts', import.meta.url))},
+        ],
     },
     test: {
         root,

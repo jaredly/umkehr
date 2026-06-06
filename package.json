@@ -78,7 +78,7 @@
         "test": "npm run build && vitest run",
         "test:e2e:migration": "cd examples/react-crdt && npm run test:e2e",
         "typecheck": "tsc -p tsconfig.json --noEmit",
-        "typecheck:examples": "npm run build && tsc -p examples/react/tsconfig.json --noEmit && tsc -p examples/react-crdt/tsconfig.json --noEmit",
+        "typecheck:examples": "npm run build && tsc -p examples/react/tsconfig.json --noEmit && tsc -p examples/react-crdt/tsconfig.json --noEmit && tsc -p examples/block-rich-text/tsconfig.json --noEmit",
         "typecheck:tests": "tsc -p tsconfig.type-tests.json",
         "prepack": "npm run build",
         "pack:check": "npm --cache /tmp/umkehr-npm-cache pack --dry-run"

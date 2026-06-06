@@ -1,0 +1,152 @@
+import {describe, expect, it} from 'vitest';
+import {
+    blockContents,
+    cachedState,
+    materializeFormattedBlocks,
+    organizeState,
+    rootBlockIds,
+} from 'umkehr/block-crdt';
+import {initialState} from 'umkehr/block-crdt/initialState';
+import type {CachedState} from 'umkehr/block-crdt/types';
+import {
+    deleteBackward,
+    insertText,
+    moveBlock,
+    pastePlainText,
+    splitBlock,
+    toggleMark,
+    type CommandContext,
+} from './blockCommands';
+import {applyLocalChange, createDemoState, makeCommandContext, toggleOnline} from './blockEditorRuntime';
+import {caret, type EditorSelection} from './selectionModel';
+
+const ctx = (actor = 'left'): CommandContext => {
+    let i = 1;
+    return {
+        actor,
+        nextTs: () => `${actor}-${String(i++).padStart(5, '0')}`,
+    };
+};
+
+const init = () => cachedState(initialState('doc', '00000'));
+
+const onlyBlock = (state: CachedState) => rootBlockIds(state)[0];
+
+const lines = (state: CachedState) => rootBlockIds(state).map((id) => blockContents(state, id));
+
+const expectCache = (state: CachedState) => {
+    expect(state.cache).toEqual(organizeState(state.state.blocks, state.state.chars));
+};
+
+describe('block rich text commands', () => {
+    it('inserts text and deletes ordinary backspace inside a block', () => {
+        let state = init();
+        const blockId = onlyBlock(state);
+        const context = ctx();
+        let result = insertText(state, caret(blockId, 0), 'abc', context);
+        expect(lines(result.state)).toEqual(['abc']);
+        expect(result.selection).toEqual(caret(blockId, 3));
+
+        result = deleteBackward(result.state, caret(blockId, 2), context);
+        expect(lines(result.state)).toEqual(['ac']);
+        expect(result.selection).toEqual(caret(blockId, 1));
+        expectCache(result.state);
+    });
+
+    it('splits at start, middle, and end', () => {
+        const context = ctx();
+        let result = insertText(init(), caret(onlyBlock(init()), 0), 'abcdef', context);
+        const blockId = onlyBlock(result.state);
+
+        result = splitBlock(result.state, caret(blockId, 3), context);
+        expect(lines(result.state)).toEqual(['abc', 'def']);
+
+        const first = rootBlockIds(result.state)[0];
+        result = splitBlock(result.state, caret(first, 0), context);
+        expect(lines(result.state)).toEqual(['', 'abc', 'def']);
+
+        const last = rootBlockIds(result.state)[2];
+        result = splitBlock(result.state, caret(last, 3), context);
+        expect(lines(result.state)).toEqual(['', 'abc', 'def', '']);
+        expectCache(result.state);
+    });
+
+    it('joins with the previous block on backspace at block start', () => {
+        const context = ctx();
+        let result = pastePlainText(init(), caret(onlyBlock(init()), 0), 'one\ntwo', context);
+        expect(lines(result.state)).toEqual(['one', 'two']);
+        const second = rootBlockIds(result.state)[1];
+
+        result = deleteBackward(result.state, caret(second, 0), context);
+        expect(lines(result.state)).toEqual(['onetwo']);
+        expect(result.selection).toEqual(caret(rootBlockIds(result.state)[0], 3));
+        expectCache(result.state);
+    });
+
+    it('splits pasted newlines into blocks', () => {
+        const state = init();
+        const result = pastePlainText(state, caret(onlyBlock(state), 0), 'a\nb\n', ctx());
+
+        expect(lines(result.state)).toEqual(['a', 'b', '']);
+        expectCache(result.state);
+    });
+
+    it('toggles bold over a multi-block selection using per-block marks', () => {
+        const context = ctx();
+        let result = pastePlainText(init(), caret(onlyBlock(init()), 0), 'ab\ncd', context);
+        const [first, second] = rootBlockIds(result.state);
+        const selection: EditorSelection = {
+            type: 'range',
+            anchor: {blockId: first, offset: 0},
+            focus: {blockId: second, offset: 2},
+        };
+
+        result = toggleMark(result.state, selection, 'bold', context);
+        expect(materializeFormattedBlocks(result.state).map((block) => block.runs)).toEqual([
+            [{text: 'ab', marks: {bold: true}}],
+            [{text: 'cd', marks: {bold: true}}],
+        ]);
+
+        result = toggleMark(result.state, selection, 'bold', context);
+        expect(materializeFormattedBlocks(result.state).map((block) => block.runs)).toEqual([
+            [{text: 'ab', marks: {}}],
+            [{text: 'cd', marks: {}}],
+        ]);
+        expectCache(result.state);
+    });
+
+    it('moves root blocks with a block:move op', () => {
+        const context = ctx();
+        let result = pastePlainText(init(), caret(onlyBlock(init()), 0), 'a\nb\nc', context);
+        const [first, , third] = rootBlockIds(result.state);
+
+        result = moveBlock(result.state, first, {targetBlockId: third, after: true}, context);
+        expect(lines(result.state)).toEqual(['b', 'c', 'a']);
+        expectCache(result.state);
+    });
+});
+
+describe('block rich text runtime', () => {
+    it('queues offline local changes and flushes them on reconnect', () => {
+        let demo = createDemoState();
+        demo = toggleOnline(demo, 'left');
+        const leftBlock = rootBlockIds(demo.left.state)[0];
+        const context = makeCommandContext(demo.left);
+        const result = insertText(demo.left.state, caret(leftBlock, 0), 'offline', context);
+
+        demo = applyLocalChange(demo, {
+            editorId: 'left',
+            state: result.state,
+            selection: result.selection,
+            ops: result.ops,
+        });
+
+        expect(lines(demo.left.state)).toEqual(['offline']);
+        expect(lines(demo.right.state)).toEqual(['']);
+        expect(demo.left.queue).toHaveLength(1);
+
+        demo = toggleOnline(demo, 'left');
+        expect(lines(demo.right.state)).toEqual(['offline']);
+        expect(demo.left.queue).toHaveLength(0);
+    });
+});
