@@ -176,6 +176,8 @@ function EditableBlock({
     onSplit(): void;
     onPasteText(text: string): void;
 }) {
+    const handledBeforeInputRef = useRef(false);
+
     return (
         <div
             ref={(element) => registerRow(block.id, element)}
@@ -209,11 +211,16 @@ function EditableBlock({
                     if (native.isComposing) return;
                     if (native.inputType === 'insertText' && native.data) {
                         event.preventDefault();
+                        handledBeforeInputRef.current = true;
                         onInsertText(native.data);
                     }
                 }}
                 onInput={(event) => {
                     const native = event.nativeEvent as InputEvent;
+                    if (handledBeforeInputRef.current) {
+                        handledBeforeInputRef.current = false;
+                        return;
+                    }
                     if (native.isComposing) return;
                     if (native.inputType === 'insertText' && native.data) {
                         onInsertText(native.data);

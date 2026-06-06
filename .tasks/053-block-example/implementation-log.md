@@ -26,3 +26,9 @@
 - RTL paste test found a real sync bug: `pastePlainText` dropped the first inserted line's ops while aggregating split/insert batches, so the peer only received later lines. Fixed paste op aggregation to preserve all batches.
 - Dispatching `InputEvent('beforeinput')` still did not reach React's `onBeforeInput` path in jsdom. Added an `onInput` fallback for insertText and switched RTL typing to dispatch `InputEvent('input')`. Browser editing still uses `beforeinput` to prevent default DOM mutation first.
 - Testing Library coverage now exercises rendering two editors, typing and online sync, offline queue/flush, Enter split, and newline paste.
+- User reported real browser typing duplicated characters in the source editor while the peer editor rendered correctly. Root cause was the jsdom `onInput` fallback also running after browser `beforeinput` had already applied the CRDT insert. Added a per-block guard so `onInput` is skipped immediately after a handled `beforeinput`.
+- Added an RTL regression that dispatches both `beforeinput` and `input` for one character and verifies both editors render a single character.
+- Verification passed after the duplicate-input fix:
+  - `npm exec vitest -- examples/block-rich-text/src/App.test.tsx examples/block-rich-text/src/blockCommands.test.ts` passed with 13 tests.
+  - `../../node_modules/.bin/tsc -p tsconfig.json --noEmit` passed from `examples/block-rich-text`.
+  - `../react-crdt/node_modules/.bin/vite build` passed from `examples/block-rich-text`.
