@@ -103,3 +103,7 @@ however, one of the splits will win, ultimately keyed by the right's lamport num
 So again, if there are multiple splits with the same left, then we take the one with the "older" right, and that's where we'll find our "end".
 
 We'll want some robust testing of this, but I'm optimistic.
+
+##
+
+A note about mark traversal over splits. The rule should be "continue to the tail of the start char, *but* jump early if you see a char with a "join-style" parent". Unfortunately we don't actually track join-style parents just yet. Maybe the initial parent.ts should be blank? And then a populated string ts would signal a join? that seems reasonable.
