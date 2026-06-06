@@ -2,7 +2,7 @@ import {State, Lamport, CachedState, Cache, Char, HLC, Block} from './types';
 import {lamportToString, parseLamportString} from './utils';
 import {compareLseqIds, createLseqIdBetween, LseqOptions} from './lseq';
 
-type Op =
+export type Op =
     | {type: 'char'; char: Char}
     | {type: 'block'; block: Block}
     | {type: 'char:move'; id: Lamport; parent: Char['parent']}
@@ -323,11 +323,12 @@ export const addChars = (
     text: string,
     after: Lamport,
     ts: () => HLC,
+    actor = 'self',
 ): CachedState => {
     let i = state.state.maxSeenCount + 1;
     const ops: Op[] = [];
     for (let char of new Intl.Segmenter().segment(text)) {
-        const id: Lamport = [i, 'self'];
+        const id: Lamport = [i, actor];
         ops.push(charOp(char.segment, id, after, ts()));
         after = id;
         i++;
@@ -409,21 +410,53 @@ export const findTail = (char: string, contents: Cache['charContents']) => {
 
 export const split = (
     {state, cache}: CachedState,
-    at: {block: Lamport; char: Lamport},
+    at: {block: Lamport; char: Lamport | null},
     ts: string,
     actor: string,
     options?: LseqOptions,
 ): Op[] => {
     const {chars, blocks, maxSeenCount} = state;
     const bid = lamportToString(at.block);
-    if (bid === lamportToString(at.char)) {
-        // in this case we should create a new empty *previous sibling* block
-        throw new Error(`not implemented yet`);
-    }
     const current = blocks[bid];
     const siblings = cache.blockChildren[lamportToString(current.order.parent)];
-    const afterId = siblings[siblings.indexOf(bid) + 1];
-    const after = afterId ? blocks[afterId].order.index : null;
+    const index = siblings.indexOf(bid);
+    const previousId = siblings[index - 1];
+    const nextId = siblings[index + 1];
+    if (at.char === null) {
+        return [
+            {
+                type: 'block',
+                block: blockBetween(
+                    [maxSeenCount + 1, actor],
+                    current.meta,
+                    current.order.parent,
+                    current.order.index,
+                    nextId ? blocks[nextId].order.index : null,
+                    ts,
+                    actor,
+                    options,
+                ),
+            },
+        ];
+    }
+    if (bid === lamportToString(at.char)) {
+        return [
+            {
+                type: 'block',
+                block: blockBetween(
+                    [maxSeenCount + 1, actor],
+                    current.meta,
+                    current.order.parent,
+                    previousId ? blocks[previousId].order.index : null,
+                    current.order.index,
+                    ts,
+                    actor,
+                    options,
+                ),
+            },
+        ];
+    }
+    const after = nextId ? blocks[nextId].order.index : null;
     const block: Block = {
         id: [maxSeenCount + 1, actor],
         meta: current.meta,
@@ -480,5 +513,89 @@ export const split = (
 
     return ops;
 };
+
+export const join = (
+    {state, cache}: CachedState,
+    left: Lamport,
+    right: Lamport,
+    ts: string,
+    actor: string,
+): Op[] => {
+    const {chars, blocks} = state;
+    const leftId = lamportToString(left);
+    const rightId = lamportToString(right);
+    if (!blocks[leftId] || !blocks[rightId]) {
+        throw new Error(`join block not found`);
+    }
+
+    const ops: Op[] = [];
+    const rightRoots = cache.charContents[rightId] ?? [];
+    const leftRoots = cache.charContents[leftId] ?? [];
+    const firstRightRoot = rightRoots[0];
+    let tail = leftRoots.length
+        ? parseLamportString(findTail(leftRoots[leftRoots.length - 1], cache.charContents))
+        : left;
+
+    if (firstRightRoot) {
+        ops.push({
+            type: 'char:move',
+            id: chars[firstRightRoot].id,
+            parent: {
+                id: tail,
+                ts,
+            },
+        });
+        tail = chars[findTail(firstRightRoot, cache.charContents)].id;
+
+        for (let i = 1; i < rightRoots.length; i++) {
+            const id = rightRoots[i];
+            ops.push({
+                type: 'char:move',
+                id: chars[id].id,
+                parent: {
+                    id: tail,
+                    ts: [lastMoveTs(chars[id].parent.ts), [chars[firstRightRoot].id], ts],
+                },
+            });
+            tail = chars[findTail(id, cache.charContents)].id;
+        }
+    }
+
+    ops.push({
+        type: 'block:status',
+        id: right,
+        status: {archived: true, ts},
+    });
+
+    return ops;
+};
+
+const blockBetween = (
+    id: Lamport,
+    meta: Block['meta'],
+    parent: Lamport,
+    before: Block['order']['index'] | null,
+    after: Block['order']['index'] | null,
+    ts: string,
+    actor: string,
+    options?: LseqOptions,
+): Block => ({
+    id,
+    meta,
+    order: {
+        ts,
+        parent,
+        index: createLseqIdBetween(
+            before,
+            after,
+            {
+                actorId: actor,
+                counter: id[0],
+            },
+            options,
+        ),
+    },
+    status: {archived: false, ts},
+});
 
 const lastMoveTs = (ts: Char['parent']['ts']) => (typeof ts === 'string' ? ts : ts[2]);

@@ -1,4 +1,5 @@
 import {it, expect} from 'vitest';
+import fc from 'fast-check';
 import {
     stateToString,
     addChars,
@@ -11,6 +12,8 @@ import {
     charToString,
     blockContents,
     findTail,
+    join,
+    Op,
 } from './index';
 import {Block, CachedState, Lamport} from './types';
 import {lamportToString, parseLamportString, selPos} from './utils';
@@ -119,6 +122,109 @@ const blockLines = (state: CachedState) =>
     state.cache.blockChildren[lamportToString([0, 'root'])]
         .filter((child) => !state.state.blocks[child]?.status.archived)
         .map((child) => blockContents(state, child));
+
+const rootBlockIds = (state: CachedState) =>
+    state.cache.blockChildren[lamportToString([0, 'root'])].filter(
+        (child) => !state.state.blocks[child]?.status.archived,
+    );
+
+const blockLength = (state: CachedState, blockId: string) => blockContents(state, blockId).length;
+
+const insertOps = (
+    state: CachedState,
+    actor: string,
+    blockIndex: number,
+    offset: number,
+    text: string,
+    ts: () => string,
+): Op[] => {
+    const bid = parseLamportString(rootBlockIds(state)[blockIndex]);
+    let after = selPos(state, bid, offset)!;
+    let next = state.state.maxSeenCount + 1;
+    const ops: Op[] = [];
+    for (const char of new Intl.Segmenter().segment(text)) {
+        const id: Lamport = [next++, actor];
+        ops.push(charOp(char.segment, id, after, ts()));
+        after = id;
+    }
+    return ops;
+};
+
+class EditorHarness {
+    state = cachedState(initialState('self', '00001'));
+
+    constructor(readonly ts = mts()) {}
+
+    blockIds() {
+        return rootBlockIds(this.state);
+    }
+
+    lines() {
+        return blockLines(this.state);
+    }
+
+    serialized() {
+        return stateToString(this.state);
+    }
+
+    expectCache() {
+        expectCache(this.state);
+    }
+
+    apply(ops: Op[]) {
+        this.state = applyMany(this.state, ops);
+        this.expectCache();
+        return ops;
+    }
+
+    insert(actor: string, blockIndex: number, offset: number, text: string) {
+        return this.apply(insertOps(this.state, actor, blockIndex, offset, text, this.ts));
+    }
+
+    split(actor: string, blockIndex: number, offset: number, options = {}) {
+        const id = this.blockIds()[blockIndex];
+        const bid = parseLamportString(id);
+        const length = blockLength(this.state, id);
+        const char = offset === 0 ? bid : offset >= length ? null : selPos(this.state, bid, offset + 1)!;
+        return this.apply(split(this.state, {block: bid, char}, this.ts(), actor, options));
+    }
+
+    join(actor: string, leftIndex: number, rightIndex: number) {
+        const ids = this.blockIds();
+        return this.apply(
+            join(
+                this.state,
+                parseLamportString(ids[leftIndex]),
+                parseLamportString(ids[rightIndex]),
+                this.ts(),
+                actor,
+            ),
+        );
+    }
+
+    deleteRange(blockIndex: number, start: number, end: number) {
+        const bid = parseLamportString(this.blockIds()[blockIndex]);
+        const ops: Op[] = [];
+        for (let offset = start + 1; offset <= end; offset++) {
+            ops.push({type: 'char:delete', id: selPos(this.state, bid, offset)!});
+        }
+        return this.apply(ops);
+    }
+}
+
+const expectConverges = (
+    state: CachedState,
+    left: Op[],
+    right: Op[],
+    expected: string[],
+) => {
+    const one = applyMany(state, [...left, ...right]);
+    const two = applyMany(state, [...right, ...left]);
+    expect(blockLines(one)).toEqual(expected);
+    expect(blockLines(two)).toEqual(expected);
+    expectCache(one);
+    expectCache(two);
+};
 
 it('split, move, and join', () => {
     const ts = mts();
@@ -477,4 +583,259 @@ it('archives and restores blocks by status timestamp', () => {
     expect(state.state.blocks['0001-self'].status).toEqual({archived: false, ts: '00004'});
     expect(state.cache.blockChildren['0000-root']).toContain('0001-self');
     expectCache(state);
+});
+
+it('harness inserts at start, middle, and end with multiple actors', () => {
+    const editor = new EditorHarness();
+
+    editor.insert('alice', 0, 0, 'ac');
+    editor.insert('bob', 0, 1, 'b');
+    editor.insert('alice', 0, 3, 'd');
+
+    expect(editor.lines()).toEqual(['abcd']);
+    expect(editor.serialized()).toBe('0000-self: abcd');
+});
+
+it('inserts grapheme clusters as visible text', () => {
+    const editor = new EditorHarness();
+
+    editor.insert('alice', 0, 0, 'a👩‍💻b');
+
+    expect(editor.lines()).toEqual(['a👩‍💻b']);
+});
+
+it('splits at start, middle, and end using user offsets', () => {
+    const editor = new EditorHarness();
+
+    editor.insert('alice', 0, 0, 'abcd');
+    editor.split('alice', 0, 0, {random: () => 0});
+    expect(editor.lines()).toEqual(['', 'abcd']);
+
+    editor.split('alice', 1, 2, {random: () => 0});
+    expect(editor.lines()).toEqual(['', 'ab', 'cd']);
+
+    editor.split('alice', 2, 2, {random: () => 0});
+    expect(editor.lines()).toEqual(['', 'ab', 'cd', '']);
+});
+
+it('joins adjacent blocks including empty blocks', () => {
+    const editor = new EditorHarness();
+
+    editor.insert('alice', 0, 0, 'abcd');
+    editor.split('alice', 0, 2, {random: () => 0});
+    editor.join('alice', 0, 1);
+    expect(editor.lines()).toEqual(['abcd']);
+
+    editor.split('alice', 0, 0, {random: () => 0});
+    editor.join('alice', 0, 1);
+    expect(editor.lines()).toEqual(['abcd']);
+
+    editor.split('alice', 0, 4, {random: () => 0});
+    editor.join('alice', 0, 1);
+    expect(editor.lines()).toEqual(['abcd']);
+});
+
+it('joins tree-shaped block contents', () => {
+    const editor = new EditorHarness();
+
+    editor.insert('alice', 0, 0, 'abcdef');
+    editor.insert('alice', 0, 3, 'xyz');
+    expect(editor.lines()).toEqual(['abcxyzdef']);
+
+    editor.split('alice', 0, 3, {random: () => 0});
+    expect(editor.lines()).toEqual(['abc', 'xyzdef']);
+
+    editor.join('alice', 0, 1);
+    expect(editor.lines()).toEqual(['abcxyzdef']);
+});
+
+it('deletes ranges while keeping deleted chars with descendants valid', () => {
+    const editor = new EditorHarness();
+
+    editor.insert('alice', 0, 0, 'abc');
+    editor.insert('alice', 0, 2, 'x');
+    expect(editor.lines()).toEqual(['abxc']);
+
+    editor.deleteRange(0, 1, 3);
+    expect(editor.lines()).toEqual(['ac']);
+
+    editor.expectCache();
+});
+
+it('allows char moves to point at missing parents', () => {
+    let state = addChars(cachedState(init), 'ab', [0, 'self'], mts());
+
+    state = apply(state, {
+        type: 'char:move',
+        id: [2, 'self'],
+        parent: {id: [99, 'missing'], ts: '00005'},
+    }) as CachedState;
+
+    expect(state.state.chars['0002-self'].parent.id).toEqual([99, 'missing']);
+    expectCache(state);
+});
+
+it('converges concurrent inserts at the same position', () => {
+    const ts = mts();
+    let state = cachedState(initialState('self', '00001'));
+    state = applyMany(state, insertOps(state, 'self', 0, 0, 'abc', ts));
+
+    const left = insertOps(state, 'alice', 0, 1, 'X', ts);
+    const right = insertOps(state, 'bob', 0, 1, 'Y', ts);
+
+    expectConverges(state, left, right, ['aYXbc']);
+});
+
+it('converges insert before and after a concurrent split point', () => {
+    const ts = mts();
+    let state = cachedState(initialState('self', '00001'));
+    state = applyMany(state, insertOps(state, 'self', 0, 0, 'abcd', ts));
+    const bid = parseLamportString(rootBlockIds(state)[0]);
+
+    expectConverges(
+        state,
+        split(state, {block: bid, char: selPos(state, bid, 3)!}, ts(), 'alice', {random: () => 0}),
+        insertOps(state, 'bob', 0, 1, 'X', ts),
+        ['aXb', 'cd'],
+    );
+
+    expectConverges(
+        state,
+        split(state, {block: bid, char: selPos(state, bid, 3)!}, ts(), 'alice', {random: () => 0}),
+        insertOps(state, 'bob', 0, 3, 'X', ts),
+        ['ab', 'cXd'],
+    );
+});
+
+it('converges join with concurrent inserts into either side', () => {
+    const ts = mts();
+    let state = cachedState(initialState('self', '00001'));
+    state = applyMany(state, insertOps(state, 'self', 0, 0, 'abcd', ts));
+    state = applyMany(
+        state,
+        split(
+            state,
+            {block: [0, 'self'], char: selPos(state, [0, 'self'], 3)!},
+            ts(),
+            'self',
+            {random: () => 0},
+        ),
+    );
+    const [leftBlock, rightBlock] = rootBlockIds(state).map(parseLamportString);
+
+    expectConverges(
+        state,
+        join(state, leftBlock, rightBlock, ts(), 'alice'),
+        insertOps(state, 'bob', 0, 1, 'X', ts),
+        ['aXbcd'],
+    );
+
+    expectConverges(
+        state,
+        join(state, leftBlock, rightBlock, ts(), 'alice'),
+        insertOps(state, 'bob', 1, 1, 'X', ts),
+        ['abcXd'],
+    );
+});
+
+it('converges join with concurrent splits of either joined block', () => {
+    const ts = mts();
+    let state = cachedState(initialState('self', '00001'));
+    state = applyMany(state, insertOps(state, 'self', 0, 0, 'abcdef', ts));
+    state = applyMany(
+        state,
+        split(
+            state,
+            {block: [0, 'self'], char: selPos(state, [0, 'self'], 5)!},
+            ts(),
+            'self',
+            {random: () => 0},
+        ),
+    );
+    const [leftBlock, rightBlock] = rootBlockIds(state).map(parseLamportString);
+
+    expectConverges(
+        state,
+        join(state, leftBlock, rightBlock, ts(), 'alice'),
+        split(state, {block: leftBlock, char: selPos(state, leftBlock, 3)!}, ts(), 'bob', {
+            random: () => 0,
+        }),
+        ['ab', 'cdef'],
+    );
+
+    expectConverges(
+        state,
+        join(state, leftBlock, rightBlock, ts(), 'alice'),
+        split(state, {block: rightBlock, char: selPos(state, rightBlock, 2)!}, ts(), 'bob', {
+            random: () => 0,
+        }),
+        ['abcde', 'f'],
+    );
+});
+
+it('preserves cache and serialization invariants across generated editing scripts', () => {
+    type Command =
+        | {type: 'insert'; actor: string; block: number; offset: number; text: string}
+        | {type: 'split'; actor: string; block: number; offset: number}
+        | {type: 'join'; actor: string; block: number}
+        | {type: 'delete'; block: number; offset: number};
+
+    const command = fc.oneof<Command>(
+        fc.record({
+            type: fc.constant('insert'),
+            actor: fc.constantFrom('alice', 'bob', 'cara'),
+            block: fc.integer({min: 0, max: 3}),
+            offset: fc.integer({min: 0, max: 12}),
+            text: fc.constantFrom('a', 'b', 'xy'),
+        }),
+        fc.record({
+            type: fc.constant('split'),
+            actor: fc.constantFrom('alice', 'bob', 'cara'),
+            block: fc.integer({min: 0, max: 3}),
+            offset: fc.integer({min: 0, max: 12}),
+        }),
+        fc.record({
+            type: fc.constant('join'),
+            actor: fc.constantFrom('alice', 'bob', 'cara'),
+            block: fc.integer({min: 0, max: 3}),
+        }),
+        fc.record({
+            type: fc.constant('delete'),
+            block: fc.integer({min: 0, max: 3}),
+            offset: fc.integer({min: 0, max: 12}),
+        }),
+    );
+
+    fc.assert(
+        fc.property(fc.array(command, {minLength: 1, maxLength: 20}), (commands) => {
+            const editor = new EditorHarness();
+            for (const command of commands) {
+                const blocks = editor.blockIds();
+                const blockCount = blocks.length;
+                if (command.type === 'insert') {
+                    const block = command.block % blockCount;
+                    const offset = Math.min(command.offset, blockLength(editor.state, blocks[block]));
+                    editor.insert(command.actor, block, offset, command.text);
+                } else if (command.type === 'split') {
+                    const block = command.block % blockCount;
+                    const offset = Math.min(command.offset, blockLength(editor.state, blocks[block]));
+                    editor.split(command.actor, block, offset, {random: () => 0});
+                } else if (command.type === 'join') {
+                    if (blockCount < 2) continue;
+                    const block = command.block % (blockCount - 1);
+                    editor.join(command.actor, block, block + 1);
+                } else {
+                    const block = command.block % blockCount;
+                    const length = blockLength(editor.state, blocks[block]);
+                    if (length === 0) continue;
+                    const offset = command.offset % length;
+                    editor.deleteRange(block, offset, offset + 1);
+                }
+
+                editor.expectCache();
+                expect(editor.serialized()).toBe(stateToString(cachedState(editor.state.state)));
+            }
+        }),
+        {numRuns: 100, seed: 51},
+    );
 });
