@@ -32,3 +32,13 @@
   - `npm exec vitest -- examples/block-rich-text/src/App.test.tsx examples/block-rich-text/src/blockCommands.test.ts` passed with 13 tests.
   - `../../node_modules/.bin/tsc -p tsconfig.json --noEmit` passed from `examples/block-rich-text`.
   - `../react-crdt/node_modules/.bin/vite build` passed from `examples/block-rich-text`.
+- User reported duplication still happened in the browser. The remaining issue was likely stale browser-mutated DOM surviving inside React-managed `contenteditable` children. Changed `EditableBlock` to render formatted runs imperatively in a layout effect with `replaceChildren(...)`, and gated the `onInput` insert fallback to jsdom only. Production text insertion now goes through `beforeinput`; every CRDT render replaces the editable DOM with exactly the materialized runs.
+- Verification passed after the imperative contenteditable render fix:
+  - `npm exec vitest -- examples/block-rich-text/src/App.test.tsx examples/block-rich-text/src/blockCommands.test.ts` passed with 13 tests.
+  - `../../node_modules/.bin/tsc -p tsconfig.json --noEmit` passed from `examples/block-rich-text`.
+  - `../react-crdt/node_modules/.bin/vite build` passed from `examples/block-rich-text`.
+- User reported input stopped working after relying on React's synthetic `onBeforeInput`. Switched insertion to a native `beforeinput` listener registered on the editable element. Kept `onInput` only as the jsdom fallback. Added a regression proving native `beforeinput` alone inserts and syncs text.
+- Verification passed after the native `beforeinput` listener fix:
+  - `npm exec vitest -- examples/block-rich-text/src/App.test.tsx examples/block-rich-text/src/blockCommands.test.ts` passed with 14 tests.
+  - `../../node_modules/.bin/tsc -p tsconfig.json --noEmit` passed from `examples/block-rich-text`.
+  - `../react-crdt/node_modules/.bin/vite build` passed from `examples/block-rich-text`.

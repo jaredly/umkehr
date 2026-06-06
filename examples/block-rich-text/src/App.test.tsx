@@ -81,6 +81,20 @@ const browserTypeText = (block: HTMLElement, text: string) => {
     }
 };
 
+const beforeInputText = (block: HTMLElement, text: string) => {
+    for (const char of text) {
+        fireEvent(
+            block,
+            new InputEvent('beforeinput', {
+                bubbles: true,
+                cancelable: true,
+                inputType: 'insertText',
+                data: char,
+            }),
+        );
+    }
+};
+
 describe('Block rich text example UI', () => {
     it('renders two synced editors', () => {
         const view = render(<App />);
@@ -114,6 +128,18 @@ describe('Block rich text example UI', () => {
 
         await waitFor(() => expect(blocks(left)[0].textContent).toBe('a'));
         expect(blocks(right)[0].textContent).toBe('a');
+    });
+
+    it('handles native beforeinput as the production insertion path', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+        const leftBlock = blocks(left)[0];
+
+        selectCaret(leftBlock, 0);
+        beforeInputText(leftBlock, 'z');
+
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('z'));
+        expect(blocks(right)[0].textContent).toBe('z');
     });
 
     it('queues offline edits and flushes them when the editor returns online', async () => {

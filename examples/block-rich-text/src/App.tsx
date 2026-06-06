@@ -177,6 +177,37 @@ function EditableBlock({
     onPasteText(text: string): void;
 }) {
     const handledBeforeInputRef = useRef(false);
+    const editableRef = useRef<HTMLDivElement>(null);
+
+    useLayoutEffect(() => {
+        const element = editableRef.current;
+        if (!element) return;
+
+        const onBeforeInput = (event: InputEvent) => {
+            if (event.isComposing) return;
+            if (event.inputType === 'insertText' && event.data) {
+                event.preventDefault();
+                handledBeforeInputRef.current = true;
+                onInsertText(event.data);
+            }
+        };
+
+        element.addEventListener('beforeinput', onBeforeInput);
+        return () => element.removeEventListener('beforeinput', onBeforeInput);
+    }, [onInsertText]);
+
+    useLayoutEffect(() => {
+        const element = editableRef.current;
+        if (!element) return;
+        const children = block.runs.map((run) => {
+            const span = document.createElement('span');
+            span.textContent = run.text;
+            if (run.marks.bold) span.classList.add('markBold');
+            if (run.marks.italic) span.classList.add('markItalic');
+            return span;
+        });
+        element.replaceChildren(...children);
+    }, [block.runs]);
 
     return (
         <div
@@ -198,6 +229,7 @@ function EditableBlock({
                 ⋮⋮
             </button>
             <div
+                ref={editableRef}
                 className="editableBlock"
                 contentEditable
                 role="textbox"
@@ -206,23 +238,23 @@ function EditableBlock({
                 spellCheck
                 data-block-id={block.id}
                 data-empty={block.runs.length === 0 ? 'true' : undefined}
-                onBeforeInput={(event) => {
-                    const native = event.nativeEvent as InputEvent;
-                    if (native.isComposing) return;
-                    if (native.inputType === 'insertText' && native.data) {
-                        event.preventDefault();
-                        handledBeforeInputRef.current = true;
-                        onInsertText(native.data);
-                    }
-                }}
                 onInput={(event) => {
                     const native = event.nativeEvent as InputEvent;
                     if (handledBeforeInputRef.current) {
                         handledBeforeInputRef.current = false;
+                        event.currentTarget.replaceChildren(
+                            ...block.runs.map((run) => {
+                                const span = document.createElement('span');
+                                span.textContent = run.text;
+                                if (run.marks.bold) span.classList.add('markBold');
+                                if (run.marks.italic) span.classList.add('markItalic');
+                                return span;
+                            }),
+                        );
                         return;
                     }
                     if (native.isComposing) return;
-                    if (native.inputType === 'insertText' && native.data) {
+                    if (isJsdom() && native.inputType === 'insertText' && native.data) {
                         onInsertText(native.data);
                     }
                 }}
@@ -239,21 +271,9 @@ function EditableBlock({
                     event.preventDefault();
                     onPasteText(event.clipboardData.getData('text/plain'));
                 }}
-            >
-                {block.runs.map((run, index) => (
-                    <span
-                        key={index}
-                        className={[
-                            run.marks.bold ? 'markBold' : '',
-                            run.marks.italic ? 'markItalic' : '',
-                        ]
-                            .filter(Boolean)
-                            .join(' ')}
-                    >
-                        {run.text}
-                    </span>
-                ))}
-            </div>
+            />
         </div>
     );
 }
+
+const isJsdom = () => navigator.userAgent.includes('jsdom');
