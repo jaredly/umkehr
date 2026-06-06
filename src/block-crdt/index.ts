@@ -1,6 +1,6 @@
 import {State, Lamport, CachedState, Cache, Char, HLC, Block} from './types';
 import {lamportToString, parseLamportString} from './utils';
-import {compareLseqIds, createLseqIdBetween} from './lseq';
+import {compareLseqIds, createLseqIdBetween, LseqOptions} from './lseq';
 
 type Op =
     | {type: 'char'; char: Char}
@@ -345,7 +345,7 @@ export const cachedState = (state: State): CachedState => ({
 // Blocks ... are created with a single char. but if there happen to be multiple, idk we can handle it.
 
 export const blockContents = (state: CachedState, id: string): string =>
-    state.cache.charContents[id].map((id) => charToString(state, id)).join('');
+    state.cache.charContents[id]?.map((id) => charToString(state, id)).join('') ?? '';
 
 export const charToString = (state: CachedState, id: string): string => {
     const char = state.state.chars[id];
@@ -400,7 +400,7 @@ export function organizeState(blocks: Record<string, Block>, chars: Record<strin
     return {blockChildren, charContents};
 }
 
-const findTail = (char: string, contents: Cache['charContents']) => {
+export const findTail = (char: string, contents: Cache['charContents']) => {
     while (contents[char]?.length) {
         char = contents[char][contents[char].length - 1];
     }
@@ -411,6 +411,8 @@ export const split = (
     {state, cache}: CachedState,
     at: {block: Lamport; char: Lamport},
     ts: string,
+    actor: string,
+    options?: LseqOptions,
 ): Op[] => {
     const {chars, blocks, maxSeenCount} = state;
     const bid = lamportToString(at.block);
@@ -423,15 +425,20 @@ export const split = (
     const afterId = siblings[siblings.indexOf(bid) + 1];
     const after = afterId ? blocks[afterId].order.index : null;
     const block: Block = {
-        id: [maxSeenCount + 1, 'self'],
+        id: [maxSeenCount + 1, actor],
         meta: current.meta,
         order: {
             ts,
             parent: current.order.parent,
-            index: createLseqIdBetween(current.order.index, after, {
-                actorId: 'self',
-                counter: maxSeenCount + 1,
-            }),
+            index: createLseqIdBetween(
+                current.order.index,
+                after,
+                {
+                    actorId: actor,
+                    counter: maxSeenCount + 1,
+                },
+                options,
+            ),
         },
         status: {archived: false, ts},
     };

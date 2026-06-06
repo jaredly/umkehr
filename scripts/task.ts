@@ -2,7 +2,7 @@ import {execSync} from 'child_process';
 import fs from 'fs';
 const [_, __, name] = process.argv;
 
-const count = fs.readdirSync('.tasks/archive').length + fs.readdirSync('.tasks').length - 1;
+const count = fs.readdirSync('.tasks/000-archive').length + fs.readdirSync('.tasks').length - 1;
 
 const fullName = `${count.toString().padStart(3, '0')}-${name}`;
 const dir = `.tasks/${fullName}`;

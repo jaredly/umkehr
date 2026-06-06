@@ -10,9 +10,10 @@ import {
     applyMany,
     charToString,
     blockContents,
+    findTail,
 } from './index';
 import {Block, CachedState, Lamport} from './types';
-import {lamportToString, selPos} from './utils';
+import {lamportToString, parseLamportString, selPos} from './utils';
 import {initialState} from './initialState';
 import {LseqId} from './lseq';
 
@@ -66,7 +67,7 @@ it('split', () => {
     const ts = mts();
     let state = initial;
     state = addAfter(state, 'abcdef', 0, ts);
-    const ops = split(state, {block: [0, 'self'], char: [4, 'self']}, ts());
+    const ops = split(state, {block: [0, 'self'], char: [4, 'self']}, ts(), 'self');
     state = applyMany(state, ops);
     expect(stateToString(state)).toBe('0000-self: abc\n0007-self: def');
 });
@@ -105,13 +106,115 @@ it('split with tree', () => {
     for (let i = 1; i < 8; i++) {
         const at = selPos(state, [0, 'self'], i)!;
 
-        const ops = split(state, {block: [0, 'self'], char: at}, ts());
+        const ops = split(state, {block: [0, 'self'], char: at}, ts(), 'self', {});
         const inner = applyMany(state, ops);
         // at every position yay
         expect(stateToString(inner)).toBe(
             `0000-self: ${blockText.slice(0, i - 1)}\n0010-self: ${blockText.slice(i - 1)}`,
         );
     }
+});
+
+const blockLines = (state: CachedState) =>
+    state.cache.blockChildren[lamportToString([0, 'root'])]
+        .filter((child) => !state.state.blocks[child]?.status.archived)
+        .map((child) => blockContents(state, child));
+
+it('split, move, and join', () => {
+    const ts = mts();
+    let state = initial;
+    const bid: Lamport = [0, 'self'];
+    state = addAfter(state, 'abcdef', 0, ts);
+    const first = selPos(state, bid, 3)!;
+    const second = selPos(state, bid, 5)!;
+
+    const splitFirst = split(state, {block: bid, char: first}, ts(), 'one', {random: () => 0});
+    const splitSecond = split(state, {block: bid, char: second}, ts(), 'two', {random: () => 1});
+    state = applyMany(state, [...splitFirst, ...splitSecond]);
+    expect(blockLines(state)).toEqual(['ab', 'cd', 'ef']);
+
+    const blocks = state.cache.blockChildren[lamportToString([0, 'root'])];
+    const firstTail = findTail(state.cache.charContents[blocks[0]][0], state.cache.charContents);
+    const thirdTail = findTail(state.cache.charContents[blocks[2]][0], state.cache.charContents);
+    state = applyMany(state, [
+        {
+            type: 'char:move',
+            id: parseLamportString(state.cache.charContents[blocks[2]][0]),
+            parent: {
+                id: parseLamportString(firstTail),
+                ts: ts(),
+            },
+        },
+        {
+            type: 'char:move',
+            id: parseLamportString(state.cache.charContents[blocks[1]][0]),
+            parent: {
+                id: parseLamportString(thirdTail),
+                ts: ts(),
+            },
+        },
+        {
+            type: 'block:status',
+            id: parseLamportString(blocks[1]),
+            status: {archived: true, ts: ts()},
+        },
+        {
+            type: 'block:status',
+            id: parseLamportString(blocks[2]),
+            status: {archived: true, ts: ts()},
+        },
+    ]);
+
+    expect(blockLines(state)).toEqual(['abefcd']);
+});
+
+it('concurrent tree split', () => {
+    const ts = mts();
+    let state = initial;
+    const bid: Lamport = [0, 'self'];
+    state = addAfter(state, 'abcdef', 0, ts);
+    state = addAfter(state, 'xyz', 3, ts);
+    const first = selPos(state, bid, 3)!;
+    const second = selPos(state, bid, 5)!;
+
+    const splitSecond = split(state, {block: bid, char: second}, ts(), 'two', {random: () => 1});
+    const splitFirst = split(state, {block: bid, char: first}, ts(), 'one', {random: () => 0});
+
+    expect(blockLines(applyMany(state, splitFirst))).toEqual(['ab', 'cxyzdef']);
+    expect(blockLines(applyMany(state, splitSecond))).toEqual(['abcx', 'yzdef']);
+
+    expect(blockLines(applyMany(state, [...splitFirst, ...splitSecond]))).toEqual([
+        'ab',
+        'cx',
+        'yzdef',
+    ]);
+
+    expect(blockLines(applyMany(state, [...splitSecond, ...splitFirst]))).toEqual([
+        'ab',
+        'cx',
+        'yzdef',
+    ]);
+});
+
+it('concurrent split and split', () => {
+    const ts = mts();
+    let state = initial;
+    const bid: Lamport = [0, 'self'];
+    state = addAfter(state, 'abcdef', 0, ts);
+    const first = selPos(state, bid, 3)!;
+    const second = selPos(state, bid, 5)!;
+
+    const splitFirst = split(state, {block: bid, char: first}, ts(), 'one', {random: () => 0});
+    const splitSecond = split(state, {block: bid, char: second}, ts(), 'two', {random: () => 1});
+
+    expect(blockLines(applyMany(state, splitFirst))).toEqual(['ab', 'cdef']);
+    expect(blockLines(applyMany(state, splitSecond))).toEqual(['abcd', 'ef']);
+
+    expect(blockLines(applyMany(state, [...splitFirst, ...splitSecond]))).toEqual([
+        'ab',
+        'cd',
+        'ef',
+    ]);
 });
 
 it('concurrent edit and split', () => {
@@ -125,7 +228,7 @@ it('concurrent edit and split', () => {
 
     const at = selPos(state, bid, 4)!;
 
-    const splitOps = split(state, {block: bid, char: at}, ts());
+    const splitOps = split(state, {block: bid, char: at}, ts(), 'self', {});
     const insertOp = charOp(
         'm',
         [state.state.maxSeenCount + 1, 'other'],
