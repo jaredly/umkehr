@@ -64,3 +64,10 @@
   - `npm exec vitest -- examples/block-rich-text/src/App.test.tsx examples/block-rich-text/src/blockCommands.test.ts` passed with 17 tests.
   - `../../node_modules/.bin/tsc -p tsconfig.json --noEmit` passed from `examples/block-rich-text`.
   - `../react-crdt/node_modules/.bin/vite build` passed from `examples/block-rich-text`.
+- User requested in-browser diagnostics. Added a capped debug log panel to each editor showing captured selections, command begin/end state, operation counts, and per-block text before/after commands.
+- Initial debug implementation logged from the caret-restore layout effect, which caused a render loop because log updates re-rendered materialized block runs and retriggered the effect. Removed effect-level restore logging; logs now come from user-triggered command and selection-capture paths only.
+- User reported `captureSelection` log spam while idle. Root cause was the `onSelect` listener on the contenteditable list: browsers can fire `select` for programmatic selection changes caused by our own restore path. Removed `onSelect`; command handlers already read live DOM selection synchronously, and mouse/key capture remains for explicit user interactions.
+- Verification passed after debug logging:
+  - `npm exec vitest -- examples/block-rich-text/src/App.test.tsx examples/block-rich-text/src/blockCommands.test.ts` passed with 19 tests.
+  - `../../node_modules/.bin/tsc -p tsconfig.json --noEmit` passed from `examples/block-rich-text`.
+  - `../react-crdt/node_modules/.bin/vite build` passed from `examples/block-rich-text`.

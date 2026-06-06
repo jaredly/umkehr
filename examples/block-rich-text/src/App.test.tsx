@@ -199,6 +199,25 @@ describe('Block rich text example UI', () => {
         expect(blocks(right)[0].textContent).toBe('aXc');
     });
 
+    it('keeps the middle Backspace caret after the browser keyup selection event', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abcd');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abcd'));
+
+        selectCaret(blocks(left)[0], 2);
+        fireEvent.keyDown(blocks(left)[0], {key: 'Backspace'});
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('acd'));
+
+        fireEvent.keyUp(blocks(left)[0], {key: 'Backspace'});
+        beforeInputText(blocks(left)[0], 'X');
+
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('aXcd'));
+        expect(blocks(right)[0].textContent).toBe('aXcd');
+    });
+
     it('uses the live DOM caret for Backspace even if selection state is stale', async () => {
         const view = render(<App />);
         const {left, right} = panels(view);

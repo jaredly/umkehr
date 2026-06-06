@@ -192,6 +192,38 @@ input {
     font-style: italic;
 }
 
+.debugLog {
+    border-top: 1px solid #e6ebf0;
+    background: #f8fafb;
+    color: #2d3b47;
+    font-size: 12px;
+}
+
+.debugLog summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 12px;
+    cursor: pointer;
+}
+
+.debugLog summary button {
+    border: 1px solid #cbd5df;
+    border-radius: 6px;
+    background: #fff;
+    color: #33414d;
+    cursor: pointer;
+}
+
+.debugLog pre {
+    max-height: 220px;
+    margin: 0;
+    padding: 8px 12px 12px;
+    overflow: auto;
+    white-space: pre-wrap;
+}
+
 @media (max-width: 860px) {
     .appShell {
         padding: 14px;

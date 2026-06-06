@@ -53,6 +53,23 @@ describe('block rich text commands', () => {
         expectCache(result.state);
     });
 
+    it('calculates middle Backspace deletion and caret shift without DOM state', () => {
+        const context = ctx();
+        let result = insertText(init(), caret(onlyBlock(init()), 0), 'abcd', context);
+        const blockId = onlyBlock(result.state);
+
+        result = deleteBackward(result.state, caret(blockId, 2), context);
+
+        expect(lines(result.state)).toEqual(['acd']);
+        expect(result.selection).toEqual(caret(blockId, 1));
+
+        result = insertText(result.state, result.selection, 'X', context);
+
+        expect(lines(result.state)).toEqual(['aXcd']);
+        expect(result.selection).toEqual(caret(blockId, 2));
+        expectCache(result.state);
+    });
+
     it('splits at start, middle, and end', () => {
         const context = ctx();
         let result = insertText(init(), caret(onlyBlock(init()), 0), 'abcdef', context);
