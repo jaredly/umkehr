@@ -30,6 +30,11 @@ const blocks = (panel: HTMLElement) => within(panel).getAllByRole('textbox', {na
 
 const selectCaret = (block: HTMLElement, offset = 0) => {
     block.focus();
+    setDomCaret(block, offset);
+    fireEvent.select(block);
+};
+
+const setDomCaret = (block: HTMLElement, offset = 0) => {
     const selection = window.getSelection()!;
     const range = document.createRange();
     const text = firstTextNode(block);
@@ -41,7 +46,6 @@ const selectCaret = (block: HTMLElement, offset = 0) => {
     range.collapse(true);
     selection.removeAllRanges();
     selection.addRange(range);
-    fireEvent.select(block);
 };
 
 const typeText = (block: HTMLElement, text: string) => {
@@ -174,6 +178,42 @@ describe('Block rich text example UI', () => {
 
         await waitFor(() => expect(blocks(left).map((block) => block.textContent)).toEqual(['ab', 'cd']));
         expect(blocks(right).map((block) => block.textContent)).toEqual(['ab', 'cd']);
+    });
+
+    it('restores the caret one position left after ordinary Backspace', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abc');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abc'));
+
+        selectCaret(blocks(left)[0], 2);
+        fireEvent.keyDown(blocks(left)[0], {key: 'Backspace'});
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('ac'));
+
+        beforeInputText(blocks(left)[0], 'X');
+
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('aXc'));
+        expect(blocks(right)[0].textContent).toBe('aXc');
+    });
+
+    it('uses the live DOM caret for Backspace even if selection state is stale', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abc');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abc'));
+
+        setDomCaret(blocks(left)[0], 2);
+        fireEvent.keyDown(blocks(left)[0], {key: 'Backspace'});
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('ac'));
+
+        beforeInputText(blocks(left)[0], 'X');
+
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('aXc'));
+        expect(blocks(right)[0].textContent).toBe('aXc');
     });
 
     it('pastes newlines as multiple synced blocks', async () => {

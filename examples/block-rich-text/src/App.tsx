@@ -86,6 +86,11 @@ function BlockEditor({
         onCommand((current) => ({state: current.state, ops: [], selection}));
     }, [onCommand]);
 
+    const liveSelection = useCallback((current: Replica) => {
+        const root = rootRef.current;
+        return (root ? readSelectionFromDom(root) : null) ?? current.selection;
+    }, []);
+
     useLayoutEffect(() => {
         const root = rootRef.current;
         if (!root || document.activeElement === null || !root.contains(document.activeElement)) return;
@@ -124,16 +129,16 @@ function BlockEditor({
                         registerRow={registerRow}
                         onStartDrag={startDrag}
                         onInsertText={(text) =>
-                            onCommand((current) => insertText(current.state, current.selection, text, makeCommandContext(current)))
+                            onCommand((current) => insertText(current.state, liveSelection(current), text, makeCommandContext(current)))
                         }
                         onDeleteBackward={() =>
-                            onCommand((current) => deleteBackward(current.state, current.selection, makeCommandContext(current)))
+                            onCommand((current) => deleteBackward(current.state, liveSelection(current), makeCommandContext(current)))
                         }
                         onSplit={() =>
-                            onCommand((current) => splitBlock(current.state, current.selection, makeCommandContext(current)))
+                            onCommand((current) => splitBlock(current.state, liveSelection(current), makeCommandContext(current)))
                         }
                         onPasteText={(text) =>
-                            onCommand((current) => pastePlainText(current.state, current.selection, text, makeCommandContext(current)))
+                            onCommand((current) => pastePlainText(current.state, liveSelection(current), text, makeCommandContext(current)))
                         }
                     />
                 ))}

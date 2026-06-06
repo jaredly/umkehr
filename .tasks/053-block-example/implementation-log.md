@@ -42,3 +42,8 @@
   - `npm exec vitest -- examples/block-rich-text/src/App.test.tsx examples/block-rich-text/src/blockCommands.test.ts` passed with 14 tests.
   - `../../node_modules/.bin/tsc -p tsconfig.json --noEmit` passed from `examples/block-rich-text`.
   - `../react-crdt/node_modules/.bin/vite build` passed from `examples/block-rich-text`.
+- User reported Backspace's new selection needed to be shifted over. The command-level selection was already shifting left, so the likely issue was stale React selection state when the DOM caret moved without a captured selection event. Edit commands now read the live DOM selection synchronously before insert/delete/split/paste. Added regressions for ordinary Backspace caret restore and stale-selection Backspace.
+- Verification passed after the live-selection fix:
+  - `npm exec vitest -- examples/block-rich-text/src/App.test.tsx examples/block-rich-text/src/blockCommands.test.ts` passed with 16 tests.
+  - `../../node_modules/.bin/tsc -p tsconfig.json --noEmit` passed from `examples/block-rich-text`.
+  - `../react-crdt/node_modules/.bin/vite build` passed from `examples/block-rich-text`.
