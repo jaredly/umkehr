@@ -1,5 +1,6 @@
 import {State, Lamport, CachedState, Cache, Char, HLC, Block} from './types';
 import {lamportToString} from './utils';
+import {compareLseqIds, createLseqIdBetween} from './lseq';
 
 type Op =
     | {type: 'char'; char: Char}
@@ -135,6 +136,7 @@ const applyBlockMove = (
         (blockChildren[newParentId] ?? []).slice(),
         id,
         (id) => blocks[id].order.index,
+        compareLseqIds,
     );
 
     current = {...current, order: op.order};
@@ -196,6 +198,7 @@ const applyBlock = ({state, cache}: CachedState, {block}: Op & {type: 'block'}) 
         (blockChildren[parentId] ?? []).slice(),
         id,
         (id) => blocks[id].order.index,
+        compareLseqIds,
     );
     return {
         state: {
@@ -267,10 +270,15 @@ const applyChar = ({state, cache}: CachedState, {char}: Op & {type: 'char'}) => 
     };
 };
 
-const insertSortedBy = (array: string[], item: string, order: (id: string) => string) => {
+const insertSortedBy = <T>(
+    array: string[],
+    item: string,
+    order: (id: string) => T,
+    compare: (a: T, b: T) => number,
+) => {
     const self = order(item);
     for (let i = 0; i < array.length; i++) {
-        if (self < order(array[i])) {
+        if (compare(self, order(array[i])) < 0) {
             array.splice(i, 0, item);
             return array;
         }
@@ -377,7 +385,7 @@ export function organizeState(blocks: Record<string, Block>, chars: Record<strin
         charContents[pid].push(id);
     }
     Object.values(blockChildren).forEach((items) => {
-        items.sort((a, b) => blocks[a].order.index.localeCompare(blocks[b].order.index));
+        items.sort((a, b) => compareLseqIds(blocks[a].order.index, blocks[b].order.index));
     });
     Object.values(charContents).forEach((items) => {
         items.sort((a, b) => b.localeCompare(a));
@@ -396,7 +404,14 @@ export const split = (
     const block: Block = {
         id: [maxSeenCount + 1, 'self'],
         meta: current.meta,
-        order: {ts: ts(), parent: current.order.parent, index: current.order.index + 'a'},
+        order: {
+            ts: ts(),
+            parent: current.order.parent,
+            index: createLseqIdBetween(current.order.index, null, {
+                actorId: 'self',
+                counter: maxSeenCount + 1,
+            }),
+        },
         status: {archived: false, ts: '0001'},
     };
     const charId = lamportToString(at);

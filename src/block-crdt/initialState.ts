@@ -7,7 +7,11 @@ export const initialState = (session: string, ts: string): State => ({
         [lamportToString([0, session])]: {
             id: [0, session],
             meta: {type: 'paragraph', ts: ts},
-            order: {index: '0', ts: ts, parent: [0, 'root']},
+            order: {
+                index: {path: [1], opId: {actorId: session, counter: 0}},
+                ts: ts,
+                parent: [0, 'root'],
+            },
             status: {archived: false, ts: ts},
         },
     },

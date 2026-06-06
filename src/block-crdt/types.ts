@@ -1,3 +1,5 @@
+import {LseqId} from './lseq';
+
 export type Lamport = [number, string];
 export type HLC = string;
 
@@ -20,7 +22,7 @@ export type Block = {
         | {type: 'blockquote'; ts: HLC}
         | {type: 'bullets'; ts: HLC}
         | {type: 'checkboxes'; ts: HLC; checked: Record<string, {ts: HLC; checked: boolean}>};
-    order: {index: string; ts: HLC; parent: Lamport}; // fractional index
+    order: {index: LseqId; ts: HLC; parent: Lamport};
     status: {archived: boolean; ts: HLC};
 };
 

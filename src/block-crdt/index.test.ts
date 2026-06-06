@@ -3,6 +3,7 @@ import {stateToString, addChars, cachedState, organizeState, charOp, apply} from
 import {Block, CachedState, Lamport} from './types';
 import {selPos} from './utils';
 import {initialState} from './initialState';
+import {LseqId} from './lseq';
 
 const init = initialState('self', '00001');
 
@@ -33,16 +34,16 @@ const expectCache = (state: CachedState) => {
     expect(state.cache).toEqual(organizeState(state.state.blocks, state.state.chars));
 };
 
-const block = (
-    id: Lamport,
-    index: string,
-    ts: string,
-    parent: Lamport = [0, 'root'],
-): Block => ({
+const block = (id: Lamport, index: number, ts: string, parent: Lamport = [0, 'root']): Block => ({
     id,
     meta: {type: 'paragraph', ts},
-    order: {index, ts, parent},
+    order: {index: lseq(index), ts, parent},
     status: {archived: false, ts},
+});
+
+const lseq = (path: number, actorId = 'self', counter = path): LseqId => ({
+    path: [path],
+    opId: {actorId, counter},
 });
 
 it('add chars', () => {
@@ -96,21 +97,21 @@ it('applies block meta by timestamp', () => {
 it('moves blocks by timestamp and updates child cache', () => {
     let state = apply(cachedState(init), {
         type: 'block',
-        block: block([1, 'self'], '1', '00002'),
+        block: block([1, 'self'], 1, '00002'),
     }) as CachedState;
     state = apply(state, {
         type: 'block',
-        block: block([2, 'self'], '2', '00002'),
+        block: block([2, 'self'], 2, '00002'),
     }) as CachedState;
 
     state = apply(state, {
         type: 'block:move',
         id: [2, 'self'],
-        order: {index: '0', ts: '00003', parent: [1, 'self']},
+        order: {index: lseq(1, 'self', 2), ts: '00003', parent: [1, 'self']},
     }) as CachedState;
 
     expect(state.state.blocks['0002-self'].order).toEqual({
-        index: '0',
+        index: lseq(1, 'self', 2),
         ts: '00003',
         parent: [1, 'self'],
     });
@@ -119,11 +120,11 @@ it('moves blocks by timestamp and updates child cache', () => {
     state = apply(state, {
         type: 'block:move',
         id: [2, 'self'],
-        order: {index: '9', ts: '00002', parent: [0, 'root']},
+        order: {index: lseq(9), ts: '00002', parent: [0, 'root']},
     }) as CachedState;
 
     expect(state.state.blocks['0002-self'].order).toEqual({
-        index: '0',
+        index: lseq(1, 'self', 2),
         ts: '00003',
         parent: [1, 'self'],
     });
@@ -152,7 +153,7 @@ it('returns false for ops that reference missing records', () => {
         apply(state, {
             type: 'block:move',
             id: [9, 'self'],
-            order: {index: '1', parent: [0, 'root'], ts: '00002'},
+            order: {index: lseq(1), parent: [0, 'root'], ts: '00002'},
         }),
     ).toBe(false);
     expect(
@@ -214,7 +215,7 @@ it('rejects char reinserts with different text', () => {
 it('merges duplicate block inserts by field timestamps', () => {
     let state = apply(cachedState(init), {
         type: 'block',
-        block: block([1, 'self'], '1', '00003'),
+        block: block([1, 'self'], 1, '00003'),
     }) as CachedState;
 
     state = apply(state, {
@@ -222,7 +223,7 @@ it('merges duplicate block inserts by field timestamps', () => {
         block: {
             id: [1, 'self'],
             meta: {type: 'blockquote', ts: '00004'},
-            order: {index: '9', parent: [0, 'root'], ts: '00002'},
+            order: {index: lseq(9), parent: [0, 'root'], ts: '00002'},
             status: {archived: true, ts: '00002'},
         },
     }) as CachedState;
@@ -230,7 +231,7 @@ it('merges duplicate block inserts by field timestamps', () => {
     expect(state.state.blocks['0001-self']).toEqual({
         id: [1, 'self'],
         meta: {type: 'blockquote', ts: '00004'},
-        order: {index: '1', parent: [0, 'root'], ts: '00003'},
+        order: {index: lseq(1), parent: [0, 'root'], ts: '00003'},
         status: {archived: false, ts: '00003'},
     });
     expect(state.cache.blockChildren['0000-root'].filter((id) => id === '0001-self')).toHaveLength(
@@ -242,7 +243,7 @@ it('merges duplicate block inserts by field timestamps', () => {
 it('archives and restores blocks by status timestamp', () => {
     let state = apply(cachedState(init), {
         type: 'block',
-        block: block([1, 'self'], '1', '00002'),
+        block: block([1, 'self'], 1, '00002'),
     }) as CachedState;
 
     state = apply(state, {
