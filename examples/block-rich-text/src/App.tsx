@@ -93,8 +93,7 @@ function BlockEditor({
     onToggleOnline(): void;
 }) {
     const rootRef = useRef<HTMLDivElement>(null);
-    const [focusedBlockId, setFocusedBlockId] = useState<string | null>(null);
-    const focusedBlockIdRef = useRef<string | null>(null);
+    const activeBlockIdRef = useRef<string | null>(null);
     const blocks = materializeFormattedBlocks(replica.state);
     const blockIds = rootBlockIds(replica.state);
     const {draggingId, dropTarget, registerRow, startDrag} = useBlockReorder({
@@ -117,16 +116,14 @@ function BlockEditor({
         return (root ? readSelectionFromDom(root) : null) ?? current.selection;
     }, []);
 
-    const markFocusedBlock = useCallback((blockId: string) => {
-        focusedBlockIdRef.current = blockId;
-        setFocusedBlockId(blockId);
+    const markActiveBlock = useCallback((blockId: string) => {
+        activeBlockIdRef.current = blockId;
     }, []);
 
     useLayoutEffect(() => {
         const root = rootRef.current;
         if (replica.selection.type === 'caret') return;
         if (!root || document.activeElement === null || !root.contains(document.activeElement)) return;
-        onDebug(`restore range ${formatSelection(replica.selection)}`);
         restoreSelectionToDom(root, replica.selection);
     }, [replica.state, replica.selection]);
 
@@ -189,8 +186,7 @@ function BlockEditor({
                         key={block.id}
                         block={block}
                         selection={replica.selection}
-                        focused={focusedBlockId === block.id}
-                        focusedBlockIdRef={focusedBlockIdRef}
+                        activeBlockIdRef={activeBlockIdRef}
                         isDragging={draggingId === block.id}
                         dropTarget={dropTarget?.targetBlockId === block.id ? dropTarget : null}
                         registerRow={registerRow}
@@ -200,7 +196,7 @@ function BlockEditor({
                                 insertText(current.state, selection, text, makeCommandContext(current)),
                             )
                         }
-                        onActive={() => markFocusedBlock(block.id)}
+                        onActive={() => markActiveBlock(block.id)}
                         onDeleteBackward={() =>
                             runEditCommand('backspace', (current, selection) =>
                                 deleteBackward(current.state, selection, makeCommandContext(current)),
@@ -240,8 +236,7 @@ function Toolbar({onBold, onItalic}: {onBold(): void; onItalic(): void}) {
 function EditableBlock({
     block,
     selection,
-    focused,
-    focusedBlockIdRef,
+    activeBlockIdRef,
     isDragging,
     dropTarget,
     registerRow,
@@ -254,8 +249,7 @@ function EditableBlock({
 }: {
     block: FormattedBlock;
     selection: Replica['selection'];
-    focused: boolean;
-    focusedBlockIdRef: MutableRefObject<string | null>;
+    activeBlockIdRef: MutableRefObject<string | null>;
     isDragging: boolean;
     dropTarget: DropTarget | null;
     registerRow(id: string, element: HTMLElement | null): void;
@@ -285,7 +279,7 @@ function EditableBlock({
 
         element.addEventListener('beforeinput', onBeforeInput);
         return () => element.removeEventListener('beforeinput', onBeforeInput);
-    }, [onInsertText]);
+    }, [onActive, onInsertText]);
 
     useLayoutEffect(() => {
         const element = editableRef.current;
@@ -299,10 +293,10 @@ function EditableBlock({
         });
         element.replaceChildren(...children);
         const point = selection.type === 'caret' ? selection.point : null;
-        if (point?.blockId === block.id && (focused || focusedBlockIdRef.current === block.id)) {
+        if (point?.blockId === block.id && activeBlockIdRef.current === block.id) {
             restoreCaretToDom(element, point.offset);
         }
-    }, [block.id, block.runs, focused, focusedBlockIdRef, selection]);
+    }, [activeBlockIdRef, block.id, block.runs, selection]);
 
     return (
         <div

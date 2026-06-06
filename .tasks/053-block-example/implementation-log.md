@@ -71,3 +71,12 @@
   - `npm exec vitest -- examples/block-rich-text/src/App.test.tsx examples/block-rich-text/src/blockCommands.test.ts` passed with 19 tests.
   - `../../node_modules/.bin/tsc -p tsconfig.json --noEmit` passed from `examples/block-rich-text`.
   - `../react-crdt/node_modules/.bin/vite build` passed from `examples/block-rich-text`.
+- Audited the Backspace diagnostics and caret-restoration code after removing `onSelect`.
+- Removed the remaining restore-effect debug log; it was not tied to explicit user input and could make the browser log look noisy while idle.
+- Removed the extra React focused-block state. The caret restore path now uses only a synchronous active-block ref, because the value is needed for DOM ownership rather than rendering.
+- Kept the block-local caret restore after `replaceChildren(...)`. This is not a timing workaround: after imperative contenteditable rendering, the active block is the component that owns collapsed-caret restoration. Removing it caused live DOM selection reads to fall back to offset `0`, which reversed typed text in tests.
+- Current debug logs are limited to command begin/end and explicit mouse/key selection capture. `onSelect` remains removed.
+- Verification passed after the cleanup:
+  - `npm exec vitest -- examples/block-rich-text/src/App.test.tsx examples/block-rich-text/src/blockCommands.test.ts` passed with 19 tests.
+  - `../../node_modules/.bin/tsc -p tsconfig.json --noEmit` passed from `examples/block-rich-text`; the shell printed `Error connecting to agent: Operation not permitted`, but the command exited `0`.
+  - `../react-crdt/node_modules/.bin/vite build` passed from `examples/block-rich-text`.
