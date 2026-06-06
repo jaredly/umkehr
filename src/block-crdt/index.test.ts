@@ -14,6 +14,7 @@ import {
     findTail,
     join,
     Op,
+    orderedCharIdsForBlock,
 } from './index';
 import {Block, CachedState, Lamport} from './types';
 import {lamportToString, parseLamportString, selPos} from './utils';
@@ -70,7 +71,7 @@ it('split', () => {
     const ts = mts();
     let state = initial;
     state = addAfter(state, 'abcdef', 0, ts);
-    const ops = split(state, {block: [0, 'self'], char: [4, 'self']}, ts(), 'self');
+    const ops = split(state, splitLocation(state, [0, 'self'], [4, 'self']), ts(), 'self');
     state = applyMany(state, ops);
     expect(stateToString(state)).toBe('0000-self: abc\n0007-self: def');
 });
@@ -109,7 +110,7 @@ it('split with tree', () => {
     for (let i = 1; i < 8; i++) {
         const at = selPos(state, [0, 'self'], i)!;
 
-        const ops = split(state, {block: [0, 'self'], char: at}, ts(), 'self', {});
+        const ops = split(state, splitLocation(state, [0, 'self'], at), ts(), 'self', {});
         const inner = applyMany(state, ops);
         // at every position yay
         expect(stateToString(inner)).toBe(
@@ -129,6 +130,25 @@ const rootBlockIds = (state: CachedState) =>
     );
 
 const blockLength = (state: CachedState, blockId: string) => blockContents(state, blockId).length;
+
+const splitLocation = (state: CachedState, block: Lamport, char: Lamport | null) => {
+    if (char === null || lamportToString(char) === lamportToString(block)) {
+        return {block, char, previous: char === null ? lastCharInBlock(state, block) : null};
+    }
+    const chars = orderedCharIdsForBlock(state, lamportToString(block), {visibleOnly: true});
+    const index = chars.indexOf(lamportToString(char));
+    return {
+        block,
+        char,
+        previous: index > 0 ? state.state.chars[chars[index - 1]].id : null,
+    };
+};
+
+const lastCharInBlock = (state: CachedState, block: Lamport): Lamport | null => {
+    const chars = orderedCharIdsForBlock(state, lamportToString(block), {visibleOnly: true});
+    const id = chars[chars.length - 1];
+    return id ? state.state.chars[id].id : null;
+};
 
 const insertOps = (
     state: CachedState,
@@ -186,7 +206,7 @@ class EditorHarness {
         const bid = parseLamportString(id);
         const length = blockLength(this.state, id);
         const char = offset === 0 ? bid : offset >= length ? null : selPos(this.state, bid, offset + 1)!;
-        return this.apply(split(this.state, {block: bid, char}, this.ts(), actor, options));
+        return this.apply(split(this.state, splitLocation(this.state, bid, char), this.ts(), actor, options));
     }
 
     join(actor: string, leftIndex: number, rightIndex: number) {
@@ -234,8 +254,10 @@ it('split, move, and join', () => {
     const first = selPos(state, bid, 3)!;
     const second = selPos(state, bid, 5)!;
 
-    const splitFirst = split(state, {block: bid, char: first}, ts(), 'one', {random: () => 0});
-    const splitSecond = split(state, {block: bid, char: second}, ts(), 'two', {random: () => 1});
+    const splitFirst = split(state, splitLocation(state, bid, first), ts(), 'one', {random: () => 0});
+    const splitSecond = split(state, splitLocation(state, bid, second), ts(), 'two', {
+        random: () => 1,
+    });
     state = applyMany(state, [...splitFirst, ...splitSecond]);
     expect(blockLines(state)).toEqual(['ab', 'cd', 'ef']);
 
@@ -283,8 +305,10 @@ it('concurrent tree split', () => {
     const first = selPos(state, bid, 3)!;
     const second = selPos(state, bid, 5)!;
 
-    const splitSecond = split(state, {block: bid, char: second}, ts(), 'two', {random: () => 1});
-    const splitFirst = split(state, {block: bid, char: first}, ts(), 'one', {random: () => 0});
+    const splitSecond = split(state, splitLocation(state, bid, second), ts(), 'two', {
+        random: () => 1,
+    });
+    const splitFirst = split(state, splitLocation(state, bid, first), ts(), 'one', {random: () => 0});
 
     expect(blockLines(applyMany(state, splitFirst))).toEqual(['ab', 'cxyzdef']);
     expect(blockLines(applyMany(state, splitSecond))).toEqual(['abcx', 'yzdef']);
@@ -310,8 +334,10 @@ it('concurrent split and split', () => {
     const first = selPos(state, bid, 3)!;
     const second = selPos(state, bid, 5)!;
 
-    const splitFirst = split(state, {block: bid, char: first}, ts(), 'one', {random: () => 0});
-    const splitSecond = split(state, {block: bid, char: second}, ts(), 'two', {random: () => 1});
+    const splitFirst = split(state, splitLocation(state, bid, first), ts(), 'one', {random: () => 0});
+    const splitSecond = split(state, splitLocation(state, bid, second), ts(), 'two', {
+        random: () => 1,
+    });
 
     expect(blockLines(applyMany(state, splitFirst))).toEqual(['ab', 'cdef']);
     expect(blockLines(applyMany(state, splitSecond))).toEqual(['abcd', 'ef']);
@@ -334,7 +360,7 @@ it('concurrent edit and split', () => {
 
     const at = selPos(state, bid, 4)!;
 
-    const splitOps = split(state, {block: bid, char: at}, ts(), 'self', {});
+    const splitOps = split(state, splitLocation(state, bid, at), ts(), 'self', {});
     const insertOp = charOp(
         'm',
         [state.state.maxSeenCount + 1, 'other'],
@@ -694,14 +720,18 @@ it('converges insert before and after a concurrent split point', () => {
 
     expectConverges(
         state,
-        split(state, {block: bid, char: selPos(state, bid, 3)!}, ts(), 'alice', {random: () => 0}),
+        split(state, splitLocation(state, bid, selPos(state, bid, 3)!), ts(), 'alice', {
+            random: () => 0,
+        }),
         insertOps(state, 'bob', 0, 1, 'X', ts),
         ['aXb', 'cd'],
     );
 
     expectConverges(
         state,
-        split(state, {block: bid, char: selPos(state, bid, 3)!}, ts(), 'alice', {random: () => 0}),
+        split(state, splitLocation(state, bid, selPos(state, bid, 3)!), ts(), 'alice', {
+            random: () => 0,
+        }),
         insertOps(state, 'bob', 0, 3, 'X', ts),
         ['ab', 'cXd'],
     );
@@ -715,7 +745,7 @@ it('converges join with concurrent inserts into either side', () => {
         state,
         split(
             state,
-            {block: [0, 'self'], char: selPos(state, [0, 'self'], 3)!},
+            splitLocation(state, [0, 'self'], selPos(state, [0, 'self'], 3)!),
             ts(),
             'self',
             {random: () => 0},
@@ -746,7 +776,7 @@ it('converges join with concurrent splits of either joined block', () => {
         state,
         split(
             state,
-            {block: [0, 'self'], char: selPos(state, [0, 'self'], 5)!},
+            splitLocation(state, [0, 'self'], selPos(state, [0, 'self'], 5)!),
             ts(),
             'self',
             {random: () => 0},
@@ -757,7 +787,7 @@ it('converges join with concurrent splits of either joined block', () => {
     expectConverges(
         state,
         join(state, leftBlock, rightBlock, ts(), 'alice'),
-        split(state, {block: leftBlock, char: selPos(state, leftBlock, 3)!}, ts(), 'bob', {
+        split(state, splitLocation(state, leftBlock, selPos(state, leftBlock, 3)!), ts(), 'bob', {
             random: () => 0,
         }),
         ['ab', 'cdef'],
@@ -766,7 +796,7 @@ it('converges join with concurrent splits of either joined block', () => {
     expectConverges(
         state,
         join(state, leftBlock, rightBlock, ts(), 'alice'),
-        split(state, {block: rightBlock, char: selPos(state, rightBlock, 2)!}, ts(), 'bob', {
+        split(state, splitLocation(state, rightBlock, selPos(state, rightBlock, 2)!), ts(), 'bob', {
             random: () => 0,
         }),
         ['abcde', 'f'],

@@ -1,4 +1,16 @@
-import {State, Lamport, CachedState, Cache, Char, HLC, Block} from './types';
+import equal from 'fast-deep-equal';
+import {
+    State,
+    Lamport,
+    CachedState,
+    Cache,
+    Char,
+    HLC,
+    Block,
+    Mark,
+    SplitRecord,
+    JsonValue,
+} from './types';
 import {lamportToString, parseLamportString} from './utils';
 import {compareLseqIds, createLseqIdBetween, LseqOptions} from './lseq';
 
@@ -9,11 +21,13 @@ export type Op =
     | {type: 'char:delete'; id: Lamport}
     | {type: 'block:move'; id: Lamport; order: Block['order']}
     | {type: 'block:status'; id: Lamport; status: Block['status']}
-    | {type: 'block:meta'; id: Lamport; meta: Block['meta']};
+    | {type: 'block:meta'; id: Lamport; meta: Block['meta']}
+    | {type: 'mark'; mark: Mark}
+    | {type: 'split-record'; split: SplitRecord};
 
 export const charOp = (text: string, id: Lamport, after: Lamport, ts: string): Op => ({
     type: 'char',
-    char: {text, id, deleted: false, parent: {id: after, ts}},
+    char: {text, id, deleted: false, parent: {id: after, ts: ''}},
 });
 
 export const apply = (state: CachedState, op: Op): CachedState | false => {
@@ -32,14 +46,70 @@ export const apply = (state: CachedState, op: Op): CachedState | false => {
             return applyBlockMove(state, op);
         case 'block:meta':
             return applyBlockMeta(state, op);
+        case 'mark':
+            return applyMark(state, op);
+        case 'split-record':
+            return applySplitRecord(state, op);
     }
+};
+
+const applyMark = ({state, cache}: CachedState, op: Op & {type: 'mark'}): CachedState | false => {
+    const id = lamportToString(op.mark.id);
+    const current = state.marks[id];
+    if (current) {
+        if (!equal(current, op.mark)) {
+            throw new Error(`re-insert of mark ${id} and the payload is different`);
+        }
+        return {state, cache};
+    }
+    return {
+        state: {
+            ...state,
+            marks: {...state.marks, [id]: op.mark},
+            maxSeenCount: Math.max(
+                state.maxSeenCount,
+                op.mark.id[0],
+                op.mark.start.id[0],
+                op.mark.end.id[0],
+                ...op.mark.crossedSplits.map((id) => id[0]),
+            ),
+        },
+        cache,
+    };
+};
+
+const applySplitRecord = (
+    {state, cache}: CachedState,
+    op: Op & {type: 'split-record'},
+): CachedState | false => {
+    const id = lamportToString(op.split.id);
+    const current = state.splits[id];
+    if (current) {
+        if (!equal(current, op.split)) {
+            throw new Error(`re-insert of split ${id} and the payload is different`);
+        }
+        return {state, cache};
+    }
+    return {
+        state: {
+            ...state,
+            splits: {...state.splits, [id]: op.split},
+            maxSeenCount: Math.max(
+                state.maxSeenCount,
+                op.split.id[0],
+                op.split.left[0],
+                op.split.right[0],
+            ),
+        },
+        cache,
+    };
 };
 
 const applyCharDelete = (
     {state, cache}: CachedState,
     op: Op & {type: 'char:delete'},
 ): CachedState | false => {
-    const {chars, blocks, maxSeenCount} = state;
+    const {chars, blocks, marks, splits, maxSeenCount} = state;
     const charId = lamportToString(op.id);
     let current = state.chars[charId];
     if (!current) {
@@ -51,8 +121,10 @@ const applyCharDelete = (
     current = {...current, deleted: true};
     return {
         state: {
-            chars: {...chars, [charId]: current},
             blocks,
+            chars: {...chars, [charId]: current},
+            marks,
+            splits,
             maxSeenCount: Math.max(maxSeenCount, op.id[0]),
         },
         cache,
@@ -63,7 +135,7 @@ const applyCharMove = (
     {state, cache}: CachedState,
     op: Op & {type: 'char:move'},
 ): CachedState | false => {
-    const {chars, blocks, maxSeenCount} = state;
+    const {chars, blocks, marks, splits, maxSeenCount} = state;
     const charId = lamportToString(op.id);
     let current = state.chars[charId];
     if (!current) {
@@ -80,8 +152,10 @@ const applyCharMove = (
     charContents[pid] = insertSortedRev((charContents[pid] ?? []).slice(), charId);
     return {
         state: {
-            chars: {...chars, [charId]: current},
             blocks,
+            chars: {...chars, [charId]: current},
+            marks,
+            splits,
             maxSeenCount: Math.max(maxSeenCount, op.parent.id[0]),
         },
         cache: {
@@ -233,7 +307,7 @@ const laterTs = (one: Char['parent']['ts'], two: Char['parent']['ts']) => {
 };
 
 const applyChar = ({state, cache}: CachedState, {char}: Op & {type: 'char'}) => {
-    const {chars, blocks, maxSeenCount} = state;
+    const {chars, blocks, marks, splits, maxSeenCount} = state;
     const charId = lamportToString(char.id);
     const current = state.chars[charId];
     if (current) {
@@ -254,8 +328,10 @@ const applyChar = ({state, cache}: CachedState, {char}: Op & {type: 'char'}) => 
     charContents[parentId] = insertSortedRev(charContents[parentId]?.slice() ?? [], charId);
     return {
         state: {
-            chars: {...chars, [charId]: char},
             blocks,
+            chars: {...chars, [charId]: char},
+            marks,
+            splits,
             maxSeenCount: Math.max(
                 maxSeenCount,
                 char.id[0],
@@ -408,9 +484,269 @@ export const findTail = (char: string, contents: Cache['charContents']) => {
     return char;
 };
 
+export const compareLamports = (one: Lamport, two: Lamport) =>
+    one[0] === two[0] ? one[1].localeCompare(two[1]) : one[0] - two[0];
+
+export const orderedCharIdsForBlock = (
+    state: CachedState,
+    blockId: string,
+    options: {visibleOnly?: boolean} = {},
+): string[] => {
+    const result: string[] = [];
+    const visit = (id: string) => {
+        const char = state.state.chars[id];
+        if (!options.visibleOnly || !char.deleted) {
+            result.push(id);
+        }
+        for (const child of state.cache.charContents[id] ?? []) {
+            visit(child);
+        }
+    };
+    for (const id of state.cache.charContents[blockId] ?? []) {
+        visit(id);
+    }
+    return result;
+};
+
+export const rootBlockIds = (state: CachedState, includeArchived = false): string[] =>
+    (state.cache.blockChildren[lamportToString([0, 'root'])] ?? []).filter(
+        (id) => includeArchived || !state.state.blocks[id]?.status.archived,
+    );
+
+export const hasJoinStyleParent = (state: CachedState, charId: string): boolean => {
+    const char = state.state.chars[charId];
+    const parentId = lamportToString(char.parent.id);
+    return (
+        parentId in state.state.chars &&
+        typeof char.parent.ts === 'string' &&
+        char.parent.ts !== ''
+    );
+};
+
+export const splitRecordsByLeft = (state: CachedState): Record<string, SplitRecord[]> => {
+    const result: Record<string, SplitRecord[]> = {};
+    for (const split of Object.values(state.state.splits)) {
+        const left = lamportToString(split.left);
+        result[left] = result[left] ?? [];
+        result[left].push(split);
+    }
+    for (const splits of Object.values(result)) {
+        splits.sort((a, b) => compareLamports(a.right, b.right) || compareLamports(a.id, b.id));
+    }
+    return result;
+};
+
+export type FormattedRun = {
+    text: string;
+    marks: Record<string, JsonValue | true>;
+};
+
+export type FormattedBlock = {
+    id: string;
+    block: Block;
+    runs: FormattedRun[];
+};
+
+export const markOp = (
+    id: Lamport,
+    start: Lamport,
+    end: Lamport,
+    type: string,
+    data?: JsonValue,
+    remove = false,
+    crossedSplits: Lamport[] = [],
+): Op => ({
+    type: 'mark',
+    mark: {
+        id,
+        start: {id: start, at: 'before'},
+        end: {id: end, at: 'after'},
+        remove,
+        type,
+        data,
+        crossedSplits,
+    },
+});
+
+export const markRange = (
+    state: CachedState,
+    block: Lamport,
+    startOffset: number,
+    endOffset: number,
+    type: string,
+    data: JsonValue | undefined,
+    remove: boolean,
+    id: Lamport,
+): Op => {
+    if (startOffset >= endOffset) {
+        throw new Error(`mark range must not be empty`);
+    }
+    const start = charAtVisibleOffset(state, block, startOffset);
+    const end = charAtVisibleOffset(state, block, endOffset - 1);
+    if (!start || !end) {
+        throw new Error(`mark range must anchor to characters`);
+    }
+    return markOp(id, start, end, type, data, remove, crossedSplitsBetween(state, start, end));
+};
+
+export const materializeFormattedBlocks = (state: CachedState): FormattedBlock[] => {
+    const coveredByMark: Record<string, Mark[]> = {};
+    const marks = Object.values(state.state.marks).sort((a, b) => compareLamports(a.id, b.id));
+    for (const mark of marks) {
+        for (const charId of coveredCharIdsForMark(state, mark)) {
+            coveredByMark[charId] = coveredByMark[charId] ?? [];
+            coveredByMark[charId].push(mark);
+        }
+    }
+
+    return rootBlockIds(state).map((id) => {
+        const runs: FormattedRun[] = [];
+        for (const charId of orderedCharIdsForBlock(state, id, {visibleOnly: true})) {
+            const char = state.state.chars[charId];
+            const marks = resolveMarks(coveredByMark[charId] ?? []);
+            const last = runs[runs.length - 1];
+            if (last && equal(last.marks, marks)) {
+                last.text += char.text;
+            } else {
+                runs.push({text: char.text, marks});
+            }
+        }
+        return {id, block: state.state.blocks[id], runs};
+    });
+};
+
+const charAtVisibleOffset = (state: CachedState, block: Lamport, offset: number): Lamport | null => {
+    const id = orderedCharIdsForBlock(state, lamportToString(block), {visibleOnly: true})[offset];
+    return id ? state.state.chars[id].id : null;
+};
+
+const crossedSplitsBetween = (state: CachedState, start: Lamport, end: Lamport): Lamport[] => {
+    const splitRecords = splitRecordsByLeft(state);
+    const sequence = allCharIds(state);
+    const nextById = nextIdMap(sequence);
+    const crossed: Lamport[] = [];
+    let current: string | undefined = lamportToString(start);
+    const endId = lamportToString(end);
+    let stop = sequence.length + Object.keys(state.state.splits).length + 1;
+    while (current && stop-- > 0) {
+        const split = splitRecords[current]?.[0];
+        if (split) {
+            crossed.push(split.id);
+        }
+        if (current === endId) {
+            break;
+        }
+        current = nextById[current];
+    }
+    return crossed;
+};
+
+const coveredCharIdsForMark = (state: CachedState, mark: Mark): string[] => {
+    const sequence = allCharIds(state);
+    const nextById = nextIdMap(sequence);
+    const splitRecords = splitRecordsByLeft(state);
+    const crossed = new Set(mark.crossedSplits.map(lamportToString));
+    const covered: string[] = [];
+    const forcedNext: Record<string, string> = {};
+    let current =
+        mark.start.at === 'before'
+            ? lamportToString(mark.start.id)
+            : nextById[lamportToString(mark.start.id)];
+    const end = lamportToString(mark.end.id);
+    let stop = sequence.length + Object.keys(state.state.splits).length * 20 + 20;
+
+    while (current && stop-- > 0) {
+        if (mark.end.at === 'before' && current === end) {
+            break;
+        }
+        covered.push(current);
+        if (mark.end.at === 'after' && current === end) {
+            break;
+        }
+        if (forcedNext[current]) {
+            current = forcedNext[current];
+            continue;
+        }
+        const split = splitRecords[current]?.find((split) => !crossed.has(lamportToString(split.id)));
+        if (split) {
+            const path = pathForFollowedSplit(state, split);
+            for (let i = 0; i < path.length - 1; i++) {
+                forcedNext[path[i]] = path[i + 1];
+            }
+            current = forcedNext[current] ?? lamportToString(split.right);
+            continue;
+        }
+        current = nextById[current];
+    }
+    if (stop <= 0) {
+        throw new Error(`mark traversal exceeded safety limit`);
+    }
+    return covered;
+};
+
+const allCharIds = (state: CachedState): string[] =>
+    rootBlockIds(state, true).flatMap((id) => orderedCharIdsForBlock(state, id));
+
+const nextIdMap = (sequence: string[]): Record<string, string> => {
+    const result: Record<string, string> = {};
+    for (let i = 0; i < sequence.length - 1; i++) {
+        result[sequence[i]] = sequence[i + 1];
+    }
+    return result;
+};
+
+const pathForFollowedSplit = (state: CachedState, split: SplitRecord): string[] => {
+    const left = lamportToString(split.left);
+    const right = lamportToString(split.right);
+    const tail = tailAfterSplitLeft(state, left);
+    if (tail[tail.length - 1] === right) {
+        return [left, ...tail];
+    }
+    return [left, ...tail, right];
+};
+
+const tailAfterSplitLeft = (state: CachedState, left: string): string[] => {
+    const result: string[] = [];
+    const visit = (id: string): boolean => {
+        result.push(id);
+        if (hasJoinStyleParent(state, id)) {
+            return true;
+        }
+        for (const child of state.cache.charContents[id] ?? []) {
+            if (visit(child)) {
+                return true;
+            }
+        }
+        return false;
+    };
+    for (const child of state.cache.charContents[left] ?? []) {
+        if (visit(child)) {
+            break;
+        }
+    }
+    return result;
+};
+
+const resolveMarks = (marks: Mark[]): Record<string, JsonValue | true> => {
+    const winning: Record<string, Mark> = {};
+    for (const mark of marks) {
+        const current = winning[mark.type];
+        if (!current || compareLamports(current.id, mark.id) < 0) {
+            winning[mark.type] = mark;
+        }
+    }
+    const result: Record<string, JsonValue | true> = {};
+    for (const mark of Object.values(winning)) {
+        if (!mark.remove) {
+            result[mark.type] = mark.data ?? true;
+        }
+    }
+    return result;
+};
+
 export const split = (
     {state, cache}: CachedState,
-    at: {block: Lamport; char: Lamport | null},
+    at: {block: Lamport; char: Lamport | null; previous: Lamport | null},
     ts: string,
     actor: string,
     options?: LseqOptions,
@@ -476,6 +812,17 @@ export const split = (
         status: {archived: false, ts},
     };
     const ops: Op[] = [{type: 'block', block}];
+
+    if (at.previous && at.char) {
+        ops.push({
+            type: 'split-record',
+            split: {
+                id: block.id,
+                left: at.previous,
+                right: at.char,
+            },
+        });
+    }
 
     ops.push({
         type: 'char:move',

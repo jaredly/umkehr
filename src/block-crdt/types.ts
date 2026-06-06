@@ -2,6 +2,34 @@ import {LseqId} from './lseq';
 
 export type Lamport = [number, string];
 export type HLC = string;
+export type JsonValue =
+    | null
+    | boolean
+    | number
+    | string
+    | JsonValue[]
+    | {[key: string]: JsonValue};
+
+export type Boundary = {
+    id: Lamport;
+    at: 'before' | 'after';
+};
+
+export type Mark = {
+    id: Lamport;
+    start: Boundary;
+    end: Boundary;
+    remove: boolean;
+    type: string;
+    data?: JsonValue;
+    crossedSplits: Lamport[];
+};
+
+export type SplitRecord = {
+    id: Lamport;
+    left: Lamport;
+    right: Lamport;
+};
 
 export type Char = {
     id: Lamport;
@@ -29,6 +57,8 @@ export type Block = {
 export type State = {
     chars: Record<string, Char>;
     blocks: Record<string, Block>;
+    marks: Record<string, Mark>;
+    splits: Record<string, SplitRecord>;
     maxSeenCount: number;
 };
 

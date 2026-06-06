@@ -15,5 +15,7 @@ export const initialState = (session: string, ts: string): State => ({
             status: {archived: false, ts: ts},
         },
     },
+    marks: {},
+    splits: {},
     maxSeenCount: 0,
 });
