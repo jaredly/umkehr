@@ -57,9 +57,17 @@ const pointFromDom = (
     }
 
     if (node === block) {
-        return {blockId: block.dataset.blockId!, offset: 0};
+        return {blockId: block.dataset.blockId!, offset: textLengthBeforeChild(block, nodeOffset)};
     }
     return {blockId: block.dataset.blockId!, offset};
+};
+
+const textLengthBeforeChild = (block: HTMLElement, childOffset: number): number => {
+    let offset = 0;
+    for (let index = 0; index < childOffset && index < block.childNodes.length; index++) {
+        offset += segmentText(block.childNodes[index].textContent ?? '').length;
+    }
+    return offset;
 };
 
 const domPointForOffset = (
@@ -75,7 +83,7 @@ const domPointForOffset = (
     while ((current = walker.nextNode())) {
         const text = current.textContent ?? '';
         const segments = segmentText(text);
-        if (offset <= segments.length) {
+        if (offset < segments.length) {
             return {node: current, offset: utf16OffsetForGraphemeOffset(text, offset)};
         }
         offset -= segments.length;

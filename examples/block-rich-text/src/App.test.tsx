@@ -191,6 +191,7 @@ describe('Block rich text example UI', () => {
         selectCaret(blocks(left)[0], 2);
         fireEvent.keyDown(blocks(left)[0], {key: 'Backspace'});
         await waitFor(() => expect(blocks(left)[0].textContent).toBe('ac'));
+        expect(domCaretOffset(blocks(left)[0])).toBe(1);
 
         beforeInputText(blocks(left)[0], 'X');
 
@@ -209,11 +210,31 @@ describe('Block rich text example UI', () => {
         setDomCaret(blocks(left)[0], 2);
         fireEvent.keyDown(blocks(left)[0], {key: 'Backspace'});
         await waitFor(() => expect(blocks(left)[0].textContent).toBe('ac'));
+        expect(domCaretOffset(blocks(left)[0])).toBe(1);
 
         beforeInputText(blocks(left)[0], 'X');
 
         await waitFor(() => expect(blocks(left)[0].textContent).toBe('aXc'));
         expect(blocks(right)[0].textContent).toBe('aXc');
+    });
+
+    it('keeps Backspace at the end of a block at the new end', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abc');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abc'));
+
+        selectCaret(blocks(left)[0], 3);
+        fireEvent.keyDown(blocks(left)[0], {key: 'Backspace'});
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('ab'));
+        expect(domCaretOffset(blocks(left)[0])).toBe(2);
+
+        beforeInputText(blocks(left)[0], 'X');
+
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abX'));
+        expect(blocks(right)[0].textContent).toBe('abX');
     });
 
     it('pastes newlines as multiple synced blocks', async () => {
@@ -236,4 +257,18 @@ describe('Block rich text example UI', () => {
 const firstTextNode = (element: HTMLElement): Text | null => {
     const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
     return walker.nextNode() as Text | null;
+};
+
+const domCaretOffset = (block: HTMLElement): number => {
+    const selection = window.getSelection()!;
+    const node = selection.focusNode;
+    if (!node || !block.contains(node)) return -1;
+    let offset = 0;
+    const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+    let current: Node | null;
+    while ((current = walker.nextNode())) {
+        if (current === node) return offset + selection.focusOffset;
+        offset += current.textContent?.length ?? 0;
+    }
+    return node === block ? offset : -1;
 };

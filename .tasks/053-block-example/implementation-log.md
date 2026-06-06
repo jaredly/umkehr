@@ -47,3 +47,8 @@
   - `npm exec vitest -- examples/block-rich-text/src/App.test.tsx examples/block-rich-text/src/blockCommands.test.ts` passed with 16 tests.
   - `../../node_modules/.bin/tsc -p tsconfig.json --noEmit` passed from `examples/block-rich-text`.
   - `../react-crdt/node_modules/.bin/vite build` passed from `examples/block-rich-text`.
+- User reported Backspace still restored incorrectly: at the end it jumped to start, and in the middle it jumped forward. A tighter regression exposed the real mapping bug: `readSelectionFromDom` treated a caret whose focus node was the block element itself as offset `0`, ignoring the DOM child offset. This happened after restoring end-of-text carets to the editable element boundary. Fixed block-element selection reading by summing grapheme lengths of child nodes before `focusOffset`.
+- Verification passed after the block-element caret offset fix:
+  - `npm exec vitest -- examples/block-rich-text/src/App.test.tsx examples/block-rich-text/src/blockCommands.test.ts` passed with 17 tests.
+  - `../../node_modules/.bin/tsc -p tsconfig.json --noEmit` passed from `examples/block-rich-text`.
+  - `../react-crdt/node_modules/.bin/vite build` passed from `examples/block-rich-text`.
