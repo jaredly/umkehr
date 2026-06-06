@@ -17,9 +17,11 @@
   join-style parent, and split-tail tests.
 - Phase 8: added a bounded formatting property test that checks formatted text preserves visible
   block text across generated marked/split documents.
+- Added follow-up coverage for mark/split and mark/join convergence, explicit crossed-split marks,
+  deleted anchor chars, archived block omission, and same-type mark override behavior.
 - Verification:
   - `npm exec vitest run src/block-crdt/index.test.ts src/block-crdt/formatting.test.ts` passed
-    with 40 tests.
+    with 46 tests.
   - `npm run typecheck` passed.
   - `git diff --check` passed.
   - `npm exec vitest run` failed in existing React example tests with invalid hook call errors in
@@ -34,3 +36,6 @@
 - The second-split tail-scan test initially used the visible previous char helper, which selected
   `Y`; the scenario required the logical split-left char `c`. This validates why `split(...)` now
   accepts `previous` explicitly.
+- `markRange(...)` remains a block-offset helper. Cross-block/cross-split tests currently use
+  explicit `markOp(...)` anchors plus `crossedSplits`; a higher-level cross-block selection helper
+  is still future work.

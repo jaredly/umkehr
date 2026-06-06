@@ -9,6 +9,7 @@ import {
     charOp,
     hasJoinStyleParent,
     join,
+    markOp,
     markRange,
     materializeFormattedBlocks,
     orderedCharIdsForBlock,
@@ -50,8 +51,17 @@ const formatted = (state: CachedState) =>
         runs: block.runs,
     }));
 
+const formattedRuns = (state: CachedState) =>
+    materializeFormattedBlocks(state).map((block) => block.runs);
+
 const add = (state: CachedState, text: string, after: Lamport, ts = mts()) =>
     addChars(state, text, after, ts);
+
+const expectFormattedConverges = (base: CachedState, left: Op[], right: Op[]) => {
+    const one = applyMany(base, [...left, ...right]);
+    const two = applyMany(base, [...right, ...left]);
+    expect(formattedRuns(one)).toEqual(formattedRuns(two));
+};
 
 it('uses blank parent timestamps for inserted chars and populated strings for join-style parents', () => {
     const ts = mts();
@@ -131,6 +141,35 @@ it('removes marks by highest mark id for the same type', () => {
     ]);
 });
 
+it('later same-type add marks override earlier data', () => {
+    let state = add(init(), 'abc', [0, 'self']);
+    state = apply(
+        state,
+        markRange(state, [0, 'self'], 0, 3, 'color', 'red', false, [10, 'self']),
+    ) as CachedState;
+    state = apply(
+        state,
+        markRange(state, [0, 'self'], 1, 2, 'color', 'blue', false, [11, 'self']),
+    ) as CachedState;
+
+    expect(formattedRuns(state)[0]).toEqual([
+        {text: 'a', marks: {color: 'red'}},
+        {text: 'b', marks: {color: 'blue'}},
+        {text: 'c', marks: {color: 'red'}},
+    ]);
+});
+
+it('deleted chars do not render but still preserve mark anchors', () => {
+    let state = add(init(), 'abc', [0, 'self']);
+    state = apply(
+        state,
+        markRange(state, [0, 'self'], 0, 3, 'bold', undefined, false, [10, 'self']),
+    ) as CachedState;
+    state = apply(state, {type: 'char:delete', id: [2, 'self']}) as CachedState;
+
+    expect(formattedRuns(state)[0]).toEqual([{text: 'ac', marks: {bold: true}}]);
+});
+
 it('follows a later split when the mark did not explicitly cross it', () => {
     const ts = mts();
     let state = add(init(), 'abcdef', [0, 'self'], ts);
@@ -156,6 +195,72 @@ it('follows a later split when the mark did not explicitly cross it', () => {
             {text: 'f', marks: {}},
         ],
     ]);
+});
+
+it('stores crossed splits for marks created across an existing split', () => {
+    const ts = mts();
+    let state = add(init(), 'abcdef', [0, 'self'], ts);
+    state = applyMany(
+        state,
+        split(state, splitLocation(state, [0, 'self'], selPos(state, [0, 'self'], 4)!), ts(), 'self', {
+            random: () => 0,
+        }),
+    );
+    const splitRecord = Object.values(state.state.splits)[0];
+
+    const mark = markOp([20, 'self'], [2, 'self'], [5, 'self'], 'bold', undefined, false, [
+        splitRecord.id,
+    ]);
+    expect(mark.type).toBe('mark');
+    expect(mark.mark.crossedSplits).toEqual([splitRecord.id]);
+    state = apply(state, mark) as CachedState;
+
+    expect(formattedRuns(state)).toEqual([
+        [
+            {text: 'a', marks: {}},
+            {text: 'bc', marks: {bold: true}},
+        ],
+        [
+            {text: 'de', marks: {bold: true}},
+            {text: 'f', marks: {}},
+        ],
+    ]);
+});
+
+it('converges mark and split batches applied in either order', () => {
+    const ts = mts();
+    const base = add(init(), 'abcdef', [0, 'self'], ts);
+    const mark = [markRange(base, [0, 'self'], 1, 5, 'bold', undefined, false, [20, 'self'])];
+    const splitOps = split(
+        base,
+        splitLocation(base, [0, 'self'], selPos(base, [0, 'self'], 4)!),
+        ts(),
+        'self',
+        {random: () => 0},
+    );
+
+    expectFormattedConverges(base, mark, splitOps);
+});
+
+it('converges mark and join batches applied in either order', () => {
+    const ts = mts();
+    let base = add(init(), 'abcdef', [0, 'self'], ts);
+    base = applyMany(
+        base,
+        split(base, splitLocation(base, [0, 'self'], selPos(base, [0, 'self'], 4)!), ts(), 'self', {
+            random: () => 0,
+        }),
+    );
+    const [left, right] = base.cache.blockChildren['0000-root'].map((id) => base.state.blocks[id].id);
+    const splitRecord = Object.values(base.state.splits)[0];
+    const mark = [
+        markOp([20, 'self'], [2, 'self'], [5, 'self'], 'bold', undefined, false, [
+            splitRecord.id,
+        ]),
+    ];
+    const joinOps = join(base, left, right, ts(), 'self');
+
+    expectFormattedConverges(base, mark, joinOps);
 });
 
 it('walks the split-left tail before jumping to the split right char', () => {
@@ -247,6 +352,34 @@ it('jumps early while following a split when the tail scan sees a join-style par
         {text: 'a', marks: {}},
         {text: 'bcde', marks: {bold: true}},
         {text: 'f', marks: {}},
+    ]);
+});
+
+it('traverses archived blocks while omitting them from formatted output', () => {
+    const ts = mts();
+    let state = add(init(), 'abcdef', [0, 'self'], ts);
+    state = apply(
+        state,
+        markRange(state, [0, 'self'], 1, 5, 'bold', undefined, false, [20, 'self']),
+    ) as CachedState;
+    state = applyMany(
+        state,
+        split(state, splitLocation(state, [0, 'self'], selPos(state, [0, 'self'], 4)!), ts(), 'self', {
+            random: () => 0,
+        }),
+    );
+    const rightBlock = state.cache.blockChildren['0000-root'][1];
+    state = apply(state, {
+        type: 'block:status',
+        id: state.state.blocks[rightBlock].id,
+        status: {archived: true, ts: ts()},
+    }) as CachedState;
+
+    expect(formattedRuns(state)).toEqual([
+        [
+            {text: 'a', marks: {}},
+            {text: 'bc', marks: {bold: true}},
+        ],
     ]);
 });
 
