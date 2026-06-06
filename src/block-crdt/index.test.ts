@@ -1,11 +1,23 @@
 import {it, expect} from 'vitest';
-import {stateToString, addChars, cachedState, organizeState, charOp, apply} from './index';
+import {
+    stateToString,
+    addChars,
+    cachedState,
+    organizeState,
+    charOp,
+    apply,
+    split,
+    applyMany,
+    charToString,
+    blockContents,
+} from './index';
 import {Block, CachedState, Lamport} from './types';
-import {selPos} from './utils';
+import {lamportToString, selPos} from './utils';
 import {initialState} from './initialState';
 import {LseqId} from './lseq';
 
 const init = initialState('self', '00001');
+const initial = cachedState(init);
 
 it('basic test', () => {
     const state = apply(
@@ -21,10 +33,14 @@ const mts = (init = 0) => {
     return () => (i++).toString().padStart(5, '0');
 };
 
+const addAfter = (state: CachedState, text: string, at: number, ts: () => string) => {
+    const atPos = selPos(state, [0, 'self'], at);
+    return addChars(state, text, atPos!, ts);
+};
+
 const run = (state: CachedState, items: [number, string][], ts: () => string) => {
     for (let [pos, text] of items) {
-        const at = selPos(state, [0, 'self'], pos);
-        state = addChars(state, text, at!, ts);
+        state = addAfter(state, text, pos, ts);
         expect(state.cache).toEqual(organizeState(state.state.blocks, state.state.chars));
     }
     return state;
@@ -44,6 +60,90 @@ const block = (id: Lamport, index: number, ts: string, parent: Lamport = [0, 'ro
 const lseq = (path: number, actorId = 'self', counter = path): LseqId => ({
     path: [path],
     opId: {actorId, counter},
+});
+
+it('split', () => {
+    const ts = mts();
+    let state = initial;
+    state = addAfter(state, 'abcdef', 0, ts);
+    const ops = split(state, {block: [0, 'self'], char: [4, 'self']}, ts());
+    state = applyMany(state, ops);
+    expect(stateToString(state)).toBe('0000-self: abc\n0007-self: def');
+});
+
+it('selPos maps to the correct char', () => {
+    const ts = mts();
+    let state = initial;
+    state = addAfter(state, 'abcdef', 0, ts);
+    for (let i = 1; i < 7; i++) {
+        const at = selPos(state, [0, 'self'], i)!;
+        expect(state.state.chars[lamportToString(at)].text).toBe('abcdef'[i - 1]);
+    }
+});
+
+it('selPos maps to the correct char with tree', () => {
+    const ts = mts();
+    let state = initial;
+    state = addAfter(state, 'abcdef', 0, ts);
+    state = addAfter(state, 'xyz', 3, ts);
+    const blockText = blockContents(state, lamportToString([0, 'self']));
+    expect(blockText).toBe('abcxyzdef');
+    for (let i = 1; i < blockText.length + 1; i++) {
+        const at = selPos(state, [0, 'self'], i)!;
+        expect(state.state.chars[lamportToString(at)].text).toBe(blockText[i - 1]);
+    }
+});
+
+it('split with tree', () => {
+    const ts = mts();
+    let state = initial;
+    state = addAfter(state, 'abcdef', 0, ts);
+    state = addAfter(state, 'xyz', 3, ts);
+    const blockText = blockContents(state, lamportToString([0, 'self']));
+    expect(blockText).toBe('abcxyzdef');
+
+    for (let i = 1; i < 8; i++) {
+        const at = selPos(state, [0, 'self'], i)!;
+
+        const ops = split(state, {block: [0, 'self'], char: at}, ts());
+        const inner = applyMany(state, ops);
+        // at every position yay
+        expect(stateToString(inner)).toBe(
+            `0000-self: ${blockText.slice(0, i - 1)}\n0010-self: ${blockText.slice(i - 1)}`,
+        );
+    }
+});
+
+it('concurrent edit and split', () => {
+    const ts = mts();
+    let state = initial;
+    const bid: Lamport = [0, 'self'];
+    state = addAfter(state, 'abc', 0, ts);
+    state = addAfter(state, 'd', 2, ts);
+    const blockText = blockContents(state, lamportToString(bid));
+    expect(blockText).toBe('abdc');
+
+    const at = selPos(state, bid, 4)!;
+
+    const splitOps = split(state, {block: bid, char: at}, ts());
+    const insertOp = charOp(
+        'm',
+        [state.state.maxSeenCount + 1, 'other'],
+        selPos(state, bid, 1)!,
+        ts(),
+    );
+
+    const one = applyMany(state, splitOps);
+    expect(stateToString(one)).toBe(`0000-self: abd\n0005-self: c`);
+
+    const two = applyMany(state, [insertOp]);
+    expect(stateToString(two)).toBe(`0000-self: ambdc`);
+
+    const left = applyMany(state, [...splitOps, insertOp]);
+    expect(stateToString(left)).toBe(`0000-self: ambd\n0005-self: c`);
+
+    const right = applyMany(state, [insertOp, ...splitOps]);
+    expect(stateToString(right)).toBe(`0000-self: ambd\n0005-self: c`);
 });
 
 it('add chars', () => {

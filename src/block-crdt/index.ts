@@ -1,5 +1,5 @@
 import {State, Lamport, CachedState, Cache, Char, HLC, Block} from './types';
-import {lamportToString} from './utils';
+import {lamportToString, parseLamportString} from './utils';
 import {compareLseqIds, createLseqIdBetween} from './lseq';
 
 type Op =
@@ -218,10 +218,10 @@ const laterTs = (one: Char['parent']['ts'], two: Char['parent']['ts']) => {
         if (typeof two === 'string') {
             return one > two;
         }
-        return one > two[0];
+        return one === two[0] ? false : one > two[0];
     }
     if (typeof two === 'string') {
-        return one[0] > two;
+        return one[0] === two ? true : one[0] > two;
     }
     if (one[0] !== two[0]) return one[0] > two[0];
     for (let i = 0; i < one[1].length && i < two[1].length; i++) {
@@ -307,7 +307,7 @@ const insertSortedRev = (array: string[], item: string) => {
     return array;
 };
 
-const applyMany = (state: CachedState, ops: Op[]) => {
+export const applyMany = (state: CachedState, ops: Op[]) => {
     ops.forEach((op) => {
         const result = apply(state, op);
         if (result === false) {
@@ -344,8 +344,19 @@ export const cachedState = (state: State): CachedState => ({
 
 // Blocks ... are created with a single char. but if there happen to be multiple, idk we can handle it.
 
+export const blockContents = (state: CachedState, id: string): string =>
+    state.cache.charContents[id].map((id) => charToString(state, id)).join('');
+
+export const charToString = (state: CachedState, id: string): string => {
+    const char = state.state.chars[id];
+    return (
+        (char.deleted ? '' : char.text) +
+        (state.cache.charContents[id]?.map((id) => charToString(state, id)).join('') ?? '')
+    );
+};
+
 export const stateToString = (state: CachedState) => {
-    const {chars, blocks} = state.state;
+    const {blocks} = state.state;
     const {blockChildren, charContents} = state.cache;
     const showBlock = (id: string): string[] => {
         const block = blocks[id];
@@ -356,13 +367,9 @@ export const stateToString = (state: CachedState) => {
             block.meta.type
         ];
         return [
-            id + ': ' + (charContents[id]?.map(showChar).join('') ?? ''),
+            id + ': ' + (charContents[id]?.map((id) => charToString(state, id)).join('') ?? ''),
             ...(blockChildren[id]?.flatMap(showBlock).map((line) => symbol + ' ' + line) ?? []),
         ];
-    };
-    const showChar = (id: string): string => {
-        const char = chars[id];
-        return (char.deleted ? '' : char.text) + (charContents[id]?.map(showChar).join('') ?? '');
     };
     return blockChildren['0000-root']?.flatMap(showBlock).join('\n');
 };
@@ -393,35 +400,78 @@ export function organizeState(blocks: Record<string, Block>, chars: Record<strin
     return {blockChildren, charContents};
 }
 
+const findTail = (char: string, contents: Cache['charContents']) => {
+    while (contents[char]?.length) {
+        char = contents[char][contents[char].length - 1];
+    }
+    return char;
+};
+
 export const split = (
     {state, cache}: CachedState,
-    bid: Lamport,
-    at: Lamport,
-    ts: () => HLC,
-): CachedState => {
+    at: {block: Lamport; char: Lamport},
+    ts: string,
+): Op[] => {
     const {chars, blocks, maxSeenCount} = state;
-    const current = blocks[lamportToString(bid)];
+    const bid = lamportToString(at.block);
+    if (bid === lamportToString(at.char)) {
+        // in this case we should create a new empty *previous sibling* block
+        throw new Error(`not implemented yet`);
+    }
+    const current = blocks[bid];
+    const siblings = cache.blockChildren[lamportToString(current.order.parent)];
+    const afterId = siblings[siblings.indexOf(bid) + 1];
+    const after = afterId ? blocks[afterId].order.index : null;
     const block: Block = {
         id: [maxSeenCount + 1, 'self'],
         meta: current.meta,
         order: {
-            ts: ts(),
+            ts,
             parent: current.order.parent,
-            index: createLseqIdBetween(current.order.index, null, {
+            index: createLseqIdBetween(current.order.index, after, {
                 actorId: 'self',
                 counter: maxSeenCount + 1,
             }),
         },
-        status: {archived: false, ts: '0001'},
+        status: {archived: false, ts},
     };
-    const charId = lamportToString(at);
-    const pchar = lamportToString(chars[charId].parent.id);
-    return cachedState({
-        chars: {...chars, [charId]: {...chars[charId]}},
-        blocks: {
-            ...blocks,
-            [lamportToString(block.id)]: block,
+    const ops: Op[] = [{type: 'block', block}];
+
+    ops.push({
+        type: 'char:move',
+        id: at.char,
+        parent: {
+            ts: ts,
+            id: block.id,
         },
-        maxSeenCount: maxSeenCount + 1,
     });
+
+    const ancestryPath: Lamport[] = [];
+    let tail = chars[findTail(lamportToString(at.char), cache.charContents)].id;
+    let cid = lamportToString(at.char);
+    let stop = 1000;
+    while (cid !== bid) {
+        if (stop-- < 0) throw new Error(`Too deep`);
+        ancestryPath.unshift(parseLamportString(cid));
+
+        const pid = lamportToString(chars[cid].parent.id);
+        const children = cache.charContents[pid];
+        for (let at = children.indexOf(cid) + 1; at < children.length; at++) {
+            const id = children[at];
+            ops.push({
+                type: 'char:move',
+                id: chars[id].id,
+                parent: {
+                    ts: [lastMoveTs(chars[id].parent.ts), ancestryPath, ts],
+                    id: tail,
+                },
+            });
+            tail = chars[findTail(id, cache.charContents)].id;
+        }
+        cid = pid;
+    }
+
+    return ops;
 };
+
+const lastMoveTs = (ts: Char['parent']['ts']) => (typeof ts === 'string' ? ts : ts[2]);

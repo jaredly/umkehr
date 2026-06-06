@@ -10,21 +10,23 @@ export const selPos = (
     if (selection === 0) {
         return block;
     }
-    selection--;
 
-    const charStack: string[][] = [charContents[lamportToString(block)].slice()];
-    while (charStack.length) {
-        if (!charStack[0].length) {
-            charStack.shift();
+    const stack = (charContents[lamportToString(block)] ?? []).slice().reverse();
+    while (stack.length) {
+        const id = stack.pop()!;
+        const char = chars[id];
+        const children = charContents[id];
+        if (children) {
+            for (let i = children.length - 1; i >= 0; i--) {
+                stack.push(children[i]);
+            }
+        }
+        if (char.deleted) {
             continue;
         }
-        const id = charStack[0].pop()!;
+        selection--;
         if (selection === 0) {
             return chars[id].id;
-        }
-        selection--;
-        if (charContents[id]) {
-            charStack.unshift(charContents[id].slice());
         }
     }
     throw new Error('selection out of bounds');
