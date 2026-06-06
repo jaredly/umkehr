@@ -1,4 +1,4 @@
-import {useCallback, useLayoutEffect, useRef, useState} from 'react';
+import {useCallback, useLayoutEffect, useRef, useState, type MutableRefObject} from 'react';
 import {materializeFormattedBlocks, rootBlockIds} from 'umkehr/block-crdt';
 import type {FormattedBlock} from 'umkehr/block-crdt';
 import {
@@ -19,7 +19,7 @@ import {
     type EditorId,
     type Replica,
 } from './blockEditorRuntime';
-import {readSelectionFromDom, restoreSelectionToDom} from './domSelection';
+import {readSelectionFromDom, restoreCaretToDom, restoreSelectionToDom} from './domSelection';
 import {useBlockReorder, type DropTarget} from './useBlockReorder';
 
 export function App() {
@@ -70,6 +70,8 @@ function BlockEditor({
     onToggleOnline(): void;
 }) {
     const rootRef = useRef<HTMLDivElement>(null);
+    const [focusedBlockId, setFocusedBlockId] = useState<string | null>(null);
+    const focusedBlockIdRef = useRef<string | null>(null);
     const blocks = materializeFormattedBlocks(replica.state);
     const blockIds = rootBlockIds(replica.state);
     const {draggingId, dropTarget, registerRow, startDrag} = useBlockReorder({
@@ -91,8 +93,14 @@ function BlockEditor({
         return (root ? readSelectionFromDom(root) : null) ?? current.selection;
     }, []);
 
+    const markFocusedBlock = useCallback((blockId: string) => {
+        focusedBlockIdRef.current = blockId;
+        setFocusedBlockId(blockId);
+    }, []);
+
     useLayoutEffect(() => {
         const root = rootRef.current;
+        if (replica.selection.type === 'caret') return;
         if (!root || document.activeElement === null || !root.contains(document.activeElement)) return;
         restoreSelectionToDom(root, replica.selection);
     }, [replica.state, replica.selection]);
@@ -124,6 +132,9 @@ function BlockEditor({
                     <EditableBlock
                         key={block.id}
                         block={block}
+                        selection={replica.selection}
+                        focused={focusedBlockId === block.id}
+                        focusedBlockIdRef={focusedBlockIdRef}
                         isDragging={draggingId === block.id}
                         dropTarget={dropTarget?.targetBlockId === block.id ? dropTarget : null}
                         registerRow={registerRow}
@@ -131,6 +142,7 @@ function BlockEditor({
                         onInsertText={(text) =>
                             onCommand((current) => insertText(current.state, liveSelection(current), text, makeCommandContext(current)))
                         }
+                        onActive={() => markFocusedBlock(block.id)}
                         onDeleteBackward={() =>
                             onCommand((current) => deleteBackward(current.state, liveSelection(current), makeCommandContext(current)))
                         }
@@ -162,21 +174,29 @@ function Toolbar({onBold, onItalic}: {onBold(): void; onItalic(): void}) {
 
 function EditableBlock({
     block,
+    selection,
+    focused,
+    focusedBlockIdRef,
     isDragging,
     dropTarget,
     registerRow,
     onStartDrag,
     onInsertText,
+    onActive,
     onDeleteBackward,
     onSplit,
     onPasteText,
 }: {
     block: FormattedBlock;
+    selection: Replica['selection'];
+    focused: boolean;
+    focusedBlockIdRef: MutableRefObject<string | null>;
     isDragging: boolean;
     dropTarget: DropTarget | null;
     registerRow(id: string, element: HTMLElement | null): void;
     onStartDrag: ReturnType<typeof useBlockReorder>['startDrag'];
     onInsertText(text: string): void;
+    onActive(): void;
     onDeleteBackward(): void;
     onSplit(): void;
     onPasteText(text: string): void;
@@ -193,6 +213,7 @@ function EditableBlock({
             if (event.inputType === 'insertText' && event.data) {
                 event.preventDefault();
                 handledBeforeInputRef.current = true;
+                onActive();
                 onInsertText(event.data);
             }
         };
@@ -212,7 +233,11 @@ function EditableBlock({
             return span;
         });
         element.replaceChildren(...children);
-    }, [block.runs]);
+        const point = selection.type === 'caret' ? selection.point : null;
+        if (point?.blockId === block.id && (focused || focusedBlockIdRef.current === block.id)) {
+            restoreCaretToDom(element, point.offset);
+        }
+    }, [block.id, block.runs, focused, focusedBlockIdRef, selection]);
 
     return (
         <div
@@ -243,6 +268,7 @@ function EditableBlock({
                 spellCheck
                 data-block-id={block.id}
                 data-empty={block.runs.length === 0 ? 'true' : undefined}
+                onFocus={onActive}
                 onInput={(event) => {
                     const native = event.nativeEvent as InputEvent;
                     if (handledBeforeInputRef.current) {
@@ -260,20 +286,24 @@ function EditableBlock({
                     }
                     if (native.isComposing) return;
                     if (isJsdom() && native.inputType === 'insertText' && native.data) {
+                        onActive();
                         onInsertText(native.data);
                     }
                 }}
                 onKeyDown={(event) => {
                     if (event.key === 'Enter') {
                         event.preventDefault();
+                        onActive();
                         onSplit();
                     } else if (event.key === 'Backspace') {
                         event.preventDefault();
+                        onActive();
                         onDeleteBackward();
                     }
                 }}
                 onPaste={(event) => {
                     event.preventDefault();
+                    onActive();
                     onPasteText(event.clipboardData.getData('text/plain'));
                 }}
             />

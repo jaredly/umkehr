@@ -34,6 +34,17 @@ export const restoreSelectionToDom = (root: HTMLElement, selection: EditorSelect
     domSelection.extend(focusDom.node, focusDom.offset);
 };
 
+export const restoreCaretToDom = (block: HTMLElement, offset: number) => {
+    const domSelection = window.getSelection();
+    if (!domSelection) return;
+    const point = domPointInBlockForOffset(block, offset);
+    const range = document.createRange();
+    range.setStart(point.node, point.offset);
+    range.collapse(true);
+    domSelection.removeAllRanges();
+    domSelection.addRange(range);
+};
+
 const pointFromDom = (
     root: HTMLElement,
     node: Node | null,
@@ -77,6 +88,13 @@ const domPointForOffset = (
 ): {node: Node; offset: number} | null => {
     const block = root.querySelector<HTMLElement>(`[data-block-id="${CSS.escape(blockId)}"]`);
     if (!block) return null;
+    return domPointInBlockForOffset(block, wantedOffset);
+};
+
+const domPointInBlockForOffset = (
+    block: HTMLElement,
+    wantedOffset: number,
+): {node: Node; offset: number} => {
     let offset = Math.max(0, wantedOffset);
     const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
     let current: Node | null;

@@ -263,6 +263,13 @@ const domCaretOffset = (block: HTMLElement): number => {
     const selection = window.getSelection()!;
     const node = selection.focusNode;
     if (!node || !block.contains(node)) return -1;
+    if (node === block) {
+        let offset = 0;
+        for (let index = 0; index < selection.focusOffset && index < block.childNodes.length; index++) {
+            offset += block.childNodes[index].textContent?.length ?? 0;
+        }
+        return offset;
+    }
     let offset = 0;
     const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
     let current: Node | null;
@@ -270,5 +277,5 @@ const domCaretOffset = (block: HTMLElement): number => {
         if (current === node) return offset + selection.focusOffset;
         offset += current.textContent?.length ?? 0;
     }
-    return node === block ? offset : -1;
+    return -1;
 };

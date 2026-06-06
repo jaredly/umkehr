@@ -52,3 +52,15 @@
   - `npm exec vitest -- examples/block-rich-text/src/App.test.tsx examples/block-rich-text/src/blockCommands.test.ts` passed with 17 tests.
   - `../../node_modules/.bin/tsc -p tsconfig.json --noEmit` passed from `examples/block-rich-text`.
   - `../react-crdt/node_modules/.bin/vite build` passed from `examples/block-rich-text`.
+- User correctly pushed back that the middle Backspace issue was logic, not timing. Removed the delayed restore workaround.
+- Reworked caret rendering/restoration logic. First pass used one DOM child per grapheme, which fixed mapping but was too inefficient.
+- Replaced that with run-level spans again:
+  - formatted text renders one span per materialized run;
+  - caret restoration for collapsed selections is owned by the focused `EditableBlock` immediately after it performs `replaceChildren(...)`;
+  - parent editor no longer restores collapsed caret selections and only handles range selections;
+  - active block tracking uses a synchronous ref so the same event that edits text can restore into the right block;
+  - selection read/restore logic walks text nodes and translates grapheme offsets to UTF-16 offsets for run-level spans.
+- Verification passed after the caret logic fix:
+  - `npm exec vitest -- examples/block-rich-text/src/App.test.tsx examples/block-rich-text/src/blockCommands.test.ts` passed with 17 tests.
+  - `../../node_modules/.bin/tsc -p tsconfig.json --noEmit` passed from `examples/block-rich-text`.
+  - `../react-crdt/node_modules/.bin/vite build` passed from `examples/block-rich-text`.
