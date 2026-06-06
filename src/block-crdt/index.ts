@@ -1,32 +1,6 @@
 import {State, Lamport, CachedState, Cache, Char, HLC, Block} from './types';
 import {lamportToString} from './utils';
 
-export const split = (
-    {state, cache}: CachedState,
-    bid: Lamport,
-    at: Lamport,
-    ts: () => HLC,
-): CachedState => {
-    const {chars, blocks, maxSeenCount} = state;
-    const current = blocks[lamportToString(bid)];
-    const block: Block = {
-        id: [maxSeenCount + 1, 'self'],
-        meta: current.meta,
-        order: {ts: ts(), parent: current.order.parent, index: current.order.index + 'a'},
-        status: {archived: false, ts: '0001'},
-    };
-    const charId = lamportToString(at);
-    const pchar = lamportToString(chars[charId].parent.id);
-    return cachedState({
-        chars: {...chars, [charId]: {...chars[charId]}},
-        blocks: {
-            ...blocks,
-            [lamportToString(block.id)]: block,
-        },
-        maxSeenCount: maxSeenCount + 1,
-    });
-};
-
 type Op =
     | {type: 'char'; char: Char}
     | {type: 'block'; block: Block}
@@ -410,3 +384,29 @@ export function organizeState(blocks: Record<string, Block>, chars: Record<strin
     });
     return {blockChildren, charContents};
 }
+
+export const split = (
+    {state, cache}: CachedState,
+    bid: Lamport,
+    at: Lamport,
+    ts: () => HLC,
+): CachedState => {
+    const {chars, blocks, maxSeenCount} = state;
+    const current = blocks[lamportToString(bid)];
+    const block: Block = {
+        id: [maxSeenCount + 1, 'self'],
+        meta: current.meta,
+        order: {ts: ts(), parent: current.order.parent, index: current.order.index + 'a'},
+        status: {archived: false, ts: '0001'},
+    };
+    const charId = lamportToString(at);
+    const pchar = lamportToString(chars[charId].parent.id);
+    return cachedState({
+        chars: {...chars, [charId]: {...chars[charId]}},
+        blocks: {
+            ...blocks,
+            [lamportToString(block.id)]: block,
+        },
+        maxSeenCount: maxSeenCount + 1,
+    });
+};
