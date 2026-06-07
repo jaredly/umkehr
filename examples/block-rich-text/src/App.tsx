@@ -25,6 +25,7 @@ import {useBlockReorder, type DropTarget} from './useBlockReorder';
 export function App() {
     const [demo, setDemo] = useState<DemoState>(() => createDemoState());
     const [logs, setLogs] = useState<Record<EditorId, string[]>>({left: [], right: []});
+    const [activeEditorId, setActiveEditorId] = useState<EditorId | null>(null);
 
     const runCommand = useCallback((editorId: EditorId, command: (replica: Replica) => CommandResult) => {
         setDemo((current) => {
@@ -58,18 +59,22 @@ export function App() {
             <section className="editorGrid" aria-label="Synced block editors">
                 <BlockEditor
                     replica={demo.left}
+                    active={activeEditorId === 'left'}
                     logs={logs.left}
                     onCommand={(command) => runCommand('left', command)}
                     onDebug={(message) => appendLog('left', message)}
                     onClearDebug={() => setLogs((current) => ({...current, left: []}))}
+                    onActive={() => setActiveEditorId('left')}
                     onToggleOnline={() => setDemo((current) => toggleOnline(current, 'left'))}
                 />
                 <BlockEditor
                     replica={demo.right}
+                    active={activeEditorId === 'right'}
                     logs={logs.right}
                     onCommand={(command) => runCommand('right', command)}
                     onDebug={(message) => appendLog('right', message)}
                     onClearDebug={() => setLogs((current) => ({...current, right: []}))}
+                    onActive={() => setActiveEditorId('right')}
                     onToggleOnline={() => setDemo((current) => toggleOnline(current, 'right'))}
                 />
             </section>
@@ -79,17 +84,21 @@ export function App() {
 
 function BlockEditor({
     replica,
+    active,
     logs,
     onCommand,
     onDebug,
     onClearDebug,
+    onActive,
     onToggleOnline,
 }: {
     replica: Replica;
+    active: boolean;
     logs: string[];
     onCommand(command: (replica: Replica) => CommandResult): void;
     onDebug(message: string): void;
     onClearDebug(): void;
+    onActive(): void;
     onToggleOnline(): void;
 }) {
     const rootRef = useRef<HTMLDivElement>(null);
@@ -117,15 +126,17 @@ function BlockEditor({
     }, []);
 
     const markActiveBlock = useCallback((blockId: string) => {
+        onActive();
         activeBlockIdRef.current = blockId;
-    }, []);
+    }, [onActive]);
 
     useLayoutEffect(() => {
         const root = rootRef.current;
         if (replica.selection.type === 'caret') return;
-        if (!root || document.activeElement === null || !root.contains(document.activeElement)) return;
+        if (!active) return;
+        if (!root) return;
         restoreSelectionToDom(root, replica.selection);
-    }, [replica.state, replica.selection]);
+    }, [active, replica.state, replica.selection]);
 
     const runEditCommand = useCallback(
         (
@@ -178,6 +189,8 @@ function BlockEditor({
             <div
                 ref={rootRef}
                 className="blockList"
+                onFocusCapture={onActive}
+                onPointerDownCapture={onActive}
                 onMouseUp={captureSelection}
                 onKeyUp={captureSelection}
             >

@@ -80,3 +80,11 @@
   - `npm exec vitest -- examples/block-rich-text/src/App.test.tsx examples/block-rich-text/src/blockCommands.test.ts` passed with 19 tests.
   - `../../node_modules/.bin/tsc -p tsconfig.json --noEmit` passed from `examples/block-rich-text`; the shell printed `Error connecting to agent: Operation not permitted`, but the command exited `0`.
   - `../react-crdt/node_modules/.bin/vite build` passed from `examples/block-rich-text`.
+- User reported selecting a range in the right editor could cause the left editor to capture focus/selection. Root cause was that range restoration was guarded only by `document.activeElement`, which can be stale while the user starts selecting in the other editor.
+- Added explicit active-editor tracking at the app/editor boundary. Pointer/focus activity marks the owning editor active, and range restoration is now allowed only for that editor.
+- Removed the old activeElement containment dependency for range restoration. With active-editor ownership in place, the active editor may restore its own range even if the browser has not updated `document.activeElement` yet, while inactive editors cannot write to the global DOM selection.
+- Added a regression where the left editor has a stored range, the user edits a selected range in the right editor, and synced peer updates make the left editor re-render. The selection remains owned by the right editor.
+- Verification passed after the active-editor selection fix:
+  - `npm exec vitest -- examples/block-rich-text/src/App.test.tsx examples/block-rich-text/src/blockCommands.test.ts` passed with 20 tests.
+  - `../../node_modules/.bin/tsc -p tsconfig.json --noEmit` passed from `examples/block-rich-text`; the shell printed `Error connecting to agent: Operation not permitted`, but the command exited `0`.
+  - `../react-crdt/node_modules/.bin/vite build` passed from `examples/block-rich-text`.

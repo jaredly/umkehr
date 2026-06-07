@@ -34,6 +34,12 @@ const selectCaret = (block: HTMLElement, offset = 0) => {
     fireEvent.select(block);
 };
 
+const selectRange = (block: HTMLElement, start: number, end: number) => {
+    block.focus();
+    setDomRange(block, start, end);
+    fireEvent.mouseUp(block);
+};
+
 const setDomCaret = (block: HTMLElement, offset = 0) => {
     const selection = window.getSelection()!;
     const range = document.createRange();
@@ -44,6 +50,22 @@ const setDomCaret = (block: HTMLElement, offset = 0) => {
         range.setStart(block, 0);
     }
     range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+};
+
+const setDomRange = (block: HTMLElement, start: number, end: number) => {
+    const selection = window.getSelection()!;
+    const range = document.createRange();
+    const text = firstTextNode(block);
+    if (text) {
+        const length = text.textContent?.length ?? 0;
+        range.setStart(text, Math.min(start, length));
+        range.setEnd(text, Math.min(end, length));
+    } else {
+        range.setStart(block, 0);
+        range.setEnd(block, 0);
+    }
     selection.removeAllRanges();
     selection.addRange(range);
 };
@@ -256,6 +278,27 @@ describe('Block rich text example UI', () => {
         expect(blocks(right)[0].textContent).toBe('abX');
     });
 
+    it('does not let an inactive editor restore its stored range over the active editor', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abcd');
+        await waitFor(() => expect(blocks(right)[0].textContent).toBe('abcd'));
+
+        selectRange(blocks(left)[0], 1, 3);
+        expect(domSelectionBlock()).toBe(blocks(left)[0]);
+
+        fireEvent.pointerDown(blocks(right)[0]);
+        setDomRange(blocks(right)[0], 1, 3);
+        fireEvent.mouseUp(blocks(right)[0]);
+        beforeInputText(blocks(right)[0], 'X');
+
+        await waitFor(() => expect(blocks(right)[0].textContent).toBe('aXd'));
+        expect(blocks(left)[0].textContent).toBe('aXd');
+        expect(domSelectionBlock()).toBe(blocks(right)[0]);
+    });
+
     it('pastes newlines as multiple synced blocks', async () => {
         const view = render(<App />);
         const {left, right} = panels(view);
@@ -276,6 +319,13 @@ describe('Block rich text example UI', () => {
 const firstTextNode = (element: HTMLElement): Text | null => {
     const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
     return walker.nextNode() as Text | null;
+};
+
+const domSelectionBlock = (): HTMLElement | null => {
+    const node = window.getSelection()?.focusNode;
+    if (!node) return null;
+    const element = node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement;
+    return element?.closest<HTMLElement>('[data-block-id]') ?? null;
 };
 
 const domCaretOffset = (block: HTMLElement): number => {
