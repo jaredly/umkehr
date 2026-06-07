@@ -18,6 +18,7 @@ import {
     type CommandContext,
 } from './blockCommands';
 import {applyLocalChange, createDemoState, makeCommandContext, toggleOnline} from './blockEditorRuntime';
+import {retainSelection} from './retainedSelection';
 import {caret, type EditorSelection} from './selectionModel';
 
 const ctx = (actor = 'left'): CommandContext => {
@@ -154,7 +155,7 @@ describe('block rich text runtime', () => {
         demo = applyLocalChange(demo, {
             editorId: 'left',
             state: result.state,
-            selection: result.selection,
+            selection: retainSelection(result.state, result.selection),
             ops: result.ops,
         });
 

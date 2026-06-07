@@ -1,4 +1,4 @@
-import {useCallback, useLayoutEffect, useRef, useState, type MutableRefObject} from 'react';
+import {useCallback, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject} from 'react';
 import {blockContents, materializeFormattedBlocks, rootBlockIds} from 'umkehr/block-crdt';
 import type {FormattedBlock} from 'umkehr/block-crdt';
 import {
@@ -20,6 +20,13 @@ import {
     type Replica,
 } from './blockEditorRuntime';
 import {readSelectionFromDom, restoreCaretToDom, restoreSelectionToDom} from './domSelection';
+import {resolveSelection, retainSelection} from './retainedSelection';
+import {
+    normalizeSelectionSegments,
+    segmentText,
+    type EditorSelection,
+    type SelectionSegment,
+} from './selectionModel';
 import {useBlockReorder, type DropTarget} from './useBlockReorder';
 
 export function App() {
@@ -33,7 +40,7 @@ export function App() {
             return applyLocalChange(current, {
                 editorId,
                 state: result.state,
-                selection: result.selection,
+                selection: retainSelection(result.state, result.selection),
                 ops: result.ops,
             });
         });
@@ -94,9 +101,24 @@ function BlockEditor({
 }) {
     const rootRef = useRef<HTMLDivElement>(null);
     const pendingCaretRestoreBlockIdRef = useRef<string | null>(null);
-    const pendingSelectionRestoreRef = useRef<Replica['selection'] | null>(null);
+    const pendingSelectionRestoreRef = useRef<EditorSelection | null>(null);
+    const [hasFocus, setHasFocus] = useState(false);
     const blocks = materializeFormattedBlocks(replica.state);
     const blockIds = rootBlockIds(replica.state);
+    const resolvedSelection = resolveSelection(replica.state, replica.selection);
+    const inactiveSelection = hasFocus ? null : resolvedSelection;
+    const inactiveSegmentsByBlock = useMemo(() => {
+        const segments = new Map<string, SelectionSegment>();
+        if (!inactiveSelection) return segments;
+        for (const segment of normalizeSelectionSegments(replica.state, inactiveSelection)) {
+            segments.set(segment.blockId, segment);
+        }
+        return segments;
+    }, [inactiveSelection, replica.state]);
+    const inactiveCaret =
+        inactiveSelection?.type === 'caret'
+            ? {blockId: inactiveSelection.point.blockId, offset: inactiveSelection.point.offset}
+            : null;
     const {draggingId, dropTarget, registerRow, startDrag} = useBlockReorder({
         blockIds,
         onMove: (blockId: string, target: DropTarget) =>
@@ -114,20 +136,20 @@ function BlockEditor({
 
     const liveSelection = useCallback((current: Replica) => {
         const root = rootRef.current;
-        return (root ? readSelectionFromDom(root) : null) ?? current.selection;
+        return (root ? readSelectionFromDom(root) : null) ?? resolveSelection(current.state, current.selection);
     }, []);
 
     const runEditCommand = useCallback(
         (
             label: string,
-            command: (current: Replica, selection: Replica['selection']) => CommandResult,
+            command: (current: Replica, selection: EditorSelection) => CommandResult,
         ) => {
             onCommand((current) => {
                 const selection = liveSelection(current);
                 onDebug(
-                    `${label} begin stored=${formatSelection(current.selection)} live=${formatSelection(
-                        selection,
-                    )} text=${formatReplicaText(current)}`,
+                    `${label} begin stored=${formatSelection(
+                        resolveSelection(current.state, current.selection),
+                    )} live=${formatSelection(selection)} text=${formatReplicaText(current)}`,
                 );
                 const result = command(current, selection);
                 if (result.selection.type === 'caret') {
@@ -184,6 +206,11 @@ function BlockEditor({
             <div
                 ref={rootRef}
                 className="blockList"
+                onFocus={() => setHasFocus(true)}
+                onBlur={(event) => {
+                    if (event.currentTarget.contains(event.relatedTarget)) return;
+                    setHasFocus(false);
+                }}
                 onMouseUp={captureSelection}
                 onKeyUp={captureSelection}
             >
@@ -191,7 +218,11 @@ function BlockEditor({
                     <EditableBlock
                         key={block.id}
                         block={block}
-                        selection={replica.selection}
+                        selection={resolvedSelection}
+                        inactiveSelectionSegment={inactiveSegmentsByBlock.get(block.id) ?? null}
+                        inactiveCaretOffset={
+                            inactiveCaret?.blockId === block.id ? inactiveCaret.offset : null
+                        }
                         pendingCaretRestoreBlockIdRef={pendingCaretRestoreBlockIdRef}
                         isDragging={draggingId === block.id}
                         dropTarget={dropTarget?.targetBlockId === block.id ? dropTarget : null}
@@ -251,6 +282,8 @@ function Toolbar({onBold, onItalic}: {onBold(): void; onItalic(): void}) {
 function EditableBlock({
     block,
     selection,
+    inactiveSelectionSegment,
+    inactiveCaretOffset,
     pendingCaretRestoreBlockIdRef,
     isDragging,
     dropTarget,
@@ -264,7 +297,9 @@ function EditableBlock({
     onPasteText,
 }: {
     block: FormattedBlock;
-    selection: Replica['selection'];
+    selection: EditorSelection;
+    inactiveSelectionSegment: SelectionSegment | null;
+    inactiveCaretOffset: number | null;
     pendingCaretRestoreBlockIdRef: MutableRefObject<string | null>;
     isDragging: boolean;
     dropTarget: DropTarget | null;
@@ -301,16 +336,10 @@ function EditableBlock({
     useLayoutEffect(() => {
         const element = editableRef.current;
         if (!element) return;
-        const renderedRuns = serializeRuns(block.runs);
+        const renderedRuns = serializeRuns(block.runs, inactiveSelectionSegment, inactiveCaretOffset);
         if (renderedRunsRef.current === renderedRuns) return;
         renderedRunsRef.current = renderedRuns;
-        const children = block.runs.map((run) => {
-            const span = document.createElement('span');
-            span.textContent = run.text;
-            if (run.marks.bold) span.classList.add('markBold');
-            if (run.marks.italic) span.classList.add('markItalic');
-            return span;
-        });
+        const children = renderRunNodes(block.runs, inactiveSelectionSegment, inactiveCaretOffset);
         element.replaceChildren(...children);
         const point = selection.type === 'caret' ? selection.point : null;
         if (point?.blockId === block.id && pendingCaretRestoreBlockIdRef.current === block.id) {
@@ -318,7 +347,14 @@ function EditableBlock({
             if (document.activeElement !== element) element.focus();
             restoreCaretToDom(element, point.offset);
         }
-    }, [block.id, block.runs, pendingCaretRestoreBlockIdRef, selection]);
+    }, [
+        block.id,
+        block.runs,
+        inactiveCaretOffset,
+        inactiveSelectionSegment,
+        pendingCaretRestoreBlockIdRef,
+        selection,
+    ]);
 
     return (
         <div
@@ -349,18 +385,17 @@ function EditableBlock({
                 spellCheck
                 data-block-id={block.id}
                 data-empty={block.runs.length === 0 ? 'true' : undefined}
+                onFocus={(event) => {
+                    if (!inactiveSelectionSegment && inactiveCaretOffset === null) return;
+                    event.currentTarget.replaceChildren(...renderRunNodes(block.runs, null, null));
+                    renderedRunsRef.current = serializeRuns(block.runs, null, null);
+                }}
                 onInput={(event) => {
                     const native = event.nativeEvent as InputEvent;
                     if (handledBeforeInputRef.current) {
                         handledBeforeInputRef.current = false;
                         event.currentTarget.replaceChildren(
-                            ...block.runs.map((run) => {
-                                const span = document.createElement('span');
-                                span.textContent = run.text;
-                                if (run.marks.bold) span.classList.add('markBold');
-                                if (run.marks.italic) span.classList.add('markItalic');
-                                return span;
-                            }),
+                            ...renderRunNodes(block.runs, inactiveSelectionSegment, inactiveCaretOffset),
                         );
                         return;
                     }
@@ -397,8 +432,67 @@ function EditableBlock({
 
 const isJsdom = () => navigator.userAgent.includes('jsdom');
 
-const serializeRuns = (runs: FormattedBlock['runs']) =>
-    JSON.stringify(runs.map((run) => [run.text, run.marks.bold, run.marks.italic]));
+const serializeRuns = (
+    runs: FormattedBlock['runs'],
+    inactiveSelectionSegment: SelectionSegment | null,
+    inactiveCaretOffset: number | null,
+) =>
+    JSON.stringify({
+        runs: runs.map((run) => [run.text, run.marks.bold, run.marks.italic]),
+        inactiveSelectionSegment,
+        inactiveCaretOffset,
+    });
+
+const renderRunNodes = (
+    runs: FormattedBlock['runs'],
+    inactiveSelectionSegment: SelectionSegment | null,
+    inactiveCaretOffset: number | null,
+): Node[] => {
+    if (!inactiveSelectionSegment && inactiveCaretOffset === null) {
+        return runs.map((run) => {
+            const span = document.createElement('span');
+            span.textContent = run.text;
+            applyRunClasses(span, run);
+            return span;
+        });
+    }
+
+    const nodes: Node[] = [];
+    let offset = 0;
+    for (const run of runs) {
+        for (const segment of segmentText(run.text)) {
+            if (inactiveCaretOffset === offset) nodes.push(renderRetainedCaret());
+            const span = document.createElement('span');
+            span.textContent = segment;
+            applyRunClasses(span, run);
+            if (
+                inactiveSelectionSegment &&
+                offset >= inactiveSelectionSegment.startOffset &&
+                offset < inactiveSelectionSegment.endOffset
+            ) {
+                span.classList.add('retainedSelectionHighlight');
+                span.dataset.retainedSelection = 'highlight';
+            }
+            nodes.push(span);
+            offset++;
+        }
+    }
+    if (inactiveCaretOffset === offset) nodes.push(renderRetainedCaret());
+    return nodes;
+};
+
+const applyRunClasses = (span: HTMLElement, run: FormattedBlock['runs'][number]) => {
+    if (run.marks.bold) span.classList.add('markBold');
+    if (run.marks.italic) span.classList.add('markItalic');
+};
+
+const renderRetainedCaret = () => {
+    const span = document.createElement('span');
+    span.className = 'retainedSelectionCaret';
+    span.dataset.retainedSelection = 'caret';
+    span.contentEditable = 'false';
+    return span;
+};
 
 function DebugLog({logs, onClear}: {logs: string[]; onClear(): void}) {
     return (
@@ -420,7 +514,7 @@ function DebugLog({logs, onClear}: {logs: string[]; onClear(): void}) {
     );
 }
 
-const formatSelection = (selection: Replica['selection']) =>
+const formatSelection = (selection: EditorSelection) =>
     selection.type === 'caret'
         ? `caret(${selection.point.blockId}@${selection.point.offset})`
         : `range(${selection.anchor.blockId}@${selection.anchor.offset}->${selection.focus.blockId}@${selection.focus.offset})`;

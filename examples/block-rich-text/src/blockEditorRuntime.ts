@@ -1,7 +1,7 @@
-import {applyMany, cachedState, rootBlockIds, type Op} from 'umkehr/block-crdt';
+import {applyMany, cachedState, type Op} from 'umkehr/block-crdt';
 import {initialState} from 'umkehr/block-crdt/initialState';
 import type {CachedState} from 'umkehr/block-crdt/types';
-import {caret, clampSelection, type EditorSelection} from './selectionModel';
+import {initialRetainedSelection, type RetainedSelection} from './retainedSelection';
 
 export type EditorId = 'left' | 'right';
 
@@ -9,7 +9,7 @@ export type Replica = {
     id: EditorId;
     actor: EditorId;
     state: CachedState;
-    selection: EditorSelection;
+    selection: RetainedSelection;
     online: boolean;
     queue: Op[][];
     clock: number;
@@ -23,16 +23,15 @@ export type DemoState = {
 export type LocalChange = {
     editorId: EditorId;
     state: CachedState;
-    selection: EditorSelection;
+    selection: RetainedSelection;
     ops: Op[];
 };
 
 export const createDemoState = (): DemoState => {
     const state = cachedState(initialState('doc', '00000'));
-    const firstBlock = rootBlockIds(state)[0];
     return {
-        left: createReplica('left', state, firstBlock),
-        right: createReplica('right', state, firstBlock),
+        left: createReplica('left', state),
+        right: createReplica('right', state),
     };
 };
 
@@ -79,11 +78,11 @@ export const flushQueues = (demo: DemoState): DemoState => {
     return next;
 };
 
-const createReplica = (id: EditorId, state: CachedState, firstBlock: string): Replica => ({
+const createReplica = (id: EditorId, state: CachedState): Replica => ({
     id,
     actor: id,
     state,
-    selection: caret(firstBlock, 0),
+    selection: initialRetainedSelection(state),
     online: true,
     queue: [],
     clock: 1,
@@ -91,5 +90,5 @@ const createReplica = (id: EditorId, state: CachedState, firstBlock: string): Re
 
 const applyRemoteOps = (replica: Replica, ops: Op[]): Replica => {
     const state = applyMany(replica.state, ops);
-    return {...replica, state, selection: clampSelection(state, replica.selection)};
+    return {...replica, state};
 };

@@ -121,6 +121,25 @@ const beforeInputText = (block: HTMLElement, text: string) => {
     }
 };
 
+const retainedCaretOffset = (block: HTMLElement): number | null => {
+    let offset = 0;
+    for (const node of block.childNodes) {
+        if (
+            node.nodeType === Node.ELEMENT_NODE &&
+            (node as HTMLElement).dataset.retainedSelection === 'caret'
+        ) {
+            return offset;
+        }
+        offset += node.textContent?.length ?? 0;
+    }
+    return null;
+};
+
+const retainedHighlightText = (block: HTMLElement): string =>
+    [...block.querySelectorAll<HTMLElement>('[data-retained-selection="highlight"]')]
+        .map((element) => element.textContent ?? '')
+        .join('');
+
 describe('Block rich text example UI', () => {
     it('renders two synced editors', () => {
         const view = render(<App />);
@@ -311,6 +330,51 @@ describe('Block rich text example UI', () => {
         await waitFor(() => expect(blocks(right)[0].textContent).toBe('aXd'));
         expect(blocks(left)[0].textContent).toBe('aXd');
         expect(domSelectionBlock()).toBe(blocks(right)[0]);
+    });
+
+    it('shows an inactive editor caret without showing the active editor caret', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(right)[0], 0);
+        beforeInputText(blocks(right)[0], 'abc');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abc'));
+
+        selectCaret(blocks(right)[0], 2);
+        selectCaret(blocks(left)[0], 0);
+
+        await waitFor(() => expect(retainedCaretOffset(blocks(right)[0])).toBe(2));
+        expect(retainedCaretOffset(blocks(left)[0])).toBeNull();
+    });
+
+    it('shows an inactive editor range highlight', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(right)[0], 0);
+        beforeInputText(blocks(right)[0], 'abcd');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abcd'));
+
+        selectRange(blocks(right)[0], 1, 3);
+        selectCaret(blocks(left)[0], 0);
+
+        await waitFor(() => expect(retainedHighlightText(blocks(right)[0])).toBe('bc'));
+    });
+
+    it('shifts an inactive editor caret after a remote insert before it', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(right)[0], 0);
+        beforeInputText(blocks(right)[0], 'abc');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abc'));
+
+        selectCaret(blocks(right)[0], 2);
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'X');
+
+        await waitFor(() => expect(blocks(right)[0].textContent).toBe('Xabc'));
+        expect(retainedCaretOffset(blocks(right)[0])).toBe(3);
     });
 
     it('keeps the selected range after clicking Bold', async () => {
