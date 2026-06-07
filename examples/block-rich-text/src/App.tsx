@@ -212,6 +212,16 @@ function BlockEditor({
                                 splitBlock(current.state, selection, makeCommandContext(current)),
                             )
                         }
+                        onToggleBold={() =>
+                            runEditCommand('toggle bold', (current, selection) =>
+                                toggleMark(current.state, selection, 'bold', makeCommandContext(current)),
+                            )
+                        }
+                        onToggleItalic={() =>
+                            runEditCommand('toggle italic', (current, selection) =>
+                                toggleMark(current.state, selection, 'italic', makeCommandContext(current)),
+                            )
+                        }
                         onPasteText={(text) =>
                             runEditCommand(`paste ${JSON.stringify(text)}`, (current, selection) =>
                                 pastePlainText(current.state, selection, text, makeCommandContext(current)),
@@ -249,6 +259,8 @@ function EditableBlock({
     onInsertText,
     onDeleteBackward,
     onSplit,
+    onToggleBold,
+    onToggleItalic,
     onPasteText,
 }: {
     block: FormattedBlock;
@@ -261,6 +273,8 @@ function EditableBlock({
     onInsertText(text: string): void;
     onDeleteBackward(): void;
     onSplit(): void;
+    onToggleBold(): void;
+    onToggleItalic(): void;
     onPasteText(text: string): void;
 }) {
     const handledBeforeInputRef = useRef(false);
@@ -356,7 +370,15 @@ function EditableBlock({
                     }
                 }}
                 onKeyDown={(event) => {
-                    if (event.key === 'Enter') {
+                    const modifierPressed = event.metaKey || event.ctrlKey;
+                    const key = event.key.toLowerCase();
+                    if (modifierPressed && key === 'b') {
+                        event.preventDefault();
+                        onToggleBold();
+                    } else if (modifierPressed && key === 'i') {
+                        event.preventDefault();
+                        onToggleItalic();
+                    } else if (event.key === 'Enter') {
                         event.preventDefault();
                         onSplit();
                     } else if (event.key === 'Backspace') {

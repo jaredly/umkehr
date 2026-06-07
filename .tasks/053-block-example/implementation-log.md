@@ -112,3 +112,9 @@
   - `npm exec vitest -- examples/block-rich-text/src/App.test.tsx examples/block-rich-text/src/blockCommands.test.ts` passed with 22 tests.
   - `../../node_modules/.bin/tsc -p tsconfig.json --noEmit` passed from `examples/block-rich-text`; the shell printed `Error connecting to agent: Operation not permitted`, but the command exited `0`.
   - `../react-crdt/node_modules/.bin/vite build` passed from `examples/block-rich-text`.
+- User reported that Cmd+B did not bold the first selected range in a newly-created block, while clicking the Bold button worked. Added a Testing Library regression for the keyboard shortcut path.
+- Root cause: the example had no explicit Cmd/Ctrl+B or Cmd/Ctrl+I handling, so the keyboard shortcut never entered the CRDT command path. Added editable-block shortcut handling that prevents default native contenteditable formatting and calls the same `toggleMark` commands used by the toolbar.
+- Verification passed after the keyboard shortcut formatting fix:
+  - `npm exec vitest -- examples/block-rich-text/src/App.test.tsx examples/block-rich-text/src/blockCommands.test.ts` passed with 23 tests.
+  - `../../node_modules/.bin/tsc -p tsconfig.json --noEmit` passed from `examples/block-rich-text`; the shell printed `Error connecting to agent: Operation not permitted`, but the command exited `0`.
+  - `../react-crdt/node_modules/.bin/vite build` passed from `examples/block-rich-text`.
