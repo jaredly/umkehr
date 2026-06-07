@@ -88,6 +88,25 @@ describe('retained block rich text selections', () => {
         });
     });
 
+    it('collapses a retained range to a caret when the selected text is deleted', () => {
+        const inserted = insertText(init(), caret(onlyBlock(init()), 0), 'abcd', ctx('left'));
+        const blockId = onlyBlock(inserted.state);
+        const retained = retainSelection(inserted.state, {
+            type: 'range',
+            anchor: {blockId, offset: 1},
+            focus: {blockId, offset: 3},
+        });
+
+        const deleted = deleteBackward(inserted.state, {
+            type: 'range',
+            anchor: {blockId, offset: 1},
+            focus: {blockId, offset: 3},
+        }, ctx('right'));
+
+        expect(lines(deleted.state)).toEqual(['ad']);
+        expect(resolveSelection(deleted.state, retained)).toEqual(caret(blockId, 1));
+    });
+
     it('keeps a selection inside a moved block', () => {
         const context = ctx();
         const pasted = pastePlainText(init(), caret(onlyBlock(init()), 0), 'a\nbc', context);

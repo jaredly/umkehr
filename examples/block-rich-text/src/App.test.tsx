@@ -140,6 +140,9 @@ const retainedHighlightText = (block: HTMLElement): string =>
         .map((element) => element.textContent ?? '')
         .join('');
 
+const childTexts = (block: HTMLElement): string[] =>
+    [...block.childNodes].map((node) => node.textContent ?? '');
+
 describe('Block rich text example UI', () => {
     it('renders two synced editors', () => {
         const view = render(<App />);
@@ -359,6 +362,7 @@ describe('Block rich text example UI', () => {
         selectCaret(blocks(left)[0], 0);
 
         await waitFor(() => expect(retainedHighlightText(blocks(right)[0])).toBe('bc'));
+        expect(childTexts(blocks(right)[0])).toEqual(['a', 'bc', 'd']);
     });
 
     it('shifts an inactive editor caret after a remote insert before it', async () => {
@@ -375,6 +379,23 @@ describe('Block rich text example UI', () => {
 
         await waitFor(() => expect(blocks(right)[0].textContent).toBe('Xabc'));
         expect(retainedCaretOffset(blocks(right)[0])).toBe(3);
+    });
+
+    it('shows a caret when an inactive selected range is deleted remotely', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(right)[0], 0);
+        beforeInputText(blocks(right)[0], 'abcd');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abcd'));
+
+        selectRange(blocks(right)[0], 1, 3);
+        selectRange(blocks(left)[0], 1, 3);
+        fireEvent.keyDown(blocks(left)[0], {key: 'Backspace'});
+
+        await waitFor(() => expect(blocks(right)[0].textContent).toBe('ad'));
+        expect(retainedHighlightText(blocks(right)[0])).toBe('');
+        expect(retainedCaretOffset(blocks(right)[0])).toBe(1);
     });
 
     it('keeps the selected range after clicking Bold', async () => {

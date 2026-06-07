@@ -459,26 +459,56 @@ const renderRunNodes = (
 
     const nodes: Node[] = [];
     let offset = 0;
+    let caretRendered = false;
     for (const run of runs) {
-        for (const segment of segmentText(run.text)) {
-            if (inactiveCaretOffset === offset) nodes.push(renderRetainedCaret());
+        const runSegments = segmentText(run.text);
+        const runStart = offset;
+        const runEnd = runStart + runSegments.length;
+        const boundaries = new Set([0, runSegments.length]);
+        if (inactiveSelectionSegment) {
+            addBoundaryInRun(boundaries, inactiveSelectionSegment.startOffset - runStart, runSegments.length);
+            addBoundaryInRun(boundaries, inactiveSelectionSegment.endOffset - runStart, runSegments.length);
+        }
+        if (inactiveCaretOffset !== null) {
+            addBoundaryInRun(boundaries, inactiveCaretOffset - runStart, runSegments.length);
+        }
+        const sortedBoundaries = [...boundaries].sort((a, b) => a - b);
+
+        for (let index = 0; index < sortedBoundaries.length - 1; index++) {
+            const start = sortedBoundaries[index];
+            const end = sortedBoundaries[index + 1];
+            const chunkStart = runStart + start;
+            const chunkEnd = runStart + end;
+            if (!caretRendered && inactiveCaretOffset === chunkStart) {
+                nodes.push(renderRetainedCaret());
+                caretRendered = true;
+            }
+            if (start === end) continue;
             const span = document.createElement('span');
-            span.textContent = segment;
+            span.textContent = runSegments.slice(start, end).join('');
             applyRunClasses(span, run);
             if (
                 inactiveSelectionSegment &&
-                offset >= inactiveSelectionSegment.startOffset &&
-                offset < inactiveSelectionSegment.endOffset
+                chunkStart >= inactiveSelectionSegment.startOffset &&
+                chunkEnd <= inactiveSelectionSegment.endOffset
             ) {
                 span.classList.add('retainedSelectionHighlight');
                 span.dataset.retainedSelection = 'highlight';
             }
             nodes.push(span);
-            offset++;
         }
+        if (!caretRendered && inactiveCaretOffset === runEnd) {
+            nodes.push(renderRetainedCaret());
+            caretRendered = true;
+        }
+        offset = runEnd;
     }
-    if (inactiveCaretOffset === offset) nodes.push(renderRetainedCaret());
+    if (!caretRendered && inactiveCaretOffset === offset) nodes.push(renderRetainedCaret());
     return nodes;
+};
+
+const addBoundaryInRun = (boundaries: Set<number>, boundary: number, runLength: number) => {
+    if (boundary > 0 && boundary < runLength) boundaries.add(boundary);
 };
 
 const applyRunClasses = (span: HTMLElement, run: FormattedBlock['runs'][number]) => {

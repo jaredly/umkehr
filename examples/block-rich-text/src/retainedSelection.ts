@@ -48,10 +48,15 @@ export const resolveSelection = (
     if (selection.type === 'caret') {
         return {type: 'caret', point: resolvePoint(state, selection.point)};
     }
+    const anchor = resolvePoint(state, selection.anchor);
+    const focus = resolvePoint(state, selection.focus);
+    if (anchor.blockId === focus.blockId && anchor.offset === focus.offset) {
+        return {type: 'caret', point: focus};
+    }
     return {
         type: 'range',
-        anchor: resolvePoint(state, selection.anchor),
-        focus: resolvePoint(state, selection.focus),
+        anchor,
+        focus,
     };
 };
 
