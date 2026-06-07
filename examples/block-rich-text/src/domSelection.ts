@@ -16,6 +16,24 @@ export const readSelectionFromDom = (root: HTMLElement): EditorSelection | null 
     return {type: 'range', anchor, focus};
 };
 
+export const restoreSelectionToDom = (root: HTMLElement, selection: EditorSelection) => {
+    const domSelection = window.getSelection();
+    if (!domSelection) return;
+
+    const anchor = selection.type === 'caret' ? selection.point : selection.anchor;
+    const focus = selection.type === 'caret' ? selection.point : selection.focus;
+    const anchorDom = domPointForOffset(root, anchor.blockId, anchor.offset);
+    const focusDom = domPointForOffset(root, focus.blockId, focus.offset);
+    if (!anchorDom || !focusDom) return;
+
+    const range = document.createRange();
+    range.setStart(anchorDom.node, anchorDom.offset);
+    range.collapse(true);
+    domSelection.removeAllRanges();
+    domSelection.addRange(range);
+    domSelection.extend(focusDom.node, focusDom.offset);
+};
+
 export const restoreCaretToDom = (block: HTMLElement, offset: number) => {
     const domSelection = window.getSelection();
     if (!domSelection) return;
@@ -61,6 +79,16 @@ const textLengthBeforeChild = (block: HTMLElement, childOffset: number): number 
         offset += segmentText(block.childNodes[index].textContent ?? '').length;
     }
     return offset;
+};
+
+const domPointForOffset = (
+    root: HTMLElement,
+    blockId: string,
+    wantedOffset: number,
+): {node: Node; offset: number} | null => {
+    const block = root.querySelector<HTMLElement>(`[data-block-id="${CSS.escape(blockId)}"]`);
+    if (!block) return null;
+    return domPointInBlockForOffset(block, wantedOffset);
 };
 
 const domPointInBlockForOffset = (

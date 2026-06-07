@@ -329,6 +329,29 @@ describe('Block rich text example UI', () => {
         expect(domSelectionOffsets(blocks(left)[0])).toEqual({anchor: 1, focus: 3});
     });
 
+    it('bolds the first selected range in a newly-created block with Cmd+B', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'title');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('title'));
+
+        selectCaret(blocks(left)[0], 5);
+        fireEvent.keyDown(blocks(left)[0], {key: 'Enter'});
+        await waitFor(() => expect(blocks(left).map((block) => block.textContent)).toEqual(['title', '']));
+
+        beforeInputText(blocks(left)[1], 'abcd');
+        await waitFor(() => expect(blocks(left)[1].textContent).toBe('abcd'));
+
+        selectRange(blocks(left)[1], 1, 3);
+        fireEvent.keyDown(blocks(left)[1], {key: 'b', metaKey: true});
+
+        await waitFor(() => expect(blocks(left)[1].querySelector('.markBold')?.textContent).toBe('bc'));
+        expect(domSelectionBlock()).toBe(blocks(left)[1]);
+        expect(domSelectionOffsets(blocks(left)[1])).toEqual({anchor: 1, focus: 3});
+    });
+
     it('pastes newlines as multiple synced blocks', async () => {
         const view = render(<App />);
         const {left, right} = panels(view);

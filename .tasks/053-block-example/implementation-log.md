@@ -105,3 +105,10 @@
   - `npm exec vitest -- examples/block-rich-text/src/App.test.tsx examples/block-rich-text/src/blockCommands.test.ts` passed with 21 tests.
   - `../../node_modules/.bin/tsc -p tsconfig.json --noEmit` passed from `examples/block-rich-text`; the shell printed `Error connecting to agent: Operation not permitted`, but the command exited `0`.
   - `../react-crdt/node_modules/.bin/vite build` passed from `examples/block-rich-text`.
+- User reported that selecting text and clicking Bold collapsed the caret to the start of the line. Added a Testing Library regression that failed with DOM selection offsets `{anchor: 0, focus: 0}` after Bold instead of the selected `{anchor: 1, focus: 3}` range.
+- Implemented a one-shot local range restore for command results that return a range selection, currently used by toolbar mark commands. It is separate from the one-shot caret restore and is guarded by the editor root still containing `document.activeElement`, so it does not become a general range-replay/focus-stealing effect.
+- Reintroduced `restoreSelectionToDom` only for this local pending-range restore path.
+- Verification passed after the Bold range restore fix:
+  - `npm exec vitest -- examples/block-rich-text/src/App.test.tsx examples/block-rich-text/src/blockCommands.test.ts` passed with 22 tests.
+  - `../../node_modules/.bin/tsc -p tsconfig.json --noEmit` passed from `examples/block-rich-text`; the shell printed `Error connecting to agent: Operation not permitted`, but the command exited `0`.
+  - `../react-crdt/node_modules/.bin/vite build` passed from `examples/block-rich-text`.

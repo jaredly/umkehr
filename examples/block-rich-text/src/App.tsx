@@ -19,7 +19,7 @@ import {
     type EditorId,
     type Replica,
 } from './blockEditorRuntime';
-import {readSelectionFromDom, restoreCaretToDom} from './domSelection';
+import {readSelectionFromDom, restoreCaretToDom, restoreSelectionToDom} from './domSelection';
 import {useBlockReorder, type DropTarget} from './useBlockReorder';
 
 export function App() {
@@ -94,6 +94,7 @@ function BlockEditor({
 }) {
     const rootRef = useRef<HTMLDivElement>(null);
     const pendingCaretRestoreBlockIdRef = useRef<string | null>(null);
+    const pendingSelectionRestoreRef = useRef<Replica['selection'] | null>(null);
     const blocks = materializeFormattedBlocks(replica.state);
     const blockIds = rootBlockIds(replica.state);
     const {draggingId, dropTarget, registerRow, startDrag} = useBlockReorder({
@@ -131,8 +132,10 @@ function BlockEditor({
                 const result = command(current, selection);
                 if (result.selection.type === 'caret') {
                     pendingCaretRestoreBlockIdRef.current = result.selection.point.blockId;
+                    pendingSelectionRestoreRef.current = null;
                 } else {
                     pendingCaretRestoreBlockIdRef.current = null;
+                    pendingSelectionRestoreRef.current = result.selection;
                 }
                 onDebug(
                     `${label} end next=${formatSelection(result.selection)} ops=${
@@ -144,6 +147,15 @@ function BlockEditor({
         },
         [liveSelection, onCommand, onDebug],
     );
+
+    useLayoutEffect(() => {
+        const root = rootRef.current;
+        const selection = pendingSelectionRestoreRef.current;
+        if (!root || !selection) return;
+        if (document.activeElement === null || !root.contains(document.activeElement)) return;
+        pendingSelectionRestoreRef.current = null;
+        restoreSelectionToDom(root, selection);
+    }, [replica.state, replica.selection]);
 
     return (
         <article className={replica.online ? 'editorPanel' : 'editorPanel offline'}>
