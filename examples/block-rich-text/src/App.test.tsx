@@ -313,6 +313,22 @@ describe('Block rich text example UI', () => {
         expect(domSelectionBlock()).toBe(blocks(right)[0]);
     });
 
+    it('keeps the selected range after clicking Bold', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abcd');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abcd'));
+
+        selectRange(blocks(left)[0], 1, 3);
+        fireEvent.click(within(left).getByRole('button', {name: 'B'}));
+
+        await waitFor(() => expect(blocks(left)[0].querySelector('.markBold')?.textContent).toBe('bc'));
+        expect(domSelectionBlock()).toBe(blocks(left)[0]);
+        expect(domSelectionOffsets(blocks(left)[0])).toEqual({anchor: 1, focus: 3});
+    });
+
     it('pastes newlines as multiple synced blocks', async () => {
         const view = render(<App />);
         const {left, right} = panels(view);
@@ -342,13 +358,24 @@ const domSelectionBlock = (): HTMLElement | null => {
     return element?.closest<HTMLElement>('[data-block-id]') ?? null;
 };
 
+const domSelectionOffsets = (block: HTMLElement): {anchor: number; focus: number} => {
+    const selection = window.getSelection()!;
+    return {
+        anchor: domPointOffset(block, selection.anchorNode, selection.anchorOffset),
+        focus: domPointOffset(block, selection.focusNode, selection.focusOffset),
+    };
+};
+
 const domCaretOffset = (block: HTMLElement): number => {
     const selection = window.getSelection()!;
-    const node = selection.focusNode;
+    return domPointOffset(block, selection.focusNode, selection.focusOffset);
+};
+
+const domPointOffset = (block: HTMLElement, node: Node | null, nodeOffset: number): number => {
     if (!node || !block.contains(node)) return -1;
     if (node === block) {
         let offset = 0;
-        for (let index = 0; index < selection.focusOffset && index < block.childNodes.length; index++) {
+        for (let index = 0; index < nodeOffset && index < block.childNodes.length; index++) {
             offset += block.childNodes[index].textContent?.length ?? 0;
         }
         return offset;
@@ -357,7 +384,7 @@ const domCaretOffset = (block: HTMLElement): number => {
     const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
     let current: Node | null;
     while ((current = walker.nextNode())) {
-        if (current === node) return offset + selection.focusOffset;
+        if (current === node) return offset + nodeOffset;
         offset += current.textContent?.length ?? 0;
     }
     return -1;
