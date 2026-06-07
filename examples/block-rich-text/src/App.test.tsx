@@ -289,9 +289,7 @@ describe('Block rich text example UI', () => {
         selectRange(blocks(left)[0], 1, 3);
         expect(domSelectionBlock()).toBe(blocks(left)[0]);
 
-        fireEvent.pointerDown(blocks(right)[0]);
-        setDomRange(blocks(right)[0], 1, 3);
-        fireEvent.mouseUp(blocks(right)[0]);
+        selectRange(blocks(right)[0], 1, 3);
         beforeInputText(blocks(right)[0], 'X');
 
         await waitFor(() => expect(blocks(right)[0].textContent).toBe('aXd'));

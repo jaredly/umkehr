@@ -88,3 +88,13 @@
   - `npm exec vitest -- examples/block-rich-text/src/App.test.tsx examples/block-rich-text/src/blockCommands.test.ts` passed with 20 tests.
   - `../../node_modules/.bin/tsc -p tsconfig.json --noEmit` passed from `examples/block-rich-text`; the shell printed `Error connecting to agent: Operation not permitted`, but the command exited `0`.
   - `../react-crdt/node_modules/.bin/vite build` passed from `examples/block-rich-text`.
+- User asked whether any focus stealing is needed. Removed editor-level range restoration entirely; stored range selections are still captured for commands, but the app no longer replays them into `window.getSelection()`.
+- Removed the unused `restoreSelectionToDom` helper as well, so there is no remaining range-replay API in the example code.
+- Removed the active-editor tracking that had been added to guard range restoration, since there is no longer any range restoration to guard.
+- Found the remaining selection disruption: selection-only state updates caused `EditableBlock` to call `replaceChildren(...)` even when text/marks were unchanged, destroying the browser's live range. Added a rendered-runs signature so the editable DOM is only rewritten when materialized text or marks actually change.
+- Kept only the block-local collapsed-caret restore after a real content rewrite. This is still needed for typed/deleted text after the app replaces the active block's DOM.
+- Tightened that caret restore so it only runs when the same editable element is `document.activeElement`; stale active-block refs from another editor can no longer restore a peer editor's caret during remote updates.
+- Verification passed after removing range focus restoration:
+  - `npm exec vitest -- examples/block-rich-text/src/App.test.tsx examples/block-rich-text/src/blockCommands.test.ts` passed with 20 tests.
+  - `../../node_modules/.bin/tsc -p tsconfig.json --noEmit` passed from `examples/block-rich-text`; the shell printed `Error connecting to agent: Operation not permitted`, but the command exited `0`.
+  - `../react-crdt/node_modules/.bin/vite build` passed from `examples/block-rich-text`.

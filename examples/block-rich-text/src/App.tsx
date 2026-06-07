@@ -19,13 +19,12 @@ import {
     type EditorId,
     type Replica,
 } from './blockEditorRuntime';
-import {readSelectionFromDom, restoreCaretToDom, restoreSelectionToDom} from './domSelection';
+import {readSelectionFromDom, restoreCaretToDom} from './domSelection';
 import {useBlockReorder, type DropTarget} from './useBlockReorder';
 
 export function App() {
     const [demo, setDemo] = useState<DemoState>(() => createDemoState());
     const [logs, setLogs] = useState<Record<EditorId, string[]>>({left: [], right: []});
-    const [activeEditorId, setActiveEditorId] = useState<EditorId | null>(null);
 
     const runCommand = useCallback((editorId: EditorId, command: (replica: Replica) => CommandResult) => {
         setDemo((current) => {
@@ -59,22 +58,18 @@ export function App() {
             <section className="editorGrid" aria-label="Synced block editors">
                 <BlockEditor
                     replica={demo.left}
-                    active={activeEditorId === 'left'}
                     logs={logs.left}
                     onCommand={(command) => runCommand('left', command)}
                     onDebug={(message) => appendLog('left', message)}
                     onClearDebug={() => setLogs((current) => ({...current, left: []}))}
-                    onActive={() => setActiveEditorId('left')}
                     onToggleOnline={() => setDemo((current) => toggleOnline(current, 'left'))}
                 />
                 <BlockEditor
                     replica={demo.right}
-                    active={activeEditorId === 'right'}
                     logs={logs.right}
                     onCommand={(command) => runCommand('right', command)}
                     onDebug={(message) => appendLog('right', message)}
                     onClearDebug={() => setLogs((current) => ({...current, right: []}))}
-                    onActive={() => setActiveEditorId('right')}
                     onToggleOnline={() => setDemo((current) => toggleOnline(current, 'right'))}
                 />
             </section>
@@ -84,21 +79,17 @@ export function App() {
 
 function BlockEditor({
     replica,
-    active,
     logs,
     onCommand,
     onDebug,
     onClearDebug,
-    onActive,
     onToggleOnline,
 }: {
     replica: Replica;
-    active: boolean;
     logs: string[];
     onCommand(command: (replica: Replica) => CommandResult): void;
     onDebug(message: string): void;
     onClearDebug(): void;
-    onActive(): void;
     onToggleOnline(): void;
 }) {
     const rootRef = useRef<HTMLDivElement>(null);
@@ -126,17 +117,8 @@ function BlockEditor({
     }, []);
 
     const markActiveBlock = useCallback((blockId: string) => {
-        onActive();
         activeBlockIdRef.current = blockId;
-    }, [onActive]);
-
-    useLayoutEffect(() => {
-        const root = rootRef.current;
-        if (replica.selection.type === 'caret') return;
-        if (!active) return;
-        if (!root) return;
-        restoreSelectionToDom(root, replica.selection);
-    }, [active, replica.state, replica.selection]);
+    }, []);
 
     const runEditCommand = useCallback(
         (
@@ -189,8 +171,6 @@ function BlockEditor({
             <div
                 ref={rootRef}
                 className="blockList"
-                onFocusCapture={onActive}
-                onPointerDownCapture={onActive}
                 onMouseUp={captureSelection}
                 onKeyUp={captureSelection}
             >
@@ -275,6 +255,7 @@ function EditableBlock({
 }) {
     const handledBeforeInputRef = useRef(false);
     const editableRef = useRef<HTMLDivElement>(null);
+    const renderedRunsRef = useRef('');
 
     useLayoutEffect(() => {
         const element = editableRef.current;
@@ -297,6 +278,9 @@ function EditableBlock({
     useLayoutEffect(() => {
         const element = editableRef.current;
         if (!element) return;
+        const renderedRuns = serializeRuns(block.runs);
+        if (renderedRunsRef.current === renderedRuns) return;
+        renderedRunsRef.current = renderedRuns;
         const children = block.runs.map((run) => {
             const span = document.createElement('span');
             span.textContent = run.text;
@@ -306,7 +290,11 @@ function EditableBlock({
         });
         element.replaceChildren(...children);
         const point = selection.type === 'caret' ? selection.point : null;
-        if (point?.blockId === block.id && activeBlockIdRef.current === block.id) {
+        if (
+            point?.blockId === block.id &&
+            activeBlockIdRef.current === block.id &&
+            document.activeElement === element
+        ) {
             restoreCaretToDom(element, point.offset);
         }
     }, [activeBlockIdRef, block.id, block.runs, selection]);
@@ -384,6 +372,9 @@ function EditableBlock({
 }
 
 const isJsdom = () => navigator.userAgent.includes('jsdom');
+
+const serializeRuns = (runs: FormattedBlock['runs']) =>
+    JSON.stringify(runs.map((run) => [run.text, run.marks.bold, run.marks.italic]));
 
 function DebugLog({logs, onClear}: {logs: string[]; onClear(): void}) {
     return (
