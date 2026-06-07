@@ -5,9 +5,10 @@ const [_, __, ...name] = process.argv;
 
 const now = new Date();
 
-const minutesSince2026 = (now.getTime() - new Date(2026, 0, 1).getTime()) / 60000;
+const minutesSince2026 = ((now.getTime() - new Date(2026, 0, 1).getTime()) / 60000) | 0;
 
-const theoreticalMax = (new Date(2100, 0, 1).getTime() - new Date(2026, 0, 1).getTime()) / 60000;
+const theoreticalMax =
+    ((new Date(2100, 0, 1).getTime() - new Date(2026, 0, 1).getTime()) / 60000) | 0;
 
 const maxLength = theoreticalMax.toString(36).length;
 
