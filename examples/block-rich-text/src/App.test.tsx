@@ -28,6 +28,31 @@ const panels = (view: ReturnType<typeof render>) => {
 
 const blocks = (panel: HTMLElement) => within(panel).getAllByRole('textbox', {name: 'Block text'});
 
+const blockTexts = (panel: HTMLElement): string[] =>
+    blocks(panel).map((block) => block.textContent ?? '');
+
+const waitForBlockTexts = async (panel: HTMLElement, expected: string[]) => {
+    await waitFor(
+        () => {
+            const actual = blockTexts(panel);
+            if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+                throw new Error(
+                    `expected block texts ${JSON.stringify(expected)}, received ${JSON.stringify(actual)}`,
+                );
+            }
+        },
+        {onTimeout: (error) => error},
+    );
+};
+
+const pasteText = (block: HTMLElement, text: string) => {
+    fireEvent.paste(block, {
+        clipboardData: {
+            getData: () => text,
+        },
+    });
+};
+
 const selectCaret = (block: HTMLElement, offset = 0) => {
     block.focus();
     setDomCaret(block, offset);
@@ -323,6 +348,42 @@ describe('Block rich text example UI', () => {
         await waitFor(() => expect(blocks(left).map((block) => block.textContent)).toEqual(['ab', 'cd']));
         expect(domSelectionBlock()).toBe(blocks(left)[1]);
         expect(domCaretOffset(blocks(left)[1])).toBe(0);
+    });
+
+    it('moves ArrowLeft from the start of a block to the previous block end', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        pasteText(blocks(left)[0], 'one\ntwo');
+        await waitForBlockTexts(left, ['one', 'two']);
+
+        selectCaret(blocks(left)[1], 0);
+        fireEvent.keyDown(blocks(left)[1], {key: 'ArrowLeft'});
+
+        expect(domCaretPosition(left)).toEqual({blockIndex: 0, offset: 3});
+
+        beforeInputText(blocks(left)[0], 'X');
+        await waitForBlockTexts(left, ['oneX', 'two']);
+        expect(blockTexts(right)).toEqual(['oneX', 'two']);
+    });
+
+    it('moves ArrowRight from the end of a block to the next block start', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        pasteText(blocks(left)[0], 'one\ntwo');
+        await waitForBlockTexts(left, ['one', 'two']);
+
+        selectCaret(blocks(left)[0], 3);
+        fireEvent.keyDown(blocks(left)[0], {key: 'ArrowRight'});
+
+        expect(domCaretPosition(left)).toEqual({blockIndex: 1, offset: 0});
+
+        beforeInputText(blocks(left)[1], 'X');
+        await waitForBlockTexts(left, ['one', 'Xtwo']);
+        expect(blockTexts(right)).toEqual(['one', 'Xtwo']);
     });
 
     it('restores the caret one position left after ordinary Backspace', async () => {
@@ -647,6 +708,16 @@ const domSelectionOffsets = (block: HTMLElement): {anchor: number; focus: number
 const domCaretOffset = (block: HTMLElement): number => {
     const selection = window.getSelection()!;
     return domPointOffset(block, selection.focusNode, selection.focusOffset);
+};
+
+const domCaretPosition = (panel: HTMLElement): {blockIndex: number; offset: number} => {
+    const selectedBlock = domSelectionBlock();
+    const editorBlocks = blocks(panel);
+    const blockIndex = selectedBlock ? editorBlocks.indexOf(selectedBlock) : -1;
+    return {
+        blockIndex,
+        offset: blockIndex >= 0 ? domCaretOffset(editorBlocks[blockIndex]) : -1,
+    };
 };
 
 const domPointOffset = (block: HTMLElement, node: Node | null, nodeOffset: number): number => {

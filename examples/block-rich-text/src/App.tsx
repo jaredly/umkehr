@@ -21,7 +21,13 @@ import {
     type Replica,
 } from './blockEditorRuntime';
 import {readSelectionFromDom, restoreCaretToDom, restoreSelectionToDom} from './domSelection';
-import {firstPointForSelection, segmentText, type EditorSelection} from './selectionModel';
+import {
+    caret,
+    firstPointForSelection,
+    pointTextLength,
+    segmentText,
+    type EditorSelection,
+} from './selectionModel';
 import {
     deleteBackwardEverywhere,
     deleteForwardEverywhere,
@@ -297,10 +303,18 @@ function BlockEditor({
                 onMouseUp={captureSelection}
                 onKeyUp={captureSelection}
             >
-                {blocks.map((block) => (
+                {blocks.map((block, index) => (
                     <EditableBlock
                         key={block.id}
                         block={block}
+                        previousBlockId={blocks[index - 1]?.id ?? null}
+                        previousBlockLength={
+                            blocks[index - 1]
+                                ? pointTextLength(replica.state, blocks[index - 1].id)
+                                : 0
+                        }
+                        blockLength={pointTextLength(replica.state, block.id)}
+                        nextBlockId={blocks[index + 1]?.id ?? null}
                         selection={primaryResolvedSelection}
                         decorations={decorationsByBlock.get(block.id) ?? null}
                         pendingCaretRestoreBlockIdRef={pendingCaretRestoreBlockIdRef}
@@ -375,6 +389,18 @@ function BlockEditor({
                                 ),
                             )
                         }
+                        onMoveCaret={(selection) => {
+                            scheduleSelectionRestore(selection);
+                            onCommand((current) => ({
+                                state: current.state,
+                                ops: [],
+                                selection: replacePrimarySelection(
+                                    current.state,
+                                    current.selection,
+                                    selection,
+                                ),
+                            }));
+                        }}
                     />
                 ))}
             </div>
@@ -402,6 +428,10 @@ function Toolbar({onBold, onItalic}: {onBold(): void; onItalic(): void}) {
 
 function EditableBlock({
     block,
+    previousBlockId,
+    previousBlockLength,
+    blockLength,
+    nextBlockId,
     selection,
     decorations,
     pendingCaretRestoreBlockIdRef,
@@ -416,8 +446,13 @@ function EditableBlock({
     onToggleBold,
     onToggleItalic,
     onPasteText,
+    onMoveCaret,
 }: {
     block: FormattedBlock;
+    previousBlockId: string | null;
+    previousBlockLength: number;
+    blockLength: number;
+    nextBlockId: string | null;
     selection: EditorSelection;
     decorations: BlockSelectionDecorations | null;
     pendingCaretRestoreBlockIdRef: MutableRefObject<string | null>;
@@ -432,6 +467,7 @@ function EditableBlock({
     onToggleBold(): void;
     onToggleItalic(): void;
     onPasteText(text: string): void;
+    onMoveCaret(selection: EditorSelection): void;
 }) {
     const handledBeforeInputRef = useRef(false);
     const editableRef = useRef<HTMLDivElement>(null);
@@ -466,10 +502,11 @@ function EditableBlock({
         const element = editableRef.current;
         if (!element) return;
         const renderedRuns = serializeRuns(block.runs, decorations);
-        if (renderedRunsRef.current === renderedRuns) return;
-        renderedRunsRef.current = renderedRuns;
-        const children = renderRunNodes(block.runs, decorations);
-        element.replaceChildren(...children);
+        if (renderedRunsRef.current !== renderedRuns) {
+            renderedRunsRef.current = renderedRuns;
+            const children = renderRunNodes(block.runs, decorations);
+            element.replaceChildren(...children);
+        }
         const point = selection.type === 'caret' ? selection.point : null;
         if (point?.blockId === block.id && pendingCaretRestoreBlockIdRef.current === block.id) {
             pendingCaretRestoreBlockIdRef.current = null;
@@ -548,6 +585,36 @@ function EditableBlock({
                     } else if (event.key === 'Delete') {
                         event.preventDefault();
                         onDeleteForward();
+                    } else if (
+                        event.key === 'ArrowLeft' &&
+                        !event.shiftKey &&
+                        !event.altKey &&
+                        !modifierPressed &&
+                        previousBlockId
+                    ) {
+                        const currentSelection = readSelectionFromDom(event.currentTarget);
+                        if (
+                            currentSelection?.type === 'caret' &&
+                            currentSelection.point.offset === 0
+                        ) {
+                            event.preventDefault();
+                            onMoveCaret(caret(previousBlockId, previousBlockLength));
+                        }
+                    } else if (
+                        event.key === 'ArrowRight' &&
+                        !event.shiftKey &&
+                        !event.altKey &&
+                        !modifierPressed &&
+                        nextBlockId
+                    ) {
+                        const currentSelection = readSelectionFromDom(event.currentTarget);
+                        if (
+                            currentSelection?.type === 'caret' &&
+                            currentSelection.point.offset === blockLength
+                        ) {
+                            event.preventDefault();
+                            onMoveCaret(caret(nextBlockId, 0));
+                        }
                     }
                 }}
                 onPaste={(event) => {
