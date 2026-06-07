@@ -149,6 +149,16 @@ const beforeInputDeleteBackward = (block: HTMLElement) =>
         }),
     );
 
+const beforeInputDeleteForward = (block: HTMLElement) =>
+    fireEvent(
+        block,
+        new InputEvent('beforeinput', {
+            bubbles: true,
+            cancelable: true,
+            inputType: 'deleteContentForward',
+        }),
+    );
+
 const retainedCaretOffset = (block: HTMLElement): number | null => {
     let offset = 0;
     for (const node of block.childNodes) {
@@ -247,6 +257,22 @@ describe('Block rich text example UI', () => {
         await waitFor(() => expect(blocks(left)[0].textContent).toBe('ac'));
         expect(blocks(right)[0].textContent).toBe('ac');
         expect(domCaretOffset(blocks(left)[0])).toBe(1);
+    });
+
+    it('handles native beforeinput as the production forward deletion path', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abc');
+        await waitFor(() => expect(blocks(right)[0].textContent).toBe('abc'));
+
+        selectCaret(blocks(left)[0], 2);
+        expect(beforeInputDeleteForward(blocks(left)[0])).toBe(false);
+
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('ab'));
+        expect(blocks(right)[0].textContent).toBe('ab');
+        expect(domCaretOffset(blocks(left)[0])).toBe(2);
     });
 
     it('queues offline edits and flushes them when the editor returns online', async () => {
@@ -373,6 +399,22 @@ describe('Block rich text example UI', () => {
 
         await waitFor(() => expect(blocks(left)[0].textContent).toBe('abX'));
         expect(blocks(right)[0].textContent).toBe('abX');
+    });
+
+    it('handles the Delete key without native contenteditable mutation', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abc');
+        await waitFor(() => expect(blocks(right)[0].textContent).toBe('abc'));
+
+        selectCaret(blocks(left)[0], 2);
+        fireEvent.keyDown(blocks(left)[0], {key: 'Delete'});
+
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('ab'));
+        expect(blocks(right)[0].textContent).toBe('ab');
+        expect(domCaretOffset(blocks(left)[0])).toBe(2);
     });
 
     it('does not let an inactive editor restore its stored range over the active editor', async () => {

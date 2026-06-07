@@ -10,6 +10,7 @@ import {initialState} from 'umkehr/block-crdt/initialState';
 import type {CachedState} from 'umkehr/block-crdt/types';
 import {
     deleteBackward,
+    deleteForward,
     insertText,
     moveBlock,
     pastePlainText,
@@ -71,6 +72,18 @@ describe('block rich text commands', () => {
         expectCache(result.state);
     });
 
+    it('calculates middle Delete deletion without moving the caret', () => {
+        const context = ctx();
+        let result = insertText(init(), caret(onlyBlock(init()), 0), 'abcd', context);
+        const blockId = onlyBlock(result.state);
+
+        result = deleteForward(result.state, caret(blockId, 2), context);
+
+        expect(lines(result.state)).toEqual(['abd']);
+        expect(result.selection).toEqual(caret(blockId, 2));
+        expectCache(result.state);
+    });
+
     it('splits at start, middle, and end', () => {
         const context = ctx();
         let result = insertText(init(), caret(onlyBlock(init()), 0), 'abcdef', context);
@@ -98,6 +111,19 @@ describe('block rich text commands', () => {
         result = deleteBackward(result.state, caret(second, 0), context);
         expect(lines(result.state)).toEqual(['onetwo']);
         expect(result.selection).toEqual(caret(rootBlockIds(result.state)[0], 3));
+        expectCache(result.state);
+    });
+
+    it('joins with the next block on Delete at block end', () => {
+        const context = ctx();
+        let result = pastePlainText(init(), caret(onlyBlock(init()), 0), 'one\ntwo', context);
+        expect(lines(result.state)).toEqual(['one', 'two']);
+        const first = rootBlockIds(result.state)[0];
+
+        result = deleteForward(result.state, caret(first, 3), context);
+
+        expect(lines(result.state)).toEqual(['onetwo']);
+        expect(result.selection).toEqual(caret(first, 3));
         expectCache(result.state);
     });
 

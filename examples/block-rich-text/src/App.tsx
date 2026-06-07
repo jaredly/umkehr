@@ -24,6 +24,7 @@ import {readSelectionFromDom, restoreCaretToDom, restoreSelectionToDom} from './
 import {firstPointForSelection, segmentText, type EditorSelection} from './selectionModel';
 import {
     deleteBackwardEverywhere,
+    deleteForwardEverywhere,
     insertTextEverywhere,
     pastePlainTextEverywhere,
     splitBlockEverywhere,
@@ -326,6 +327,15 @@ function BlockEditor({
                                 ),
                             )
                         }
+                        onDeleteForward={() =>
+                            runEditCommand('delete', (current, selection) =>
+                                deleteForwardEverywhere(
+                                    current.state,
+                                    selection,
+                                    makeCommandContext(current),
+                                ),
+                            )
+                        }
                         onSplit={() =>
                             runEditCommand('split', (current, selection) =>
                                 splitBlockEverywhere(
@@ -401,6 +411,7 @@ function EditableBlock({
     onStartDrag,
     onInsertText,
     onDeleteBackward,
+    onDeleteForward,
     onSplit,
     onToggleBold,
     onToggleItalic,
@@ -416,6 +427,7 @@ function EditableBlock({
     onStartDrag: ReturnType<typeof useBlockReorder>['startDrag'];
     onInsertText(text: string): void;
     onDeleteBackward(): void;
+    onDeleteForward(): void;
     onSplit(): void;
     onToggleBold(): void;
     onToggleItalic(): void;
@@ -439,12 +451,16 @@ function EditableBlock({
                 event.preventDefault();
                 handledBeforeInputRef.current = true;
                 onDeleteBackward();
+            } else if (event.inputType === 'deleteContentForward') {
+                event.preventDefault();
+                handledBeforeInputRef.current = true;
+                onDeleteForward();
             }
         };
 
         element.addEventListener('beforeinput', onBeforeInput);
         return () => element.removeEventListener('beforeinput', onBeforeInput);
-    }, [onDeleteBackward, onInsertText]);
+    }, [onDeleteBackward, onDeleteForward, onInsertText]);
 
     useLayoutEffect(() => {
         const element = editableRef.current;
@@ -529,6 +545,9 @@ function EditableBlock({
                     } else if (event.key === 'Backspace') {
                         event.preventDefault();
                         onDeleteBackward();
+                    } else if (event.key === 'Delete') {
+                        event.preventDefault();
+                        onDeleteForward();
                     }
                 }}
                 onPaste={(event) => {

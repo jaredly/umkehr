@@ -86,6 +86,27 @@ export const deleteBackward = (
     return joinWithPrevious(state, point.blockId, context);
 };
 
+export const deleteForward = (
+    state: CachedState,
+    selection: EditorSelection,
+    context: CommandContext,
+): CommandResult => {
+    if (!isCollapsed(selection)) {
+        const deleted = deleteSelection(state, selection);
+        return {state: deleted.state, ops: deleted.ops, selection: caret(deleted.point.blockId, deleted.point.offset)};
+    }
+
+    const point = focusPoint(selection);
+    const charId = orderedCharIdsForBlock(state, point.blockId, {visibleOnly: true})[point.offset];
+    if (charId) {
+        const op: Op = {type: 'char:delete', id: state.state.chars[charId].id};
+        const next = applyMany(state, [op]);
+        return {state: next, ops: [op], selection: caret(point.blockId, point.offset)};
+    }
+
+    return joinWithNext(state, point.blockId, context);
+};
+
 export const splitBlock = (
     state: CachedState,
     selection: EditorSelection,
@@ -233,6 +254,30 @@ export const joinWithPrevious = (
     );
     const next = applyMany(state, ops);
     return {state: next, ops, selection: caret(previousBlockId, previousLength)};
+};
+
+export const joinWithNext = (
+    state: CachedState,
+    blockId: string,
+    context: CommandContext,
+): CommandResult => {
+    const blocks = rootBlockIds(state);
+    const index = blocks.indexOf(blockId);
+    const nextBlockId = blocks[index + 1];
+    if (index < 0 || !nextBlockId) {
+        return {state, ops: [], selection: caret(blockId, pointTextLength(state, blockId))};
+    }
+
+    const currentLength = pointTextLength(state, blockId);
+    const ops = join(
+        state,
+        parseLamportString(blockId),
+        parseLamportString(nextBlockId),
+        context.nextTs(),
+        context.actor,
+    );
+    const next = applyMany(state, ops);
+    return {state: next, ops, selection: caret(blockId, currentLength)};
 };
 
 const insertTextAtPoint = (

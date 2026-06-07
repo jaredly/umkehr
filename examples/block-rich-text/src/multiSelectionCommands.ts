@@ -2,6 +2,7 @@ import type {CachedState} from 'umkehr/block-crdt/types';
 import type {Op} from 'umkehr/block-crdt';
 import {
     deleteBackward,
+    deleteForward,
     insertText,
     pastePlainText,
     splitBlock,
@@ -51,6 +52,15 @@ export const deleteBackwardEverywhere = (
 ): MultiCommandResult =>
     runReplacingCommand(state, selection, (working, entry) =>
         deleteBackward(working, resolveSelection(working, entry.selection), context),
+    );
+
+export const deleteForwardEverywhere = (
+    state: CachedState,
+    selection: RetainedSelectionSet,
+    context: CommandContext,
+): MultiCommandResult =>
+    runReplacingCommand(state, selection, (working, entry) =>
+        deleteForward(working, resolveSelection(working, entry.selection), context),
     );
 
 export const splitBlockEverywhere = (
