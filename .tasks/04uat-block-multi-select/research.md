@@ -323,12 +323,22 @@ JSDOM does not provide reliable layout geometry, so continue asserting with `dat
 ## Open Questions
 
 - Should multi-select additions use `Cmd` only, or should `Ctrl` be treated equivalently for Windows/Linux? Recommendation: support both with `event.metaKey || event.ctrlKey`.
+    - sure
 - Is triple-click word matching case-sensitive? Recommendation: exact case-sensitive match for the first version.
+    - sure
 - What counts as a word? Recommendation: use `Intl.Segmenter` word segmentation and require `isWordLike`.
+    - sure
 - If selected ranges overlap, should they be merged, or should later-added ranges win? Recommendation: merge overlapping ranges for destructive operations.
+    - merge
 - For typing into overlapping ranges, should inserted text appear once per merged range or once per original range? Recommendation: once per merged range.
+    - once per merged range
 - Should `Cmd+B` and `Cmd+I` apply to all selected ranges, or remain primary-selection only in this task?
+    - all ranges
 - After adding a cursor/range, should the newly-added entry always become primary? Recommendation: yes.
+    - yes
 - When triple-click selects all occurrences, should the clicked occurrence become primary even if it is not the first occurrence in document order? Recommendation: yes.
+    - yes
 - Should occurrence search include formatted text across mark-run boundaries? Recommendation: yes, use block plain text from the materialized runs or `blockContents`.
+    - yes
 - Should occurrence search include archived/joined blocks? Recommendation: no, visible blocks only.
+    - no

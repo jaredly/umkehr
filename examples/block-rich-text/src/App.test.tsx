@@ -40,6 +40,24 @@ const selectRange = (block: HTMLElement, start: number, end: number) => {
     fireEvent.mouseUp(block);
 };
 
+const addCaret = (block: HTMLElement, offset = 0) => {
+    block.focus();
+    setDomCaret(block, offset);
+    fireEvent.mouseUp(block, {metaKey: true});
+};
+
+const addRange = (block: HTMLElement, start: number, end: number) => {
+    block.focus();
+    setDomRange(block, start, end);
+    fireEvent.mouseUp(block, {metaKey: true});
+};
+
+const tripleClickRange = (block: HTMLElement, start: number, end: number) => {
+    block.focus();
+    setDomRange(block, start, end);
+    fireEvent.mouseUp(block, {detail: 3});
+};
+
 const setDomCaret = (block: HTMLElement, offset = 0) => {
     const selection = window.getSelection()!;
     const range = document.createRange();
@@ -121,6 +139,16 @@ const beforeInputText = (block: HTMLElement, text: string) => {
     }
 };
 
+const beforeInputDeleteBackward = (block: HTMLElement) =>
+    fireEvent(
+        block,
+        new InputEvent('beforeinput', {
+            bubbles: true,
+            cancelable: true,
+            inputType: 'deleteContentBackward',
+        }),
+    );
+
 const retainedCaretOffset = (block: HTMLElement): number | null => {
     let offset = 0;
     for (const node of block.childNodes) {
@@ -133,6 +161,21 @@ const retainedCaretOffset = (block: HTMLElement): number | null => {
         offset += node.textContent?.length ?? 0;
     }
     return null;
+};
+
+const retainedCaretOffsets = (block: HTMLElement): number[] => {
+    const offsets: number[] = [];
+    let offset = 0;
+    for (const node of block.childNodes) {
+        if (
+            node.nodeType === Node.ELEMENT_NODE &&
+            (node as HTMLElement).dataset.retainedSelection === 'caret'
+        ) {
+            offsets.push(offset);
+        }
+        offset += node.textContent?.length ?? 0;
+    }
+    return offsets;
 };
 
 const retainedHighlightText = (block: HTMLElement): string =>
@@ -188,6 +231,22 @@ describe('Block rich text example UI', () => {
 
         await waitFor(() => expect(blocks(left)[0].textContent).toBe('z'));
         expect(blocks(right)[0].textContent).toBe('z');
+    });
+
+    it('handles native beforeinput as the production deletion path', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abc');
+        await waitFor(() => expect(blocks(right)[0].textContent).toBe('abc'));
+
+        selectCaret(blocks(left)[0], 2);
+        expect(beforeInputDeleteBackward(blocks(left)[0])).toBe(false);
+
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('ac'));
+        expect(blocks(right)[0].textContent).toBe('ac');
+        expect(domCaretOffset(blocks(left)[0])).toBe(1);
     });
 
     it('queues offline edits and flushes them when the editor returns online', async () => {
@@ -451,6 +510,75 @@ describe('Block rich text example UI', () => {
 
         await waitFor(() => expect(blocks(left).map((block) => block.textContent)).toEqual(['one', 'two']));
         expect(blocks(right).map((block) => block.textContent)).toEqual(['one', 'two']);
+    });
+
+    it('adds a second cursor with Cmd-click and types at both cursors', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abcd');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abcd'));
+
+        selectCaret(blocks(left)[0], 1);
+        addCaret(blocks(left)[0], 3);
+        expect(retainedCaretOffsets(blocks(left)[0])).toEqual([1]);
+
+        beforeInputText(blocks(left)[0], 'X');
+
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('aXbcXd'));
+        expect(blocks(right)[0].textContent).toBe('aXbcXd');
+    });
+
+    it('adds a range with Cmd-drag and shows it when inactive', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abcd');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abcd'));
+
+        selectCaret(blocks(left)[0], 0);
+        addRange(blocks(left)[0], 1, 3);
+        selectCaret(blocks(right)[0], 0);
+
+        await waitFor(() => expect(retainedHighlightText(blocks(left)[0])).toBe('bc'));
+        expect(retainedCaretOffsets(blocks(left)[0])).toEqual([0]);
+    });
+
+    it('applies Cmd+B to all selected ranges', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abcd');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abcd'));
+
+        selectRange(blocks(left)[0], 0, 1);
+        addRange(blocks(left)[0], 2, 3);
+        fireEvent.keyDown(blocks(left)[0], {key: 'b', metaKey: true});
+
+        await waitFor(() =>
+            expect([...blocks(left)[0].querySelectorAll('.markBold')].map((node) => node.textContent)).toEqual([
+                'a',
+                'c',
+            ]),
+        );
+    });
+
+    it('triple-clicks a word and selects all exact visible occurrences', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'one One one');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('one One one'));
+
+        tripleClickRange(blocks(left)[0], 8, 11);
+        selectCaret(blocks(right)[0], 0);
+
+        await waitFor(() => expect(retainedHighlightText(blocks(left)[0])).toBe('oneone'));
+        expect(childTexts(blocks(left)[0])).toEqual(['one', ' One ', 'one']);
     });
 });
 

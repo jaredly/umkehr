@@ -1,7 +1,7 @@
 import {applyMany, cachedState, type Op} from 'umkehr/block-crdt';
 import {initialState} from 'umkehr/block-crdt/initialState';
 import type {CachedState} from 'umkehr/block-crdt/types';
-import {initialRetainedSelection, type RetainedSelection} from './retainedSelection';
+import {initialRetainedSelectionSet, type RetainedSelectionSet} from './selectionSet';
 
 export type EditorId = 'left' | 'right';
 
@@ -9,7 +9,7 @@ export type Replica = {
     id: EditorId;
     actor: EditorId;
     state: CachedState;
-    selection: RetainedSelection;
+    selection: RetainedSelectionSet;
     online: boolean;
     queue: Op[][];
     clock: number;
@@ -23,7 +23,7 @@ export type DemoState = {
 export type LocalChange = {
     editorId: EditorId;
     state: CachedState;
-    selection: RetainedSelection;
+    selection: RetainedSelectionSet;
     ops: Op[];
 };
 
@@ -82,7 +82,7 @@ const createReplica = (id: EditorId, state: CachedState): Replica => ({
     id,
     actor: id,
     state,
-    selection: initialRetainedSelection(state),
+    selection: initialRetainedSelectionSet(state),
     online: true,
     queue: [],
     clock: 1,

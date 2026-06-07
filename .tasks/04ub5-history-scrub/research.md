@@ -235,8 +235,14 @@ Range input changes should not call command handlers or record history actions.
 ## Open Questions
 
 1. Should selection-only captures be included in "all actions"? Including them improves reproduction of retained-selection bugs but may make the scrubber noisy because mouse/key selection updates are frequent.
+    - no
 2. Should the exported file include only the action list, or also include derived final snapshots for easier human inspection? The action list should remain authoritative either way.
+    - final snapshot would be great
 3. Should import preserve the exported cursor, or always jump to the end of the imported history? For bug reproduction, jumping to the end is likely the default users expect.
+    - jump to the end
 4. Should history include debug log messages? They are not needed for deterministic replay, but they may help diagnose bug reports.
+    - no
 5. Should there be explicit action labels in the history model, such as `insert "a"` or `toggle bold`, for a future visible action list? The scrubber only needs indices, but labels would make exports easier to inspect.
+    - no need
 6. What should happen to unsaved current history on import or reset? A confirmation may be useful later, but the first implementation can keep replacement simple.
+    - `confirm()` is fine
