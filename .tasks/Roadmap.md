@@ -30,6 +30,9 @@ Testing findings
 NEEDS TO TEST:
 - migration definiteily
 
+ID: can you look at task.md and write up a research.md, including any open questions?
+
+
 ok can you write up a plan.md detailing what needs to be done?
 
 Ok I've answered questions inline.

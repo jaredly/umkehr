@@ -1,10 +1,21 @@
+#!/usr/bin/env bun
 import {execSync} from 'child_process';
 import fs from 'fs';
-const [_, __, name] = process.argv;
+const [_, __, ...name] = process.argv;
 
-const count = fs.readdirSync('.tasks/000-archive').length + fs.readdirSync('.tasks').length - 1;
+const now = new Date();
 
-const fullName = `${count.toString().padStart(3, '0')}-${name}`;
+const minutesSince2026 = (now.getTime() - new Date(2026, 0, 1).getTime()) / 60000;
+
+const theoreticalMax = (new Date(2100, 0, 1).getTime() - new Date(2026, 0, 1).getTime()) / 60000;
+
+const maxLength = theoreticalMax.toString(36).length;
+
+const fmt = minutesSince2026.toString(36).padStart(maxLength, '0');
+
+// const fmt = `${(now.getFullYear() - 2000).toString().padStart(2, '0')}${(now.getMonth() + 1).toString().padStart(2, '0')}${now.getDate().toString().padStart(2, '0')}-${now.getHours().toString().padStart(2, '0')}${now.getMinutes().toString().padStart(2, '0')}`;
+
+const fullName = `${fmt}-${name.join('-')}`;
 const dir = `.tasks/${fullName}`;
 fs.mkdirSync(dir);
 execSync(`zed ${dir}/task.md`);
@@ -18,5 +29,5 @@ console.log(
 );
 console.log();
 console.log(
-    `Ok, go ahead and implement, keeping a concise log of your progress in implementation-log.md`,
+    `Ok, go ahead and implement phase by phase, keeping a concise log of your progress in implementation-log.md. Be sure to call out any issues, workarounds or bugs encountered.`,
 );
