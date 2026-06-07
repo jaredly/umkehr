@@ -98,3 +98,10 @@
   - `npm exec vitest -- examples/block-rich-text/src/App.test.tsx examples/block-rich-text/src/blockCommands.test.ts` passed with 20 tests.
   - `../../node_modules/.bin/tsc -p tsconfig.json --noEmit` passed from `examples/block-rich-text`; the shell printed `Error connecting to agent: Operation not permitted`, but the command exited `0`.
   - `../react-crdt/node_modules/.bin/vite build` passed from `examples/block-rich-text`.
+- User reported that splitting a block should place the cursor at the start of the new block. Added a Testing Library regression that failed because DOM selection remained in the old block after Enter.
+- The split command already returned `caret(newBlockId, 0)`; the DOM restore path did not follow command results across block boundaries. Replaced the persistent active-block restore ref with a one-shot pending local caret restore ref set from each local command result.
+- The one-shot restore focuses/restores only the block named by the local command result, then clears itself. This lets Enter move focus to the newly-created block without allowing remote peer updates or stale refs to steal focus later.
+- Verification passed after the split caret fix:
+  - `npm exec vitest -- examples/block-rich-text/src/App.test.tsx examples/block-rich-text/src/blockCommands.test.ts` passed with 21 tests.
+  - `../../node_modules/.bin/tsc -p tsconfig.json --noEmit` passed from `examples/block-rich-text`; the shell printed `Error connecting to agent: Operation not permitted`, but the command exited `0`.
+  - `../react-crdt/node_modules/.bin/vite build` passed from `examples/block-rich-text`.

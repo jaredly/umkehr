@@ -93,7 +93,7 @@ function BlockEditor({
     onToggleOnline(): void;
 }) {
     const rootRef = useRef<HTMLDivElement>(null);
-    const activeBlockIdRef = useRef<string | null>(null);
+    const pendingCaretRestoreBlockIdRef = useRef<string | null>(null);
     const blocks = materializeFormattedBlocks(replica.state);
     const blockIds = rootBlockIds(replica.state);
     const {draggingId, dropTarget, registerRow, startDrag} = useBlockReorder({
@@ -116,10 +116,6 @@ function BlockEditor({
         return (root ? readSelectionFromDom(root) : null) ?? current.selection;
     }, []);
 
-    const markActiveBlock = useCallback((blockId: string) => {
-        activeBlockIdRef.current = blockId;
-    }, []);
-
     const runEditCommand = useCallback(
         (
             label: string,
@@ -133,6 +129,11 @@ function BlockEditor({
                     )} text=${formatReplicaText(current)}`,
                 );
                 const result = command(current, selection);
+                if (result.selection.type === 'caret') {
+                    pendingCaretRestoreBlockIdRef.current = result.selection.point.blockId;
+                } else {
+                    pendingCaretRestoreBlockIdRef.current = null;
+                }
                 onDebug(
                     `${label} end next=${formatSelection(result.selection)} ops=${
                         result.ops.length
@@ -179,7 +180,7 @@ function BlockEditor({
                         key={block.id}
                         block={block}
                         selection={replica.selection}
-                        activeBlockIdRef={activeBlockIdRef}
+                        pendingCaretRestoreBlockIdRef={pendingCaretRestoreBlockIdRef}
                         isDragging={draggingId === block.id}
                         dropTarget={dropTarget?.targetBlockId === block.id ? dropTarget : null}
                         registerRow={registerRow}
@@ -189,7 +190,6 @@ function BlockEditor({
                                 insertText(current.state, selection, text, makeCommandContext(current)),
                             )
                         }
-                        onActive={() => markActiveBlock(block.id)}
                         onDeleteBackward={() =>
                             runEditCommand('backspace', (current, selection) =>
                                 deleteBackward(current.state, selection, makeCommandContext(current)),
@@ -229,26 +229,24 @@ function Toolbar({onBold, onItalic}: {onBold(): void; onItalic(): void}) {
 function EditableBlock({
     block,
     selection,
-    activeBlockIdRef,
+    pendingCaretRestoreBlockIdRef,
     isDragging,
     dropTarget,
     registerRow,
     onStartDrag,
     onInsertText,
-    onActive,
     onDeleteBackward,
     onSplit,
     onPasteText,
 }: {
     block: FormattedBlock;
     selection: Replica['selection'];
-    activeBlockIdRef: MutableRefObject<string | null>;
+    pendingCaretRestoreBlockIdRef: MutableRefObject<string | null>;
     isDragging: boolean;
     dropTarget: DropTarget | null;
     registerRow(id: string, element: HTMLElement | null): void;
     onStartDrag: ReturnType<typeof useBlockReorder>['startDrag'];
     onInsertText(text: string): void;
-    onActive(): void;
     onDeleteBackward(): void;
     onSplit(): void;
     onPasteText(text: string): void;
@@ -266,14 +264,13 @@ function EditableBlock({
             if (event.inputType === 'insertText' && event.data) {
                 event.preventDefault();
                 handledBeforeInputRef.current = true;
-                onActive();
                 onInsertText(event.data);
             }
         };
 
         element.addEventListener('beforeinput', onBeforeInput);
         return () => element.removeEventListener('beforeinput', onBeforeInput);
-    }, [onActive, onInsertText]);
+    }, [onInsertText]);
 
     useLayoutEffect(() => {
         const element = editableRef.current;
@@ -290,14 +287,12 @@ function EditableBlock({
         });
         element.replaceChildren(...children);
         const point = selection.type === 'caret' ? selection.point : null;
-        if (
-            point?.blockId === block.id &&
-            activeBlockIdRef.current === block.id &&
-            document.activeElement === element
-        ) {
+        if (point?.blockId === block.id && pendingCaretRestoreBlockIdRef.current === block.id) {
+            pendingCaretRestoreBlockIdRef.current = null;
+            if (document.activeElement !== element) element.focus();
             restoreCaretToDom(element, point.offset);
         }
-    }, [activeBlockIdRef, block.id, block.runs, selection]);
+    }, [block.id, block.runs, pendingCaretRestoreBlockIdRef, selection]);
 
     return (
         <div
@@ -328,7 +323,6 @@ function EditableBlock({
                 spellCheck
                 data-block-id={block.id}
                 data-empty={block.runs.length === 0 ? 'true' : undefined}
-                onFocus={onActive}
                 onInput={(event) => {
                     const native = event.nativeEvent as InputEvent;
                     if (handledBeforeInputRef.current) {
@@ -346,24 +340,20 @@ function EditableBlock({
                     }
                     if (native.isComposing) return;
                     if (isJsdom() && native.inputType === 'insertText' && native.data) {
-                        onActive();
                         onInsertText(native.data);
                     }
                 }}
                 onKeyDown={(event) => {
                     if (event.key === 'Enter') {
                         event.preventDefault();
-                        onActive();
                         onSplit();
                     } else if (event.key === 'Backspace') {
                         event.preventDefault();
-                        onActive();
                         onDeleteBackward();
                     }
                 }}
                 onPaste={(event) => {
                     event.preventDefault();
-                    onActive();
                     onPasteText(event.clipboardData.getData('text/plain'));
                 }}
             />

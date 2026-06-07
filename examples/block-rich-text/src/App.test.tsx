@@ -202,6 +202,22 @@ describe('Block rich text example UI', () => {
         expect(blocks(right).map((block) => block.textContent)).toEqual(['ab', 'cd']);
     });
 
+    it('places the caret at the start of the new block after Enter splits a block', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abcd');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abcd'));
+
+        selectCaret(blocks(left)[0], 2);
+        fireEvent.keyDown(blocks(left)[0], {key: 'Enter'});
+
+        await waitFor(() => expect(blocks(left).map((block) => block.textContent)).toEqual(['ab', 'cd']));
+        expect(domSelectionBlock()).toBe(blocks(left)[1]);
+        expect(domCaretOffset(blocks(left)[1])).toBe(0);
+    });
+
     it('restores the caret one position left after ordinary Backspace', async () => {
         const view = render(<App />);
         const {left, right} = panels(view);
