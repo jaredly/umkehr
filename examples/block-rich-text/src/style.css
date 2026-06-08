@@ -42,6 +42,48 @@ input {
     color: #5d6b78;
 }
 
+.historyControls {
+    display: grid;
+    grid-template-columns: minmax(160px, 1fr) auto auto auto auto minmax(0, auto);
+    align-items: center;
+    gap: 8px;
+    max-width: 1280px;
+    margin: 0 auto 18px;
+    padding: 10px 12px;
+    background: #fff;
+    border: 1px solid #d9e0e7;
+    border-radius: 8px;
+}
+
+.historyControls input[type="range"] {
+    min-width: 0;
+}
+
+.historyControls button {
+    min-height: 32px;
+    padding: 0 10px;
+    border: 1px solid #cbd5df;
+    border-radius: 6px;
+    color: #23313d;
+    background: #fff;
+    cursor: pointer;
+}
+
+.historyControls button:hover {
+    background: #eef3f7;
+}
+
+.historyCount,
+.historyStatus {
+    color: #657380;
+    font-size: 13px;
+    white-space: nowrap;
+}
+
+.historyImportInput {
+    display: none;
+}
+
 .editorGrid {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -225,6 +267,15 @@ input {
 
     .topBar p {
         margin-top: 6px;
+    }
+
+    .historyControls {
+        grid-template-columns: 1fr auto;
+    }
+
+    .historyControls button,
+    .historyStatus {
+        grid-column: span 1;
     }
 
     .editorGrid {

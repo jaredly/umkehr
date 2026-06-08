@@ -12,15 +12,7 @@ import {
 import {materializeFormattedBlocks, rootBlockIds} from 'umkehr/block-crdt';
 import type {FormattedBlock} from 'umkehr/block-crdt';
 import {indentBlock, moveBlock, unindentBlock} from './blockCommands';
-import {
-    applyLocalChange,
-    createDemoState,
-    makeCommandContext,
-    toggleOnline,
-    type DemoState,
-    type EditorId,
-    type Replica,
-} from './blockEditorRuntime';
+import {makeCommandContext, type DemoState, type EditorId, type Replica} from './blockEditorRuntime';
 import {
     closestCaretOffsetForHorizontalIntent,
     isCaretOnFirstVisualLine,
@@ -68,25 +60,112 @@ import {
     type RetainedSelectionSet,
 } from './selectionSet';
 import {findWordOccurrences, wordAtPoint} from './wordOccurrences';
+import {
+    appendHistoryAction,
+    initialHistoryState,
+    parseHistoryExport,
+    replayHistory,
+    resetHistoryState,
+    serializeHistory,
+    setHistoryCursor,
+    type HistoryState,
+} from './history';
 
 export function App() {
-    const [demo, setDemo] = useState<DemoState>(() => createDemoState());
+    const [history, setHistory] = useState<HistoryState>(() => initialHistoryState());
+    const [transientSelections, setTransientSelections] = useState<
+        Partial<Record<EditorId, RetainedSelectionSet>>
+    >({});
+    const [historyStatus, setHistoryStatus] = useState('');
+    const [historyResetSignal, setHistoryResetSignal] = useState(0);
+    const importInputRef = useRef<HTMLInputElement>(null);
+    const demo = useMemo(
+        () => replayHistory(history.actions, history.cursor),
+        [history.actions, history.cursor],
+    );
+    const displayDemo = useMemo(
+        () => overlayTransientSelections(demo, transientSelections),
+        [demo, transientSelections],
+    );
+
+    const clearReplayUiState = useCallback(() => {
+        setTransientSelections({});
+        setHistoryResetSignal((current) => current + 1);
+    }, []);
 
     const runCommand = useCallback(
         (editorId: EditorId, command: (replica: Replica) => MultiCommandResult) => {
-            setDemo((current) => {
-                const replica = current[editorId];
-                const result = command(replica);
-                return applyLocalChange(current, {
+            const replica = displayDemo[editorId];
+            const result = command(replica);
+            if (!result.ops.length) {
+                setTransientSelections((current) => ({...current, [editorId]: result.selection}));
+                return;
+            }
+            setHistory((current) =>
+                appendHistoryAction(current, {
+                    type: 'local-change',
                     editorId,
-                    state: result.state,
-                    selection: result.selection,
                     ops: result.ops,
-                });
+                    selection: result.selection,
+                }),
+            );
+            setTransientSelections((current) => {
+                const next = {...current};
+                delete next[editorId];
+                return next;
             });
+            setHistoryStatus('');
         },
-        [],
+        [displayDemo],
     );
+
+    const updateCursor = useCallback(
+        (cursor: number) => {
+            setHistory((current) => setHistoryCursor(current, cursor));
+            clearReplayUiState();
+            setHistoryStatus('');
+        },
+        [clearReplayUiState],
+    );
+
+    const toggleEditorOnline = useCallback((editorId: EditorId) => {
+        setHistory((current) => appendHistoryAction(current, {type: 'toggle-online', editorId}));
+        setHistoryStatus('');
+    }, []);
+
+    const exportHistory = useCallback(() => {
+        const blob = new Blob([serializeHistory(history)], {type: 'application/json'});
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'block-rich-text-history.json';
+        link.click();
+        URL.revokeObjectURL(url);
+        setHistoryStatus(`Exported ${history.actions.length} actions.`);
+    }, [history]);
+
+    const importHistoryFile = useCallback(
+        async (file: File) => {
+            if (history.actions.length && !window.confirm('Replace the current history?')) return;
+            const text = await file.text();
+            const parsed = parseHistoryExport(text);
+            if ('error' in parsed) {
+                setHistoryStatus(parsed.error);
+                return;
+            }
+            setHistory(parsed.history);
+            clearReplayUiState();
+            setHistoryStatus(`Imported ${parsed.history.actions.length} actions.`);
+        },
+        [clearReplayUiState, history.actions.length],
+    );
+
+    const resetHistory = useCallback(() => {
+        if (history.actions.length && !window.confirm('Reset the current history?')) return;
+        setHistory(resetHistoryState());
+        clearReplayUiState();
+        setHistoryStatus('');
+    }, [clearReplayUiState, history.actions.length]);
 
     return (
         <main className="appShell">
@@ -94,16 +173,53 @@ export function App() {
                 <h1>Block Rich Text CRDT</h1>
                 <p>Two local replicas exchange block rich-text operations.</p>
             </header>
+            <section className="historyControls" aria-label="History controls">
+                <input
+                    type="range"
+                    min={0}
+                    max={history.actions.length}
+                    value={history.cursor}
+                    aria-label="History position"
+                    onChange={(event) => updateCursor(Number(event.currentTarget.value))}
+                />
+                <span className="historyCount">
+                    {history.cursor} / {history.actions.length}
+                </span>
+                <button type="button" onClick={exportHistory}>
+                    Export
+                </button>
+                <button type="button" onClick={() => importInputRef.current?.click()}>
+                    Import
+                </button>
+                <button type="button" onClick={resetHistory}>
+                    Reset
+                </button>
+                <input
+                    ref={importInputRef}
+                    className="historyImportInput"
+                    type="file"
+                    accept="application/json,.json"
+                    aria-label="Import history file"
+                    onChange={(event) => {
+                        const file = event.currentTarget.files?.[0];
+                        event.currentTarget.value = '';
+                        if (file) void importHistoryFile(file);
+                    }}
+                />
+                {historyStatus ? <span className="historyStatus">{historyStatus}</span> : null}
+            </section>
             <section className="editorGrid" aria-label="Synced block editors">
                 <BlockEditor
-                    replica={demo.left}
+                    replica={displayDemo.left}
+                    resetSignal={historyResetSignal}
                     onCommand={(command) => runCommand('left', command)}
-                    onToggleOnline={() => setDemo((current) => toggleOnline(current, 'left'))}
+                    onToggleOnline={() => toggleEditorOnline('left')}
                 />
                 <BlockEditor
-                    replica={demo.right}
+                    replica={displayDemo.right}
+                    resetSignal={historyResetSignal}
                     onCommand={(command) => runCommand('right', command)}
-                    onToggleOnline={() => setDemo((current) => toggleOnline(current, 'right'))}
+                    onToggleOnline={() => toggleEditorOnline('right')}
                 />
             </section>
         </main>
@@ -112,10 +228,12 @@ export function App() {
 
 function BlockEditor({
     replica,
+    resetSignal,
     onCommand,
     onToggleOnline,
 }: {
     replica: Replica;
+    resetSignal: number;
     onCommand(command: (replica: Replica) => MultiCommandResult): void;
     onToggleOnline(): void;
 }) {
@@ -179,6 +297,17 @@ function BlockEditor({
     }, []);
 
     const nextSelectionId = useCallback(() => `sel-${nextSelectionIdRef.current++}`, []);
+
+    useLayoutEffect(() => {
+        pendingCaretRestoreBlockIdRef.current = null;
+        pendingSelectionRestoreRef.current = null;
+        verticalCaretXRef.current = null;
+        pendingMultiselectClickRef.current = null;
+        pendingAddSelectionClickRef.current = null;
+        handledTripleClickRef.current = false;
+        handledNavigationKeyRef.current = false;
+        setIsExtendingSelection(false);
+    }, [resetSignal]);
 
     const captureSelection = useCallback(
         (event: MouseEvent | KeyboardEvent) => {
@@ -1074,6 +1203,14 @@ const removePrimaryDecorations = (
     };
     return nextDecorations.carets.length || nextDecorations.segments.length ? nextDecorations : null;
 };
+
+const overlayTransientSelections = (
+    demo: DemoState,
+    selections: Partial<Record<EditorId, RetainedSelectionSet>>,
+): DemoState => ({
+    left: selections.left ? {...demo.left, selection: selections.left} : demo.left,
+    right: selections.right ? {...demo.right, selection: selections.right} : demo.right,
+});
 
 const occurrenceSelectionSet = (
     state: Replica['state'],

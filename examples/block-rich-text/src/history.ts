@@ -1,0 +1,334 @@
+import {applyMany, materializeFormattedBlocks, type Op} from 'umkehr/block-crdt';
+import {
+    applyLocalChange,
+    createDemoState,
+    toggleOnline,
+    type DemoState,
+    type EditorId,
+} from './blockEditorRuntime';
+import type {RetainedSelectionSet} from './selectionSet';
+
+export type HistoryAction =
+    | {
+          type: 'local-change';
+          editorId: EditorId;
+          ops: Op[];
+          selection: RetainedSelectionSet;
+      }
+    | {
+          type: 'toggle-online';
+          editorId: EditorId;
+      };
+
+export type HistoryState = {
+    actions: HistoryAction[];
+    cursor: number;
+};
+
+export type HistorySnapshot = {
+    left: ReplicaSnapshot;
+    right: ReplicaSnapshot;
+};
+
+export type ReplicaSnapshot = {
+    online: boolean;
+    queueLength: number;
+    blocks: Array<{id: string; depth: number; text: string}>;
+    deletedBlockCount: number;
+    joinCount: number;
+};
+
+export type ExportedHistory = {
+    version: 1;
+    app: 'examples/block-rich-text';
+    actions: HistoryAction[];
+    finalSnapshot: HistorySnapshot;
+};
+
+const EXPORT_VERSION = 1;
+const EXPORT_APP = 'examples/block-rich-text';
+const EDITOR_IDS = new Set(['left', 'right']);
+const REMOVED_OP_TYPES = new Set(['block:status']);
+const CURRENT_OP_TYPES = new Set([
+    'char',
+    'block',
+    'char:move',
+    'char:delete',
+    'block:move',
+    'block:delete',
+    'block:meta',
+    'mark',
+    'split-record',
+    'join-record',
+]);
+
+export const initialHistoryState = (): HistoryState => ({actions: [], cursor: 0});
+
+export const resetHistoryState = initialHistoryState;
+
+export const appendHistoryAction = (
+    history: HistoryState,
+    action: HistoryAction,
+): HistoryState => {
+    const prefix = history.actions.slice(0, clampCursor(history.cursor, history.actions.length));
+    const actions = [...prefix, action];
+    return {actions, cursor: actions.length};
+};
+
+export const setHistoryCursor = (history: HistoryState, cursor: number): HistoryState => ({
+    actions: history.actions,
+    cursor: clampCursor(cursor, history.actions.length),
+});
+
+export const replayHistory = (
+    actions: HistoryAction[],
+    cursor = actions.length,
+): DemoState => {
+    let demo = createDemoState();
+    const limit = clampCursor(cursor, actions.length);
+
+    for (const action of actions.slice(0, limit)) {
+        if (action.type === 'toggle-online') {
+            demo = toggleOnline(demo, action.editorId);
+            continue;
+        }
+
+        const current = demo[action.editorId];
+        demo = applyLocalChange(demo, {
+            editorId: action.editorId,
+            state: action.ops.length ? applyMany(current.state, action.ops) : current.state,
+            selection: action.selection,
+            ops: action.ops,
+        });
+    }
+
+    return advanceReplicaClocks(demo, actions.slice(0, limit));
+};
+
+export const buildHistorySnapshot = (demo: DemoState): HistorySnapshot => ({
+    left: snapshotReplica(demo.left),
+    right: snapshotReplica(demo.right),
+});
+
+export const serializeHistory = (history: HistoryState): string => {
+    const actions = history.actions;
+    const exported: ExportedHistory = {
+        version: EXPORT_VERSION,
+        app: EXPORT_APP,
+        actions,
+        finalSnapshot: buildHistorySnapshot(replayHistory(actions, actions.length)),
+    };
+    return `${JSON.stringify(exported, null, 2)}\n`;
+};
+
+export const parseHistoryExport = (
+    text: string,
+): {history: HistoryState} | {error: string} => {
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(text);
+    } catch {
+        return {error: 'Import file is not valid JSON.'};
+    }
+
+    if (!isRecord(parsed)) return {error: 'Import file must contain a JSON object.'};
+    if (parsed.version !== EXPORT_VERSION) return {error: 'Unsupported history version.'};
+    if (parsed.app !== EXPORT_APP) return {error: 'Import file is for a different app.'};
+    if (!Array.isArray(parsed.actions)) return {error: 'Import file is missing actions.'};
+
+    const actions: HistoryAction[] = [];
+    for (const [index, action] of parsed.actions.entries()) {
+        const valid = parseAction(action);
+        if ('error' in valid) return {error: `Action ${index}: ${valid.error}`};
+        actions.push(valid.action);
+    }
+
+    if (!isSnapshot(parsed.finalSnapshot)) {
+        return {error: 'Import file has an invalid final snapshot.'};
+    }
+
+    try {
+        replayHistory(actions, actions.length);
+    } catch (error) {
+        return {
+            error: error instanceof Error ? error.message : 'Import actions could not be replayed.',
+        };
+    }
+
+    return {history: {actions, cursor: actions.length}};
+};
+
+const clampCursor = (cursor: number, max: number) => {
+    if (!Number.isFinite(cursor)) return max;
+    return Math.max(0, Math.min(Math.trunc(cursor), max));
+};
+
+const snapshotReplica = (replica: DemoState[EditorId]): ReplicaSnapshot => ({
+    online: replica.online,
+    queueLength: replica.queue.length,
+    blocks: materializeFormattedBlocks(replica.state).map((block) => ({
+        id: block.id,
+        depth: block.depth,
+        text: block.runs.map((run) => run.text).join(''),
+    })),
+    deletedBlockCount: Object.values(replica.state.state.blocks).filter((block) => block.deleted).length,
+    joinCount: Object.keys(replica.state.state.joins).length,
+});
+
+const parseAction = (value: unknown): {action: HistoryAction} | {error: string} => {
+    if (!isRecord(value)) return {error: 'must be an object.'};
+    if (!isEditorId(value.editorId)) return {error: 'has an invalid editorId.'};
+
+    if (value.type === 'toggle-online') {
+        return {action: {type: 'toggle-online', editorId: value.editorId}};
+    }
+
+    if (value.type !== 'local-change') return {error: 'has an invalid action type.'};
+    if (!Array.isArray(value.ops)) return {error: 'local-change ops must be an array.'};
+    for (const [index, op] of value.ops.entries()) {
+        const opError = validateOp(op);
+        if (opError) return {error: `op ${index} ${opError}`};
+    }
+    if (!isRetainedSelectionSet(value.selection)) {
+        return {error: 'local-change selection must be a retained selection set.'};
+    }
+
+    return {
+        action: {
+            type: 'local-change',
+            editorId: value.editorId,
+            ops: value.ops as Op[],
+            selection: value.selection,
+        },
+    };
+};
+
+const validateOp = (value: unknown): string | null => {
+    if (!isRecord(value)) return 'must be an object.';
+    if (typeof value.type !== 'string') return 'is missing a type.';
+    if (REMOVED_OP_TYPES.has(value.type)) return 'uses removed block:status shape.';
+    if (!CURRENT_OP_TYPES.has(value.type)) return 'has an unknown type.';
+
+    if ((value.type === 'block' || value.type === 'block:move') && 'order' in value) {
+        if (!isBlockOrder(value.order)) return 'has invalid block order.';
+    }
+    if (value.type === 'block') {
+        if (!isRecord(value.block)) return 'has invalid block record.';
+        if (typeof value.block.deleted !== 'boolean') return 'block must use deleted boolean.';
+        if (!isBlockOrder(value.block.order)) return 'block has invalid order.';
+        if ('status' in value.block) return 'block uses removed status shape.';
+    }
+    if (value.type === 'join-record' && !isRecord(value.join)) {
+        return 'has invalid join record.';
+    }
+    return null;
+};
+
+const isBlockOrder = (value: unknown) =>
+    isRecord(value) &&
+    isLamport(value.id) &&
+    Array.isArray(value.path) &&
+    value.path.length > 0 &&
+    value.path.every(isLamport) &&
+    isRecord(value.index) &&
+    isBlockOrderTs(value.ts);
+
+const isBlockOrderTs = (value: unknown): boolean =>
+    typeof value === 'string' ||
+    (Array.isArray(value) &&
+        value.length === 3 &&
+        typeof value[0] === 'string' &&
+        isRecord(value[1]) &&
+        typeof value[2] === 'string');
+
+const isRetainedSelectionSet = (value: unknown): value is RetainedSelectionSet => {
+    if (!isRecord(value) || typeof value.primaryId !== 'string' || !Array.isArray(value.entries)) {
+        return false;
+    }
+    return value.entries.every(
+        (entry) =>
+            isRecord(entry) &&
+            typeof entry.id === 'string' &&
+            isRetainedSelection(entry.selection),
+    );
+};
+
+const isRetainedSelection = (value: unknown): boolean => {
+    if (!isRecord(value) || typeof value.type !== 'string') return false;
+    if (value.type === 'caret') return isRetainedPoint(value.point);
+    if (value.type === 'range') return isRetainedPoint(value.anchor) && isRetainedPoint(value.focus);
+    return false;
+};
+
+const isRetainedPoint = (value: unknown): boolean =>
+    isRecord(value) &&
+    typeof value.blockId === 'string' &&
+    (value.affinity === 'before' || value.affinity === 'after') &&
+    (value.charId === null || typeof value.charId === 'string');
+
+const isSnapshot = (value: unknown): value is HistorySnapshot =>
+    isRecord(value) && isReplicaSnapshot(value.left) && isReplicaSnapshot(value.right);
+
+const isReplicaSnapshot = (value: unknown): value is ReplicaSnapshot =>
+    isRecord(value) &&
+    typeof value.online === 'boolean' &&
+    typeof value.queueLength === 'number' &&
+    typeof value.deletedBlockCount === 'number' &&
+    typeof value.joinCount === 'number' &&
+    Array.isArray(value.blocks) &&
+    value.blocks.every(
+        (block) =>
+            isRecord(block) &&
+            typeof block.id === 'string' &&
+            typeof block.depth === 'number' &&
+            typeof block.text === 'string',
+    );
+
+const advanceReplicaClocks = (demo: DemoState, actions: HistoryAction[]): DemoState => {
+    const nextClock: Record<EditorId, number> = {left: demo.left.clock, right: demo.right.clock};
+    for (const action of actions) {
+        if (action.type !== 'local-change') continue;
+        for (const op of action.ops) {
+            scanClockValue(op, nextClock);
+        }
+    }
+    return {
+        left: {...demo.left, clock: Math.max(demo.left.clock, nextClock.left)},
+        right: {...demo.right, clock: Math.max(demo.right.clock, nextClock.right)},
+    };
+};
+
+const scanClockValue = (value: unknown, nextClock: Record<EditorId, number>) => {
+    if (typeof value === 'string') {
+        const match = /^(left|right)-(\d+)$/.exec(value);
+        if (match) {
+            const actor = match[1] as EditorId;
+            nextClock[actor] = Math.max(nextClock[actor], Number(match[2]) + 1);
+        }
+        return;
+    }
+    if (isLamport(value)) {
+        const actor = value[1];
+        if (isEditorId(actor)) nextClock[actor] = Math.max(nextClock[actor], value[0] + 1);
+        return;
+    }
+    if (Array.isArray(value)) {
+        for (const item of value) scanClockValue(item, nextClock);
+        return;
+    }
+    if (isRecord(value)) {
+        for (const item of Object.values(value)) scanClockValue(item, nextClock);
+    }
+};
+
+const isLamport = (value: unknown): value is [number, string] =>
+    Array.isArray(value) &&
+    value.length === 2 &&
+    Number.isInteger(value[0]) &&
+    typeof value[1] === 'string';
+
+const isEditorId = (value: unknown): value is EditorId =>
+    typeof value === 'string' && EDITOR_IDS.has(value);
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+    typeof value === 'object' && value !== null && !Array.isArray(value);

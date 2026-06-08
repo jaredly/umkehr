@@ -1,7 +1,7 @@
 import '../../../src/react/test-dom';
 
 import {cleanup, fireEvent, render, waitFor, within} from '@testing-library/react';
-import {afterEach, describe, expect, it} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 import {App} from './App';
 
 Object.defineProperty(globalThis, 'NodeFilter', {
@@ -246,6 +246,77 @@ describe('Block rich text example UI', () => {
 
         await waitFor(() => expect(blocks(left)[0].textContent).toBe('abc'));
         expect(blocks(right)[0].textContent).toBe('abc');
+    });
+
+    it('scrubs document history backward and forward', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+        const slider = view.getByLabelText('History position') as HTMLInputElement;
+
+        selectCaret(blocks(left)[0], 0);
+        typeText(blocks(left)[0], 'abc');
+        await waitFor(() => expect(slider.value).toBe('3'));
+
+        fireEvent.change(slider, {target: {value: '1'}});
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('a'));
+        expect(blocks(right)[0].textContent).toBe('a');
+
+        fireEvent.change(slider, {target: {value: '3'}});
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abc'));
+        expect(blocks(right)[0].textContent).toBe('abc');
+    });
+
+    it('branches history when editing from the past', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+        const slider = view.getByLabelText('History position') as HTMLInputElement;
+
+        selectCaret(blocks(left)[0], 0);
+        typeText(blocks(left)[0], 'ab');
+        await waitFor(() => expect(slider.value).toBe('2'));
+
+        fireEvent.change(slider, {target: {value: '1'}});
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('a'));
+        selectCaret(blocks(left)[0], 1);
+        typeText(blocks(left)[0], 'c');
+
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('ac'));
+        expect(blocks(right)[0].textContent).toBe('ac');
+        expect(slider.max).toBe('2');
+        expect(slider.value).toBe('2');
+        expect(view.getByText('2 / 2')).toBeTruthy();
+    });
+
+    it('does not add selection-only captures to history', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        const slider = view.getByLabelText('History position') as HTMLInputElement;
+
+        selectCaret(blocks(left)[0], 0);
+        fireEvent.mouseUp(blocks(left)[0]);
+
+        await waitFor(() => expect(slider.max).toBe('0'));
+        expect(view.getByText('0 / 0')).toBeTruthy();
+    });
+
+    it('reports invalid history imports without replacing current history', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+        const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+        const input = view.getByLabelText('Import history file') as HTMLInputElement;
+        const file = new File(['not json'], 'history.json', {type: 'application/json'});
+
+        selectCaret(blocks(left)[0], 0);
+        typeText(blocks(left)[0], 'a');
+        await waitFor(() => expect(blocks(right)[0].textContent).toBe('a'));
+
+        fireEvent.change(input, {target: {files: [file]}});
+
+        await waitFor(() => expect(view.getByText('Import file is not valid JSON.')).toBeTruthy());
+        expect(blocks(left)[0].textContent).toBe('a');
+        expect(blocks(right)[0].textContent).toBe('a');
+        expect(confirmSpy).toHaveBeenCalled();
+        confirmSpy.mockRestore();
     });
 
     it('does not duplicate browser input after beforeinput already handled insertion', async () => {
