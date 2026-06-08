@@ -778,13 +778,10 @@ function EditableBlock({
                 data-block-id={block.id}
                 data-empty={block.runs.length === 0 ? 'true' : undefined}
                 onFocus={(event) => {
-                    if (
-                        !decorations ||
-                        (!decorations.carets.length && !decorations.segments.length)
-                    )
-                        return;
-                    event.currentTarget.replaceChildren(...renderRunNodes(block.runs, null));
-                    renderedRunsRef.current = serializeRuns(block.runs, null);
+                    const nextDecorations = removePrimaryDecorations(decorations);
+                    if (nextDecorations === decorations) return;
+                    event.currentTarget.replaceChildren(...renderRunNodes(block.runs, nextDecorations));
+                    renderedRunsRef.current = serializeRuns(block.runs, nextDecorations);
                 }}
                 onInput={(event) => {
                     const native = event.nativeEvent as InputEvent;
@@ -928,6 +925,24 @@ const isSameClick = (
 ): event is MouseEvent => {
     if (event.type !== 'mouseup' || !('clientX' in event) || !('clientY' in event)) return false;
     return Math.abs(event.clientX - start.x) <= 3 && Math.abs(event.clientY - start.y) <= 3;
+};
+
+const removePrimaryDecorations = (
+    decorations: BlockSelectionDecorations | null,
+): BlockSelectionDecorations | null => {
+    if (!decorations) return decorations;
+    if (
+        !decorations.carets.some((caret) => caret.primary) &&
+        !decorations.segments.some((segment) => segment.primary)
+    ) {
+        return decorations;
+    }
+
+    const nextDecorations = {
+        carets: decorations.carets.filter((caret) => !caret.primary),
+        segments: decorations.segments.filter((segment) => !segment.primary),
+    };
+    return nextDecorations.carets.length || nextDecorations.segments.length ? nextDecorations : null;
 };
 
 const occurrenceSelectionSet = (

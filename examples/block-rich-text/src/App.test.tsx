@@ -780,6 +780,27 @@ describe('Block rich text example UI', () => {
         }
     });
 
+    it('keeps non-primary cursors visible while focusing their block', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        fireEvent.paste(blocks(left)[0], {
+            clipboardData: {
+                getData: () => 'abcd\nwxyz',
+            },
+        });
+        await waitFor(() => expect(blockTexts(left)).toEqual(['abcd', 'wxyz']));
+
+        selectCaret(blocks(left)[1], 1);
+        addCaret(blocks(left)[0], 1);
+        expect(retainedCaretOffsets(blocks(left)[1])).toEqual([1]);
+
+        fireEvent.focus(blocks(left)[1]);
+
+        expect(retainedCaretOffsets(blocks(left)[1])).toEqual([1]);
+    });
+
     it('moves every cursor with plain ArrowRight before typing', async () => {
         const view = render(<App />);
         const {left, right} = panels(view);
