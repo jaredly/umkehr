@@ -1,13 +1,14 @@
-import {describe, it} from 'vitest';
-import {organizeState} from './index';
+import {describe, expect, it} from 'vitest';
+import {blockParentStrategiesForStress} from './index';
 import {Block} from './types';
-import {LseqId} from './lseq';
+import {compareLseqIds, LseqId} from './lseq';
 
 const runStress = process.env.BLOCK_CRDT_STRESS === '1';
 const stressLevel = process.env.BLOCK_CRDT_STRESS_LEVEL ?? 'default';
 const iterations = Number(process.env.BLOCK_CRDT_STRESS_ITERATIONS ?? 11);
 
 type CaseResult = {
+    strategy: string;
     name: string;
     blocks: number;
     medianMs: string;
@@ -115,16 +116,37 @@ const reciprocalCycles = (pairs: number, tailLength: number) => {
 
 const id = (count: number) => `${String(count).padStart(4, '0')}-stress`;
 
-const timeCase = (name: string, blocks: Record<string, Block>, sampleCount = iterations): CaseResult => {
+const buildBlockChildren = (
+    blocks: Record<string, Block>,
+    parents: Record<string, string>,
+): Record<string, string[]> => {
+    const blockChildren: Record<string, string[]> = {};
+    for (const id of Object.keys(blocks)) {
+        const pid = parents[id];
+        blockChildren[pid] = blockChildren[pid] ?? [];
+        blockChildren[pid].push(id);
+    }
+    Object.values(blockChildren).forEach((items) => {
+        items.sort((a, b) => compareLseqIds(blocks[a].order.index, blocks[b].order.index));
+    });
+    return blockChildren;
+};
+
+const timeCase = (
+    strategy: (typeof blockParentStrategiesForStress)[number],
+    name: string,
+    blocks: Record<string, Block>,
+    sampleCount = iterations,
+): CaseResult => {
     // Warm up JIT and allocation paths before measuring.
     for (let i = 0; i < 2; i++) {
-        organizeState(blocks, {}, {});
+        buildBlockChildren(blocks, strategy.derive(blocks).parents);
     }
 
     const samples: number[] = [];
     for (let i = 0; i < sampleCount; i++) {
         const started = performance.now();
-        organizeState(blocks, {}, {});
+        buildBlockChildren(blocks, strategy.derive(blocks).parents);
         samples.push(performance.now() - started);
     }
     samples.sort((a, b) => a - b);
@@ -132,6 +154,7 @@ const timeCase = (name: string, blocks: Record<string, Block>, sampleCount = ite
     const p95 = samples[Math.floor(samples.length * 0.95)];
     const max = samples[samples.length - 1];
     return {
+        strategy: strategy.name,
         name,
         blocks: Object.keys(blocks).length,
         medianMs: median.toFixed(3),
@@ -139,6 +162,15 @@ const timeCase = (name: string, blocks: Record<string, Block>, sampleCount = ite
         maxMs: max.toFixed(3),
         over10ms: median > 10 || p95 > 10,
     };
+};
+
+const runCase = (results: CaseResult[], name: string, blocks: Record<string, Block>) => {
+    const baseline = blockParentStrategiesForStress[0];
+    const expected = buildBlockChildren(blocks, baseline.derive(blocks).parents);
+    for (const strategy of blockParentStrategiesForStress) {
+        expect(buildBlockChildren(blocks, strategy.derive(blocks).parents)).toEqual(expected);
+        results.push(timeCase(strategy, name, blocks));
+    }
 };
 
 describe.runIf(runStress)('organizeState stress', () => {
@@ -157,31 +189,31 @@ describe.runIf(runStress)('organizeState stress', () => {
         const cyclePairs = stressLevel === 'deep' ? [25, 50, 100, 250, 500] : [25, 100, 500];
 
         for (const size of broadSizes) {
-            results.push(timeCase(`flat/${size}`, flat(size)));
-            results.push(timeCase(`balanced4/${size}`, balancedTree(size, 4)));
+            runCase(results, `flat/${size}`, flat(size));
+            runCase(results, `balanced4/${size}`, balancedTree(size, 4));
         }
         for (const size of compressedSizes) {
-            results.push(timeCase(`compressed-chain/${size}`, compressedChain(size)));
+            runCase(results, `compressed-chain/${size}`, compressedChain(size));
         }
 
         for (const size of fullPathSizes) {
-            results.push(timeCase(`full-path-chain/${size}`, fullPathChain(size)));
+            runCase(results, `full-path-chain/${size}`, fullPathChain(size));
         }
 
         for (const maxDepth of [10, 25, 50]) {
             for (const size of cappedPathSizes) {
-                results.push(timeCase(`capped-chain-d${maxDepth}/${size}`, cappedPathChain(size, maxDepth)));
+                runCase(results, `capped-chain-d${maxDepth}/${size}`, cappedPathChain(size, maxDepth));
             }
         }
 
         for (const maxDepth of [10, 25, 50]) {
             for (const size of cappedBalancedSizes) {
-                results.push(timeCase(`capped-balanced4-d${maxDepth}/${size}`, cappedBalancedTree(size, 4, maxDepth)));
+                runCase(results, `capped-balanced4-d${maxDepth}/${size}`, cappedBalancedTree(size, 4, maxDepth));
             }
         }
 
         for (const pairs of cyclePairs) {
-            results.push(timeCase(`reciprocal-cycles-tail3/${pairs}`, reciprocalCycles(pairs, 3)));
+            runCase(results, `reciprocal-cycles-tail3/${pairs}`, reciprocalCycles(pairs, 3));
         }
 
         console.table(results);
