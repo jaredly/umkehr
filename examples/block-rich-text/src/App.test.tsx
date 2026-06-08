@@ -728,6 +728,58 @@ describe('Block rich text example UI', () => {
         expect(blocks(right)[0].textContent).toBe('aXbcXd');
     });
 
+    it('Cmd-click adds a cursor in a block that already has a retained cursor', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        fireEvent.paste(blocks(left)[0], {
+            clipboardData: {
+                getData: () => 'abcd\nwxyz',
+            },
+        });
+        await waitFor(() => expect(blockTexts(left)).toEqual(['abcd', 'wxyz']));
+
+        selectCaret(blocks(left)[1], 1);
+        addCaret(blocks(left)[0], 1);
+
+        const documentWithCaretRange = document as Document & {
+            caretRangeFromPoint?: (x: number, y: number) => Range | null;
+        };
+        const previousCaretRangeFromPoint = documentWithCaretRange.caretRangeFromPoint;
+        Object.defineProperty(document, 'caretRangeFromPoint', {
+            value: () => rangeAtBlockOffset(blocks(left)[1], 3),
+            configurable: true,
+        });
+
+        try {
+            fireEvent.mouseDown(blocks(left)[1], {
+                metaKey: true,
+                clientX: 10,
+                clientY: 10,
+            });
+            setDomCaret(blocks(left)[0], 1);
+            fireEvent.mouseUp(blocks(left)[1], {
+                metaKey: true,
+                clientX: 10,
+                clientY: 10,
+            });
+
+            await waitFor(() => expect(domSelectionBlock()).toBe(blocks(left)[1]));
+            expect(domCaretOffset(blocks(left)[1])).toBe(3);
+
+            beforeInputText(blocks(left)[1], 'X');
+
+            await waitFor(() => expect(blockTexts(left)).toEqual(['aXbcd', 'wXxyXz']));
+            expect(blockTexts(right)).toEqual(['aXbcd', 'wXxyXz']);
+        } finally {
+            Object.defineProperty(document, 'caretRangeFromPoint', {
+                value: previousCaretRangeFromPoint,
+                configurable: true,
+            });
+        }
+    });
+
     it('moves every cursor with plain ArrowRight before typing', async () => {
         const view = render(<App />);
         const {left, right} = panels(view);
@@ -912,6 +964,25 @@ describe('Block rich text example UI', () => {
 const firstTextNode = (element: HTMLElement): Text | null => {
     const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
     return walker.nextNode() as Text | null;
+};
+
+const rangeAtBlockOffset = (block: HTMLElement, offset: number): Range => {
+    const range = document.createRange();
+    let remaining = offset;
+    const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+    let current: Text | null;
+    while ((current = walker.nextNode() as Text | null)) {
+        const length = current.textContent?.length ?? 0;
+        if (remaining <= length) {
+            range.setStart(current, remaining);
+            range.collapse(true);
+            return range;
+        }
+        remaining -= length;
+    }
+    range.setStart(block, block.childNodes.length);
+    range.collapse(true);
+    return range;
 };
 
 const domSelectionBlock = (): HTMLElement | null => {

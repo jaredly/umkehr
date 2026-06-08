@@ -126,6 +126,11 @@ function BlockEditor({
         x: number;
         y: number;
     } | null>(null);
+    const pendingAddSelectionClickRef = useRef<{
+        point: {blockId: string; offset: number};
+        x: number;
+        y: number;
+    } | null>(null);
     const [hasFocus, setHasFocus] = useState(false);
     const [isExtendingSelection, setIsExtendingSelection] = useState(false);
     const blocks = materializeFormattedBlocks(replica.state);
@@ -209,6 +214,25 @@ function BlockEditor({
                     return;
                 }
             }
+            if (event.type === 'mouseup' && pendingAddSelectionClickRef.current) {
+                const pendingClick = pendingAddSelectionClickRef.current;
+                pendingAddSelectionClickRef.current = null;
+                if (isSameClick(pendingClick, event) && 'metaKey' in event && (event.metaKey || event.ctrlKey)) {
+                    const selection = caret(pendingClick.point.blockId, pendingClick.point.offset);
+                    scheduleSelectionRestore(selection);
+                    onCommand((current) => ({
+                        state: current.state,
+                        ops: [],
+                        selection: appendSelection(
+                            current.state,
+                            current.selection,
+                            selection,
+                            nextSelectionId(),
+                        ),
+                    }));
+                    return;
+                }
+            }
             const selection = readSelectionFromDom(root);
             if (!selection) return;
             if (event.type === 'mouseup' && 'detail' in event && event.detail === 3) {
@@ -254,6 +278,20 @@ function BlockEditor({
             if (!root) return;
             const point = readPointFromMouseEvent(root, event.nativeEvent);
             if (!point) return;
+
+            if (
+                event.detail <= 1 &&
+                (event.metaKey || event.ctrlKey) &&
+                !event.shiftKey &&
+                !event.altKey
+            ) {
+                pendingAddSelectionClickRef.current = {
+                    point,
+                    x: event.clientX,
+                    y: event.clientY,
+                };
+                return;
+            }
 
             if (
                 event.detail <= 1 &&
