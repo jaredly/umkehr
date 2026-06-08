@@ -31,6 +31,14 @@ export type SplitRecord = {
     right: Lamport;
 };
 
+export type JoinRecord = {
+    id: Lamport;
+    left: Lamport;
+    right: Lamport;
+    tail: Lamport;
+    ts: HLC;
+};
+
 export type Char = {
     id: Lamport;
     text: string;
@@ -59,12 +67,15 @@ export type State = {
     blocks: Record<string, Block>;
     marks: Record<string, Mark>;
     splits: Record<string, SplitRecord>;
+    joins: Record<string, JoinRecord>;
     maxSeenCount: number;
 };
 
 export type Cache = {
     blockChildren: Record<string, string[]>;
     charContents: Record<string, string[]>;
+    joinSentinels: Record<string, JoinRecord>;
+    joinedBlocks: Record<string, JoinRecord>;
 };
 
 export type CachedState = {state: State; cache: Cache};

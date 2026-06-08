@@ -88,14 +88,15 @@ const resolveCharPoint = (state: CachedState, point: RetainedPoint): BlockPoint 
                     offset: point.affinity === 'before' ? visibleOffset : visibleOffset + visibleCount(state, charId),
                 };
             }
-            if (!state.state.chars[charId]?.deleted) visibleOffset++;
+            const char = state.state.chars[charId];
+            if (char && !char.deleted) visibleOffset++;
         }
     }
     return null;
 };
 
 const visibleCount = (state: CachedState, charId: string) =>
-    state.state.chars[charId]?.deleted ? 0 : 1;
+    state.state.chars[charId] && !state.state.chars[charId].deleted ? 1 : 0;
 
 const visibleBlockOrFallback = (state: CachedState, blockId: string) => {
     if (rootBlockIds(state).includes(blockId)) return blockId;

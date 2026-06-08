@@ -14,7 +14,9 @@ import {
     findTail,
     join,
     Op,
+    activeJoinRecords,
     orderedCharIdsForBlock,
+    visibleBlockChildren,
 } from './index';
 import {Block, CachedState, Lamport} from './types';
 import {lamportToString, parseLamportString, selPos} from './utils';
@@ -46,13 +48,13 @@ const addAfter = (state: CachedState, text: string, at: number, ts: () => string
 const run = (state: CachedState, items: [number, string][], ts: () => string) => {
     for (let [pos, text] of items) {
         state = addAfter(state, text, pos, ts);
-        expect(state.cache).toEqual(organizeState(state.state.blocks, state.state.chars));
+        expect(state.cache).toEqual(organizeState(state.state.blocks, state.state.chars, state.state.joins));
     }
     return state;
 };
 
 const expectCache = (state: CachedState) => {
-    expect(state.cache).toEqual(organizeState(state.state.blocks, state.state.chars));
+    expect(state.cache).toEqual(organizeState(state.state.blocks, state.state.chars, state.state.joins));
 };
 
 const block = (id: Lamport, index: number, ts: string, parent: Lamport = [0, 'root']): Block => ({
@@ -120,14 +122,10 @@ it('split with tree', () => {
 });
 
 const blockLines = (state: CachedState) =>
-    state.cache.blockChildren[lamportToString([0, 'root'])]
-        .filter((child) => !state.state.blocks[child]?.deleted)
-        .map((child) => blockContents(state, child));
+    rootBlockIds(state).map((child) => blockContents(state, child));
 
 const rootBlockIds = (state: CachedState) =>
-    state.cache.blockChildren[lamportToString([0, 'root'])].filter(
-        (child) => !state.state.blocks[child]?.deleted,
-    );
+    visibleBlockChildren(state, lamportToString([0, 'root']));
 
 const blockLength = (state: CachedState, blockId: string) => blockContents(state, blockId).length;
 
@@ -787,7 +785,7 @@ it('converges join with concurrent insert at start of joined right block', () =>
     );
 });
 
-it('represents join with a deleted block sentinel char', () => {
+it('derives join sentinel chars from join records', () => {
     const ts = mts();
     let state = cachedState(initialState('self', '00001'));
     state = applyMany(state, insertOps(state, 'self', 0, 0, 'abcd', ts));
@@ -806,13 +804,17 @@ it('represents join with a deleted block sentinel char', () => {
 
     state = applyMany(state, join(state, leftBlock, rightBlock, ts(), 'alice'));
 
-    expect(state.state.blocks[rightId].deleted).toBe(true);
-    expect(state.state.chars[rightId]).toEqual({
-        id: rightBlock,
-        text: '',
-        deleted: true,
-        parent: {id: [2, 'self'], ts: '00005'},
+    expect(state.state.blocks[rightId].deleted).toBe(false);
+    expect(state.state.chars[rightId]).toBeUndefined();
+    expect(state.state.joins['0006-alice']).toEqual({
+        id: [6, 'alice'],
+        left: leftBlock,
+        right: rightBlock,
+        tail: [2, 'self'],
+        ts: '00005',
     });
+    expect(state.cache.joinSentinels[rightId]).toEqual(state.state.joins['0006-alice']);
+    expect(state.cache.joinedBlocks[rightId]).toEqual(state.state.joins['0006-alice']);
     expect(orderedCharIdsForBlock(state, leftId)).toContain(rightId);
     expect(orderedCharIdsForBlock(state, leftId, {visibleOnly: true})).not.toContain(rightId);
     expect(blockLines(state)).toEqual(['abcd']);
@@ -904,7 +906,7 @@ it('joins a non-empty right block into an empty left block through a sentinel', 
     state = applyMany(state, join(state, leftBlock, rightBlock, ts(), 'alice'));
 
     expect(blockLines(state)).toEqual(['cd']);
-    expect(state.state.chars[lamportToString(rightBlock)].parent.id).toEqual(leftBlock);
+    expect(state.cache.joinSentinels[lamportToString(rightBlock)].tail).toEqual(leftBlock);
     expectCache(state);
 });
 
@@ -978,6 +980,89 @@ it('converges join with concurrent splits of either joined block', () => {
         }),
         ['abcde', 'f'],
     );
+});
+
+it('resolves reciprocal concurrent joins by lower join id without tombstoning both blocks', () => {
+    const ts = mts();
+    let state = cachedState(initialState('self', '00001'));
+    state = applyMany(state, insertOps(state, 'self', 0, 0, 'abcd', ts));
+    state = applyMany(
+        state,
+        split(
+            state,
+            splitLocation(state, [0, 'self'], selPos(state, [0, 'self'], 3)!),
+            ts(),
+            'self',
+            {random: () => 0},
+        ),
+    );
+    const [leftBlock, rightBlock] = rootBlockIds(state).map(parseLamportString);
+    const [leftId, rightId] = rootBlockIds(state);
+
+    const leftWins = join(state, leftBlock, rightBlock, ts(), 'alice');
+    const rightLoses = join(state, rightBlock, leftBlock, ts(), 'bob');
+
+    const one = applyMany(state, [...leftWins, ...rightLoses]);
+    const two = applyMany(state, [...rightLoses, ...leftWins]);
+
+    expect(blockLines(one)).toEqual(['abcd']);
+    expect(blockLines(two)).toEqual(['abcd']);
+    expect(rootBlockIds(one)).toEqual([leftId]);
+    expect(rootBlockIds(two)).toEqual([leftId]);
+    expect(one.state.blocks[leftId].deleted).toBe(false);
+    expect(one.state.blocks[rightId].deleted).toBe(false);
+    expect(Object.keys(one.cache.joinedBlocks)).toEqual([rightId]);
+    expect(one.cache.joinSentinels[rightId]).toEqual(one.state.joins['0006-alice']);
+    expect(one.cache.joinSentinels[leftId]).toBeUndefined();
+    expectCache(one);
+    expectCache(two);
+});
+
+it('resolves a three-block join cycle and preserves joined text', () => {
+    const ts = mts();
+    let state = cachedState(initialState('self', '00001'));
+    state = applyMany(state, insertOps(state, 'self', 0, 0, 'abcdef', ts));
+    state = applyMany(
+        state,
+        split(
+            state,
+            splitLocation(state, [0, 'self'], selPos(state, [0, 'self'], 3)!),
+            ts(),
+            'self',
+            {random: () => 0},
+        ),
+    );
+    state = applyMany(
+        state,
+        split(
+            state,
+            splitLocation(
+                state,
+                parseLamportString(rootBlockIds(state)[1]),
+                selPos(state, parseLamportString(rootBlockIds(state)[1]), 3)!,
+            ),
+            ts(),
+            'self',
+            {random: () => 0},
+        ),
+    );
+    const [first, second, third] = rootBlockIds(state).map(parseLamportString);
+    const [firstId, secondId, thirdId] = rootBlockIds(state);
+
+    const firstJoin = join(state, first, second, ts(), 'alice');
+    const secondJoin = join(state, second, third, ts(), 'bob');
+    const cycleJoin = join(state, third, first, ts(), 'cara');
+    state = applyMany(state, [...cycleJoin, ...secondJoin, ...firstJoin]);
+
+    expect(activeJoinRecords(state.state.joins).map((join) => lamportToString(join.id))).toEqual([
+        '0009-alice',
+        '0009-bob',
+    ]);
+    expect(rootBlockIds(state)).toEqual([firstId]);
+    expect(Object.keys(state.cache.joinedBlocks).sort()).toEqual([secondId, thirdId].sort());
+    expect(state.cache.joinedBlocks[firstId]).toBeUndefined();
+    expect(blockLines(state)).toEqual(['abcdef']);
+    expectCache(state);
 });
 
 it('preserves cache and serialization invariants across generated editing scripts', () => {

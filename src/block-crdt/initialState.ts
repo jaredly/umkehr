@@ -17,5 +17,6 @@ export const initialState = (session: string, ts: string): State => ({
     },
     marks: {},
     splits: {},
+    joins: {},
     maxSeenCount: 0,
 });

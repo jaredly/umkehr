@@ -21,7 +21,7 @@ export const selPos = (
                 stack.push(children[i]);
             }
         }
-        if (char.deleted) {
+        if (!char || char.deleted) {
             continue;
         }
         selection--;

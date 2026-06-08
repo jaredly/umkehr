@@ -10,6 +10,7 @@ import {
     Mark,
     SplitRecord,
     JsonValue,
+    JoinRecord,
 } from './types';
 import {lamportToString, parseLamportString} from './utils';
 import {compareLseqIds, createLseqIdBetween, LseqOptions} from './lseq';
@@ -23,7 +24,8 @@ export type Op =
     | {type: 'block:delete'; id: Lamport}
     | {type: 'block:meta'; id: Lamport; meta: Block['meta']}
     | {type: 'mark'; mark: Mark}
-    | {type: 'split-record'; split: SplitRecord};
+    | {type: 'split-record'; split: SplitRecord}
+    | {type: 'join-record'; join: JoinRecord};
 
 export const charOp = (text: string, id: Lamport, after: Lamport, ts: string): Op => ({
     type: 'char',
@@ -50,6 +52,8 @@ export const apply = (state: CachedState, op: Op): CachedState | false => {
             return applyMark(state, op);
         case 'split-record':
             return applySplitRecord(state, op);
+        case 'join-record':
+            return applyJoinRecord(state, op);
     }
 };
 
@@ -105,11 +109,40 @@ const applySplitRecord = (
     };
 };
 
+const applyJoinRecord = (
+    {state, cache}: CachedState,
+    op: Op & {type: 'join-record'},
+): CachedState | false => {
+    const id = lamportToString(op.join.id);
+    const current = state.joins[id];
+    if (current) {
+        if (!equal(current, op.join)) {
+            throw new Error(`re-insert of join ${id} and the payload is different`);
+        }
+        return {state, cache};
+    }
+    const nextState = {
+        ...state,
+        joins: {...state.joins, [id]: op.join},
+        maxSeenCount: Math.max(
+            state.maxSeenCount,
+            op.join.id[0],
+            op.join.left[0],
+            op.join.right[0],
+            op.join.tail[0],
+        ),
+    };
+    return {
+        state: nextState,
+        cache: organizeState(nextState.blocks, nextState.chars, nextState.joins),
+    };
+};
+
 const applyCharDelete = (
     {state, cache}: CachedState,
     op: Op & {type: 'char:delete'},
 ): CachedState | false => {
-    const {chars, blocks, marks, splits, maxSeenCount} = state;
+    const {chars, blocks, marks, splits, joins, maxSeenCount} = state;
     const charId = lamportToString(op.id);
     let current = state.chars[charId];
     if (!current) {
@@ -125,6 +158,7 @@ const applyCharDelete = (
             chars: {...chars, [charId]: current},
             marks,
             splits,
+            joins,
             maxSeenCount: Math.max(maxSeenCount, op.id[0]),
         },
         cache,
@@ -135,7 +169,7 @@ const applyCharMove = (
     {state, cache}: CachedState,
     op: Op & {type: 'char:move'},
 ): CachedState | false => {
-    const {chars, blocks, marks, splits, maxSeenCount} = state;
+    const {chars, blocks, marks, splits, joins, maxSeenCount} = state;
     const charId = lamportToString(op.id);
     let current = state.chars[charId];
     if (!current) {
@@ -156,6 +190,7 @@ const applyCharMove = (
             chars: {...chars, [charId]: current},
             marks,
             splits,
+            joins,
             maxSeenCount: Math.max(maxSeenCount, op.parent.id[0]),
         },
         cache: {
@@ -306,7 +341,7 @@ const laterTs = (one: Char['parent']['ts'], two: Char['parent']['ts']) => {
 };
 
 const applyChar = ({state, cache}: CachedState, {char}: Op & {type: 'char'}) => {
-    const {chars, blocks, marks, splits, maxSeenCount} = state;
+    const {chars, blocks, marks, splits, joins, maxSeenCount} = state;
     const charId = lamportToString(char.id);
     const current = state.chars[charId];
     if (current) {
@@ -331,6 +366,7 @@ const applyChar = ({state, cache}: CachedState, {char}: Op & {type: 'char'}) => 
             chars: {...chars, [charId]: char},
             marks,
             splits,
+            joins,
             maxSeenCount: Math.max(
                 maxSeenCount,
                 char.id[0],
@@ -413,7 +449,7 @@ export const addChars = (
 
 export const cachedState = (state: State): CachedState => ({
     state,
-    cache: organizeState(state.blocks, state.chars),
+    cache: organizeState(state.blocks, state.chars, state.joins),
 });
 
 // root blocks are those whose parent = 'root'
@@ -424,7 +460,8 @@ export const blockContents = (state: CachedState, id: string): string =>
     state.cache.charContents[id]?.map((id) => charToString(state, id)).join('') ?? '';
 
 export const charToString = (state: CachedState, id: string): string => {
-    const char = state.state.chars[id];
+    const char = charRecord(state, id);
+    if (!char) return '';
     return (
         (char.deleted ? '' : char.text) +
         (state.cache.charContents[id]?.map((id) => charToString(state, id)).join('') ?? '')
@@ -447,10 +484,14 @@ export const stateToString = (state: CachedState) => {
             ...(blockChildren[id]?.flatMap(showBlock).map((line) => symbol + ' ' + line) ?? []),
         ];
     };
-    return blockChildren['0000-root']?.flatMap(showBlock).join('\n');
+    return visibleBlockChildren(state, '0000-root').flatMap(showBlock).join('\n');
 };
 
-export function organizeState(blocks: Record<string, Block>, chars: Record<string, Char>): Cache {
+export function organizeState(
+    blocks: Record<string, Block>,
+    chars: Record<string, Char>,
+    joins: Record<string, JoinRecord> = {},
+): Cache {
     const blockChildren: Record<string, string[]> = {};
     for (const [id, block] of Object.entries(blocks)) {
         const pid = lamportToString(block.order.parent);
@@ -473,11 +514,27 @@ export function organizeState(blocks: Record<string, Block>, chars: Record<strin
     Object.values(charContents).forEach((items) => {
         items.sort((a, b) => b.localeCompare(a));
     });
-    return {blockChildren, charContents};
+
+    const joinSentinels: Record<string, JoinRecord> = {};
+    const joinedBlocks: Record<string, JoinRecord> = {};
+    for (const join of activeJoinRecords(joins)) {
+        const rightId = lamportToString(join.right);
+        const tailId = lamportToString(join.tail);
+        joinSentinels[rightId] = join;
+        joinedBlocks[rightId] = join;
+        charContents[tailId] = insertSortedRev(charContents[tailId]?.slice() ?? [], rightId);
+    }
+
+    return {blockChildren, charContents, joinSentinels, joinedBlocks};
 }
 
 export const findTail = (char: string, contents: Cache['charContents']) => {
+    const seen = new Set<string>();
     while (contents[char]?.length) {
+        if (seen.has(char)) {
+            throw new Error(`char traversal cycle at ${char}`);
+        }
+        seen.add(char);
         char = contents[char][contents[char].length - 1];
     }
     return char;
@@ -486,6 +543,94 @@ export const findTail = (char: string, contents: Cache['charContents']) => {
 export const compareLamports = (one: Lamport, two: Lamport) =>
     one[0] === two[0] ? one[1].localeCompare(two[1]) : one[0] - two[0];
 
+export const activeJoinRecords = (joins: Record<string, JoinRecord>): JoinRecord[] => {
+    const active: JoinRecord[] = [];
+    const edges: Record<string, string> = {};
+    const byId = Object.values(joins).sort((a, b) => compareLamports(a.id, b.id));
+
+    for (const join of byId) {
+        const right = lamportToString(join.right);
+        const left = lamportToString(join.left);
+        if (edges[right]) {
+            continue;
+        }
+        if (joinPathExists(edges, left, right)) {
+            continue;
+        }
+        edges[right] = left;
+        active.push(join);
+    }
+
+    return active;
+};
+
+const joinPathExists = (edges: Record<string, string>, from: string, to: string): boolean => {
+    const seen = new Set<string>();
+    let current: string | undefined = from;
+    while (current) {
+        if (current === to) return true;
+        if (seen.has(current)) return false;
+        seen.add(current);
+        current = edges[current];
+    }
+    return false;
+};
+
+export const activeJoinByRightBlock = (
+    state: State | CachedState,
+): Record<string, JoinRecord> => {
+    const joins = 'cache' in state ? state.cache.joinedBlocks : state.joins;
+    if ('cache' in state) return joins;
+    const result: Record<string, JoinRecord> = {};
+    for (const join of activeJoinRecords(joins)) {
+        result[lamportToString(join.right)] = join;
+    }
+    return result;
+};
+
+export const joinedBlockIds = (state: State | CachedState): Set<string> =>
+    new Set(Object.keys(activeJoinByRightBlock(state)));
+
+const charRecord = (
+    state: CachedState,
+    id: string,
+): Pick<Char, 'id' | 'text' | 'deleted' | 'parent'> | undefined => {
+    const char = state.state.chars[id];
+    if (char) return char;
+    const join = state.cache.joinSentinels[id];
+    if (!join) return undefined;
+    return {
+        id: join.right,
+        text: '',
+        deleted: true,
+        parent: {id: join.tail, ts: join.ts},
+    };
+};
+
+const visibleBlock = (state: CachedState, id: string): boolean => {
+    const block = state.state.blocks[id];
+    return Boolean(block && !block.deleted && !state.cache.joinedBlocks[id]);
+};
+
+export const visibleBlockChildren = (state: CachedState, parent: string): string[] => {
+    const result: string[] = [];
+    const visitChildren = (pid: string, seen: Set<string>) => {
+        if (seen.has(pid)) {
+            throw new Error(`block traversal cycle at ${pid}`);
+        }
+        seen.add(pid);
+        for (const child of state.cache.blockChildren[pid] ?? []) {
+            if (visibleBlock(state, child)) {
+                result.push(child);
+            } else {
+                visitChildren(child, new Set(seen));
+            }
+        }
+    };
+    visitChildren(parent, new Set());
+    return result;
+};
+
 export const orderedCharIdsForBlock = (
     state: CachedState,
     blockId: string,
@@ -493,7 +638,8 @@ export const orderedCharIdsForBlock = (
 ): string[] => {
     const result: string[] = [];
     const visit = (id: string) => {
-        const char = state.state.chars[id];
+        const char = charRecord(state, id);
+        if (!char) return;
         if (!options.visibleOnly || !char.deleted) {
             result.push(id);
         }
@@ -508,15 +654,19 @@ export const orderedCharIdsForBlock = (
 };
 
 export const rootBlockIds = (state: CachedState, includeDeleted = false): string[] =>
-    (state.cache.blockChildren[lamportToString([0, 'root'])] ?? []).filter(
-        (id) => includeDeleted || !state.state.blocks[id]?.deleted,
-    );
+    includeDeleted
+        ? state.cache.blockChildren[lamportToString([0, 'root'])] ?? []
+        : visibleBlockChildren(state, lamportToString([0, 'root']));
 
 export const hasJoinStyleParent = (state: CachedState, charId: string): boolean => {
+    if (state.cache.joinSentinels[charId]) {
+        return true;
+    }
     const char = state.state.chars[charId];
+    if (!char) return false;
     const parentId = lamportToString(char.parent.id);
     return (
-        parentId in state.state.chars &&
+        (parentId in state.state.chars || parentId in state.cache.joinSentinels) &&
         typeof char.parent.ts === 'string' &&
         char.parent.ts !== ''
     );
@@ -601,7 +751,8 @@ export const materializeFormattedBlocks = (state: CachedState): FormattedBlock[]
     return rootBlockIds(state).map((id) => {
         const runs: FormattedRun[] = [];
         for (const charId of orderedCharIdsForBlock(state, id, {visibleOnly: true})) {
-            const char = state.state.chars[charId];
+            const char = charRecord(state, charId);
+            if (!char) continue;
             const marks = resolveMarks(coveredByMark[charId] ?? []);
             const last = runs[runs.length - 1];
             if (last && equal(last.marks, marks)) {
@@ -865,7 +1016,7 @@ export const join = (
     left: Lamport,
     right: Lamport,
     ts: string,
-    _actor: string,
+    actor: string,
 ): Op[] => {
     const {blocks} = state;
     const leftId = lamportToString(left);
@@ -876,29 +1027,27 @@ export const join = (
     if (blocks[leftId].deleted || blocks[rightId].deleted) {
         throw new Error(`join block deleted`);
     }
+    if (cache.joinedBlocks[leftId] || cache.joinedBlocks[rightId]) {
+        throw new Error(`join block deleted`);
+    }
 
-    const ops: Op[] = [];
     const leftRoots = cache.charContents[leftId] ?? [];
     const tail = leftRoots.length
         ? parseLamportString(findTail(leftRoots[leftRoots.length - 1], cache.charContents))
         : left;
 
-    ops.push({
-        type: 'char',
-        char: {
-            id: right,
-            text: '',
-            deleted: true,
-            parent: {id: tail, ts},
+    return [
+        {
+            type: 'join-record',
+            join: {
+                id: [state.maxSeenCount + 1, actor],
+                left,
+                right,
+                tail,
+                ts,
+            },
         },
-    });
-
-    ops.push({
-        type: 'block:delete',
-        id: right,
-    });
-
-    return ops;
+    ];
 };
 
 const blockBetween = (

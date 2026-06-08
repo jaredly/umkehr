@@ -37,7 +37,7 @@ const onlyBlock = (state: CachedState) => rootBlockIds(state)[0];
 const lines = (state: CachedState) => rootBlockIds(state).map((id) => blockContents(state, id));
 
 const expectCache = (state: CachedState) => {
-    expect(state.cache).toEqual(organizeState(state.state.blocks, state.state.chars));
+    expect(state.cache).toEqual(organizeState(state.state.blocks, state.state.chars, state.state.joins));
 };
 
 describe('block rich text commands', () => {
