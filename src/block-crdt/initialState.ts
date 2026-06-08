@@ -8,9 +8,10 @@ export const initialState = (session: string, ts: string): State => ({
             id: [0, session],
             meta: {type: 'paragraph', ts: ts},
             order: {
+                id: [0, session],
+                path: [[0, session]],
                 index: {path: [1], opId: {actorId: session, counter: 0}},
                 ts: ts,
-                parent: [0, 'root'],
             },
             deleted: false,
         },

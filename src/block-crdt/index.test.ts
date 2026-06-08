@@ -15,6 +15,8 @@ import {
     join,
     Op,
     activeJoinRecords,
+    materializedBlockParent,
+    materializedBlockPath,
     orderedCharIdsForBlock,
     visibleBlockChildren,
     visibleBlockOutline,
@@ -62,7 +64,7 @@ const blockParentIds = (state: CachedState) =>
     Object.fromEntries(
         Object.entries(state.state.blocks).map(([id, block]) => [
             id,
-            lamportToString(block.order.parent),
+            lamportToString(materializedBlockParent(state, id)),
         ]),
     );
 
@@ -79,12 +81,22 @@ const expectVisibleTraversalSafe = (state: CachedState) => {
     expect(new Set(ids).size).toBe(ids.length);
 };
 
-const block = (id: Lamport, index: number, ts: string, parent: Lamport = [0, 'root']): Block => ({
-    id,
-    meta: {type: 'paragraph', ts},
-    order: {index: lseq(index), ts, parent},
-    deleted: false,
-});
+const block = (id: Lamport, index: number, ts: string, parent: Lamport | Lamport[] = []): Block => {
+    const parentPath =
+        parent.length === 0
+            ? []
+            : typeof parent[0] === 'number'
+              ? lamportToString(parent as Lamport) === lamportToString([0, 'root'])
+                  ? []
+                  : [parent as Lamport]
+              : (parent as Lamport[]);
+    return {
+        id,
+        meta: {type: 'paragraph', ts},
+        order: {id, index: lseq(index), ts, path: [...parentPath, id]},
+        deleted: false,
+    };
+};
 
 const lseq = (path: number, actorId = 'self', counter = path): LseqId => ({
     path: [path],
@@ -279,7 +291,7 @@ const indentBlockOps = (
     const current = state.state.blocks[blockId];
     if (!current || !outlineIds(state).includes(blockId)) return [];
 
-    const parentId = lamportToString(current.order.parent);
+    const parentId = lamportToString(materializedBlockParent(state, blockId));
     const siblings = visibleBlockChildren(state, parentId);
     const index = siblings.indexOf(blockId);
     const previousBlockId = siblings[index - 1];
@@ -299,7 +311,8 @@ const indentBlockOps = (
             type: 'block:move',
             id: current.id,
             order: {
-                parent: previous.id,
+                id: [state.state.maxSeenCount + 1, actor],
+                path: [...materializedBlockPath(state, previousBlockId), current.id],
                 index: nextIndex,
                 ts: ts(),
             },
@@ -316,13 +329,18 @@ const unindentBlockOps = (
     const current = state.state.blocks[blockId];
     if (!current || !outlineIds(state).includes(blockId)) return [];
 
-    const parentId = lamportToString(current.order.parent);
+    const parentId = lamportToString(materializedBlockParent(state, blockId));
     if (parentId === lamportToString([0, 'root'])) return [];
 
     const parent = state.state.blocks[parentId];
     if (!parent) return [];
 
-    const grandparentId = lamportToString(parent.order.parent);
+    const parentPath = materializedBlockPath(state, parentId);
+    const grandparentPath = parentPath.slice(0, -1);
+    const grandparentId =
+        grandparentPath.length > 0
+            ? lamportToString(grandparentPath[grandparentPath.length - 1])
+            : lamportToString([0, 'root']);
     const grandparentChildren = visibleBlockChildren(state, grandparentId).filter(
         (id) => id !== blockId,
     );
@@ -342,7 +360,8 @@ const unindentBlockOps = (
             type: 'block:move',
             id: current.id,
             order: {
-                parent: parent.order.parent,
+                id: [state.state.maxSeenCount + 1, actor],
+                path: [...grandparentPath, current.id],
                 index: nextIndex,
                 ts: ts(),
             },
@@ -356,7 +375,8 @@ const unindentBlockOps = (
             type: 'block:move',
             id: sibling.id,
             order: {
-                parent: current.id,
+                id: [state.state.maxSeenCount + ops.length + 1, actor],
+                path: [...grandparentPath, current.id, sibling.id],
                 index: sibling.order.index,
                 ts: [lastBlockOrderTs(sibling.order.ts), current.order.index, ts()],
             },
@@ -388,7 +408,8 @@ const moveBlockToRootOps = (
             type: 'block:move',
             id: current.id,
             order: {
-                parent: [0, 'root'],
+                id: [state.state.maxSeenCount + 1, actor],
+                path: [current.id],
                 index: nextIndex,
                 ts: ts(),
             },
@@ -615,26 +636,28 @@ it('moves blocks by timestamp and updates child cache', () => {
     state = apply(state, {
         type: 'block:move',
         id: [2, 'self'],
-        order: {index: lseq(1, 'self', 2), ts: '00003', parent: [1, 'self']},
+        order: {id: [3, 'self'], index: lseq(1, 'self', 2), ts: '00003', path: [[1, 'self'], [2, 'self']]},
     }) as CachedState;
 
     expect(state.state.blocks['0002-self'].order).toEqual({
+        id: [3, 'self'],
         index: lseq(1, 'self', 2),
         ts: '00003',
-        parent: [1, 'self'],
+        path: [[1, 'self'], [2, 'self']],
     });
     expectCache(state);
 
     state = apply(state, {
         type: 'block:move',
         id: [2, 'self'],
-        order: {index: lseq(9), ts: '00002', parent: [0, 'root']},
+        order: {id: [4, 'self'], index: lseq(9), ts: '00002', path: [[2, 'self']]},
     }) as CachedState;
 
     expect(state.state.blocks['0002-self'].order).toEqual({
+        id: [3, 'self'],
         index: lseq(1, 'self', 2),
         ts: '00003',
-        parent: [1, 'self'],
+        path: [[1, 'self'], [2, 'self']],
     });
     expectCache(state);
 });
@@ -683,7 +706,8 @@ it('orders incidental block moves by source sibling index', () => {
         type: 'block:move',
         id: [4, 'self'],
         order: {
-            parent: [2, 'self'],
+            id: [5, 'self'],
+            path: [[2, 'self'], [4, 'self']],
             index: lseq(4),
             ts: ['00002', lseq(2), '00010'],
         },
@@ -692,7 +716,8 @@ it('orders incidental block moves by source sibling index', () => {
         type: 'block:move',
         id: [4, 'self'],
         order: {
-            parent: [3, 'self'],
+            id: [6, 'self'],
+            path: [[3, 'self'], [4, 'self']],
             index: lseq(4),
             ts: ['00002', lseq(3), '00009'],
         },
@@ -701,10 +726,212 @@ it('orders incidental block moves by source sibling index', () => {
     const one = applyMany(state, [moveUnderB, moveUnderC]);
     const two = applyMany(state, [moveUnderC, moveUnderB]);
 
-    expect(one.state.blocks['0004-self'].order.parent).toEqual([3, 'self']);
-    expect(two.state.blocks['0004-self'].order.parent).toEqual([3, 'self']);
+    expect(materializedBlockParent(one, '0004-self')).toEqual([3, 'self']);
+    expect(materializedBlockParent(two, '0004-self')).toEqual([3, 'self']);
     expectCache(one);
     expectCache(two);
+});
+
+it('validates block order paths', () => {
+    let state = apply(cachedState(init), {
+        type: 'block',
+        block: block([1, 'self'], 1, '00002'),
+    }) as CachedState;
+
+    expect(() =>
+        apply(state, {
+            type: 'block:move',
+            id: [1, 'self'],
+            order: {id: [2, 'self'], index: lseq(1), ts: '00003', path: []},
+        }),
+    ).toThrow('must not be empty');
+
+    expect(() =>
+        apply(state, {
+            type: 'block:move',
+            id: [1, 'self'],
+            order: {id: [2, 'self'], index: lseq(1), ts: '00003', path: [[2, 'self']]},
+        }),
+    ).toThrow('must end with the block id');
+
+    expect(() =>
+        apply(state, {
+            type: 'block:move',
+            id: [1, 'self'],
+            order: {id: [2, 'self'], index: lseq(1), ts: '00003', path: [[0, 'root'], [1, 'self']]},
+        }),
+    ).toThrow('must omit root');
+
+    expect(() =>
+        apply(state, {
+            type: 'block:move',
+            id: [1, 'self'],
+            order: {id: [2, 'self'], index: lseq(1), ts: '00003', path: [[1, 'self'], [1, 'self']]},
+        }),
+    ).toThrow('contains duplicate id');
+
+    expect(
+        apply(state, {
+            type: 'block:move',
+            id: [1, 'self'],
+            order: {id: [2, 'self'], index: lseq(1), ts: '00003', path: [[9, 'self'], [1, 'self']]},
+        }),
+    ).toBe(false);
+
+    const missingAncestorBlock = apply(state, {
+        type: 'block',
+        block: {
+            id: [2, 'self'],
+            meta: {type: 'paragraph', ts: '00003'},
+            order: {id: [2, 'self'], index: lseq(2), ts: '00003', path: [[9, 'self'], [2, 'self']]},
+            deleted: false,
+        },
+    });
+    expect(missingAncestorBlock).toBe(false);
+});
+
+it('breaks reciprocal path cycles by lower order id and preserves reachability', () => {
+    let state = cachedState(init);
+    state = apply(state, {type: 'block', block: block([1, 'self'], 1, '00002')}) as CachedState;
+    state = apply(state, {type: 'block', block: block([2, 'self'], 2, '00002')}) as CachedState;
+
+    state = applyMany(state, [
+        {
+            type: 'block:move',
+            id: [1, 'self'],
+            order: {id: [11, 'alice'], index: lseq(1), ts: '00003', path: [[2, 'self'], [1, 'self']]},
+        },
+        {
+            type: 'block:move',
+            id: [2, 'self'],
+            order: {id: [10, 'bob'], index: lseq(2), ts: '00003', path: [[1, 'self'], [2, 'self']]},
+        },
+    ]);
+
+    expect(materializedBlockPath(state, '0002-self')).toEqual([[2, 'self']]);
+    expect(materializedBlockPath(state, '0001-self')).toEqual([[2, 'self'], [1, 'self']]);
+    expect(visibleBlockOutline(state)).toEqual([
+        {id: '0000-self', depth: 0, parentId: '0000-root'},
+        {id: '0002-self', depth: 0, parentId: '0000-root'},
+        {id: '0001-self', depth: 1, parentId: '0002-self'},
+    ]);
+    expectCache(state);
+});
+
+it('breaks three-block cycles and keeps every visible block reachable', () => {
+    let state = cachedState(init);
+    for (let index = 1; index <= 3; index++) {
+        state = apply(state, {type: 'block', block: block([index, 'self'], index, '00002')}) as CachedState;
+    }
+
+    const ops: Op[] = [
+        {
+            type: 'block:move',
+            id: [1, 'self'],
+            order: {id: [12, 'a'], index: lseq(1), ts: '00003', path: [[3, 'self'], [1, 'self']]},
+        },
+        {
+            type: 'block:move',
+            id: [2, 'self'],
+            order: {id: [10, 'b'], index: lseq(2), ts: '00003', path: [[1, 'self'], [2, 'self']]},
+        },
+        {
+            type: 'block:move',
+            id: [3, 'self'],
+            order: {id: [11, 'c'], index: lseq(3), ts: '00003', path: [[2, 'self'], [3, 'self']]},
+        },
+    ];
+
+    const one = applyMany(state, ops);
+    const two = applyMany(state, [ops[2], ops[1], ops[0]]);
+
+    expect(materializedBlockPath(one, '0002-self')).toEqual([[2, 'self']]);
+    expect(materializedBlockPath(one, '0003-self')).toEqual([[2, 'self'], [3, 'self']]);
+    expect(materializedBlockPath(one, '0001-self')).toEqual([[2, 'self'], [3, 'self'], [1, 'self']]);
+    expect(visibleBlockOutline(one)).toEqual(visibleBlockOutline(two));
+    expectVisibleTraversalSafe(one);
+    expectVisibleTraversalSafe(two);
+});
+
+it('preserves deep path suffixes after an ancestor cycle break', () => {
+    let state = cachedState(init);
+    for (let index = 1; index <= 5; index++) {
+        state = apply(state, {type: 'block', block: block([index, 'self'], index, '00002')}) as CachedState;
+    }
+
+    state = applyMany(state, [
+        {
+            type: 'block:move',
+            id: [1, 'self'],
+            order: {id: [20, 'a'], index: lseq(1), ts: '00003', path: [[2, 'self'], [1, 'self']]},
+        },
+        {
+            type: 'block:move',
+            id: [2, 'self'],
+            order: {id: [10, 'b'], index: lseq(2), ts: '00003', path: [[1, 'self'], [2, 'self']]},
+        },
+        {
+            type: 'block:move',
+            id: [3, 'self'],
+            order: {id: [30, 'c'], index: lseq(3), ts: '00003', path: [[1, 'self'], [2, 'self'], [3, 'self']]},
+        },
+        {
+            type: 'block:move',
+            id: [4, 'self'],
+            order: {
+                id: [31, 'd'],
+                index: lseq(4),
+                ts: '00003',
+                path: [[1, 'self'], [2, 'self'], [3, 'self'], [4, 'self']],
+            },
+        },
+        {
+            type: 'block:move',
+            id: [5, 'self'],
+            order: {
+                id: [32, 'e'],
+                index: lseq(5),
+                ts: '00003',
+                path: [[1, 'self'], [2, 'self'], [3, 'self'], [4, 'self'], [5, 'self']],
+            },
+        },
+    ]);
+
+    expect(materializedBlockPath(state, '0002-self')).toEqual([[2, 'self']]);
+    expect(materializedBlockPath(state, '0003-self')).toEqual([[2, 'self'], [3, 'self']]);
+    expect(materializedBlockPath(state, '0004-self')).toEqual([[2, 'self'], [3, 'self'], [4, 'self']]);
+    expect(materializedBlockPath(state, '0005-self')).toEqual([
+        [2, 'self'],
+        [3, 'self'],
+        [4, 'self'],
+        [5, 'self'],
+    ]);
+    expectVisibleTraversalSafe(state);
+});
+
+it('uses lower order id as the equivalent timestamp tie-breaker', () => {
+    let state = cachedState(init);
+    state = apply(state, {type: 'block', block: block([1, 'self'], 1, '00002')}) as CachedState;
+    state = apply(state, {type: 'block', block: block([2, 'self'], 2, '00002')}) as CachedState;
+
+    const highOrderId: Op = {
+        type: 'block:move',
+        id: [2, 'self'],
+        order: {id: [20, 'z'], index: lseq(2), ts: '00003', path: [[1, 'self'], [2, 'self']]},
+    };
+    const lowOrderId: Op = {
+        type: 'block:move',
+        id: [2, 'self'],
+        order: {id: [10, 'a'], index: lseq(2), ts: '00003', path: [[2, 'self']]},
+    };
+
+    const one = applyMany(state, [highOrderId, lowOrderId]);
+    const two = applyMany(state, [lowOrderId, highOrderId]);
+
+    expect(materializedBlockPath(one, '0002-self')).toEqual([[2, 'self']]);
+    expect(materializedBlockPath(two, '0002-self')).toEqual([[2, 'self']]);
+    expect(one.state.blocks['0002-self'].order.id).toEqual([10, 'a']);
+    expect(two.state.blocks['0002-self'].order.id).toEqual([10, 'a']);
 });
 
 it('keeps concurrent adjacent indents traversal-safe and convergent', () => {
@@ -836,7 +1063,7 @@ it('returns false for ops that reference missing records', () => {
         apply(state, {
             type: 'block:move',
             id: [9, 'self'],
-            order: {index: lseq(1), parent: [0, 'root'], ts: '00002'},
+            order: {id: [10, 'self'], index: lseq(1), path: [[9, 'self']], ts: '00002'},
         }),
     ).toBe(false);
     expect(
@@ -906,7 +1133,7 @@ it('merges duplicate block inserts by field timestamps', () => {
         block: {
             id: [1, 'self'],
             meta: {type: 'blockquote', ts: '00004'},
-            order: {index: lseq(9), parent: [0, 'root'], ts: '00002'},
+            order: {id: [9, 'self'], index: lseq(9), path: [[1, 'self']], ts: '00002'},
             deleted: true,
         },
     }) as CachedState;
@@ -914,7 +1141,7 @@ it('merges duplicate block inserts by field timestamps', () => {
     expect(state.state.blocks['0001-self']).toEqual({
         id: [1, 'self'],
         meta: {type: 'blockquote', ts: '00004'},
-        order: {index: lseq(1), parent: [0, 'root'], ts: '00003'},
+        order: {id: [1, 'self'], index: lseq(1), path: [[1, 'self']], ts: '00003'},
         deleted: true,
     });
     expect(state.cache.blockChildren['0000-root'].filter((id) => id === '0001-self')).toHaveLength(

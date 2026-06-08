@@ -43,6 +43,13 @@ export type CharParentTs = HLC | [HLC, Lamport[], HLC];
 export type IncidentalBlockOrderTs = [HLC, LseqId, HLC];
 export type BlockOrderTs = HLC | IncidentalBlockOrderTs;
 
+export type BlockOrder = {
+    id: Lamport;
+    path: Lamport[];
+    index: LseqId;
+    ts: BlockOrderTs;
+};
+
 export type Char = {
     id: Lamport;
     text: string;
@@ -62,7 +69,7 @@ export type Block = {
         | {type: 'blockquote'; ts: HLC}
         | {type: 'bullets'; ts: HLC}
         | {type: 'checkboxes'; ts: HLC; checked: Record<string, {ts: HLC; checked: boolean}>};
-    order: {index: LseqId; ts: BlockOrderTs; parent: Lamport};
+    order: BlockOrder;
     deleted: boolean;
 };
 

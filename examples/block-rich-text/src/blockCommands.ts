@@ -5,6 +5,8 @@ import {
     join,
     markRange,
     materializeFormattedBlocks,
+    materializedBlockParent,
+    materializedBlockPath,
     orderedCharIdsForBlock,
     rootBlockIds,
     split,
@@ -41,6 +43,7 @@ export type CommandResult = {
 export type MoveTarget = {targetBlockId: string; after: boolean};
 
 const ROOT: Lamport = [0, 'root'];
+const ROOT_ID = lamportToString(ROOT);
 
 export const insertText = (
     state: CachedState,
@@ -227,7 +230,8 @@ export const moveBlock = (
         type: 'block:move',
         id: current.id,
         order: {
-            parent: ROOT,
+            id: [state.state.maxSeenCount + 1, context.actor],
+            path: [current.id],
             index: nextIndex,
             ts: context.nextTs(),
         },
@@ -246,7 +250,7 @@ export const indentBlock = (
         return {state, ops: [], selection: caret(blockId, 0)};
     }
 
-    const parentId = lamportToString(current.order.parent);
+    const parentId = lamportToString(materializedBlockParent(state, blockId));
     const siblings = visibleBlockChildren(state, parentId);
     const index = siblings.indexOf(blockId);
     const previousBlockId = siblings[index - 1];
@@ -266,7 +270,8 @@ export const indentBlock = (
         type: 'block:move',
         id: current.id,
         order: {
-            parent: previous.id,
+            id: [state.state.maxSeenCount + 1, context.actor],
+            path: [...materializedBlockPath(state, previousBlockId), current.id],
             index: nextIndex,
             ts: context.nextTs(),
         },
@@ -285,8 +290,8 @@ export const unindentBlock = (
         return {state, ops: [], selection: caret(blockId, 0)};
     }
 
-    const parentId = lamportToString(current.order.parent);
-    if (parentId === lamportToString(ROOT)) {
+    const parentId = lamportToString(materializedBlockParent(state, blockId));
+    if (parentId === ROOT_ID) {
         return {state, ops: [], selection: caret(blockId, 0)};
     }
 
@@ -295,7 +300,10 @@ export const unindentBlock = (
         return {state, ops: [], selection: caret(blockId, 0)};
     }
 
-    const grandparentId = lamportToString(parent.order.parent);
+    const parentPath = materializedBlockPath(state, parentId);
+    const grandparentPath = parentPath.slice(0, -1);
+    const grandparentId =
+        grandparentPath.length > 0 ? lamportToString(grandparentPath[grandparentPath.length - 1]) : ROOT_ID;
     const grandparentChildren = visibleBlockChildren(state, grandparentId).filter(
         (id) => id !== blockId,
     );
@@ -315,7 +323,8 @@ export const unindentBlock = (
             type: 'block:move',
             id: current.id,
             order: {
-                parent: parent.order.parent,
+                id: [state.state.maxSeenCount + 1, context.actor],
+                path: [...grandparentPath, current.id],
                 index: nextIndex,
                 ts: context.nextTs(),
             },
@@ -329,7 +338,8 @@ export const unindentBlock = (
             type: 'block:move',
             id: sibling.id,
             order: {
-                parent: current.id,
+                id: [state.state.maxSeenCount + ops.length + 1, context.actor],
+                path: [...grandparentPath, current.id, sibling.id],
                 index: sibling.order.index,
                 ts: [lastBlockOrderTs(sibling.order.ts), current.order.index, context.nextTs()],
             },

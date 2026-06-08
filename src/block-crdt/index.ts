@@ -228,35 +228,27 @@ const applyBlockMove = (
     op: Op & {type: 'block:move'},
 ): CachedState | false => {
     const id = lamportToString(op.id);
-    let current = state.blocks[id];
+    const current = state.blocks[id];
     if (!current) {
         return false;
     }
-    if (!laterBlockOrderTs(op.order.ts, current.order.ts)) {
+    const valid = validateBlockOrderPath(state.blocks, id, op.order);
+    if (valid === false) {
+        return false;
+    }
+    if (!blockOrderWins(op.order, current.order)) {
         return {state, cache};
     }
 
-    const blockChildren = {...cache.blockChildren};
-    const oldParentId = lamportToString(current.order.parent);
-    removeFromCache(blockChildren, oldParentId, id);
-
-    const newParentId = lamportToString(op.order.parent);
     const blocks = {...state.blocks, [id]: {...current, order: op.order}};
-    blockChildren[newParentId] = insertSortedBy(
-        (blockChildren[newParentId] ?? []).slice(),
-        id,
-        (id) => blocks[id].order.index,
-        compareLseqIds,
-    );
-
-    current = {...current, order: op.order};
+    const nextState = {
+        ...state,
+        blocks,
+        maxSeenCount: Math.max(state.maxSeenCount, op.id[0], op.order.id[0], ...op.order.path.map((id) => id[0])),
+    };
     return {
-        state: {
-            ...state,
-            blocks: {...state.blocks, [id]: current},
-            maxSeenCount: Math.max(state.maxSeenCount, op.id[0], op.order.parent[0]),
-        },
-        cache: {...cache, blockChildren},
+        state: nextState,
+        cache: organizeState(nextState.blocks, nextState.chars, nextState.joins),
     };
 };
 
@@ -282,42 +274,32 @@ const applyBlockMeta = (
     };
 };
 
-const applyBlock = ({state, cache}: CachedState, {block}: Op & {type: 'block'}) => {
+const applyBlock = ({state}: CachedState, {block}: Op & {type: 'block'}): CachedState | false => {
     const id = lamportToString(block.id);
     const current = state.blocks[id];
     if (current) {
         if (current.meta.ts > block.meta.ts) {
             block = {...block, meta: current.meta};
         }
-        if (laterBlockOrderTs(current.order.ts, block.order.ts)) {
+        if (!blockOrderWins(block.order, current.order)) {
             block = {...block, order: current.order};
         }
         block = {...block, deleted: current.deleted || block.deleted};
     }
 
     const blocks = {...state.blocks, [id]: block};
-    const parentId = lamportToString(block.order.parent);
-    const blockChildren = {...cache.blockChildren};
-    if (current) {
-        const currentParentId = lamportToString(current.order.parent);
-        removeFromCache(blockChildren, currentParentId, id);
+    const valid = validateBlockOrderPath(blocks, id, block.order);
+    if (valid === false) {
+        return false;
     }
-    blockChildren[parentId] = insertSortedBy(
-        (blockChildren[parentId] ?? []).slice(),
-        id,
-        (id) => blocks[id].order.index,
-        compareLseqIds,
-    );
+    const nextState = {
+        ...state,
+        blocks,
+        maxSeenCount: Math.max(state.maxSeenCount, block.id[0], block.order.id[0], ...block.order.path.map((id) => id[0])),
+    };
     return {
-        state: {
-            ...state,
-            blocks,
-            maxSeenCount: Math.max(state.maxSeenCount, block.id[0], block.order.parent[0]),
-        },
-        cache: {
-            ...cache,
-            blockChildren,
-        },
+        state: nextState,
+        cache: organizeState(nextState.blocks, nextState.chars, nextState.joins),
     };
 };
 
@@ -356,6 +338,41 @@ const laterBlockOrderTs = (one: Block['order']['ts'], two: Block['order']['ts'])
     const compared = compareLseqIds(one[1], two[1]);
     if (compared !== 0) return compared > 0;
     return one[2] > two[2];
+};
+
+const blockOrderWins = (incoming: Block['order'], current: Block['order']) => {
+    if (laterBlockOrderTs(incoming.ts, current.ts)) return true;
+    if (laterBlockOrderTs(current.ts, incoming.ts)) return false;
+    return compareLamports(incoming.id, current.id) < 0;
+};
+
+const validateBlockOrderPath = (
+    blocks: Record<string, Block>,
+    blockId: string,
+    order: Block['order'],
+): false | void => {
+    if (!order.path.length) {
+        throw new Error(`block order path for ${blockId} must not be empty`);
+    }
+    if (lamportToString(order.path[order.path.length - 1]) !== blockId) {
+        throw new Error(`block order path for ${blockId} must end with the block id`);
+    }
+
+    const seen = new Set<string>();
+    const rootId = lamportToString([0, 'root']);
+    for (const item of order.path) {
+        const id = lamportToString(item);
+        if (id === rootId) {
+            throw new Error(`block order path for ${blockId} must omit root`);
+        }
+        if (seen.has(id)) {
+            throw new Error(`block order path for ${blockId} contains duplicate id ${id}`);
+        }
+        seen.add(id);
+        if (!blocks[id]) {
+            return false;
+        }
+    }
 };
 
 const applyChar = ({state, cache}: CachedState, {char}: Op & {type: 'char'}) => {
@@ -505,14 +522,96 @@ export const stateToString = (state: CachedState) => {
     return visibleBlockChildren(state, '0000-root').flatMap(showBlock).join('\n');
 };
 
+const stateBlocks = (state: State | CachedState) => ('cache' in state ? state.state.blocks : state.blocks);
+
+export const materializedBlockPaths = (state: State | CachedState): Record<string, Lamport[]> =>
+    materializedBlockPathsForBlocks(stateBlocks(state));
+
+export const materializedBlockPath = (state: State | CachedState, blockId: string): Lamport[] => {
+    const path = materializedBlockPaths(state)[blockId];
+    if (!path) {
+        throw new Error(`block ${blockId} not found`);
+    }
+    return path;
+};
+
+export const materializedBlockParent = (state: State | CachedState, blockId: string): Lamport => {
+    const path = materializedBlockPath(state, blockId);
+    return path.length > 1 ? path[path.length - 2] : [0, 'root'];
+};
+
+const materializedBlockPathsForBlocks = (blocks: Record<string, Block>): Record<string, Lamport[]> => {
+    const rawParent: Record<string, string | null> = {};
+    const rejectedRoot = new Set<string>();
+
+    for (const [id, block] of Object.entries(blocks)) {
+        const valid = validateBlockOrderPath(blocks, id, block.order);
+        if (valid === false) {
+            throw new Error(`block order path for ${id} references a missing block`);
+        }
+        rawParent[id] =
+            block.order.path.length > 1
+                ? lamportToString(block.order.path[block.order.path.length - 2])
+                : null;
+    }
+
+    let changed = true;
+    while (changed) {
+        changed = false;
+        for (const id of Object.keys(blocks)) {
+            const seen = new Map<string, number>();
+            const path: string[] = [];
+            let current: string | null | undefined = id;
+            while (current && !rejectedRoot.has(current)) {
+                const index = seen.get(current);
+                if (index !== undefined) {
+                    const cycle = path.slice(index);
+                    const winner = cycle.reduce((best, item) =>
+                        compareLamports(blocks[item].order.id, blocks[best].order.id) < 0 ? item : best,
+                    );
+                    if (!rejectedRoot.has(winner)) {
+                        rejectedRoot.add(winner);
+                        changed = true;
+                    }
+                    break;
+                }
+                seen.set(current, path.length);
+                path.push(current);
+                current = rawParent[current];
+            }
+        }
+    }
+
+    const memo: Record<string, Lamport[]> = {};
+    const normalize = (id: string): Lamport[] => {
+        const existing = memo[id];
+        if (existing) return existing;
+        const block = blocks[id];
+        if (!block) {
+            throw new Error(`block ${id} not found while materializing paths`);
+        }
+        const parent = rejectedRoot.has(id) ? null : rawParent[id];
+        const path = parent ? [...normalize(parent), block.id] : [block.id];
+        memo[id] = path;
+        return path;
+    };
+
+    for (const id of Object.keys(blocks)) {
+        normalize(id);
+    }
+    return memo;
+};
+
 export function organizeState(
     blocks: Record<string, Block>,
     chars: Record<string, Char>,
     joins: Record<string, JoinRecord> = {},
 ): Cache {
     const blockChildren: Record<string, string[]> = {};
+    const paths = materializedBlockPathsForBlocks(blocks);
     for (const [id, block] of Object.entries(blocks)) {
-        const pid = lamportToString(block.order.parent);
+        const path = paths[id];
+        const pid = path.length > 1 ? lamportToString(path[path.length - 2]) : lamportToString([0, 'root']);
         if (!blockChildren[pid]) {
             blockChildren[pid] = [];
         }
@@ -958,18 +1057,21 @@ export const split = (
     const {chars, blocks, maxSeenCount} = state;
     const bid = lamportToString(at.block);
     const current = blocks[bid];
-    const siblings = cache.blockChildren[lamportToString(current.order.parent)];
+    const parent = materializedBlockParent({state, cache}, bid);
+    const parentPath = materializedBlockPath({state, cache}, bid).slice(0, -1);
+    const siblings = cache.blockChildren[lamportToString(parent)] ?? [];
     const index = siblings.indexOf(bid);
     const previousId = siblings[index - 1];
     const nextId = siblings[index + 1];
     if (at.char === null) {
+        const id: Lamport = [maxSeenCount + 1, actor];
         return [
             {
                 type: 'block',
                 block: blockBetween(
-                    [maxSeenCount + 1, actor],
+                    id,
                     current.meta,
-                    current.order.parent,
+                    parentPath,
                     current.order.index,
                     nextId ? blocks[nextId].order.index : null,
                     ts,
@@ -980,13 +1082,14 @@ export const split = (
         ];
     }
     if (bid === lamportToString(at.char)) {
+        const id: Lamport = [maxSeenCount + 1, actor];
         return [
             {
                 type: 'block',
                 block: blockBetween(
-                    [maxSeenCount + 1, actor],
+                    id,
                     current.meta,
-                    current.order.parent,
+                    parentPath,
                     previousId ? blocks[previousId].order.index : null,
                     current.order.index,
                     ts,
@@ -1001,8 +1104,9 @@ export const split = (
         id: [maxSeenCount + 1, actor],
         meta: current.meta,
         order: {
+            id: [maxSeenCount + 1, actor],
             ts,
-            parent: current.order.parent,
+            path: [...parentPath, [maxSeenCount + 1, actor]],
             index: createLseqIdBetween(
                 current.order.index,
                 after,
@@ -1124,7 +1228,7 @@ export const join = (
 const blockBetween = (
     id: Lamport,
     meta: Block['meta'],
-    parent: Lamport,
+    parentPath: Lamport[],
     before: Block['order']['index'] | null,
     after: Block['order']['index'] | null,
     ts: string,
@@ -1134,8 +1238,9 @@ const blockBetween = (
     id,
     meta,
     order: {
+        id,
         ts,
-        parent,
+        path: [...parentPath, id],
         index: createLseqIdBetween(
             before,
             after,

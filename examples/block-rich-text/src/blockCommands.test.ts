@@ -3,6 +3,7 @@ import {
     applyMany,
     blockContents,
     cachedState,
+    materializedBlockParent,
     materializeFormattedBlocks,
     organizeState,
     rootBlockIds,
@@ -244,8 +245,8 @@ describe('block rich text commands', () => {
         const one = applyMany(base, [...left, ...right]);
         const two = applyMany(base, [...right, ...left]);
 
-        expect(one.state.blocks[fourth].order.parent).toEqual(one.state.blocks[third].id);
-        expect(two.state.blocks[fourth].order.parent).toEqual(two.state.blocks[third].id);
+        expect(materializedBlockParent(one, fourth)).toEqual(one.state.blocks[third].id);
+        expect(materializedBlockParent(two, fourth)).toEqual(two.state.blocks[third].id);
         expect(visibleBlockOutline(one).map(({id, depth}) => ({id, depth}))).toEqual(
             visibleBlockOutline(two).map(({id, depth}) => ({id, depth})),
         );
