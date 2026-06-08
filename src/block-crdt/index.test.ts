@@ -768,6 +768,30 @@ it('converges join with concurrent inserts into either side', () => {
     );
 });
 
+it('converges join with concurrent insert at start of joined right block', () => {
+    const ts = mts();
+    let state = cachedState(initialState('self', '00001'));
+    state = applyMany(state, insertOps(state, 'self', 0, 0, 'abcd', ts));
+    state = applyMany(
+        state,
+        split(
+            state,
+            splitLocation(state, [0, 'self'], selPos(state, [0, 'self'], 3)!),
+            ts(),
+            'self',
+            {random: () => 0},
+        ),
+    );
+    const [leftBlock, rightBlock] = rootBlockIds(state).map(parseLamportString);
+
+    expectConverges(
+        state,
+        join(state, leftBlock, rightBlock, ts(), 'alice'),
+        insertOps(state, 'bob', 1, 0, 'X', ts),
+        ['abXcd'],
+    );
+});
+
 it('converges join with concurrent splits of either joined block', () => {
     const ts = mts();
     let state = cachedState(initialState('self', '00001'));

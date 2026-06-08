@@ -8,7 +8,7 @@ import {
     type MouseEvent,
     type MutableRefObject,
 } from 'react';
-import {blockContents, materializeFormattedBlocks, rootBlockIds} from 'umkehr/block-crdt';
+import {materializeFormattedBlocks, rootBlockIds} from 'umkehr/block-crdt';
 import type {FormattedBlock} from 'umkehr/block-crdt';
 import {moveBlock} from './blockCommands';
 import {
@@ -54,7 +54,6 @@ import {findWordOccurrences, wordAtPoint} from './wordOccurrences';
 
 export function App() {
     const [demo, setDemo] = useState<DemoState>(() => createDemoState());
-    const [logs, setLogs] = useState<Record<EditorId, string[]>>({left: [], right: []});
 
     const runCommand = useCallback(
         (editorId: EditorId, command: (replica: Replica) => MultiCommandResult) => {
@@ -72,16 +71,6 @@ export function App() {
         [],
     );
 
-    const appendLog = useCallback((editorId: EditorId, message: string) => {
-        // setLogs((current) => ({
-        //     ...current,
-        //     [editorId]: [`${new Date().toLocaleTimeString()} ${message}`, ...current[editorId]].slice(
-        //         0,
-        //         80,
-        //     ),
-        // }));
-    }, []);
-
     return (
         <main className="appShell">
             <header className="topBar">
@@ -91,18 +80,12 @@ export function App() {
             <section className="editorGrid" aria-label="Synced block editors">
                 <BlockEditor
                     replica={demo.left}
-                    logs={logs.left}
                     onCommand={(command) => runCommand('left', command)}
-                    onDebug={(message) => appendLog('left', message)}
-                    onClearDebug={() => setLogs((current) => ({...current, left: []}))}
                     onToggleOnline={() => setDemo((current) => toggleOnline(current, 'left'))}
                 />
                 <BlockEditor
                     replica={demo.right}
-                    logs={logs.right}
                     onCommand={(command) => runCommand('right', command)}
-                    onDebug={(message) => appendLog('right', message)}
-                    onClearDebug={() => setLogs((current) => ({...current, right: []}))}
                     onToggleOnline={() => setDemo((current) => toggleOnline(current, 'right'))}
                 />
             </section>
@@ -112,17 +95,11 @@ export function App() {
 
 function BlockEditor({
     replica,
-    logs,
     onCommand,
-    onDebug,
-    onClearDebug,
     onToggleOnline,
 }: {
     replica: Replica;
-    logs: string[];
     onCommand(command: (replica: Replica) => MultiCommandResult): void;
-    onDebug(message: string): void;
-    onClearDebug(): void;
     onToggleOnline(): void;
 }) {
     const rootRef = useRef<HTMLDivElement>(null);
@@ -174,7 +151,6 @@ function BlockEditor({
             const selection = readSelectionFromDom(root);
             if (!selection) return;
             if (event.type === 'mouseup' && 'detail' in event && event.detail === 3) {
-                onDebug(`captureSelection triple ${formatSelection(selection)}`);
                 scheduleSelectionRestore(selection);
                 onCommand((current) => ({
                     state: current.state,
@@ -189,9 +165,6 @@ function BlockEditor({
                 return;
             }
             const addSelection = 'metaKey' in event && (event.metaKey || event.ctrlKey);
-            onDebug(
-                `captureSelection ${addSelection ? 'add' : 'replace'} ${formatSelection(selection)}`,
-            );
             scheduleSelectionRestore(selection);
             onCommand((current) => ({
                 state: current.state,
@@ -208,7 +181,7 @@ function BlockEditor({
                       : replaceSelectionSet(current.state, selection, current.selection.primaryId),
             }));
         },
-        [nextSelectionId, onCommand, onDebug, scheduleSelectionRestore],
+        [nextSelectionId, onCommand, scheduleSelectionRestore],
     );
 
     const liveSelectionSet = useCallback((current: Replica): RetainedSelectionSet => {
@@ -221,30 +194,19 @@ function BlockEditor({
 
     const runEditCommand = useCallback(
         (
-            label: string,
             command: (current: Replica, selection: RetainedSelectionSet) => MultiCommandResult,
         ) => {
             onCommand((current) => {
                 const selection = liveSelectionSet(current);
-                onDebug(
-                    `${label} begin stored=${formatSelection(
-                        primarySelection(resolveSelectionSet(current.state, current.selection)),
-                    )} live=${formatSelection(primarySelection(resolveSelectionSet(current.state, selection)))} text=${formatReplicaText(current)}`,
-                );
                 const result = command(current, selection);
                 const primaryResultSelection = primarySelection(
                     resolveSelectionSet(result.state, result.selection),
                 );
                 scheduleSelectionRestore(primaryResultSelection);
-                onDebug(
-                    `${label} end next=${formatSelection(primaryResultSelection)} ops=${
-                        result.ops.length
-                    } text=${formatStateText(result.state)}`,
-                );
                 return result;
             });
         },
-        [liveSelectionSet, onCommand, onDebug, scheduleSelectionRestore],
+        [liveSelectionSet, onCommand, scheduleSelectionRestore],
     );
 
     useLayoutEffect(() => {
@@ -272,7 +234,7 @@ function BlockEditor({
             </header>
             <Toolbar
                 onBold={() =>
-                    runEditCommand('toggle bold', (current, selection) =>
+                    runEditCommand((current, selection) =>
                         toggleMarkEverywhere(
                             current.state,
                             selection,
@@ -282,7 +244,7 @@ function BlockEditor({
                     )
                 }
                 onItalic={() =>
-                    runEditCommand('toggle italic', (current, selection) =>
+                    runEditCommand((current, selection) =>
                         toggleMarkEverywhere(
                             current.state,
                             selection,
@@ -323,7 +285,7 @@ function BlockEditor({
                         registerRow={registerRow}
                         onStartDrag={startDrag}
                         onInsertText={(text) =>
-                            runEditCommand(`insert "${text}"`, (current, selection) =>
+                            runEditCommand((current, selection) =>
                                 insertTextEverywhere(
                                     current.state,
                                     selection,
@@ -333,7 +295,7 @@ function BlockEditor({
                             )
                         }
                         onDeleteBackward={() =>
-                            runEditCommand('backspace', (current, selection) =>
+                            runEditCommand((current, selection) =>
                                 deleteBackwardEverywhere(
                                     current.state,
                                     selection,
@@ -342,7 +304,7 @@ function BlockEditor({
                             )
                         }
                         onDeleteForward={() =>
-                            runEditCommand('delete', (current, selection) =>
+                            runEditCommand((current, selection) =>
                                 deleteForwardEverywhere(
                                     current.state,
                                     selection,
@@ -351,7 +313,7 @@ function BlockEditor({
                             )
                         }
                         onSplit={() =>
-                            runEditCommand('split', (current, selection) =>
+                            runEditCommand((current, selection) =>
                                 splitBlockEverywhere(
                                     current.state,
                                     selection,
@@ -360,7 +322,7 @@ function BlockEditor({
                             )
                         }
                         onToggleBold={() =>
-                            runEditCommand('toggle bold', (current, selection) =>
+                            runEditCommand((current, selection) =>
                                 toggleMarkEverywhere(
                                     current.state,
                                     selection,
@@ -370,7 +332,7 @@ function BlockEditor({
                             )
                         }
                         onToggleItalic={() =>
-                            runEditCommand('toggle italic', (current, selection) =>
+                            runEditCommand((current, selection) =>
                                 toggleMarkEverywhere(
                                     current.state,
                                     selection,
@@ -380,7 +342,7 @@ function BlockEditor({
                             )
                         }
                         onPasteText={(text) =>
-                            runEditCommand(`paste ${JSON.stringify(text)}`, (current, selection) =>
+                            runEditCommand((current, selection) =>
                                 pastePlainTextEverywhere(
                                     current.state,
                                     selection,
@@ -404,7 +366,6 @@ function BlockEditor({
                     />
                 ))}
             </div>
-            <DebugLog logs={logs} onClear={onClearDebug} />
         </article>
     );
 }
@@ -767,35 +728,3 @@ const renderRetainedCaret = (id: string, primary: boolean) => {
     span.contentEditable = 'false';
     return span;
 };
-
-function DebugLog({logs, onClear}: {logs: string[]; onClear(): void}) {
-    return (
-        <details className="debugLog" open>
-            <summary>
-                Debug log
-                <button
-                    type="button"
-                    onClick={(event) => {
-                        event.preventDefault();
-                        onClear();
-                    }}
-                >
-                    clear
-                </button>
-            </summary>
-            <pre>{logs.join('\n')}</pre>
-        </details>
-    );
-}
-
-const formatSelection = (selection: EditorSelection) =>
-    selection.type === 'caret'
-        ? `caret(${selection.point.blockId}@${selection.point.offset})`
-        : `range(${selection.anchor.blockId}@${selection.anchor.offset}->${selection.focus.blockId}@${selection.focus.offset})`;
-
-const formatReplicaText = (replica: Replica) => formatStateText(replica.state);
-
-const formatStateText = (state: Replica['state']) =>
-    rootBlockIds(state)
-        .map((id) => `${id}:${JSON.stringify(blockContents(state, id))}`)
-        .join(' | ');
