@@ -22,7 +22,7 @@ import {
 import {Block, CachedState, Lamport} from './types';
 import {lamportToString, parseLamportString, selPos} from './utils';
 import {initialState} from './initialState';
-import {LseqId} from './lseq';
+import {createLseqIdBetween, LseqId} from './lseq';
 
 const init = initialState('self', '00001');
 const initial = cachedState(init);
@@ -58,6 +58,27 @@ const expectCache = (state: CachedState) => {
     expect(state.cache).toEqual(organizeState(state.state.blocks, state.state.chars, state.state.joins));
 };
 
+const blockParentIds = (state: CachedState) =>
+    Object.fromEntries(
+        Object.entries(state.state.blocks).map(([id, block]) => [
+            id,
+            lamportToString(block.order.parent),
+        ]),
+    );
+
+const outlineIds = (state: CachedState) => visibleBlockOutline(state).map((entry) => entry.id);
+
+const outlineById = (state: CachedState) =>
+    Object.fromEntries(visibleBlockOutline(state).map((entry) => [entry.id, entry]));
+
+const expectVisibleTraversalSafe = (state: CachedState) => {
+    expect(() => rootBlockIds(state)).not.toThrow();
+    expect(() => visibleBlockOutline(state)).not.toThrow();
+    expectCache(state);
+    const ids = outlineIds(state);
+    expect(new Set(ids).size).toBe(ids.length);
+};
+
 const block = (id: Lamport, index: number, ts: string, parent: Lamport = [0, 'root']): Block => ({
     id,
     meta: {type: 'paragraph', ts},
@@ -69,6 +90,8 @@ const lseq = (path: number, actorId = 'self', counter = path): LseqId => ({
     path: [path],
     opId: {actorId, counter},
 });
+
+const lastBlockOrderTs = (ts: Block['order']['ts']) => (typeof ts === 'string' ? ts : ts[2]);
 
 it('split', () => {
     const ts = mts();
@@ -229,7 +252,160 @@ class EditorHarness {
         }
         return this.apply(ops);
     }
+
+    outline() {
+        return visibleBlockOutline(this.state);
+    }
+
+    indent(actor: string, blockId: string) {
+        return this.apply(indentBlockOps(this.state, actor, blockId, this.ts));
+    }
+
+    unindent(actor: string, blockId: string) {
+        return this.apply(unindentBlockOps(this.state, actor, blockId, this.ts));
+    }
+
+    moveToRoot(actor: string, blockId: string) {
+        return this.apply(moveBlockToRootOps(this.state, actor, blockId, this.ts));
+    }
 }
+
+const indentBlockOps = (
+    state: CachedState,
+    actor: string,
+    blockId: string,
+    ts: () => string,
+): Op[] => {
+    const current = state.state.blocks[blockId];
+    if (!current || !outlineIds(state).includes(blockId)) return [];
+
+    const parentId = lamportToString(current.order.parent);
+    const siblings = visibleBlockChildren(state, parentId);
+    const index = siblings.indexOf(blockId);
+    const previousBlockId = siblings[index - 1];
+    const previous = previousBlockId ? state.state.blocks[previousBlockId] : null;
+    if (index <= 0 || !previous) return [];
+
+    const previousChildren = visibleBlockChildren(state, previousBlockId);
+    const lastChildId = previousChildren[previousChildren.length - 1] ?? null;
+    const nextIndex = createLseqIdBetween(
+        lastChildId ? state.state.blocks[lastChildId].order.index : null,
+        null,
+        {actorId: actor, counter: state.state.maxSeenCount + 1},
+    );
+
+    return [
+        {
+            type: 'block:move',
+            id: current.id,
+            order: {
+                parent: previous.id,
+                index: nextIndex,
+                ts: ts(),
+            },
+        },
+    ];
+};
+
+const unindentBlockOps = (
+    state: CachedState,
+    actor: string,
+    blockId: string,
+    ts: () => string,
+): Op[] => {
+    const current = state.state.blocks[blockId];
+    if (!current || !outlineIds(state).includes(blockId)) return [];
+
+    const parentId = lamportToString(current.order.parent);
+    if (parentId === lamportToString([0, 'root'])) return [];
+
+    const parent = state.state.blocks[parentId];
+    if (!parent) return [];
+
+    const grandparentId = lamportToString(parent.order.parent);
+    const grandparentChildren = visibleBlockChildren(state, grandparentId).filter(
+        (id) => id !== blockId,
+    );
+    const parentIndex = grandparentChildren.indexOf(parentId);
+    const afterParentId = parentIndex >= 0 ? grandparentChildren[parentIndex + 1] : null;
+    const nextIndex = createLseqIdBetween(
+        parent.order.index,
+        afterParentId ? state.state.blocks[afterParentId].order.index : null,
+        {actorId: actor, counter: state.state.maxSeenCount + 1},
+    );
+
+    const siblings = visibleBlockChildren(state, parentId);
+    const blockIndex = siblings.indexOf(blockId);
+    const followingSiblings = blockIndex >= 0 ? siblings.slice(blockIndex + 1) : [];
+    const ops: Op[] = [
+        {
+            type: 'block:move',
+            id: current.id,
+            order: {
+                parent: parent.order.parent,
+                index: nextIndex,
+                ts: ts(),
+            },
+        },
+    ];
+
+    for (const siblingId of followingSiblings) {
+        const sibling = state.state.blocks[siblingId];
+        if (!sibling) continue;
+        ops.push({
+            type: 'block:move',
+            id: sibling.id,
+            order: {
+                parent: current.id,
+                index: sibling.order.index,
+                ts: [lastBlockOrderTs(sibling.order.ts), current.order.index, ts()],
+            },
+        });
+    }
+
+    return ops;
+};
+
+const moveBlockToRootOps = (
+    state: CachedState,
+    actor: string,
+    blockId: string,
+    ts: () => string,
+): Op[] => {
+    const current = state.state.blocks[blockId];
+    if (!current || !outlineIds(state).includes(blockId)) return [];
+
+    const rootIds = rootBlockIds(state).filter((id) => id !== blockId);
+    const lastRootId = rootIds[rootIds.length - 1] ?? null;
+    const nextIndex = createLseqIdBetween(
+        lastRootId ? state.state.blocks[lastRootId].order.index : null,
+        null,
+        {actorId: actor, counter: state.state.maxSeenCount + 1},
+    );
+
+    return [
+        {
+            type: 'block:move',
+            id: current.id,
+            order: {
+                parent: [0, 'root'],
+                index: nextIndex,
+                ts: ts(),
+            },
+        },
+    ];
+};
+
+const expectBlockMoveBatchesConverge = (state: CachedState, left: Op[], right: Op[]) => {
+    const one = applyMany(state, [...left, ...right]);
+    const two = applyMany(state, [...right, ...left]);
+
+    expect(blockParentIds(one)).toEqual(blockParentIds(two));
+    expect(visibleBlockOutline(one)).toEqual(visibleBlockOutline(two));
+    expectVisibleTraversalSafe(one);
+    expectVisibleTraversalSafe(two);
+    return {one, two};
+};
 
 const expectConverges = (
     state: CachedState,
@@ -529,6 +705,114 @@ it('orders incidental block moves by source sibling index', () => {
     expect(two.state.blocks['0004-self'].order.parent).toEqual([3, 'self']);
     expectCache(one);
     expectCache(two);
+});
+
+it('keeps concurrent adjacent indents traversal-safe and convergent', () => {
+    let state = cachedState(init);
+    state = apply(state, {type: 'block', block: block([1, 'self'], 2, '00002')}) as CachedState;
+    state = apply(state, {type: 'block', block: block([2, 'self'], 3, '00002')}) as CachedState;
+    const [a, b, c] = rootBlockIds(state);
+
+    const left = indentBlockOps(state, 'alice', b, mts(10));
+    const right = indentBlockOps(state, 'bob', c, mts(10));
+    const {one} = expectBlockMoveBatchesConverge(state, left, right);
+
+    expect(blockParentIds(one)).toMatchObject({
+        [a]: '0000-root',
+        [b]: a,
+        [c]: b,
+    });
+    expect(visibleBlockOutline(one)).toEqual([
+        {id: a, depth: 0, parentId: '0000-root'},
+        {id: b, depth: 1, parentId: a},
+        {id: c, depth: 2, parentId: b},
+    ]);
+});
+
+it('keeps concurrent unindents with incidental reparenting traversal-safe and convergent', () => {
+    let state = cachedState(init);
+    state = apply(state, {
+        type: 'block',
+        block: block([1, 'self'], 1, '00002', [0, 'self']),
+    }) as CachedState;
+    state = apply(state, {
+        type: 'block',
+        block: block([2, 'self'], 2, '00002', [0, 'self']),
+    }) as CachedState;
+    state = apply(state, {
+        type: 'block',
+        block: block([3, 'self'], 3, '00002', [0, 'self']),
+    }) as CachedState;
+    const [a, b, c, d] = outlineIds(state);
+
+    const left = unindentBlockOps(state, 'alice', b, mts(10));
+    const right = unindentBlockOps(state, 'bob', c, mts(10));
+    const {one} = expectBlockMoveBatchesConverge(state, left, right);
+
+    expect(blockParentIds(one)).toMatchObject({
+        [a]: '0000-root',
+        [b]: '0000-root',
+        [c]: '0000-root',
+        [d]: c,
+    });
+    expect(outlineById(one)).toMatchObject({
+        [a]: {id: a, depth: 0, parentId: '0000-root'},
+        [b]: {id: b, depth: 0, parentId: '0000-root'},
+        [c]: {id: c, depth: 0, parentId: '0000-root'},
+        [d]: {id: d, depth: 1, parentId: c},
+    });
+});
+
+it('keeps concurrent indent and unindent of neighboring blocks traversal-safe', () => {
+    let state = cachedState(init);
+    state = apply(state, {
+        type: 'block',
+        block: block([1, 'self'], 1, '00002', [0, 'self']),
+    }) as CachedState;
+    state = apply(state, {
+        type: 'block',
+        block: block([2, 'self'], 2, '00002', [0, 'self']),
+    }) as CachedState;
+    const [a, b, c] = outlineIds(state);
+
+    const left = indentBlockOps(state, 'alice', c, mts(10));
+    const right = unindentBlockOps(state, 'bob', b, mts(10));
+    const {one} = expectBlockMoveBatchesConverge(state, left, right);
+
+    expect(blockParentIds(one)).toMatchObject({
+        [a]: '0000-root',
+        [b]: '0000-root',
+        [c]: b,
+    });
+    expect(visibleBlockOutline(one)).toEqual([
+        {id: a, depth: 0, parentId: '0000-root'},
+        {id: b, depth: 0, parentId: '0000-root'},
+        {id: c, depth: 1, parentId: b},
+    ]);
+});
+
+it('keeps concurrent move-to-root and nested reparenting traversal-safe', () => {
+    let state = cachedState(init);
+    state = apply(state, {
+        type: 'block',
+        block: block([1, 'self'], 1, '00002', [0, 'self']),
+    }) as CachedState;
+    state = apply(state, {
+        type: 'block',
+        block: block([2, 'self'], 2, '00002', [0, 'self']),
+    }) as CachedState;
+    const [a, b, c] = outlineIds(state);
+
+    const left = moveBlockToRootOps(state, 'alice', c, mts(10));
+    const right = unindentBlockOps(state, 'bob', b, mts(10));
+    const {one} = expectBlockMoveBatchesConverge(state, left, right);
+
+    expect(blockParentIds(one)).toMatchObject({
+        [a]: '0000-root',
+        [b]: '0000-root',
+        [c]: '0000-root',
+    });
+    expect(new Set(rootBlockIds(one))).toEqual(new Set([a, b, c]));
 });
 
 it('returns false for ops that reference missing records', () => {
@@ -1185,7 +1469,7 @@ it('preserves cache and serialization invariants across generated editing script
                     if (blockCount < 2) continue;
                     const block = command.block % (blockCount - 1);
                     editor.join(command.actor, block, block + 1);
-                } else {
+                } else if (command.type === 'delete') {
                     const block = command.block % blockCount;
                     const length = blockLength(editor.state, blocks[block]);
                     if (length === 0) continue;
@@ -1193,10 +1477,60 @@ it('preserves cache and serialization invariants across generated editing script
                     editor.deleteRange(block, offset, offset + 1);
                 }
 
-                editor.expectCache();
+                expectVisibleTraversalSafe(editor.state);
                 expect(editor.serialized()).toBe(stateToString(cachedState(editor.state.state)));
             }
         }),
         {numRuns: 100, seed: 51},
+    );
+});
+
+it('preserves traversal invariants across generated block reparent scripts', () => {
+    type Command =
+        | {type: 'indent'; actor: string; block: number}
+        | {type: 'unindent'; actor: string; block: number}
+        | {type: 'moveToRoot'; actor: string; block: number};
+
+    const command = fc.oneof<Command>(
+        fc.record({
+            type: fc.constant('indent'),
+            actor: fc.constantFrom('alice', 'bob', 'cara'),
+            block: fc.integer({min: 0, max: 6}),
+        }),
+        fc.record({
+            type: fc.constant('unindent'),
+            actor: fc.constantFrom('alice', 'bob', 'cara'),
+            block: fc.integer({min: 0, max: 6}),
+        }),
+        fc.record({
+            type: fc.constant('moveToRoot'),
+            actor: fc.constantFrom('alice', 'bob', 'cara'),
+            block: fc.integer({min: 0, max: 6}),
+        }),
+    );
+
+    fc.assert(
+        fc.property(fc.array(command, {minLength: 1, maxLength: 30}), (commands) => {
+            const editor = new EditorHarness();
+            editor.split('seed', 0, 0, {random: () => 0});
+            editor.split('seed', 1, 0, {random: () => 0});
+            editor.split('seed', 2, 0, {random: () => 0});
+
+            for (const command of commands) {
+                const outline = editor.outline();
+                const block = outline[command.block % outline.length];
+                if (command.type === 'indent') {
+                    editor.indent(command.actor, block.id);
+                } else if (command.type === 'unindent') {
+                    editor.unindent(command.actor, block.id);
+                } else {
+                    editor.moveToRoot(command.actor, block.id);
+                }
+
+                expectVisibleTraversalSafe(editor.state);
+                expect(editor.serialized()).toBe(stateToString(cachedState(editor.state.state)));
+            }
+        }),
+        {numRuns: 100, seed: 52},
     );
 });
