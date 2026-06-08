@@ -23,7 +23,7 @@ type HistoryAction =
           type: 'local-change';
           editorId: EditorId;
           ops: Op[];
-          selection: RetainedSelection;
+          selection: RetainedSelectionSet;
       }
     | {
           type: 'toggle-online';
@@ -51,6 +51,7 @@ Replay details:
 - For `toggle-online`, call `toggleOnline()`.
 - Clamp cursor to `0..actions.length`.
 - Treat appending while scrubbed into the past as branching: drop actions after the cursor before appending.
+- Advance each replayed replica's `clock` past every Lamport/HLC count emitted by that actor in recorded ops. New edits after scrubbing or importing must not reuse timestamps or Lamport ids already present in replayed history.
 
 ## Phase 2: Add Import/Export Serialization
 
@@ -71,8 +72,15 @@ Implement:
 
 - `serializeHistory(history): string`
 - `parseHistoryExport(text): {history: HistoryState} | {error: string}`
-- A compact `HistorySnapshot` shape for human inspection of the final replay state. It should include visible block text/order, online flags, queue lengths, and any other cheap summary data that helps a bug report without becoming the replay source.
-- Runtime validation for envelope shape, `version`, `app`, `editorId`, action `type`, `ops`, retained selections, and final snapshot shape if present.
+- A compact `HistorySnapshot` shape for human inspection of the final replay state. It should be derived from materialized/visible block APIs and include visible block text/order, online flags, queue lengths, deleted block count, join count, and any other cheap summary data that helps a bug report without becoming the replay source.
+- Runtime validation for envelope shape, `version`, `app`, `editorId`, action `type`, `ops`, retained selection sets, and final snapshot shape if present.
+- Op validation should match the current block CRDT shape:
+  - Accept `join-record` and `block:delete`.
+  - Do not accept the removed `block:status` op.
+  - Validate block records with `deleted: boolean`, not `status`.
+  - Validate block order as `{id, path, index, ts}`.
+  - Validate `State` snapshots or diagnostics with `joins`.
+  - Allow tuple timestamps for `CharParentTs` and `BlockOrderTs`.
 - Import cursor behavior: always set `cursor` to `actions.length`.
 
 Validation does not need to prove every CRDT op is semantically valid before replay. It should reject malformed JSON and obviously wrong shapes, then let replay exercise the CRDT code.
@@ -89,16 +97,16 @@ const demo = useMemo(() => replayHistory(history.actions, history.cursor), [hist
 Because selection-only captures are not history actions, add transient UI selection state:
 
 ```ts
-const [transientSelections, setTransientSelections] = useState<Partial<Record<EditorId, RetainedSelection>>>({});
+const [transientSelections, setTransientSelections] = useState<Partial<Record<EditorId, RetainedSelectionSet>>>({});
 ```
 
-Before rendering editors, derive a display state by overlaying transient selections onto the replayed `demo`. This preserves the existing inactive selection/caret display during live editing without making selection-only captures part of exported history.
+Before rendering editors and before running commands, derive display replicas by overlaying transient selections onto the replayed `demo`. This preserves the existing inactive selection/caret display during live editing and ensures the next edit command sees the current selection set without making selection-only captures part of exported history.
 
 Update `runCommand`:
 
-- Read the current rendered `demo[editorId]`.
+- Read the current display replica for `editorId`, including transient selection overlays.
 - Run the command against that replica.
-- Convert the returned selection with `retainSelection(result.state, result.selection)`.
+- Store the returned `RetainedSelectionSet` directly; command results already use the runtime selection-set shape.
 - Append a `local-change` action with `editorId`, `ops`, and retained `selection` only when the command produced document ops.
 - For commands with no document ops, update `transientSelections[editorId]` instead of appending history.
 - When a document-op action is appended, clear that editor's transient selection because replayed history now includes the resulting retained selection.
@@ -146,6 +154,9 @@ Runtime test cases:
 - Selection-only captures are not appended to history.
 - Serialized history includes a final snapshot and parses back to a history whose final replay state matches it.
 - Invalid import JSON and invalid envelopes return errors.
+- Replaying or importing histories containing `join-record`, `block:delete`, nested `block:move` order paths, and incidental block order timestamps works.
+- Editing after scrubbing/importing uses fresh actor clocks and does not duplicate Lamport ids or HLC strings already present in the replayed history.
+- Concurrent join and block-move cycle-hardening histories replay to the same materialized block output after export/import.
 
 Add targeted `App.test.tsx` coverage:
 
@@ -186,5 +197,6 @@ Review for accidental coupling between live DOM state and replay state:
 - Debug logs should not be serialized.
 - Exported JSON should be readable and reasonably compact.
 - Final snapshots should be clearly treated as diagnostic metadata, not as replay authority.
+- History should treat CRDT ops as opaque replay data except for shallow import validation and actor-clock advancement.
 
 Keep the public `umkehr/block-crdt` API unchanged unless implementation proves a missing primitive is necessary.
