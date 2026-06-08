@@ -1038,26 +1038,43 @@ export const split = (
     });
 
     const ancestryPath: Lamport[] = [];
-    let tail = chars[findTail(lamportToString(at.char), cache.charContents)].id;
+    const initialTail = charRecord({state, cache}, findTail(lamportToString(at.char), cache.charContents));
+    if (!initialTail) {
+        throw new Error(`split tail not found`);
+    }
+    let tail = initialTail.id;
     let cid = lamportToString(at.char);
     let stop = 1000;
     while (cid !== bid) {
         if (stop-- < 0) throw new Error(`Too deep`);
         ancestryPath.unshift(parseLamportString(cid));
 
-        const pid = lamportToString(chars[cid].parent.id);
-        const children = cache.charContents[pid];
+        const currentChar = charRecord({state, cache}, cid);
+        if (!currentChar) {
+            throw new Error(`split char not found`);
+        }
+        const pid = lamportToString(currentChar.parent.id);
+        const children = cache.charContents[pid] ?? [];
         for (let at = children.indexOf(cid) + 1; at < children.length; at++) {
             const id = children[at];
+            const char = chars[id];
+            const tailChar = charRecord({state, cache}, findTail(id, cache.charContents));
+            if (!tailChar) {
+                throw new Error(`split sibling tail not found`);
+            }
+            if (!char) {
+                tail = tailChar.id;
+                continue;
+            }
             ops.push({
                 type: 'char:move',
-                id: chars[id].id,
+                id: char.id,
                 parent: {
-                    ts: [lastMoveTs(chars[id].parent.ts), ancestryPath, ts],
+                    ts: [lastMoveTs(char.parent.ts), ancestryPath, ts],
                     id: tail,
                 },
             });
-            tail = chars[findTail(id, cache.charContents)].id;
+            tail = tailChar.id;
         }
         cid = pid;
     }

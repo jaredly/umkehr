@@ -1,0 +1,1 @@
+I'd like to architect our block-crdt in such a way as to prevent "block parenting cycles" altogether. Let's use a similar approach to the [join cycle](.tasks/000-archive/04vdi-join-cycle/plan.md) work.

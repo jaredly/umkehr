@@ -1263,6 +1263,18 @@ it('joins a non-empty right block into an empty left block through a sentinel', 
     expectCache(state);
 });
 
+it('splits safely after joining a start-split block with later inserts', () => {
+    const editor = new EditorHarness();
+
+    editor.split('alice', 0, 0, {random: () => 0});
+    editor.join('alice', 0, 1);
+    editor.insert('alice', 0, 0, 'a');
+    editor.insert('alice', 0, 0, 'a');
+
+    expect(() => editor.split('alice', 0, 1, {random: () => 0})).not.toThrow();
+    expect(editor.lines()).toEqual(['a', 'a']);
+});
+
 it('keeps inserted text visible across chained joins', () => {
     const ts = mts();
     let state = cachedState(initialState('self', '00001'));
