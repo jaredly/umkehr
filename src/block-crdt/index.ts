@@ -20,7 +20,7 @@ export type Op =
     | {type: 'char:move'; id: Lamport; parent: Char['parent']}
     | {type: 'char:delete'; id: Lamport}
     | {type: 'block:move'; id: Lamport; order: Block['order']}
-    | {type: 'block:status'; id: Lamport; status: Block['status']}
+    | {type: 'block:delete'; id: Lamport}
     | {type: 'block:meta'; id: Lamport; meta: Block['meta']}
     | {type: 'mark'; mark: Mark}
     | {type: 'split-record'; split: SplitRecord};
@@ -36,8 +36,8 @@ export const apply = (state: CachedState, op: Op): CachedState | false => {
             return applyChar(state, op);
         case 'block':
             return applyBlock(state, op);
-        case 'block:status':
-            return applyBlockStatus(state, op);
+        case 'block:delete':
+            return applyBlockDelete(state, op);
         case 'char:move':
             return applyCharMove(state, op);
         case 'char:delete':
@@ -165,23 +165,24 @@ const applyCharMove = (
     };
 };
 
-const applyBlockStatus = (
+const applyBlockDelete = (
     state: CachedState,
-    op: Op & {type: 'block:status'},
+    op: Op & {type: 'block:delete'},
 ): CachedState | false => {
     const id = lamportToString(op.id);
     let current = state.state.blocks[id];
     if (!current) {
         return false;
     }
-    current = {...current};
-    if (op.status.ts > current.status.ts) {
-        current.status = op.status;
+    if (current.deleted) {
+        return state;
     }
+    current = {...current, deleted: true};
     return {
         state: {
             ...state.state,
             blocks: {...state.state.blocks, [id]: current},
+            maxSeenCount: Math.max(state.state.maxSeenCount, op.id[0]),
         },
         cache: state.cache,
     };
@@ -256,9 +257,7 @@ const applyBlock = ({state, cache}: CachedState, {block}: Op & {type: 'block'}) 
         if (current.order.ts > block.order.ts) {
             block = {...block, order: current.order};
         }
-        if (current.status.ts > block.status.ts) {
-            block = {...block, status: current.status};
-        }
+        block = {...block, deleted: current.deleted || block.deleted};
     }
 
     const blocks = {...state.blocks, [id]: block};
@@ -437,7 +436,7 @@ export const stateToString = (state: CachedState) => {
     const {blockChildren, charContents} = state.cache;
     const showBlock = (id: string): string[] => {
         const block = blocks[id];
-        if (block.status.archived) {
+        if (block.deleted) {
             return [];
         }
         const symbol = {paragraph: ' ', bullets: '•', checkboxes: '☐', blockquote: '|'}[
@@ -508,9 +507,9 @@ export const orderedCharIdsForBlock = (
     return result;
 };
 
-export const rootBlockIds = (state: CachedState, includeArchived = false): string[] =>
+export const rootBlockIds = (state: CachedState, includeDeleted = false): string[] =>
     (state.cache.blockChildren[lamportToString([0, 'root'])] ?? []).filter(
-        (id) => includeArchived || !state.state.blocks[id]?.status.archived,
+        (id) => includeDeleted || !state.state.blocks[id]?.deleted,
     );
 
 export const hasJoinStyleParent = (state: CachedState, charId: string): boolean => {
@@ -685,7 +684,7 @@ const coveredCharIdsForMark = (state: CachedState, mark: Mark): string[] => {
 };
 
 const allCharIds = (state: CachedState): string[] =>
-    rootBlockIds(state, true).flatMap((id) => orderedCharIdsForBlock(state, id));
+    rootBlockIds(state).flatMap((id) => orderedCharIdsForBlock(state, id));
 
 const nextIdMap = (sequence: string[]): Record<string, string> => {
     const result: Record<string, string> = {};
@@ -809,7 +808,7 @@ export const split = (
                 options,
             ),
         },
-        status: {archived: false, ts},
+        deleted: false,
     };
     const ops: Op[] = [{type: 'block', block}];
 
@@ -866,52 +865,37 @@ export const join = (
     left: Lamport,
     right: Lamport,
     ts: string,
-    actor: string,
+    _actor: string,
 ): Op[] => {
-    const {chars, blocks} = state;
+    const {blocks} = state;
     const leftId = lamportToString(left);
     const rightId = lamportToString(right);
     if (!blocks[leftId] || !blocks[rightId]) {
         throw new Error(`join block not found`);
     }
+    if (blocks[leftId].deleted || blocks[rightId].deleted) {
+        throw new Error(`join block deleted`);
+    }
 
     const ops: Op[] = [];
-    const rightRoots = cache.charContents[rightId] ?? [];
     const leftRoots = cache.charContents[leftId] ?? [];
-    const firstRightRoot = rightRoots[0];
-    let tail = leftRoots.length
+    const tail = leftRoots.length
         ? parseLamportString(findTail(leftRoots[leftRoots.length - 1], cache.charContents))
         : left;
 
-    if (firstRightRoot) {
-        ops.push({
-            type: 'char:move',
-            id: chars[firstRightRoot].id,
-            parent: {
-                id: tail,
-                ts,
-            },
-        });
-        tail = chars[findTail(firstRightRoot, cache.charContents)].id;
-
-        for (let i = 1; i < rightRoots.length; i++) {
-            const id = rightRoots[i];
-            ops.push({
-                type: 'char:move',
-                id: chars[id].id,
-                parent: {
-                    id: tail,
-                    ts: [lastMoveTs(chars[id].parent.ts), [chars[firstRightRoot].id], ts],
-                },
-            });
-            tail = chars[findTail(id, cache.charContents)].id;
-        }
-    }
+    ops.push({
+        type: 'char',
+        char: {
+            id: right,
+            text: '',
+            deleted: true,
+            parent: {id: tail, ts},
+        },
+    });
 
     ops.push({
-        type: 'block:status',
+        type: 'block:delete',
         id: right,
-        status: {archived: true, ts},
     });
 
     return ops;
@@ -942,7 +926,7 @@ const blockBetween = (
             options,
         ),
     },
-    status: {archived: false, ts},
+    deleted: false,
 });
 
 const lastMoveTs = (ts: Char['parent']['ts']) => (typeof ts === 'string' ? ts : ts[2]);

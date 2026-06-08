@@ -355,7 +355,7 @@ it('jumps early while following a split when the tail scan sees a join-style par
     ]);
 });
 
-it('traverses archived blocks while omitting them from formatted output', () => {
+it('traverses deleted blocks while omitting them from formatted output', () => {
     const ts = mts();
     let state = add(init(), 'abcdef', [0, 'self'], ts);
     state = apply(
@@ -370,9 +370,8 @@ it('traverses archived blocks while omitting them from formatted output', () => 
     );
     const rightBlock = state.cache.blockChildren['0000-root'][1];
     state = apply(state, {
-        type: 'block:status',
+        type: 'block:delete',
         id: state.state.blocks[rightBlock].id,
-        status: {archived: true, ts: ts()},
     }) as CachedState;
 
     expect(formattedRuns(state)).toEqual([
@@ -417,7 +416,7 @@ it('preserves visible text when materializing generated marked documents', () =>
                     .map((block) => block.runs.map((run) => run.text).join(''))
                     .join('\n');
                 const visibleText = state.cache.blockChildren['0000-root']
-                    .filter((id) => !state.state.blocks[id].status.archived)
+                    .filter((id) => !state.state.blocks[id].deleted)
                     .map((id) => blockContents(state, id))
                     .join('\n');
                 expect(formattedText).toBe(visibleText);

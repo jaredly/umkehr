@@ -12,7 +12,7 @@ export const initialState = (session: string, ts: string): State => ({
                 ts: ts,
                 parent: [0, 'root'],
             },
-            status: {archived: false, ts: ts},
+            deleted: false,
         },
     },
     marks: {},

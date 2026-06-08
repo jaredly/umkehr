@@ -59,7 +59,7 @@ const block = (id: Lamport, index: number, ts: string, parent: Lamport = [0, 'ro
     id,
     meta: {type: 'paragraph', ts},
     order: {index: lseq(index), ts, parent},
-    status: {archived: false, ts},
+    deleted: false,
 });
 
 const lseq = (path: number, actorId = 'self', counter = path): LseqId => ({
@@ -121,12 +121,12 @@ it('split with tree', () => {
 
 const blockLines = (state: CachedState) =>
     state.cache.blockChildren[lamportToString([0, 'root'])]
-        .filter((child) => !state.state.blocks[child]?.status.archived)
+        .filter((child) => !state.state.blocks[child]?.deleted)
         .map((child) => blockContents(state, child));
 
 const rootBlockIds = (state: CachedState) =>
     state.cache.blockChildren[lamportToString([0, 'root'])].filter(
-        (child) => !state.state.blocks[child]?.status.archived,
+        (child) => !state.state.blocks[child]?.deleted,
     );
 
 const blockLength = (state: CachedState, blockId: string) => blockContents(state, blockId).length;
@@ -282,14 +282,12 @@ it('split, move, and join', () => {
             },
         },
         {
-            type: 'block:status',
+            type: 'block:delete',
             id: parseLamportString(blocks[1]),
-            status: {archived: true, ts: ts()},
         },
         {
-            type: 'block:status',
+            type: 'block:delete',
             id: parseLamportString(blocks[2]),
-            status: {archived: true, ts: ts()},
         },
     ]);
 
@@ -479,9 +477,8 @@ it('returns false for ops that reference missing records', () => {
     ).toBe(false);
     expect(
         apply(state, {
-            type: 'block:status',
+            type: 'block:delete',
             id: [9, 'self'],
-            status: {archived: true, ts: '00002'},
         }),
     ).toBe(false);
     expect(
@@ -559,7 +556,7 @@ it('merges duplicate block inserts by field timestamps', () => {
             id: [1, 'self'],
             meta: {type: 'blockquote', ts: '00004'},
             order: {index: lseq(9), parent: [0, 'root'], ts: '00002'},
-            status: {archived: true, ts: '00002'},
+            deleted: true,
         },
     }) as CachedState;
 
@@ -567,7 +564,7 @@ it('merges duplicate block inserts by field timestamps', () => {
         id: [1, 'self'],
         meta: {type: 'blockquote', ts: '00004'},
         order: {index: lseq(1), parent: [0, 'root'], ts: '00003'},
-        status: {archived: false, ts: '00003'},
+        deleted: true,
     });
     expect(state.cache.blockChildren['0000-root'].filter((id) => id === '0001-self')).toHaveLength(
         1,
@@ -575,39 +572,37 @@ it('merges duplicate block inserts by field timestamps', () => {
     expectCache(state);
 });
 
-it('archives and restores blocks by status timestamp', () => {
+it('deletes blocks irreversibly and preserves cache consistency', () => {
     let state = apply(cachedState(init), {
         type: 'block',
         block: block([1, 'self'], 1, '00002'),
     }) as CachedState;
 
     state = apply(state, {
-        type: 'block:status',
+        type: 'block:delete',
         id: [1, 'self'],
-        status: {archived: true, ts: '00003'},
     }) as CachedState;
-    expect(state.state.blocks['0001-self'].status).toEqual({archived: true, ts: '00003'});
+    expect(state.state.blocks['0001-self'].deleted).toBe(true);
     expect(state.cache.blockChildren['0000-root']).toContain('0001-self');
     expect(stateToString(state)).not.toContain('0001-self');
     expectCache(state);
 
     state = apply(state, {
-        type: 'block:status',
+        type: 'block:delete',
         id: [1, 'self'],
-        status: {archived: false, ts: '00002'},
     }) as CachedState;
-    expect(state.state.blocks['0001-self'].status).toEqual({archived: true, ts: '00003'});
+    expect(state.state.blocks['0001-self'].deleted).toBe(true);
     expect(state.cache.blockChildren['0000-root']).toContain('0001-self');
     expect(stateToString(state)).not.toContain('0001-self');
     expectCache(state);
 
     state = apply(state, {
-        type: 'block:status',
-        id: [1, 'self'],
-        status: {archived: false, ts: '00004'},
+        type: 'block',
+        block: block([1, 'self'], 9, '00004'),
     }) as CachedState;
-    expect(state.state.blocks['0001-self'].status).toEqual({archived: false, ts: '00004'});
+    expect(state.state.blocks['0001-self'].deleted).toBe(true);
     expect(state.cache.blockChildren['0000-root']).toContain('0001-self');
+    expect(stateToString(state)).not.toContain('0001-self');
     expectCache(state);
 });
 
@@ -790,6 +785,164 @@ it('converges join with concurrent insert at start of joined right block', () =>
         insertOps(state, 'bob', 1, 0, 'X', ts),
         ['abXcd'],
     );
+});
+
+it('represents join with a deleted block sentinel char', () => {
+    const ts = mts();
+    let state = cachedState(initialState('self', '00001'));
+    state = applyMany(state, insertOps(state, 'self', 0, 0, 'abcd', ts));
+    state = applyMany(
+        state,
+        split(
+            state,
+            splitLocation(state, [0, 'self'], selPos(state, [0, 'self'], 3)!),
+            ts(),
+            'self',
+            {random: () => 0},
+        ),
+    );
+    const [leftBlock, rightBlock] = rootBlockIds(state).map(parseLamportString);
+    const [leftId, rightId] = rootBlockIds(state);
+
+    state = applyMany(state, join(state, leftBlock, rightBlock, ts(), 'alice'));
+
+    expect(state.state.blocks[rightId].deleted).toBe(true);
+    expect(state.state.chars[rightId]).toEqual({
+        id: rightBlock,
+        text: '',
+        deleted: true,
+        parent: {id: [2, 'self'], ts: '00005'},
+    });
+    expect(orderedCharIdsForBlock(state, leftId)).toContain(rightId);
+    expect(orderedCharIdsForBlock(state, leftId, {visibleOnly: true})).not.toContain(rightId);
+    expect(blockLines(state)).toEqual(['abcd']);
+    expectCache(state);
+});
+
+it('keeps start-of-joined-block inserts in both explicit op orders', () => {
+    const ts = mts();
+    let state = cachedState(initialState('self', '00001'));
+    state = applyMany(state, insertOps(state, 'self', 0, 0, 'abcd', ts));
+    state = applyMany(
+        state,
+        split(
+            state,
+            splitLocation(state, [0, 'self'], selPos(state, [0, 'self'], 3)!),
+            ts(),
+            'self',
+            {random: () => 0},
+        ),
+    );
+    const [leftBlock, rightBlock] = rootBlockIds(state).map(parseLamportString);
+    const joinOps = join(state, leftBlock, rightBlock, ts(), 'alice');
+    const insert = insertOps(state, 'bob', 1, 0, 'X', ts);
+
+    expect(blockLines(applyMany(state, [...joinOps, ...insert]))).toEqual(['abXcd']);
+    expect(blockLines(applyMany(state, [...insert, ...joinOps]))).toEqual(['abXcd']);
+});
+
+it('converges join with multi-character insert at start of joined right block', () => {
+    const ts = mts();
+    let state = cachedState(initialState('self', '00001'));
+    state = applyMany(state, insertOps(state, 'self', 0, 0, 'abcd', ts));
+    state = applyMany(
+        state,
+        split(
+            state,
+            splitLocation(state, [0, 'self'], selPos(state, [0, 'self'], 3)!),
+            ts(),
+            'self',
+            {random: () => 0},
+        ),
+    );
+    const [leftBlock, rightBlock] = rootBlockIds(state).map(parseLamportString);
+
+    expectConverges(
+        state,
+        join(state, leftBlock, rightBlock, ts(), 'alice'),
+        insertOps(state, 'bob', 1, 0, 'XY', ts),
+        ['abXYcd'],
+    );
+});
+
+it('converges join with concurrent insert into an empty right block', () => {
+    const ts = mts();
+    let state = cachedState(initialState('self', '00001'));
+    state = applyMany(state, insertOps(state, 'self', 0, 0, 'ab', ts));
+    state = applyMany(
+        state,
+        split(state, splitLocation(state, [0, 'self'], null), ts(), 'self', {
+            random: () => 0,
+        }),
+    );
+    const [leftBlock, rightBlock] = rootBlockIds(state).map(parseLamportString);
+
+    expectConverges(
+        state,
+        join(state, leftBlock, rightBlock, ts(), 'alice'),
+        insertOps(state, 'bob', 1, 0, 'X', ts),
+        ['abX'],
+    );
+});
+
+it('joins a non-empty right block into an empty left block through a sentinel', () => {
+    const ts = mts();
+    let state = cachedState(initialState('self', '00001'));
+    state = applyMany(state, insertOps(state, 'self', 0, 0, 'cd', ts));
+    state = applyMany(
+        state,
+        split(
+            state,
+            splitLocation(state, [0, 'self'], [0, 'self']),
+            ts(),
+            'self',
+            {random: () => 0},
+        ),
+    );
+    const [leftBlock, rightBlock] = rootBlockIds(state).map(parseLamportString);
+
+    state = applyMany(state, join(state, leftBlock, rightBlock, ts(), 'alice'));
+
+    expect(blockLines(state)).toEqual(['cd']);
+    expect(state.state.chars[lamportToString(rightBlock)].parent.id).toEqual(leftBlock);
+    expectCache(state);
+});
+
+it('keeps inserted text visible across chained joins', () => {
+    const ts = mts();
+    let state = cachedState(initialState('self', '00001'));
+    state = applyMany(state, insertOps(state, 'self', 0, 0, 'abcdef', ts));
+    state = applyMany(
+        state,
+        split(
+            state,
+            splitLocation(state, [0, 'self'], selPos(state, [0, 'self'], 3)!),
+            ts(),
+            'self',
+            {random: () => 0},
+        ),
+    );
+    state = applyMany(
+        state,
+        split(
+            state,
+            splitLocation(
+                state,
+                parseLamportString(rootBlockIds(state)[1]),
+                selPos(state, parseLamportString(rootBlockIds(state)[1]), 3)!,
+            ),
+            ts(),
+            'self',
+            {random: () => 0},
+        ),
+    );
+    const [first, second, third] = rootBlockIds(state).map(parseLamportString);
+    state = applyMany(state, insertOps(state, 'bob', 1, 0, 'X', ts));
+    state = applyMany(state, join(state, first, second, ts(), 'alice'));
+    state = applyMany(state, join(state, first, third, ts(), 'alice'));
+
+    expect(blockLines(state)).toEqual(['abXcdef']);
+    expectCache(state);
 });
 
 it('converges join with concurrent splits of either joined block', () => {

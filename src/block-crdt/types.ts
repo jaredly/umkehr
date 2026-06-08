@@ -51,7 +51,7 @@ export type Block = {
         | {type: 'bullets'; ts: HLC}
         | {type: 'checkboxes'; ts: HLC; checked: Record<string, {ts: HLC; checked: boolean}>};
     order: {index: LseqId; ts: HLC; parent: Lamport};
-    status: {archived: boolean; ts: HLC};
+    deleted: boolean;
 };
 
 export type State = {
