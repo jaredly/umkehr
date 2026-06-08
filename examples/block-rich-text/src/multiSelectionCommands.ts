@@ -152,6 +152,42 @@ export const moveSelectionsVertically = (
     };
 };
 
+export const extendSelectionsHorizontally = (
+    state: CachedState,
+    selection: RetainedSelectionSet,
+    direction: 'left' | 'right',
+): MultiCommandResult => {
+    const resolved = resolveSelectionSet(state, selection);
+    const entries = resolved.entries.map((entry) => ({
+        id: entry.id,
+        selection: retainSelection(state, extendSelectionHorizontally(state, entry.selection, direction)),
+    }));
+
+    return {
+        state,
+        ops: [],
+        selection: dedupeSelectionSet(state, {primaryId: resolved.primaryId, entries}),
+    };
+};
+
+export const extendSelectionsVertically = (
+    state: CachedState,
+    selection: RetainedSelectionSet,
+    direction: 'up' | 'down',
+): MultiCommandResult => {
+    const resolved = resolveSelectionSet(state, selection);
+    const entries = resolved.entries.map((entry) => ({
+        id: entry.id,
+        selection: retainSelection(state, extendSelectionVertically(state, entry.selection, direction)),
+    }));
+
+    return {
+        state,
+        ops: [],
+        selection: dedupeSelectionSet(state, {primaryId: resolved.primaryId, entries}),
+    };
+};
+
 const moveSelectionHorizontally = (
     state: CachedState,
     selection: EditorSelection,
@@ -167,17 +203,45 @@ const moveSelectionHorizontally = (
     return caretAtPoint(movePointHorizontally(state, focusPoint(selection), direction));
 };
 
+const extendSelectionHorizontally = (
+    state: CachedState,
+    selection: EditorSelection,
+    direction: 'left' | 'right',
+): EditorSelection => {
+    const anchor = selection.type === 'caret' ? selection.point : selection.anchor;
+    const focus = movePointHorizontally(state, focusPoint(selection), direction);
+    return {type: 'range', anchor, focus};
+};
+
+const extendSelectionVertically = (
+    state: CachedState,
+    selection: EditorSelection,
+    direction: 'up' | 'down',
+): EditorSelection => {
+    const anchor = selection.type === 'caret' ? selection.point : selection.anchor;
+    const focus = movePointVertically(state, focusPoint(selection), direction);
+    return {type: 'range', anchor, focus};
+};
+
 const moveSelectionVertically = (
     state: CachedState,
     selection: EditorSelection,
     direction: 'up' | 'down',
 ): EditorSelection => {
     const point = focusPoint(selection);
+    return caretAtPoint(movePointVertically(state, point, direction));
+};
+
+const movePointVertically = (
+    state: CachedState,
+    point: BlockPoint,
+    direction: 'up' | 'down',
+): BlockPoint => {
     const blocks = visibleBlockIds(state);
     const index = blocks.indexOf(point.blockId);
     const targetBlockId = blocks[direction === 'up' ? index - 1 : index + 1];
-    if (!targetBlockId) return caret(point.blockId, point.offset);
-    return caret(targetBlockId, Math.min(point.offset, pointTextLength(state, targetBlockId)));
+    if (!targetBlockId) return point;
+    return {blockId: targetBlockId, offset: Math.min(point.offset, pointTextLength(state, targetBlockId))};
 };
 
 const movePointHorizontally = (

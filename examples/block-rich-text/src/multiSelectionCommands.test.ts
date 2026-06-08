@@ -6,6 +6,8 @@ import {insertText, pastePlainText, type CommandContext} from './blockCommands';
 import {caret, type EditorSelection} from './selectionModel';
 import {
     deleteBackwardEverywhere,
+    extendSelectionsHorizontally,
+    extendSelectionsVertically,
     insertTextEverywhere,
     moveSelectionsHorizontally,
     moveSelectionsVertically,
@@ -114,6 +116,58 @@ describe('block rich text multi-selection commands', () => {
         expect(resolveSelectionSet(result.state, result.selection).entries.map((entry) => entry.selection)).toEqual([
             caret(secondBlock, 2),
             caret(thirdBlock, 1),
+        ]);
+    });
+
+    it('extends every selected caret horizontally', () => {
+        const inserted = insertText(init(), caret(onlyBlock(init()), 0), 'abcd', ctx());
+        const blockId = onlyBlock(inserted.state);
+        const set = appendSelection(
+            inserted.state,
+            singleRetainedSelectionSet(inserted.state, caret(blockId, 1), 'first'),
+            caret(blockId, 3),
+            'second',
+        );
+
+        const result = extendSelectionsHorizontally(inserted.state, set, 'right');
+
+        expect(resolveSelectionSet(result.state, result.selection).entries.map((entry) => entry.selection)).toEqual([
+            {
+                type: 'range',
+                anchor: {blockId, offset: 1},
+                focus: {blockId, offset: 2},
+            },
+            {
+                type: 'range',
+                anchor: {blockId, offset: 3},
+                focus: {blockId, offset: 4},
+            },
+        ]);
+    });
+
+    it('extends every selected caret vertically', () => {
+        const pasted = pastePlainText(init(), caret(onlyBlock(init()), 0), 'ab\ncdef\nx', ctx());
+        const [firstBlock, secondBlock, thirdBlock] = rootBlockIds(pasted.state);
+        const set = appendSelection(
+            pasted.state,
+            singleRetainedSelectionSet(pasted.state, caret(firstBlock, 2), 'first'),
+            caret(secondBlock, 3),
+            'second',
+        );
+
+        const result = extendSelectionsVertically(pasted.state, set, 'down');
+
+        expect(resolveSelectionSet(result.state, result.selection).entries.map((entry) => entry.selection)).toEqual([
+            {
+                type: 'range',
+                anchor: {blockId: firstBlock, offset: 2},
+                focus: {blockId: secondBlock, offset: 2},
+            },
+            {
+                type: 'range',
+                anchor: {blockId: secondBlock, offset: 3},
+                focus: {blockId: thirdBlock, offset: 1},
+            },
         ]);
     });
 

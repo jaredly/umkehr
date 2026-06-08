@@ -824,6 +824,24 @@ describe('Block rich text example UI', () => {
         expect(blocks(right)[0].textContent).toBe('abXcdX');
     });
 
+    it('extends every cursor with Shift+ArrowRight', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abcd');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abcd'));
+
+        selectCaret(blocks(left)[0], 1);
+        addCaret(blocks(left)[0], 3);
+
+        fireEvent.keyDown(blocks(left)[0], {key: 'ArrowRight', shiftKey: true});
+        fireEvent.keyUp(blocks(left)[0], {key: 'ArrowRight', shiftKey: true});
+        selectCaret(blocks(right)[0], 0);
+
+        await waitFor(() => expect(retainedHighlightText(blocks(left)[0])).toBe('bd'));
+    });
+
     it('clicking after multiselect clears secondary cursors at the clicked point', async () => {
         const view = render(<App />);
         const {left, right} = panels(view);

@@ -41,6 +41,8 @@ import {
 import {
     deleteBackwardEverywhere,
     deleteForwardEverywhere,
+    extendSelectionsHorizontally,
+    extendSelectionsVertically,
     insertTextEverywhere,
     moveSelectionsHorizontally,
     moveSelectionsVertically,
@@ -387,6 +389,26 @@ function BlockEditor({
         [runEditCommand],
     );
 
+    const extendSelectionsHorizontallyEverywhere = useCallback(
+        (direction: 'left' | 'right') => {
+            handledNavigationKeyRef.current = true;
+            runEditCommand((current, selection) =>
+                extendSelectionsHorizontally(current.state, selection, direction),
+            );
+        },
+        [runEditCommand],
+    );
+
+    const extendSelectionsVerticallyEverywhere = useCallback(
+        (direction: 'up' | 'down') => {
+            handledNavigationKeyRef.current = true;
+            runEditCommand((current, selection) =>
+                extendSelectionsVertically(current.state, selection, direction),
+            );
+        },
+        [runEditCommand],
+    );
+
     const moveCaret = useCallback(
         (selection: EditorSelection) => {
             scheduleSelectionRestore(selection);
@@ -619,6 +641,8 @@ function BlockEditor({
                         onMoveCaretVertically={moveCaretVertically}
                         onMoveSelectionsHorizontally={moveSelectionsHorizontallyEverywhere}
                         onMoveSelectionsVertically={moveSelectionsVerticallyEverywhere}
+                        onExtendSelectionsHorizontally={extendSelectionsHorizontallyEverywhere}
+                        onExtendSelectionsVertically={extendSelectionsVerticallyEverywhere}
                     />
                 ))}
             </div>
@@ -671,6 +695,8 @@ function EditableBlock({
     onMoveCaretVertically,
     onMoveSelectionsHorizontally,
     onMoveSelectionsVertically,
+    onExtendSelectionsHorizontally,
+    onExtendSelectionsVertically,
 }: {
     block: FormattedBlock;
     canDrag: boolean;
@@ -699,6 +725,8 @@ function EditableBlock({
     onMoveCaretVertically(sourceBlock: HTMLElement, targetBlockId: string): void;
     onMoveSelectionsHorizontally(direction: 'left' | 'right'): void;
     onMoveSelectionsVertically(direction: 'up' | 'down'): void;
+    onExtendSelectionsHorizontally(direction: 'left' | 'right'): void;
+    onExtendSelectionsVertically(direction: 'up' | 'down'): void;
 }) {
     const handledBeforeInputRef = useRef(false);
     const editableRef = useRef<HTMLDivElement>(null);
@@ -828,6 +856,23 @@ function EditableBlock({
                     } else if (event.key === 'Delete') {
                         event.preventDefault();
                         onDeleteForward();
+                    } else if (
+                        hasMultipleSelections &&
+                        isPlainArrowKey(event.key) &&
+                        event.shiftKey &&
+                        !event.altKey &&
+                        !modifierPressed
+                    ) {
+                        event.preventDefault();
+                        if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+                            onExtendSelectionsHorizontally(
+                                event.key === 'ArrowLeft' ? 'left' : 'right',
+                            );
+                        } else {
+                            onExtendSelectionsVertically(
+                                event.key === 'ArrowUp' ? 'up' : 'down',
+                            );
+                        }
                     } else if (
                         hasMultipleSelections &&
                         isPlainArrowKey(event.key) &&
