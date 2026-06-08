@@ -1,6 +1,19 @@
 import type {EditorSelection} from './selectionModel';
 import {caret, segmentText} from './selectionModel';
 
+export type CaretHorizontalIntent = {
+    x: number;
+};
+
+type CaretRect = {
+    left: number;
+    right: number;
+    top: number;
+    bottom: number;
+    width: number;
+    height: number;
+};
+
 export const readSelectionFromDom = (root: HTMLElement): EditorSelection | null => {
     const selection = window.getSelection();
     if (!selection || selection.rangeCount === 0) return null;
@@ -43,6 +56,66 @@ export const restoreCaretToDom = (block: HTMLElement, offset: number) => {
     range.collapse(true);
     domSelection.removeAllRanges();
     domSelection.addRange(range);
+};
+
+export const readCaretHorizontalIntent = (root: HTMLElement): CaretHorizontalIntent | null => {
+    const range = collapsedRangeIn(root);
+    if (!range) return null;
+    const block = closestBlock(root, range.startContainer);
+    const rect = block ? caretRectForRange(range, block) : null;
+    return rect ? {x: caretX(rect)} : null;
+};
+
+export const closestCaretOffsetForHorizontalIntent = (
+    block: HTMLElement,
+    intent: CaretHorizontalIntent,
+): number => {
+    const length = blockTextLength(block);
+    let closestOffset = 0;
+    let closestDistance = Number.POSITIVE_INFINITY;
+
+    for (let offset = 0; offset <= length; offset++) {
+        const rect = caretRectForBlockOffset(block, offset);
+        const distance = Math.abs(caretX(rect) - intent.x);
+        if (distance < closestDistance) {
+            closestDistance = distance;
+            closestOffset = offset;
+        }
+    }
+
+    return closestOffset;
+};
+
+export const isCaretOnFirstVisualLine = (block: HTMLElement): boolean => {
+    const range = collapsedRangeIn(block);
+    if (!range) return false;
+    const current = caretRectForRange(range, block);
+    if (!current) return true;
+    const currentTop = current.top;
+    const tolerance = Math.max(2, current.height / 2);
+
+    for (let offset = 0; offset <= blockTextLength(block); offset++) {
+        const candidate = caretRectForBlockOffset(block, offset);
+        if (candidate.top < currentTop - tolerance) return false;
+    }
+
+    return true;
+};
+
+export const isCaretOnLastVisualLine = (block: HTMLElement): boolean => {
+    const range = collapsedRangeIn(block);
+    if (!range) return false;
+    const current = caretRectForRange(range, block);
+    if (!current) return true;
+    const currentTop = current.top;
+    const tolerance = Math.max(2, current.height / 2);
+
+    for (let offset = 0; offset <= blockTextLength(block); offset++) {
+        const candidate = caretRectForBlockOffset(block, offset);
+        if (candidate.top > currentTop + tolerance) return false;
+    }
+
+    return true;
 };
 
 const pointFromDom = (
@@ -108,6 +181,72 @@ const domPointInBlockForOffset = (
     }
     return {node: block, offset: block.childNodes.length};
 };
+
+const collapsedRangeIn = (root: HTMLElement): Range | null => {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return null;
+    const range = selection.getRangeAt(0);
+    if (!range.collapsed) return null;
+    if (!root.contains(range.startContainer) || !root.contains(range.endContainer)) return null;
+    return range;
+};
+
+const blockTextLength = (block: HTMLElement): number => segmentText(block.textContent ?? '').length;
+
+const caretRectForBlockOffset = (block: HTMLElement, offset: number): CaretRect => {
+    const point = domPointInBlockForOffset(block, offset);
+    const range = document.createRange();
+    range.setStart(point.node, point.offset);
+    range.collapse(true);
+    return caretRectForRange(range, block) ?? fallbackBlockRect(block);
+};
+
+const caretRectForRange = (range: Range, fallbackBlock: HTMLElement): CaretRect | null => {
+    const firstClientRect = range.getClientRects()[0];
+    if (hasUsableRect(firstClientRect)) return rectLike(firstClientRect);
+
+    const boundingRect = range.getBoundingClientRect();
+    if (hasUsableRect(boundingRect)) return rectLike(boundingRect);
+
+    const markerRect = measureTemporaryCaretMarker(range);
+    if (markerRect) return markerRect;
+
+    return fallbackBlockRect(fallbackBlock);
+};
+
+const measureTemporaryCaretMarker = (range: Range): CaretRect | null => {
+    const marker = document.createElement('span');
+    marker.style.display = 'inline-block';
+    marker.style.width = '0';
+    marker.style.height = '1em';
+    marker.style.overflow = 'hidden';
+    marker.textContent = '\u200b';
+
+    const markerRange = range.cloneRange();
+    markerRange.insertNode(marker);
+    const rect = marker.getBoundingClientRect();
+    marker.remove();
+    return hasUsableRect(rect) ? rectLike(rect) : null;
+};
+
+const fallbackBlockRect = (block: HTMLElement): CaretRect => {
+    const rect = block.getBoundingClientRect();
+    return rectLike(rect);
+};
+
+const hasUsableRect = (rect: DOMRect | DOMRectReadOnly | undefined): rect is DOMRect | DOMRectReadOnly =>
+    !!rect && (rect.width > 0 || rect.height > 0 || rect.left !== 0 || rect.top !== 0);
+
+const rectLike = (rect: DOMRect | DOMRectReadOnly): CaretRect => ({
+    left: rect.left,
+    right: rect.right,
+    top: rect.top,
+    bottom: rect.bottom,
+    width: rect.width,
+    height: rect.height,
+});
+
+const caretX = (rect: CaretRect): number => (rect.width > 0 ? rect.left + rect.width / 2 : rect.left);
 
 const utf16OffsetForGraphemeOffset = (text: string, offset: number): number =>
     segmentText(text)

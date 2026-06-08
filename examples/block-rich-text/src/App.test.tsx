@@ -14,7 +14,11 @@ Object.defineProperty(globalThis, 'CSS', {
     configurable: true,
 });
 
+let restoreCaretGeometry: (() => void) | null = null;
+
 afterEach(() => {
+    restoreCaretGeometry?.();
+    restoreCaretGeometry = null;
     cleanup();
 });
 
@@ -386,6 +390,97 @@ describe('Block rich text example UI', () => {
         expect(blockTexts(right)).toEqual(['one', 'Xtwo']);
     });
 
+    it('moves ArrowDown to the next block using the closest horizontal caret position', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        pasteText(blocks(left)[0], 'abcd\nxy');
+        await waitForBlockTexts(left, ['abcd', 'xy']);
+        installMockCaretGeometry(left);
+
+        selectCaret(blocks(left)[0], 3);
+        fireEvent.keyDown(blocks(left)[0], {key: 'ArrowDown'});
+
+        await waitFor(() => expect(domCaretPosition(left)).toEqual({blockIndex: 1, offset: 2}));
+
+        beforeInputText(blocks(left)[1], 'X');
+        await waitForBlockTexts(left, ['abcd', 'xyX']);
+        expect(blockTexts(right)).toEqual(['abcd', 'xyX']);
+    });
+
+    it('moves ArrowUp to the previous block using the closest horizontal caret position', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        pasteText(blocks(left)[0], 'abcd\nxy');
+        await waitForBlockTexts(left, ['abcd', 'xy']);
+        installMockCaretGeometry(left);
+
+        selectCaret(blocks(left)[1], 1);
+        fireEvent.keyDown(blocks(left)[1], {key: 'ArrowUp'});
+
+        await waitFor(() => expect(domCaretPosition(left)).toEqual({blockIndex: 0, offset: 1}));
+    });
+
+    it('preserves the original horizontal intent across repeated ArrowDown moves', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        pasteText(blocks(left)[0], 'abcd\nxy\nmnopqrst');
+        await waitForBlockTexts(left, ['abcd', 'xy', 'mnopqrst']);
+        installMockCaretGeometry(left);
+
+        selectCaret(blocks(left)[0], 3);
+        fireEvent.keyDown(blocks(left)[0], {key: 'ArrowDown'});
+        await waitFor(() => expect(domCaretPosition(left)).toEqual({blockIndex: 1, offset: 2}));
+
+        fireEvent.keyDown(blocks(left)[1], {key: 'ArrowDown'});
+
+        await waitFor(() => expect(domCaretPosition(left)).toEqual({blockIndex: 2, offset: 3}));
+    });
+
+    it('lets native ArrowDown handle movement when the caret is not on the last visual line', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        pasteText(blocks(left)[0], 'abcdef\nnext');
+        await waitForBlockTexts(left, ['abcdef', 'next']);
+        installMockCaretGeometry(left, {
+            topForOffset: (blockIndex, offset) => blockIndex * 40 + (blockIndex === 0 && offset >= 3 ? 20 : 0),
+        });
+
+        selectCaret(blocks(left)[0], 1);
+        fireEvent.keyDown(blocks(left)[0], {key: 'ArrowDown'});
+
+        expect(domCaretPosition(left)).toEqual({blockIndex: 0, offset: 1});
+    });
+
+    it('does not custom-handle Shift+ArrowDown or edge-block vertical arrows', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        pasteText(blocks(left)[0], 'one\ntwo');
+        await waitForBlockTexts(left, ['one', 'two']);
+        installMockCaretGeometry(left);
+
+        selectCaret(blocks(left)[0], 1);
+        fireEvent.keyDown(blocks(left)[0], {key: 'ArrowDown', shiftKey: true});
+        expect(domCaretPosition(left)).toEqual({blockIndex: 0, offset: 1});
+
+        selectCaret(blocks(left)[0], 1);
+        fireEvent.keyDown(blocks(left)[0], {key: 'ArrowUp'});
+        expect(domCaretPosition(left)).toEqual({blockIndex: 0, offset: 1});
+
+        selectCaret(blocks(left)[1], 1);
+        fireEvent.keyDown(blocks(left)[1], {key: 'ArrowDown'});
+        expect(domCaretPosition(left)).toEqual({blockIndex: 1, offset: 1});
+    });
+
     it('restores the caret one position left after ordinary Backspace', async () => {
         const view = render(<App />);
         const {left, right} = panels(view);
@@ -737,4 +832,67 @@ const domPointOffset = (block: HTMLElement, node: Node | null, nodeOffset: numbe
         offset += current.textContent?.length ?? 0;
     }
     return -1;
+};
+
+const installMockCaretGeometry = (
+    panel: HTMLElement,
+    options: {
+        xForOffset?(blockIndex: number, offset: number): number;
+        topForOffset?(blockIndex: number, offset: number): number;
+    } = {},
+) => {
+    restoreCaretGeometry?.();
+    const rangePrototype = window.Range.prototype;
+    const originalGetClientRects = rangePrototype.getClientRects;
+    const originalGetBoundingClientRect = rangePrototype.getBoundingClientRect;
+    const xForOffset = options.xForOffset ?? ((_blockIndex, offset) => offset * 10);
+    const topForOffset = options.topForOffset ?? ((blockIndex) => blockIndex * 24);
+
+    const rectForRange = (range: Range) => {
+        const block = blockForNode(range.startContainer);
+        if (!block) return makeDomRect(0, 0);
+        const blockIndex = blocks(panel).indexOf(block);
+        const offset = domPointOffset(block, range.startContainer, range.startOffset);
+        return makeDomRect(xForOffset(blockIndex, offset), topForOffset(blockIndex, offset));
+    };
+
+    rangePrototype.getClientRects = function getClientRects() {
+        const rect = rectForRange(this);
+        return {
+            0: rect,
+            length: 1,
+            item: (index: number) => (index === 0 ? rect : null),
+            [Symbol.iterator]: function* () {
+                yield rect;
+            },
+        } as DOMRectList;
+    };
+    rangePrototype.getBoundingClientRect = function getBoundingClientRect() {
+        return rectForRange(this);
+    };
+
+    restoreCaretGeometry = () => {
+        rangePrototype.getClientRects = originalGetClientRects;
+        rangePrototype.getBoundingClientRect = originalGetBoundingClientRect;
+    };
+};
+
+const blockForNode = (node: Node): HTMLElement | null => {
+    const element = node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement;
+    return element?.closest<HTMLElement>('[data-block-id]') ?? null;
+};
+
+const makeDomRect = (left: number, top: number): DOMRect => {
+    const rect = {
+        x: left,
+        y: top,
+        left,
+        top,
+        right: left,
+        bottom: top + 16,
+        width: 0,
+        height: 16,
+        toJSON: () => ({}),
+    };
+    return rect as DOMRect;
 };

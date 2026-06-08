@@ -21,7 +21,15 @@ import {
     type EditorId,
     type Replica,
 } from './blockEditorRuntime';
-import {readSelectionFromDom, restoreCaretToDom, restoreSelectionToDom} from './domSelection';
+import {
+    closestCaretOffsetForHorizontalIntent,
+    isCaretOnFirstVisualLine,
+    isCaretOnLastVisualLine,
+    readCaretHorizontalIntent,
+    readSelectionFromDom,
+    restoreCaretToDom,
+    restoreSelectionToDom,
+} from './domSelection';
 import {
     caret,
     firstPointForSelection,
@@ -106,6 +114,7 @@ function BlockEditor({
     const rootRef = useRef<HTMLDivElement>(null);
     const pendingCaretRestoreBlockIdRef = useRef<string | null>(null);
     const pendingSelectionRestoreRef = useRef<EditorSelection | null>(null);
+    const verticalCaretXRef = useRef<number | null>(null);
     const nextSelectionIdRef = useRef(1);
     const [hasFocus, setHasFocus] = useState(false);
     const blocks = materializeFormattedBlocks(replica.state);
@@ -143,10 +152,19 @@ function BlockEditor({
         pendingSelectionRestoreRef.current = selection;
     }, []);
 
+    const resetVerticalCaretIntent = useCallback(() => {
+        verticalCaretXRef.current = null;
+    }, []);
+
     const nextSelectionId = useCallback(() => `sel-${nextSelectionIdRef.current++}`, []);
 
     const captureSelection = useCallback(
         (event: MouseEvent | KeyboardEvent) => {
+            if (event.type === 'mouseup') {
+                resetVerticalCaretIntent();
+            } else if ('key' in event && event.key !== 'ArrowUp' && event.key !== 'ArrowDown') {
+                resetVerticalCaretIntent();
+            }
             const root = rootRef.current;
             if (!root) return;
             const selection = readSelectionFromDom(root);
@@ -182,7 +200,7 @@ function BlockEditor({
                       : replaceSelectionSet(current.state, selection, current.selection.primaryId),
             }));
         },
-        [nextSelectionId, onCommand, scheduleSelectionRestore],
+        [nextSelectionId, onCommand, resetVerticalCaretIntent, scheduleSelectionRestore],
     );
 
     const liveSelectionSet = useCallback((current: Replica): RetainedSelectionSet => {
@@ -198,6 +216,7 @@ function BlockEditor({
             command: (current: Replica, selection: RetainedSelectionSet) => MultiCommandResult,
         ) => {
             onCommand((current) => {
+                resetVerticalCaretIntent();
                 const selection = liveSelectionSet(current);
                 const result = command(current, selection);
                 const primaryResultSelection = primarySelection(
@@ -207,7 +226,50 @@ function BlockEditor({
                 return result;
             });
         },
-        [liveSelectionSet, onCommand, scheduleSelectionRestore],
+        [liveSelectionSet, onCommand, resetVerticalCaretIntent, scheduleSelectionRestore],
+    );
+
+    const moveCaret = useCallback(
+        (selection: EditorSelection) => {
+            scheduleSelectionRestore(selection);
+            onCommand((current) => ({
+                state: current.state,
+                ops: [],
+                selection: replacePrimarySelection(current.state, current.selection, selection),
+            }));
+        },
+        [onCommand, scheduleSelectionRestore],
+    );
+
+    const moveCaretHorizontally = useCallback(
+        (selection: EditorSelection) => {
+            resetVerticalCaretIntent();
+            moveCaret(selection);
+        },
+        [moveCaret, resetVerticalCaretIntent],
+    );
+
+    const moveCaretVertically = useCallback(
+        (sourceBlock: HTMLElement, targetBlockId: string) => {
+            const root = rootRef.current;
+            if (!root) return;
+            const targetBlock = root.querySelector<HTMLElement>(
+                `[data-block-id="${CSS.escape(targetBlockId)}"]`,
+            );
+            if (!targetBlock) return;
+
+            if (verticalCaretXRef.current === null) {
+                const intent = readCaretHorizontalIntent(sourceBlock);
+                if (!intent) return;
+                verticalCaretXRef.current = intent.x;
+            }
+
+            const offset = closestCaretOffsetForHorizontalIntent(targetBlock, {
+                x: verticalCaretXRef.current,
+            });
+            moveCaret(caret(targetBlockId, offset));
+        },
+        [moveCaret],
     );
 
     useLayoutEffect(() => {
@@ -261,6 +323,7 @@ function BlockEditor({
                 onFocus={() => setHasFocus(true)}
                 onBlur={(event) => {
                     if (event.currentTarget.contains(event.relatedTarget)) return;
+                    resetVerticalCaretIntent();
                     setHasFocus(false);
                 }}
                 onMouseUp={captureSelection}
@@ -390,17 +453,9 @@ function BlockEditor({
                             )
                         }
                         onMoveCaret={(selection) => {
-                            scheduleSelectionRestore(selection);
-                            onCommand((current) => ({
-                                state: current.state,
-                                ops: [],
-                                selection: replacePrimarySelection(
-                                    current.state,
-                                    current.selection,
-                                    selection,
-                                ),
-                            }));
+                            moveCaretHorizontally(selection);
                         }}
+                        onMoveCaretVertically={moveCaretVertically}
                     />
                 ))}
             </div>
@@ -449,6 +504,7 @@ function EditableBlock({
     onToggleItalic,
     onPasteText,
     onMoveCaret,
+    onMoveCaretVertically,
 }: {
     block: FormattedBlock;
     canDrag: boolean;
@@ -473,6 +529,7 @@ function EditableBlock({
     onToggleItalic(): void;
     onPasteText(text: string): void;
     onMoveCaret(selection: EditorSelection): void;
+    onMoveCaretVertically(sourceBlock: HTMLElement, targetBlockId: string): void;
 }) {
     const handledBeforeInputRef = useRef(false);
     const editableRef = useRef<HTMLDivElement>(null);
@@ -634,6 +691,36 @@ function EditableBlock({
                         ) {
                             event.preventDefault();
                             onMoveCaret(caret(nextBlockId, 0));
+                        }
+                    } else if (
+                        event.key === 'ArrowUp' &&
+                        !event.shiftKey &&
+                        !event.altKey &&
+                        !modifierPressed &&
+                        previousBlockId
+                    ) {
+                        const currentSelection = readSelectionFromDom(event.currentTarget);
+                        if (
+                            currentSelection?.type === 'caret' &&
+                            isCaretOnFirstVisualLine(event.currentTarget)
+                        ) {
+                            event.preventDefault();
+                            onMoveCaretVertically(event.currentTarget, previousBlockId);
+                        }
+                    } else if (
+                        event.key === 'ArrowDown' &&
+                        !event.shiftKey &&
+                        !event.altKey &&
+                        !modifierPressed &&
+                        nextBlockId
+                    ) {
+                        const currentSelection = readSelectionFromDom(event.currentTarget);
+                        if (
+                            currentSelection?.type === 'caret' &&
+                            isCaretOnLastVisualLine(event.currentTarget)
+                        ) {
+                            event.preventDefault();
+                            onMoveCaretVertically(event.currentTarget, nextBlockId);
                         }
                     }
                 }}
