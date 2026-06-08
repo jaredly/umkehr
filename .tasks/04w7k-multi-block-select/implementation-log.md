@@ -24,11 +24,13 @@
 - `mergeOverlappingRanges` originally ignored boundary-only cross-block ranges because `normalizeSelectionSegments` returns no character segments for them. Fixed `selectionSet.ts` to derive a span from anchor/focus when a non-collapsed range has no selected character segments.
 - Initial UI replacement tests exposed that `insertText` still used the old char-only delete helper. Fixed by routing replacement through the new boundary-joining helper.
 - Updated the old Shift+ArrowDown UI expectation because single-selection vertical Shift+Arrow is now intentionally custom-handled.
+- Follow-up: boundary-adjacent range endpoints had no visible affordance when no highlight pixels appeared in the endpoint block. Added range edge caret decorations for cross-block range endpoints at offset `0` or block end. Boundary-only selections now render carets on both sides; partial selections that end just over a boundary render a caret at that endpoint.
 
 ## Verification
 
 - `npm exec vitest -- examples/block-rich-text/src/blockCommands.test.ts` passed: 21 tests.
 - `npm exec vitest -- examples/block-rich-text/src/multiSelectionCommands.test.ts` passed: 15 tests.
 - `npm exec vitest -- examples/block-rich-text/src/App.test.tsx` passed: 43 tests.
-- `npm exec vitest -- examples/block-rich-text/src` passed: 6 files, 95 tests.
+- `npm exec vitest -- examples/block-rich-text/src/selectionSet.test.ts` passed: 6 tests.
+- `npm exec vitest -- examples/block-rich-text/src` passed: 6 files, 97 tests.
 - `npx tsc -p examples/block-rich-text/tsconfig.json --noEmit` passed.

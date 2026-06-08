@@ -146,6 +146,7 @@ function BlockEditor({
         () =>
             decorationsForSelectionSet(replica.state, resolvedSelectionSet, {
                 includePrimary: !hasFocus || isExtendingSelection,
+                includePrimaryBoundaryCaret: true,
             }),
         [hasFocus, isExtendingSelection, replica.state, resolvedSelectionSet],
     );

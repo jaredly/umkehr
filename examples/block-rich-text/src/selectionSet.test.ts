@@ -6,6 +6,7 @@ import {deleteBackward, insertText, pastePlainText, type CommandContext} from '.
 import {caret, type EditorSelection} from './selectionModel';
 import {
     appendSelection,
+    decorationsForSelectionSet,
     dedupeSelectionSet,
     mergeOverlappingRanges,
     primarySelection,
@@ -135,5 +136,76 @@ describe('block rich text selection sets', () => {
                 },
             },
         ]);
+    });
+
+    it('decorates boundary-only ranges with carets on both sides', () => {
+        const pasted = pastePlainText(init(), caret(onlyBlock(init()), 0), 'one\ntwo', ctx());
+        const [firstBlock, secondBlock] = rootBlockIds(pasted.state);
+        const set = resolveSelectionSet(
+            pasted.state,
+            singleRetainedSelectionSet(
+                pasted.state,
+                {
+                    type: 'range',
+                    anchor: {blockId: firstBlock, offset: 3},
+                    focus: {blockId: secondBlock, offset: 0},
+                },
+                'primary',
+            ),
+        );
+
+        const decorations = decorationsForSelectionSet(pasted.state, set, {
+            includePrimary: false,
+            includePrimaryBoundaryCaret: true,
+        });
+
+        expect(decorations.get(firstBlock)).toEqual({
+            carets: [{id: 'primary', offset: 3, primary: true}],
+            segments: [],
+        });
+        expect(decorations.get(secondBlock)).toEqual({
+            carets: [{id: 'primary', offset: 0, primary: true}],
+            segments: [],
+        });
+    });
+
+    it('decorates a cross-block range endpoint just past a boundary', () => {
+        const pasted = pastePlainText(init(), caret(onlyBlock(init()), 0), 'one\ntwo', ctx());
+        const [firstBlock, secondBlock] = rootBlockIds(pasted.state);
+        const set = resolveSelectionSet(
+            pasted.state,
+            singleRetainedSelectionSet(
+                pasted.state,
+                {
+                    type: 'range',
+                    anchor: {blockId: firstBlock, offset: 1},
+                    focus: {blockId: secondBlock, offset: 0},
+                },
+                'primary',
+            ),
+        );
+
+        const activeDecorations = decorationsForSelectionSet(pasted.state, set, {
+            includePrimary: false,
+            includePrimaryBoundaryCaret: true,
+        });
+        expect(activeDecorations.get(firstBlock)).toBeUndefined();
+        expect(activeDecorations.get(secondBlock)).toEqual({
+            carets: [{id: 'primary', offset: 0, primary: true}],
+            segments: [],
+        });
+
+        const inactiveDecorations = decorationsForSelectionSet(pasted.state, set, {
+            includePrimary: true,
+            includePrimaryBoundaryCaret: true,
+        });
+        expect(inactiveDecorations.get(firstBlock)).toEqual({
+            carets: [],
+            segments: [{id: 'primary', startOffset: 1, endOffset: 3, primary: true}],
+        });
+        expect(inactiveDecorations.get(secondBlock)).toEqual({
+            carets: [{id: 'primary', offset: 0, primary: true}],
+            segments: [],
+        });
     });
 });

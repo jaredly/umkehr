@@ -6,6 +6,7 @@ import {
     isCollapsed,
     clampPoint,
     normalizeSelectionSegments,
+    pointTextLength,
     visibleBlockIds,
     type BlockPoint,
     type EditorSelection,
@@ -228,24 +229,34 @@ export const mergeOverlappingRanges = (
 export const decorationsForSelectionSet = (
     state: CachedState,
     set: EditorSelectionSet,
-    options: {includePrimary: boolean},
+    options: {includePrimary: boolean; includePrimaryBoundaryCaret?: boolean},
 ): Map<string, BlockSelectionDecorations> => {
     const result = new Map<string, BlockSelectionDecorations>();
 
     for (const entry of set.entries) {
         const primary = entry.id === set.primaryId;
-        if (primary && !options.includePrimary) continue;
 
         if (isCollapsed(entry.selection)) {
+            if (primary && !options.includePrimary) continue;
             const point = focusPoint(entry.selection);
-            const decorations = ensureDecorations(result, point.blockId);
-            if (!decorations.carets.some((caret) => caret.offset === point.offset)) {
-                decorations.carets.push({id: entry.id, offset: point.offset, primary});
+            addCaretDecoration(result, entry.id, point, primary);
+            continue;
+        }
+
+        const segments = normalizeSelectionSegments(state, entry.selection);
+        if (primary && !options.includePrimary) {
+            if (options.includePrimaryBoundaryCaret) {
+                addRangeEdgeCarets(state, result, entry.id, entry.selection, primary);
             }
             continue;
         }
 
-        for (const segment of normalizeSelectionSegments(state, entry.selection)) {
+        if (!segments.length) {
+            addRangeEdgeCarets(state, result, entry.id, entry.selection, primary);
+            continue;
+        }
+
+        for (const segment of segments) {
             ensureDecorations(result, segment.blockId).segments.push({
                 id: entry.id,
                 startOffset: segment.startOffset,
@@ -253,6 +264,7 @@ export const decorationsForSelectionSet = (
                 primary,
             });
         }
+        addRangeEdgeCarets(state, result, entry.id, entry.selection, primary);
     }
 
     for (const decorations of result.values()) {
@@ -361,6 +373,40 @@ const retainedBlockOrder = (state: CachedState): string[] => {
 const affinityRank = (affinity: RetainedPoint['affinity']) => (affinity === 'before' ? 0 : 1);
 
 const visiblePointKey = (point: BlockPoint) => `${point.blockId}:${point.offset}`;
+
+const addRangeEdgeCarets = (
+    state: CachedState,
+    map: Map<string, BlockSelectionDecorations>,
+    id: string,
+    selection: EditorSelection,
+    primary: boolean,
+) => {
+    if (selection.type === 'caret') return;
+    const anchor = clampPoint(state, selection.anchor);
+    const focus = clampPoint(state, selection.focus);
+    if (anchor.blockId === focus.blockId) return;
+
+    for (const point of [anchor, focus]) {
+        if (isBlockEdgePoint(state, point)) {
+            addCaretDecoration(map, id, point, primary);
+        }
+    }
+};
+
+const isBlockEdgePoint = (state: CachedState, point: BlockPoint): boolean =>
+    point.offset === 0 || point.offset === pointTextLength(state, point.blockId);
+
+const addCaretDecoration = (
+    map: Map<string, BlockSelectionDecorations>,
+    id: string,
+    point: BlockPoint,
+    primary: boolean,
+) => {
+    const decorations = ensureDecorations(map, point.blockId);
+    if (!decorations.carets.some((caret) => caret.offset === point.offset)) {
+        decorations.carets.push({id, offset: point.offset, primary});
+    }
+};
 
 const ensureDecorations = (
     map: Map<string, BlockSelectionDecorations>,

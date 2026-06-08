@@ -495,6 +495,8 @@ describe('Block rich text example UI', () => {
 
         expect(domSelectionBlock()).toBe(blocks(left)[1]);
         expect(domSelectionOffsets(blocks(left)[1])).toEqual({anchor: -1, focus: 0});
+        expect(retainedCaretOffsets(blocks(left)[0])).toEqual([3]);
+        expect(retainedCaretOffsets(blocks(left)[1])).toEqual([0]);
 
         fireEvent.keyDown(blocks(left)[1], {key: 'Backspace'});
 
