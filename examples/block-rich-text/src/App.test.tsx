@@ -728,6 +728,75 @@ describe('Block rich text example UI', () => {
         expect(blocks(right)[0].textContent).toBe('aXbcXd');
     });
 
+    it('moves every cursor with plain ArrowRight before typing', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abcd');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abcd'));
+
+        selectCaret(blocks(left)[0], 1);
+        addCaret(blocks(left)[0], 3);
+
+        fireEvent.keyDown(blocks(left)[0], {key: 'ArrowRight'});
+        fireEvent.keyUp(blocks(left)[0], {key: 'ArrowRight'});
+
+        await waitFor(() => expect(domCaretOffset(blocks(left)[0])).toBe(4));
+        expect(retainedCaretOffsets(blocks(left)[0])).toEqual([2]);
+
+        beforeInputText(blocks(left)[0], 'X');
+
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abXcdX'));
+        expect(blocks(right)[0].textContent).toBe('abXcdX');
+    });
+
+    it('clicking after multiselect clears secondary cursors at the clicked point', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abcd');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abcd'));
+
+        selectCaret(blocks(left)[0], 3);
+        addCaret(blocks(left)[0], 1);
+        expect(retainedCaretOffsets(blocks(left)[0])).toEqual([3]);
+
+        const documentWithCaretRange = document as Document & {
+            caretRangeFromPoint?: (x: number, y: number) => Range | null;
+        };
+        const previousCaretRangeFromPoint = documentWithCaretRange.caretRangeFromPoint;
+        Object.defineProperty(document, 'caretRangeFromPoint', {
+            value: () => {
+                const range = document.createRange();
+                range.setStart(firstTextNode(blocks(left)[0])!, 0);
+                range.collapse(true);
+                return range;
+            },
+            configurable: true,
+        });
+
+        try {
+            fireEvent.mouseDown(blocks(left)[0], {clientX: 10, clientY: 10});
+            setDomCaret(blocks(left)[0], 1);
+            fireEvent.mouseUp(blocks(left)[0], {clientX: 10, clientY: 10});
+
+            await waitFor(() => expect(domCaretOffset(blocks(left)[0])).toBe(0));
+            expect(retainedCaretOffsets(blocks(left)[0])).toEqual([]);
+
+            beforeInputText(blocks(left)[0], 'X');
+
+            await waitFor(() => expect(blocks(left)[0].textContent).toBe('Xabcd'));
+            expect(blocks(right)[0].textContent).toBe('Xabcd');
+        } finally {
+            Object.defineProperty(document, 'caretRangeFromPoint', {
+                value: previousCaretRangeFromPoint,
+                configurable: true,
+            });
+        }
+    });
+
     it('adds a range with Cmd-drag and shows it when inactive', async () => {
         const view = render(<App />);
         const {left, right} = panels(view);

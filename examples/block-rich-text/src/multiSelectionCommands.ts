@@ -14,10 +14,21 @@ import {
     dedupeSelectionSet,
     mergeOverlappingRanges,
     reverseSortedRetainedEntries,
+    resolveSelectionSet,
     type RetainedSelectionEntry,
     type RetainedSelectionSet,
 } from './selectionSet';
-import {isCollapsed} from './selectionModel';
+import {
+    caret,
+    firstPointForSelection,
+    focusPoint,
+    isCollapsed,
+    normalizeSelectionSegments,
+    pointTextLength,
+    visibleBlockIds,
+    type BlockPoint,
+    type EditorSelection,
+} from './selectionModel';
 
 export type MultiCommandResult = {
     state: CachedState;
@@ -103,6 +114,102 @@ export const toggleMarkEverywhere = (
         ops,
         selection: dedupeSelectionSet(working, deduped),
     };
+};
+
+export const moveSelectionsHorizontally = (
+    state: CachedState,
+    selection: RetainedSelectionSet,
+    direction: 'left' | 'right',
+): MultiCommandResult => {
+    const resolved = resolveSelectionSet(state, selection);
+    const entries = resolved.entries.map((entry) => ({
+        id: entry.id,
+        selection: retainSelection(state, moveSelectionHorizontally(state, entry.selection, direction)),
+    }));
+
+    return {
+        state,
+        ops: [],
+        selection: dedupeSelectionSet(state, {primaryId: resolved.primaryId, entries}),
+    };
+};
+
+export const moveSelectionsVertically = (
+    state: CachedState,
+    selection: RetainedSelectionSet,
+    direction: 'up' | 'down',
+): MultiCommandResult => {
+    const resolved = resolveSelectionSet(state, selection);
+    const entries = resolved.entries.map((entry) => ({
+        id: entry.id,
+        selection: retainSelection(state, moveSelectionVertically(state, entry.selection, direction)),
+    }));
+
+    return {
+        state,
+        ops: [],
+        selection: dedupeSelectionSet(state, {primaryId: resolved.primaryId, entries}),
+    };
+};
+
+const moveSelectionHorizontally = (
+    state: CachedState,
+    selection: EditorSelection,
+    direction: 'left' | 'right',
+): EditorSelection => {
+    if (!isCollapsed(selection)) {
+        const point =
+            direction === 'left'
+                ? firstPointForSelection(state, selection)
+                : lastPointForSelection(state, selection);
+        return caret(point.blockId, point.offset);
+    }
+    return caretAtPoint(movePointHorizontally(state, focusPoint(selection), direction));
+};
+
+const moveSelectionVertically = (
+    state: CachedState,
+    selection: EditorSelection,
+    direction: 'up' | 'down',
+): EditorSelection => {
+    const point = focusPoint(selection);
+    const blocks = visibleBlockIds(state);
+    const index = blocks.indexOf(point.blockId);
+    const targetBlockId = blocks[direction === 'up' ? index - 1 : index + 1];
+    if (!targetBlockId) return caret(point.blockId, point.offset);
+    return caret(targetBlockId, Math.min(point.offset, pointTextLength(state, targetBlockId)));
+};
+
+const movePointHorizontally = (
+    state: CachedState,
+    point: BlockPoint,
+    direction: 'left' | 'right',
+): BlockPoint => {
+    const blocks = visibleBlockIds(state);
+    const index = blocks.indexOf(point.blockId);
+    if (index < 0) return point;
+
+    if (direction === 'left') {
+        if (point.offset > 0) return {blockId: point.blockId, offset: point.offset - 1};
+        const previousBlockId = blocks[index - 1];
+        return previousBlockId
+            ? {blockId: previousBlockId, offset: pointTextLength(state, previousBlockId)}
+            : point;
+    }
+
+    const length = pointTextLength(state, point.blockId);
+    if (point.offset < length) return {blockId: point.blockId, offset: point.offset + 1};
+    const nextBlockId = blocks[index + 1];
+    return nextBlockId ? {blockId: nextBlockId, offset: 0} : point;
+};
+
+const caretAtPoint = (point: BlockPoint): EditorSelection => caret(point.blockId, point.offset);
+
+const lastPointForSelection = (state: CachedState, selection: EditorSelection): BlockPoint => {
+    const segments = normalizeSelectionSegments(state, selection);
+    const last = segments[segments.length - 1];
+    if (!last) return focusPoint(selection);
+    return {blockId: last.blockId, offset: last.endOffset};
 };
 
 const runReplacingCommand = (

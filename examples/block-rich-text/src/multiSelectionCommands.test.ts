@@ -7,6 +7,8 @@ import {caret, type EditorSelection} from './selectionModel';
 import {
     deleteBackwardEverywhere,
     insertTextEverywhere,
+    moveSelectionsHorizontally,
+    moveSelectionsVertically,
     splitBlockEverywhere,
     toggleMarkEverywhere,
 } from './multiSelectionCommands';
@@ -59,6 +61,60 @@ describe('block rich text multi-selection commands', () => {
         const result = insertTextEverywhere(pasted.state, set, 'X', ctx());
 
         expect(lines(result.state)).toEqual(['aXb', 'cXd']);
+    });
+
+    it('moves every selected caret horizontally', () => {
+        const inserted = insertText(init(), caret(onlyBlock(init()), 0), 'abcd', ctx());
+        const blockId = onlyBlock(inserted.state);
+        const set = appendSelection(
+            inserted.state,
+            singleRetainedSelectionSet(inserted.state, caret(blockId, 1), 'first'),
+            caret(blockId, 3),
+            'second',
+        );
+
+        const result = moveSelectionsHorizontally(inserted.state, set, 'right');
+
+        expect(resolveSelectionSet(result.state, result.selection).entries.map((entry) => entry.selection)).toEqual([
+            caret(blockId, 2),
+            caret(blockId, 4),
+        ]);
+    });
+
+    it('moves every selected caret across block boundaries', () => {
+        const pasted = pastePlainText(init(), caret(onlyBlock(init()), 0), 'ab\ncd', ctx());
+        const [firstBlock, secondBlock] = rootBlockIds(pasted.state);
+        const set = appendSelection(
+            pasted.state,
+            singleRetainedSelectionSet(pasted.state, caret(firstBlock, 2), 'first'),
+            caret(secondBlock, 0),
+            'second',
+        );
+
+        const result = moveSelectionsHorizontally(pasted.state, set, 'right');
+
+        expect(resolveSelectionSet(result.state, result.selection).entries.map((entry) => entry.selection)).toEqual([
+            caret(secondBlock, 0),
+            caret(secondBlock, 1),
+        ]);
+    });
+
+    it('moves every selected caret vertically to adjacent blocks', () => {
+        const pasted = pastePlainText(init(), caret(onlyBlock(init()), 0), 'ab\ncdef\nx', ctx());
+        const [firstBlock, secondBlock, thirdBlock] = rootBlockIds(pasted.state);
+        const set = appendSelection(
+            pasted.state,
+            singleRetainedSelectionSet(pasted.state, caret(firstBlock, 2), 'first'),
+            caret(secondBlock, 3),
+            'second',
+        );
+
+        const result = moveSelectionsVertically(pasted.state, set, 'down');
+
+        expect(resolveSelectionSet(result.state, result.selection).entries.map((entry) => entry.selection)).toEqual([
+            caret(secondBlock, 2),
+            caret(thirdBlock, 1),
+        ]);
     });
 
     it('replaces overlapping ranges once after merging', () => {

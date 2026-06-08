@@ -42,6 +42,8 @@ import {
     deleteBackwardEverywhere,
     deleteForwardEverywhere,
     insertTextEverywhere,
+    moveSelectionsHorizontally,
+    moveSelectionsVertically,
     pastePlainTextEverywhere,
     splitBlockEverywhere,
     toggleMarkEverywhere,
@@ -118,6 +120,12 @@ function BlockEditor({
     const verticalCaretXRef = useRef<number | null>(null);
     const nextSelectionIdRef = useRef(1);
     const handledTripleClickRef = useRef(false);
+    const handledNavigationKeyRef = useRef(false);
+    const pendingMultiselectClickRef = useRef<{
+        point: {blockId: string; offset: number};
+        x: number;
+        y: number;
+    } | null>(null);
     const [hasFocus, setHasFocus] = useState(false);
     const blocks = materializeFormattedBlocks(replica.state);
     const blockIds = rootBlockIds(replica.state);
@@ -168,11 +176,37 @@ function BlockEditor({
                     handledTripleClickRef.current = false;
                     return;
                 }
+            } else if (
+                'key' in event &&
+                event.type === 'keyup' &&
+                isPlainArrowKey(event.key) &&
+                handledNavigationKeyRef.current
+            ) {
+                handledNavigationKeyRef.current = false;
+                return;
             } else if ('key' in event && event.key !== 'ArrowUp' && event.key !== 'ArrowDown') {
                 resetVerticalCaretIntent();
             }
             const root = rootRef.current;
             if (!root) return;
+            if (event.type === 'mouseup' && pendingMultiselectClickRef.current) {
+                const pendingClick = pendingMultiselectClickRef.current;
+                pendingMultiselectClickRef.current = null;
+                if (isSameClick(pendingClick, event)) {
+                    const selection = caret(pendingClick.point.blockId, pendingClick.point.offset);
+                    scheduleSelectionRestore(selection);
+                    onCommand((current) => ({
+                        state: current.state,
+                        ops: [],
+                        selection: replaceSelectionSet(
+                            current.state,
+                            selection,
+                            current.selection.primaryId,
+                        ),
+                    }));
+                    return;
+                }
+            }
             const selection = readSelectionFromDom(root);
             if (!selection) return;
             if (event.type === 'mouseup' && 'detail' in event && event.detail === 3) {
@@ -209,13 +243,30 @@ function BlockEditor({
         [nextSelectionId, onCommand, resetVerticalCaretIntent, scheduleSelectionRestore],
     );
 
-    const selectOccurrencesFromTripleClick = useCallback(
+    const captureMouseDown = useCallback(
         (event: MouseEvent<HTMLElement>) => {
-            if (event.detail !== 3) return;
             const root = rootRef.current;
             if (!root) return;
             const point = readPointFromMouseEvent(root, event.nativeEvent);
             if (!point) return;
+
+            if (
+                event.detail <= 1 &&
+                resolvedSelectionSet.entries.length > 1 &&
+                !event.metaKey &&
+                !event.ctrlKey &&
+                !event.shiftKey &&
+                !event.altKey
+            ) {
+                pendingMultiselectClickRef.current = {
+                    point,
+                    x: event.clientX,
+                    y: event.clientY,
+                };
+                return;
+            }
+
+            if (event.detail !== 3) return;
 
             event.preventDefault();
             handledTripleClickRef.current = true;
@@ -238,7 +289,13 @@ function BlockEditor({
                 };
             });
         },
-        [nextSelectionId, onCommand, resetVerticalCaretIntent, scheduleSelectionRestore],
+        [
+            nextSelectionId,
+            onCommand,
+            resetVerticalCaretIntent,
+            resolvedSelectionSet.entries.length,
+            scheduleSelectionRestore,
+        ],
     );
 
     const liveSelectionSet = useCallback((current: Replica): RetainedSelectionSet => {
@@ -265,6 +322,26 @@ function BlockEditor({
             });
         },
         [liveSelectionSet, onCommand, resetVerticalCaretIntent, scheduleSelectionRestore],
+    );
+
+    const moveSelectionsHorizontallyEverywhere = useCallback(
+        (direction: 'left' | 'right') => {
+            handledNavigationKeyRef.current = true;
+            runEditCommand((current, selection) =>
+                moveSelectionsHorizontally(current.state, selection, direction),
+            );
+        },
+        [runEditCommand],
+    );
+
+    const moveSelectionsVerticallyEverywhere = useCallback(
+        (direction: 'up' | 'down') => {
+            handledNavigationKeyRef.current = true;
+            runEditCommand((current, selection) =>
+                moveSelectionsVertically(current.state, selection, direction),
+            );
+        },
+        [runEditCommand],
     );
 
     const moveCaret = useCallback(
@@ -364,7 +441,7 @@ function BlockEditor({
                     resetVerticalCaretIntent();
                     setHasFocus(false);
                 }}
-                onMouseDown={selectOccurrencesFromTripleClick}
+                onMouseDown={captureMouseDown}
                 onMouseUp={captureSelection}
                 onKeyUp={captureSelection}
             >
@@ -382,6 +459,7 @@ function BlockEditor({
                         blockLength={pointTextLength(replica.state, block.id)}
                         nextBlockId={blocks[index + 1]?.id ?? null}
                         selection={primaryResolvedSelection}
+                        hasMultipleSelections={resolvedSelectionSet.entries.length > 1}
                         decorations={decorationsByBlock.get(block.id) ?? null}
                         pendingCaretRestoreBlockIdRef={pendingCaretRestoreBlockIdRef}
                         isDragging={draggingId === block.id}
@@ -495,6 +573,8 @@ function BlockEditor({
                             moveCaretHorizontally(selection);
                         }}
                         onMoveCaretVertically={moveCaretVertically}
+                        onMoveSelectionsHorizontally={moveSelectionsHorizontallyEverywhere}
+                        onMoveSelectionsVertically={moveSelectionsVerticallyEverywhere}
                     />
                 ))}
             </div>
@@ -527,6 +607,7 @@ function EditableBlock({
     blockLength,
     nextBlockId,
     selection,
+    hasMultipleSelections,
     decorations,
     pendingCaretRestoreBlockIdRef,
     isDragging,
@@ -544,6 +625,8 @@ function EditableBlock({
     onPasteText,
     onMoveCaret,
     onMoveCaretVertically,
+    onMoveSelectionsHorizontally,
+    onMoveSelectionsVertically,
 }: {
     block: FormattedBlock;
     canDrag: boolean;
@@ -552,6 +635,7 @@ function EditableBlock({
     blockLength: number;
     nextBlockId: string | null;
     selection: EditorSelection;
+    hasMultipleSelections: boolean;
     decorations: BlockSelectionDecorations | null;
     pendingCaretRestoreBlockIdRef: MutableRefObject<string | null>;
     isDragging: boolean;
@@ -569,6 +653,8 @@ function EditableBlock({
     onPasteText(text: string): void;
     onMoveCaret(selection: EditorSelection): void;
     onMoveCaretVertically(sourceBlock: HTMLElement, targetBlockId: string): void;
+    onMoveSelectionsHorizontally(direction: 'left' | 'right'): void;
+    onMoveSelectionsVertically(direction: 'up' | 'down'): void;
 }) {
     const handledBeforeInputRef = useRef(false);
     const editableRef = useRef<HTMLDivElement>(null);
@@ -702,6 +788,21 @@ function EditableBlock({
                         event.preventDefault();
                         onDeleteForward();
                     } else if (
+                        hasMultipleSelections &&
+                        isPlainArrowKey(event.key) &&
+                        !event.shiftKey &&
+                        !event.altKey &&
+                        !modifierPressed
+                    ) {
+                        event.preventDefault();
+                        if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+                            onMoveSelectionsHorizontally(
+                                event.key === 'ArrowLeft' ? 'left' : 'right',
+                            );
+                        } else {
+                            onMoveSelectionsVertically(event.key === 'ArrowUp' ? 'up' : 'down');
+                        }
+                    } else if (
                         event.key === 'ArrowLeft' &&
                         !event.shiftKey &&
                         !event.altKey &&
@@ -773,6 +874,17 @@ function EditableBlock({
 }
 
 const isJsdom = () => navigator.userAgent.includes('jsdom');
+
+const isPlainArrowKey = (key: string) =>
+    key === 'ArrowLeft' || key === 'ArrowRight' || key === 'ArrowUp' || key === 'ArrowDown';
+
+const isSameClick = (
+    start: {x: number; y: number},
+    event: MouseEvent | KeyboardEvent,
+): event is MouseEvent => {
+    if (event.type !== 'mouseup' || !('clientX' in event) || !('clientY' in event)) return false;
+    return Math.abs(event.clientX - start.x) <= 3 && Math.abs(event.clientY - start.y) <= 3;
+};
 
 const occurrenceSelectionSet = (
     state: Replica['state'],
