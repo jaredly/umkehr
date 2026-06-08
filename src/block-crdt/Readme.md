@@ -36,3 +36,13 @@ In order to solve this problem, we need a way to indicate that the "sibling repa
 [diagram of this thing making sense]
 
 Next up: making rich text work!
+
+
+.....
+
+
+oof ok so something have made things more complicated:
+
+- wanted to eliminate the possibilty of join-cycles. which I do think is worth it
+- wanting unindent to do "incidental reparenting" of later sibling nodes so that we can follow user expectation, principle of least surprise
+- also wanting to eliminate the possiblity of block nesting cycles. seems like it might require a similar bookkeeping setup, which tbh is a little annoying, but I kindof want this to be rock solid.
