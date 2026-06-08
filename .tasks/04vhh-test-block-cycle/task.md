@@ -1,0 +1,1 @@
+It looks like the way we've architected block reparenting is preventing block cycles, which surprises me. Can you put together some comprehensive tests to verify that we're successfully preventing block parent cycles in the concurrent reparenting case?
