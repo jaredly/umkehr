@@ -26,6 +26,7 @@ import {
     isCaretOnFirstVisualLine,
     isCaretOnLastVisualLine,
     readCaretHorizontalIntent,
+    readPointFromMouseEvent,
     readSelectionFromDom,
     restoreCaretToDom,
     restoreSelectionToDom,
@@ -116,6 +117,7 @@ function BlockEditor({
     const pendingSelectionRestoreRef = useRef<EditorSelection | null>(null);
     const verticalCaretXRef = useRef<number | null>(null);
     const nextSelectionIdRef = useRef(1);
+    const handledTripleClickRef = useRef(false);
     const [hasFocus, setHasFocus] = useState(false);
     const blocks = materializeFormattedBlocks(replica.state);
     const blockIds = rootBlockIds(replica.state);
@@ -162,6 +164,10 @@ function BlockEditor({
         (event: MouseEvent | KeyboardEvent) => {
             if (event.type === 'mouseup') {
                 resetVerticalCaretIntent();
+                if ('detail' in event && event.detail === 3 && handledTripleClickRef.current) {
+                    handledTripleClickRef.current = false;
+                    return;
+                }
             } else if ('key' in event && event.key !== 'ArrowUp' && event.key !== 'ArrowDown') {
                 resetVerticalCaretIntent();
             }
@@ -199,6 +205,38 @@ function BlockEditor({
                       ? replacePrimarySelection(current.state, current.selection, selection)
                       : replaceSelectionSet(current.state, selection, current.selection.primaryId),
             }));
+        },
+        [nextSelectionId, onCommand, resetVerticalCaretIntent, scheduleSelectionRestore],
+    );
+
+    const selectOccurrencesFromTripleClick = useCallback(
+        (event: MouseEvent<HTMLElement>) => {
+            if (event.detail !== 3) return;
+            const root = rootRef.current;
+            if (!root) return;
+            const point = readPointFromMouseEvent(root, event.nativeEvent);
+            if (!point) return;
+
+            event.preventDefault();
+            handledTripleClickRef.current = true;
+            resetVerticalCaretIntent();
+            const selection = caret(point.blockId, point.offset);
+            onCommand((current) => {
+                const nextSelection = occurrenceSelectionSet(
+                    current.state,
+                    selection,
+                    nextSelectionId,
+                    current.selection,
+                );
+                scheduleSelectionRestore(
+                    primarySelection(resolveSelectionSet(current.state, nextSelection)),
+                );
+                return {
+                    state: current.state,
+                    ops: [],
+                    selection: nextSelection,
+                };
+            });
         },
         [nextSelectionId, onCommand, resetVerticalCaretIntent, scheduleSelectionRestore],
     );
@@ -326,6 +364,7 @@ function BlockEditor({
                     resetVerticalCaretIntent();
                     setHasFocus(false);
                 }}
+                onMouseDown={selectOccurrencesFromTripleClick}
                 onMouseUp={captureSelection}
                 onKeyUp={captureSelection}
             >

@@ -778,6 +778,50 @@ describe('Block rich text example UI', () => {
         await waitFor(() => expect(retainedHighlightText(blocks(left)[0])).toBe('oneone'));
         expect(childTexts(blocks(left)[0])).toEqual(['one', ' One ', 'one']);
     });
+
+    it('prevents native triple-click line selection from replacing occurrence selections', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'one One one');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('one One one'));
+
+        const documentWithCaretRange = document as Document & {
+            caretRangeFromPoint?: (x: number, y: number) => Range | null;
+        };
+        const previousCaretRangeFromPoint = documentWithCaretRange.caretRangeFromPoint;
+        Object.defineProperty(document, 'caretRangeFromPoint', {
+            value: () => {
+                const range = document.createRange();
+                range.setStart(firstTextNode(blocks(left)[0])!, 8);
+                range.collapse(true);
+                return range;
+            },
+            configurable: true,
+        });
+
+        try {
+            expect(
+                fireEvent.mouseDown(blocks(left)[0], {
+                    detail: 3,
+                    clientX: 10,
+                    clientY: 10,
+                }),
+            ).toBe(false);
+            setDomRange(blocks(left)[0], 0, 11);
+            fireEvent.mouseUp(blocks(left)[0], {detail: 3});
+            selectCaret(blocks(right)[0], 0);
+
+            await waitFor(() => expect(retainedHighlightText(blocks(left)[0])).toBe('oneone'));
+            expect(childTexts(blocks(left)[0])).toEqual(['one', ' One ', 'one']);
+        } finally {
+            Object.defineProperty(document, 'caretRangeFromPoint', {
+                value: previousCaretRangeFromPoint,
+                configurable: true,
+            });
+        }
+    });
 });
 
 const firstTextNode = (element: HTMLElement): Text | null => {

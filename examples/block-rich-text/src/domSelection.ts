@@ -1,4 +1,4 @@
-import type {EditorSelection} from './selectionModel';
+import type {BlockPoint, EditorSelection} from './selectionModel';
 import {caret, segmentText} from './selectionModel';
 
 export type CaretHorizontalIntent = {
@@ -27,6 +27,29 @@ export const readSelectionFromDom = (root: HTMLElement): EditorSelection | null 
         return caret(focus.blockId, focus.offset);
     }
     return {type: 'range', anchor, focus};
+};
+
+export const readPointFromMouseEvent = (
+    root: HTMLElement,
+    event: MouseEvent,
+): BlockPoint | null => {
+    const caretPosition = documentWithCaretPoint().caretPositionFromPoint?.(
+        event.clientX,
+        event.clientY,
+    );
+    if (caretPosition) {
+        return pointFromDom(root, caretPosition.offsetNode, caretPosition.offset);
+    }
+
+    const caretRange = documentWithCaretPoint().caretRangeFromPoint?.(
+        event.clientX,
+        event.clientY,
+    );
+    if (caretRange) {
+        return pointFromDom(root, caretRange.startContainer, caretRange.startOffset);
+    }
+
+    return null;
 };
 
 export const restoreSelectionToDom = (root: HTMLElement, selection: EditorSelection) => {
@@ -153,6 +176,14 @@ const textLengthBeforeChild = (block: HTMLElement, childOffset: number): number 
     }
     return offset;
 };
+
+const documentWithCaretPoint = (): Document & {
+    caretPositionFromPoint?: (
+        x: number,
+        y: number,
+    ) => {offsetNode: Node; offset: number} | null;
+    caretRangeFromPoint?: (x: number, y: number) => Range | null;
+} => document;
 
 const domPointForOffset = (
     root: HTMLElement,
