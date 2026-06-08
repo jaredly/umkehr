@@ -18,6 +18,7 @@ import type {BlockOrderTs, CachedState, Lamport} from 'umkehr/block-crdt/types';
 import {lamportToString, parseLamportString, selPos} from 'umkehr/block-crdt/utils';
 import {
     caret,
+    clampPoint,
     firstPointForSelection,
     focusPoint,
     isCollapsed,
@@ -56,7 +57,7 @@ export const insertText = (
     const ops: Op[] = [];
 
     if (!isCollapsed(selection)) {
-        const deleted = deleteSelection(working, selection);
+        const deleted = deleteSelectionAndJoinBoundaries(working, selection, context);
         if (deleted.ops.length) {
             working = deleted.state;
             ops.push(...deleted.ops);
@@ -75,7 +76,7 @@ export const deleteBackward = (
     context: CommandContext,
 ): CommandResult => {
     if (!isCollapsed(selection)) {
-        const deleted = deleteSelection(state, selection);
+        const deleted = deleteSelectionAndJoinBoundaries(state, selection, context);
         return {state: deleted.state, ops: deleted.ops, selection: caret(deleted.point.blockId, deleted.point.offset)};
     }
 
@@ -97,7 +98,7 @@ export const deleteForward = (
     context: CommandContext,
 ): CommandResult => {
     if (!isCollapsed(selection)) {
-        const deleted = deleteSelection(state, selection);
+        const deleted = deleteSelectionAndJoinBoundaries(state, selection, context);
         return {state: deleted.state, ops: deleted.ops, selection: caret(deleted.point.blockId, deleted.point.offset)};
     }
 
@@ -122,7 +123,7 @@ export const splitBlock = (
     const ops: Op[] = [];
 
     if (!isCollapsed(selection)) {
-        const deleted = deleteSelection(working, selection);
+        const deleted = deleteSelectionAndJoinBoundaries(working, selection, context);
         if (deleted.ops.length) {
             working = deleted.state;
             ops.push(...deleted.ops);
@@ -436,6 +437,60 @@ const deleteSelection = (
         }
     }
     return {state: ops.length ? applyMany(state, ops) : state, ops, point};
+};
+
+const deleteSelectionAndJoinBoundaries = (
+    state: CachedState,
+    selection: EditorSelection,
+    context: CommandContext,
+): {state: CachedState; ops: Op[]; point: BlockPoint} => {
+    const span = normalizedSelectionSpan(state, selection);
+    if (!span) return deleteSelection(state, selection);
+
+    const blocks = visibleBlockIds(state);
+    const startIndex = blocks.indexOf(span.start.blockId);
+    const endIndex = blocks.indexOf(span.end.blockId);
+    const blockRun = startIndex >= 0 && endIndex >= startIndex ? blocks.slice(startIndex, endIndex + 1) : [];
+
+    const deleted = deleteSelection(state, selection);
+    let working = deleted.state;
+    const ops = [...deleted.ops];
+
+    if (blockRun.length > 1) {
+        const survivor = blockRun[0];
+        for (const blockId of blockRun.slice(1)) {
+            const joinOps = join(
+                working,
+                parseLamportString(survivor),
+                parseLamportString(blockId),
+                context.nextTs(),
+                context.actor,
+            );
+            working = applyMany(working, joinOps);
+            ops.push(...joinOps);
+        }
+    }
+
+    return {state: working, ops, point: clampPoint(working, span.start)};
+};
+
+const normalizedSelectionSpan = (
+    state: CachedState,
+    selection: EditorSelection,
+): {start: BlockPoint; end: BlockPoint} | null => {
+    if (selection.type === 'caret') return null;
+
+    const anchor = clampPoint(state, selection.anchor);
+    const focus = clampPoint(state, selection.focus);
+    const blocks = visibleBlockIds(state);
+    const anchorBlockIndex = blocks.indexOf(anchor.blockId);
+    const focusBlockIndex = blocks.indexOf(focus.blockId);
+    if (anchorBlockIndex < 0 || focusBlockIndex < 0) return null;
+
+    if (anchorBlockIndex > focusBlockIndex || (anchorBlockIndex === focusBlockIndex && anchor.offset > focus.offset)) {
+        return {start: focus, end: anchor};
+    }
+    return {start: anchor, end: focus};
 };
 
 const lastChar = (state: CachedState, blockId: string): Lamport | null => {

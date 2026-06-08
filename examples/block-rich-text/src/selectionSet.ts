@@ -4,6 +4,7 @@ import {
     firstPointForSelection,
     focusPoint,
     isCollapsed,
+    clampPoint,
     normalizeSelectionSegments,
     visibleBlockIds,
     type BlockPoint,
@@ -269,7 +270,14 @@ type SelectionSpan = {
 
 const normalizedSpan = (state: CachedState, selection: EditorSelection): SelectionSpan | null => {
     const segments = normalizeSelectionSegments(state, selection);
-    if (!segments.length) return null;
+    if (!segments.length) {
+        if (selection.type === 'caret') return null;
+        const anchor = clampPoint(state, selection.anchor);
+        const focus = clampPoint(state, selection.focus);
+        const comparison = comparePoints(state, anchor, focus);
+        if (comparison === 0) return null;
+        return comparison < 0 ? {start: anchor, end: focus} : {start: focus, end: anchor};
+    }
     const first = segments[0];
     const last = segments[segments.length - 1];
     return {

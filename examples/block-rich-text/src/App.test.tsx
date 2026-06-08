@@ -459,7 +459,7 @@ describe('Block rich text example UI', () => {
         expect(domCaretPosition(left)).toEqual({blockIndex: 0, offset: 1});
     });
 
-    it('does not custom-handle Shift+ArrowDown or edge-block vertical arrows', async () => {
+    it('custom-handles Shift+ArrowDown and leaves edge-block vertical arrows alone', async () => {
         const view = render(<App />);
         const {left} = panels(view);
 
@@ -470,7 +470,7 @@ describe('Block rich text example UI', () => {
 
         selectCaret(blocks(left)[0], 1);
         fireEvent.keyDown(blocks(left)[0], {key: 'ArrowDown', shiftKey: true});
-        expect(domCaretPosition(left)).toEqual({blockIndex: 0, offset: 1});
+        expect(domCaretPosition(left)).toEqual({blockIndex: 1, offset: 1});
 
         selectCaret(blocks(left)[0], 1);
         fireEvent.keyDown(blocks(left)[0], {key: 'ArrowUp'});
@@ -479,6 +479,69 @@ describe('Block rich text example UI', () => {
         selectCaret(blocks(left)[1], 1);
         fireEvent.keyDown(blocks(left)[1], {key: 'ArrowDown'});
         expect(domCaretPosition(left)).toEqual({blockIndex: 1, offset: 1});
+    });
+
+    it('extends a single selection across blocks with Shift+ArrowRight', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        pasteText(blocks(left)[0], 'one\ntwo');
+        await waitForBlockTexts(left, ['one', 'two']);
+
+        selectCaret(blocks(left)[0], 3);
+        fireEvent.keyDown(blocks(left)[0], {key: 'ArrowRight', shiftKey: true});
+        fireEvent.keyUp(blocks(left)[0], {key: 'ArrowRight', shiftKey: true});
+
+        expect(domSelectionBlock()).toBe(blocks(left)[1]);
+        expect(domSelectionOffsets(blocks(left)[1])).toEqual({anchor: -1, focus: 0});
+
+        fireEvent.keyDown(blocks(left)[1], {key: 'Backspace'});
+
+        await waitForBlockTexts(left, ['onetwo']);
+        expect(blockTexts(right)).toEqual(['onetwo']);
+        expect(domCaretPosition(left)).toEqual({blockIndex: 0, offset: 3});
+    });
+
+    it('extends a single selection backward across blocks with Shift+ArrowLeft', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        pasteText(blocks(left)[0], 'one\ntwo');
+        await waitForBlockTexts(left, ['one', 'two']);
+
+        selectCaret(blocks(left)[1], 0);
+        fireEvent.keyDown(blocks(left)[1], {key: 'ArrowLeft', shiftKey: true});
+        fireEvent.keyUp(blocks(left)[1], {key: 'ArrowLeft', shiftKey: true});
+        beforeInputText(blocks(left)[0], 'X');
+
+        await waitForBlockTexts(left, ['oneXtwo']);
+        expect(blockTexts(right)).toEqual(['oneXtwo']);
+        expect(domCaretPosition(left)).toEqual({blockIndex: 0, offset: 4});
+    });
+
+    it('extends Shift+ArrowDown using visual horizontal intent', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        pasteText(blocks(left)[0], 'abcd\nxy\nmnopqrst');
+        await waitForBlockTexts(left, ['abcd', 'xy', 'mnopqrst']);
+        installMockCaretGeometry(left);
+
+        selectCaret(blocks(left)[0], 3);
+        fireEvent.keyDown(blocks(left)[0], {key: 'ArrowDown', shiftKey: true});
+        fireEvent.keyUp(blocks(left)[0], {key: 'ArrowDown', shiftKey: true});
+
+        await waitFor(() => expect(domSelectionBlock()).toBe(blocks(left)[1]));
+        expect(domSelectionOffsets(blocks(left)[1])).toEqual({anchor: -1, focus: 2});
+
+        fireEvent.keyDown(blocks(left)[1], {key: 'ArrowDown', shiftKey: true});
+        fireEvent.keyUp(blocks(left)[1], {key: 'ArrowDown', shiftKey: true});
+
+        await waitFor(() => expect(domSelectionBlock()).toBe(blocks(left)[2]));
+        expect(domSelectionOffsets(blocks(left)[2])).toEqual({anchor: -1, focus: 3});
     });
 
     it('restores the caret one position left after ordinary Backspace', async () => {

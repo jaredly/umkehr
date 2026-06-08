@@ -89,6 +89,17 @@ export const readCaretHorizontalIntent = (root: HTMLElement): CaretHorizontalInt
     return rect ? {x: caretX(rect)} : null;
 };
 
+export const readSelectionFocusHorizontalIntent = (root: HTMLElement): CaretHorizontalIntent | null => {
+    const selection = window.getSelection();
+    if (!selection || !selection.focusNode || !root.contains(selection.focusNode)) return null;
+    const range = document.createRange();
+    range.setStart(selection.focusNode, selection.focusOffset);
+    range.collapse(true);
+    const block = closestBlock(root, selection.focusNode);
+    const rect = block ? caretRectForRange(range, block) : null;
+    return rect ? {x: caretX(rect)} : null;
+};
+
 export const closestCaretOffsetForHorizontalIntent = (
     block: HTMLElement,
     intent: CaretHorizontalIntent,

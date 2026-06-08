@@ -27,6 +27,7 @@ import {
     isCaretOnLastVisualLine,
     readCaretHorizontalIntent,
     readPointFromMouseEvent,
+    readSelectionFocusHorizontalIntent,
     readSelectionFromDom,
     restoreCaretToDom,
     restoreSelectionToDom,
@@ -34,8 +35,10 @@ import {
 import {
     caret,
     firstPointForSelection,
+    focusPoint,
     pointTextLength,
     segmentText,
+    visibleBlockIds,
     type EditorSelection,
 } from './selectionModel';
 import {
@@ -409,6 +412,75 @@ function BlockEditor({
         [runEditCommand],
     );
 
+    const extendSelectionVerticallyWithVisualIntent = useCallback(
+        (direction: 'up' | 'down', sourceBlock: HTMLElement) => {
+            handledNavigationKeyRef.current = true;
+            onCommand((current) => {
+                const root = rootRef.current;
+                if (!root) return {state: current.state, ops: [], selection: current.selection};
+
+                const liveSelection =
+                    readSelectionFromDom(root) ??
+                    primarySelection(resolveSelectionSet(current.state, current.selection));
+                const focus = focusPoint(liveSelection);
+                const blockOrder = visibleBlockIds(current.state);
+                const index = blockOrder.indexOf(focus.blockId);
+                const targetBlockId = blockOrder[direction === 'up' ? index - 1 : index + 1];
+                if (!targetBlockId) {
+                    return {
+                        state: current.state,
+                        ops: [],
+                        selection: replacePrimarySelection(current.state, current.selection, liveSelection),
+                    };
+                }
+
+                const targetBlock = root.querySelector<HTMLElement>(
+                    `[data-block-id="${CSS.escape(targetBlockId)}"]`,
+                );
+                if (!targetBlock) {
+                    return {
+                        state: current.state,
+                        ops: [],
+                        selection: replacePrimarySelection(current.state, current.selection, liveSelection),
+                    };
+                }
+
+                if (verticalCaretXRef.current === null) {
+                    const intent =
+                        readSelectionFocusHorizontalIntent(root) ?? readCaretHorizontalIntent(sourceBlock);
+                    if (!intent) {
+                        return {
+                            state: current.state,
+                            ops: [],
+                            selection: replacePrimarySelection(
+                                current.state,
+                                current.selection,
+                                liveSelection,
+                            ),
+                        };
+                    }
+                    verticalCaretXRef.current = intent.x;
+                }
+
+                const offset = closestCaretOffsetForHorizontalIntent(targetBlock, {
+                    x: verticalCaretXRef.current,
+                });
+                const nextSelection: EditorSelection = {
+                    type: 'range',
+                    anchor: liveSelection.type === 'caret' ? liveSelection.point : liveSelection.anchor,
+                    focus: {blockId: targetBlockId, offset},
+                };
+                scheduleSelectionRestore(nextSelection);
+                return {
+                    state: current.state,
+                    ops: [],
+                    selection: replacePrimarySelection(current.state, current.selection, nextSelection),
+                };
+            });
+        },
+        [onCommand, scheduleSelectionRestore],
+    );
+
     const moveCaret = useCallback(
         (selection: EditorSelection) => {
             scheduleSelectionRestore(selection);
@@ -643,6 +715,9 @@ function BlockEditor({
                         onMoveSelectionsVertically={moveSelectionsVerticallyEverywhere}
                         onExtendSelectionsHorizontally={extendSelectionsHorizontallyEverywhere}
                         onExtendSelectionsVertically={extendSelectionsVerticallyEverywhere}
+                        onExtendSelectionVerticallyWithVisualIntent={
+                            extendSelectionVerticallyWithVisualIntent
+                        }
                     />
                 ))}
             </div>
@@ -697,6 +772,7 @@ function EditableBlock({
     onMoveSelectionsVertically,
     onExtendSelectionsHorizontally,
     onExtendSelectionsVertically,
+    onExtendSelectionVerticallyWithVisualIntent,
 }: {
     block: FormattedBlock;
     canDrag: boolean;
@@ -727,6 +803,10 @@ function EditableBlock({
     onMoveSelectionsVertically(direction: 'up' | 'down'): void;
     onExtendSelectionsHorizontally(direction: 'left' | 'right'): void;
     onExtendSelectionsVertically(direction: 'up' | 'down'): void;
+    onExtendSelectionVerticallyWithVisualIntent(
+        direction: 'up' | 'down',
+        sourceBlock: HTMLElement,
+    ): void;
 }) {
     const handledBeforeInputRef = useRef(false);
     const editableRef = useRef<HTMLDivElement>(null);
@@ -857,7 +937,6 @@ function EditableBlock({
                         event.preventDefault();
                         onDeleteForward();
                     } else if (
-                        hasMultipleSelections &&
                         isPlainArrowKey(event.key) &&
                         event.shiftKey &&
                         !event.altKey &&
@@ -868,9 +947,14 @@ function EditableBlock({
                             onExtendSelectionsHorizontally(
                                 event.key === 'ArrowLeft' ? 'left' : 'right',
                             );
-                        } else {
+                        } else if (hasMultipleSelections) {
                             onExtendSelectionsVertically(
                                 event.key === 'ArrowUp' ? 'up' : 'down',
+                            );
+                        } else {
+                            onExtendSelectionVerticallyWithVisualIntent(
+                                event.key === 'ArrowUp' ? 'up' : 'down',
+                                event.currentTarget,
                             );
                         }
                     } else if (

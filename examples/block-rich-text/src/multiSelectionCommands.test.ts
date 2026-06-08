@@ -6,6 +6,7 @@ import {insertText, pastePlainText, type CommandContext} from './blockCommands';
 import {caret, type EditorSelection} from './selectionModel';
 import {
     deleteBackwardEverywhere,
+    deleteForwardEverywhere,
     extendSelectionsHorizontally,
     extendSelectionsVertically,
     insertTextEverywhere,
@@ -209,6 +210,85 @@ describe('block rich text multi-selection commands', () => {
         const result = deleteBackwardEverywhere(inserted.state, set, ctx());
 
         expect(lines(result.state)).toEqual(['ad']);
+    });
+
+    it('deletes a single retained cross-block range by joining blocks', () => {
+        const pasted = pastePlainText(init(), caret(onlyBlock(init()), 0), 'one\ntwo', ctx());
+        const [firstBlock, secondBlock] = rootBlockIds(pasted.state);
+        const selection: EditorSelection = {
+            type: 'range',
+            anchor: {blockId: firstBlock, offset: 2},
+            focus: {blockId: secondBlock, offset: 1},
+        };
+        const set = singleRetainedSelectionSet(pasted.state, selection, 'primary');
+
+        const result = deleteBackwardEverywhere(pasted.state, set, ctx());
+
+        expect(lines(result.state)).toEqual(['onwo']);
+        expect(resolveSelectionSet(result.state, result.selection).entries.map((entry) => entry.selection)).toEqual([
+            caret(firstBlock, 2),
+        ]);
+    });
+
+    it('deletes a boundary-only retained cross-block range by joining blocks', () => {
+        const pasted = pastePlainText(init(), caret(onlyBlock(init()), 0), 'one\ntwo', ctx());
+        const [firstBlock, secondBlock] = rootBlockIds(pasted.state);
+        const selection: EditorSelection = {
+            type: 'range',
+            anchor: {blockId: firstBlock, offset: 3},
+            focus: {blockId: secondBlock, offset: 0},
+        };
+        const set = singleRetainedSelectionSet(pasted.state, selection, 'primary');
+
+        const result = deleteBackwardEverywhere(pasted.state, set, ctx());
+
+        expect(lines(result.state)).toEqual(['onetwo']);
+        expect(resolveSelectionSet(result.state, result.selection).entries.map((entry) => entry.selection)).toEqual([
+            caret(firstBlock, 3),
+        ]);
+    });
+
+    it('deletes a single retained cross-block range forward by joining blocks', () => {
+        const pasted = pastePlainText(init(), caret(onlyBlock(init()), 0), 'one\ntwo', ctx());
+        const [firstBlock, secondBlock] = rootBlockIds(pasted.state);
+        const selection: EditorSelection = {
+            type: 'range',
+            anchor: {blockId: firstBlock, offset: 2},
+            focus: {blockId: secondBlock, offset: 1},
+        };
+        const set = singleRetainedSelectionSet(pasted.state, selection, 'primary');
+
+        const result = deleteForwardEverywhere(pasted.state, set, ctx());
+
+        expect(lines(result.state)).toEqual(['onwo']);
+        expect(resolveSelectionSet(result.state, result.selection).entries.map((entry) => entry.selection)).toEqual([
+            caret(firstBlock, 2),
+        ]);
+    });
+
+    it('merges overlapping cross-block ranges before deleting', () => {
+        const pasted = pastePlainText(init(), caret(onlyBlock(init()), 0), 'ab\ncd\nef', ctx());
+        const [firstBlock, secondBlock, thirdBlock] = rootBlockIds(pasted.state);
+        const first: EditorSelection = {
+            type: 'range',
+            anchor: {blockId: firstBlock, offset: 1},
+            focus: {blockId: secondBlock, offset: 1},
+        };
+        const second: EditorSelection = {
+            type: 'range',
+            anchor: {blockId: secondBlock, offset: 0},
+            focus: {blockId: thirdBlock, offset: 1},
+        };
+        const set = appendSelection(
+            pasted.state,
+            singleRetainedSelectionSet(pasted.state, first, 'first'),
+            second,
+            'second',
+        );
+
+        const result = deleteBackwardEverywhere(pasted.state, set, ctx());
+
+        expect(lines(result.state)).toEqual(['af']);
     });
 
     it('splits at two carets in one block', () => {

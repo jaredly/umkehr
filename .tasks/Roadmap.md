@@ -1,4 +1,12 @@
 
+Block Rich Text is really shaping up.
+
+- we want undo/redo thx
+- we want a history scrubber with full state import/export
+
+
+#
+
 Next things to tackle:
 - [x] peerjs for react-crdt example
 - [x] the react-crdt example, lots can be generic, can we put it in like src/lib?

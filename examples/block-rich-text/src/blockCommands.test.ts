@@ -138,6 +138,108 @@ describe('block rich text commands', () => {
         expectCache(result.state);
     });
 
+    it('joins blocks after Backspace deletes a cross-block range', () => {
+        const context = ctx();
+        let result = pastePlainText(init(), caret(onlyBlock(init()), 0), 'one\ntwo', context);
+        const [first, second] = rootBlockIds(result.state);
+        const selection: EditorSelection = {
+            type: 'range',
+            anchor: {blockId: first, offset: 2},
+            focus: {blockId: second, offset: 1},
+        };
+
+        result = deleteBackward(result.state, selection, context);
+
+        expect(lines(result.state)).toEqual(['onwo']);
+        expect(result.selection).toEqual(caret(first, 2));
+        expectCache(result.state);
+    });
+
+    it('joins blocks after Delete deletes a cross-block range', () => {
+        const context = ctx();
+        let result = pastePlainText(init(), caret(onlyBlock(init()), 0), 'one\ntwo', context);
+        const [first, second] = rootBlockIds(result.state);
+        const selection: EditorSelection = {
+            type: 'range',
+            anchor: {blockId: first, offset: 2},
+            focus: {blockId: second, offset: 1},
+        };
+
+        result = deleteForward(result.state, selection, context);
+
+        expect(lines(result.state)).toEqual(['onwo']);
+        expect(result.selection).toEqual(caret(first, 2));
+        expectCache(result.state);
+    });
+
+    it('joins a boundary-only cross-block selection', () => {
+        const context = ctx();
+        let result = pastePlainText(init(), caret(onlyBlock(init()), 0), 'one\ntwo', context);
+        const [first, second] = rootBlockIds(result.state);
+        const selection: EditorSelection = {
+            type: 'range',
+            anchor: {blockId: first, offset: 3},
+            focus: {blockId: second, offset: 0},
+        };
+
+        result = deleteBackward(result.state, selection, context);
+
+        expect(lines(result.state)).toEqual(['onetwo']);
+        expect(result.selection).toEqual(caret(first, 3));
+        expectCache(result.state);
+    });
+
+    it('joins cross-block selection even when the first block is fully selected', () => {
+        const context = ctx();
+        let result = pastePlainText(init(), caret(onlyBlock(init()), 0), 'one\ntwo', context);
+        const [first, second] = rootBlockIds(result.state);
+        const selection: EditorSelection = {
+            type: 'range',
+            anchor: {blockId: first, offset: 0},
+            focus: {blockId: second, offset: 0},
+        };
+
+        result = deleteBackward(result.state, selection, context);
+
+        expect(lines(result.state)).toEqual(['two']);
+        expect(result.selection).toEqual(caret(first, 0));
+        expectCache(result.state);
+    });
+
+    it('joins every visible boundary in a three-block range', () => {
+        const context = ctx();
+        let result = pastePlainText(init(), caret(onlyBlock(init()), 0), 'ab\ncd\nef', context);
+        const [first, , third] = rootBlockIds(result.state);
+        const selection: EditorSelection = {
+            type: 'range',
+            anchor: {blockId: first, offset: 1},
+            focus: {blockId: third, offset: 1},
+        };
+
+        result = deleteBackward(result.state, selection, context);
+
+        expect(lines(result.state)).toEqual(['af']);
+        expect(result.selection).toEqual(caret(first, 1));
+        expectCache(result.state);
+    });
+
+    it('joins a reversed cross-block selection', () => {
+        const context = ctx();
+        let result = pastePlainText(init(), caret(onlyBlock(init()), 0), 'one\ntwo', context);
+        const [first, second] = rootBlockIds(result.state);
+        const selection: EditorSelection = {
+            type: 'range',
+            anchor: {blockId: second, offset: 1},
+            focus: {blockId: first, offset: 2},
+        };
+
+        result = deleteBackward(result.state, selection, context);
+
+        expect(lines(result.state)).toEqual(['onwo']);
+        expect(result.selection).toEqual(caret(first, 2));
+        expectCache(result.state);
+    });
+
     it('splits pasted newlines into blocks', () => {
         const state = init();
         const result = pastePlainText(state, caret(onlyBlock(state), 0), 'a\nb\n', ctx());
