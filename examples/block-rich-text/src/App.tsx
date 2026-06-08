@@ -127,6 +127,7 @@ function BlockEditor({
         y: number;
     } | null>(null);
     const [hasFocus, setHasFocus] = useState(false);
+    const [isExtendingSelection, setIsExtendingSelection] = useState(false);
     const blocks = materializeFormattedBlocks(replica.state);
     const blockIds = rootBlockIds(replica.state);
     const resolvedSelectionSet = resolveSelectionSet(replica.state, replica.selection);
@@ -134,9 +135,9 @@ function BlockEditor({
     const decorationsByBlock = useMemo(
         () =>
             decorationsForSelectionSet(replica.state, resolvedSelectionSet, {
-                includePrimary: !hasFocus,
+                includePrimary: !hasFocus || isExtendingSelection,
             }),
-        [hasFocus, replica.state, resolvedSelectionSet],
+        [hasFocus, isExtendingSelection, replica.state, resolvedSelectionSet],
     );
     const {draggingId, dropTarget, registerRow, startDrag} = useBlockReorder({
         blockIds,
@@ -172,6 +173,7 @@ function BlockEditor({
         (event: MouseEvent | KeyboardEvent) => {
             if (event.type === 'mouseup') {
                 resetVerticalCaretIntent();
+                setIsExtendingSelection(false);
                 if ('detail' in event && event.detail === 3 && handledTripleClickRef.current) {
                     handledTripleClickRef.current = false;
                     return;
@@ -245,6 +247,9 @@ function BlockEditor({
 
     const captureMouseDown = useCallback(
         (event: MouseEvent<HTMLElement>) => {
+            setIsExtendingSelection(
+                event.detail <= 1 && !event.shiftKey && (event.metaKey || event.ctrlKey),
+            );
             const root = rootRef.current;
             if (!root) return;
             const point = readPointFromMouseEvent(root, event.nativeEvent);
@@ -439,6 +444,7 @@ function BlockEditor({
                 onBlur={(event) => {
                     if (event.currentTarget.contains(event.relatedTarget)) return;
                     resetVerticalCaretIntent();
+                    setIsExtendingSelection(false);
                     setHasFocus(false);
                 }}
                 onMouseDown={captureMouseDown}

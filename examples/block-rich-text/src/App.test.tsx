@@ -813,6 +813,22 @@ describe('Block rich text example UI', () => {
         expect(retainedCaretOffsets(blocks(left)[0])).toEqual([0]);
     });
 
+    it('keeps the existing selection visible while Cmd-dragging another selection', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abcdef');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abcdef'));
+
+        selectRange(blocks(left)[0], 1, 3);
+        expect(retainedHighlightText(blocks(left)[0])).toBe('');
+
+        fireEvent.mouseDown(blocks(left)[0], {metaKey: true});
+
+        await waitFor(() => expect(retainedHighlightText(blocks(left)[0])).toBe('bc'));
+    });
+
     it('applies Cmd+B to all selected ranges', async () => {
         const view = render(<App />);
         const {left} = panels(view);
