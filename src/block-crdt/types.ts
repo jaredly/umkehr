@@ -39,12 +39,16 @@ export type JoinRecord = {
     ts: HLC;
 };
 
+export type CharParentTs = HLC | [HLC, Lamport[], HLC];
+export type IncidentalBlockOrderTs = [HLC, LseqId, HLC];
+export type BlockOrderTs = HLC | IncidentalBlockOrderTs;
+
 export type Char = {
     id: Lamport;
     text: string;
     deleted: boolean;
     parent: {
-        ts: HLC | [HLC, Lamport[], HLC];
+        ts: CharParentTs;
         id: Lamport;
     };
     // NOTE: getting formatting to be happy will have some 'markOpsBefore/markOpsAfter' stuff going on.
@@ -58,7 +62,7 @@ export type Block = {
         | {type: 'blockquote'; ts: HLC}
         | {type: 'bullets'; ts: HLC}
         | {type: 'checkboxes'; ts: HLC; checked: Record<string, {ts: HLC; checked: boolean}>};
-    order: {index: LseqId; ts: HLC; parent: Lamport};
+    order: {index: LseqId; ts: BlockOrderTs; parent: Lamport};
     deleted: boolean;
 };
 

@@ -1,6 +1,6 @@
-import {orderedCharIdsForBlock, rootBlockIds} from 'umkehr/block-crdt';
+import {orderedCharIdsForBlock} from 'umkehr/block-crdt';
 import type {CachedState} from 'umkehr/block-crdt/types';
-import {caret, clampPoint, type BlockPoint, type EditorSelection} from './selectionModel';
+import {caret, clampPoint, visibleBlockIds, type BlockPoint, type EditorSelection} from './selectionModel';
 
 export type RetainedPoint = {
     blockId: string;
@@ -13,7 +13,7 @@ export type RetainedSelection =
     | {type: 'range'; anchor: RetainedPoint; focus: RetainedPoint};
 
 export const initialRetainedSelection = (state: CachedState): RetainedSelection => {
-    const blockId = rootBlockIds(state)[0] ?? rootBlockIds(state, true)[0] ?? '';
+    const blockId = visibleBlockIds(state)[0] ?? allBlockIds(state)[0] ?? '';
     return {type: 'caret', point: {blockId, charId: null, affinity: 'after'}};
 };
 
@@ -66,18 +66,19 @@ export const resolvePoint = (state: CachedState, point: RetainedPoint): BlockPoi
         if (resolved) return resolved;
     }
 
-    if (point.blockId && rootBlockIds(state).includes(point.blockId)) {
+    const visibleBlocks = visibleBlockIds(state);
+    if (point.blockId && visibleBlocks.includes(point.blockId)) {
         return clampPoint(state, {blockId: point.blockId, offset: 0});
     }
 
-    const firstVisibleBlock = rootBlockIds(state)[0];
+    const firstVisibleBlock = visibleBlocks[0];
     if (firstVisibleBlock) return {blockId: firstVisibleBlock, offset: 0};
 
     return {blockId: point.blockId, offset: 0};
 };
 
 const resolveCharPoint = (state: CachedState, point: RetainedPoint): BlockPoint | null => {
-    for (const blockId of rootBlockIds(state, true)) {
+    for (const blockId of allBlockIds(state)) {
         const logicalCharIds = orderedCharIdsForBlock(state, blockId);
         let visibleOffset = 0;
 
@@ -99,9 +100,12 @@ const visibleCount = (state: CachedState, charId: string) =>
     state.state.chars[charId] && !state.state.chars[charId].deleted ? 1 : 0;
 
 const visibleBlockOrFallback = (state: CachedState, blockId: string) => {
-    if (rootBlockIds(state).includes(blockId)) return blockId;
-    return rootBlockIds(state)[0] ?? blockId;
+    const visibleBlocks = visibleBlockIds(state);
+    if (visibleBlocks.includes(blockId)) return blockId;
+    return visibleBlocks[0] ?? blockId;
 };
+
+const allBlockIds = (state: CachedState): string[] => Object.keys(state.state.blocks).sort();
 
 export const retainedCaret = (state: CachedState, blockId: string, offset: number): RetainedSelection =>
     retainSelection(state, caret(blockId, offset));

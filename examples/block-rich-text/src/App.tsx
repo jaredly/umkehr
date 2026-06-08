@@ -4,13 +4,14 @@ import {
     useMemo,
     useRef,
     useState,
+    type CSSProperties,
     type KeyboardEvent,
     type MouseEvent,
     type MutableRefObject,
 } from 'react';
 import {materializeFormattedBlocks, rootBlockIds} from 'umkehr/block-crdt';
 import type {FormattedBlock} from 'umkehr/block-crdt';
-import {moveBlock} from './blockCommands';
+import {indentBlock, moveBlock, unindentBlock} from './blockCommands';
 import {
     applyLocalChange,
     createDemoState,
@@ -269,6 +270,7 @@ function BlockEditor({
                     <EditableBlock
                         key={block.id}
                         block={block}
+                        canDrag={block.depth === 0}
                         previousBlockId={blocks[index - 1]?.id ?? null}
                         previousBlockLength={
                             blocks[index - 1]
@@ -320,6 +322,42 @@ function BlockEditor({
                                     makeCommandContext(current),
                                 ),
                             )
+                        }
+                        onIndent={() =>
+                            runEditCommand((current, selection) => {
+                                const result = indentBlock(
+                                    current.state,
+                                    block.id,
+                                    makeCommandContext(current),
+                                );
+                                return {
+                                    state: result.state,
+                                    ops: result.ops,
+                                    selection: replacePrimarySelection(
+                                        result.state,
+                                        selection,
+                                        result.selection,
+                                    ),
+                                };
+                            })
+                        }
+                        onUnindent={() =>
+                            runEditCommand((current, selection) => {
+                                const result = unindentBlock(
+                                    current.state,
+                                    block.id,
+                                    makeCommandContext(current),
+                                );
+                                return {
+                                    state: result.state,
+                                    ops: result.ops,
+                                    selection: replacePrimarySelection(
+                                        result.state,
+                                        selection,
+                                        result.selection,
+                                    ),
+                                };
+                            })
                         }
                         onToggleBold={() =>
                             runEditCommand((current, selection) =>
@@ -389,6 +427,7 @@ function Toolbar({onBold, onItalic}: {onBold(): void; onItalic(): void}) {
 
 function EditableBlock({
     block,
+    canDrag,
     previousBlockId,
     previousBlockLength,
     blockLength,
@@ -404,12 +443,15 @@ function EditableBlock({
     onDeleteBackward,
     onDeleteForward,
     onSplit,
+    onIndent,
+    onUnindent,
     onToggleBold,
     onToggleItalic,
     onPasteText,
     onMoveCaret,
 }: {
     block: FormattedBlock;
+    canDrag: boolean;
     previousBlockId: string | null;
     previousBlockLength: number;
     blockLength: number;
@@ -425,6 +467,8 @@ function EditableBlock({
     onDeleteBackward(): void;
     onDeleteForward(): void;
     onSplit(): void;
+    onIndent(): void;
+    onUnindent(): void;
     onToggleBold(): void;
     onToggleItalic(): void;
     onPasteText(text: string): void;
@@ -486,12 +530,14 @@ function EditableBlock({
             ]
                 .filter(Boolean)
                 .join(' ')}
+            style={{'--block-depth': block.depth} as CSSProperties}
         >
             <button
                 type="button"
                 className="dragHandle"
                 aria-label="Move block"
-                onPointerDown={(event) => onStartDrag(block.id, event)}
+                disabled={!canDrag}
+                onPointerDown={canDrag ? (event) => onStartDrag(block.id, event) : undefined}
             >
                 ⋮⋮
             </button>
@@ -540,6 +586,19 @@ function EditableBlock({
                     } else if (event.key === 'Enter') {
                         event.preventDefault();
                         onSplit();
+                    } else if (event.key === 'Tab' && !event.altKey && !modifierPressed) {
+                        const currentSelection = readSelectionFromDom(event.currentTarget);
+                        event.preventDefault();
+                        if (
+                            currentSelection?.type === 'caret' &&
+                            currentSelection.point.offset === 0
+                        ) {
+                            if (event.shiftKey) {
+                                onUnindent();
+                            } else {
+                                onIndent();
+                            }
+                        }
                     } else if (event.key === 'Backspace') {
                         event.preventDefault();
                         onDeleteBackward();

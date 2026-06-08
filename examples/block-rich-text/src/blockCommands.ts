@@ -8,10 +8,11 @@ import {
     orderedCharIdsForBlock,
     rootBlockIds,
     split,
+    visibleBlockChildren,
     type Op,
 } from 'umkehr/block-crdt';
 import {createLseqIdBetween} from 'umkehr/block-crdt/lseq';
-import type {CachedState, Lamport} from 'umkehr/block-crdt/types';
+import type {BlockOrderTs, CachedState, Lamport} from 'umkehr/block-crdt/types';
 import {lamportToString, parseLamportString, selPos} from 'umkehr/block-crdt/utils';
 import {
     caret,
@@ -21,6 +22,7 @@ import {
     normalizeSelectionSegments,
     pointTextLength,
     segmentText,
+    visibleBlockIds,
     type BlockPoint,
     type EditorSelection,
 } from './selectionModel';
@@ -234,12 +236,116 @@ export const moveBlock = (
     return {state: next, ops: [op], selection: caret(movedBlockId, 0)};
 };
 
+export const indentBlock = (
+    state: CachedState,
+    blockId: string,
+    context: CommandContext,
+): CommandResult => {
+    const current = state.state.blocks[blockId];
+    if (!current || !visibleBlockIds(state).includes(blockId)) {
+        return {state, ops: [], selection: caret(blockId, 0)};
+    }
+
+    const parentId = lamportToString(current.order.parent);
+    const siblings = visibleBlockChildren(state, parentId);
+    const index = siblings.indexOf(blockId);
+    const previousBlockId = siblings[index - 1];
+    const previous = previousBlockId ? state.state.blocks[previousBlockId] : null;
+    if (index <= 0 || !previous) {
+        return {state, ops: [], selection: caret(blockId, 0)};
+    }
+
+    const previousChildren = visibleBlockChildren(state, previousBlockId);
+    const lastChildId = previousChildren[previousChildren.length - 1] ?? null;
+    const nextIndex = createLseqIdBetween(
+        lastChildId ? state.state.blocks[lastChildId].order.index : null,
+        null,
+        {actorId: context.actor, counter: state.state.maxSeenCount + 1},
+    );
+    const op: Op = {
+        type: 'block:move',
+        id: current.id,
+        order: {
+            parent: previous.id,
+            index: nextIndex,
+            ts: context.nextTs(),
+        },
+    };
+    const next = applyMany(state, [op]);
+    return {state: next, ops: [op], selection: caret(blockId, 0)};
+};
+
+export const unindentBlock = (
+    state: CachedState,
+    blockId: string,
+    context: CommandContext,
+): CommandResult => {
+    const current = state.state.blocks[blockId];
+    if (!current || !visibleBlockIds(state).includes(blockId)) {
+        return {state, ops: [], selection: caret(blockId, 0)};
+    }
+
+    const parentId = lamportToString(current.order.parent);
+    if (parentId === lamportToString(ROOT)) {
+        return {state, ops: [], selection: caret(blockId, 0)};
+    }
+
+    const parent = state.state.blocks[parentId];
+    if (!parent) {
+        return {state, ops: [], selection: caret(blockId, 0)};
+    }
+
+    const grandparentId = lamportToString(parent.order.parent);
+    const grandparentChildren = visibleBlockChildren(state, grandparentId).filter(
+        (id) => id !== blockId,
+    );
+    const parentIndex = grandparentChildren.indexOf(parentId);
+    const afterParentId = parentIndex >= 0 ? grandparentChildren[parentIndex + 1] : null;
+    const nextIndex = createLseqIdBetween(
+        parent.order.index,
+        afterParentId ? state.state.blocks[afterParentId].order.index : null,
+        {actorId: context.actor, counter: state.state.maxSeenCount + 1},
+    );
+
+    const siblings = visibleBlockChildren(state, parentId);
+    const blockIndex = siblings.indexOf(blockId);
+    const followingSiblings = blockIndex >= 0 ? siblings.slice(blockIndex + 1) : [];
+    const ops: Op[] = [
+        {
+            type: 'block:move',
+            id: current.id,
+            order: {
+                parent: parent.order.parent,
+                index: nextIndex,
+                ts: context.nextTs(),
+            },
+        },
+    ];
+
+    for (const siblingId of followingSiblings) {
+        const sibling = state.state.blocks[siblingId];
+        if (!sibling) continue;
+        ops.push({
+            type: 'block:move',
+            id: sibling.id,
+            order: {
+                parent: current.id,
+                index: sibling.order.index,
+                ts: [lastBlockOrderTs(sibling.order.ts), current.order.index, context.nextTs()],
+            },
+        });
+    }
+
+    const next = applyMany(state, ops);
+    return {state: next, ops, selection: caret(blockId, 0)};
+};
+
 export const joinWithPrevious = (
     state: CachedState,
     blockId: string,
     context: CommandContext,
 ): CommandResult => {
-    const blocks = rootBlockIds(state);
+    const blocks = visibleBlockIds(state);
     const index = blocks.indexOf(blockId);
     if (index <= 0) return {state, ops: [], selection: caret(blockId, 0)};
 
@@ -261,7 +367,7 @@ export const joinWithNext = (
     blockId: string,
     context: CommandContext,
 ): CommandResult => {
-    const blocks = rootBlockIds(state);
+    const blocks = visibleBlockIds(state);
     const index = blocks.indexOf(blockId);
     const nextBlockId = blocks[index + 1];
     if (index < 0 || !nextBlockId) {
@@ -327,6 +433,8 @@ const lastChar = (state: CachedState, blockId: string): Lamport | null => {
     const id = chars[chars.length - 1];
     return id ? state.state.chars[id].id : null;
 };
+
+const lastBlockOrderTs = (ts: BlockOrderTs) => (typeof ts === 'string' ? ts : ts[2]);
 
 const selectionFullyHasMark = (
     state: CachedState,

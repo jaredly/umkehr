@@ -17,6 +17,7 @@ import {
     activeJoinRecords,
     orderedCharIdsForBlock,
     visibleBlockChildren,
+    visibleBlockOutline,
 } from './index';
 import {Block, CachedState, Lamport} from './types';
 import {lamportToString, parseLamportString, selPos} from './utils';
@@ -460,6 +461,74 @@ it('moves blocks by timestamp and updates child cache', () => {
         parent: [1, 'self'],
     });
     expectCache(state);
+});
+
+it('returns visible block outline with nested depths and splices hidden parent children', () => {
+    let state = apply(cachedState(init), {
+        type: 'block',
+        block: block([1, 'self'], 1, '00002'),
+    }) as CachedState;
+    state = apply(state, {
+        type: 'block',
+        block: block([2, 'self'], 2, '00002', [1, 'self']),
+    }) as CachedState;
+    state = apply(state, {
+        type: 'block',
+        block: block([3, 'self'], 3, '00002'),
+    }) as CachedState;
+
+    expect(visibleBlockOutline(state)).toEqual([
+        {id: '0000-self', depth: 0, parentId: '0000-root'},
+        {id: '0001-self', depth: 0, parentId: '0000-root'},
+        {id: '0002-self', depth: 1, parentId: '0001-self'},
+        {id: '0003-self', depth: 0, parentId: '0000-root'},
+    ]);
+
+    state = apply(state, {type: 'block:delete', id: [1, 'self']}) as CachedState;
+
+    expect(visibleBlockOutline(state)).toEqual([
+        {id: '0000-self', depth: 0, parentId: '0000-root'},
+        {id: '0002-self', depth: 0, parentId: '0000-root'},
+        {id: '0003-self', depth: 0, parentId: '0000-root'},
+    ]);
+    expectCache(state);
+});
+
+it('orders incidental block moves by source sibling index', () => {
+    let state = cachedState(init);
+    for (let index = 1; index <= 4; index++) {
+        state = apply(state, {
+            type: 'block',
+            block: block([index, 'self'], index, '00002'),
+        }) as CachedState;
+    }
+
+    const moveUnderB: Op = {
+        type: 'block:move',
+        id: [4, 'self'],
+        order: {
+            parent: [2, 'self'],
+            index: lseq(4),
+            ts: ['00002', lseq(2), '00010'],
+        },
+    };
+    const moveUnderC: Op = {
+        type: 'block:move',
+        id: [4, 'self'],
+        order: {
+            parent: [3, 'self'],
+            index: lseq(4),
+            ts: ['00002', lseq(3), '00009'],
+        },
+    };
+
+    const one = applyMany(state, [moveUnderB, moveUnderC]);
+    const two = applyMany(state, [moveUnderC, moveUnderB]);
+
+    expect(one.state.blocks['0004-self'].order.parent).toEqual([3, 'self']);
+    expect(two.state.blocks['0004-self'].order.parent).toEqual([3, 'self']);
+    expectCache(one);
+    expectCache(two);
 });
 
 it('returns false for ops that reference missing records', () => {

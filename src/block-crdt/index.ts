@@ -175,7 +175,7 @@ const applyCharMove = (
     if (!current) {
         return false;
     }
-    if (!laterTs(op.parent.ts, current.parent.ts)) {
+    if (!laterCharParentTs(op.parent.ts, current.parent.ts)) {
         return {state, cache}; // ignore
     }
     const charContents = {...cache.charContents};
@@ -232,7 +232,7 @@ const applyBlockMove = (
     if (!current) {
         return false;
     }
-    if (!laterTs(op.order.ts, current.order.ts)) {
+    if (!laterBlockOrderTs(op.order.ts, current.order.ts)) {
         return {state, cache};
     }
 
@@ -269,7 +269,7 @@ const applyBlockMeta = (
     if (!current) {
         return false;
     }
-    if (!laterTs(op.meta.ts, current.meta.ts)) {
+    if (op.meta.ts <= current.meta.ts) {
         return {state, cache};
     }
     return {
@@ -289,7 +289,7 @@ const applyBlock = ({state, cache}: CachedState, {block}: Op & {type: 'block'}) 
         if (current.meta.ts > block.meta.ts) {
             block = {...block, meta: current.meta};
         }
-        if (current.order.ts > block.order.ts) {
+        if (laterBlockOrderTs(current.order.ts, block.order.ts)) {
             block = {...block, order: current.order};
         }
         block = {...block, deleted: current.deleted || block.deleted};
@@ -321,7 +321,7 @@ const applyBlock = ({state, cache}: CachedState, {block}: Op & {type: 'block'}) 
     };
 };
 
-const laterTs = (one: Char['parent']['ts'], two: Char['parent']['ts']) => {
+const laterCharParentTs = (one: Char['parent']['ts'], two: Char['parent']['ts']) => {
     if (typeof one === 'string') {
         if (typeof two === 'string') {
             return one > two;
@@ -333,10 +333,28 @@ const laterTs = (one: Char['parent']['ts'], two: Char['parent']['ts']) => {
     }
     if (one[0] !== two[0]) return one[0] > two[0];
     for (let i = 0; i < one[1].length && i < two[1].length; i++) {
-        if (one[1][i] !== two[1][i]) {
-            return one[1][i] > two[1][i];
+        const compared = compareLamports(one[1][i], two[1][i]);
+        if (compared !== 0) {
+            return compared > 0;
         }
     }
+    if (one[1].length !== two[1].length) return one[1].length > two[1].length;
+    return one[2] > two[2];
+};
+
+const laterBlockOrderTs = (one: Block['order']['ts'], two: Block['order']['ts']) => {
+    if (typeof one === 'string') {
+        if (typeof two === 'string') {
+            return one > two;
+        }
+        return one === two[0] ? false : one > two[0];
+    }
+    if (typeof two === 'string') {
+        return one[0] === two ? true : one[0] > two;
+    }
+    if (one[0] !== two[0]) return one[0] > two[0];
+    const compared = compareLseqIds(one[1], two[1]);
+    if (compared !== 0) return compared > 0;
     return one[2] > two[2];
 };
 
@@ -348,7 +366,7 @@ const applyChar = ({state, cache}: CachedState, {char}: Op & {type: 'char'}) => 
         if (current.text !== char.text) {
             throw new Error(`re-insert of ${charId} and the text is different`);
         }
-        if (laterTs(current.parent.ts, char.parent.ts)) {
+        if (laterCharParentTs(current.parent.ts, char.parent.ts)) {
             char = {...char, parent: current.parent};
         }
         char = {...char, deleted: current.deleted};
@@ -631,6 +649,40 @@ export const visibleBlockChildren = (state: CachedState, parent: string): string
     return result;
 };
 
+export type VisibleBlockOutlineEntry = {
+    id: string;
+    depth: number;
+    parentId: string;
+};
+
+export const visibleBlockOutline = (state: CachedState): VisibleBlockOutlineEntry[] => {
+    const result: VisibleBlockOutlineEntry[] = [];
+    const rootId = lamportToString([0, 'root']);
+
+    const visitChildren = (
+        pid: string,
+        depth: number,
+        visibleParentId: string,
+        seen: Set<string>,
+    ) => {
+        if (seen.has(pid)) {
+            throw new Error(`block traversal cycle at ${pid}`);
+        }
+        seen.add(pid);
+        for (const child of state.cache.blockChildren[pid] ?? []) {
+            if (visibleBlock(state, child)) {
+                result.push({id: child, depth, parentId: visibleParentId});
+                visitChildren(child, depth + 1, child, new Set(seen));
+            } else {
+                visitChildren(child, depth, visibleParentId, new Set(seen));
+            }
+        }
+    };
+
+    visitChildren(rootId, 0, rootId, new Set());
+    return result;
+};
+
 export const orderedCharIdsForBlock = (
     state: CachedState,
     blockId: string,
@@ -694,6 +746,8 @@ export type FormattedBlock = {
     id: string;
     block: Block;
     runs: FormattedRun[];
+    depth: number;
+    parentId: string;
 };
 
 export const markOp = (
@@ -748,7 +802,7 @@ export const materializeFormattedBlocks = (state: CachedState): FormattedBlock[]
         }
     }
 
-    return rootBlockIds(state).map((id) => {
+    return visibleBlockOutline(state).map(({id, depth, parentId}) => {
         const runs: FormattedRun[] = [];
         for (const charId of orderedCharIdsForBlock(state, id, {visibleOnly: true})) {
             const char = charRecord(state, charId);
@@ -761,7 +815,7 @@ export const materializeFormattedBlocks = (state: CachedState): FormattedBlock[]
                 runs.push({text: char.text, marks});
             }
         }
-        return {id, block: state.state.blocks[id], runs};
+        return {id, block: state.state.blocks[id], runs, depth, parentId};
     });
 };
 
@@ -835,7 +889,7 @@ const coveredCharIdsForMark = (state: CachedState, mark: Mark): string[] => {
 };
 
 const allCharIds = (state: CachedState): string[] =>
-    rootBlockIds(state).flatMap((id) => orderedCharIdsForBlock(state, id));
+    visibleBlockOutline(state).flatMap(({id}) => orderedCharIdsForBlock(state, id));
 
 const nextIdMap = (sequence: string[]): Record<string, string> => {
     const result: Record<string, string> = {};

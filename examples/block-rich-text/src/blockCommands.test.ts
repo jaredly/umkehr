@@ -1,21 +1,25 @@
 import {describe, expect, it} from 'vitest';
 import {
+    applyMany,
     blockContents,
     cachedState,
     materializeFormattedBlocks,
     organizeState,
     rootBlockIds,
+    visibleBlockOutline,
 } from 'umkehr/block-crdt';
 import {initialState} from 'umkehr/block-crdt/initialState';
 import type {CachedState} from 'umkehr/block-crdt/types';
 import {
     deleteBackward,
     deleteForward,
+    indentBlock,
     insertText,
     moveBlock,
     pastePlainText,
     splitBlock,
     toggleMark,
+    unindentBlock,
     type CommandContext,
 } from './blockCommands';
 import {applyLocalChange, createDemoState, makeCommandContext, toggleOnline} from './blockEditorRuntime';
@@ -35,6 +39,12 @@ const init = () => cachedState(initialState('doc', '00000'));
 const onlyBlock = (state: CachedState) => rootBlockIds(state)[0];
 
 const lines = (state: CachedState) => rootBlockIds(state).map((id) => blockContents(state, id));
+
+const outline = (state: CachedState) =>
+    materializeFormattedBlocks(state).map((block) => ({
+        text: blockContents(state, block.id),
+        depth: block.depth,
+    }));
 
 const expectCache = (state: CachedState) => {
     expect(state.cache).toEqual(organizeState(state.state.blocks, state.state.chars, state.state.joins));
@@ -166,6 +176,92 @@ describe('block rich text commands', () => {
 
         result = moveBlock(result.state, first, {targetBlockId: third, after: true}, context);
         expect(lines(result.state)).toEqual(['b', 'c', 'a']);
+        expectCache(result.state);
+    });
+
+    it('indents a block under its previous visible sibling', () => {
+        const context = ctx();
+        let result = pastePlainText(init(), caret(onlyBlock(init()), 0), 'a\nb\nc', context);
+        const [, second] = rootBlockIds(result.state);
+
+        result = indentBlock(result.state, second, context);
+
+        expect(outline(result.state)).toEqual([
+            {text: 'a', depth: 0},
+            {text: 'b', depth: 1},
+            {text: 'c', depth: 0},
+        ]);
+        expect(result.selection).toEqual(caret(second, 0));
+        expectCache(result.state);
+    });
+
+    it('does not indent the first sibling', () => {
+        const context = ctx();
+        let result = pastePlainText(init(), caret(onlyBlock(init()), 0), 'a\nb', context);
+        const first = rootBlockIds(result.state)[0];
+
+        result = indentBlock(result.state, first, context);
+
+        expect(result.ops).toEqual([]);
+        expect(outline(result.state)).toEqual([
+            {text: 'a', depth: 0},
+            {text: 'b', depth: 0},
+        ]);
+        expectCache(result.state);
+    });
+
+    it('unindents a block and reparents following siblings under it', () => {
+        const context = ctx();
+        let result = pastePlainText(init(), caret(onlyBlock(init()), 0), 'a\nb\nc\nd', context);
+        const [, second, third, fourth] = rootBlockIds(result.state);
+        result = indentBlock(result.state, second, context);
+        result = indentBlock(result.state, third, context);
+        result = indentBlock(result.state, fourth, context);
+
+        result = unindentBlock(result.state, second, context);
+
+        expect(outline(result.state)).toEqual([
+            {text: 'a', depth: 0},
+            {text: 'b', depth: 0},
+            {text: 'c', depth: 1},
+            {text: 'd', depth: 1},
+        ]);
+        expect(result.selection).toEqual(caret(second, 0));
+        expectCache(result.state);
+    });
+
+    it('converges concurrent unindents by source sibling order', () => {
+        const context = ctx();
+        let result = pastePlainText(init(), caret(onlyBlock(init()), 0), 'a\nb\nc\nd', context);
+        const [, second, third, fourth] = rootBlockIds(result.state);
+        result = indentBlock(result.state, second, context);
+        result = indentBlock(result.state, third, context);
+        result = indentBlock(result.state, fourth, context);
+        const base = result.state;
+
+        const left = unindentBlock(base, second, ctx('left')).ops;
+        const right = unindentBlock(base, third, ctx('right')).ops;
+        const one = applyMany(base, [...left, ...right]);
+        const two = applyMany(base, [...right, ...left]);
+
+        expect(one.state.blocks[fourth].order.parent).toEqual(one.state.blocks[third].id);
+        expect(two.state.blocks[fourth].order.parent).toEqual(two.state.blocks[third].id);
+        expect(visibleBlockOutline(one).map(({id, depth}) => ({id, depth}))).toEqual(
+            visibleBlockOutline(two).map(({id, depth}) => ({id, depth})),
+        );
+        expectCache(one);
+        expectCache(two);
+    });
+
+    it('joins using visible adjacency across nesting', () => {
+        const context = ctx();
+        let result = pastePlainText(init(), caret(onlyBlock(init()), 0), 'a\nb', context);
+        const [, second] = rootBlockIds(result.state);
+        result = indentBlock(result.state, second, context);
+
+        result = deleteForward(result.state, caret(rootBlockIds(result.state)[0], 1), context);
+
+        expect(outline(result.state)).toEqual([{text: 'ab', depth: 0}]);
         expectCache(result.state);
     });
 });

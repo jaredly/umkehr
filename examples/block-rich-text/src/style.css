@@ -126,6 +126,7 @@ input {
     grid-template-columns: 34px minmax(0, 1fr);
     gap: 8px;
     align-items: start;
+    margin-left: calc(var(--block-depth, 0) * 24px);
     padding: 3px 0;
 }
 
@@ -161,6 +162,12 @@ input {
 
 .dragHandle:active {
     cursor: grabbing;
+}
+
+.dragHandle:disabled {
+    color: #c2c9d0;
+    background: #f7f9fb;
+    cursor: default;
 }
 
 .editableBlock {

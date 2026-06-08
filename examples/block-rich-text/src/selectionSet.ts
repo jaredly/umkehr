@@ -1,10 +1,11 @@
-import {orderedCharIdsForBlock, rootBlockIds} from 'umkehr/block-crdt';
+import {orderedCharIdsForBlock} from 'umkehr/block-crdt';
 import type {CachedState} from 'umkehr/block-crdt/types';
 import {
     firstPointForSelection,
     focusPoint,
     isCollapsed,
     normalizeSelectionSegments,
+    visibleBlockIds,
     type BlockPoint,
     type EditorSelection,
     type SelectionSegment,
@@ -284,7 +285,7 @@ export const compareSelections = (
 ): number => comparePoints(state, firstPointForSelection(state, one), firstPointForSelection(state, two));
 
 export const comparePoints = (state: CachedState, one: BlockPoint, two: BlockPoint): number => {
-    const blocks = rootBlockIds(state);
+    const blocks = visibleBlockIds(state);
     const oneBlock = blocks.indexOf(one.blockId);
     const twoBlock = blocks.indexOf(two.blockId);
     return oneBlock - twoBlock || one.offset - two.offset;
@@ -315,7 +316,7 @@ const compareRetainedPoints = (
 };
 
 const retainedPointKey = (state: CachedState, point: RetainedPoint) => {
-    const blocks = rootBlockIds(state, true);
+    const blocks = retainedBlockOrder(state);
     const fallbackBlock = point.blockId ? blocks.indexOf(point.blockId) : -1;
     if (!point.charId) {
         return {
@@ -338,6 +339,15 @@ const retainedPointKey = (state: CachedState, point: RetainedPoint) => {
         charIndex: Number.MAX_SAFE_INTEGER,
         fallback: point.charId,
     };
+};
+
+const retainedBlockOrder = (state: CachedState): string[] => {
+    const visible = visibleBlockIds(state);
+    const seen = new Set(visible);
+    const hidden = Object.keys(state.state.blocks)
+        .filter((id) => !seen.has(id))
+        .sort();
+    return [...visible, ...hidden];
 };
 
 const affinityRank = (affinity: RetainedPoint['affinity']) => (affinity === 'before' ? 0 : 1);
