@@ -94,3 +94,15 @@ export type Cache = {
 };
 
 export type CachedState<M extends TimestampedBlockMeta = DefaultBlockMeta> = {state: State<M>; cache: Cache};
+
+export type Op<M extends TimestampedBlockMeta = DefaultBlockMeta> =
+    | {type: 'char'; char: Char}
+    | {type: 'block'; block: Block<M>}
+    | {type: 'char:move'; id: Lamport; parent: Char['parent']}
+    | {type: 'char:delete'; id: Lamport}
+    | {type: 'block:move'; id: Lamport; order: Block['order']}
+    | {type: 'block:delete'; id: Lamport}
+    | {type: 'block:meta'; id: Lamport; meta: M}
+    | {type: 'mark'; mark: Mark}
+    | {type: 'split-record'; split: SplitRecord}
+    | {type: 'join-record'; join: JoinRecord};

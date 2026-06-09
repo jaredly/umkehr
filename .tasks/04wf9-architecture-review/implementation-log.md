@@ -44,3 +44,28 @@
 - Final focused verification for this batch:
   - `npm run build`
   - `npm exec vitest -- run examples/block-rich-text/src`
+
+## Continued Module Decomposition
+
+- Extracted block parent/path derivation, cycle handling, block path validation, materialized block path helpers, and stress strategies into `src/block-crdt/blocks.ts`.
+- Extracted active join selection and joined block lookup helpers into `src/block-crdt/joins.ts`.
+- Extracted full cache derivation into `src/block-crdt/cache.ts`.
+- Preserved barrel exports from `index.ts` while removing duplicate local implementations.
+- Verified with `npm exec vitest -- run src/block-crdt/index.test.ts src/block-crdt/formatting.test.ts src/block-crdt/organizeState.stress.test.ts` and `npm run typecheck`.
+- Moved the `Op` type into `types.ts` and kept it re-exported from `index.ts`.
+- Extracted op validation and Lamport counter accounting into `src/block-crdt/ops.ts`.
+- Verified with `npm exec vitest -- run src/block-crdt/index.test.ts src/block-crdt/formatting.test.ts examples/block-rich-text/src` and `npm run typecheck`.
+- Extracted shared traversal/materialization primitives into `src/block-crdt/traversal.ts`.
+- Extracted mark creation, split-aware mark traversal, and formatted block materialization into `src/block-crdt/marks.ts`.
+- Extracted apply result helpers and op handlers into `src/block-crdt/apply.ts`.
+- Reduced `src/block-crdt/index.ts` from 1,760 lines at the start of this task to 417 lines; it now mostly holds split/join/change creation and barrel exports.
+- Verified with `npm exec vitest -- run src/block-crdt/index.test.ts src/block-crdt/formatting.test.ts examples/block-rich-text/src` and `npm run typecheck`.
+- Verified build with `npm run build`.
+- Moved split/join/change creation into `src/block-crdt/changes.ts`.
+- Moved `cachedState` into `src/block-crdt/cache.ts`.
+- Converted `src/block-crdt/index.ts` into a barrel export file; it is now 103 lines.
+- Hardened mark traversal by replacing heuristic step limits with explicit cycle detection in split scans, mark coverage, and split-tail traversal.
+- Verified with:
+  - `npm exec vitest -- run src/block-crdt/index.test.ts src/block-crdt/formatting.test.ts examples/block-rich-text/src`
+  - `npm run typecheck`
+  - `npm run build`
