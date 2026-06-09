@@ -64,3 +64,8 @@
   - Added app tests for `Option+ArrowRight`, `Cmd+ArrowLeft`, and `End` with multiple cursors.
   - `npm exec vitest -- run examples/block-rich-text/src/blockCommands.test.ts examples/block-rich-text/src/retainedSelection.test.ts examples/block-rich-text/src/multiSelectionCommands.test.ts examples/block-rich-text/src/App.test.tsx` passes with 113 tests.
   - `npm --prefix examples/block-rich-text run build` passes.
+- Retained cursor visual follow-up:
+  - Changed retained caret styling from an inline-block border with negative margin to a layout-neutral inline marker with an absolutely positioned pseudo-element.
+  - This avoids the retained cursor contributing inline metrics at word boundaries, which could visibly shift text/kerning by a pixel.
+  - `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx` passes with 54 tests.
+  - `npm --prefix examples/block-rich-text run build` passes.

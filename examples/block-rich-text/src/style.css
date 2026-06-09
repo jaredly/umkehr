@@ -285,12 +285,22 @@ input {
 }
 
 .retainedSelectionCaret {
-    display: inline-block;
-    width: 0;
-    height: 1.25em;
-    margin-left: -1px;
-    border-left: 2px solid #4c814e;
-    vertical-align: -0.2em;
+    position: relative;
+    display: inline;
+    font-size: 0;
+    line-height: 0;
+    pointer-events: none;
+}
+
+.retainedSelectionCaret::after {
+    content: "";
+    position: absolute;
+    left: -1px;
+    bottom: -0.2rem;
+    width: 2px;
+    height: 1.25rem;
+    border-radius: 999px;
+    background: #4c814e;
     pointer-events: none;
 }
 
