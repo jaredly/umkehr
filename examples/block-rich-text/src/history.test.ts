@@ -163,6 +163,92 @@ describe('block rich text history', () => {
         );
     });
 
+    it('round-trips optional command metadata', () => {
+        let history = initialHistoryState();
+        const demo = replayHistory(history.actions, history.cursor);
+        const result = insert('a')(demo.left);
+        history = appendHistoryAction(history, {
+            type: 'local-change',
+            editorId: 'left',
+            ops: result.ops,
+            selection: result.selection,
+            command: {
+                id: '0010-left',
+                actor: 'left',
+                intent: 'edit',
+                beforeSelection: demo.left.selection,
+                afterSelection: result.selection,
+                label: 'insert a',
+            },
+        });
+
+        const parsed = parseHistoryExport(serializeHistory(history));
+
+        expect('history' in parsed).toBe(true);
+        if (!('history' in parsed)) return;
+        const action = parsed.history.actions[0];
+        expect(action.type === 'local-change' ? action.command : null).toEqual({
+            id: '0010-left',
+            actor: 'left',
+            intent: 'edit',
+            beforeSelection: demo.left.selection,
+            afterSelection: result.selection,
+            label: 'insert a',
+        });
+    });
+
+    it('rejects invalid command metadata', () => {
+        const selection = replayHistory([]).left.selection;
+        const invalid = {
+            version: 1,
+            app: 'examples/block-rich-text',
+            actions: [
+                {
+                    type: 'local-change',
+                    editorId: 'left',
+                    ops: [],
+                    selection,
+                    command: {
+                        id: '0001-left',
+                        actor: 'left',
+                        intent: 'undo',
+                        beforeSelection: selection,
+                        afterSelection: selection,
+                    },
+                },
+            ],
+            keystrokes: [],
+            finalSnapshot: buildHistorySnapshot(replayHistory([])),
+        };
+
+        const parsed = parseHistoryExport(JSON.stringify(invalid));
+
+        expect('error' in parsed ? parsed.error : '').toContain('targetCommandId');
+    });
+
+    it('advances actor clocks from lamport-string command ids after replay', () => {
+        let history = initialHistoryState();
+        const demo = replayHistory(history.actions, history.cursor);
+        const result = insert('a')(demo.left);
+        history = appendHistoryAction(history, {
+            type: 'local-change',
+            editorId: 'left',
+            ops: result.ops,
+            selection: result.selection,
+            command: {
+                id: '0010-left',
+                actor: 'left',
+                intent: 'edit',
+                beforeSelection: demo.left.selection,
+                afterSelection: result.selection,
+            },
+        });
+
+        const replayed = replayHistory(history.actions, history.cursor);
+
+        expect(replayed.left.clock).toBe(11);
+    });
+
     it('rejects malformed imports and removed block status ops', () => {
         expect(parseHistoryExport('{')).toEqual({error: 'Import file is not valid JSON.'});
 

@@ -14,11 +14,24 @@ export type HistoryAction =
           editorId: EditorId;
           ops: Op[];
           selection: RetainedSelectionSet;
+          command?: BlockCommandInfo;
       }
     | {
           type: 'toggle-online';
           editorId: EditorId;
       };
+
+export type BlockCommandIntent = 'edit' | 'undo' | 'redo';
+
+export type BlockCommandInfo = {
+    id: string;
+    actor: EditorId;
+    intent: BlockCommandIntent;
+    targetCommandId?: string;
+    beforeSelection: RetainedSelectionSet;
+    afterSelection: RetainedSelectionSet;
+    label?: string;
+};
 
 export type HistoryState = {
     actions: HistoryAction[];
@@ -228,6 +241,8 @@ const parseAction = (value: unknown): {action: HistoryAction} | {error: string} 
     if (!isRetainedSelectionSet(value.selection)) {
         return {error: 'local-change selection must be a retained selection set.'};
     }
+    const command = parseCommandInfo(value.command);
+    if ('error' in command) return {error: `local-change command ${command.error}`};
 
     return {
         action: {
@@ -235,6 +250,47 @@ const parseAction = (value: unknown): {action: HistoryAction} | {error: string} 
             editorId: value.editorId,
             ops: value.ops as Op[],
             selection: value.selection,
+            ...(command.command ? {command: command.command} : {}),
+        },
+    };
+};
+
+const parseCommandInfo = (
+    value: unknown,
+): {command?: BlockCommandInfo} | {error: string} => {
+    if (value === undefined) return {};
+    if (!isRecord(value)) return {error: 'must be an object.'};
+    if (typeof value.id !== 'string') return {error: 'id must be a string.'};
+    if (!isEditorId(value.actor)) return {error: 'actor must be left or right.'};
+    if (value.intent !== 'edit' && value.intent !== 'undo' && value.intent !== 'redo') {
+        return {error: 'intent must be edit, undo, or redo.'};
+    }
+    if (value.intent === 'edit' && value.targetCommandId !== undefined) {
+        return {error: 'edit must not include targetCommandId.'};
+    }
+    if ((value.intent === 'undo' || value.intent === 'redo') && typeof value.targetCommandId !== 'string') {
+        return {error: 'undo and redo require targetCommandId.'};
+    }
+    if (!isRetainedSelectionSet(value.beforeSelection)) {
+        return {error: 'beforeSelection must be a retained selection set.'};
+    }
+    if (!isRetainedSelectionSet(value.afterSelection)) {
+        return {error: 'afterSelection must be a retained selection set.'};
+    }
+    if (value.label !== undefined && typeof value.label !== 'string') {
+        return {error: 'label must be a string.'};
+    }
+    const targetCommandId = typeof value.targetCommandId === 'string' ? value.targetCommandId : undefined;
+    const label = typeof value.label === 'string' ? value.label : undefined;
+    return {
+        command: {
+            id: value.id,
+            actor: value.actor,
+            intent: value.intent,
+            ...(targetCommandId ? {targetCommandId} : {}),
+            beforeSelection: value.beforeSelection,
+            afterSelection: value.afterSelection,
+            ...(label ? {label} : {}),
         },
     };
 };
@@ -351,9 +407,7 @@ const advanceReplicaClocks = (demo: DemoState, actions: HistoryAction[]): DemoSt
     const nextClock: Record<EditorId, number> = {left: demo.left.clock, right: demo.right.clock};
     for (const action of actions) {
         if (action.type !== 'local-change') continue;
-        for (const op of action.ops) {
-            scanClockValue(op, nextClock);
-        }
+        scanClockValue(action, nextClock);
     }
     return {
         left: {...demo.left, clock: Math.max(demo.left.clock, nextClock.left)},
@@ -367,6 +421,11 @@ const scanClockValue = (value: unknown, nextClock: Record<EditorId, number>) => 
         if (match) {
             const actor = match[1] as EditorId;
             nextClock[actor] = Math.max(nextClock[actor], Number(match[2]) + 1);
+        }
+        const lamportMatch = /^(\d+)-(left|right)$/.exec(value);
+        if (lamportMatch) {
+            const actor = lamportMatch[2] as EditorId;
+            nextClock[actor] = Math.max(nextClock[actor], Number(lamportMatch[1]) + 1);
         }
         return;
     }

@@ -12,7 +12,7 @@ import {
 import {materializeFormattedBlocks} from 'umkehr/block-crdt';
 import type {FormattedBlock} from 'umkehr/block-crdt';
 import {moveBlock} from './blockCommands';
-import {makeCommandContext, type DemoState, type EditorId, type Replica} from './blockEditorRuntime';
+import {makeCommandContext, nextReplicaTs, type DemoState, type EditorId, type Replica} from './blockEditorRuntime';
 import {
     closestCaretOffsetForHorizontalIntent,
     isCaretOnFirstVisualLine,
@@ -75,6 +75,7 @@ import {
     type HistoryKeystroke,
     type HistoryState,
 } from './history';
+import {createRedoAction, createUndoAction, deriveUndoState} from './undoHistory';
 
 export function App() {
     const [history, setHistory] = useState<HistoryState>(() => initialHistoryState());
@@ -82,6 +83,7 @@ export function App() {
         Partial<Record<EditorId, RetainedSelectionSet>>
     >({});
     const [historyStatus, setHistoryStatus] = useState('');
+    const [undoStatus, setUndoStatus] = useState<Partial<Record<EditorId, string>>>({});
     const [historyResetSignal, setHistoryResetSignal] = useState(0);
     const importInputRef = useRef<HTMLInputElement>(null);
     const demo = useMemo(
@@ -91,6 +93,13 @@ export function App() {
     const displayDemo = useMemo(
         () => overlayTransientSelections(demo, transientSelections),
         [demo, transientSelections],
+    );
+    const undoStates = useMemo(
+        () => ({
+            left: deriveUndoState(history, 'left'),
+            right: deriveUndoState(history, 'right'),
+        }),
+        [history],
     );
 
     const clearReplayUiState = useCallback(() => {
@@ -106,12 +115,20 @@ export function App() {
                 setTransientSelections((current) => ({...current, [editorId]: result.selection}));
                 return;
             }
+            const commandId = nextReplicaTs(replica);
             setHistory((current) =>
                 appendHistoryAction(current, {
                     type: 'local-change',
                     editorId,
                     ops: result.ops,
                     selection: result.selection,
+                    command: {
+                        id: commandId,
+                        actor: replica.actor,
+                        intent: 'edit',
+                        beforeSelection: replica.selection,
+                        afterSelection: result.selection,
+                    },
                 }),
             );
             setTransientSelections((current) => {
@@ -120,6 +137,7 @@ export function App() {
                 return next;
             });
             setHistoryStatus('');
+            setUndoStatus((current) => ({...current, [editorId]: ''}));
         },
         [displayDemo],
     );
@@ -129,6 +147,7 @@ export function App() {
             setHistory((current) => setHistoryCursor(current, cursor));
             clearReplayUiState();
             setHistoryStatus('');
+            setUndoStatus({});
         },
         [clearReplayUiState],
     );
@@ -136,6 +155,7 @@ export function App() {
     const toggleEditorOnline = useCallback((editorId: EditorId) => {
         setHistory((current) => appendHistoryAction(current, {type: 'toggle-online', editorId}));
         setHistoryStatus('');
+        setUndoStatus((current) => ({...current, [editorId]: ''}));
     }, []);
 
     const recordKeystroke = useCallback(
@@ -184,6 +204,7 @@ export function App() {
             setHistory(parsed.history);
             clearReplayUiState();
             setHistoryStatus(`Imported ${parsed.history.actions.length} actions.`);
+            setUndoStatus({});
         },
         [clearReplayUiState, history.actions.length],
     );
@@ -193,7 +214,28 @@ export function App() {
         setHistory(resetHistoryState());
         clearReplayUiState();
         setHistoryStatus('');
+        setUndoStatus({});
     }, [clearReplayUiState, history.actions.length]);
+
+    const runUndoCommand = useCallback(
+        (editorId: EditorId, direction: 'undo' | 'redo') => {
+            const result =
+                direction === 'undo' ? createUndoAction(history, editorId) : createRedoAction(history, editorId);
+            if ('error' in result) {
+                setUndoStatus((current) => ({...current, [editorId]: result.error}));
+                return;
+            }
+            setHistory((current) => appendHistoryAction(current, result.action));
+            setTransientSelections((current) => {
+                const next = {...current};
+                delete next[editorId];
+                return next;
+            });
+            setUndoStatus((current) => ({...current, [editorId]: ''}));
+            setHistoryStatus('');
+        },
+        [history],
+    );
 
     return (
         <main className="appShell">
@@ -257,14 +299,22 @@ export function App() {
                 <BlockEditor
                     replica={displayDemo.left}
                     resetSignal={historyResetSignal}
+                    undoState={undoStates.left}
+                    undoStatus={undoStatus.left ?? ''}
                     onCommand={(command) => runCommand('left', command)}
+                    onUndo={() => runUndoCommand('left', 'undo')}
+                    onRedo={() => runUndoCommand('left', 'redo')}
                     onToggleOnline={() => toggleEditorOnline('left')}
                     onKeystroke={(blockId, event) => recordKeystroke('left', blockId, event)}
                 />
                 <BlockEditor
                     replica={displayDemo.right}
                     resetSignal={historyResetSignal}
+                    undoState={undoStates.right}
+                    undoStatus={undoStatus.right ?? ''}
                     onCommand={(command) => runCommand('right', command)}
+                    onUndo={() => runUndoCommand('right', 'undo')}
+                    onRedo={() => runUndoCommand('right', 'redo')}
                     onToggleOnline={() => toggleEditorOnline('right')}
                     onKeystroke={(blockId, event) => recordKeystroke('right', blockId, event)}
                 />
@@ -276,13 +326,21 @@ export function App() {
 function BlockEditor({
     replica,
     resetSignal,
+    undoState,
+    undoStatus,
     onCommand,
+    onUndo,
+    onRedo,
     onToggleOnline,
     onKeystroke,
 }: {
     replica: Replica;
     resetSignal: number;
+    undoState: ReturnType<typeof deriveUndoState>;
+    undoStatus: string;
     onCommand(command: (replica: Replica) => MultiCommandResult): void;
+    onUndo(): void;
+    onRedo(): void;
     onToggleOnline(): void;
     onKeystroke(blockId: string, event: KeyboardEvent<HTMLElement>): void;
 }) {
@@ -726,6 +784,10 @@ function BlockEditor({
                 </label>
             </header>
             <Toolbar
+                canUndo={undoState.canUndo}
+                canRedo={undoState.canRedo}
+                onUndo={onUndo}
+                onRedo={onRedo}
                 onBold={() =>
                     runEditCommand((current, selection) =>
                         toggleMarkEverywhere(
@@ -747,6 +809,11 @@ function BlockEditor({
                     )
                 }
             />
+            {undoStatus || undoState.undoReason || undoState.redoReason ? (
+                <p className="editorUndoStatus">
+                    {undoStatus || undoState.undoReason || undoState.redoReason}
+                </p>
+            ) : null}
             <div
                 ref={rootRef}
                 className="blockList"
@@ -870,6 +937,8 @@ function BlockEditor({
                         onExtendSelectionVerticallyWithVisualIntent={
                             extendSelectionVerticallyWithVisualIntent
                         }
+                        onUndo={onUndo}
+                        onRedo={onRedo}
                         onKeystroke={onKeystroke}
                     />
                 ))}
@@ -878,9 +947,39 @@ function BlockEditor({
     );
 }
 
-function Toolbar({onBold, onItalic}: {onBold(): void; onItalic(): void}) {
+function Toolbar({
+    canUndo,
+    canRedo,
+    onUndo,
+    onRedo,
+    onBold,
+    onItalic,
+}: {
+    canUndo: boolean;
+    canRedo: boolean;
+    onUndo(): void;
+    onRedo(): void;
+    onBold(): void;
+    onItalic(): void;
+}) {
     return (
         <div className="toolbar" aria-label="Formatting">
+            <button
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={onUndo}
+                disabled={!canUndo}
+            >
+                Undo
+            </button>
+            <button
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={onRedo}
+                disabled={!canRedo}
+            >
+                Redo
+            </button>
             <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={onBold}>
                 <strong>B</strong>
             </button>
@@ -926,6 +1025,8 @@ function EditableBlock({
     onExtendSelectionsHorizontally,
     onExtendSelectionsVertically,
     onExtendSelectionVerticallyWithVisualIntent,
+    onUndo,
+    onRedo,
     onKeystroke,
 }: {
     block: FormattedBlock;
@@ -961,6 +1062,8 @@ function EditableBlock({
         direction: 'up' | 'down',
         sourceBlock: HTMLElement,
     ): void;
+    onUndo(): void;
+    onRedo(): void;
     onKeystroke(blockId: string, event: KeyboardEvent<HTMLElement>): void;
 }) {
     const handledBeforeInputRef = useRef(false);
@@ -1070,7 +1173,16 @@ function EditableBlock({
                     onKeystroke(block.id, event);
                     const modifierPressed = event.metaKey || event.ctrlKey;
                     const key = event.key.toLowerCase();
-                    if (modifierPressed && key === 'b') {
+                    if (modifierPressed && key === 'z' && event.shiftKey) {
+                        event.preventDefault();
+                        onRedo();
+                    } else if (modifierPressed && key === 'z') {
+                        event.preventDefault();
+                        onUndo();
+                    } else if (modifierPressed && key === 'y') {
+                        event.preventDefault();
+                        onRedo();
+                    } else if (modifierPressed && key === 'b') {
                         event.preventDefault();
                         onToggleBold();
                     } else if (modifierPressed && key === 'i') {

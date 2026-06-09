@@ -1574,19 +1574,86 @@ it('plans undo for additive marks with normal mark ops', () => {
     expect(materializeFormattedBlocks(state)[0].runs).toEqual([{text: 'abc', marks: {}}]);
 });
 
-it('reports unsupported undo cases instead of producing unsafe inverses', () => {
+it('plans undo for deleted chars by inserting fresh replacement chars', () => {
     const ts = mts(2);
     let state = cachedState(initialState('self', '00001'));
     state = applyMany(state, insertTextOps(state, {actor: 'alice', block: [0, 'self'], offset: 0, text: 'abc', ts}));
     const before = state;
-    const deletion = deleteRangeOps(state, {block: [0, 'self'], startOffset: 1, endOffset: 2});
+    const deletion = deleteRangeOps(state, {block: [0, 'self'], startOffset: 1, endOffset: 3});
     state = applyMany(state, deletion);
+    expect(blockLines(state)).toEqual(['a']);
 
     const undo = planUndoOps(before, state, deletion, {actor: 'alice', ts: mts(20)});
 
-    expect(undo.complete).toBe(false);
-    expect(undo.ops).toEqual([]);
-    expect(undo.unsupported[0].reason).toContain('resurrection');
+    expect(undo.complete).toBe(true);
+    expect(undo.ops.map((op) => op.type)).toEqual(['char', 'char']);
+    state = applyMany(state, undo.ops);
+    expect(blockLines(state)).toEqual(['abc']);
+});
+
+it('plans redo for inserted chars after undo tombstones them', () => {
+    const ts = mts(2);
+    let state = cachedState(initialState('self', '00001'));
+    const before = state;
+    const insert = insertTextOps(state, {actor: 'alice', block: [0, 'self'], offset: 0, text: 'ab', ts});
+    state = applyMany(state, insert);
+
+    const undo = planUndoOps(before, state, insert, {actor: 'alice', ts: mts(20)});
+    expect(undo.complete).toBe(true);
+    const undone = applyMany(state, undo.ops);
+    expect(blockLines(undone)).toEqual(['']);
+
+    const redo = planUndoOps(state, undone, undo.ops, {actor: 'alice', ts: mts(30)});
+    expect(redo.complete).toBe(true);
+    state = applyMany(undone, redo.ops);
+    expect(blockLines(state)).toEqual(['ab']);
+});
+
+it('plans undo for block delete by creating a fresh visible block with copied text', () => {
+    const ts = mts(2);
+    let state = cachedState(initialState('self', '00001'));
+    state = applyMany(state, insertTextOps(state, {actor: 'alice', block: [0, 'self'], offset: 0, text: 'abc', ts}));
+    const before = state;
+    const deletion: Op[] = [{type: 'block:delete', id: [0, 'self']}];
+    state = applyMany(state, deletion);
+    expect(blockLines(state)).toEqual([]);
+
+    const undo = planUndoOps(before, state, deletion, {actor: 'alice', ts: mts(20)});
+    expect(undo.complete).toBe(true);
+    state = applyMany(state, undo.ops);
+    expect(blockLines(state)).toEqual(['abc']);
+});
+
+it('plans undo for split as char moves plus hiding the split block', () => {
+    const ts = mts(2);
+    let state = cachedState(initialState('self', '00001'));
+    state = applyMany(state, insertTextOps(state, {actor: 'alice', block: [0, 'self'], offset: 0, text: 'abcd', ts}));
+    const before = state;
+    const splitOps = splitBlockOps(state, {actor: 'alice', block: [0, 'self'], offset: 2, ts: ts(), options: {random: () => 0}});
+    state = applyMany(state, splitOps);
+    expect(blockLines(state)).toEqual(['ab', 'cd']);
+
+    const undo = planUndoOps(before, state, splitOps, {actor: 'alice', ts: mts(30)});
+    expect(undo.complete).toBe(true);
+    state = applyMany(state, undo.ops);
+    expect(blockLines(state)).toEqual(['abcd']);
+});
+
+it('plans undo for join by creating a fresh right-side block with copied text', () => {
+    const ts = mts(2);
+    let state = cachedState(initialState('self', '00001'));
+    state = applyMany(state, insertTextOps(state, {actor: 'alice', block: [0, 'self'], offset: 0, text: 'ab', ts}));
+    state = applyMany(state, splitBlockOps(state, {actor: 'alice', block: [0, 'self'], offset: 1, ts: ts(), options: {random: () => 0}}));
+    const before = state;
+    const [left, right] = rootBlockIds(state).map(parseLamportString);
+    const joinOps = joinBlocksOps(state, {actor: 'alice', left, right, ts: ts()});
+    state = applyMany(state, joinOps);
+    expect(blockLines(state)).toEqual(['ab']);
+
+    const undo = planUndoOps(before, state, joinOps, {actor: 'alice', ts: mts(30)});
+    expect(undo.complete).toBe(true);
+    state = applyMany(state, undo.ops);
+    expect(blockLines(state)).toEqual(['a', 'b']);
 });
 
 it('inserts grapheme clusters as visible text', () => {

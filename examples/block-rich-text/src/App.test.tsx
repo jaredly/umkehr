@@ -286,6 +286,44 @@ describe('Block rich text example UI', () => {
         expect(blocks(right)[0].textContent).toBe('abc');
     });
 
+    it('undoes and redoes text through editor toolbar buttons', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+        const leftBlock = blocks(left)[0];
+
+        selectCaret(leftBlock, 0);
+        typeText(leftBlock, 'a');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('a'));
+
+        fireEvent.click(within(left).getByText('Undo'));
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe(''));
+        expect(blocks(right)[0].textContent).toBe('');
+
+        fireEvent.click(within(left).getByText('Redo'));
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('a'));
+        expect(blocks(right)[0].textContent).toBe('a');
+    });
+
+    it('queues undo while offline and flushes it when online', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+        const online = within(left).getByLabelText('Online');
+
+        selectCaret(blocks(left)[0], 0);
+        typeText(blocks(left)[0], 'a');
+        await waitFor(() => expect(blocks(right)[0].textContent).toBe('a'));
+
+        fireEvent.click(online);
+        fireEvent.click(within(left).getByText('Undo'));
+
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe(''));
+        expect(blocks(right)[0].textContent).toBe('a');
+        expect(within(left).getByText(/queued 1/)).toBeTruthy();
+
+        fireEvent.click(online);
+        await waitFor(() => expect(blocks(right)[0].textContent).toBe(''));
+    });
+
     it('scrubs document history backward and forward', async () => {
         const view = render(<App />);
         const {left, right} = panels(view);

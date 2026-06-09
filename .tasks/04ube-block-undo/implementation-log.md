@@ -1,0 +1,43 @@
+# Implementation Log: Block Rich Text Undo/Redo
+
+## 2026-06-08
+
+- Started Phase 1 by inspecting the current block CRDT APIs.
+- Current key constraints:
+  - `planUndoOps()` already exists and is the right low-level boundary.
+  - `char:delete` and `block:delete` are tombstones/deleted flags, so visual undo must create fresh chars/blocks rather than resurrecting ids.
+  - `join()` now emits `join-record`; undo needs fresh visible structure rather than a dedicated unjoin operation.
+  - The history scrubber is already implemented, so later phases should append undo/redo as `local-change` actions.
+- Expanded `planUndoOps()`:
+  - `char:delete` now plans fresh replacement `char` ops.
+  - `block:delete` now plans a fresh visible block and copies visible text.
+  - remove-mark undo restores previous exact-boundary mark data when available.
+  - `split-record` is treated as an immutable fact; surrounding block/char move inverses handle the visual undo.
+  - `join-record` now creates a fresh right-side block, copies its prior visible text, and tombstones the old right-side chars so the joined left block no longer duplicates the content.
+- Added focused `src/block-crdt/index.test.ts` coverage for delete undo, redo after tombstone undo, block delete undo, split undo, and join undo.
+- Verification: `npm exec vitest src/block-crdt/index.test.ts` passed with 75 tests.
+- Issue/workaround: join records cannot be removed, so visual join undo must compensate by deleting the old joined chars and creating a fresh right block.
+- Added optional `BlockCommandInfo` metadata to block-rich-text `HistoryAction`.
+- Import/export now validates command metadata when present and still accepts metadata-free histories.
+- Updated clock advancement to scan whole local-change actions, including `0001-left` / `0001-right` command id strings.
+- Verification: `npm exec vitest examples/block-rich-text/src/history.test.ts` passed with 13 tests.
+- Bug encountered: command ids did not advance clocks at first because replay only scanned raw ops; fixed by scanning the whole action.
+- Added `nextReplicaTs()` and changed `makeCommandContext()` to use it.
+- Updated `App.runCommand()` so document-changing edit actions are stamped with `intent: 'edit'`, command id, actor, and before/after retained selections. Selection-only transient updates still do not allocate command ids.
+- Added `examples/block-rich-text/src/undoHistory.ts` with undo/redo stack derivation and action creation.
+- Added `examples/block-rich-text/src/undoHistory.test.ts`.
+- Verification:
+  - `npm exec vitest examples/block-rich-text/src/App.test.tsx` passed with 54 tests after edit stamping.
+  - `npm exec vitest examples/block-rich-text/src/undoHistory.test.ts` passed with 7 tests.
+- Wired editor UI:
+  - Added per-editor Undo/Redo toolbar buttons.
+  - Added `Mod+Z`, `Mod+Shift+Z`, and `Mod+Y` shortcuts inside editable blocks.
+  - Added editor-local undo/redo status messaging.
+  - Undo/redo append `local-change` actions through existing history branching.
+- Added App tests for toolbar undo/redo and offline queued undo.
+- Verification:
+  - `npm exec vitest src/block-crdt/index.test.ts examples/block-rich-text/src/history.test.ts examples/block-rich-text/src/undoHistory.test.ts examples/block-rich-text/src/App.test.tsx` passed with 151 tests.
+  - `npm run build` in `examples/block-rich-text` passed.
+- Build issue encountered: TypeScript rejected the initial `parseCommandInfo()` object spread because `targetCommandId` was still typed as `unknown`; fixed with explicit narrowed locals.
+- Known environment noise: the build printed `Error connecting to agent: Operation not permitted` before running, but `tsc` and `vite build` completed successfully.
+- Test adjustment: a UI undo test originally typed `ab` and expected one Undo to clear both characters. The app records each typed character as its own command, so the test now uses one character for one undo step.

@@ -192,9 +192,32 @@ input {
     cursor: pointer;
 }
 
+.toolbar button {
+    padding: 0 10px;
+}
+
+.toolbar button:disabled {
+    color: #8a96a3;
+    background: #f3f6f8;
+    cursor: not-allowed;
+}
+
 .toolbar button:hover,
 .dragHandle:hover {
     background: #eef3f7;
+}
+
+.toolbar button:disabled:hover {
+    background: #f3f6f8;
+}
+
+.editorUndoStatus {
+    margin: 0;
+    padding: 6px 12px;
+    border-bottom: 1px solid #e6ebf0;
+    color: #8a4b12;
+    background: #fff7ed;
+    font-size: 13px;
 }
 
 .blockList {

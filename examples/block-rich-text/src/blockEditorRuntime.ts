@@ -36,9 +36,11 @@ export const createDemoState = (): DemoState => {
     };
 };
 
+export const nextReplicaTs = (replica: Replica) => lamportToString([replica.clock++, replica.actor]);
+
 export const makeCommandContext = (replica: Replica) => ({
     actor: replica.actor,
-    nextTs: () => lamportToString([replica.clock++, replica.actor]),
+    nextTs: () => nextReplicaTs(replica),
 });
 
 export const applyLocalChange = (demo: DemoState, change: LocalChange): DemoState => {
