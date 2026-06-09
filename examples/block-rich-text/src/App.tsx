@@ -826,11 +826,7 @@ function BlockEditor({
                                 return {
                                     state: result.state,
                                     ops: result.ops,
-                                    selection: replacePrimarySelection(
-                                        result.state,
-                                        selection,
-                                        result.selection,
-                                    ),
+                                    selection,
                                 };
                             })
                         }
@@ -844,11 +840,7 @@ function BlockEditor({
                                 return {
                                     state: result.state,
                                     ops: result.ops,
-                                    selection: replacePrimarySelection(
-                                        result.state,
-                                        selection,
-                                        result.selection,
-                                    ),
+                                    selection,
                                 };
                             })
                         }

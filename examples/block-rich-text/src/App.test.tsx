@@ -460,11 +460,14 @@ describe('Block rich text example UI', () => {
         fireEvent.keyDown(blocks(left)[1], {key: 'Tab'});
 
         await waitFor(() => expect(blockDepth(blocks(left)[1])).toBe('1'));
+        expect(domSelectionBlock()).toBe(blocks(left)[1]);
+        expect(domCaretOffset(blocks(left)[1])).toBe(2);
 
-        selectCaret(blocks(left)[1], 2);
         fireEvent.keyDown(blocks(left)[1], {key: 'Tab', shiftKey: true});
 
         await waitFor(() => expect(blockDepth(blocks(left)[1])).toBe('0'));
+        expect(domSelectionBlock()).toBe(blocks(left)[1]);
+        expect(domCaretOffset(blocks(left)[1])).toBe(2);
     });
 
     it('moves ArrowLeft from the start of a block to the previous block end', async () => {

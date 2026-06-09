@@ -41,3 +41,8 @@
   - Added an app regression test that indents and unindents the second block with the caret at offset 2.
   - `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx` passes with 49 tests.
   - `npm --prefix examples/block-rich-text run build` passes.
+- Selection-preserving Tab follow-up:
+  - `indentBlock` and `unindentBlock` still return `caret(blockId, 0)` for command-level callers, but the UI no longer replaces the active retained selection with that command selection.
+  - Extended the Tab app regression to assert the DOM caret remains at offset 2 after both indent and unindent.
+  - `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx` passes with 49 tests.
+  - `npm --prefix examples/block-rich-text run build` passes.
