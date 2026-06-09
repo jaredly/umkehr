@@ -1639,8 +1639,9 @@ it('plans undo for split as char moves plus hiding the split block', () => {
     expect(blockLines(state)).toEqual(['abcd']);
 });
 
-it('plans undo for join by creating a fresh right-side block with copied text', () => {
+it('plans undo for join as a split-style move without recreating or deleting chars', () => {
     const ts = mts(2);
+    const remoteTs = mts(100);
     let state = cachedState(initialState('self', '00001'));
     state = applyMany(state, insertTextOps(state, {actor: 'alice', block: [0, 'self'], offset: 0, text: 'ab', ts}));
     state = applyMany(state, splitBlockOps(state, {actor: 'alice', block: [0, 'self'], offset: 1, ts: ts(), options: {random: () => 0}}));
@@ -1649,11 +1650,23 @@ it('plans undo for join by creating a fresh right-side block with copied text', 
     const joinOps = joinBlocksOps(state, {actor: 'alice', left, right, ts: ts()});
     state = applyMany(state, joinOps);
     expect(blockLines(state)).toEqual(['ab']);
+    state = applyMany(
+        state,
+        insertTextOps(state, {
+            actor: 'bob',
+            block: right,
+            offset: 1,
+            text: 'X',
+            ts: remoteTs,
+        }),
+    );
+    expect(blockLines(state)).toEqual(['abX']);
 
     const undo = planUndoOps(before, state, joinOps, {actor: 'alice', ts: mts(30)});
     expect(undo.complete).toBe(true);
+    expect(undo.ops.map((op) => op.type)).toEqual(['block', 'char:move']);
     state = applyMany(state, undo.ops);
-    expect(blockLines(state)).toEqual(['a', 'b']);
+    expect(blockLines(state)).toEqual(['a', 'bX']);
 });
 
 it('inserts grapheme clusters as visible text', () => {

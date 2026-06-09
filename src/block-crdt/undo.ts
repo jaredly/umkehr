@@ -1,5 +1,5 @@
 import {compareLamports, lamportToString} from './ids.js';
-import {orderedCharIdsForBlock, charRecord} from './traversal.js';
+import {findTail, orderedCharIdsForBlock, charRecord} from './traversal.js';
 import {
     Block,
     CachedState,
@@ -142,7 +142,7 @@ export const planUndoOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
                 // produce the visible split undo; the record itself does not need a compensating op.
                 break;
             case 'join-record':
-                restoreJoinedBlock(before, op.join.right, nextId, ops) ||
+                restoreJoinedBlock(before, op.join.right, nextId, nextTs, ops) ||
                     reject(op, 'join record undo requires the joined right block in the previous state');
                 break;
         }
@@ -184,16 +184,26 @@ const restoreJoinedBlock = <M extends TimestampedBlockMeta>(
     before: CachedState<M>,
     id: Lamport,
     nextId: () => Lamport,
+    nextTs: () => HLC,
     ops: Op<M>[],
 ) => {
     const beforeBlock = before.state.blocks[lamportToString(id)];
     if (!beforeBlock) return false;
-    const oldCharIds = orderedCharIdsForBlock(before, lamportToString(beforeBlock.id), {visibleOnly: true})
-        .map((charId) => before.state.chars[charId]?.id)
-        .filter((charId): charId is Lamport => Boolean(charId));
-    restoreBlockWithVisibleText(before, beforeBlock, nextId, ops);
-    for (const charId of oldCharIds) {
-        ops.push({type: 'char:delete', id: charId});
+
+    const blockId = nextId();
+    const rootCharIds = before.cache.charContents[lamportToString(beforeBlock.id)] ?? [];
+    ops.push(freshBlockOp(beforeBlock, blockId, nextTs()));
+
+    let parent = blockId;
+    for (const charId of rootCharIds) {
+        const char = before.state.chars[charId];
+        if (!char) continue;
+        ops.push({
+            type: 'char:move',
+            id: char.id,
+            parent: {id: parent, ts: nextTs()},
+        });
+        parent = before.state.chars[findTail(charId, before.cache.charContents)]?.id ?? char.id;
     }
     return true;
 };
@@ -205,20 +215,7 @@ const restoreBlockWithVisibleText = <M extends TimestampedBlockMeta>(
     ops: Op<M>[],
 ) => {
     const id = nextId();
-    const path = [...beforeBlock.order.path.slice(0, -1), id];
-    ops.push({
-        type: 'block',
-        block: {
-            ...beforeBlock,
-            id,
-            order: {
-                ...beforeBlock.order,
-                id,
-                path,
-            },
-            deleted: false,
-        },
-    });
+    ops.push(freshBlockOp(beforeBlock, id));
 
     let parent = id;
     for (const charId of orderedCharIdsForBlock(before, lamportToString(beforeBlock.id), {visibleOnly: true})) {
@@ -229,6 +226,25 @@ const restoreBlockWithVisibleText = <M extends TimestampedBlockMeta>(
         parent = replacement;
     }
 };
+
+const freshBlockOp = <M extends TimestampedBlockMeta>(
+    beforeBlock: Block<M>,
+    id: Lamport,
+    ts: HLC | undefined = undefined,
+): Op<M> => ({
+    type: 'block',
+    block: {
+        ...beforeBlock,
+        id,
+        order: {
+            ...beforeBlock.order,
+            id,
+            path: [...beforeBlock.order.path.slice(0, -1), id],
+            ...(ts ? {ts} : {}),
+        },
+        deleted: false,
+    },
+});
 
 const charInsertOp = <M extends TimestampedBlockMeta>(
     text: string,

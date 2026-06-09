@@ -41,3 +41,12 @@
 - Build issue encountered: TypeScript rejected the initial `parseCommandInfo()` object spread because `targetCommandId` was still typed as `unknown`; fixed with explicit narrowed locals.
 - Known environment noise: the build printed `Error connecting to agent: Operation not permitted` before running, but `tsc` and `vite build` completed successfully.
 - Test adjustment: a UI undo test originally typed `ab` and expected one Undo to clear both characters. The app records each typed character as its own command, so the test now uses one character for one undo step.
+
+## 2026-06-09
+
+- Corrected join undo implementation after review:
+  - Join undo now behaves as a split-style operation.
+  - It creates a fresh visible block and moves existing right-block root chars into it.
+  - It no longer creates replacement chars or emits `char:delete` for joined chars.
+- Strengthened the join undo test with a concurrent edit by another actor into the lower/right block after the join. Undo preserves that concurrent edit in the split-out block.
+- Verification: `npm exec vitest src/block-crdt/index.test.ts` passed with 75 tests.
