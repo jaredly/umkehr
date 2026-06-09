@@ -46,6 +46,7 @@ import {
     splitBlockEverywhere,
     toggleMarkEverywhere,
     unindentSelections,
+    type HorizontalMovementUnit,
     type MultiCommandResult,
 } from './multiSelectionCommands';
 import {useBlockReorder, type DropTarget} from './useBlockReorder';
@@ -550,10 +551,10 @@ function BlockEditor({
     );
 
     const moveSelectionsHorizontallyEverywhere = useCallback(
-        (direction: 'left' | 'right') => {
+        (direction: 'left' | 'right', unit: HorizontalMovementUnit = 'character') => {
             handledNavigationKeyRef.current = true;
             runEditCommand((current, selection) =>
-                moveSelectionsHorizontally(current.state, selection, direction),
+                moveSelectionsHorizontally(current.state, selection, direction, unit),
             );
         },
         [runEditCommand],
@@ -570,10 +571,10 @@ function BlockEditor({
     );
 
     const extendSelectionsHorizontallyEverywhere = useCallback(
-        (direction: 'left' | 'right') => {
+        (direction: 'left' | 'right', unit: HorizontalMovementUnit = 'character') => {
             handledNavigationKeyRef.current = true;
             runEditCommand((current, selection) =>
-                extendSelectionsHorizontally(current.state, selection, direction),
+                extendSelectionsHorizontally(current.state, selection, direction, unit),
             );
         },
         [runEditCommand],
@@ -952,9 +953,9 @@ function EditableBlock({
     onPasteText(text: string): void;
     onMoveCaret(selection: EditorSelection): void;
     onMoveCaretVertically(sourceBlock: HTMLElement, targetBlockId: string): void;
-    onMoveSelectionsHorizontally(direction: 'left' | 'right'): void;
+    onMoveSelectionsHorizontally(direction: 'left' | 'right', unit?: HorizontalMovementUnit): void;
     onMoveSelectionsVertically(direction: 'up' | 'down'): void;
-    onExtendSelectionsHorizontally(direction: 'left' | 'right'): void;
+    onExtendSelectionsHorizontally(direction: 'left' | 'right', unit?: HorizontalMovementUnit): void;
     onExtendSelectionsVertically(direction: 'up' | 'down'): void;
     onExtendSelectionVerticallyWithVisualIntent(
         direction: 'up' | 'down',
@@ -1091,6 +1092,26 @@ function EditableBlock({
                     } else if (event.key === 'Delete') {
                         event.preventDefault();
                         onDeleteForward();
+                    } else if (event.key === 'Home' || event.key === 'End') {
+                        event.preventDefault();
+                        const direction = event.key === 'Home' ? 'left' : 'right';
+                        if (event.shiftKey) {
+                            onExtendSelectionsHorizontally(direction, 'block');
+                        } else {
+                            onMoveSelectionsHorizontally(direction, 'block');
+                        }
+                    } else if (
+                        (event.key === 'ArrowLeft' || event.key === 'ArrowRight') &&
+                        (event.altKey || modifierPressed)
+                    ) {
+                        event.preventDefault();
+                        const direction = event.key === 'ArrowLeft' ? 'left' : 'right';
+                        const unit = event.altKey ? 'word' : 'block';
+                        if (event.shiftKey) {
+                            onExtendSelectionsHorizontally(direction, unit);
+                        } else {
+                            onMoveSelectionsHorizontally(direction, unit);
+                        }
                     } else if (
                         isPlainArrowKey(event.key) &&
                         event.shiftKey &&

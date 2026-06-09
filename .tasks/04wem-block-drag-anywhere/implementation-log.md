@@ -55,3 +55,12 @@
   - Added app tests for multi-caret Tab/Shift+Tab and range-spanning Tab.
   - `npm exec vitest -- run examples/block-rich-text/src/blockCommands.test.ts examples/block-rich-text/src/retainedSelection.test.ts examples/block-rich-text/src/multiSelectionCommands.test.ts examples/block-rich-text/src/App.test.tsx` passes with 108 tests.
   - `npm --prefix examples/block-rich-text run build` passes.
+- Multi-cursor navigation follow-up:
+  - Added horizontal movement units for character, word, and block-boundary movement.
+  - `Option+ArrowLeft/Right` now moves every cursor by word.
+  - `Cmd/Ctrl+ArrowLeft/Right`, `Home`, and `End` now move every cursor to the current block boundary.
+  - Shift with these keys extends every selection through the same multi-selection path.
+  - Added command tests for word and block-boundary multi-cursor movement.
+  - Added app tests for `Option+ArrowRight`, `Cmd+ArrowLeft`, and `End` with multiple cursors.
+  - `npm exec vitest -- run examples/block-rich-text/src/blockCommands.test.ts examples/block-rich-text/src/retainedSelection.test.ts examples/block-rich-text/src/multiSelectionCommands.test.ts examples/block-rich-text/src/App.test.tsx` passes with 113 tests.
+  - `npm --prefix examples/block-rich-text run build` passes.

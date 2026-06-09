@@ -1082,6 +1082,60 @@ describe('Block rich text example UI', () => {
         expect(blocks(right)[0].textContent).toBe('abXcdX');
     });
 
+    it('moves every cursor with Option+ArrowRight', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'one two three');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('one two three'));
+
+        selectCaret(blocks(left)[0], 1);
+        addCaret(blocks(left)[0], 5);
+
+        fireEvent.keyDown(blocks(left)[0], {key: 'ArrowRight', altKey: true});
+        fireEvent.keyUp(blocks(left)[0], {key: 'ArrowRight', altKey: true});
+
+        await waitFor(() => expect(domCaretOffset(blocks(left)[0])).toBe(7));
+        expect(retainedCaretOffsets(blocks(left)[0])).toEqual([3]);
+    });
+
+    it('moves every cursor with Cmd+ArrowLeft', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        pasteText(blocks(left)[0], 'abcd\nwxyz');
+        await waitForBlockTexts(left, ['abcd', 'wxyz']);
+
+        selectCaret(blocks(left)[0], 3);
+        addCaret(blocks(left)[1], 2);
+
+        fireEvent.keyDown(blocks(left)[1], {key: 'ArrowLeft', metaKey: true});
+        fireEvent.keyUp(blocks(left)[1], {key: 'ArrowLeft', metaKey: true});
+
+        await waitFor(() => expect(domCaretOffset(blocks(left)[1])).toBe(0));
+        expect(retainedCaretOffsets(blocks(left)[0])).toEqual([0]);
+    });
+
+    it('moves every cursor with End', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        pasteText(blocks(left)[0], 'abcd\nwxyz');
+        await waitForBlockTexts(left, ['abcd', 'wxyz']);
+
+        selectCaret(blocks(left)[0], 1);
+        addCaret(blocks(left)[1], 2);
+
+        fireEvent.keyDown(blocks(left)[1], {key: 'End'});
+        fireEvent.keyUp(blocks(left)[1], {key: 'End'});
+
+        await waitFor(() => expect(domCaretOffset(blocks(left)[1])).toBe(4));
+        expect(retainedCaretOffsets(blocks(left)[0])).toEqual([4]);
+    });
+
     it('extends every cursor with Shift+ArrowRight', async () => {
         const view = render(<App />);
         const {left, right} = panels(view);

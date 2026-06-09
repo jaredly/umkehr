@@ -1,5 +1,5 @@
 import type {CachedState} from 'umkehr/block-crdt/types';
-import {materializeFormattedBlocks, type Op} from 'umkehr/block-crdt';
+import {blockContents, materializeFormattedBlocks, type Op} from 'umkehr/block-crdt';
 import {
     deleteBackward,
     deleteForward,
@@ -26,6 +26,7 @@ import {
     isCollapsed,
     normalizeSelectionSegments,
     pointTextLength,
+    segmentText,
     visibleBlockIds,
     type BlockPoint,
     type EditorSelection,
@@ -36,6 +37,8 @@ export type MultiCommandResult = {
     ops: Op[];
     selection: RetainedSelectionSet;
 };
+
+export type HorizontalMovementUnit = 'character' | 'word' | 'block';
 
 export const insertTextEverywhere = (
     state: CachedState,
@@ -133,11 +136,12 @@ export const moveSelectionsHorizontally = (
     state: CachedState,
     selection: RetainedSelectionSet,
     direction: 'left' | 'right',
+    unit: HorizontalMovementUnit = 'character',
 ): MultiCommandResult => {
     const resolved = resolveSelectionSet(state, selection);
     const entries = resolved.entries.map((entry) => ({
         id: entry.id,
-        selection: retainSelection(state, moveSelectionHorizontally(state, entry.selection, direction)),
+        selection: retainSelection(state, moveSelectionHorizontally(state, entry.selection, direction, unit)),
     }));
 
     return {
@@ -286,11 +290,12 @@ export const extendSelectionsHorizontally = (
     state: CachedState,
     selection: RetainedSelectionSet,
     direction: 'left' | 'right',
+    unit: HorizontalMovementUnit = 'character',
 ): MultiCommandResult => {
     const resolved = resolveSelectionSet(state, selection);
     const entries = resolved.entries.map((entry) => ({
         id: entry.id,
-        selection: retainSelection(state, extendSelectionHorizontally(state, entry.selection, direction)),
+        selection: retainSelection(state, extendSelectionHorizontally(state, entry.selection, direction, unit)),
     }));
 
     return {
@@ -322,6 +327,7 @@ const moveSelectionHorizontally = (
     state: CachedState,
     selection: EditorSelection,
     direction: 'left' | 'right',
+    unit: HorizontalMovementUnit,
 ): EditorSelection => {
     if (!isCollapsed(selection)) {
         const point =
@@ -330,16 +336,17 @@ const moveSelectionHorizontally = (
                 : lastPointForSelection(state, selection);
         return caret(point.blockId, point.offset);
     }
-    return caretAtPoint(movePointHorizontally(state, focusPoint(selection), direction));
+    return caretAtPoint(movePointHorizontally(state, focusPoint(selection), direction, unit));
 };
 
 const extendSelectionHorizontally = (
     state: CachedState,
     selection: EditorSelection,
     direction: 'left' | 'right',
+    unit: HorizontalMovementUnit,
 ): EditorSelection => {
     const anchor = selection.type === 'caret' ? selection.point : selection.anchor;
-    const focus = movePointHorizontally(state, focusPoint(selection), direction);
+    const focus = movePointHorizontally(state, focusPoint(selection), direction, unit);
     return {type: 'range', anchor, focus};
 };
 
@@ -378,7 +385,18 @@ const movePointHorizontally = (
     state: CachedState,
     point: BlockPoint,
     direction: 'left' | 'right',
+    unit: HorizontalMovementUnit,
 ): BlockPoint => {
+    if (unit === 'block') {
+        return {
+            blockId: point.blockId,
+            offset: direction === 'left' ? 0 : pointTextLength(state, point.blockId),
+        };
+    }
+    if (unit === 'word') {
+        return movePointByWord(state, point, direction);
+    }
+
     const blocks = visibleBlockIds(state);
     const index = blocks.indexOf(point.blockId);
     if (index < 0) return point;
@@ -395,6 +413,40 @@ const movePointHorizontally = (
     if (point.offset < length) return {blockId: point.blockId, offset: point.offset + 1};
     const nextBlockId = blocks[index + 1];
     return nextBlockId ? {blockId: nextBlockId, offset: 0} : point;
+};
+
+const movePointByWord = (
+    state: CachedState,
+    point: BlockPoint,
+    direction: 'left' | 'right',
+): BlockPoint => {
+    const text = blockContents(state, point.blockId);
+    const boundaries = wordBoundaries(text);
+    const target =
+        direction === 'left'
+            ? [...boundaries].reverse().find((offset) => offset < point.offset)
+            : boundaries.find((offset) => offset > point.offset);
+    if (target !== undefined) return {blockId: point.blockId, offset: target};
+
+    const blocks = visibleBlockIds(state);
+    const index = blocks.indexOf(point.blockId);
+    const targetBlockId = blocks[direction === 'left' ? index - 1 : index + 1];
+    if (!targetBlockId) return point;
+    return {
+        blockId: targetBlockId,
+        offset: direction === 'left' ? pointTextLength(state, targetBlockId) : 0,
+    };
+};
+
+const wordBoundaries = (text: string): number[] => {
+    const boundaries = new Set<number>([0, segmentText(text).length]);
+    const segmenter = new Intl.Segmenter(undefined, {granularity: 'word'});
+    for (const segment of segmenter.segment(text)) {
+        if (!segment.isWordLike) continue;
+        boundaries.add(segmentText(text.slice(0, segment.index)).length);
+        boundaries.add(segmentText(text.slice(0, segment.index + segment.segment.length)).length);
+    }
+    return [...boundaries].sort((a, b) => a - b);
 };
 
 const caretAtPoint = (point: BlockPoint): EditorSelection => caret(point.blockId, point.offset);

@@ -93,6 +93,45 @@ describe('block rich text multi-selection commands', () => {
         ]);
     });
 
+    it('moves every selected caret to block boundaries', () => {
+        const inserted = insertText(init(), caret(onlyBlock(init()), 0), 'abcd', ctx());
+        const blockId = onlyBlock(inserted.state);
+        const set = appendSelection(
+            inserted.state,
+            singleRetainedSelectionSet(inserted.state, caret(blockId, 1), 'first'),
+            caret(blockId, 3),
+            'second',
+        );
+
+        const left = moveSelectionsHorizontally(inserted.state, set, 'left', 'block');
+        const right = moveSelectionsHorizontally(inserted.state, set, 'right', 'block');
+
+        expect(resolveSelectionSet(left.state, left.selection).entries.map((entry) => entry.selection)).toEqual([
+            caret(blockId, 0),
+        ]);
+        expect(resolveSelectionSet(right.state, right.selection).entries.map((entry) => entry.selection)).toEqual([
+            caret(blockId, 4),
+        ]);
+    });
+
+    it('moves every selected caret by word', () => {
+        const inserted = insertText(init(), caret(onlyBlock(init()), 0), 'one two three', ctx());
+        const blockId = onlyBlock(inserted.state);
+        const set = appendSelection(
+            inserted.state,
+            singleRetainedSelectionSet(inserted.state, caret(blockId, 1), 'first'),
+            caret(blockId, 5),
+            'second',
+        );
+
+        const result = moveSelectionsHorizontally(inserted.state, set, 'right', 'word');
+
+        expect(resolveSelectionSet(result.state, result.selection).entries.map((entry) => entry.selection)).toEqual([
+            caret(blockId, 3),
+            caret(blockId, 7),
+        ]);
+    });
+
     it('moves every selected caret across block boundaries', () => {
         const pasted = pastePlainText(init(), caret(onlyBlock(init()), 0), 'ab\ncd', ctx());
         const [firstBlock, secondBlock] = rootBlockIds(pasted.state);
