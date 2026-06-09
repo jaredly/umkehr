@@ -1,138 +1,234 @@
-Rich Causal Blocks: a CRDT for block-based text editing
+# Rich Causal Blocks
 
-Notion-like blocks are all the rage in document editors.
-I like them too.
-but I also want local-first/collaborative editing goodness.
+`umkehr/block-crdt` is an operation-based CRDT for block-structured rich text. It models text as stable character ids inside stable block ids, supports non-destructive split/join/move operations, and exposes plain `Op[]` records for storage and replication.
 
-Introducing, the first (to my knowledge) CRDT for text editing that allows for multiple "blocks" of text, that can be split, moved, and joined together, all while preserving concurrent edits.
+The package is intended for editor/runtime authors. Application code should usually create ops with the public change helpers and reserve raw op construction for tests, migrations, and advanced integrations.
 
-This improves dramatically on the state of the art. Some algorithms allow the designation of blocks via in-text markers (i.e. automerge), but none to my knowledge allow reordering of those blocks without resorting to destructive cut & paste.
+## Importing
 
-How does it work? We start with an RGA/Causal-Tree data structure where each character has a lamport ID and a reference to a parent character. Concurrent edits are prevented from interleaving by virtue of the parent references establishing a causal ordering between characters.
+```ts
+import {
+    applyMany,
+    applyRemote,
+    cachedState,
+    insertTextOps,
+    materializeFormattedBlocks,
+} from 'umkehr/block-crdt';
+import {initialState} from 'umkehr/block-crdt/initialState';
+```
 
-[diagram of characters pointing to their parents, including concurrent edits]
+Support modules are also exported, for example `umkehr/block-crdt/types` and `umkehr/block-crdt/lseq`.
 
-The change is that we allow the parent reference to be updated, so that text can be moved around, using a 'last write wins' policy for the parent reference.
+## Quick Start
 
-[diagram of a simple sequence of characters, then splitting at one character by re-parenting it to a new block]
+```ts
+import {
+    applyMany,
+    cachedState,
+    insertTextOps,
+    materializeFormattedBlocks,
+} from 'umkehr/block-crdt';
+import {initialState} from 'umkehr/block-crdt/initialState';
 
-A naive approach, updating the parent of the char where you want to split, would work in the trivial case where text was all inserted in sequence, but breaks when the character sequence is actually a tree, due to insertions happening either concurrently or out of order.
+const ts = (() => {
+    let next = 1;
+    return () => String(next++).padStart(5, '0');
+})();
 
-[diagram of a naive split that yields suprising behavior in the presence of sibling nodes]
+let state = cachedState(initialState('alice', ts()));
+const block = [0, 'alice'] as const;
 
--> I think we actually want a video of 'typing into a text editor and then pressing enter'
+const ops = insertTextOps(state, {
+    actor: 'alice',
+    block,
+    offset: 0,
+    text: 'Hello',
+    ts,
+});
 
+state = applyMany(state, ops);
+const visible = materializeFormattedBlocks(state);
+```
 
-In order to faithfully split a block of text following user intent, we must also re-parent sibling nodes that fall after the split point, so that they also move to the new block.
+Persist and replicate the `ops` array. Rebuild the cached wrapper with `cachedState(rawState)` after loading a persisted raw `State`.
 
-[diagram of a split that correctly moves sibling nodes to the new block]
+## Data Model
 
-This gets us a split behavior that follows user intent, but it still fails in the presence of concurrent splits, as "last write wins" fails when "incidental reparent" wins over a concurrent "intentional split".
+`State<M>` stores five durable record maps:
 
-[diagram of two concurrent splits that happen to fall along sibling nodes. the later split gets eaten up by the former]
+- `chars`: character records keyed by Lamport id strings.
+- `blocks`: block records keyed by Lamport id strings.
+- `marks`: formatting marks keyed by mark Lamport id strings.
+- `splits`: split records that preserve split boundaries for formatting and undo planning.
+- `joins`: join records that hide right blocks without deleting their contents.
 
-In order to solve this problem, we need a way to indicate that the "sibling reparenting" was incidental, and should be overridden by a split that happened further to the right, even if it happened earlier. To this end, the "timestamp" associated with an incidental reparenting becomes richer, and tracks the "ancestor path" of the split position that initiated the incidental reparenting.
+`CachedState<M>` wraps `State<M>` with derived traversal indexes. The cache is not the persistence format.
 
-[diagram of this thing making sense]
+Characters and blocks use stable Lamport ids: `[counter, actor]`. Actor ids must not contain `-`, because string encodings use that separator. Lamport string encodings are map keys only; use `compareLamports` or `compareLamportStrings` for semantic ordering.
 
-Next up: making rich text work!
+Characters form parent-linked trees rooted at block ids. Blocks carry:
 
+- `id`: stable Lamport id.
+- `meta`: app-defined metadata with at least a lexicographically sortable `ts`.
+- `order`: LSEQ sibling position plus a materialized block path.
+- `deleted`: tombstone flag.
 
-.....
+Deletes are tombstones. Deleted chars and blocks remain in state so concurrent and out-of-order ops can still resolve against stable ids.
 
+## Operation Format
 
-oof ok so something have made things more complicated:
+`Op<M>` is the wire/storage format:
 
-- wanted to eliminate the possibilty of join-cycles. which I do think is worth it
-- wanting unindent to do "incidental reparenting" of later sibling nodes so that we can follow user expectation, principle of least surprise
-- also wanting to eliminate the possiblity of block nesting cycles. seems like it might require a similar bookkeeping setup, which tbh is a little annoying, but I kindof want this to be rock solid. also, most docs are going to have relatively little in the way of block reparenting.
+- `char`
+- `char:move`
+- `char:delete`
+- `block`
+- `block:move`
+- `block:delete`
+- `block:meta`
+- `mark`
+- `split-record`
+- `join-record`
 
-# YEAS
+The operation shape is public, but normal editor integrations should prefer the change helpers below. Raw ops have non-obvious dependency and versioning invariants.
 
-# OK, fun features:
+## Change Helpers
 
-- multi-cursor, why notttt
-- export/import
-- unindent-reparenting
+The public helpers return related `Op[]` batches. They do not introduce a transaction object and they do not hide the op log.
 
-## Public Integration Contract
+```ts
+insertTextOps(state, {actor, block, offset, text, ts});
+deleteRangeOps(state, {block, startOffset, endOffset});
+splitBlockOps(state, {actor, block, offset, ts, options});
+joinBlocksOps(state, {actor, left, right, ts});
+moveBlockOps(state, {actor, block, parent, before, after, ts, options});
+setBlockMetaOps(state, {block, meta});
+markRangeOp(state, block, startOffset, endOffset, type, data, remove, id);
+```
 
-`umkehr/block-crdt` exposes plain operation records (`Op[]`) as the replication and persistence format, but editor integrations should normally create those records through the public change helpers:
+Offsets are visible text offsets inside a visible block. Text insertion uses `Intl.Segmenter`, so ids are allocated per grapheme cluster rather than per UTF-16 code unit.
 
-- `insertTextOps(state, {actor, block, offset, text, ts})`
-- `deleteRangeOps(state, {block, startOffset, endOffset})`
-- `splitBlockOps(state, {actor, block, offset, ts, options})`
-- `joinBlocksOps(state, {actor, left, right, ts})`
-- `moveBlockOps(state, {actor, block, parent, before, after, ts, options})`
-- `setBlockMetaOps(state, {block, meta})`
-- `markRangeOp(state, block, startOffset, endOffset, type, data, remove, id)`
-
-The helpers return related `Op[]` batches. They do not hide the operation log, and they do not introduce a separate transaction object. A sync layer can store and transmit the returned ops directly.
-
-`moveBlockOps` takes a visible logical parent. If a deleted or joined block is hidden by materialization, its visible children are treated as children of the nearest visible ancestor for `visibleBlockChildren`, `visibleBlockOutline`, and move placement. Callers should not pass hidden blocks as move parents.
-
-## State Model
-
-Characters and blocks both have stable Lamport ids. Characters form parent-linked trees rooted at a block id. Blocks carry an LSEQ sibling order and a materialized path used for nesting. Deletes are tombstones: deleted characters and blocks remain in state so concurrent operations can still resolve against stable ids.
-
-Splits and joins are non-destructive records. A split creates a new block and moves the right-side character subtree into it. A join records that the right block is semantically hidden and that its characters are materialized after the left block tail. Joined blocks remain in state, but visible traversal, plain text materialization, and formatted block materialization omit them as blocks. Visible descendants of hidden blocks are spliced into the nearest visible parent's child list and ordered with that logical sibling list.
+`moveBlockOps` takes a visible logical parent. Hidden deleted/joined parents are not public move targets. If a hidden block has visible descendants, those descendants are treated as logical children of the nearest visible ancestor for `visibleBlockChildren`, `visibleBlockOutline`, and move placement.
 
 ## Applying Ops
 
 Use strict helpers for local batches that were just produced by this package:
 
-- `applyStrict(state, op)`
-- `applyManyStrict(state, ops)`
-- `apply(state, op)` and `applyMany(state, ops)` are currently kept for compatibility with the strict style.
+```ts
+state = applyMany(state, ops);
+state = applyManyStrict(state, ops);
+state = applyStrict(state, op);
+```
 
-Use remote helpers for arbitrary network/storage delivery order:
+Use remote helpers for arbitrary network or storage delivery order:
 
-- `applyRemote(state, op)`
-- `applyRemoteMany(state, ops)`
+```ts
+const result = applyRemote(state, op);
+const batchResult = applyRemoteMany(state, ops);
+```
 
-`applyRemote` returns one of:
+`applyRemote` returns:
 
 - `applied`: the op changed state.
-- `ignored`: the op was duplicate or stale under the CRDT's conflict rules.
-- `pending`: the op is structurally valid but references dependencies that have not arrived yet.
+- `ignored`: the op was duplicate or stale under CRDT conflict rules.
+- `pending`: the op is structurally valid but references missing dependencies.
 - `invalid`: the op is malformed or conflicts with an existing id payload.
 
-Pending ops should be retried after their missing Lamport ids arrive. Missing parents for `char` and `char:move`, missing block path ancestors, missing mark anchors, split anchors, and join anchors are treated as pending rather than silently accepted.
+Retry pending ops after their missing Lamport ids arrive. Missing parents for `char` and `char:move`, missing block path ancestors, missing mark anchors, missing split anchors, and missing join anchors are pending rather than silently accepted.
+
+`validateOp(op)` checks op shape and Lamport encoding. It does not prove dependency readiness; use `applyRemote` for that.
+
+## Split And Join Semantics
+
+A split creates a new block and moves the right-side character subtree into it. When a split crosses a character tree rather than a simple list, incidental `char:move` ops move sibling subtrees that visually fall after the split point.
+
+Intentional moves and incidental split moves use named version comparators:
+
+- `compareCharParentVersions`
+- `charParentVersionWins`
+- `compareBlockOrderVersions`
+- `blockOrderVersionWins`
+
+These comparators preserve user intent when concurrent splits or moves overlap.
+
+A join records that the right block is semantically hidden and that its characters materialize after the left block tail. Joined blocks remain in state; visible traversal, plain-text materialization, and formatted materialization omit them as blocks. Visible descendants of hidden blocks are spliced into the nearest visible parent's child list and sorted with that logical sibling list.
+
+## Formatting
+
+Formatting is in the core package because mark coverage depends on split and join records.
+
+Marks anchor to character ids and can store crossed split ids. A mark created across an existing split records that split so materialization can follow the user's selected text range later. Subsequent splits and joins are handled by mark traversal.
+
+Use `materializeFormattedBlocks(state)` to render visible formatted output:
+
+```ts
+const blocks = materializeFormattedBlocks(state);
+for (const block of blocks) {
+    for (const run of block.runs) {
+        console.log(run.text, run.marks);
+    }
+}
+```
+
+Joined blocks are hidden as blocks, but their visible characters still contribute to the joined text stream.
 
 ## Metadata
 
-Block metadata is generic. The core only requires a lexicographically sortable `ts` field:
+Block metadata is generic. The core only requires a `ts` field:
 
 ```ts
 type CustomMeta = {ts: string; kind: 'task'; priority: number};
 ```
 
-The default metadata union includes paragraph, blockquote, bullets, and checkboxes for the demo editor, but the CRDT algorithms do not depend on those variants. `block:meta` conflict resolution compares `meta.ts`.
+`State<M>`, `CachedState<M>`, `Block<M>`, and `Op<M>` carry the metadata type. `block:meta` conflict resolution compares `meta.ts`.
+
+The default metadata union supports the demo editor:
+
+- paragraph
+- blockquote
+- bullets
+- checkboxes
+
+The CRDT algorithms do not depend on those variants.
 
 ## Undo Planning
 
-`planUndoOps(before, current, batch, {actor, ts})` creates normal CRDT ops that undo a previously applied user-level batch where an inverse can be represented without mutating history.
+`planUndoOps(before, current, batch, {actor, ts})` creates normal CRDT ops that undo a previously applied user-level batch when the inverse can be represented without mutating history.
 
-Supported inverses include:
+Supported inverses:
 
-- inserted characters, by emitting `char:delete` ops for those character ids,
-- block moves, by emitting a newer `block:move` to the previous order/path,
-- block metadata changes, by emitting a newer `block:meta` with the previous metadata and a fresh `ts`,
-- additive marks, by emitting a newer remove mark over the same anchors.
+- inserted chars become `char:delete` ops,
+- block moves become newer `block:move` ops to the previous order/path,
+- block metadata changes become newer `block:meta` ops with previous metadata,
+- additive marks become newer remove marks over the same anchors.
 
-The planner returns `{complete, ops, unsupported}`. Callers should only apply `ops` automatically when `complete` is true. Unsupported cases include character/block deletion, removed-mark undo without previous winning mark data, split records, and join records. Those need either explicit resurrection/unjoin operations or higher-level editor-specific inverse planning.
+The planner returns `{complete, ops, unsupported}`. Apply `ops` automatically only when `complete` is true.
 
-## Formatting
+Unsupported cases include char/block deletion, removed-mark undo without previous winning mark data, split records, and join records. Those require either future resurrection/unjoin operations or higher-level editor-specific inverse planning.
 
-Formatting marks live in the core package because mark coverage depends on split and join semantics. Marks anchor to character ids and can record crossed split ids so coverage follows the user's intended text range after later structural edits.
+## Performance Expectations
 
-`materializeFormattedBlocks(state)` returns visible blocks with formatted text runs. Joined blocks are hidden as blocks, but their visible characters still contribute to the joined text stream. Mark materialization scans marks and character sequences, so expect work proportional to visible characters plus mark coverage. This is suitable for documents with thousands of blocks and substantially more characters; very large documents should cache materialized ranges at the application layer.
+The current target is thousands of blocks and one or two orders of magnitude more characters.
 
-## Identity And Validation
+Expected costs:
 
-Lamport string encodings are map keys, not semantic ordering. Use `compareLamports` or `compareLamportStrings` when ordering ids. Actor ids must not contain `-`, because that character separates Lamport counters from actor ids in the string encoding.
+- applying char insert/delete/move updates char traversal cache incrementally,
+- block moves, block inserts, and joins rebuild block/cache structure,
+- visible block traversal is proportional to visible blocks plus hidden descendants being spliced,
+- formatted materialization scans visible character order and mark coverage.
 
-`validateOp(op)` checks operation shape and Lamport id encoding. It does not prove dependencies are present; dependency readiness is reported by `applyRemote`.
+For very large documents, cache rendered ranges at the application layer and avoid materializing the entire document on every keystroke.
+
+## Migration Notes
+
+This package is still before the first public `block-crdt` release, so the op wire shape can still change. If it changes after publication, migration should be handled at the stored `Op[]` or `State` boundary before calling `cachedState` or `applyRemote`.
+
+Known pre-release changes already made:
+
+- `block:status` was removed in favor of generic timestamped block metadata.
+- missing dependencies are reported as `pending` by remote apply helpers.
+- actor ids containing `-` are invalid.
+- `block-crdt` package subpaths require built ESM `.js` specifiers.
 
 ## Release Checklist
 
@@ -142,7 +238,8 @@ Before publishing a release that includes `umkehr/block-crdt`:
 - run `npm run typecheck`,
 - run `npm run build`,
 - run `npm exec tsc -- -p examples/block-rich-text/tsconfig.json --noEmit`,
+- run `npm run pack:check`,
 - verify package self-imports after build:
   - `node -e "import('umkehr/block-crdt')"`,
   - `node -e "import('umkehr/block-crdt/initialState')"`,
-- review any op wire-shape changes and update import/history migration notes before publishing.
+- review op wire-shape changes and update migration notes before publishing.

@@ -110,3 +110,17 @@
   - `node -e "import('umkehr/block-crdt/initialState').then(m=>console.log(typeof m.initialState))"`
 - Added a release checklist to `src/block-crdt/Readme.md`.
 - Verified publish contents with `npm run pack:check`; the dry-run tarball includes the `dist/src/block-crdt/*` JS and declaration files.
+
+## Phase 10 Documentation
+
+- Replaced the research-note style `src/block-crdt/Readme.md` with a release-facing integration guide.
+- The guide now covers imports, quick start, data model, op wire format, change helpers, apply/pending semantics, split/join behavior, formatting, generic metadata, undo planning, performance expectations, migration notes, and the release checklist.
+- Updated the root `Readme.md` entry point and examples tables to include `umkehr/block-crdt` and `examples/block-rich-text`.
+- Final Phase 10 verification:
+  - `npm exec vitest -- run src/block-crdt/index.test.ts src/block-crdt/formatting.test.ts examples/block-rich-text/src`
+  - `npm run typecheck`
+  - `npm run build`
+  - `npm exec tsc -- -p examples/block-rich-text/tsconfig.json --noEmit`
+  - `node -e "import('umkehr/block-crdt').then(m=>console.log(typeof m.planUndoOps, typeof m.insertTextOps))"`
+  - `node -e "import('umkehr/block-crdt/initialState').then(m=>console.log(typeof m.initialState))"`
+  - `npm run pack:check`
