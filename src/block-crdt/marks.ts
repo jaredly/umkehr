@@ -7,9 +7,11 @@ import {
     orderedCharIdsForBlock,
     visibleBlockOutline,
 } from './traversal';
-import {Block, CachedState, JsonValue, Lamport, Mark, Op, SplitRecord} from './types';
+import {Block, CachedState, JsonValue, Lamport, Mark, Op, SplitRecord, TimestampedBlockMeta} from './types';
 
-export const splitRecordsByLeft = (state: CachedState): Record<string, SplitRecord[]> => {
+export const splitRecordsByLeft = <M extends TimestampedBlockMeta>(
+    state: CachedState<M>,
+): Record<string, SplitRecord[]> => {
     const result: Record<string, SplitRecord[]> = {};
     for (const split of Object.values(state.state.splits)) {
         const left = lamportToString(split.left);
@@ -27,15 +29,15 @@ export type FormattedRun = {
     marks: Record<string, JsonValue | true>;
 };
 
-export type FormattedBlock = {
+export type FormattedBlock<M extends TimestampedBlockMeta = TimestampedBlockMeta> = {
     id: string;
-    block: Block;
+    block: Block<M>;
     runs: FormattedRun[];
     depth: number;
     parentId: string;
 };
 
-export const markOp = (
+export const markOp = <M extends TimestampedBlockMeta = TimestampedBlockMeta>(
     id: Lamport,
     start: Lamport,
     end: Lamport,
@@ -43,7 +45,7 @@ export const markOp = (
     data?: JsonValue,
     remove = false,
     crossedSplits: Lamport[] = [],
-): Op => ({
+): Op<M> => ({
     type: 'mark',
     mark: {
         id,
@@ -56,8 +58,8 @@ export const markOp = (
     },
 });
 
-export const markRange = (
-    state: CachedState,
+export const markRange = <M extends TimestampedBlockMeta = TimestampedBlockMeta>(
+    state: CachedState<M>,
     block: Lamport,
     startOffset: number,
     endOffset: number,
@@ -65,7 +67,7 @@ export const markRange = (
     data: JsonValue | undefined,
     remove: boolean,
     id: Lamport,
-): Op => {
+): Op<M> => {
     if (startOffset >= endOffset) {
         throw new Error(`mark range must not be empty`);
     }
@@ -77,7 +79,9 @@ export const markRange = (
     return markOp(id, start, end, type, data, remove, crossedSplitsBetween(state, start, end));
 };
 
-export const materializeFormattedBlocks = (state: CachedState): FormattedBlock[] => {
+export const materializeFormattedBlocks = <M extends TimestampedBlockMeta>(
+    state: CachedState<M>,
+): FormattedBlock<M>[] => {
     const coveredByMark: Record<string, Mark[]> = {};
     const marks = Object.values(state.state.marks).sort((a, b) => compareLamports(a.id, b.id));
     for (const mark of marks) {
@@ -104,7 +108,11 @@ export const materializeFormattedBlocks = (state: CachedState): FormattedBlock[]
     });
 };
 
-const crossedSplitsBetween = (state: CachedState, start: Lamport, end: Lamport): Lamport[] => {
+const crossedSplitsBetween = <M extends TimestampedBlockMeta>(
+    state: CachedState<M>,
+    start: Lamport,
+    end: Lamport,
+): Lamport[] => {
     const splitRecords = splitRecordsByLeft(state);
     const sequence = allCharIds(state);
     const nextById = nextIdMap(sequence);
@@ -129,7 +137,7 @@ const crossedSplitsBetween = (state: CachedState, start: Lamport, end: Lamport):
     return crossed;
 };
 
-const coveredCharIdsForMark = (state: CachedState, mark: Mark): string[] => {
+const coveredCharIdsForMark = <M extends TimestampedBlockMeta>(state: CachedState<M>, mark: Mark): string[] => {
     const sequence = allCharIds(state);
     const nextById = nextIdMap(sequence);
     const splitRecords = splitRecordsByLeft(state);
@@ -173,7 +181,7 @@ const coveredCharIdsForMark = (state: CachedState, mark: Mark): string[] => {
     return covered;
 };
 
-const allCharIds = (state: CachedState): string[] =>
+const allCharIds = <M extends TimestampedBlockMeta>(state: CachedState<M>): string[] =>
     visibleBlockOutline(state).flatMap(({id}) => orderedCharIdsForBlock(state, id));
 
 const nextIdMap = (sequence: string[]): Record<string, string> => {
@@ -184,7 +192,10 @@ const nextIdMap = (sequence: string[]): Record<string, string> => {
     return result;
 };
 
-const pathForFollowedSplit = (state: CachedState, split: SplitRecord): string[] => {
+const pathForFollowedSplit = <M extends TimestampedBlockMeta>(
+    state: CachedState<M>,
+    split: SplitRecord,
+): string[] => {
     const left = lamportToString(split.left);
     const right = lamportToString(split.right);
     const tail = tailAfterSplitLeft(state, left);
@@ -194,7 +205,7 @@ const pathForFollowedSplit = (state: CachedState, split: SplitRecord): string[] 
     return [left, ...tail, right];
 };
 
-const tailAfterSplitLeft = (state: CachedState, left: string): string[] => {
+const tailAfterSplitLeft = <M extends TimestampedBlockMeta>(state: CachedState<M>, left: string): string[] => {
     const result: string[] = [];
     const seen = new Set<string>();
     const visit = (id: string): boolean => {

@@ -69,3 +69,23 @@
   - `npm exec vitest -- run src/block-crdt/index.test.ts src/block-crdt/formatting.test.ts examples/block-rich-text/src`
   - `npm run typecheck`
   - `npm run build`
+
+## Public API And Metadata Tightening
+
+- Propagated generic block metadata through cache, block path, traversal, formatting, op validation, apply, and change-creation APIs instead of only typing the state container generically.
+- Strengthened custom metadata coverage so generated `insertTextOps`/`splitBlockOps` batches preserve application-specific metadata.
+- Added public `moveBlockOps` for explicit visible outline moves with adjacent sibling anchors and descendant-cycle validation.
+- Updated `examples/block-rich-text` to use public change-creation helpers for text insertion/deletion, split/join, mark creation, and ordinary explicit block moves.
+- Corrected visible move semantics so deleted/joined hidden parents are not public move targets; their visible descendants are treated as logical children of the nearest visible ancestor.
+- Removed the example-local raw `block:move` fallback for moving through hidden parents after `visibleBlockChildren`/`visibleBlockOutline` were updated to flatten hidden descendants into logical visible sibling lists.
+- Added public integration contract documentation to `src/block-crdt/Readme.md`, covering data model, apply results, change helpers, metadata generics, formatting/join behavior, identity validation, and performance expectations.
+- Verified incremental changes with:
+  - `npm exec vitest -- run src/block-crdt/index.test.ts src/block-crdt/formatting.test.ts`
+  - `npm exec vitest -- run examples/block-rich-text/src`
+  - `npm run typecheck`
+- Final verification for this batch:
+  - `npm exec vitest -- run src/block-crdt/index.test.ts src/block-crdt/formatting.test.ts examples/block-rich-text/src`
+  - `npm run typecheck`
+  - `npm run build`
+  - `npm exec tsc -- -p examples/block-rich-text/tsconfig.json --noEmit`
+- `npm run typecheck:examples` still fails before block-rich-text because `examples/react/src/persistence.ts` cannot resolve `umkehr/migration`; this appears unrelated to the block-crdt work.

@@ -407,7 +407,7 @@ describe('block rich text commands', () => {
             {text: 'd', depth: 1},
             {text: 'c', depth: 1},
         ]);
-        expect(materializedBlockParent(result.state, fourth)).toEqual(result.state.state.blocks[second].id);
+        expect(materializedBlockParent(result.state, fourth)).toEqual(result.state.state.blocks[first].id);
         expectCache(result.state);
     });
 
@@ -458,7 +458,7 @@ describe('block rich text commands', () => {
             {text: 'e', depth: 1},
             {text: 'd', depth: 1},
         ]);
-        expect(materializedBlockParent(result.state, fifth)).toEqual(result.state.state.blocks[second].id);
+        expect(materializedBlockParent(result.state, fifth)).toEqual(result.state.state.blocks[first].id);
         expectCache(result.state);
     });
 

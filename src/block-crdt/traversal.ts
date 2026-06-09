@@ -1,10 +1,11 @@
 import {lamportToString} from './ids';
-import {Cache, CachedState, Char, Lamport} from './types';
+import {compareLseqIds} from './lseq';
+import {Cache, CachedState, Char, Lamport, TimestampedBlockMeta} from './types';
 
-export const blockContents = (state: CachedState, id: string): string =>
+export const blockContents = <M extends TimestampedBlockMeta>(state: CachedState<M>, id: string): string =>
     state.cache.charContents[id]?.map((id) => charToString(state, id)).join('') ?? '';
 
-export const charToString = (state: CachedState, id: string): string => {
+export const charToString = <M extends TimestampedBlockMeta>(state: CachedState<M>, id: string): string => {
     const char = charRecord(state, id);
     if (!char) return '';
     return (
@@ -13,7 +14,7 @@ export const charToString = (state: CachedState, id: string): string => {
     );
 };
 
-export const stateToString = (state: CachedState) => {
+export const stateToString = <M extends TimestampedBlockMeta>(state: CachedState<M>) => {
     const {blocks} = state.state;
     const {blockChildren, charContents} = state.cache;
     const showBlock = (id: string): string[] => {
@@ -44,8 +45,8 @@ export const findTail = (char: string, contents: Cache['charContents']) => {
     return char;
 };
 
-export const charRecord = (
-    state: CachedState,
+export const charRecord = <M extends TimestampedBlockMeta>(
+    state: CachedState<M>,
     id: string,
 ): Pick<Char, 'id' | 'text' | 'deleted' | 'parent'> | undefined => {
     const char = state.state.chars[id];
@@ -60,28 +61,16 @@ export const charRecord = (
     };
 };
 
-const visibleBlock = (state: CachedState, id: string): boolean => {
+const visibleBlock = <M extends TimestampedBlockMeta>(state: CachedState<M>, id: string): boolean => {
     const block = state.state.blocks[id];
     return Boolean(block && !block.deleted && !state.cache.joinedBlocks[id]);
 };
 
-export const visibleBlockChildren = (state: CachedState, parent: string): string[] => {
-    const result: string[] = [];
-    const visitChildren = (pid: string, seen: Set<string>) => {
-        if (seen.has(pid)) {
-            throw new Error(`block traversal cycle at ${pid}`);
-        }
-        seen.add(pid);
-        for (const child of state.cache.blockChildren[pid] ?? []) {
-            if (visibleBlock(state, child)) {
-                result.push(child);
-            } else {
-                visitChildren(child, new Set(seen));
-            }
-        }
-    };
-    visitChildren(parent, new Set());
-    return result;
+export const visibleBlockChildren = <M extends TimestampedBlockMeta>(
+    state: CachedState<M>,
+    parent: string,
+): string[] => {
+    return logicalVisibleBlockChildren(state, parent, new Set());
 };
 
 export type VisibleBlockOutlineEntry = {
@@ -90,27 +79,16 @@ export type VisibleBlockOutlineEntry = {
     parentId: string;
 };
 
-export const visibleBlockOutline = (state: CachedState): VisibleBlockOutlineEntry[] => {
+export const visibleBlockOutline = <M extends TimestampedBlockMeta>(
+    state: CachedState<M>,
+): VisibleBlockOutlineEntry[] => {
     const result: VisibleBlockOutlineEntry[] = [];
     const rootId = lamportToString([0, 'root']);
 
-    const visitChildren = (
-        pid: string,
-        depth: number,
-        visibleParentId: string,
-        seen: Set<string>,
-    ) => {
-        if (seen.has(pid)) {
-            throw new Error(`block traversal cycle at ${pid}`);
-        }
-        seen.add(pid);
-        for (const child of state.cache.blockChildren[pid] ?? []) {
-            if (visibleBlock(state, child)) {
-                result.push({id: child, depth, parentId: visibleParentId});
-                visitChildren(child, depth + 1, child, new Set(seen));
-            } else {
-                visitChildren(child, depth, visibleParentId, new Set(seen));
-            }
+    const visitChildren = (pid: string, depth: number, visibleParentId: string, seen: Set<string>) => {
+        for (const child of logicalVisibleBlockChildren(state, pid, seen)) {
+            result.push({id: child, depth, parentId: visibleParentId});
+            visitChildren(child, depth + 1, child, new Set(seen));
         }
     };
 
@@ -118,8 +96,28 @@ export const visibleBlockOutline = (state: CachedState): VisibleBlockOutlineEntr
     return result;
 };
 
-export const orderedCharIdsForBlock = (
-    state: CachedState,
+const logicalVisibleBlockChildren = <M extends TimestampedBlockMeta>(
+    state: CachedState<M>,
+    parent: string,
+    seen: Set<string>,
+): string[] => {
+    if (seen.has(parent)) {
+        throw new Error(`block traversal cycle at ${parent}`);
+    }
+    seen.add(parent);
+    const result: string[] = [];
+    for (const child of state.cache.blockChildren[parent] ?? []) {
+        if (visibleBlock(state, child)) {
+            result.push(child);
+        } else {
+            result.push(...logicalVisibleBlockChildren(state, child, new Set(seen)));
+        }
+    }
+    return result.sort((a, b) => compareLseqIds(state.state.blocks[a].order.index, state.state.blocks[b].order.index));
+};
+
+export const orderedCharIdsForBlock = <M extends TimestampedBlockMeta>(
+    state: CachedState<M>,
     blockId: string,
     options: {visibleOnly?: boolean} = {},
 ): string[] => {
@@ -140,17 +138,24 @@ export const orderedCharIdsForBlock = (
     return result;
 };
 
-export const charAtVisibleOffset = (state: CachedState, block: Lamport, offset: number): Lamport | null => {
+export const charAtVisibleOffset = <M extends TimestampedBlockMeta>(
+    state: CachedState<M>,
+    block: Lamport,
+    offset: number,
+): Lamport | null => {
     const id = orderedCharIdsForBlock(state, lamportToString(block), {visibleOnly: true})[offset];
     return id ? state.state.chars[id].id : null;
 };
 
-export const rootBlockIds = (state: CachedState, includeDeleted = false): string[] =>
+export const rootBlockIds = <M extends TimestampedBlockMeta>(state: CachedState<M>, includeDeleted = false): string[] =>
     includeDeleted
         ? state.cache.blockChildren[lamportToString([0, 'root'])] ?? []
         : visibleBlockChildren(state, lamportToString([0, 'root']));
 
-export const hasJoinStyleParent = (state: CachedState, charId: string): boolean => {
+export const hasJoinStyleParent = <M extends TimestampedBlockMeta>(
+    state: CachedState<M>,
+    charId: string,
+): boolean => {
     if (state.cache.joinSentinels[charId]) {
         return true;
     }

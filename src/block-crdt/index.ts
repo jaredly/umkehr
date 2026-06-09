@@ -26,6 +26,7 @@ export {
     insertTextOps,
     join,
     joinBlocksOps,
+    moveBlockOps,
     setBlockMetaOps,
     split,
     splitBlockOps,

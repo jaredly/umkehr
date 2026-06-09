@@ -3,21 +3,29 @@ import {validateBlockOrderPath} from './blocks';
 import {organizeState} from './cache';
 import {compareLamports, compareLamportStrings, lamportToString} from './ids';
 import {maxLamportCounterForOp} from './ops';
-import {Block, CachedState, Lamport, Op} from './types';
+import {Block, CachedState, DefaultBlockMeta, Lamport, Op, TimestampedBlockMeta} from './types';
 import {blockOrderVersionWins, charParentVersionWins} from './versions';
 
-export type ApplyResult =
-    | {status: 'applied'; state: CachedState}
-    | {status: 'ignored'; state: CachedState; reason: 'stale' | 'duplicate'}
-    | {status: 'pending'; state: CachedState; missing: Lamport[]}
-    | {status: 'invalid'; state: CachedState; error: Error};
+export type ApplyResult<M extends TimestampedBlockMeta = DefaultBlockMeta> =
+    | {status: 'applied'; state: CachedState<M>}
+    | {status: 'ignored'; state: CachedState<M>; reason: 'stale' | 'duplicate'}
+    | {status: 'pending'; state: CachedState<M>; missing: Lamport[]}
+    | {status: 'invalid'; state: CachedState<M>; error: Error};
 
-export const charOp = (text: string, id: Lamport, after: Lamport, ts: string): Op => ({
+export const charOp = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
+    text: string,
+    id: Lamport,
+    after: Lamport,
+    ts: string,
+): Op<M> => ({
     type: 'char',
     char: {text, id, deleted: false, parent: {id: after, ts: ''}},
 });
 
-export const applyRemote = (state: CachedState, op: Op): ApplyResult => {
+export const applyRemote = <M extends TimestampedBlockMeta>(
+    state: CachedState<M>,
+    op: Op<M>,
+): ApplyResult<M> => {
     try {
         const result = apply(state, op);
         if (result === false) {
@@ -31,11 +39,11 @@ export const applyRemote = (state: CachedState, op: Op): ApplyResult => {
     }
 };
 
-export const applyRemoteMany = (state: CachedState, ops: Op[]) => {
-    const applied: Op[] = [];
-    const ignored: {op: Op; reason: 'stale' | 'duplicate'}[] = [];
-    const pending: {op: Op; missing: Lamport[]}[] = [];
-    const invalid: {op: Op; error: Error}[] = [];
+export const applyRemoteMany = <M extends TimestampedBlockMeta>(state: CachedState<M>, ops: Op<M>[]) => {
+    const applied: Op<M>[] = [];
+    const ignored: {op: Op<M>; reason: 'stale' | 'duplicate'}[] = [];
+    const pending: {op: Op<M>; missing: Lamport[]}[] = [];
+    const invalid: {op: Op<M>; error: Error}[] = [];
 
     for (const op of ops) {
         const result = applyRemote(state, op);
@@ -55,14 +63,14 @@ export const applyRemoteMany = (state: CachedState, ops: Op[]) => {
     return {state, applied, ignored, pending, invalid};
 };
 
-export const assertCacheConsistent = (state: CachedState) => {
+export const assertCacheConsistent = <M extends TimestampedBlockMeta>(state: CachedState<M>) => {
     const expected = organizeState(state.state.blocks, state.state.chars, state.state.joins);
     if (!equal(state.cache, expected)) {
         throw new Error(`cached state is inconsistent`);
     }
 };
 
-export const applyStrict = (state: CachedState, op: Op): CachedState => {
+export const applyStrict = <M extends TimestampedBlockMeta>(state: CachedState<M>, op: Op<M>): CachedState<M> => {
     const result = apply(state, op);
     if (result === false) {
         throw new Error(`op was pending`);
@@ -70,7 +78,7 @@ export const applyStrict = (state: CachedState, op: Op): CachedState => {
     return result;
 };
 
-export const apply = (state: CachedState, op: Op): CachedState | false => {
+export const apply = <M extends TimestampedBlockMeta>(state: CachedState<M>, op: Op<M>): CachedState<M> | false => {
     switch (op.type) {
         case 'char':
             return applyChar(state, op);
@@ -95,7 +103,7 @@ export const apply = (state: CachedState, op: Op): CachedState | false => {
     }
 };
 
-export const applyMany = (state: CachedState, ops: Op[]) => {
+export const applyMany = <M extends TimestampedBlockMeta>(state: CachedState<M>, ops: Op<M>[]) => {
     ops.forEach((op) => {
         state = applyStrict(state, op);
     });
@@ -104,7 +112,10 @@ export const applyMany = (state: CachedState, ops: Op[]) => {
 
 export const applyManyStrict = applyMany;
 
-const applyMark = ({state, cache}: CachedState, op: Op & {type: 'mark'}): CachedState | false => {
+const applyMark = <M extends TimestampedBlockMeta>(
+    {state, cache}: CachedState<M>,
+    op: Op<M> & {type: 'mark'},
+): CachedState<M> | false => {
     const id = lamportToString(op.mark.id);
     const current = state.marks[id];
     if (current) {
@@ -123,10 +134,10 @@ const applyMark = ({state, cache}: CachedState, op: Op & {type: 'mark'}): Cached
     };
 };
 
-const applySplitRecord = (
-    {state, cache}: CachedState,
-    op: Op & {type: 'split-record'},
-): CachedState | false => {
+const applySplitRecord = <M extends TimestampedBlockMeta>(
+    {state, cache}: CachedState<M>,
+    op: Op<M> & {type: 'split-record'},
+): CachedState<M> | false => {
     const id = lamportToString(op.split.id);
     const current = state.splits[id];
     if (current) {
@@ -145,10 +156,10 @@ const applySplitRecord = (
     };
 };
 
-const applyJoinRecord = (
-    {state, cache}: CachedState,
-    op: Op & {type: 'join-record'},
-): CachedState | false => {
+const applyJoinRecord = <M extends TimestampedBlockMeta>(
+    {state, cache}: CachedState<M>,
+    op: Op<M> & {type: 'join-record'},
+): CachedState<M> | false => {
     const id = lamportToString(op.join.id);
     const current = state.joins[id];
     if (current) {
@@ -168,10 +179,10 @@ const applyJoinRecord = (
     };
 };
 
-const applyCharDelete = (
-    {state, cache}: CachedState,
-    op: Op & {type: 'char:delete'},
-): CachedState | false => {
+const applyCharDelete = <M extends TimestampedBlockMeta>(
+    {state, cache}: CachedState<M>,
+    op: Op<M> & {type: 'char:delete'},
+): CachedState<M> | false => {
     const {chars, blocks, marks, splits, joins, maxSeenCount} = state;
     const charId = lamportToString(op.id);
     let current = state.chars[charId];
@@ -195,10 +206,10 @@ const applyCharDelete = (
     };
 };
 
-const applyCharMove = (
-    {state, cache}: CachedState,
-    op: Op & {type: 'char:move'},
-): CachedState | false => {
+const applyCharMove = <M extends TimestampedBlockMeta>(
+    {state, cache}: CachedState<M>,
+    op: Op<M> & {type: 'char:move'},
+): CachedState<M> | false => {
     const {chars, blocks, marks, splits, joins, maxSeenCount} = state;
     const charId = lamportToString(op.id);
     let current = state.chars[charId];
@@ -233,10 +244,10 @@ const applyCharMove = (
     };
 };
 
-const applyBlockDelete = (
-    state: CachedState,
-    op: Op & {type: 'block:delete'},
-): CachedState | false => {
+const applyBlockDelete = <M extends TimestampedBlockMeta>(
+    state: CachedState<M>,
+    op: Op<M> & {type: 'block:delete'},
+): CachedState<M> | false => {
     const id = lamportToString(op.id);
     let current = state.state.blocks[id];
     if (!current) {
@@ -256,10 +267,10 @@ const applyBlockDelete = (
     };
 };
 
-const applyBlockMove = (
-    {state, cache}: CachedState,
-    op: Op & {type: 'block:move'},
-): CachedState | false => {
+const applyBlockMove = <M extends TimestampedBlockMeta>(
+    {state, cache}: CachedState<M>,
+    op: Op<M> & {type: 'block:move'},
+): CachedState<M> | false => {
     const id = lamportToString(op.id);
     const current = state.blocks[id];
     if (!current) {
@@ -285,10 +296,10 @@ const applyBlockMove = (
     };
 };
 
-const applyBlockMeta = (
-    {state, cache}: CachedState,
-    op: Op & {type: 'block:meta'},
-): CachedState | false => {
+const applyBlockMeta = <M extends TimestampedBlockMeta>(
+    {state, cache}: CachedState<M>,
+    op: Op<M> & {type: 'block:meta'},
+): CachedState<M> | false => {
     const id = lamportToString(op.id);
     const current = state.blocks[id];
     if (!current) {
@@ -307,7 +318,10 @@ const applyBlockMeta = (
     };
 };
 
-const applyBlock = ({state}: CachedState, {block}: Op & {type: 'block'}): CachedState | false => {
+const applyBlock = <M extends TimestampedBlockMeta>(
+    {state}: CachedState<M>,
+    {block}: Op<M> & {type: 'block'},
+): CachedState<M> | false => {
     const id = lamportToString(block.id);
     const current = state.blocks[id];
     if (current) {
@@ -336,7 +350,10 @@ const applyBlock = ({state}: CachedState, {block}: Op & {type: 'block'}): Cached
     };
 };
 
-const applyChar = ({state, cache}: CachedState, {char}: Op & {type: 'char'}) => {
+const applyChar = <M extends TimestampedBlockMeta>(
+    {state, cache}: CachedState<M>,
+    {char}: Op<M> & {type: 'char'},
+): CachedState<M> | false => {
     const {chars, blocks, marks, splits, joins, maxSeenCount} = state;
     const charId = lamportToString(char.id);
     const current = state.chars[charId];
@@ -401,12 +418,12 @@ const insertSortedRev = (array: string[], item: string) => {
     return array;
 };
 
-const parentExists = (state: CachedState, id: Lamport): boolean => {
+const parentExists = <M extends TimestampedBlockMeta>(state: CachedState<M>, id: Lamport): boolean => {
     const key = lamportToString(id);
     return Boolean(state.state.blocks[key] || state.state.chars[key] || state.cache.joinSentinels[key]);
 };
 
-const missingDependenciesForOp = (state: CachedState, op: Op): Lamport[] => {
+const missingDependenciesForOp = <M extends TimestampedBlockMeta>(state: CachedState<M>, op: Op<M>): Lamport[] => {
     switch (op.type) {
         case 'char':
             return parentExists(state, op.char.parent.id) ? [] : [op.char.parent.id];

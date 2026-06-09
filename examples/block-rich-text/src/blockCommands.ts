@@ -1,21 +1,23 @@
 import equal from 'fast-deep-equal';
 import {
     applyMany,
-    charOp,
-    join,
-    markRange,
+    deleteRangeOps,
+    insertTextOps,
+    joinBlocksOps,
+    markRangeOp,
     materializeFormattedBlocks,
     materializedBlockParent,
     materializedBlockPath,
+    moveBlockOps,
     orderedCharIdsForBlock,
-    split,
+    splitBlockOps,
     visibleBlockChildren,
     visibleBlockOutline,
     type Op,
 } from 'umkehr/block-crdt';
 import {createLseqIdBetween} from 'umkehr/block-crdt/lseq';
 import type {BlockOrderTs, CachedState, Lamport} from 'umkehr/block-crdt/types';
-import {lamportToString, parseLamportString, selPos} from 'umkehr/block-crdt/utils';
+import {lamportToString, parseLamportString} from 'umkehr/block-crdt/utils';
 import {
     caret,
     clampPoint,
@@ -85,11 +87,13 @@ export const deleteBackward = (
 
     const point = focusPoint(selection);
     if (point.offset > 0) {
-        const charId = orderedCharIdsForBlock(state, point.blockId, {visibleOnly: true})[point.offset - 1];
-        if (!charId) return {state, ops: [], selection};
-        const op: Op = {type: 'char:delete', id: state.state.chars[charId].id};
-        const next = applyMany(state, [op]);
-        return {state: next, ops: [op], selection: caret(point.blockId, point.offset - 1)};
+        const ops = deleteRangeOps(state, {
+            block: parseLamportString(point.blockId),
+            startOffset: point.offset - 1,
+            endOffset: point.offset,
+        });
+        const next = applyMany(state, ops);
+        return {state: next, ops, selection: caret(point.blockId, point.offset - 1)};
     }
 
     return joinWithPrevious(state, point.blockId, context);
@@ -106,11 +110,14 @@ export const deleteForward = (
     }
 
     const point = focusPoint(selection);
-    const charId = orderedCharIdsForBlock(state, point.blockId, {visibleOnly: true})[point.offset];
-    if (charId) {
-        const op: Op = {type: 'char:delete', id: state.state.chars[charId].id};
-        const next = applyMany(state, [op]);
-        return {state: next, ops: [op], selection: caret(point.blockId, point.offset)};
+    if (point.offset < pointTextLength(state, point.blockId)) {
+        const ops = deleteRangeOps(state, {
+            block: parseLamportString(point.blockId),
+            startOffset: point.offset,
+            endOffset: point.offset + 1,
+        });
+        const next = applyMany(state, ops);
+        return {state: next, ops, selection: caret(point.blockId, point.offset)};
     }
 
     return joinWithNext(state, point.blockId, context);
@@ -134,22 +141,13 @@ export const splitBlock = (
         }
     }
 
-    const block = parseLamportString(point.blockId);
-    const length = pointTextLength(working, point.blockId);
-    const char =
-        point.offset === 0
-            ? block
-            : point.offset === length
-              ? null
-              : selPos(working, block, point.offset + 1);
-    const previous =
-        point.offset === 0
-            ? null
-            : point.offset >= length
-              ? lastChar(working, point.blockId)
-              : selPos(working, block, point.offset);
     const newBlockId = lamportToString([working.state.maxSeenCount + 1, context.actor]);
-    const splitOps = split(working, {block, char, previous}, context.nextTs(), context.actor);
+    const splitOps = splitBlockOps(working, {
+        actor: context.actor,
+        block: parseLamportString(point.blockId),
+        offset: point.offset,
+        ts: context.nextTs(),
+    });
     const next = applyMany(working, splitOps);
     ops.push(...splitOps);
     return {state: next, ops, selection: caret(newBlockId, 0)};
@@ -189,7 +187,7 @@ export const toggleMark = (
     let working = state;
     const ops: Op[] = [];
     for (const segment of segments) {
-        const op = markRange(
+        const op = markRangeOp(
             working,
             parseLamportString(segment.blockId),
             segment.startOffset,
@@ -220,23 +218,17 @@ export const moveBlock = (
     const resolved = resolveMoveTarget(state, movedBlockId, target);
     if (!resolved) return {state, ops: [], selection: caret(movedBlockId, 0)};
 
-    const nextIndex = createLseqIdBetween(
-        resolved.beforeId ? state.state.blocks[resolved.beforeId].order.index : null,
-        resolved.afterId ? state.state.blocks[resolved.afterId].order.index : null,
-        {actorId: context.actor, counter: state.state.maxSeenCount + 1},
-    );
-    const op: Op = {
-        type: 'block:move',
-        id: current.id,
-        order: {
-            id: [state.state.maxSeenCount + 1, context.actor],
-            path: [...resolved.parentPath, current.id],
-            index: nextIndex,
-            ts: context.nextTs(),
-        },
-    };
-    const next = applyMany(state, [op]);
-    return {state: next, ops: [op], selection: caret(movedBlockId, 0)};
+    const parent = parentFromPath(resolved.parentPath);
+    const ops = moveBlockOps(state, {
+        actor: context.actor,
+        block: current.id,
+        parent,
+        before: resolved.beforeId ? state.state.blocks[resolved.beforeId].id : null,
+        after: resolved.afterId ? state.state.blocks[resolved.afterId].id : null,
+        ts: context.nextTs(),
+    });
+    const next = applyMany(state, ops);
+    return {state: next, ops, selection: caret(movedBlockId, 0)};
 };
 
 const resolveMoveTarget = (
@@ -268,7 +260,8 @@ const resolveMoveTarget = (
     const beforeId = insertIndex > 0 ? siblings[insertIndex - 1] : null;
     const afterId = siblings[insertIndex] ?? null;
     const parentPath = targetParentId === ROOT_ID ? [] : materializedBlockPath(state, targetParentId);
-    const currentParent = lamportToString(materializedBlockParent(state, movedBlockId));
+    const currentParent = visibleParentIdForBlock(state, movedBlockId);
+    if (currentParent === null) return null;
     const currentSiblings = visibleBlockChildren(state, currentParent);
     const currentIndex = currentSiblings.indexOf(movedBlockId);
     const nextSibling = currentSiblings[currentIndex + 1] ?? null;
@@ -288,10 +281,11 @@ const resolveMoveTarget = (
 const isDescendantOrSelf = (state: CachedState, blockId: string, ancestorId: string): boolean =>
     blockId === ancestorId || isDescendantOf(state, blockId, ancestorId);
 
-const rawParentIdForVisibleBlock = (state: CachedState, blockId: string): string | null => {
-    if (!visibleBlockOutline(state).some((item) => item.id === blockId)) return null;
-    return lamportToString(materializedBlockParent(state, blockId));
-};
+const rawParentIdForVisibleBlock = (state: CachedState, blockId: string): string | null =>
+    visibleParentIdForBlock(state, blockId);
+
+const visibleParentIdForBlock = (state: CachedState, blockId: string): string | null =>
+    visibleBlockOutline(state).find((item) => item.id === blockId)?.parentId ?? null;
 
 const isDescendantOf = (state: CachedState, blockId: string, ancestorId: string): boolean => {
     const path = materializedBlockPath(state, blockId).map(lamportToString);
@@ -319,23 +313,16 @@ export const indentBlock = (
 
     const previousChildren = visibleBlockChildren(state, previousBlockId);
     const lastChildId = previousChildren[previousChildren.length - 1] ?? null;
-    const nextIndex = createLseqIdBetween(
-        lastChildId ? state.state.blocks[lastChildId].order.index : null,
-        null,
-        {actorId: context.actor, counter: state.state.maxSeenCount + 1},
-    );
-    const op: Op = {
-        type: 'block:move',
-        id: current.id,
-        order: {
-            id: [state.state.maxSeenCount + 1, context.actor],
-            path: [...materializedBlockPath(state, previousBlockId), current.id],
-            index: nextIndex,
-            ts: context.nextTs(),
-        },
-    };
-    const next = applyMany(state, [op]);
-    return {state: next, ops: [op], selection: caret(blockId, 0)};
+    const ops = moveBlockOps(state, {
+        actor: context.actor,
+        block: current.id,
+        parent: previous.id,
+        before: lastChildId ? state.state.blocks[lastChildId].id : null,
+        after: null,
+        ts: context.nextTs(),
+    });
+    const next = applyMany(state, ops);
+    return {state: next, ops, selection: caret(blockId, 0)};
 };
 
 export const unindentBlock = (
@@ -367,27 +354,17 @@ export const unindentBlock = (
     );
     const parentIndex = grandparentChildren.indexOf(parentId);
     const afterParentId = parentIndex >= 0 ? grandparentChildren[parentIndex + 1] : null;
-    const nextIndex = createLseqIdBetween(
-        parent.order.index,
-        afterParentId ? state.state.blocks[afterParentId].order.index : null,
-        {actorId: context.actor, counter: state.state.maxSeenCount + 1},
-    );
-
     const siblings = visibleBlockChildren(state, parentId);
     const blockIndex = siblings.indexOf(blockId);
     const followingSiblings = blockIndex >= 0 ? siblings.slice(blockIndex + 1) : [];
-    const ops: Op[] = [
-        {
-            type: 'block:move',
-            id: current.id,
-            order: {
-                id: [state.state.maxSeenCount + 1, context.actor],
-                path: [...grandparentPath, current.id],
-                index: nextIndex,
-                ts: context.nextTs(),
-            },
-        },
-    ];
+    const ops: Op[] = moveBlockOps(state, {
+        actor: context.actor,
+        block: current.id,
+        parent: parentFromPath(grandparentPath),
+        before: parent.id,
+        after: afterParentId ? state.state.blocks[afterParentId].id : null,
+        ts: context.nextTs(),
+    });
 
     for (const siblingId of followingSiblings) {
         const sibling = state.state.blocks[siblingId];
@@ -419,12 +396,14 @@ export const joinWithPrevious = (
 
     const previousBlockId = blocks[index - 1];
     const previousLength = pointTextLength(state, previousBlockId);
-    const ops = join(
+    const ops = joinBlocksOps(
         state,
-        parseLamportString(previousBlockId),
-        parseLamportString(blockId),
-        context.nextTs(),
-        context.actor,
+        {
+            actor: context.actor,
+            left: parseLamportString(previousBlockId),
+            right: parseLamportString(blockId),
+            ts: context.nextTs(),
+        },
     );
     const next = applyMany(state, ops);
     return {state: next, ops, selection: caret(previousBlockId, previousLength)};
@@ -443,12 +422,14 @@ export const joinWithNext = (
     }
 
     const currentLength = pointTextLength(state, blockId);
-    const ops = join(
+    const ops = joinBlocksOps(
         state,
-        parseLamportString(blockId),
-        parseLamportString(nextBlockId),
-        context.nextTs(),
-        context.actor,
+        {
+            actor: context.actor,
+            left: parseLamportString(blockId),
+            right: parseLamportString(nextBlockId),
+            ts: context.nextTs(),
+        },
     );
     const next = applyMany(state, ops);
     return {state: next, ops, selection: caret(blockId, currentLength)};
@@ -462,14 +443,13 @@ const insertTextAtPoint = (
 ): {state: CachedState; ops: Op[]; point: BlockPoint} => {
     if (!text) return {state, ops: [], point};
 
-    const block = parseLamportString(point.blockId);
-    let after = selPos(state, block, point.offset);
-    const ops: Op[] = [];
-    for (const segment of segmentText(text)) {
-        const id: Lamport = [state.state.maxSeenCount + ops.length + 1, context.actor];
-        ops.push(charOp(segment, id, after ?? block, context.nextTs()));
-        after = id;
-    }
+    const ops = insertTextOps(state, {
+        actor: context.actor,
+        block: parseLamportString(point.blockId),
+        offset: point.offset,
+        text,
+        ts: context.nextTs,
+    });
     const next = applyMany(state, ops);
     return {
         state: next,
@@ -485,13 +465,13 @@ const deleteSelection = (
     const point = firstPointForSelection(state, selection);
     const ops: Op[] = [];
     for (const segment of normalizeSelectionSegments(state, selection)) {
-        const charIds = orderedCharIdsForBlock(state, segment.blockId, {visibleOnly: true}).slice(
-            segment.startOffset,
-            segment.endOffset,
+        ops.push(
+            ...deleteRangeOps(state, {
+                block: parseLamportString(segment.blockId),
+                startOffset: segment.startOffset,
+                endOffset: segment.endOffset,
+            }),
         );
-        for (const charId of charIds) {
-            ops.push({type: 'char:delete', id: state.state.chars[charId].id});
-        }
     }
     return {state: ops.length ? applyMany(state, ops) : state, ops, point};
 };
@@ -516,12 +496,14 @@ const deleteSelectionAndJoinBoundaries = (
     if (blockRun.length > 1) {
         const survivor = blockRun[0];
         for (const blockId of blockRun.slice(1)) {
-            const joinOps = join(
+            const joinOps = joinBlocksOps(
                 working,
-                parseLamportString(survivor),
-                parseLamportString(blockId),
-                context.nextTs(),
-                context.actor,
+                {
+                    actor: context.actor,
+                    left: parseLamportString(survivor),
+                    right: parseLamportString(blockId),
+                    ts: context.nextTs(),
+                },
             );
             working = applyMany(working, joinOps);
             ops.push(...joinOps);
@@ -550,11 +532,7 @@ const normalizedSelectionSpan = (
     return {start: anchor, end: focus};
 };
 
-const lastChar = (state: CachedState, blockId: string): Lamport | null => {
-    const chars = orderedCharIdsForBlock(state, blockId, {visibleOnly: true});
-    const id = chars[chars.length - 1];
-    return id ? state.state.chars[id].id : null;
-};
+const parentFromPath = (path: Lamport[]): Lamport => path[path.length - 1] ?? ROOT;
 
 const lastBlockOrderTs = (ts: BlockOrderTs) => (typeof ts === 'string' ? ts : ts[2]);
 

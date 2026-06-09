@@ -2,15 +2,15 @@ import {deriveBlockParentsForBlocks} from './blocks';
 import {compareLamportStrings, lamportToString} from './ids';
 import {activeJoinRecords} from './joins';
 import {compareLseqIds} from './lseq';
-import {Block, Cache, CachedState, Char, JoinRecord, State} from './types';
+import {Block, Cache, CachedState, Char, JoinRecord, State, TimestampedBlockMeta} from './types';
 
-export const cachedState = (state: State): CachedState => ({
+export const cachedState = <M extends TimestampedBlockMeta>(state: State<M>): CachedState<M> => ({
     state,
     cache: organizeState(state.blocks, state.chars, state.joins),
 });
 
-export function organizeState(
-    blocks: Record<string, Block>,
+export function organizeState<M extends TimestampedBlockMeta>(
+    blocks: Record<string, Block<M>>,
     chars: Record<string, Char>,
     joins: Record<string, JoinRecord> = {},
 ): Cache {

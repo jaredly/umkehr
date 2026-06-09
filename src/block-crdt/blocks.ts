@@ -1,6 +1,6 @@
 import {compareLamports, lamportToString} from './ids';
 import {compareLseqIds} from './lseq';
-import {Block, CachedState, Lamport, State} from './types';
+import {Block, CachedState, Lamport, State, TimestampedBlockMeta} from './types';
 
 export type BlockParentDerivation = {
     parents: Record<string, string>;
@@ -19,18 +19,27 @@ type BlockParentStrategy = {
 
 export const ROOT_ID = lamportToString([0, 'root']);
 
-const stateBlocks = (state: State | CachedState) => ('cache' in state ? state.state.blocks : state.blocks);
+const stateBlocks = <M extends TimestampedBlockMeta>(state: State<M> | CachedState<M>) =>
+    'cache' in state ? state.state.blocks : state.blocks;
 
-export const materializedBlockPaths = (state: State | CachedState): Record<string, Lamport[]> =>
+export const materializedBlockPaths = <M extends TimestampedBlockMeta>(
+    state: State<M> | CachedState<M>,
+): Record<string, Lamport[]> =>
     materializedBlockPathsFromParents(stateBlocks(state), deriveBlockParentsForBlocks(stateBlocks(state)).parents);
 
-export const materializedBlockPath = (state: State | CachedState, blockId: string): Lamport[] => {
+export const materializedBlockPath = <M extends TimestampedBlockMeta>(
+    state: State<M> | CachedState<M>,
+    blockId: string,
+): Lamport[] => {
     const blocks = stateBlocks(state);
     const parents = deriveBlockParentsForBlocks(blocks).parents;
     return materializedBlockPathFromParents(blocks, parents, blockId);
 };
 
-export const materializedBlockParent = (state: State | CachedState, blockId: string): Lamport => {
+export const materializedBlockParent = <M extends TimestampedBlockMeta>(
+    state: State<M> | CachedState<M>,
+    blockId: string,
+): Lamport => {
     const blocks = stateBlocks(state);
     const parent = deriveBlockParentsForBlocks(blocks).parents[blockId];
     if (parent === undefined) {
@@ -39,7 +48,9 @@ export const materializedBlockParent = (state: State | CachedState, blockId: str
     return parent === ROOT_ID ? [0, 'root'] : blocks[parent].id;
 };
 
-const deriveBlockParentsBaseline = (blocks: Record<string, Block>): BlockParentDerivationWithPaths => {
+const deriveBlockParentsBaseline = <M extends TimestampedBlockMeta>(
+    blocks: Record<string, Block<M>>,
+): BlockParentDerivationWithPaths => {
     const rawParent: Record<string, string | null> = {};
     const rejectedRoot = new Set<string>();
 
@@ -106,7 +117,9 @@ const deriveBlockParentsBaseline = (blocks: Record<string, Block>): BlockParentD
     };
 };
 
-const deriveBlockParentsLinear = (blocks: Record<string, Block>): BlockParentDerivation => {
+const deriveBlockParentsLinear = <M extends TimestampedBlockMeta>(
+    blocks: Record<string, Block<M>>,
+): BlockParentDerivation => {
     const rawParents: Record<string, string | null> = {};
     for (const [id, block] of Object.entries(blocks)) {
         const valid = validateBlockOrderPath(blocks, id, block.order);
@@ -121,7 +134,9 @@ const deriveBlockParentsLinear = (blocks: Record<string, Block>): BlockParentDer
     return parentDerivationFromRawParents(blocks, rawParents);
 };
 
-const deriveBlockParentsLinearStringCached = (blocks: Record<string, Block>): BlockParentDerivation => {
+const deriveBlockParentsLinearStringCached = <M extends TimestampedBlockMeta>(
+    blocks: Record<string, Block<M>>,
+): BlockParentDerivation => {
     const rawParents: Record<string, string | null> = {};
     const pathIdsByBlock: Record<string, string[]> = {};
     for (const [id, block] of Object.entries(blocks)) {
@@ -133,7 +148,9 @@ const deriveBlockParentsLinearStringCached = (blocks: Record<string, Block>): Bl
     return parentDerivationFromRawParents(blocks, rawParents);
 };
 
-const deriveBlockParentsLinearSummary = (blocks: Record<string, Block>): BlockParentDerivation => {
+const deriveBlockParentsLinearSummary = <M extends TimestampedBlockMeta>(
+    blocks: Record<string, Block<M>>,
+): BlockParentDerivation => {
     const rawParents: Record<string, string | null> = {};
     for (const [id, block] of Object.entries(blocks)) {
         rawParents[id] = validateBlockOrderPathSummary(blocks, id, block.order.path);
@@ -143,8 +160,8 @@ const deriveBlockParentsLinearSummary = (blocks: Record<string, Block>): BlockPa
 
 export const deriveBlockParentsForBlocks = deriveBlockParentsLinearSummary;
 
-const parentDerivationFromRawParents = (
-    blocks: Record<string, Block>,
+const parentDerivationFromRawParents = <M extends TimestampedBlockMeta>(
+    blocks: Record<string, Block<M>>,
     rawParents: Record<string, string | null>,
 ): BlockParentDerivation => {
     const rejectedRoots = rejectedRootsForRawParents(blocks, rawParents);
@@ -155,8 +172,8 @@ const parentDerivationFromRawParents = (
     return {parents, rawParents, rejectedRoots};
 };
 
-const rejectedRootsForRawParents = (
-    blocks: Record<string, Block>,
+const rejectedRootsForRawParents = <M extends TimestampedBlockMeta>(
+    blocks: Record<string, Block<M>>,
     rawParents: Record<string, string | null>,
 ): Set<string> => {
     const rejectedRoots = new Set<string>();
@@ -204,8 +221,8 @@ const parentsFromPaths = (paths: Record<string, Lamport[]>): Record<string, stri
     return parents;
 };
 
-const materializedBlockPathsFromParents = (
-    blocks: Record<string, Block>,
+const materializedBlockPathsFromParents = <M extends TimestampedBlockMeta>(
+    blocks: Record<string, Block<M>>,
     parents: Record<string, string>,
 ): Record<string, Lamport[]> => {
     const memo: Record<string, Lamport[]> = {};
@@ -215,8 +232,8 @@ const materializedBlockPathsFromParents = (
     return memo;
 };
 
-const materializedBlockPathFromParents = (
-    blocks: Record<string, Block>,
+const materializedBlockPathFromParents = <M extends TimestampedBlockMeta>(
+    blocks: Record<string, Block<M>>,
     parents: Record<string, string>,
     blockId: string,
     memo: Record<string, Lamport[]> = {},
@@ -236,8 +253,8 @@ const materializedBlockPathFromParents = (
     return path;
 };
 
-const validateBlockOrderPathIds = (
-    blocks: Record<string, Block>,
+const validateBlockOrderPathIds = <M extends TimestampedBlockMeta>(
+    blocks: Record<string, Block<M>>,
     blockId: string,
     pathIds: string[],
 ) => {
@@ -262,8 +279,8 @@ const validateBlockOrderPathIds = (
     }
 };
 
-const validateBlockOrderPathSummary = (
-    blocks: Record<string, Block>,
+const validateBlockOrderPathSummary = <M extends TimestampedBlockMeta>(
+    blocks: Record<string, Block<M>>,
     blockId: string,
     path: Lamport[],
 ): string | null => {
@@ -295,8 +312,8 @@ const validateBlockOrderPathSummary = (
     return previous;
 };
 
-export const validateBlockOrderPath = (
-    blocks: Record<string, Block>,
+export const validateBlockOrderPath = <M extends TimestampedBlockMeta>(
+    blocks: Record<string, Block<M>>,
     blockId: string,
     order: Block['order'],
 ): false | void => {

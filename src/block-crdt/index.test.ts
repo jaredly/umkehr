@@ -33,6 +33,7 @@ import {
     deleteRangeOps,
     splitBlockOps,
     joinBlocksOps,
+    moveBlockOps,
     setBlockMetaOps,
     validateOp,
     assertCacheConsistent,
@@ -1425,6 +1426,34 @@ it('creates public block metadata ops', () => {
     expect(state.state.blocks['0000-self'].meta).toEqual({type: 'blockquote', ts: '00002'});
 });
 
+it('creates public block move ops', () => {
+    let state = cachedState(initialState('self', '00001'));
+    const ts = mts(2);
+    state = applyMany(
+        state,
+        insertTextOps(state, {actor: 'alice', block: [0, 'self'], offset: 0, text: 'one', ts}),
+    );
+    state = applyMany(state, splitBlockOps(state, {actor: 'alice', block: [0, 'self'], offset: 3, ts: ts()}));
+    const [first, second] = rootBlockIds(state).map(parseLamportString);
+    state = applyMany(
+        state,
+        insertTextOps(state, {actor: 'alice', block: second, offset: 0, text: 'two', ts}),
+    );
+
+    const ops = moveBlockOps(state, {
+        actor: 'alice',
+        block: second,
+        parent: [0, 'root'],
+        before: null,
+        after: first,
+        ts: ts(),
+        options: {random: () => 0},
+    });
+
+    state = applyMany(state, ops);
+    expect(blockLines(state)).toEqual(['two', 'one']);
+});
+
 it('supports custom timestamped block metadata in state and block meta ops', () => {
     type CustomMeta = {ts: string; kind: 'task'; priority: number};
     let state = cachedState(
@@ -1438,6 +1467,26 @@ it('supports custom timestamped block metadata in state and block meta ops', () 
     }) as typeof state;
 
     expect(state.state.blocks['0000-self'].meta).toEqual({
+        ts: '00002',
+        kind: 'task',
+        priority: 2,
+    });
+
+    state = applyMany(
+        state,
+        insertTextOps(state, {actor: 'self', block: [0, 'self'], offset: 0, text: 'ab', ts: mts(3)}),
+    );
+    const splitOps = splitBlockOps(state, {
+        actor: 'self',
+        block: [0, 'self'],
+        offset: 1,
+        ts: '00005',
+        options: {random: () => 0},
+    });
+
+    state = applyMany(state, splitOps);
+    const [, rightBlockId] = rootBlockIds(state);
+    expect(state.state.blocks[rightBlockId].meta).toEqual({
         ts: '00002',
         kind: 'task',
         priority: 2,

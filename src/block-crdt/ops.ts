@@ -1,11 +1,11 @@
 import {compareLamports, validateLamport} from './ids';
-import {Char, Lamport, Op} from './types';
+import {Char, Lamport, Op, TimestampedBlockMeta} from './types';
 
 export type ValidationResult =
     | {valid: true}
     | {valid: false; errors: string[]};
 
-export const validateOp = (op: Op): ValidationResult => {
+export const validateOp = <M extends TimestampedBlockMeta>(op: Op<M>): ValidationResult => {
     const errors: string[] = [];
     for (const lamport of lamportsForOp(op)) {
         try {
@@ -32,7 +32,7 @@ export const validateOp = (op: Op): ValidationResult => {
     return errors.length ? {valid: false, errors} : {valid: true};
 };
 
-export const maxLamportCounterForOp = (op: Op): number => {
+export const maxLamportCounterForOp = <M extends TimestampedBlockMeta>(op: Op<M>): number => {
     switch (op.type) {
         case 'char':
             return Math.max(
@@ -71,7 +71,7 @@ export const maxLamportCounterForOp = (op: Op): number => {
 const lamportsInCharParentTs = (ts: Char['parent']['ts']): Lamport[] =>
     Array.isArray(ts) ? ts[1] : [];
 
-const lamportsForOp = (op: Op): Lamport[] => {
+const lamportsForOp = <M extends TimestampedBlockMeta>(op: Op<M>): Lamport[] => {
     switch (op.type) {
         case 'char':
             return [op.char.id, op.char.parent.id, ...lamportsInCharParentTs(op.char.parent.ts)];
