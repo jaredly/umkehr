@@ -1,13 +1,13 @@
 import equal from 'fast-deep-equal';
-import {compareLamports, lamportToString} from './ids';
+import {compareLamports, lamportToString} from './ids.js';
 import {
     charAtVisibleOffset,
     charRecord,
     hasJoinStyleParent,
     orderedCharIdsForBlock,
     visibleBlockOutline,
-} from './traversal';
-import {Block, CachedState, JsonValue, Lamport, Mark, Op, SplitRecord, TimestampedBlockMeta} from './types';
+} from './traversal.js';
+import {Block, CachedState, JsonValue, Lamport, Mark, Op, SplitRecord, TimestampedBlockMeta} from './types.js';
 
 export const splitRecordsByLeft = <M extends TimestampedBlockMeta>(
     state: CachedState<M>,

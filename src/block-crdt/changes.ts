@@ -1,15 +1,15 @@
-import {applyMany, charOp} from './apply';
-import {ROOT_ID, materializedBlockParent, materializedBlockPath} from './blocks';
-import {lamportToString, parseLamportString} from './ids';
-import {createLseqIdBetween, LseqOptions} from './lseq';
+import {applyMany, charOp} from './apply.js';
+import {ROOT_ID, materializedBlockParent, materializedBlockPath} from './blocks.js';
+import {lamportToString, parseLamportString} from './ids.js';
+import {createLseqIdBetween, LseqOptions} from './lseq.js';
 import {
     charAtVisibleOffset,
     charRecord,
     findTail,
     orderedCharIdsForBlock,
     visibleBlockChildren,
-} from './traversal';
-import {Block, CachedState, Char, DefaultBlockMeta, HLC, Lamport, Op, TimestampedBlockMeta} from './types';
+} from './traversal.js';
+import {Block, CachedState, Char, DefaultBlockMeta, HLC, Lamport, Op, TimestampedBlockMeta} from './types.js';
 
 export const addChars = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
     state: CachedState<M>,

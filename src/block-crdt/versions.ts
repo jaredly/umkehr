@@ -1,6 +1,6 @@
-import {compareLamports} from './ids';
-import {compareLseqIds} from './lseq';
-import {Block, Char} from './types';
+import {compareLamports} from './ids.js';
+import {compareLseqIds} from './lseq.js';
+import {Block, Char} from './types.js';
 
 export const compareCharParentVersions = (
     one: Char['parent']['ts'],

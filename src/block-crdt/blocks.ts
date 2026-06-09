@@ -1,6 +1,6 @@
-import {compareLamports, lamportToString} from './ids';
-import {compareLseqIds} from './lseq';
-import {Block, CachedState, Lamport, State, TimestampedBlockMeta} from './types';
+import {compareLamports, lamportToString} from './ids.js';
+import {compareLseqIds} from './lseq.js';
+import {Block, CachedState, Lamport, State, TimestampedBlockMeta} from './types.js';
 
 export type BlockParentDerivation = {
     parents: Record<string, string>;

@@ -18,7 +18,7 @@ export type {
     SplitRecord,
     State,
     TimestampedBlockMeta,
-} from './types';
+} from './types.js';
 
 export {
     addChars,
@@ -30,7 +30,7 @@ export {
     setBlockMetaOps,
     split,
     splitBlockOps,
-} from './changes';
+} from './changes.js';
 
 export {
     apply,
@@ -41,33 +41,33 @@ export {
     applyStrict,
     assertCacheConsistent,
     charOp,
-} from './apply';
-export type {ApplyResult} from './apply';
+} from './apply.js';
+export type {ApplyResult} from './apply.js';
 
 export {
     blockParentStrategiesForStress,
     materializedBlockParent,
     materializedBlockPath,
     materializedBlockPaths,
-} from './blocks';
+} from './blocks.js';
 
 export {
     cachedState,
     organizeState,
-} from './cache';
+} from './cache.js';
 
 export {
     compareLamports,
     compareLamportStrings,
     lamportToString,
     parseLamportString,
-} from './ids';
+} from './ids.js';
 
 export {
     activeJoinByRightBlock,
     activeJoinRecords,
     joinedBlockIds,
-} from './joins';
+} from './joins.js';
 
 export {
     markOp,
@@ -75,13 +75,18 @@ export {
     markRange as markRangeOp,
     materializeFormattedBlocks,
     splitRecordsByLeft,
-} from './marks';
-export type {FormattedBlock, FormattedRun} from './marks';
+} from './marks.js';
+export type {FormattedBlock, FormattedRun} from './marks.js';
 
 export {
     maxLamportCounterForOp,
     validateOp,
-} from './ops';
+} from './ops.js';
+
+export {
+    planUndoOps,
+} from './undo.js';
+export type {UndoPlan, UndoUnsupported} from './undo.js';
 
 export {
     blockContents,
@@ -93,12 +98,12 @@ export {
     stateToString,
     visibleBlockChildren,
     visibleBlockOutline,
-} from './traversal';
-export type {VisibleBlockOutlineEntry} from './traversal';
+} from './traversal.js';
+export type {VisibleBlockOutlineEntry} from './traversal.js';
 
 export {
     blockOrderVersionWins,
     charParentVersionWins,
     compareBlockOrderVersions,
     compareCharParentVersions,
-} from './versions';
+} from './versions.js';

@@ -1,7 +1,7 @@
-import {CachedState, Lamport} from './types';
-import {lamportToString} from './ids';
+import {CachedState, Lamport} from './types.js';
+import {lamportToString} from './ids.js';
 
-export {assertActorId, lamportToString, parseLamportString, validateLamport} from './ids';
+export {assertActorId, lamportToString, parseLamportString, validateLamport} from './ids.js';
 
 export const selPos = (
     {state, cache}: CachedState,

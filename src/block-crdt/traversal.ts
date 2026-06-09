@@ -1,6 +1,6 @@
-import {lamportToString} from './ids';
-import {compareLseqIds} from './lseq';
-import {Cache, CachedState, Char, Lamport, TimestampedBlockMeta} from './types';
+import {lamportToString} from './ids.js';
+import {compareLseqIds} from './lseq.js';
+import {Cache, CachedState, Char, Lamport, TimestampedBlockMeta} from './types.js';
 
 export const blockContents = <M extends TimestampedBlockMeta>(state: CachedState<M>, id: string): string =>
     state.cache.charContents[id]?.map((id) => charToString(state, id)).join('') ?? '';

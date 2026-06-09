@@ -1,5 +1,5 @@
-import {State, TimestampedBlockMeta} from './types';
-import {lamportToString} from './ids';
+import {State, TimestampedBlockMeta} from './types.js';
+import {lamportToString} from './ids.js';
 
 export const initialState = (session: string, ts: string): State => ({
     chars: {},

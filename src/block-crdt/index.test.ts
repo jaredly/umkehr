@@ -35,6 +35,9 @@ import {
     joinBlocksOps,
     moveBlockOps,
     setBlockMetaOps,
+    markRangeOp,
+    materializeFormattedBlocks,
+    planUndoOps,
     validateOp,
     assertCacheConsistent,
 } from './index';
@@ -1491,6 +1494,99 @@ it('supports custom timestamped block metadata in state and block meta ops', () 
         kind: 'task',
         priority: 2,
     });
+});
+
+it('plans undo for inserted chars without removing concurrent remote chars', () => {
+    const localTs = mts(2);
+    const remoteTs = mts(20);
+    const before = cachedState(initialState('self', '00001'));
+    const local = insertTextOps(before, {
+        actor: 'alice',
+        block: [0, 'self'],
+        offset: 0,
+        text: 'ab',
+        ts: localTs,
+    });
+    let current = applyMany(before, local);
+    current = applyMany(
+        current,
+        insertTextOps(current, {
+            actor: 'bob',
+            block: [0, 'self'],
+            offset: 1,
+            text: 'X',
+            ts: remoteTs,
+        }),
+    );
+
+    const undo = planUndoOps(before, current, local, {actor: 'alice', ts: mts(30)});
+
+    expect(undo.complete).toBe(true);
+    expect(undo.ops.map((op) => op.type)).toEqual(['char:delete', 'char:delete']);
+    current = applyMany(current, undo.ops);
+    expect(blockLines(current)).toEqual(['X']);
+});
+
+it('plans undo for block move and metadata batches', () => {
+    const ts = mts(2);
+    let state = cachedState(initialState('self', '00001'));
+    state = applyMany(state, insertTextOps(state, {actor: 'alice', block: [0, 'self'], offset: 0, text: 'ab', ts}));
+    state = applyMany(state, splitBlockOps(state, {actor: 'alice', block: [0, 'self'], offset: 1, ts: ts()}));
+    const before = state;
+    const [left, right] = rootBlockIds(state).map(parseLamportString);
+    const batch: Op[] = [
+        ...moveBlockOps(state, {
+            actor: 'alice',
+            block: right,
+            parent: [0, 'root'],
+            before: null,
+            after: left,
+            ts: ts(),
+        }),
+        ...setBlockMetaOps(state, {block: left, meta: {type: 'blockquote', ts: ts()}}),
+    ];
+
+    state = applyMany(state, batch);
+    expect(blockLines(state)).toEqual(['b', 'a']);
+    expect(state.state.blocks[lamportToString(left)].meta.type).toBe('blockquote');
+
+    const undo = planUndoOps(before, state, batch, {actor: 'alice', ts: mts(40)});
+
+    expect(undo.complete).toBe(true);
+    state = applyMany(state, undo.ops);
+    expect(blockLines(state)).toEqual(['a', 'b']);
+    expect(state.state.blocks[lamportToString(left)].meta.type).toBe('paragraph');
+});
+
+it('plans undo for additive marks with normal mark ops', () => {
+    const ts = mts(2);
+    let state = cachedState(initialState('self', '00001'));
+    state = applyMany(state, insertTextOps(state, {actor: 'alice', block: [0, 'self'], offset: 0, text: 'abc', ts}));
+    const before = state;
+    const mark = markRangeOp(state, [0, 'self'], 0, 3, 'bold', undefined, false, [10, 'alice']);
+    state = applyMany(state, [mark]);
+    expect(materializeFormattedBlocks(state)[0].runs).toEqual([{text: 'abc', marks: {bold: true}}]);
+
+    const undo = planUndoOps(before, state, [mark], {actor: 'alice', ts: mts(20)});
+
+    expect(undo.complete).toBe(true);
+    state = applyMany(state, undo.ops);
+    expect(materializeFormattedBlocks(state)[0].runs).toEqual([{text: 'abc', marks: {}}]);
+});
+
+it('reports unsupported undo cases instead of producing unsafe inverses', () => {
+    const ts = mts(2);
+    let state = cachedState(initialState('self', '00001'));
+    state = applyMany(state, insertTextOps(state, {actor: 'alice', block: [0, 'self'], offset: 0, text: 'abc', ts}));
+    const before = state;
+    const deletion = deleteRangeOps(state, {block: [0, 'self'], startOffset: 1, endOffset: 2});
+    state = applyMany(state, deletion);
+
+    const undo = planUndoOps(before, state, deletion, {actor: 'alice', ts: mts(20)});
+
+    expect(undo.complete).toBe(false);
+    expect(undo.ops).toEqual([]);
+    expect(undo.unsupported[0].reason).toContain('resurrection');
 });
 
 it('inserts grapheme clusters as visible text', () => {

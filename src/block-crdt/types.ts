@@ -1,4 +1,4 @@
-import {LseqId} from './lseq';
+import {LseqId} from './lseq.js';
 
 export type Lamport = [number, string];
 export type HLC = string;

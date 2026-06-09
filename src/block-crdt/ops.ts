@@ -1,5 +1,5 @@
-import {compareLamports, validateLamport} from './ids';
-import {Char, Lamport, Op, TimestampedBlockMeta} from './types';
+import {compareLamports, validateLamport} from './ids.js';
+import {Char, Lamport, Op, TimestampedBlockMeta} from './types.js';
 
 export type ValidationResult =
     | {valid: true}

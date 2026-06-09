@@ -1,5 +1,5 @@
-import {compareLamports, lamportToString} from './ids';
-import {CachedState, JoinRecord, State} from './types';
+import {compareLamports, lamportToString} from './ids.js';
+import {CachedState, JoinRecord, State} from './types.js';
 
 export const activeJoinRecords = (joins: Record<string, JoinRecord>): JoinRecord[] => {
     const active: JoinRecord[] = [];

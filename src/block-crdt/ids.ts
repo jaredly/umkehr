@@ -1,4 +1,4 @@
-import {Lamport} from './types';
+import {Lamport} from './types.js';
 
 export const lamportToString = (lamport: Lamport) => {
     validateLamport(lamport);

@@ -89,3 +89,24 @@
   - `npm run build`
   - `npm exec tsc -- -p examples/block-rich-text/tsconfig.json --noEmit`
 - `npm run typecheck:examples` still fails before block-rich-text because `examples/react/src/persistence.ts` cannot resolve `umkehr/migration`; this appears unrelated to the block-crdt work.
+
+## Undo Planning
+
+- Added `src/block-crdt/undo.ts` with `planUndoOps(before, current, batch, {actor, ts})`.
+- The planner emits ordinary CRDT ops for supported inverses: inserted chars, block moves, block metadata changes, and additive marks.
+- The planner returns explicit unsupported entries for unsafe/inexpressible inverses such as char/block deletion, split records, join records, and remove-mark undo without prior winning mark data.
+- Added tests for undoing local inserted chars after a concurrent remote insert, block move plus metadata undo, additive mark undo, and unsupported deletion undo.
+- Verified with:
+  - `npm exec vitest -- run src/block-crdt/index.test.ts src/block-crdt/formatting.test.ts examples/block-rich-text/src`
+  - `npm run typecheck`
+  - `npm run build`
+
+## Release Readiness
+
+- Added `./block-crdt` and `./block-crdt/*` package exports so published consumers can import `umkehr/block-crdt` and support modules.
+- Updated block-crdt source modules to use `.js` relative ESM specifiers so built package output can be loaded directly by Node.
+- Verified package self-imports after build:
+  - `node -e "import('umkehr/block-crdt').then(m=>console.log(typeof m.planUndoOps, typeof m.insertTextOps))"`
+  - `node -e "import('umkehr/block-crdt/initialState').then(m=>console.log(typeof m.initialState))"`
+- Added a release checklist to `src/block-crdt/Readme.md`.
+- Verified publish contents with `npm run pack:check`; the dry-run tarball includes the `dist/src/block-crdt/*` JS and declaration files.

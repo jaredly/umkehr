@@ -1,8 +1,8 @@
-import {deriveBlockParentsForBlocks} from './blocks';
-import {compareLamportStrings, lamportToString} from './ids';
-import {activeJoinRecords} from './joins';
-import {compareLseqIds} from './lseq';
-import {Block, Cache, CachedState, Char, JoinRecord, State, TimestampedBlockMeta} from './types';
+import {deriveBlockParentsForBlocks} from './blocks.js';
+import {compareLamportStrings, lamportToString} from './ids.js';
+import {activeJoinRecords} from './joins.js';
+import {compareLseqIds} from './lseq.js';
+import {Block, Cache, CachedState, Char, JoinRecord, State, TimestampedBlockMeta} from './types.js';
 
 export const cachedState = <M extends TimestampedBlockMeta>(state: State<M>): CachedState<M> => ({
     state,

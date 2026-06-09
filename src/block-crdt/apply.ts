@@ -1,10 +1,10 @@
 import equal from 'fast-deep-equal';
-import {validateBlockOrderPath} from './blocks';
-import {organizeState} from './cache';
-import {compareLamports, compareLamportStrings, lamportToString} from './ids';
-import {maxLamportCounterForOp} from './ops';
-import {Block, CachedState, DefaultBlockMeta, Lamport, Op, TimestampedBlockMeta} from './types';
-import {blockOrderVersionWins, charParentVersionWins} from './versions';
+import {validateBlockOrderPath} from './blocks.js';
+import {organizeState} from './cache.js';
+import {compareLamports, compareLamportStrings, lamportToString} from './ids.js';
+import {maxLamportCounterForOp} from './ops.js';
+import {Block, CachedState, DefaultBlockMeta, Lamport, Op, TimestampedBlockMeta} from './types.js';
+import {blockOrderVersionWins, charParentVersionWins} from './versions.js';
 
 export type ApplyResult<M extends TimestampedBlockMeta = DefaultBlockMeta> =
     | {status: 'applied'; state: CachedState<M>}

@@ -109,6 +109,19 @@ type CustomMeta = {ts: string; kind: 'task'; priority: number};
 
 The default metadata union includes paragraph, blockquote, bullets, and checkboxes for the demo editor, but the CRDT algorithms do not depend on those variants. `block:meta` conflict resolution compares `meta.ts`.
 
+## Undo Planning
+
+`planUndoOps(before, current, batch, {actor, ts})` creates normal CRDT ops that undo a previously applied user-level batch where an inverse can be represented without mutating history.
+
+Supported inverses include:
+
+- inserted characters, by emitting `char:delete` ops for those character ids,
+- block moves, by emitting a newer `block:move` to the previous order/path,
+- block metadata changes, by emitting a newer `block:meta` with the previous metadata and a fresh `ts`,
+- additive marks, by emitting a newer remove mark over the same anchors.
+
+The planner returns `{complete, ops, unsupported}`. Callers should only apply `ops` automatically when `complete` is true. Unsupported cases include character/block deletion, removed-mark undo without previous winning mark data, split records, and join records. Those need either explicit resurrection/unjoin operations or higher-level editor-specific inverse planning.
+
 ## Formatting
 
 Formatting marks live in the core package because mark coverage depends on split and join semantics. Marks anchor to character ids and can record crossed split ids so coverage follows the user's intended text range after later structural edits.
@@ -120,3 +133,16 @@ Formatting marks live in the core package because mark coverage depends on split
 Lamport string encodings are map keys, not semantic ordering. Use `compareLamports` or `compareLamportStrings` when ordering ids. Actor ids must not contain `-`, because that character separates Lamport counters from actor ids in the string encoding.
 
 `validateOp(op)` checks operation shape and Lamport id encoding. It does not prove dependencies are present; dependency readiness is reported by `applyRemote`.
+
+## Release Checklist
+
+Before publishing a release that includes `umkehr/block-crdt`:
+
+- run `npm exec vitest -- run src/block-crdt/index.test.ts src/block-crdt/formatting.test.ts examples/block-rich-text/src`,
+- run `npm run typecheck`,
+- run `npm run build`,
+- run `npm exec tsc -- -p examples/block-rich-text/tsconfig.json --noEmit`,
+- verify package self-imports after build:
+  - `node -e "import('umkehr/block-crdt')"`,
+  - `node -e "import('umkehr/block-crdt/initialState')"`,
+- review any op wire-shape changes and update import/history migration notes before publishing.
