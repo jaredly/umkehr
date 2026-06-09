@@ -1,9 +1,11 @@
 import {describe, expect, it} from 'vitest';
+import {readFileSync} from 'node:fs';
 import {materializeFormattedBlocks} from 'umkehr/block-crdt';
 import {indentBlock} from './blockCommands';
 import {makeCommandContext, type EditorId, type Replica} from './blockEditorRuntime';
 import {
     appendHistoryAction,
+    appendHistoryKeystroke,
     buildHistorySnapshot,
     initialHistoryState,
     parseHistoryExport,
@@ -45,6 +47,12 @@ const visibleText = (replica: Replica): string[] =>
     materializeFormattedBlocks(replica.state).map((block) =>
         block.runs.map((run) => run.text).join(''),
     );
+
+const visibleOutline = (replica: Replica): Array<{text: string; depth: number}> =>
+    materializeFormattedBlocks(replica.state).map((block) => ({
+        text: block.runs.map((run) => run.text).join(''),
+        depth: block.depth,
+    }));
 
 const paste = (text: string) => (replica: Replica) =>
     pastePlainTextEverywhere(replica.state, replica.selection, text, makeCommandContext(replica));
@@ -94,11 +102,23 @@ describe('block rich text history', () => {
         let history = initialHistoryState();
         history = appendLocal(history, 'left', insert('a'));
         history = appendLocal(history, 'left', insert('b'));
+        history = appendHistoryKeystroke(history, {
+            editorId: 'left',
+            blockId: 'block',
+            key: 'ArrowLeft',
+            code: 'ArrowLeft',
+            altKey: false,
+            ctrlKey: false,
+            metaKey: false,
+            shiftKey: false,
+            repeat: false,
+        });
         history = setHistoryCursor(history, 1);
         history = appendLocal(history, 'left', insert('c'));
 
         expect(history.actions).toHaveLength(2);
         expect(history.cursor).toBe(2);
+        expect(history.keystrokes).toHaveLength(0);
         expect(visibleText(replayHistory(history.actions, history.cursor).left)).toEqual(['ac']);
     });
 
@@ -120,6 +140,17 @@ describe('block rich text history', () => {
     it('serializes with a final snapshot and imports at the end', () => {
         let history = initialHistoryState();
         history = appendLocal(history, 'left', paste('one\ntwo'));
+        history = appendHistoryKeystroke(history, {
+            editorId: 'left',
+            blockId: 'block',
+            key: 'Enter',
+            code: 'Enter',
+            altKey: false,
+            ctrlKey: false,
+            metaKey: false,
+            shiftKey: false,
+            repeat: false,
+        });
         history = setHistoryCursor(history, 1);
 
         const parsed = parseHistoryExport(serializeHistory(history));
@@ -127,6 +158,7 @@ describe('block rich text history', () => {
         expect('history' in parsed).toBe(true);
         if (!('history' in parsed)) return;
         expect(parsed.history.cursor).toBe(parsed.history.actions.length);
+        expect(parsed.history.keystrokes).toEqual(history.keystrokes);
         expect(buildHistorySnapshot(replayHistory(parsed.history.actions, parsed.history.cursor))).toEqual(
             buildHistorySnapshot(replayHistory(history.actions, history.actions.length)),
         );
@@ -205,5 +237,26 @@ describe('block rich text history', () => {
 
         expect(JSON.stringify(result.ops)).toContain('left-00002');
         expect(JSON.stringify(result.ops)).not.toContain('left-00001');
+    });
+
+    it('replays imported left-editor indent attempts after offline sync', () => {
+        const exported = readFileSync(new URL('../../../bug.json', import.meta.url), 'utf8');
+        const parsed = parseHistoryExport(exported);
+
+        expect('history' in parsed).toBe(true);
+        if (!('history' in parsed)) return;
+
+        const demo = replayHistory(parsed.history.actions, parsed.history.cursor);
+
+        expect(visibleOutline(demo.left)).toEqual([
+            {text: 'Hello', depth: 0},
+            {text: 'One', depth: 0},
+            {text: 'Two', depth: 1},
+        ]);
+        expect(visibleOutline(demo.right)).toEqual([
+            {text: 'Hello', depth: 0},
+            {text: 'One', depth: 0},
+            {text: 'Two', depth: 1},
+        ]);
     });
 });

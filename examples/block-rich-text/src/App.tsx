@@ -62,12 +62,14 @@ import {
 import {findWordOccurrences, wordAtPoint} from './wordOccurrences';
 import {
     appendHistoryAction,
+    appendHistoryKeystroke,
     initialHistoryState,
     parseHistoryExport,
     replayHistory,
     resetHistoryState,
     serializeHistory,
     setHistoryCursor,
+    type HistoryKeystroke,
     type HistoryState,
 } from './history';
 
@@ -132,6 +134,29 @@ export function App() {
         setHistory((current) => appendHistoryAction(current, {type: 'toggle-online', editorId}));
         setHistoryStatus('');
     }, []);
+
+    const recordKeystroke = useCallback(
+        (
+            editorId: EditorId,
+            blockId: string,
+            event: KeyboardEvent<HTMLElement>,
+        ) => {
+            setHistory((current) =>
+                appendHistoryKeystroke(current, {
+                    editorId,
+                    blockId,
+                    key: event.key,
+                    code: event.code,
+                    altKey: event.altKey,
+                    ctrlKey: event.ctrlKey,
+                    metaKey: event.metaKey,
+                    shiftKey: event.shiftKey,
+                    repeat: event.repeat,
+                }),
+            );
+        },
+        [],
+    );
 
     const exportHistory = useCallback(() => {
         const blob = new Blob([serializeHistory(history)], {type: 'application/json'});
@@ -208,18 +233,37 @@ export function App() {
                 />
                 {historyStatus ? <span className="historyStatus">{historyStatus}</span> : null}
             </section>
+            <details className="keystrokeLog">
+                <summary>Keystrokes ({history.keystrokes.length})</summary>
+                {history.keystrokes.length ? (
+                    <ol>
+                        {history.keystrokes.slice(-120).map((keystroke) => (
+                            <li key={keystroke.sequence}>
+                                <span>#{keystroke.sequence}</span>
+                                <span>{keystroke.editorId === 'left' ? 'Editor A' : 'Editor B'}</span>
+                                <span>{formatKeystroke(keystroke)}</span>
+                                <span>at {keystroke.actionIndex}</span>
+                            </li>
+                        ))}
+                    </ol>
+                ) : (
+                    <p>No keystrokes recorded.</p>
+                )}
+            </details>
             <section className="editorGrid" aria-label="Synced block editors">
                 <BlockEditor
                     replica={displayDemo.left}
                     resetSignal={historyResetSignal}
                     onCommand={(command) => runCommand('left', command)}
                     onToggleOnline={() => toggleEditorOnline('left')}
+                    onKeystroke={(blockId, event) => recordKeystroke('left', blockId, event)}
                 />
                 <BlockEditor
                     replica={displayDemo.right}
                     resetSignal={historyResetSignal}
                     onCommand={(command) => runCommand('right', command)}
                     onToggleOnline={() => toggleEditorOnline('right')}
+                    onKeystroke={(blockId, event) => recordKeystroke('right', blockId, event)}
                 />
             </section>
         </main>
@@ -231,11 +275,13 @@ function BlockEditor({
     resetSignal,
     onCommand,
     onToggleOnline,
+    onKeystroke,
 }: {
     replica: Replica;
     resetSignal: number;
     onCommand(command: (replica: Replica) => MultiCommandResult): void;
     onToggleOnline(): void;
+    onKeystroke(blockId: string, event: KeyboardEvent<HTMLElement>): void;
 }) {
     const rootRef = useRef<HTMLDivElement>(null);
     const pendingCaretRestoreBlockIdRef = useRef<string | null>(null);
@@ -848,6 +894,7 @@ function BlockEditor({
                         onExtendSelectionVerticallyWithVisualIntent={
                             extendSelectionVerticallyWithVisualIntent
                         }
+                        onKeystroke={onKeystroke}
                     />
                 ))}
             </div>
@@ -903,6 +950,7 @@ function EditableBlock({
     onExtendSelectionsHorizontally,
     onExtendSelectionsVertically,
     onExtendSelectionVerticallyWithVisualIntent,
+    onKeystroke,
 }: {
     block: FormattedBlock;
     canDrag: boolean;
@@ -937,6 +985,7 @@ function EditableBlock({
         direction: 'up' | 'down',
         sourceBlock: HTMLElement,
     ): void;
+    onKeystroke(blockId: string, event: KeyboardEvent<HTMLElement>): void;
 }) {
     const handledBeforeInputRef = useRef(false);
     const editableRef = useRef<HTMLDivElement>(null);
@@ -1036,6 +1085,7 @@ function EditableBlock({
                     }
                 }}
                 onKeyDown={(event) => {
+                    onKeystroke(block.id, event);
                     const modifierPressed = event.metaKey || event.ctrlKey;
                     const key = event.key.toLowerCase();
                     if (modifierPressed && key === 'b') {
@@ -1211,6 +1261,16 @@ const overlayTransientSelections = (
     left: selections.left ? {...demo.left, selection: selections.left} : demo.left,
     right: selections.right ? {...demo.right, selection: selections.right} : demo.right,
 });
+
+const formatKeystroke = (keystroke: HistoryKeystroke) => {
+    const modifiers = [
+        keystroke.metaKey ? 'Meta' : '',
+        keystroke.ctrlKey ? 'Ctrl' : '',
+        keystroke.altKey ? 'Alt' : '',
+        keystroke.shiftKey ? 'Shift' : '',
+    ].filter(Boolean);
+    return [...modifiers, keystroke.key].join('+') + (keystroke.repeat ? ' repeat' : '');
+};
 
 const occurrenceSelectionSet = (
     state: Replica['state'],

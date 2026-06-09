@@ -84,6 +84,46 @@ input {
     display: none;
 }
 
+.keystrokeLog {
+    max-width: 1280px;
+    margin: -8px auto 18px;
+    color: #2d3b47;
+    font-size: 12px;
+}
+
+.keystrokeLog summary {
+    display: inline-flex;
+    align-items: center;
+    min-height: 28px;
+    padding: 0 10px;
+    border: 1px solid #cbd5df;
+    border-radius: 6px;
+    background: #fff;
+    cursor: pointer;
+}
+
+.keystrokeLog ol {
+    max-height: 220px;
+    margin: 8px 0 0;
+    padding: 8px 12px 8px 34px;
+    overflow: auto;
+    background: #fff;
+    border: 1px solid #d9e0e7;
+    border-radius: 8px;
+}
+
+.keystrokeLog li {
+    display: grid;
+    grid-template-columns: 52px 72px minmax(0, 1fr) 56px;
+    gap: 8px;
+    padding: 2px 0;
+}
+
+.keystrokeLog p {
+    margin: 8px 0 0;
+    color: #657380;
+}
+
 .editorGrid {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);

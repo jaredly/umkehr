@@ -14,3 +14,9 @@
 - Verification: `npm exec vitest examples/block-rich-text/src/history.test.ts examples/block-rich-text/src/App.test.tsx` passed with 56 tests.
 - Verification: `npm run build` in `examples/block-rich-text` passed. The command printed `Error connecting to agent: Operation not permitted` before running the build, but the TypeScript/Vite build completed successfully.
 - Verification: `npm exec vitest examples/block-rich-text/src` passed with 110 tests.
+- Added keystroke recording as non-replay history metadata. Keystrokes are exported/imported with the action history and are branch-trimmed when editing from the past, but they do not become scrubber steps.
+- Added a collapsed `Keystrokes` log panel showing recent keydown records by sequence, editor, key combo, and action index.
+- Added tests for keystroke branch trimming, export/import, and the collapsed UI log.
+- Verification: `npm exec vitest examples/block-rich-text/src/history.test.ts examples/block-rich-text/src/App.test.tsx` passed with 57 tests.
+- Verification: `npm exec vitest examples/block-rich-text/src` passed with 111 tests.
+- Verification: `npm run build` in `examples/block-rich-text` passed again with the same non-fatal `Error connecting to agent: Operation not permitted` prefix.

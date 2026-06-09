@@ -299,6 +299,26 @@ describe('Block rich text example UI', () => {
         expect(view.getByText('0 / 0')).toBeTruthy();
     });
 
+    it('records keydown events in a collapsed keystroke log', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        const details = view.container.querySelector<HTMLDetailsElement>('.keystrokeLog')!;
+
+        selectCaret(blocks(left)[0], 0);
+        typeText(blocks(left)[0], 'ab');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('ab'));
+
+        selectCaret(blocks(left)[0], 2);
+        fireEvent.keyDown(blocks(left)[0], {key: 'Backspace', code: 'Backspace'});
+
+        await waitFor(() => expect(view.getByText('Keystrokes (1)')).toBeTruthy());
+        expect(details.open).toBe(false);
+
+        fireEvent.click(details.querySelector('summary')!);
+        expect(within(details).getByText('Backspace')).toBeTruthy();
+        expect(within(details).getByText('Editor A')).toBeTruthy();
+    });
+
     it('reports invalid history imports without replacing current history', async () => {
         const view = render(<App />);
         const {left, right} = panels(view);

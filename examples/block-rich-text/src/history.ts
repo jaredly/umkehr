@@ -23,6 +23,21 @@ export type HistoryAction =
 export type HistoryState = {
     actions: HistoryAction[];
     cursor: number;
+    keystrokes: HistoryKeystroke[];
+};
+
+export type HistoryKeystroke = {
+    sequence: number;
+    actionIndex: number;
+    editorId: EditorId;
+    key: string;
+    code: string;
+    altKey: boolean;
+    ctrlKey: boolean;
+    metaKey: boolean;
+    shiftKey: boolean;
+    repeat: boolean;
+    blockId: string;
 };
 
 export type HistorySnapshot = {
@@ -42,6 +57,7 @@ export type ExportedHistory = {
     version: 1;
     app: 'examples/block-rich-text';
     actions: HistoryAction[];
+    keystrokes: HistoryKeystroke[];
     finalSnapshot: HistorySnapshot;
 };
 
@@ -62,7 +78,7 @@ const CURRENT_OP_TYPES = new Set([
     'join-record',
 ]);
 
-export const initialHistoryState = (): HistoryState => ({actions: [], cursor: 0});
+export const initialHistoryState = (): HistoryState => ({actions: [], cursor: 0, keystrokes: []});
 
 export const resetHistoryState = initialHistoryState;
 
@@ -71,12 +87,29 @@ export const appendHistoryAction = (
     action: HistoryAction,
 ): HistoryState => {
     const prefix = history.actions.slice(0, clampCursor(history.cursor, history.actions.length));
+    const keystrokes = history.keystrokes.filter((keystroke) => keystroke.actionIndex <= prefix.length);
     const actions = [...prefix, action];
-    return {actions, cursor: actions.length};
+    return {actions, cursor: actions.length, keystrokes};
+};
+
+export const appendHistoryKeystroke = (
+    history: HistoryState,
+    keystroke: Omit<HistoryKeystroke, 'sequence' | 'actionIndex'>,
+): HistoryState => {
+    const cursor = clampCursor(history.cursor, history.actions.length);
+    const keystrokes = history.keystrokes
+        .filter((entry) => entry.actionIndex <= cursor)
+        .concat({
+            ...keystroke,
+            actionIndex: cursor,
+            sequence: history.keystrokes.filter((entry) => entry.actionIndex <= cursor).length + 1,
+        });
+    return {...history, cursor, keystrokes};
 };
 
 export const setHistoryCursor = (history: HistoryState, cursor: number): HistoryState => ({
     actions: history.actions,
+    keystrokes: history.keystrokes,
     cursor: clampCursor(cursor, history.actions.length),
 });
 
@@ -116,6 +149,7 @@ export const serializeHistory = (history: HistoryState): string => {
         version: EXPORT_VERSION,
         app: EXPORT_APP,
         actions,
+        keystrokes: history.keystrokes,
         finalSnapshot: buildHistorySnapshot(replayHistory(actions, actions.length)),
     };
     return `${JSON.stringify(exported, null, 2)}\n`;
@@ -142,6 +176,8 @@ export const parseHistoryExport = (
         if ('error' in valid) return {error: `Action ${index}: ${valid.error}`};
         actions.push(valid.action);
     }
+    const keystrokes = parseKeystrokes(parsed.keystrokes);
+    if ('error' in keystrokes) return {error: keystrokes.error};
 
     if (!isSnapshot(parsed.finalSnapshot)) {
         return {error: 'Import file has an invalid final snapshot.'};
@@ -155,7 +191,7 @@ export const parseHistoryExport = (
         };
     }
 
-    return {history: {actions, cursor: actions.length}};
+    return {history: {actions, cursor: actions.length, keystrokes: keystrokes.keystrokes}};
 };
 
 const clampCursor = (cursor: number, max: number) => {
@@ -202,6 +238,33 @@ const parseAction = (value: unknown): {action: HistoryAction} | {error: string} 
         },
     };
 };
+
+const parseKeystrokes = (
+    value: unknown,
+): {keystrokes: HistoryKeystroke[]} | {error: string} => {
+    if (value === undefined) return {keystrokes: []};
+    if (!Array.isArray(value)) return {error: 'Import file keystrokes must be an array.'};
+    const keystrokes: HistoryKeystroke[] = [];
+    for (const [index, entry] of value.entries()) {
+        if (!isKeystroke(entry)) return {error: `Keystroke ${index} has an invalid shape.`};
+        keystrokes.push(entry);
+    }
+    return {keystrokes};
+};
+
+const isKeystroke = (value: unknown): value is HistoryKeystroke =>
+    isRecord(value) &&
+    Number.isInteger(value.sequence) &&
+    Number.isInteger(value.actionIndex) &&
+    isEditorId(value.editorId) &&
+    typeof value.key === 'string' &&
+    typeof value.code === 'string' &&
+    typeof value.altKey === 'boolean' &&
+    typeof value.ctrlKey === 'boolean' &&
+    typeof value.metaKey === 'boolean' &&
+    typeof value.shiftKey === 'boolean' &&
+    typeof value.repeat === 'boolean' &&
+    typeof value.blockId === 'string';
 
 const validateOp = (value: unknown): string | null => {
     if (!isRecord(value)) return 'must be an object.';
