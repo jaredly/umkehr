@@ -35,6 +35,9 @@ const blocks = (panel: HTMLElement) => within(panel).getAllByRole('textbox', {na
 const blockTexts = (panel: HTMLElement): string[] =>
     blocks(panel).map((block) => block.textContent ?? '');
 
+const blockDepth = (block: HTMLElement): string =>
+    block.closest<HTMLElement>('.blockRow')?.style.getPropertyValue('--block-depth') ?? '';
+
 const waitForBlockTexts = async (panel: HTMLElement, expected: string[]) => {
     await waitFor(
         () => {
@@ -443,6 +446,25 @@ describe('Block rich text example UI', () => {
         await waitFor(() => expect(blocks(left).map((block) => block.textContent)).toEqual(['ab', 'cd']));
         expect(domSelectionBlock()).toBe(blocks(left)[1]);
         expect(domCaretOffset(blocks(left)[1])).toBe(0);
+    });
+
+    it('indents and unindents with Tab away from the block start', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        pasteText(blocks(left)[0], 'one\ntwo');
+        await waitForBlockTexts(left, ['one', 'two']);
+
+        selectCaret(blocks(left)[1], 2);
+        fireEvent.keyDown(blocks(left)[1], {key: 'Tab'});
+
+        await waitFor(() => expect(blockDepth(blocks(left)[1])).toBe('1'));
+
+        selectCaret(blocks(left)[1], 2);
+        fireEvent.keyDown(blocks(left)[1], {key: 'Tab', shiftKey: true});
+
+        await waitFor(() => expect(blockDepth(blocks(left)[1])).toBe('0'));
     });
 
     it('moves ArrowLeft from the start of a block to the previous block end', async () => {

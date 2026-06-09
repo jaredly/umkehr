@@ -1105,10 +1105,7 @@ function EditableBlock({
                     } else if (event.key === 'Tab' && !event.altKey && !modifierPressed) {
                         const currentSelection = readSelectionFromDom(event.currentTarget);
                         event.preventDefault();
-                        if (
-                            currentSelection?.type === 'caret' &&
-                            currentSelection.point.offset === 0
-                        ) {
+                        if (currentSelection?.type === 'caret') {
                             if (event.shiftKey) {
                                 onUnindent();
                             } else {

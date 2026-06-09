@@ -36,3 +36,8 @@
   - Updated the joined-parent regression expectations to assert the raw/logical parent remains the joined block.
   - `npm exec vitest -- run examples/block-rich-text/src/blockCommands.test.ts examples/block-rich-text/src/retainedSelection.test.ts examples/block-rich-text/src/App.test.tsx` passes with 87 tests.
   - `npm --prefix examples/block-rich-text run build` passes.
+- Tab follow-up:
+  - Removed the offset-zero requirement from `Tab` / `Shift+Tab` handling, so caret position within the block no longer matters.
+  - Added an app regression test that indents and unindents the second block with the caret at offset 2.
+  - `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx` passes with 49 tests.
+  - `npm --prefix examples/block-rich-text run build` passes.
