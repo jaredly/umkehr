@@ -29,3 +29,10 @@
   - Verified `curl -I http://127.0.0.1:5174/` returns HTTP 200.
 - Follow-up note:
   - No full browser drag automation was added; the highest-risk behavior is covered in command tests, while pointer geometry remains manually verifiable in the running Vite app.
+- Follow-up fix after manual review:
+  - Added the missing regression for dropping an outside block into the middle of visible children whose logical parent is a deleted block.
+  - Reproduced the bug in `moveBlock`: sibling `before/after` targets used the visible parent, which appended the moved block after the deleted parent's whole subtree instead of interleaving it among the deleted parent's logical children.
+  - Fixed sibling target resolution to use `materializedBlockParent(targetBlockId)` for `before/after` moves. This keeps drops between spliced children logically under the deleted/joined parent while rendering them under the visible grandparent.
+  - Updated the joined-parent regression expectations to assert the raw/logical parent remains the joined block.
+  - `npm exec vitest -- run examples/block-rich-text/src/blockCommands.test.ts examples/block-rich-text/src/retainedSelection.test.ts examples/block-rich-text/src/App.test.tsx` passes with 87 tests.
+  - `npm --prefix examples/block-rich-text run build` passes.

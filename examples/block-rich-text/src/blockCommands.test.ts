@@ -407,7 +407,7 @@ describe('block rich text commands', () => {
             {text: 'd', depth: 1},
             {text: 'c', depth: 1},
         ]);
-        expect(materializedBlockParent(result.state, fourth)).toEqual(result.state.state.blocks[first].id);
+        expect(materializedBlockParent(result.state, fourth)).toEqual(result.state.state.blocks[second].id);
         expectCache(result.state);
     });
 
@@ -428,6 +428,37 @@ describe('block rich text commands', () => {
             {text: 'c', depth: 0},
         ]);
         expect(materializedBlockParent(result.state, third)).toEqual([0, 'root']);
+        expectCache(result.state);
+    });
+
+    it('drops an outside block into the middle of children spliced through a deleted parent', () => {
+        const context = ctx();
+        let result = pastePlainText(init(), caret(onlyBlock(init()), 0), 'a\nb\nc\nd\ne', context);
+        const [first, second, third, fourth, fifth] = rootBlockIds(result.state);
+        result = moveBlock(result.state, second, {type: 'child', parentBlockId: first, at: 'start'}, context);
+        result = moveBlock(result.state, third, {type: 'child', parentBlockId: second, at: 'start'}, context);
+        result = moveBlock(result.state, fourth, {type: 'child', parentBlockId: second, at: 'end'}, context);
+        result = {
+            ...result,
+            state: applyMany(result.state, [{type: 'block:delete', id: result.state.state.blocks[second].id}]),
+        };
+
+        expect(outline(result.state)).toEqual([
+            {text: 'a', depth: 0},
+            {text: 'c', depth: 1},
+            {text: 'd', depth: 1},
+            {text: 'e', depth: 0},
+        ]);
+
+        result = moveBlock(result.state, fifth, {type: 'before', targetBlockId: fourth}, context);
+
+        expect(outline(result.state)).toEqual([
+            {text: 'a', depth: 0},
+            {text: 'c', depth: 1},
+            {text: 'e', depth: 1},
+            {text: 'd', depth: 1},
+        ]);
+        expect(materializedBlockParent(result.state, fifth)).toEqual(result.state.state.blocks[second].id);
         expectCache(result.state);
     });
 

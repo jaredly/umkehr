@@ -244,11 +244,10 @@ const resolveMoveTarget = (
     movedBlockId: string,
     target: MoveTarget,
 ): {parentPath: Lamport[]; beforeId: string | null; afterId: string | null} | null => {
-    const visibleParents = new Map(visibleBlockOutline(state).map((item) => [item.id, item.parentId]));
     const targetParentId =
         target.type === 'child'
             ? target.parentBlockId
-            : visibleParents.get(target.targetBlockId) ?? null;
+            : rawParentIdForVisibleBlock(state, target.targetBlockId);
     if (targetParentId === null) return null;
     if (target.type === 'child' && target.parentBlockId === movedBlockId) return null;
     if (target.type !== 'child' && target.targetBlockId === movedBlockId) return null;
@@ -288,6 +287,11 @@ const resolveMoveTarget = (
 
 const isDescendantOrSelf = (state: CachedState, blockId: string, ancestorId: string): boolean =>
     blockId === ancestorId || isDescendantOf(state, blockId, ancestorId);
+
+const rawParentIdForVisibleBlock = (state: CachedState, blockId: string): string | null => {
+    if (!visibleBlockOutline(state).some((item) => item.id === blockId)) return null;
+    return lamportToString(materializedBlockParent(state, blockId));
+};
 
 const isDescendantOf = (state: CachedState, blockId: string, ancestorId: string): boolean => {
     const path = materializedBlockPath(state, blockId).map(lamportToString);
