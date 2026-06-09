@@ -7,23 +7,39 @@ import {
     organizeState,
     charOp,
     apply,
+    applyRemote,
+    applyRemoteMany,
+    applyStrict,
     split,
     applyMany,
+    applyManyStrict,
     charToString,
     blockContents,
     findTail,
     join,
     Op,
     activeJoinRecords,
+    maxLamportCounterForOp,
+    compareCharParentVersions,
+    compareBlockOrderVersions,
+    charParentVersionWins,
+    blockOrderVersionWins,
     materializedBlockParent,
     materializedBlockPath,
     orderedCharIdsForBlock,
     visibleBlockChildren,
     visibleBlockOutline,
+    insertTextOps,
+    deleteRangeOps,
+    splitBlockOps,
+    joinBlocksOps,
+    setBlockMetaOps,
+    validateOp,
+    assertCacheConsistent,
 } from './index';
 import {Block, CachedState, Lamport} from './types';
 import {lamportToString, parseLamportString, selPos} from './utils';
-import {initialState} from './initialState';
+import {initialState, initialStateWithMeta} from './initialState';
 import {createLseqIdBetween, LseqId} from './lseq';
 
 const init = initialState('self', '00001');
@@ -950,6 +966,31 @@ it('orders lamport-string block timestamps by counter before actor id', () => {
     expect(materializedBlockPath(state, '0002-self')).toEqual([[1, 'self'], [2, 'self']]);
 });
 
+it('exposes named char parent version ordering', () => {
+    expect(compareCharParentVersions('', '00001')).toBeLessThan(0);
+    expect(compareCharParentVersions('00002', '00001')).toBeGreaterThan(0);
+    expect(charParentVersionWins(['00002', [[2, 'self']], '00003'], '00002')).toBe(true);
+    expect(charParentVersionWins('00002', ['00002', [[2, 'self']], '00003'])).toBe(false);
+    expect(
+        compareCharParentVersions(
+            ['00002', [[3, 'self']], '00001'],
+            ['00002', [[2, 'self']], '99999'],
+        ),
+    ).toBeGreaterThan(0);
+});
+
+it('exposes named block order version ordering', () => {
+    expect(compareBlockOrderVersions('00002', '00001')).toBeGreaterThan(0);
+    expect(blockOrderVersionWins(['00002', lseq(3), '00003'], '00002')).toBe(true);
+    expect(blockOrderVersionWins('00002', ['00002', lseq(3), '00003'])).toBe(false);
+    expect(
+        compareBlockOrderVersions(
+            ['00002', lseq(3), '00001'],
+            ['00002', lseq(2), '99999'],
+        ),
+    ).toBeGreaterThan(0);
+});
+
 it('keeps concurrent adjacent indents traversal-safe and convergent', () => {
     let state = cachedState(init);
     state = apply(state, {type: 'block', block: block([1, 'self'], 2, '00002')}) as CachedState;
@@ -1059,7 +1100,7 @@ it('keeps concurrent move-to-root and nested reparenting traversal-safe', () => 
 });
 
 it('returns false for ops that reference missing records', () => {
-    const state = cachedState(init);
+    let state = cachedState(init);
 
     expect(apply(state, {type: 'char:delete', id: [9, 'self']})).toBe(false);
     expect(
@@ -1067,6 +1108,14 @@ it('returns false for ops that reference missing records', () => {
             type: 'char:move',
             id: [9, 'self'],
             parent: {id: [0, 'self'], ts: '00002'},
+        }),
+    ).toBe(false);
+    state = addChars(state, 'ab', [0, 'self'], mts());
+    expect(
+        apply(state, {
+            type: 'char:move',
+            id: [2, 'self'],
+            parent: {id: [99, 'missing'], ts: '00002'},
         }),
     ).toBe(false);
     expect(
@@ -1089,6 +1138,132 @@ it('returns false for ops that reference missing records', () => {
             meta: {type: 'bullets', ts: '00002'},
         }),
     ).toBe(false);
+});
+
+it('returns pending apply results for missing dependencies', () => {
+    let state = addChars(cachedState(init), 'ab', [0, 'self'], mts());
+
+    const pendingMove = applyRemote(state, {
+        type: 'char:move',
+        id: [2, 'self'],
+        parent: {id: [99, 'missing'], ts: '00005'},
+    });
+
+    expect(pendingMove).toEqual({
+        status: 'pending',
+        state,
+        missing: [[99, 'missing']],
+    });
+    expect(state.state.chars['0002-self'].parent.id).toEqual([1, 'self']);
+    expectCache(state);
+
+    const pendingChar = applyRemote(state, charOp('c', [3, 'self'], [99, 'missing'], '00006'));
+    expect(pendingChar.status).toBe('pending');
+    expect(pendingChar.status === 'pending' ? pendingChar.missing : []).toEqual([[99, 'missing']]);
+
+    const parent = charOp('p', [99, 'missing'], [0, 'self'], '00007');
+    const parentResult = applyRemote(state, parent);
+    expect(parentResult.status).toBe('applied');
+    if (parentResult.status === 'applied') {
+        state = parentResult.state;
+    }
+
+    const retried = applyRemote(state, {
+        type: 'char:move',
+        id: [2, 'self'],
+        parent: {id: [99, 'missing'], ts: '00005'},
+    });
+    expect(retried.status).toBe('applied');
+    if (retried.status === 'applied') {
+        expect(retried.state.state.chars['0002-self'].parent.id).toEqual([99, 'missing']);
+        expectCache(retried.state);
+    }
+});
+
+it('validates op shape separately from dependency readiness', () => {
+    const pendingButValid = {
+        type: 'char',
+        char: {
+            id: [1, 'self'],
+            text: 'a',
+            deleted: false,
+            parent: {id: [99, 'missing'], ts: ''},
+        },
+    } satisfies Op;
+    expect(validateOp(pendingButValid)).toEqual({valid: true});
+    expect(applyRemote(cachedState(init), pendingButValid).status).toBe('pending');
+
+    expect(
+        validateOp({
+            type: 'block:move',
+            id: [1, 'bad-actor'],
+            order: {id: [2, 'self'], path: [], index: lseq(1), ts: '00001'},
+        }),
+    ).toEqual({
+        valid: false,
+        errors: [
+            `actor id must be non-empty and must not contain '-'`,
+            `block order path must not be empty`,
+        ],
+    });
+});
+
+it('asserts cache consistency for cached states', () => {
+    const state = addChars(cachedState(init), 'ab', [0, 'self'], mts());
+    expect(() => assertCacheConsistent(state)).not.toThrow();
+    expect(() =>
+        assertCacheConsistent({
+            state: state.state,
+            cache: {...state.cache, charContents: {}},
+        }),
+    ).toThrow('cached state is inconsistent');
+});
+
+it('applies remote batches while keeping pending ops retryable', () => {
+    let state = addChars(cachedState(init), 'ab', [0, 'self'], mts());
+    const move: Op = {
+        type: 'char:move',
+        id: [2, 'self'],
+        parent: {id: [99, 'remote'], ts: '00005'},
+    };
+    const parent = charOp('p', [99, 'remote'], [0, 'self'], '00006');
+
+    const first = applyRemoteMany(state, [move, parent]);
+    expect(first.applied).toEqual([parent]);
+    expect(first.pending).toEqual([{op: move, missing: [[99, 'remote']]}]);
+    expect(first.invalid).toEqual([]);
+    expect(first.ignored).toEqual([]);
+    state = first.state;
+
+    const second = applyRemoteMany(state, first.pending.map((item) => item.op));
+    expect(second.applied).toEqual([move]);
+    expect(second.pending).toEqual([]);
+    expect(second.state.state.chars['0002-self'].parent.id).toEqual([99, 'remote']);
+    expectCache(second.state);
+});
+
+it('keeps strict apply helpers for local ordered batches', () => {
+    const state = cachedState(init);
+    const next = applyManyStrict(state, [charOp('a', [1, 'self'], [0, 'self'], '00001')]);
+
+    expect(blockLines(next)).toEqual(['a']);
+    expect(() =>
+        applyStrict(next, {
+            type: 'char:move',
+            id: [1, 'self'],
+            parent: {id: [99, 'missing'], ts: '00002'},
+        }),
+    ).toThrow('op was pending');
+});
+
+it('rejects actor ids that contain the lamport separator', () => {
+    expect(() => lamportToString([1, 'bad-actor'])).toThrow(
+        `actor id must be non-empty and must not contain '-'`,
+    );
+    expect(() => parseLamportString('0001-bad-actor')).toThrow('invalid lamport id');
+    expect(() => cachedState(initialState('bad-actor', '00001'))).toThrow(
+        `actor id must be non-empty and must not contain '-'`,
+    );
 });
 
 it('deletes chars idempotently and preserves cache consistency', () => {
@@ -1211,6 +1386,64 @@ it('harness inserts at start, middle, and end with multiple actors', () => {
     expect(editor.serialized()).toBe('0000-self: abcd');
 });
 
+it('creates public text/block change op batches from visible offsets', () => {
+    const ts = mts();
+    let state = cachedState(initialState('self', '00001'));
+    const root: Lamport = [0, 'self'];
+
+    let ops = insertTextOps(state, {actor: 'alice', block: root, offset: 0, text: 'abcd', ts});
+    expect(ops.map((op) => op.type)).toEqual(['char', 'char', 'char', 'char']);
+    state = applyMany(state, ops);
+    expect(blockLines(state)).toEqual(['abcd']);
+
+    ops = splitBlockOps(state, {actor: 'alice', block: root, offset: 2, ts: ts(), options: {random: () => 0}});
+    expect(ops.map((op) => op.type)).toContain('block');
+    expect(ops.map((op) => op.type)).toContain('char:move');
+    state = applyMany(state, ops);
+    expect(blockLines(state)).toEqual(['ab', 'cd']);
+
+    const [left, right] = rootBlockIds(state).map(parseLamportString);
+    ops = joinBlocksOps(state, {actor: 'alice', left, right, ts: ts()});
+    expect(ops.map((op) => op.type)).toEqual(['join-record']);
+    state = applyMany(state, ops);
+    expect(blockLines(state)).toEqual(['abcd']);
+
+    ops = deleteRangeOps(state, {block: left, startOffset: 1, endOffset: 3});
+    expect(ops.map((op) => op.type)).toEqual(['char:delete', 'char:delete']);
+    state = applyMany(state, ops);
+    expect(blockLines(state)).toEqual(['ad']);
+});
+
+it('creates public block metadata ops', () => {
+    let state = cachedState(initialState('self', '00001'));
+    const ops = setBlockMetaOps(state, {
+        block: [0, 'self'],
+        meta: {type: 'blockquote', ts: '00002'},
+    });
+
+    state = applyMany(state, ops);
+    expect(state.state.blocks['0000-self'].meta).toEqual({type: 'blockquote', ts: '00002'});
+});
+
+it('supports custom timestamped block metadata in state and block meta ops', () => {
+    type CustomMeta = {ts: string; kind: 'task'; priority: number};
+    let state = cachedState(
+        initialStateWithMeta<CustomMeta>('self', {ts: '00001', kind: 'task', priority: 1}),
+    );
+
+    state = apply(state, {
+        type: 'block:meta',
+        id: [0, 'self'],
+        meta: {ts: '00002', kind: 'task', priority: 2},
+    }) as typeof state;
+
+    expect(state.state.blocks['0000-self'].meta).toEqual({
+        ts: '00002',
+        kind: 'task',
+        priority: 2,
+    });
+});
+
 it('inserts grapheme clusters as visible text', () => {
     const editor = new EditorHarness();
 
@@ -1277,17 +1510,45 @@ it('deletes ranges while keeping deleted chars with descendants valid', () => {
     editor.expectCache();
 });
 
-it('allows char moves to point at missing parents', () => {
-    let state = addChars(cachedState(init), 'ab', [0, 'self'], mts());
+it('keeps lamport ordering correct above the encoded padding width', () => {
+    let state = cachedState(initialState('self', '00001'));
 
-    state = apply(state, {
-        type: 'char:move',
-        id: [2, 'self'],
-        parent: {id: [99, 'missing'], ts: '00005'},
-    }) as CachedState;
+    state = applyMany(state, [
+        charOp('a', [9999, 'self'], [0, 'self'], '00001'),
+        charOp('b', [10000, 'self'], [0, 'self'], '00002'),
+    ]);
 
-    expect(state.state.chars['0002-self'].parent.id).toEqual([99, 'missing']);
+    expect(blockLines(state)).toEqual(['ba']);
+    expect(state.cache.charContents['0000-self']).toEqual(['10000-self', '9999-self']);
     expectCache(state);
+});
+
+it('tracks max seen counters from every lamport carried by op payloads', () => {
+    const state = applyMany(cachedState(init), [
+        charOp('a', [1, 'self'], [0, 'self'], '00001'),
+        charOp('b', [2, 'self'], [1, 'self'], '00002'),
+        {
+            type: 'char:move',
+            id: [2, 'self'],
+            parent: {
+                id: [1, 'self'],
+                ts: ['00002', [[50, 'remote']], '00003'],
+            },
+        },
+    ]);
+
+    expect(state.state.maxSeenCount).toBe(50);
+    expect(maxLamportCounterForOp({
+        type: 'mark',
+        mark: {
+            id: [10, 'self'],
+            start: {id: [1, 'self'], at: 'before'},
+            end: {id: [2, 'self'], at: 'after'},
+            remove: false,
+            type: 'bold',
+            crossedSplits: [[60, 'remote']],
+        },
+    })).toBe(60);
 });
 
 it('converges concurrent inserts at the same position', () => {

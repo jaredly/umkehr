@@ -62,20 +62,24 @@ export type Char = {
     // as well as privenance for splits or somehting like that
 };
 
-export type Block = {
+export type TimestampedBlockMeta = {ts: HLC};
+
+export type DefaultBlockMeta =
+    | {type: 'paragraph'; ts: HLC}
+    | {type: 'blockquote'; ts: HLC}
+    | {type: 'bullets'; ts: HLC}
+    | {type: 'checkboxes'; ts: HLC; checked: Record<string, {ts: HLC; checked: boolean}>};
+
+export type Block<M extends TimestampedBlockMeta = DefaultBlockMeta> = {
     id: Lamport;
-    meta:
-        | {type: 'paragraph'; ts: HLC}
-        | {type: 'blockquote'; ts: HLC}
-        | {type: 'bullets'; ts: HLC}
-        | {type: 'checkboxes'; ts: HLC; checked: Record<string, {ts: HLC; checked: boolean}>};
+    meta: M;
     order: BlockOrder;
     deleted: boolean;
 };
 
-export type State = {
+export type State<M extends TimestampedBlockMeta = DefaultBlockMeta> = {
     chars: Record<string, Char>;
-    blocks: Record<string, Block>;
+    blocks: Record<string, Block<M>>;
     marks: Record<string, Mark>;
     splits: Record<string, SplitRecord>;
     joins: Record<string, JoinRecord>;
@@ -89,4 +93,4 @@ export type Cache = {
     joinedBlocks: Record<string, JoinRecord>;
 };
 
-export type CachedState = {state: State; cache: Cache};
+export type CachedState<M extends TimestampedBlockMeta = DefaultBlockMeta> = {state: State<M>; cache: Cache};

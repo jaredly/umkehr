@@ -1,0 +1,46 @@
+# Implementation Log
+
+## 2026-06-08
+
+- Started phased implementation for the `src/block-crdt` architecture review plan.
+- Confirmed the working tree was clean before edits.
+- Initial approach: keep changes small and verifiable, beginning with Phase 1 tests and the Phase 2 apply-result API those tests require.
+- Added `applyRemote` with explicit `applied`/`ignored`/`pending`/`invalid` statuses while preserving the existing strict `apply`/`applyMany` shape.
+- Changed missing-parent `char:move` and `char` insert behavior to return pending/`false` instead of accepting unresolved parent links into state.
+- Fixed semantic Lamport ordering for char child lists so counters above `9999` sort by Lamport values instead of encoded string order.
+- Added tests for pending missing dependencies and Lamport counters above the old 4-digit padding width.
+- Verified with `npm exec vitest -- run src/block-crdt/index.test.ts src/block-crdt/formatting.test.ts`.
+- Added `applyStrict`, `applyManyStrict`, and `applyRemoteMany` helpers.
+- Added actor/Lamport validation that rejects actor ids containing `-`.
+- Added tests for retryable pending remote batches, strict local apply helpers, and actor id validation.
+- Verified again with `npm exec vitest -- run src/block-crdt/index.test.ts src/block-crdt/formatting.test.ts`.
+- Added `maxLamportCounterForOp` and wired apply handlers through it so all Lamports in op payloads contribute to future local id allocation.
+- Added coverage for Lamports embedded in incidental char parent timestamps.
+- Verified with `npm exec vitest -- run src/block-crdt/index.test.ts src/block-crdt/formatting.test.ts`.
+- Added named version comparators (`compareCharParentVersions`, `charParentVersionWins`, `compareBlockOrderVersions`, `blockOrderVersionWins`) and routed existing conflict checks through them.
+- Added direct comparator tests for intentional and incidental char/block versions.
+- Verified with `npm exec vitest -- run src/block-crdt/index.test.ts src/block-crdt/formatting.test.ts`.
+- Extracted Lamport/actor id helpers into `src/block-crdt/ids.ts`, with compatibility re-exports from `utils.ts`.
+- Updated core imports to use `ids.ts` directly where appropriate.
+- Verified with `npm exec vitest -- run src/block-crdt/index.test.ts src/block-crdt/formatting.test.ts` and `npm run typecheck`.
+- Extracted version/conflict comparators into `src/block-crdt/versions.ts`.
+- Moved Lamport comparison helpers into `ids.ts` and preserved their `index.ts` export.
+- Verified with `npm exec vitest -- run src/block-crdt/index.test.ts src/block-crdt/formatting.test.ts` and `npm run typecheck`.
+- Added public change creation functions: `insertTextOps`, `deleteRangeOps`, `splitBlockOps`, `joinBlocksOps`, `setBlockMetaOps`, and `markRangeOp`.
+- Added `src/block-crdt/changes.ts` as a focused re-export module for those functions.
+- Added tests that use the public change functions to produce and apply related `Op[]` batches.
+- Verified with `npm exec vitest -- run src/block-crdt/index.test.ts src/block-crdt/formatting.test.ts` and `npm run typecheck`.
+- Made block/state/cache/op types generic over timestamped block metadata, with the existing metadata union as the default.
+- Added `initialStateWithMeta` for custom metadata initialization.
+- Added coverage for applying a custom typed `block:meta` op.
+- Verified with `npm exec vitest -- run src/block-crdt/index.test.ts src/block-crdt/formatting.test.ts` and `npm run typecheck`.
+- Ran the full unit test suite with `npm exec vitest -- run`. The block-crdt tests passed, but the broader suite failed in existing React example tests with invalid hook call errors from the todo UI tests (`examples/react-crdt/...`). This appears unrelated to the block-crdt changes.
+- Verified shipped source with `npm run build`.
+- Verified the main block-crdt consumer with `npm exec vitest -- run examples/block-rich-text/src`.
+- Added `validateOp` and `assertCacheConsistent` helpers.
+- Kept op shape validation separate from dependency readiness: structurally valid ops can still return `pending` from `applyRemote`.
+- Added tests for validation and cache consistency assertion behavior.
+- Verified with `npm exec vitest -- run src/block-crdt/index.test.ts src/block-crdt/formatting.test.ts` and `npm run typecheck`.
+- Final focused verification for this batch:
+  - `npm run build`
+  - `npm exec vitest -- run examples/block-rich-text/src`

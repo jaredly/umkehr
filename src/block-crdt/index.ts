@@ -11,26 +11,126 @@ import {
     SplitRecord,
     JsonValue,
     JoinRecord,
+    TimestampedBlockMeta,
+    DefaultBlockMeta,
 } from './types';
-import {lamportToString, parseLamportString} from './utils';
+import {
+    compareLamports,
+    compareLamportStrings,
+    lamportToString,
+    parseLamportString,
+    validateLamport,
+} from './ids';
+export {compareLamports, compareLamportStrings} from './ids';
 import {compareLseqIds, createLseqIdBetween, LseqOptions} from './lseq';
+export {
+    blockOrderVersionWins,
+    charParentVersionWins,
+    compareBlockOrderVersions,
+    compareCharParentVersions,
+} from './versions';
+import {blockOrderVersionWins, charParentVersionWins} from './versions';
 
-export type Op =
+export type Op<M extends TimestampedBlockMeta = DefaultBlockMeta> =
     | {type: 'char'; char: Char}
-    | {type: 'block'; block: Block}
+    | {type: 'block'; block: Block<M>}
     | {type: 'char:move'; id: Lamport; parent: Char['parent']}
     | {type: 'char:delete'; id: Lamport}
     | {type: 'block:move'; id: Lamport; order: Block['order']}
     | {type: 'block:delete'; id: Lamport}
-    | {type: 'block:meta'; id: Lamport; meta: Block['meta']}
+    | {type: 'block:meta'; id: Lamport; meta: M}
     | {type: 'mark'; mark: Mark}
     | {type: 'split-record'; split: SplitRecord}
     | {type: 'join-record'; join: JoinRecord};
+
+export type ApplyResult =
+    | {status: 'applied'; state: CachedState}
+    | {status: 'ignored'; state: CachedState; reason: 'stale' | 'duplicate'}
+    | {status: 'pending'; state: CachedState; missing: Lamport[]}
+    | {status: 'invalid'; state: CachedState; error: Error};
 
 export const charOp = (text: string, id: Lamport, after: Lamport, ts: string): Op => ({
     type: 'char',
     char: {text, id, deleted: false, parent: {id: after, ts: ''}},
 });
+
+export const applyRemote = (state: CachedState, op: Op): ApplyResult => {
+    try {
+        const result = apply(state, op);
+        if (result === false) {
+            return {status: 'pending', state, missing: missingDependenciesForOp(state, op)};
+        }
+        return result === state
+            ? {status: 'ignored', state, reason: 'duplicate'}
+            : {status: 'applied', state: result};
+    } catch (error) {
+        return {status: 'invalid', state, error: error instanceof Error ? error : new Error(String(error))};
+    }
+};
+
+export const applyRemoteMany = (state: CachedState, ops: Op[]) => {
+    const applied: Op[] = [];
+    const ignored: {op: Op; reason: 'stale' | 'duplicate'}[] = [];
+    const pending: {op: Op; missing: Lamport[]}[] = [];
+    const invalid: {op: Op; error: Error}[] = [];
+
+    for (const op of ops) {
+        const result = applyRemote(state, op);
+        if (result.status === 'applied') {
+            state = result.state;
+            applied.push(op);
+        } else if (result.status === 'ignored') {
+            state = result.state;
+            ignored.push({op, reason: result.reason});
+        } else if (result.status === 'pending') {
+            pending.push({op, missing: result.missing});
+        } else {
+            invalid.push({op, error: result.error});
+        }
+    }
+
+    return {state, applied, ignored, pending, invalid};
+};
+
+export type ValidationResult =
+    | {valid: true}
+    | {valid: false; errors: string[]};
+
+export const validateOp = (op: Op): ValidationResult => {
+    const errors: string[] = [];
+    for (const lamport of lamportsForOp(op)) {
+        try {
+            validateLamport(lamport);
+        } catch (error) {
+            errors.push(error instanceof Error ? error.message : String(error));
+        }
+    }
+    if (op.type === 'block' || op.type === 'block:move') {
+        const order = op.type === 'block' ? op.block.order : op.order;
+        if (!order.path.length) {
+            errors.push(`block order path must not be empty`);
+        }
+        if (order.path.length && compareLamports(order.path[order.path.length - 1], op.type === 'block' ? op.block.id : op.id) !== 0) {
+            errors.push(`block order path must end with the block id`);
+        }
+    }
+    return errors.length ? {valid: false, errors} : {valid: true};
+};
+
+export const assertCacheConsistent = (state: CachedState) => {
+    const expected = organizeState(state.state.blocks, state.state.chars, state.state.joins);
+    if (!equal(state.cache, expected)) {
+        throw new Error(`cached state is inconsistent`);
+    }
+};
+
+export const applyStrict = (state: CachedState, op: Op): CachedState => {
+    const result = apply(state, op);
+    if (result === false) {
+        throw new Error(`op was pending`);
+    }
+    return result;
+};
 
 export const apply = (state: CachedState, op: Op): CachedState | false => {
     switch (op.type) {
@@ -70,13 +170,7 @@ const applyMark = ({state, cache}: CachedState, op: Op & {type: 'mark'}): Cached
         state: {
             ...state,
             marks: {...state.marks, [id]: op.mark},
-            maxSeenCount: Math.max(
-                state.maxSeenCount,
-                op.mark.id[0],
-                op.mark.start.id[0],
-                op.mark.end.id[0],
-                ...op.mark.crossedSplits.map((id) => id[0]),
-            ),
+            maxSeenCount: Math.max(state.maxSeenCount, maxLamportCounterForOp(op)),
         },
         cache,
     };
@@ -98,12 +192,7 @@ const applySplitRecord = (
         state: {
             ...state,
             splits: {...state.splits, [id]: op.split},
-            maxSeenCount: Math.max(
-                state.maxSeenCount,
-                op.split.id[0],
-                op.split.left[0],
-                op.split.right[0],
-            ),
+            maxSeenCount: Math.max(state.maxSeenCount, maxLamportCounterForOp(op)),
         },
         cache,
     };
@@ -124,13 +213,7 @@ const applyJoinRecord = (
     const nextState = {
         ...state,
         joins: {...state.joins, [id]: op.join},
-        maxSeenCount: Math.max(
-            state.maxSeenCount,
-            op.join.id[0],
-            op.join.left[0],
-            op.join.right[0],
-            op.join.tail[0],
-        ),
+        maxSeenCount: Math.max(state.maxSeenCount, maxLamportCounterForOp(op)),
     };
     return {
         state: nextState,
@@ -159,7 +242,7 @@ const applyCharDelete = (
             marks,
             splits,
             joins,
-            maxSeenCount: Math.max(maxSeenCount, op.id[0]),
+            maxSeenCount: Math.max(maxSeenCount, maxLamportCounterForOp(op)),
         },
         cache,
     };
@@ -173,6 +256,9 @@ const applyCharMove = (
     const charId = lamportToString(op.id);
     let current = state.chars[charId];
     if (!current) {
+        return false;
+    }
+    if (!parentExists({state, cache}, op.parent.id)) {
         return false;
     }
     if (!laterCharParentTs(op.parent.ts, current.parent.ts)) {
@@ -191,7 +277,7 @@ const applyCharMove = (
             marks,
             splits,
             joins,
-            maxSeenCount: Math.max(maxSeenCount, op.parent.id[0]),
+            maxSeenCount: Math.max(maxSeenCount, maxLamportCounterForOp(op)),
         },
         cache: {
             ...cache,
@@ -217,7 +303,7 @@ const applyBlockDelete = (
         state: {
             ...state.state,
             blocks: {...state.state.blocks, [id]: current},
-            maxSeenCount: Math.max(state.state.maxSeenCount, op.id[0]),
+            maxSeenCount: Math.max(state.state.maxSeenCount, maxLamportCounterForOp(op)),
         },
         cache: state.cache,
     };
@@ -244,7 +330,7 @@ const applyBlockMove = (
     const nextState = {
         ...state,
         blocks,
-        maxSeenCount: Math.max(state.maxSeenCount, op.id[0], op.order.id[0], ...op.order.path.map((id) => id[0])),
+        maxSeenCount: Math.max(state.maxSeenCount, maxLamportCounterForOp(op)),
     };
     return {
         state: nextState,
@@ -268,7 +354,7 @@ const applyBlockMeta = (
         state: {
             ...state,
             blocks: {...state.blocks, [id]: {...current, meta: op.meta}},
-            maxSeenCount: Math.max(state.maxSeenCount, op.id[0]),
+            maxSeenCount: Math.max(state.maxSeenCount, maxLamportCounterForOp(op)),
         },
         cache,
     };
@@ -295,7 +381,7 @@ const applyBlock = ({state}: CachedState, {block}: Op & {type: 'block'}): Cached
     const nextState = {
         ...state,
         blocks,
-        maxSeenCount: Math.max(state.maxSeenCount, block.id[0], block.order.id[0], ...block.order.path.map((id) => id[0])),
+        maxSeenCount: Math.max(state.maxSeenCount, maxLamportCounterForOp({type: 'block', block})),
     };
     return {
         state: nextState,
@@ -303,42 +389,9 @@ const applyBlock = ({state}: CachedState, {block}: Op & {type: 'block'}): Cached
     };
 };
 
-const laterCharParentTs = (one: Char['parent']['ts'], two: Char['parent']['ts']) => {
-    if (typeof one === 'string') {
-        if (typeof two === 'string') {
-            return one > two;
-        }
-        return one === two[0] ? false : one > two[0];
-    }
-    if (typeof two === 'string') {
-        return one[0] === two ? true : one[0] > two;
-    }
-    if (one[0] !== two[0]) return one[0] > two[0];
-    for (let i = 0; i < one[1].length && i < two[1].length; i++) {
-        const compared = compareLamports(one[1][i], two[1][i]);
-        if (compared !== 0) {
-            return compared > 0;
-        }
-    }
-    if (one[1].length !== two[1].length) return one[1].length > two[1].length;
-    return one[2] > two[2];
-};
+const laterCharParentTs = charParentVersionWins;
 
-const laterBlockOrderTs = (one: Block['order']['ts'], two: Block['order']['ts']) => {
-    if (typeof one === 'string') {
-        if (typeof two === 'string') {
-            return one > two;
-        }
-        return one === two[0] ? false : one > two[0];
-    }
-    if (typeof two === 'string') {
-        return one[0] === two ? true : one[0] > two;
-    }
-    if (one[0] !== two[0]) return one[0] > two[0];
-    const compared = compareLseqIds(one[1], two[1]);
-    if (compared !== 0) return compared > 0;
-    return one[2] > two[2];
-};
+const laterBlockOrderTs = blockOrderVersionWins;
 
 const blockOrderWins = (incoming: Block['order'], current: Block['order']) => {
     if (laterBlockOrderTs(incoming.ts, current.ts)) return true;
@@ -389,6 +442,9 @@ const applyChar = ({state, cache}: CachedState, {char}: Op & {type: 'char'}) => 
         char = {...char, deleted: current.deleted};
     }
     const parentId = lamportToString(char.parent.id);
+    if (!parentExists({state, cache}, char.parent.id)) {
+        return false;
+    }
     const charContents = {...cache.charContents};
     if (current) {
         const currentParentId = lamportToString(current.parent.id);
@@ -402,12 +458,7 @@ const applyChar = ({state, cache}: CachedState, {char}: Op & {type: 'char'}) => 
             marks,
             splits,
             joins,
-            maxSeenCount: Math.max(
-                maxSeenCount,
-                char.id[0],
-                char.parent.id[0],
-                ...(Array.isArray(char.parent.ts) ? char.parent.ts[1].map((id) => id[0]) : []),
-            ),
+            maxSeenCount: Math.max(maxSeenCount, maxLamportCounterForOp({type: 'char', char})),
         },
         cache: {
             ...cache,
@@ -444,7 +495,7 @@ const removeFromCache = (cache: Record<string, string[]>, parentId: string, id: 
 
 const insertSortedRev = (array: string[], item: string) => {
     for (let i = 0; i < array.length; i++) {
-        if (item > array[i]) {
+        if (compareLamportStrings(item, array[i]) > 0) {
             array.splice(i, 0, item);
             return array;
         }
@@ -455,14 +506,12 @@ const insertSortedRev = (array: string[], item: string) => {
 
 export const applyMany = (state: CachedState, ops: Op[]) => {
     ops.forEach((op) => {
-        const result = apply(state, op);
-        if (result === false) {
-            throw new Error(`op was pending`);
-        }
-        state = result;
+        state = applyStrict(state, op);
     });
     return state;
 };
+
+export const applyManyStrict = applyMany;
 
 export const addChars = (
     state: CachedState,
@@ -848,7 +897,7 @@ export function organizeState(
         items.sort((a, b) => compareLseqIds(blocks[a].order.index, blocks[b].order.index));
     });
     Object.values(charContents).forEach((items) => {
-        items.sort((a, b) => b.localeCompare(a));
+        items.sort((a, b) => compareLamportStrings(b, a));
     });
 
     const joinSentinels: Record<string, JoinRecord> = {};
@@ -876,8 +925,130 @@ export const findTail = (char: string, contents: Cache['charContents']) => {
     return char;
 };
 
-export const compareLamports = (one: Lamport, two: Lamport) =>
-    one[0] === two[0] ? one[1].localeCompare(two[1]) : one[0] - two[0];
+export const maxLamportCounterForOp = (op: Op): number => {
+    switch (op.type) {
+        case 'char':
+            return Math.max(
+                op.char.id[0],
+                op.char.parent.id[0],
+                ...lamportsInCharParentTs(op.char.parent.ts).map((id) => id[0]),
+            );
+        case 'block':
+            return Math.max(op.block.id[0], op.block.order.id[0], ...op.block.order.path.map((id) => id[0]));
+        case 'char:move':
+            return Math.max(
+                op.id[0],
+                op.parent.id[0],
+                ...lamportsInCharParentTs(op.parent.ts).map((id) => id[0]),
+            );
+        case 'char:delete':
+        case 'block:delete':
+        case 'block:meta':
+            return op.id[0];
+        case 'block:move':
+            return Math.max(op.id[0], op.order.id[0], ...op.order.path.map((id) => id[0]));
+        case 'mark':
+            return Math.max(
+                op.mark.id[0],
+                op.mark.start.id[0],
+                op.mark.end.id[0],
+                ...op.mark.crossedSplits.map((id) => id[0]),
+            );
+        case 'split-record':
+            return Math.max(op.split.id[0], op.split.left[0], op.split.right[0]);
+        case 'join-record':
+            return Math.max(op.join.id[0], op.join.left[0], op.join.right[0], op.join.tail[0]);
+    }
+};
+
+const lamportsInCharParentTs = (ts: Char['parent']['ts']): Lamport[] =>
+    Array.isArray(ts) ? ts[1] : [];
+
+const lamportsForOp = (op: Op): Lamport[] => {
+    switch (op.type) {
+        case 'char':
+            return [op.char.id, op.char.parent.id, ...lamportsInCharParentTs(op.char.parent.ts)];
+        case 'block':
+            return [op.block.id, op.block.order.id, ...op.block.order.path];
+        case 'char:move':
+            return [op.id, op.parent.id, ...lamportsInCharParentTs(op.parent.ts)];
+        case 'char:delete':
+        case 'block:delete':
+        case 'block:meta':
+            return [op.id];
+        case 'block:move':
+            return [op.id, op.order.id, ...op.order.path];
+        case 'mark':
+            return [
+                op.mark.id,
+                op.mark.start.id,
+                op.mark.end.id,
+                ...op.mark.crossedSplits,
+            ];
+        case 'split-record':
+            return [op.split.id, op.split.left, op.split.right];
+        case 'join-record':
+            return [op.join.id, op.join.left, op.join.right, op.join.tail];
+    }
+};
+
+const parentExists = (state: CachedState, id: Lamport): boolean => {
+    const key = lamportToString(id);
+    return Boolean(state.state.blocks[key] || state.state.chars[key] || state.cache.joinSentinels[key]);
+};
+
+const missingDependenciesForOp = (state: CachedState, op: Op): Lamport[] => {
+    switch (op.type) {
+        case 'char':
+            return parentExists(state, op.char.parent.id) ? [] : [op.char.parent.id];
+        case 'char:move': {
+            const missing: Lamport[] = [];
+            if (!state.state.chars[lamportToString(op.id)]) {
+                missing.push(op.id);
+            }
+            if (!parentExists(state, op.parent.id)) {
+                missing.push(op.parent.id);
+            }
+            return missing;
+        }
+        case 'char:delete':
+            return state.state.chars[lamportToString(op.id)] ? [] : [op.id];
+        case 'block':
+            return op.block.order.path.filter((id) => !state.state.blocks[lamportToString(id)] && compareLamports(id, op.block.id) !== 0);
+        case 'block:move': {
+            const missing = state.state.blocks[lamportToString(op.id)] ? [] : [op.id];
+            return [
+                ...missing,
+                ...op.order.path.filter((id) => !state.state.blocks[lamportToString(id)] && compareLamports(id, op.id) !== 0),
+            ];
+        }
+        case 'block:delete':
+        case 'block:meta':
+            return state.state.blocks[lamportToString(op.id)] ? [] : [op.id];
+        case 'mark': {
+            const missing: Lamport[] = [];
+            if (!state.state.chars[lamportToString(op.mark.start.id)]) missing.push(op.mark.start.id);
+            if (!state.state.chars[lamportToString(op.mark.end.id)]) missing.push(op.mark.end.id);
+            for (const split of op.mark.crossedSplits) {
+                if (!state.state.splits[lamportToString(split)]) missing.push(split);
+            }
+            return missing;
+        }
+        case 'split-record': {
+            const missing: Lamport[] = [];
+            if (!state.state.chars[lamportToString(op.split.left)]) missing.push(op.split.left);
+            if (!state.state.chars[lamportToString(op.split.right)]) missing.push(op.split.right);
+            return missing;
+        }
+        case 'join-record': {
+            const missing: Lamport[] = [];
+            if (!state.state.blocks[lamportToString(op.join.left)]) missing.push(op.join.left);
+            if (!state.state.blocks[lamportToString(op.join.right)]) missing.push(op.join.right);
+            if (!parentExists(state, op.join.tail)) missing.push(op.join.tail);
+            return missing;
+        }
+    }
+};
 
 export const activeJoinRecords = (joins: Record<string, JoinRecord>): JoinRecord[] => {
     const active: JoinRecord[] = [];
@@ -1108,6 +1279,119 @@ export const markRange = (
         throw new Error(`mark range must anchor to characters`);
     }
     return markOp(id, start, end, type, data, remove, crossedSplitsBetween(state, start, end));
+};
+
+export const insertTextOps = (
+    state: CachedState,
+    {
+        actor,
+        block,
+        offset,
+        text,
+        ts,
+    }: {
+        actor: string;
+        block: Lamport;
+        offset: number;
+        text: string;
+        ts: () => HLC;
+    },
+): Op[] => {
+    let after = insertionParentAtVisibleOffset(state, block, offset);
+    let next = state.state.maxSeenCount + 1;
+    const ops: Op[] = [];
+    for (const char of new Intl.Segmenter().segment(text)) {
+        const id: Lamport = [next++, actor];
+        ops.push(charOp(char.segment, id, after, ts()));
+        after = id;
+    }
+    return ops;
+};
+
+export const deleteRangeOps = (
+    state: CachedState,
+    {block, startOffset, endOffset}: {block: Lamport; startOffset: number; endOffset: number},
+): Op[] => {
+    if (startOffset > endOffset) {
+        throw new Error(`delete range start must be <= end`);
+    }
+    const ops: Op[] = [];
+    for (let offset = startOffset; offset < endOffset; offset++) {
+        const id = charAtVisibleOffset(state, block, offset);
+        if (!id) {
+            throw new Error(`delete range out of bounds`);
+        }
+        ops.push({type: 'char:delete', id});
+    }
+    return ops;
+};
+
+export const splitBlockOps = (
+    state: CachedState,
+    {
+        actor,
+        block,
+        offset,
+        ts,
+        options,
+    }: {
+        actor: string;
+        block: Lamport;
+        offset: number;
+        ts: HLC;
+        options?: LseqOptions;
+    },
+): Op[] => {
+    const blockId = lamportToString(block);
+    const chars = orderedCharIdsForBlock(state, blockId, {visibleOnly: true});
+    if (offset < 0 || offset > chars.length) {
+        throw new Error(`split offset out of bounds`);
+    }
+    const char =
+        offset === 0
+            ? block
+            : offset === chars.length
+              ? null
+              : state.state.chars[chars[offset]].id;
+    const previous =
+        char === null
+            ? chars.length
+                ? state.state.chars[chars[chars.length - 1]].id
+                : null
+            : offset > 0
+              ? state.state.chars[chars[offset - 1]].id
+              : null;
+    return split(state, {block, char, previous}, ts, actor, options);
+};
+
+export const joinBlocksOps = (
+    state: CachedState,
+    {actor, left, right, ts}: {actor: string; left: Lamport; right: Lamport; ts: HLC},
+): Op[] => join(state, left, right, ts, actor);
+
+export const setBlockMetaOps = (
+    _state: CachedState,
+    {block, meta}: {block: Lamport; meta: Block['meta']},
+): Op[] => [{type: 'block:meta', id: block, meta}];
+
+export const markRangeOp = markRange;
+
+const insertionParentAtVisibleOffset = (
+    state: CachedState,
+    block: Lamport,
+    offset: number,
+): Lamport => {
+    if (offset < 0) {
+        throw new Error(`insert offset out of bounds`);
+    }
+    if (offset === 0) {
+        return block;
+    }
+    const id = charAtVisibleOffset(state, block, offset - 1);
+    if (!id) {
+        throw new Error(`insert offset out of bounds`);
+    }
+    return id;
 };
 
 export const materializeFormattedBlocks = (state: CachedState): FormattedBlock[] => {

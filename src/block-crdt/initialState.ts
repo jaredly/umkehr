@@ -1,5 +1,5 @@
-import {State} from './types';
-import {lamportToString} from './utils';
+import {State, TimestampedBlockMeta} from './types';
+import {lamportToString} from './ids';
 
 export const initialState = (session: string, ts: string): State => ({
     chars: {},
@@ -12,6 +12,30 @@ export const initialState = (session: string, ts: string): State => ({
                 path: [[0, session]],
                 index: {path: [1], opId: {actorId: session, counter: 0}},
                 ts: ts,
+            },
+            deleted: false,
+        },
+    },
+    marks: {},
+    splits: {},
+    joins: {},
+    maxSeenCount: 0,
+});
+
+export const initialStateWithMeta = <M extends TimestampedBlockMeta>(
+    session: string,
+    meta: M,
+): State<M> => ({
+    chars: {},
+    blocks: {
+        [lamportToString([0, session])]: {
+            id: [0, session],
+            meta,
+            order: {
+                id: [0, session],
+                path: [[0, session]],
+                index: {path: [1], opId: {actorId: session, counter: 0}},
+                ts: meta.ts,
             },
             deleted: false,
         },

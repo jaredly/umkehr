@@ -1,4 +1,7 @@
 import {CachedState, Lamport} from './types';
+import {lamportToString} from './ids';
+
+export {assertActorId, lamportToString, parseLamportString, validateLamport} from './ids';
 
 export const selPos = (
     {state, cache}: CachedState,
@@ -30,13 +33,4 @@ export const selPos = (
         }
     }
     throw new Error('selection out of bounds');
-};
-
-export const lamportToString = (lamport: Lamport) => {
-    return `${lamport[0].toString().padStart(4, '0')}-${lamport[1]}`;
-};
-
-export const parseLamportString = (raw: string) => {
-    const [count, id] = raw.split('-');
-    return [parseInt(count), id] as Lamport;
 };
