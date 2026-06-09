@@ -72,6 +72,17 @@ const selectRange = (block: HTMLElement, start: number, end: number) => {
     fireEvent.mouseUp(block);
 };
 
+const selectCrossBlockRange = (
+    startBlock: HTMLElement,
+    startOffset: number,
+    endBlock: HTMLElement,
+    endOffset: number,
+) => {
+    endBlock.focus();
+    setDomCrossBlockRange(startBlock, startOffset, endBlock, endOffset);
+    fireEvent.mouseUp(endBlock);
+};
+
 const addCaret = (block: HTMLElement, offset = 0) => {
     block.focus();
     setDomCaret(block, offset);
@@ -115,6 +126,30 @@ const setDomRange = (block: HTMLElement, start: number, end: number) => {
     } else {
         range.setStart(block, 0);
         range.setEnd(block, 0);
+    }
+    selection.removeAllRanges();
+    selection.addRange(range);
+};
+
+const setDomCrossBlockRange = (
+    startBlock: HTMLElement,
+    startOffset: number,
+    endBlock: HTMLElement,
+    endOffset: number,
+) => {
+    const selection = window.getSelection()!;
+    const range = document.createRange();
+    const startText = firstTextNode(startBlock);
+    const endText = firstTextNode(endBlock);
+    if (startText) {
+        range.setStart(startText, Math.min(startOffset, startText.textContent?.length ?? 0));
+    } else {
+        range.setStart(startBlock, 0);
+    }
+    if (endText) {
+        range.setEnd(endText, Math.min(endOffset, endText.textContent?.length ?? 0));
+    } else {
+        range.setEnd(endBlock, 0);
     }
     selection.removeAllRanges();
     selection.addRange(range);
@@ -468,6 +503,48 @@ describe('Block rich text example UI', () => {
         await waitFor(() => expect(blockDepth(blocks(left)[1])).toBe('0'));
         expect(domSelectionBlock()).toBe(blocks(left)[1]);
         expect(domCaretOffset(blocks(left)[1])).toBe(2);
+    });
+
+    it('indents and unindents every block with a selected caret', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        pasteText(blocks(left)[0], 'one\ntwo\nthree\nfour');
+        await waitForBlockTexts(left, ['one', 'two', 'three', 'four']);
+
+        selectCaret(blocks(left)[1], 1);
+        addCaret(blocks(left)[2], 2);
+        fireEvent.keyDown(blocks(left)[2], {key: 'Tab'});
+
+        await waitFor(() => {
+            expect(blockDepth(blocks(left)[1])).toBe('1');
+            expect(blockDepth(blocks(left)[2])).toBe('1');
+        });
+
+        fireEvent.keyDown(blocks(left)[2], {key: 'Tab', shiftKey: true});
+
+        await waitFor(() => {
+            expect(blockDepth(blocks(left)[1])).toBe('0');
+            expect(blockDepth(blocks(left)[2])).toBe('0');
+        });
+    });
+
+    it('indents every block spanned by a range selection', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        pasteText(blocks(left)[0], 'one\ntwo\nthree\nfour');
+        await waitForBlockTexts(left, ['one', 'two', 'three', 'four']);
+
+        selectCrossBlockRange(blocks(left)[1], 1, blocks(left)[2], 2);
+        fireEvent.keyDown(blocks(left)[2], {key: 'Tab'});
+
+        await waitFor(() => {
+            expect(blockDepth(blocks(left)[1])).toBe('1');
+            expect(blockDepth(blocks(left)[2])).toBe('1');
+        });
     });
 
     it('moves ArrowLeft from the start of a block to the previous block end', async () => {

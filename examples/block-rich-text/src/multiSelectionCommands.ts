@@ -1,9 +1,10 @@
 import type {CachedState} from 'umkehr/block-crdt/types';
-import type {Op} from 'umkehr/block-crdt';
+import {materializeFormattedBlocks, type Op} from 'umkehr/block-crdt';
 import {
     deleteBackward,
     deleteForward,
     insertText,
+    moveBlock,
     pastePlainText,
     splitBlock,
     toggleMark,
@@ -116,6 +117,18 @@ export const toggleMarkEverywhere = (
     };
 };
 
+export const indentSelections = (
+    state: CachedState,
+    selection: RetainedSelectionSet,
+    context: CommandContext,
+): MultiCommandResult => moveSelectedBlocks(state, selection, 'indent', context);
+
+export const unindentSelections = (
+    state: CachedState,
+    selection: RetainedSelectionSet,
+    context: CommandContext,
+): MultiCommandResult => moveSelectedBlocks(state, selection, 'unindent', context);
+
 export const moveSelectionsHorizontally = (
     state: CachedState,
     selection: RetainedSelectionSet,
@@ -132,6 +145,123 @@ export const moveSelectionsHorizontally = (
         ops: [],
         selection: dedupeSelectionSet(state, {primaryId: resolved.primaryId, entries}),
     };
+};
+
+const moveSelectedBlocks = (
+    state: CachedState,
+    selection: RetainedSelectionSet,
+    direction: 'indent' | 'unindent',
+    context: CommandContext,
+): MultiCommandResult => {
+    const blockIds = topLevelSelectedBlockIds(state, selection);
+    if (!blockIds.length) {
+        return {state, ops: [], selection};
+    }
+
+    let working = state;
+    const ops: Op[] = [];
+    for (const move of blockMovesForSelection(state, blockIds, direction)) {
+        const result = moveBlock(working, move.blockId, move.target, context);
+        working = result.state;
+        ops.push(...result.ops);
+    }
+
+    return {
+        state: working,
+        ops,
+        selection: dedupeSelectionSet(working, selection),
+    };
+};
+
+const topLevelSelectedBlockIds = (
+    state: CachedState,
+    selection: RetainedSelectionSet,
+): string[] => {
+    const selected = new Set<string>();
+    for (const entry of resolveSelectionSet(state, selection).entries) {
+        for (const blockId of blockIdsForSelection(state, entry.selection)) {
+            selected.add(blockId);
+        }
+    }
+
+    const outline = materializeFormattedBlocks(state);
+    const result: string[] = [];
+    const selectedAncestorDepths: number[] = [];
+    for (const block of outline) {
+        while (
+            selectedAncestorDepths.length &&
+            selectedAncestorDepths[selectedAncestorDepths.length - 1] >= block.depth
+        ) {
+            selectedAncestorDepths.pop();
+        }
+        if (!selected.has(block.id)) continue;
+        if (!selectedAncestorDepths.length) {
+            result.push(block.id);
+            selectedAncestorDepths.push(block.depth);
+        }
+    }
+    return result;
+};
+
+const blockIdsForSelection = (state: CachedState, selection: EditorSelection): string[] => {
+    if (selection.type === 'caret') return [selection.point.blockId];
+
+    const blocks = visibleBlockIds(state);
+    const anchorIndex = blocks.indexOf(selection.anchor.blockId);
+    const focusIndex = blocks.indexOf(selection.focus.blockId);
+    if (anchorIndex < 0 || focusIndex < 0) return [];
+    const start = Math.min(anchorIndex, focusIndex);
+    const end = Math.max(anchorIndex, focusIndex);
+    return blocks.slice(start, end + 1);
+};
+
+const blockMovesForSelection = (
+    state: CachedState,
+    selectedBlockIds: string[],
+    direction: 'indent' | 'unindent',
+): Array<{blockId: string; target: Parameters<typeof moveBlock>[2]}> => {
+    const selected = new Set(selectedBlockIds);
+    const outline = materializeFormattedBlocks(state);
+    const byParent = new Map<string, typeof outline>();
+    for (const block of outline) {
+        const siblings = byParent.get(block.parentId) ?? [];
+        siblings.push(block);
+        byParent.set(block.parentId, siblings);
+    }
+
+    const moves: Array<{blockId: string; target: Parameters<typeof moveBlock>[2]}> = [];
+    for (const siblings of byParent.values()) {
+        for (let index = 0; index < siblings.length; index++) {
+            if (!selected.has(siblings[index].id)) continue;
+            const start = index;
+            while (index + 1 < siblings.length && selected.has(siblings[index + 1].id)) {
+                index++;
+            }
+            const run = siblings.slice(start, index + 1);
+            if (direction === 'indent') {
+                const previousSibling = siblings[start - 1];
+                if (!previousSibling) continue;
+                for (const block of run) {
+                    moves.push({
+                        blockId: block.id,
+                        target: {type: 'child', parentBlockId: previousSibling.id, at: 'end'},
+                    });
+                }
+            } else {
+                const parentId = run[0].parentId;
+                if (parentId === '0000-root') continue;
+                let targetBlockId = parentId;
+                for (const block of run) {
+                    moves.push({
+                        blockId: block.id,
+                        target: {type: 'after', targetBlockId},
+                    });
+                    targetBlockId = block.id;
+                }
+            }
+        }
+    }
+    return moves;
 };
 
 export const moveSelectionsVertically = (

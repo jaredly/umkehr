@@ -11,7 +11,7 @@ import {
 } from 'react';
 import {materializeFormattedBlocks} from 'umkehr/block-crdt';
 import type {FormattedBlock} from 'umkehr/block-crdt';
-import {indentBlock, moveBlock, unindentBlock} from './blockCommands';
+import {moveBlock} from './blockCommands';
 import {makeCommandContext, type DemoState, type EditorId, type Replica} from './blockEditorRuntime';
 import {
     closestCaretOffsetForHorizontalIntent,
@@ -38,12 +38,14 @@ import {
     deleteForwardEverywhere,
     extendSelectionsHorizontally,
     extendSelectionsVertically,
+    indentSelections,
     insertTextEverywhere,
     moveSelectionsHorizontally,
     moveSelectionsVertically,
     pastePlainTextEverywhere,
     splitBlockEverywhere,
     toggleMarkEverywhere,
+    unindentSelections,
     type MultiCommandResult,
 } from './multiSelectionCommands';
 import {useBlockReorder, type DropTarget} from './useBlockReorder';
@@ -817,32 +819,14 @@ function BlockEditor({
                             )
                         }
                         onIndent={() =>
-                            runEditCommand((current, selection) => {
-                                const result = indentBlock(
-                                    current.state,
-                                    block.id,
-                                    makeCommandContext(current),
-                                );
-                                return {
-                                    state: result.state,
-                                    ops: result.ops,
-                                    selection,
-                                };
-                            })
+                            runEditCommand((current, selection) =>
+                                indentSelections(current.state, selection, makeCommandContext(current)),
+                            )
                         }
                         onUnindent={() =>
-                            runEditCommand((current, selection) => {
-                                const result = unindentBlock(
-                                    current.state,
-                                    block.id,
-                                    makeCommandContext(current),
-                                );
-                                return {
-                                    state: result.state,
-                                    ops: result.ops,
-                                    selection,
-                                };
-                            })
+                            runEditCommand((current, selection) =>
+                                unindentSelections(current.state, selection, makeCommandContext(current)),
+                            )
                         }
                         onToggleBold={() =>
                             runEditCommand((current, selection) =>
@@ -1095,14 +1079,11 @@ function EditableBlock({
                         event.preventDefault();
                         onSplit();
                     } else if (event.key === 'Tab' && !event.altKey && !modifierPressed) {
-                        const currentSelection = readSelectionFromDom(event.currentTarget);
                         event.preventDefault();
-                        if (currentSelection?.type === 'caret') {
-                            if (event.shiftKey) {
-                                onUnindent();
-                            } else {
-                                onIndent();
-                            }
+                        if (event.shiftKey) {
+                            onUnindent();
+                        } else {
+                            onIndent();
                         }
                     } else if (event.key === 'Backspace') {
                         event.preventDefault();

@@ -46,3 +46,12 @@
   - Extended the Tab app regression to assert the DOM caret remains at offset 2 after both indent and unindent.
   - `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx` passes with 49 tests.
   - `npm --prefix examples/block-rich-text run build` passes.
+- Multi-select/range Tab follow-up:
+  - Added `indentSelections` and `unindentSelections` multi-selection commands.
+  - Selected blocks are derived from every caret and from every block touched by a range selection. Descendants of already selected blocks are ignored so parent subtrees move as a unit.
+  - Adjacent selected sibling runs are moved together, avoiding the old repeated-`indentBlock` cascade where `b,c` could become `b > c`.
+  - Updated the Tab handler to always delegate to the editor-root live selection path instead of reading selection from only the event block; this fixes cross-block ranges.
+  - Added command tests for multi-caret indent, cross-block range indent, and multi-caret unindent.
+  - Added app tests for multi-caret Tab/Shift+Tab and range-spanning Tab.
+  - `npm exec vitest -- run examples/block-rich-text/src/blockCommands.test.ts examples/block-rich-text/src/retainedSelection.test.ts examples/block-rich-text/src/multiSelectionCommands.test.ts examples/block-rich-text/src/App.test.tsx` passes with 108 tests.
+  - `npm --prefix examples/block-rich-text run build` passes.

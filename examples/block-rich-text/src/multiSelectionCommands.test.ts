@@ -2,6 +2,7 @@ import {describe, expect, it} from 'vitest';
 import {blockContents, cachedState, materializeFormattedBlocks, rootBlockIds} from 'umkehr/block-crdt';
 import {initialState} from 'umkehr/block-crdt/initialState';
 import type {CachedState} from 'umkehr/block-crdt/types';
+import {lamportToString} from 'umkehr/block-crdt/utils';
 import {insertText, pastePlainText, type CommandContext} from './blockCommands';
 import {caret, type EditorSelection} from './selectionModel';
 import {
@@ -9,11 +10,13 @@ import {
     deleteForwardEverywhere,
     extendSelectionsHorizontally,
     extendSelectionsVertically,
+    indentSelections,
     insertTextEverywhere,
     moveSelectionsHorizontally,
     moveSelectionsVertically,
     splitBlockEverywhere,
     toggleMarkEverywhere,
+    unindentSelections,
 } from './multiSelectionCommands';
 import {appendSelection, resolveSelectionSet, singleRetainedSelectionSet} from './selectionSet';
 
@@ -21,7 +24,7 @@ const ctx = (actor = 'left'): CommandContext => {
     let i = 1;
     return {
         actor,
-        nextTs: () => `${actor}-${String(i++).padStart(5, '0')}`,
+        nextTs: () => lamportToString([i++, actor]),
     };
 };
 
@@ -30,6 +33,12 @@ const init = () => cachedState(initialState('doc', '00000'));
 const onlyBlock = (state: CachedState) => rootBlockIds(state)[0];
 
 const lines = (state: CachedState) => rootBlockIds(state).map((id) => blockContents(state, id));
+
+const outline = (state: CachedState) =>
+    materializeFormattedBlocks(state).map((block) => ({
+        text: blockContents(state, block.id),
+        depth: block.depth,
+    }));
 
 describe('block rich text multi-selection commands', () => {
     it('inserts text at two carets in one block', () => {
@@ -169,6 +178,84 @@ describe('block rich text multi-selection commands', () => {
                 anchor: {blockId: secondBlock, offset: 3},
                 focus: {blockId: thirdBlock, offset: 1},
             },
+        ]);
+    });
+
+    it('indents adjacent selected caret blocks without cascading them', () => {
+        const context = ctx();
+        const pasted = pastePlainText(init(), caret(onlyBlock(init()), 0), 'a\nb\nc\nd', context);
+        const [, secondBlock, thirdBlock] = rootBlockIds(pasted.state);
+        const set = appendSelection(
+            pasted.state,
+            singleRetainedSelectionSet(pasted.state, caret(secondBlock, 1), 'first'),
+            caret(thirdBlock, 1),
+            'second',
+        );
+
+        const result = indentSelections(pasted.state, set, context);
+
+        expect(outline(result.state)).toEqual([
+            {text: 'a', depth: 0},
+            {text: 'b', depth: 1},
+            {text: 'c', depth: 1},
+            {text: 'd', depth: 0},
+        ]);
+        expect(resolveSelectionSet(result.state, result.selection).entries.map((entry) => entry.selection)).toEqual([
+            caret(secondBlock, 1),
+            caret(thirdBlock, 1),
+        ]);
+    });
+
+    it('indents every block touched by a cross-block selection', () => {
+        const context = ctx();
+        const pasted = pastePlainText(init(), caret(onlyBlock(init()), 0), 'a\nb\nc\nd', context);
+        const [, secondBlock, thirdBlock] = rootBlockIds(pasted.state);
+        const set = singleRetainedSelectionSet(
+            pasted.state,
+            {
+                type: 'range',
+                anchor: {blockId: secondBlock, offset: 1},
+                focus: {blockId: thirdBlock, offset: 1},
+            },
+            'range',
+        );
+
+        const result = indentSelections(pasted.state, set, context);
+
+        expect(outline(result.state)).toEqual([
+            {text: 'a', depth: 0},
+            {text: 'b', depth: 1},
+            {text: 'c', depth: 1},
+            {text: 'd', depth: 0},
+        ]);
+    });
+
+    it('unindents adjacent selected caret blocks without nesting them under each other', () => {
+        const context = ctx();
+        const pasted = pastePlainText(init(), caret(onlyBlock(init()), 0), 'a\nb\nc\nd', context);
+        const [, secondBlock, thirdBlock] = rootBlockIds(pasted.state);
+        const indented = indentSelections(
+            pasted.state,
+            appendSelection(
+                pasted.state,
+                singleRetainedSelectionSet(pasted.state, caret(secondBlock, 1), 'first'),
+                caret(thirdBlock, 1),
+                'second',
+            ),
+            context,
+        );
+
+        const result = unindentSelections(indented.state, indented.selection, context);
+
+        expect(outline(result.state)).toEqual([
+            {text: 'a', depth: 0},
+            {text: 'b', depth: 0},
+            {text: 'c', depth: 0},
+            {text: 'd', depth: 0},
+        ]);
+        expect(resolveSelectionSet(result.state, result.selection).entries.map((entry) => entry.selection)).toEqual([
+            caret(secondBlock, 1),
+            caret(thirdBlock, 1),
         ]);
     });
 
