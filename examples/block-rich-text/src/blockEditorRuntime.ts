@@ -1,6 +1,7 @@
 import {applyMany, cachedState, type Op} from 'umkehr/block-crdt';
 import {initialState} from 'umkehr/block-crdt/initialState';
 import type {CachedState} from 'umkehr/block-crdt/types';
+import {lamportToString} from 'umkehr/block-crdt/utils';
 import {initialRetainedSelectionSet, type RetainedSelectionSet} from './selectionSet';
 
 export type EditorId = 'left' | 'right';
@@ -37,7 +38,7 @@ export const createDemoState = (): DemoState => {
 
 export const makeCommandContext = (replica: Replica) => ({
     actor: replica.actor,
-    nextTs: () => `${replica.actor}-${String(replica.clock++).padStart(5, '0')}`,
+    nextTs: () => lamportToString([replica.clock++, replica.actor]),
 });
 
 export const applyLocalChange = (demo: DemoState, change: LocalChange): DemoState => {

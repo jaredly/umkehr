@@ -116,7 +116,7 @@ describe('retained block rich text selections', () => {
         const moved = moveBlock(
             pasted.state,
             second,
-            {targetBlockId: rootBlockIds(pasted.state)[0], after: false},
+            {type: 'before', targetBlockId: rootBlockIds(pasted.state)[0]},
             context,
         );
 

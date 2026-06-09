@@ -11,6 +11,7 @@ import {
 } from 'umkehr/block-crdt';
 import {initialState} from 'umkehr/block-crdt/initialState';
 import type {CachedState} from 'umkehr/block-crdt/types';
+import {lamportToString} from 'umkehr/block-crdt/utils';
 import {
     deleteBackward,
     deleteForward,
@@ -31,7 +32,7 @@ const ctx = (actor = 'left'): CommandContext => {
     let i = 1;
     return {
         actor,
-        nextTs: () => `${actor}-${String(i++).padStart(5, '0')}`,
+        nextTs: () => lamportToString([i++, actor]),
     };
 };
 
@@ -277,8 +278,156 @@ describe('block rich text commands', () => {
         let result = pastePlainText(init(), caret(onlyBlock(init()), 0), 'a\nb\nc', context);
         const [first, , third] = rootBlockIds(result.state);
 
-        result = moveBlock(result.state, first, {targetBlockId: third, after: true}, context);
+        result = moveBlock(result.state, first, {type: 'after', targetBlockId: third}, context);
         expect(lines(result.state)).toEqual(['b', 'c', 'a']);
+        expectCache(result.state);
+    });
+
+    it('moves a root block as the first child of an empty block', () => {
+        const context = ctx();
+        let result = pastePlainText(init(), caret(onlyBlock(init()), 0), 'a\nb', context);
+        const [first, second] = rootBlockIds(result.state);
+
+        result = moveBlock(result.state, second, {type: 'child', parentBlockId: first, at: 'start'}, context);
+
+        expect(outline(result.state)).toEqual([
+            {text: 'a', depth: 0},
+            {text: 'b', depth: 1},
+        ]);
+        expect(materializedBlockParent(result.state, second)).toEqual(result.state.state.blocks[first].id);
+        expectCache(result.state);
+    });
+
+    it('moves a root block as the last child of a parent with children', () => {
+        const context = ctx();
+        let result = pastePlainText(init(), caret(onlyBlock(init()), 0), 'a\nb\nc', context);
+        const [first, second, third] = rootBlockIds(result.state);
+        result = moveBlock(result.state, second, {type: 'child', parentBlockId: first, at: 'start'}, context);
+
+        result = moveBlock(result.state, third, {type: 'child', parentBlockId: first, at: 'end'}, context);
+
+        expect(outline(result.state)).toEqual([
+            {text: 'a', depth: 0},
+            {text: 'b', depth: 1},
+            {text: 'c', depth: 1},
+        ]);
+        expect(materializedBlockParent(result.state, third)).toEqual(result.state.state.blocks[first].id);
+        expectCache(result.state);
+    });
+
+    it('moves a nested block back to root', () => {
+        const context = ctx();
+        let result = pastePlainText(init(), caret(onlyBlock(init()), 0), 'a\nb\nc', context);
+        const [first, second, third] = rootBlockIds(result.state);
+        result = moveBlock(result.state, second, {type: 'child', parentBlockId: first, at: 'start'}, context);
+
+        result = moveBlock(result.state, second, {type: 'after', targetBlockId: third}, context);
+
+        expect(outline(result.state)).toEqual([
+            {text: 'a', depth: 0},
+            {text: 'c', depth: 0},
+            {text: 'b', depth: 0},
+        ]);
+        expect(materializedBlockParent(result.state, second)).toEqual([0, 'root']);
+        expectCache(result.state);
+    });
+
+    it('moves a nested block under another nested parent', () => {
+        const context = ctx();
+        let result = pastePlainText(init(), caret(onlyBlock(init()), 0), 'a\nb\nc\nd', context);
+        const [first, second, third, fourth] = rootBlockIds(result.state);
+        result = moveBlock(result.state, second, {type: 'child', parentBlockId: first, at: 'start'}, context);
+        result = moveBlock(result.state, third, {type: 'child', parentBlockId: first, at: 'end'}, context);
+
+        result = moveBlock(result.state, fourth, {type: 'child', parentBlockId: third, at: 'start'}, context);
+
+        expect(outline(result.state)).toEqual([
+            {text: 'a', depth: 0},
+            {text: 'b', depth: 1},
+            {text: 'c', depth: 1},
+            {text: 'd', depth: 2},
+        ]);
+        expect(materializedBlockParent(result.state, fourth)).toEqual(result.state.state.blocks[third].id);
+        expectCache(result.state);
+    });
+
+    it('moves a parent with children as one subtree', () => {
+        const context = ctx();
+        let result = pastePlainText(init(), caret(onlyBlock(init()), 0), 'a\nb\nc\nd', context);
+        const [first, second, third, fourth] = rootBlockIds(result.state);
+        result = moveBlock(result.state, second, {type: 'child', parentBlockId: first, at: 'start'}, context);
+        result = moveBlock(result.state, third, {type: 'child', parentBlockId: second, at: 'start'}, context);
+
+        result = moveBlock(result.state, second, {type: 'after', targetBlockId: fourth}, context);
+
+        expect(outline(result.state)).toEqual([
+            {text: 'a', depth: 0},
+            {text: 'd', depth: 0},
+            {text: 'b', depth: 0},
+            {text: 'c', depth: 1},
+        ]);
+        expect(materializedBlockParent(result.state, third)).toEqual(result.state.state.blocks[second].id);
+        expectCache(result.state);
+    });
+
+    it('rejects invalid and no-op block moves', () => {
+        const context = ctx();
+        let result = pastePlainText(init(), caret(onlyBlock(init()), 0), 'a\nb\nc', context);
+        const [first, second, third] = rootBlockIds(result.state);
+        result = moveBlock(result.state, second, {type: 'child', parentBlockId: first, at: 'start'}, context);
+        result = moveBlock(result.state, third, {type: 'child', parentBlockId: second, at: 'start'}, context);
+        const base = result.state;
+
+        expect(moveBlock(base, first, {type: 'child', parentBlockId: first, at: 'start'}, context).ops).toEqual([]);
+        expect(moveBlock(base, first, {type: 'child', parentBlockId: third, at: 'start'}, context).ops).toEqual([]);
+        expect(moveBlock(base, first, {type: 'before', targetBlockId: second}, context).ops).toEqual([]);
+        expect(moveBlock(base, second, {type: 'child', parentBlockId: first, at: 'start'}, context).ops).toEqual([]);
+        expectCache(base);
+    });
+
+    it('moves children that are visibly spliced through a joined parent', () => {
+        const context = ctx();
+        let result = pastePlainText(init(), caret(onlyBlock(init()), 0), 'a\nb\nc\nd', context);
+        const [first, second, third, fourth] = rootBlockIds(result.state);
+        result = moveBlock(result.state, second, {type: 'child', parentBlockId: first, at: 'start'}, context);
+        result = moveBlock(result.state, third, {type: 'child', parentBlockId: second, at: 'start'}, context);
+        result = moveBlock(result.state, fourth, {type: 'child', parentBlockId: second, at: 'end'}, context);
+        result = deleteForward(result.state, caret(first, 1), context);
+
+        expect(outline(result.state)).toEqual([
+            {text: 'ab', depth: 0},
+            {text: 'c', depth: 1},
+            {text: 'd', depth: 1},
+        ]);
+
+        result = moveBlock(result.state, fourth, {type: 'before', targetBlockId: third}, context);
+
+        expect(outline(result.state)).toEqual([
+            {text: 'ab', depth: 0},
+            {text: 'd', depth: 1},
+            {text: 'c', depth: 1},
+        ]);
+        expect(materializedBlockParent(result.state, fourth)).toEqual(result.state.state.blocks[first].id);
+        expectCache(result.state);
+    });
+
+    it('moves a visibly spliced child out to root', () => {
+        const context = ctx();
+        let result = pastePlainText(init(), caret(onlyBlock(init()), 0), 'a\nb\nc\nd', context);
+        const [first, second, third, fourth] = rootBlockIds(result.state);
+        result = moveBlock(result.state, second, {type: 'child', parentBlockId: first, at: 'start'}, context);
+        result = moveBlock(result.state, third, {type: 'child', parentBlockId: second, at: 'start'}, context);
+        result = moveBlock(result.state, fourth, {type: 'child', parentBlockId: second, at: 'end'}, context);
+        result = deleteForward(result.state, caret(first, 1), context);
+
+        result = moveBlock(result.state, third, {type: 'after', targetBlockId: first}, context);
+
+        expect(outline(result.state)).toEqual([
+            {text: 'ab', depth: 0},
+            {text: 'd', depth: 1},
+            {text: 'c', depth: 0},
+        ]);
+        expect(materializedBlockParent(result.state, third)).toEqual([0, 'root']);
         expectCache(result.state);
     });
 

@@ -306,17 +306,14 @@ const applyBlock = ({state}: CachedState, {block}: Op & {type: 'block'}): Cached
 const laterCharParentTs = (one: Char['parent']['ts'], two: Char['parent']['ts']) => {
     if (typeof one === 'string') {
         if (typeof two === 'string') {
-            return compareClockStrings(one, two) > 0;
+            return one > two;
         }
-        const compared = compareClockStrings(one, two[0]);
-        return compared === 0 ? false : compared > 0;
+        return one === two[0] ? false : one > two[0];
     }
     if (typeof two === 'string') {
-        const compared = compareClockStrings(one[0], two);
-        return compared === 0 ? true : compared > 0;
+        return one[0] === two ? true : one[0] > two;
     }
-    const startCompared = compareClockStrings(one[0], two[0]);
-    if (startCompared !== 0) return startCompared > 0;
+    if (one[0] !== two[0]) return one[0] > two[0];
     for (let i = 0; i < one[1].length && i < two[1].length; i++) {
         const compared = compareLamports(one[1][i], two[1][i]);
         if (compared !== 0) {
@@ -324,50 +321,29 @@ const laterCharParentTs = (one: Char['parent']['ts'], two: Char['parent']['ts'])
         }
     }
     if (one[1].length !== two[1].length) return one[1].length > two[1].length;
-    return compareClockStrings(one[2], two[2]) > 0;
+    return one[2] > two[2];
 };
 
 const laterBlockOrderTs = (one: Block['order']['ts'], two: Block['order']['ts']) => {
     if (typeof one === 'string') {
         if (typeof two === 'string') {
-            return compareClockStrings(one, two) > 0;
+            return one > two;
         }
-        const compared = compareClockStrings(one, two[0]);
-        return compared === 0 ? false : compared > 0;
+        return one === two[0] ? false : one > two[0];
     }
     if (typeof two === 'string') {
-        const compared = compareClockStrings(one[0], two);
-        return compared === 0 ? true : compared > 0;
+        return one[0] === two ? true : one[0] > two;
     }
-    const startCompared = compareClockStrings(one[0], two[0]);
-    if (startCompared !== 0) return startCompared > 0;
+    if (one[0] !== two[0]) return one[0] > two[0];
     const compared = compareLseqIds(one[1], two[1]);
     if (compared !== 0) return compared > 0;
-    return compareClockStrings(one[2], two[2]) > 0;
+    return one[2] > two[2];
 };
 
 const blockOrderWins = (incoming: Block['order'], current: Block['order']) => {
     if (laterBlockOrderTs(incoming.ts, current.ts)) return true;
     if (laterBlockOrderTs(current.ts, incoming.ts)) return false;
     return compareLamports(incoming.id, current.id) < 0;
-};
-
-const compareClockStrings = (one: string, two: string): number => {
-    const oneActorCounter = actorCounterClock(one);
-    const twoActorCounter = actorCounterClock(two);
-    if (oneActorCounter && twoActorCounter) {
-        if (oneActorCounter.counter !== twoActorCounter.counter) {
-            return oneActorCounter.counter - twoActorCounter.counter;
-        }
-        return oneActorCounter.actor.localeCompare(twoActorCounter.actor);
-    }
-    return one === two ? 0 : one > two ? 1 : -1;
-};
-
-const actorCounterClock = (value: string): {actor: string; counter: number} | null => {
-    const match = /^([A-Za-z][A-Za-z0-9_-]*)-(\d+)$/.exec(value);
-    if (!match) return null;
-    return {actor: match[1], counter: Number(match[2])};
 };
 
 const validateBlockOrderPath = (

@@ -1,0 +1,31 @@
+# Implementation Log: Block Drag Anywhere
+
+## 2026-06-08
+
+- Started implementation from `plan.md`.
+- Noted pre-existing worktree changes in `examples/block-rich-text/src/blockCommands.test.ts` and other CRDT/editor files. I am preserving them and only editing the files needed for this task.
+- Phase 1 in progress: generalizing `moveBlock` from root-only before/after moves to parent-aware before/after/child moves.
+- First focused command test run exposed incorrect test assertions that read `CachedState.blocks` instead of `CachedState.state.blocks`; fixed the assertions.
+- Phase 1 command model implemented:
+  - `MoveTarget` now supports `before`, `after`, and `child` targets.
+  - `moveBlock` computes parent-aware order paths and rejects self/descendant/no-op moves.
+  - Added command tests for root moves, child insertion, nested moves, subtree moves, and invalid moves.
+  - `npm exec vitest -- run examples/block-rich-text/src/blockCommands.test.ts` passes.
+- Phase 2/3 hook and UI wiring implemented:
+  - `useBlockReorder` now accepts full visible outline items and returns command targets plus indicator metadata.
+  - Bottom-row drops resolve after the hovered block's whole subtree.
+  - Child drops require rightward horizontal intent and use vertical position for start/end.
+  - `App.tsx` enables all visible drag handles, keeps descendants dimmed, and preserves selection after drop.
+  - `style.css` draws depth-aware indicators without shifting layout.
+  - `npm --prefix examples/block-rich-text run build` passes.
+- Phase 4 deleted/non-visible parent regression added:
+  - Initial fixture used a root grandparent, which correctly rendered spliced children at root depth; adjusted it to put the deleted parent under a visible block.
+  - Added tests for reordering visibly spliced children and moving one out to root.
+  - `npm exec vitest -- run examples/block-rich-text/src/blockCommands.test.ts` passes with 29 tests.
+- Final verification:
+  - `npm exec vitest -- run examples/block-rich-text/src/blockCommands.test.ts examples/block-rich-text/src/retainedSelection.test.ts examples/block-rich-text/src/App.test.tsx` passes with 86 tests.
+  - `npm --prefix examples/block-rich-text run build` passes.
+  - Starting the Vite server inside the sandbox failed with `listen EPERM` on `127.0.0.1:5174`; reran with approval and the server started successfully.
+  - Verified `curl -I http://127.0.0.1:5174/` returns HTTP 200.
+- Follow-up note:
+  - No full browser drag automation was added; the highest-risk behavior is covered in command tests, while pointer geometry remains manually verifiable in the running Vite app.

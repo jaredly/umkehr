@@ -1,5 +1,4 @@
 import {describe, expect, it} from 'vitest';
-import {readFileSync} from 'node:fs';
 import {materializeFormattedBlocks} from 'umkehr/block-crdt';
 import {indentBlock} from './blockCommands';
 import {makeCommandContext, type EditorId, type Replica} from './blockEditorRuntime';
@@ -235,18 +234,44 @@ describe('block rich text history', () => {
             makeCommandContext(replayed.left),
         );
 
-        expect(JSON.stringify(result.ops)).toContain('left-00002');
-        expect(JSON.stringify(result.ops)).not.toContain('left-00001');
+        expect(JSON.stringify(result.ops)).toContain('0002-left');
+        expect(JSON.stringify(result.ops)).not.toContain('0001-left');
     });
 
-    it('replays imported left-editor indent attempts after offline sync', () => {
-        const exported = readFileSync(new URL('../../../bug.json', import.meta.url), 'utf8');
-        const parsed = parseHistoryExport(exported);
+    it('replays left-editor indent attempts after offline sync', () => {
+        let history = initialHistoryState();
+        history = appendLocal(history, 'left', insert('Hello'));
+        history = appendLocal(history, 'left', paste('\nOne'));
+        history = appendToggle(history, 'left');
+        history = appendLocal(history, 'right', (replica) => {
+            const block = materializeFormattedBlocks(replica.state)[1];
+            const text = block.runs.map((run) => run.text).join('');
+            return pastePlainTextEverywhere(
+                replica.state,
+                replacePrimarySelection(replica.state, replica.selection, caret(block.id, text.length)),
+                '\nTwo',
+                makeCommandContext(replica),
+            );
+        });
+        history = appendToggle(history, 'left');
 
-        expect('history' in parsed).toBe(true);
-        if (!('history' in parsed)) return;
+        const synced = replayHistory(history.actions, history.cursor);
+        const two = materializeFormattedBlocks(synced.left.state).find(
+            (block) => block.runs.map((run) => run.text).join('') === 'Two',
+        );
+        expect(two).toBeTruthy();
+        if (!two) return;
 
-        const demo = replayHistory(parsed.history.actions, parsed.history.cursor);
+        history = appendLocal(history, 'left', (replica) => {
+            const result = indentBlock(replica.state, two.id, makeCommandContext(replica));
+            return {
+                state: result.state,
+                ops: result.ops,
+                selection: replacePrimarySelection(result.state, replica.selection, result.selection),
+            };
+        });
+
+        const demo = replayHistory(history.actions, history.cursor);
 
         expect(visibleOutline(demo.left)).toEqual([
             {text: 'Hello', depth: 0},

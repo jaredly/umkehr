@@ -934,15 +934,15 @@ it('uses lower order id as the equivalent timestamp tie-breaker', () => {
     expect(two.state.blocks['0002-self'].order.id).toEqual([10, 'a']);
 });
 
-it('orders actor-prefixed block timestamps by counter before actor id', () => {
+it('orders lamport-string block timestamps by counter before actor id', () => {
     let state = cachedState(init);
-    state = apply(state, {type: 'block', block: block([1, 'self'], 1, 'right-00001')}) as CachedState;
-    state = apply(state, {type: 'block', block: block([2, 'self'], 2, 'right-00001')}) as CachedState;
+    state = apply(state, {type: 'block', block: block([1, 'self'], 1, '0001-right')}) as CachedState;
+    state = apply(state, {type: 'block', block: block([2, 'self'], 2, '0001-right')}) as CachedState;
 
     const laterLeftMove: Op = {
         type: 'block:move',
         id: [2, 'self'],
-        order: {id: [10, 'left'], index: lseq(2), ts: 'left-00010', path: [[1, 'self'], [2, 'self']]},
+        order: {id: [10, 'left'], index: lseq(2), ts: '0010-left', path: [[1, 'self'], [2, 'self']]},
     };
 
     state = applyMany(state, [laterLeftMove]);

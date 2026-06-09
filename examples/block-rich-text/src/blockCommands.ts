@@ -8,9 +8,9 @@ import {
     materializedBlockParent,
     materializedBlockPath,
     orderedCharIdsForBlock,
-    rootBlockIds,
     split,
     visibleBlockChildren,
+    visibleBlockOutline,
     type Op,
 } from 'umkehr/block-crdt';
 import {createLseqIdBetween} from 'umkehr/block-crdt/lseq';
@@ -41,7 +41,10 @@ export type CommandResult = {
     selection: EditorSelection;
 };
 
-export type MoveTarget = {targetBlockId: string; after: boolean};
+export type MoveTarget =
+    | {type: 'before'; targetBlockId: string}
+    | {type: 'after'; targetBlockId: string}
+    | {type: 'child'; parentBlockId: string; at: 'start' | 'end'};
 
 const ROOT: Lamport = [0, 'root'];
 const ROOT_ID = lamportToString(ROOT);
@@ -209,22 +212,17 @@ export const moveBlock = (
     target: MoveTarget,
     context: CommandContext,
 ): CommandResult => {
-    const currentOrder = rootBlockIds(state);
-    const withoutMoved = currentOrder.filter((id) => id !== movedBlockId);
-    const targetIndex = withoutMoved.indexOf(target.targetBlockId);
-    if (targetIndex < 0 || movedBlockId === target.targetBlockId) {
+    const current = state.state.blocks[movedBlockId];
+    if (!current || !visibleBlockIds(state).includes(movedBlockId)) {
         return {state, ops: [], selection: caret(movedBlockId, 0)};
     }
 
-    const insertIndex = target.after ? targetIndex + 1 : targetIndex;
-    const beforeId = insertIndex > 0 ? withoutMoved[insertIndex - 1] : null;
-    const afterId = withoutMoved[insertIndex] ?? null;
-    const current = state.state.blocks[movedBlockId];
-    if (!current) return {state, ops: [], selection: caret(movedBlockId, 0)};
+    const resolved = resolveMoveTarget(state, movedBlockId, target);
+    if (!resolved) return {state, ops: [], selection: caret(movedBlockId, 0)};
 
     const nextIndex = createLseqIdBetween(
-        beforeId ? state.state.blocks[beforeId].order.index : null,
-        afterId ? state.state.blocks[afterId].order.index : null,
+        resolved.beforeId ? state.state.blocks[resolved.beforeId].order.index : null,
+        resolved.afterId ? state.state.blocks[resolved.afterId].order.index : null,
         {actorId: context.actor, counter: state.state.maxSeenCount + 1},
     );
     const op: Op = {
@@ -232,13 +230,68 @@ export const moveBlock = (
         id: current.id,
         order: {
             id: [state.state.maxSeenCount + 1, context.actor],
-            path: [current.id],
+            path: [...resolved.parentPath, current.id],
             index: nextIndex,
             ts: context.nextTs(),
         },
     };
     const next = applyMany(state, [op]);
     return {state: next, ops: [op], selection: caret(movedBlockId, 0)};
+};
+
+const resolveMoveTarget = (
+    state: CachedState,
+    movedBlockId: string,
+    target: MoveTarget,
+): {parentPath: Lamport[]; beforeId: string | null; afterId: string | null} | null => {
+    const visibleParents = new Map(visibleBlockOutline(state).map((item) => [item.id, item.parentId]));
+    const targetParentId =
+        target.type === 'child'
+            ? target.parentBlockId
+            : visibleParents.get(target.targetBlockId) ?? null;
+    if (targetParentId === null) return null;
+    if (target.type === 'child' && target.parentBlockId === movedBlockId) return null;
+    if (target.type !== 'child' && target.targetBlockId === movedBlockId) return null;
+    if (target.type !== 'child' && isDescendantOf(state, target.targetBlockId, movedBlockId)) return null;
+    if (targetParentId !== ROOT_ID && isDescendantOrSelf(state, targetParentId, movedBlockId)) return null;
+
+    const siblings = visibleBlockChildren(state, targetParentId).filter((id) => id !== movedBlockId);
+    let insertIndex: number;
+    if (target.type === 'child') {
+        if (targetParentId !== ROOT_ID && !state.state.blocks[targetParentId]) return null;
+        insertIndex = target.at === 'start' ? 0 : siblings.length;
+    } else {
+        const targetIndex = siblings.indexOf(target.targetBlockId);
+        if (targetIndex < 0) return null;
+        insertIndex = target.type === 'after' ? targetIndex + 1 : targetIndex;
+    }
+
+    const beforeId = insertIndex > 0 ? siblings[insertIndex - 1] : null;
+    const afterId = siblings[insertIndex] ?? null;
+    const parentPath = targetParentId === ROOT_ID ? [] : materializedBlockPath(state, targetParentId);
+    const currentParent = lamportToString(materializedBlockParent(state, movedBlockId));
+    const currentSiblings = visibleBlockChildren(state, currentParent);
+    const currentIndex = currentSiblings.indexOf(movedBlockId);
+    const nextSibling = currentSiblings[currentIndex + 1] ?? null;
+    const previousSibling = currentIndex > 0 ? currentSiblings[currentIndex - 1] : null;
+    if (
+        currentParent === targetParentId &&
+        ((beforeId === previousSibling && afterId === nextSibling) ||
+            (beforeId === movedBlockId && afterId === nextSibling) ||
+            (beforeId === previousSibling && afterId === movedBlockId))
+    ) {
+        return null;
+    }
+
+    return {parentPath, beforeId, afterId};
+};
+
+const isDescendantOrSelf = (state: CachedState, blockId: string, ancestorId: string): boolean =>
+    blockId === ancestorId || isDescendantOf(state, blockId, ancestorId);
+
+const isDescendantOf = (state: CachedState, blockId: string, ancestorId: string): boolean => {
+    const path = materializedBlockPath(state, blockId).map(lamportToString);
+    return path.includes(ancestorId) && blockId !== ancestorId;
 };
 
 export const indentBlock = (

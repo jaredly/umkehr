@@ -9,7 +9,7 @@ import {
     type MouseEvent,
     type MutableRefObject,
 } from 'react';
-import {materializeFormattedBlocks, rootBlockIds} from 'umkehr/block-crdt';
+import {materializeFormattedBlocks} from 'umkehr/block-crdt';
 import type {FormattedBlock} from 'umkehr/block-crdt';
 import {indentBlock, moveBlock, unindentBlock} from './blockCommands';
 import {makeCommandContext, type DemoState, type EditorId, type Replica} from './blockEditorRuntime';
@@ -303,7 +303,6 @@ function BlockEditor({
     const [hasFocus, setHasFocus] = useState(false);
     const [isExtendingSelection, setIsExtendingSelection] = useState(false);
     const blocks = materializeFormattedBlocks(replica.state);
-    const blockIds = rootBlockIds(replica.state);
     const resolvedSelectionSet = resolveSelectionSet(replica.state, replica.selection);
     const primaryResolvedSelection = primarySelection(resolvedSelectionSet);
     const decorationsByBlock = useMemo(
@@ -314,9 +313,9 @@ function BlockEditor({
             }),
         [hasFocus, isExtendingSelection, replica.state, resolvedSelectionSet],
     );
-    const {draggingId, dropTarget, registerRow, startDrag} = useBlockReorder({
-        blockIds,
-        onMove: (blockId: string, target: DropTarget) =>
+    const {draggingId, draggingSubtreeIds, dropTarget, registerRow, startDrag} = useBlockReorder({
+        blocks: blocks.map(({id, depth, parentId}) => ({id, depth, parentId})),
+        onMove: (blockId, target) =>
             onCommand((current) => {
                 const result = moveBlock(
                     current.state,
@@ -763,7 +762,6 @@ function BlockEditor({
                     <EditableBlock
                         key={block.id}
                         block={block}
-                        canDrag={block.depth === 0}
                         previousBlockId={blocks[index - 1]?.id ?? null}
                         previousBlockLength={
                             blocks[index - 1]
@@ -776,8 +774,9 @@ function BlockEditor({
                         hasMultipleSelections={resolvedSelectionSet.entries.length > 1}
                         decorations={decorationsByBlock.get(block.id) ?? null}
                         pendingCaretRestoreBlockIdRef={pendingCaretRestoreBlockIdRef}
-                        isDragging={draggingId === block.id}
-                        dropTarget={dropTarget?.targetBlockId === block.id ? dropTarget : null}
+                        isDragging={draggingSubtreeIds.has(block.id)}
+                        isDraggingRoot={draggingId === block.id}
+                        dropTarget={dropTarget?.indicatorBlockId === block.id ? dropTarget : null}
                         registerRow={registerRow}
                         onStartDrag={startDrag}
                         onInsertText={(text) =>
@@ -921,7 +920,6 @@ function Toolbar({onBold, onItalic}: {onBold(): void; onItalic(): void}) {
 
 function EditableBlock({
     block,
-    canDrag,
     previousBlockId,
     previousBlockLength,
     blockLength,
@@ -931,6 +929,7 @@ function EditableBlock({
     decorations,
     pendingCaretRestoreBlockIdRef,
     isDragging,
+    isDraggingRoot,
     dropTarget,
     registerRow,
     onStartDrag,
@@ -953,7 +952,6 @@ function EditableBlock({
     onKeystroke,
 }: {
     block: FormattedBlock;
-    canDrag: boolean;
     previousBlockId: string | null;
     previousBlockLength: number;
     blockLength: number;
@@ -963,6 +961,7 @@ function EditableBlock({
     decorations: BlockSelectionDecorations | null;
     pendingCaretRestoreBlockIdRef: MutableRefObject<string | null>;
     isDragging: boolean;
+    isDraggingRoot: boolean;
     dropTarget: DropTarget | null;
     registerRow(id: string, element: HTMLElement | null): void;
     onStartDrag: ReturnType<typeof useBlockReorder>['startDrag'];
@@ -1039,18 +1038,24 @@ function EditableBlock({
             className={[
                 'blockRow',
                 isDragging ? 'dragging' : '',
-                dropTarget ? (dropTarget.after ? 'dropAfter' : 'dropBefore') : '',
+                isDraggingRoot ? 'draggingRoot' : '',
+                dropTarget ? `drop${capitalize(dropTarget.indicatorPlacement)}` : '',
             ]
                 .filter(Boolean)
                 .join(' ')}
-            style={{'--block-depth': block.depth} as CSSProperties}
+            style={
+                {
+                    '--block-depth': block.depth,
+                    '--drop-depth': dropTarget?.indicatorDepth ?? block.depth,
+                    '--drop-offset': `${((dropTarget?.indicatorDepth ?? block.depth) - block.depth) * 24}px`,
+                } as CSSProperties
+            }
         >
             <button
                 type="button"
                 className="dragHandle"
                 aria-label="Move block"
-                disabled={!canDrag}
-                onPointerDown={canDrag ? (event) => onStartDrag(block.id, event) : undefined}
+                onPointerDown={(event) => onStartDrag(block.id, event)}
             >
                 ⋮⋮
             </button>
@@ -1401,6 +1406,8 @@ const applyRunClasses = (span: HTMLElement, run: FormattedBlock['runs'][number])
     if (run.marks.bold) span.classList.add('markBold');
     if (run.marks.italic) span.classList.add('markItalic');
 };
+
+const capitalize = (value: string) => value.slice(0, 1).toUpperCase() + value.slice(1);
 
 const renderRetainedCaret = (id: string, primary: boolean) => {
     const span = document.createElement('span');
