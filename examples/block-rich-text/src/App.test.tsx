@@ -20,6 +20,7 @@ afterEach(() => {
     restoreCaretGeometry?.();
     restoreCaretGeometry = null;
     cleanup();
+    window.history.pushState({}, '', '/');
 });
 
 const editor = (view: ReturnType<typeof render>, name: 'Editor A' | 'Editor B') =>
@@ -264,6 +265,31 @@ const childTexts = (block: HTMLElement): string[] =>
     [...block.childNodes].map((node) => node.textContent ?? '');
 
 describe('Block rich text example UI', () => {
+    it('renders the blog visual demo gallery for the demos query', () => {
+        window.history.pushState({}, '', '/?demos');
+        const view = render(<App />);
+
+        expect(view.getByRole('heading', {name: 'Blog visual demos'})).toBeTruthy();
+        expect(view.getAllByRole('img')).toHaveLength(8);
+        expect(view.container.querySelectorAll('.editorPanel')).toHaveLength(0);
+        expect(view.queryByLabelText('History position')).toBeNull();
+    });
+
+    it('updates staged demo figures without rendering the editor UI', () => {
+        window.history.pushState({}, '', '/?demos');
+        const view = render(<App />);
+        const afterSplit = view.getByRole('button', {name: 'After split'});
+
+        expect(afterSplit.getAttribute('aria-pressed')).toBe('false');
+        expect(view.queryByText('d.parent := B2')).toBeNull();
+
+        fireEvent.click(afterSplit);
+
+        expect(afterSplit.getAttribute('aria-pressed')).toBe('true');
+        expect(view.getByText('d.parent := B2')).toBeTruthy();
+        expect(view.container.querySelectorAll('.editorPanel')).toHaveLength(0);
+    });
+
     it('renders two synced editors', () => {
         const view = render(<App />);
         const {left, right} = panels(view);

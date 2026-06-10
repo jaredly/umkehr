@@ -76,8 +76,13 @@ import {
     type HistoryState,
 } from './history';
 import {createRedoAction, createUndoAction, deriveUndoState} from './undoHistory';
+import {BlogVisualDemos} from './BlogVisualDemos';
 
 export function App() {
+    return hasDemoQuery() ? <BlogVisualDemos /> : <EditorApp />;
+}
+
+function EditorApp() {
     const [history, setHistory] = useState<HistoryState>(() => initialHistoryState());
     const [transientSelections, setTransientSelections] = useState<
         Partial<Record<EditorId, RetainedSelectionSet>>
@@ -322,6 +327,9 @@ export function App() {
         </main>
     );
 }
+
+const hasDemoQuery = () =>
+    typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('demos');
 
 function BlockEditor({
     replica,
