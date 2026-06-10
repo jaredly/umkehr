@@ -53,3 +53,15 @@
 - Reversed figure 08 materialized parent arrows while preserving the ignored raw edge callout.
 - Verification after feedback: `npm run build --prefix examples/block-rich-text` passed.
 - Verification after feedback: `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx` passed with 58 tests.
+
+## Static Scroll Pass
+
+- Removed the lightweight interactivity from the demo gallery.
+- Removed `StageButtons`, `useState` usage, and the stage button CSS.
+- Changed figure 02 to stack the before and after split states vertically in one SVG.
+- Changed figure 04 to render the before tree, split-path after tree, sibling-moved after tree, and final rendered order together.
+- Changed figure 05 to render replica intents and the LWW merge result together.
+- Changed figure 06 to render tagged replica states and the merged materialization together.
+- Updated the App test that previously clicked `After split` so it now verifies the formerly staged states are present at once.
+- Verification after static scroll pass: `npm run build --prefix examples/block-rich-text` passed.
+- Verification after static scroll pass: `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx` passed with 58 tests.

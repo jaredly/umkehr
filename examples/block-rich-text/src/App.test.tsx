@@ -275,18 +275,15 @@ describe('Block rich text example UI', () => {
         expect(view.queryByLabelText('History position')).toBeNull();
     });
 
-    it('updates staged demo figures without rendering the editor UI', () => {
+    it('renders formerly staged demo states at once without rendering the editor UI', () => {
         window.history.pushState({}, '', '/?demos');
         const view = render(<App />);
-        const afterSplit = view.getByRole('button', {name: 'After split'});
 
-        expect(afterSplit.getAttribute('aria-pressed')).toBe('false');
-        expect(view.queryByText('d.parent := B2')).toBeNull();
-
-        fireEvent.click(afterSplit);
-
-        expect(afterSplit.getAttribute('aria-pressed')).toBe('true');
         expect(view.getByText('d.parent := B2')).toBeTruthy();
+        expect(view.getByText('after tree: split path')).toBeTruthy();
+        expect(view.getByText('after tree: following siblings moved')).toBeTruthy();
+        expect(view.getByText('plain LWW merge')).toBeTruthy();
+        expect(view.queryByRole('button', {name: 'After split'})).toBeNull();
         expect(view.container.querySelectorAll('.editorPanel')).toHaveLength(0);
     });
 

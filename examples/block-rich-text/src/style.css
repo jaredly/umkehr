@@ -420,33 +420,6 @@ input {
     overflow-x: auto;
 }
 
-.demoStageButtons {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin: 0 0 12px;
-}
-
-.demoStageButtons button {
-    min-height: 32px;
-    padding: 0 12px;
-    border: 1px solid #cbd5df;
-    border-radius: 6px;
-    color: #263744;
-    background: #fff;
-    cursor: pointer;
-}
-
-.demoStageButtons button:hover {
-    background: #f1f5f8;
-}
-
-.demoStageButtons button[aria-pressed="true"] {
-    border-color: #2c6b67;
-    color: #163f3c;
-    background: #e7f4f2;
-}
-
 .demoSvg {
     display: block;
     width: 100%;

@@ -1,4 +1,4 @@
-import {useState, type ReactNode} from 'react';
+import {type ReactNode} from 'react';
 
 type MarkerSet = {
     arrow: string;
@@ -197,33 +197,6 @@ function SvgCanvas({
     );
 }
 
-function StageButtons<T extends string>({
-    label,
-    stages,
-    value,
-    onChange,
-}: {
-    label: string;
-    stages: {value: T; label: string}[];
-    value: T;
-    onChange(value: T): void;
-}) {
-    return (
-        <div className="demoStageButtons" aria-label={label}>
-            {stages.map((stage) => (
-                <button
-                    key={stage.value}
-                    type="button"
-                    aria-pressed={stage.value === value}
-                    onClick={() => onChange(stage.value)}
-                >
-                    {stage.label}
-                </button>
-            ))}
-        </div>
-    );
-}
-
 function RgaOrderingFigure() {
     const chars = ['t', 'h', 'e', '_', 'r', 'e', 'd', '_', 'd', 'o', 'g'];
     return (
@@ -295,68 +268,51 @@ function RgaOrderingFigure() {
 }
 
 function ParentUpdateSplitFigure() {
-    const [stage, setStage] = useState<'before' | 'after'>('before');
     return (
-        <>
-            <StageButtons<'before' | 'after'>
-                label="Parent update split stages"
-                stages={[
-                    {value: 'before', label: 'Before split'},
-                    {value: 'after', label: 'After split'},
-                ]}
-                value={stage}
-                onChange={setStage}
-            />
-            <SvgCanvas
-                idPrefix="parent-update"
-                title="Split before d by changing d parent to B2"
-                desc="The figure toggles between a single block containing the dog and two blocks after d is reparented to B2."
-            >
-                {(markers) =>
-                    stage === 'before' ? (
-                        <>
-                            <Panel x={54} y={70} width={932} height={312} title="before">
-                                <BlockSequence x={120} y={180} label="block B1" chars={['t', 'h', 'e', '_', 'd', 'o', 'g']} />
-                                <SequenceBackPointers x={120} y={180} count={7} markers={markers} firstParent />
-                            </Panel>
-                            <Callout
-                                x={230}
-                                y={410}
-                                width={580}
-                                title="split before d"
-                                lines={['The cursor sits before d, but the character ID for d is retained.']}
-                            />
-                        </>
-                    ) : (
-                        <>
-                            <Panel x={54} y={70} width={440} height={312} title="block B1">
-                                <BlockSequence x={120} y={190} label="B1" chars={['t', 'h', 'e', '_']} />
-                                <SequenceBackPointers x={120} y={190} count={4} markers={markers} firstParent />
-                            </Panel>
-                            <Panel x={546} y={70} width={440} height={312} title="block B2">
-                                <BlockSequence x={626} y={190} label="B2" chars={['d', 'o', 'g']} accents={{0: 'accent'}} />
-                                <SequenceBackPointers
-                                    x={626}
-                                    y={190}
-                                    count={3}
-                                    kind="accent"
-                                    markers={markers}
-                                    firstParent
-                                />
-                            </Panel>
-                            <PathArrow d="M 542 276 C 566 330 606 330 632 276" kind="accent" markers={markers} />
-                            <Callout
-                                x={314}
-                                y={410}
-                                width={412}
-                                title="d.parent := B2"
-                                lines={['Only the parent reference changes; character IDs stay the same.']}
-                            />
-                        </>
-                    )
-                }
-            </SvgCanvas>
-        </>
+        <SvgCanvas
+            idPrefix="parent-update"
+            title="Split before d by changing d parent to B2"
+            desc="The figure stacks the before state above the after state, where d is reparented to B2."
+            viewBox="0 0 1040 900"
+        >
+            {(markers) => (
+                <>
+                    <Panel x={54} y={64} width={932} height={280} title="before">
+                        <BlockSequence x={120} y={174} label="block B1" chars={['t', 'h', 'e', '_', 'd', 'o', 'g']} />
+                        <SequenceBackPointers x={120} y={174} count={7} markers={markers} firstParent />
+                    </Panel>
+                    <Callout
+                        x={230}
+                        y={370}
+                        width={580}
+                        title="split before d"
+                        lines={['The cursor sits before d, but the character ID for d is retained.']}
+                    />
+                    <Panel x={54} y={500} width={440} height={280} title="after: block B1">
+                        <BlockSequence x={120} y={610} label="B1" chars={['t', 'h', 'e', '_']} />
+                        <SequenceBackPointers x={120} y={610} count={4} markers={markers} firstParent />
+                    </Panel>
+                    <Panel x={546} y={500} width={440} height={280} title="after: block B2">
+                        <BlockSequence x={626} y={610} label="B2" chars={['d', 'o', 'g']} accents={{0: 'accent'}} />
+                        <SequenceBackPointers
+                            x={626}
+                            y={610}
+                            count={3}
+                            kind="accent"
+                            markers={markers}
+                            firstParent
+                        />
+                    </Panel>
+                    <Callout
+                        x={314}
+                        y={806}
+                        width={412}
+                        title="d.parent := B2"
+                        lines={['Only the parent reference changes; character IDs stay the same.']}
+                    />
+                </>
+            )}
+        </SvgCanvas>
     );
 }
 
@@ -397,205 +353,174 @@ function NaiveSplitFigure() {
 }
 
 function CorrectSplitFigure() {
-    const [stage, setStage] = useState<'path' | 'siblings' | 'final'>('path');
     return (
-        <>
-            <StageButtons<'path' | 'siblings' | 'final'>
-                label="Correct split stages"
-                stages={[
-                    {value: 'path', label: 'Split path'},
-                    {value: 'siblings', label: 'Move siblings'},
-                    {value: 'final', label: 'Final order'},
-                ]}
-                value={stage}
-                onChange={setStage}
-            />
-            <SvgCanvas
-                idPrefix="correct-split"
-                title="Correct split moves split path and following siblings"
-                desc="The figure stages the split path, then the following sibling subtree, then the final red dog sequence."
-            >
-                {(markers) => (
-                    <>
-                        <Panel x={54} y={58} width={278} height={382} title="before">
-                            <MiniTree x={138} y={124} highlight={stage !== 'path'} />
-                        </Panel>
-                        <Panel
-                            x={382}
-                            y={58}
-                            width={606}
-                            height={382}
-                            title={stage === 'path' ? 'after tree: split path' : stage === 'siblings' ? 'after tree: siblings moved' : 'after tree: final'}
-                        >
-                            <CorrectAfterTree x={472} y={104} markers={markers} includeDog={stage !== 'path'} />
-                            {stage === 'final' ? (
-                                <RenderedStrip
-                                    x={612}
-                                    y={344}
-                                    chars={['r', 'e', 'd', '_', 'd', 'o', 'g']}
-                                    accents={{0: 'accent', 1: 'accent', 2: 'accent', 3: 'accent', 4: 'warm', 5: 'warm', 6: 'warm'}}
-                                />
-                            ) : null}
-                            <Callout
-                                x={696}
-                                y={126}
-                                width={238}
-                                title={stage === 'path' ? 'split path' : stage === 'siblings' ? 'following siblings' : 'resolved block'}
-                                lines={[
-                                    stage === 'path'
-                                        ? 'The split point starts B2.'
-                                        : stage === 'siblings'
-                                          ? 'dog follows because it renders after red.'
-                                          : 'B2 renders red dog in order.',
-                                ]}
-                                compact
-                            />
-                        </Panel>
-                    </>
-                )}
-            </SvgCanvas>
-        </>
+        <SvgCanvas
+            idPrefix="correct-split"
+            title="Correct split moves split path and following siblings"
+            desc="The figure stacks the before tree, split-path after tree, sibling-moved after tree, and final sequence."
+            viewBox="0 0 1040 1360"
+        >
+            {(markers) => (
+                <>
+                    <Panel x={54} y={58} width={278} height={382} title="before">
+                        <MiniTree x={138} y={124} />
+                    </Panel>
+                    <Panel x={382} y={58} width={606} height={382} title="after tree: split path">
+                        <CorrectAfterTree x={472} y={104} markers={markers} includeDog={false} />
+                        <Callout
+                            x={696}
+                            y={126}
+                            width={238}
+                            title="split path"
+                            lines={['The split point starts B2.']}
+                            compact
+                        />
+                    </Panel>
+                    <Panel x={54} y={492} width={934} height={382} title="after tree: following siblings moved">
+                        <CorrectAfterTree x={196} y={538} markers={markers} includeDog />
+                        <Callout
+                            x={626}
+                            y={606}
+                            width={270}
+                            title="following siblings"
+                            lines={['dog follows because it renders after red.']}
+                            compact
+                        />
+                    </Panel>
+                    <Panel x={54} y={926} width={934} height={360} title="final rendered order">
+                        <CorrectAfterTree x={196} y={972} markers={markers} includeDog />
+                        <RenderedStrip
+                            x={626}
+                            y={1108}
+                            chars={['r', 'e', 'd', '_', 'd', 'o', 'g']}
+                            accents={{0: 'accent', 1: 'accent', 2: 'accent', 3: 'accent', 4: 'warm', 5: 'warm', 6: 'warm'}}
+                        />
+                        <Callout
+                            x={626}
+                            y={1180}
+                            width={270}
+                            title="resolved block"
+                            lines={['B2 renders red dog in order.']}
+                            compact
+                        />
+                    </Panel>
+                </>
+            )}
+        </SvgCanvas>
     );
 }
 
 function ConcurrentSplitFigure() {
-    const [stage, setStage] = useState<'intents' | 'lww'>('intents');
     return (
-        <>
-            <StageButtons<'intents' | 'lww'>
-                label="Concurrent split conflict stages"
-                stages={[
-                    {value: 'intents', label: 'Replica intents'},
-                    {value: 'lww', label: 'LWW result'},
-                ]}
-                value={stage}
-                onChange={setStage}
-            />
-            <SvgCanvas
-                idPrefix="concurrent-split"
-                title="Concurrent intentional and incidental splits conflict under LWW"
-                desc="The figure toggles between replica intentions and the incorrect last-write-wins result with B3 empty."
-            >
-                {(markers) =>
-                    stage === 'intents' ? (
-                        <>
-                            <Panel x={56} y={72} width={432} height={346} title="Replica A: split before red">
-                                <BlockTextBox x={116} y={134} label="initial" text="the red dog" />
-                                <BlockTextBox x={116} y={238} width={150} label="B1" text="the " />
-                                <BlockTextBox x={286} y={238} width={168} label="B2" text="red dog" variant="accent" />
-                                <Callout
-                                    x={260}
-                                    y={134}
-                                    width={180}
-                                    title="A"
-                                    lines={['red moves intentionally', 'dog moves incidentally']}
-                                    compact
-                                />
-                            </Panel>
-                            <Panel x={552} y={72} width={432} height={346} title="Replica B: split before dog">
-                                <BlockTextBox x={612} y={134} label="initial" text="the red dog" />
-                                <BlockTextBox x={612} y={238} width={150} label="B2" text="red " variant="accent" />
-                                <BlockTextBox x={782} y={238} width={150} label="B3" text="dog" variant="warning" />
-                                <Callout
-                                    x={752}
-                                    y={134}
-                                    width={180}
-                                    title="B"
-                                    lines={['dog moves intentionally', 'into its own block']}
-                                    compact
-                                />
-                            </Panel>
-                        </>
-                    ) : (
-                        <>
-                            <Panel x={110} y={72} width={820} height={346} title="plain LWW merge">
-                                <BlockTextBox x={186} y={140} width={150} label="B1" text="the " />
-                                <BlockTextBox x={366} y={140} width={170} label="B2" text="red dog" variant="accent" />
-                                <BlockTextBox x={566} y={140} width={150} label="B3" text="empty" variant="muted" />
-                                <Callout
-                                    x={388}
-                                    y={272}
-                                    width={350}
-                                    title="later timestamp wins"
-                                    lines={['A incidental move overwrites', 'B intentional split before dog.']}
-                                />
-                            </Panel>
-                        </>
-                    )
-                }
-            </SvgCanvas>
-        </>
+        <SvgCanvas
+            idPrefix="concurrent-split"
+            title="Concurrent intentional and incidental splits conflict under LWW"
+            desc="The figure shows both replica intents and the incorrect last-write-wins result with B3 empty."
+            viewBox="0 0 1040 850"
+        >
+            {() => (
+                <>
+                    <Panel x={56} y={72} width={432} height={320} title="Replica A: split before red">
+                        <BlockTextBox x={116} y={134} label="initial" text="the red dog" />
+                        <BlockTextBox x={116} y={238} width={150} label="B1" text="the " />
+                        <BlockTextBox x={286} y={238} width={168} label="B2" text="red dog" variant="accent" />
+                        <Callout
+                            x={260}
+                            y={134}
+                            width={180}
+                            title="A"
+                            lines={['red moves intentionally', 'dog moves incidentally']}
+                            compact
+                        />
+                    </Panel>
+                    <Panel x={552} y={72} width={432} height={320} title="Replica B: split before dog">
+                        <BlockTextBox x={612} y={134} label="initial" text="the red dog" />
+                        <BlockTextBox x={612} y={238} width={150} label="B2" text="red " variant="accent" />
+                        <BlockTextBox x={782} y={238} width={150} label="B3" text="dog" variant="warning" />
+                        <Callout
+                            x={752}
+                            y={134}
+                            width={180}
+                            title="B"
+                            lines={['dog moves intentionally', 'into its own block']}
+                            compact
+                        />
+                    </Panel>
+                    <Panel x={110} y={454} width={820} height={320} title="plain LWW merge">
+                        <BlockTextBox x={186} y={522} width={150} label="B1" text="the " />
+                        <BlockTextBox x={366} y={522} width={170} label="B2" text="red dog" variant="accent" />
+                        <BlockTextBox x={566} y={522} width={150} label="B3" text="empty" variant="muted" />
+                        <Callout
+                            x={388}
+                            y={652}
+                            width={350}
+                            title="later timestamp wins"
+                            lines={['A incidental move overwrites', 'B intentional split before dog.']}
+                        />
+                    </Panel>
+                </>
+            )}
+        </SvgCanvas>
     );
 }
 
 function IncidentalResolutionFigure() {
-    const [stage, setStage] = useState<'metadata' | 'merged'>('metadata');
     return (
-        <>
-            <StageButtons<'metadata' | 'merged'>
-                label="Incidental split metadata stages"
-                stages={[
-                    {value: 'metadata', label: 'Version tags'},
-                    {value: 'merged', label: 'Merged result'},
-                ]}
-                value={stage}
-                onChange={setStage}
-            />
-            <SvgCanvas
-                idPrefix="incidental-resolution"
-                title="Incidental metadata lets the more specific split win"
-                desc="The figure shows split metadata and the final merge where B3 keeps dog."
-            >
-                {(markers) =>
-                    stage === 'metadata' ? (
-                        <>
-                            <Panel x={56} y={72} width={432} height={346} title="Replica A: tagged split before red">
-                                <BlockTextBox x={116} y={128} width={150} label="B1" text="the " />
-                                <BlockTextBox x={286} y={128} width={168} label="B2" text="red dog" variant="accent" />
-                                <CodeCallout
-                                    x={116}
-                                    y={240}
-                                    width={312}
-                                    lines={['red.parent := B2', 'dog.parent := tail(B2)', 'kind := incidental', 'splitPath := [B1, _, r]']}
-                                    compact
-                                />
-                            </Panel>
-                            <Panel x={552} y={72} width={432} height={346} title="Replica B: split before dog">
-                                <BlockTextBox x={612} y={128} width={150} label="B2" text="red " variant="accent" />
-                                <BlockTextBox x={782} y={128} width={150} label="B3" text="dog" variant="warning" />
-                                <CodeCallout
-                                    x={610}
-                                    y={240}
-                                    width={322}
-                                    lines={[
-                                        'dog.parent := B3',
-                                        'kind := intentional',
-                                        'beats incidental tail move',
-                                    ]}
-                                    compact
-                                />
-                            </Panel>
-                        </>
-                    ) : (
-                        <>
-                            <Panel x={58} y={82} width={924} height={322} title="merged materialization">
-                                <BlockTextBox x={112} y={168} label="B1" text="the " />
-                                <BlockTextBox x={390} y={168} label="B2" text="red " variant="accent" />
-                                <BlockTextBox x={668} y={168} label="B3" text="dog" variant="warning" />
-                                <PathArrow d="M 594 202 C 626 228 646 228 680 202" kind="warning" markers={markers} />
-                                <Callout
-                                    x={330}
-                                    y={300}
-                                    width={378}
-                                    title="intentional split before dog wins"
-                                    lines={['The incidental move yields to the more specific rightward split.']}
-                                />
-                            </Panel>
-                        </>
-                    )
-                }
-            </SvgCanvas>
-        </>
+        <SvgCanvas
+            idPrefix="incidental-resolution"
+            title="Incidental metadata lets the more specific split win"
+            desc="The figure shows tagged replica states and the final merge where B3 keeps dog."
+            viewBox="0 0 1040 880"
+        >
+            {(markers) => (
+                <>
+                    <Panel x={56} y={72} width={432} height={340} title="Replica A: tagged split before red">
+                        <BlockTextBox x={116} y={128} width={150} label="B1" text="the " />
+                        <BlockTextBox x={286} y={128} width={168} label="B2" text="red dog" variant="accent" />
+                        <CodeCallout
+                            x={116}
+                            y={240}
+                            width={312}
+                            lines={[
+                                'red.parent := B2',
+                                'dog.parent := tail(B2)',
+                                'kind := incidental',
+                                'splitPath := [B1, _, r]',
+                            ]}
+                            compact
+                        />
+                    </Panel>
+                    <Panel x={552} y={72} width={432} height={340} title="Replica B: split before dog">
+                        <BlockTextBox x={612} y={128} width={150} label="B2" text="red " variant="accent" />
+                        <BlockTextBox x={782} y={128} width={150} label="B3" text="dog" variant="warning" />
+                        <CodeCallout
+                            x={610}
+                            y={240}
+                            width={322}
+                            lines={[
+                                'dog.parent := B3',
+                                'kind := intentional',
+                                'beats incidental tail move',
+                            ]}
+                            compact
+                        />
+                    </Panel>
+                    <Panel x={58} y={474} width={924} height={322} title="merged materialization">
+                        <BlockTextBox x={112} y={560} label="B1" text="the " />
+                        <BlockTextBox x={390} y={560} label="B2" text="red " variant="accent" />
+                        <BlockTextBox x={668} y={560} label="B3" text="dog" variant="warning" />
+                        <PathArrow d="M 594 594 C 626 620 646 620 680 594" kind="warning" markers={markers} />
+                        <Callout
+                            x={330}
+                            y={692}
+                            width={378}
+                            title="intentional split before dog wins"
+                            lines={['The incidental move yields to the more specific rightward split.']}
+                        />
+                    </Panel>
+                </>
+            )}
+        </SvgCanvas>
     );
 }
 
