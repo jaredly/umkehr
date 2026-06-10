@@ -277,23 +277,26 @@ function ParentUpdateSplitFigure() {
         >
             {(markers) => (
                 <>
-                    <Panel x={54} y={64} width={932} height={280} title="before">
-                        <BlockSequence x={120} y={174} label="block B1" chars={['t', 'h', 'e', '_', 'd', 'o', 'g']} />
-                        <SequenceBackPointers x={120} y={174} count={7} markers={markers} firstParent />
+                    <Panel x={54} y={64} width={932} height={292} title="before">
+                        <RootNode x={107} y={86} label="B1" />
+                        <BlockSequence x={120} y={184} chars={['t', 'h', 'e', '_', 'd', 'o', 'g']} />
+                        <SequenceBackPointers x={120} y={184} count={7} markers={markers} firstParent />
                     </Panel>
                     <Callout
                         x={230}
-                        y={370}
+                        y={382}
                         width={580}
                         title="split before d"
                         lines={['The cursor sits before d, but the character ID for d is retained.']}
                     />
                     <Panel x={54} y={500} width={440} height={280} title="after: block B1">
-                        <BlockSequence x={120} y={610} label="B1" chars={['t', 'h', 'e', '_']} />
+                        <RootNode x={107} y={520} label="B1" />
+                        <BlockSequence x={120} y={610} chars={['t', 'h', 'e', '_']} />
                         <SequenceBackPointers x={120} y={610} count={4} markers={markers} firstParent />
                     </Panel>
                     <Panel x={546} y={500} width={440} height={280} title="after: block B2">
-                        <BlockSequence x={626} y={610} label="B2" chars={['d', 'o', 'g']} accents={{0: 'accent'}} />
+                        <RootNode x={613} y={520} label="B2" />
+                        <BlockSequence x={626} y={610} chars={['d', 'o', 'g']} accents={{0: 'accent'}} />
                         <SequenceBackPointers
                             x={626}
                             y={610}
@@ -302,14 +305,15 @@ function ParentUpdateSplitFigure() {
                             markers={markers}
                             firstParent
                         />
+                        <Callout
+                            x={650}
+                            y={696}
+                            width={282}
+                            title="d.parent := B2"
+                            lines={['d becomes the first child of B2.']}
+                            compact
+                        />
                     </Panel>
-                    <Callout
-                        x={314}
-                        y={806}
-                        width={412}
-                        title="d.parent := B2"
-                        lines={['Only the parent reference changes; character IDs stay the same.']}
-                    />
                 </>
             )}
         </SvgCanvas>
@@ -322,27 +326,41 @@ function NaiveSplitFigure() {
             idPrefix="naive-split"
             title="Naive split moves red but leaves dog behind"
             desc="The figure contrasts the intended split with a naive split where the sibling dog subtree remains in block B1."
+            viewBox="0 0 1040 1320"
         >
             {(markers) => (
                 <>
-                    <Panel x={54} y={58} width={278} height={382} title="before tree">
-                        <MiniTree x={138} y={124} />
-                    </Panel>
-                    <Panel x={382} y={58} width={278} height={382} title="user intent">
-                        <BlockTextBox x={424} y={150} label="B1" text="the " />
-                        <BlockTextBox x={424} y={260} label="B2" text="red dog" variant="accent" />
-                        <text className="demoSvgNote" x="430" y="356">
-                            everything after the cursor moves right
-                        </text>
-                    </Panel>
-                    <Panel x={710} y={58} width={278} height={382} title="naive after tree">
-                        <NaiveAfterTree x={776} y={112} markers={markers} />
+                    <Panel x={54} y={58} width={934} height={360} title="before tree">
+                        <MiniTree x={232} y={94} scale={0.68} />
                         <Callout
-                            x={744}
-                            y={342}
-                            width={210}
+                            x={566}
+                            y={146}
+                            width={300}
+                            title="rendered text"
+                            lines={['the red dog is one block before the split.']}
+                            compact
+                        />
+                    </Panel>
+                    <Panel x={54} y={468} width={934} height={270} title="user's intended rendered result">
+                        <BlockTextBox x={168} y={558} width={250} label="B1" text="the " />
+                        <BlockTextBox x={540} y={558} width={270} label="B2" text="red dog" variant="accent" />
+                        <Callout
+                            x={352}
+                            y={654}
+                            width={336}
+                            title="cursor intent"
+                            lines={['Everything after the cursor moves right.']}
+                            compact
+                        />
+                    </Panel>
+                    <Panel x={54} y={788} width={934} height={440} title="naive after tree">
+                        <NaiveAfterTree x={212} y={838} markers={markers} scale={0.72} />
+                        <Callout
+                            x={600}
+                            y={930}
+                            width={270}
                             title="bug"
-                            lines={['dog stayed behind', 'as a sibling of r']}
+                            lines={['dog stayed behind', 'as a sibling of r.']}
                             compact
                         />
                     </Panel>
@@ -358,51 +376,54 @@ function CorrectSplitFigure() {
             idPrefix="correct-split"
             title="Correct split moves split path and following siblings"
             desc="The figure stacks the before tree, split-path after tree, sibling-moved after tree, and final sequence."
-            viewBox="0 0 1040 1360"
+            viewBox="0 0 1040 1760"
         >
             {(markers) => (
                 <>
-                    <Panel x={54} y={58} width={278} height={382} title="before">
-                        <MiniTree x={138} y={124} />
-                    </Panel>
-                    <Panel x={382} y={58} width={606} height={382} title="after tree: split path">
-                        <CorrectAfterTree x={472} y={104} markers={markers} includeDog={false} />
+                    <Panel x={54} y={58} width={934} height={360} title="before">
+                        <MiniTree x={232} y={94} scale={0.68} />
                         <Callout
-                            x={696}
-                            y={126}
-                            width={238}
+                            x={566}
+                            y={146}
+                            width={290}
+                            title="split before r"
+                            lines={['The cursor is before red.']}
+                            compact
+                        />
+                    </Panel>
+                    <Panel x={54} y={468} width={934} height={360} title="after tree: split path">
+                        <CorrectAfterTree x={238} y={510} markers={markers} includeDog={false} scale={0.68} />
+                        <Callout
+                            x={624}
+                            y={582}
+                            width={270}
                             title="split path"
                             lines={['The split point starts B2.']}
                             compact
                         />
                     </Panel>
-                    <Panel x={54} y={492} width={934} height={382} title="after tree: following siblings moved">
-                        <CorrectAfterTree x={196} y={538} markers={markers} includeDog />
+                    <Panel x={54} y={878} width={934} height={430} title="after tree: following siblings moved">
+                        <CorrectAfterTree x={238} y={920} markers={markers} includeDog scale={0.68} />
                         <Callout
-                            x={626}
-                            y={606}
-                            width={270}
+                            x={624}
+                            y={1004}
+                            width={300}
                             title="following siblings"
                             lines={['dog follows because it renders after red.']}
                             compact
                         />
                     </Panel>
-                    <Panel x={54} y={926} width={934} height={360} title="final rendered order">
-                        <CorrectAfterTree x={196} y={972} markers={markers} includeDog />
-                        <RenderedStrip
-                            x={626}
-                            y={1108}
-                            chars={['r', 'e', 'd', '_', 'd', 'o', 'g']}
-                            accents={{0: 'accent', 1: 'accent', 2: 'accent', 3: 'accent', 4: 'warm', 5: 'warm', 6: 'warm'}}
-                        />
-                        <Callout
-                            x={626}
-                            y={1180}
-                            width={270}
-                            title="resolved block"
-                            lines={['B2 renders red dog in order.']}
-                            compact
-                        />
+                    <Panel x={54} y={1358} width={934} height={310} title="final rendered order">
+                        <BlockTextBox x={168} y={1452} width={250} label="B1" text="the " />
+                        <BlockTextBox x={540} y={1452} width={270} label="B2" text="red dog" variant="accent" />
+                        <g transform="translate(540 1554) scale(1.35)">
+                            <RenderedStrip
+                                x={0}
+                                y={0}
+                                chars={['r', 'e', 'd', '_', 'd', 'o', 'g']}
+                                accents={{0: 'accent', 1: 'accent', 2: 'accent', 3: 'accent', 4: 'warm', 5: 'warm', 6: 'warm'}}
+                            />
+                        </g>
                     </Panel>
                 </>
             )}
@@ -416,43 +437,47 @@ function ConcurrentSplitFigure() {
             idPrefix="concurrent-split"
             title="Concurrent intentional and incidental splits conflict under LWW"
             desc="The figure shows both replica intents and the incorrect last-write-wins result with B3 empty."
-            viewBox="0 0 1040 850"
+            viewBox="0 0 1040 1160"
         >
             {() => (
                 <>
-                    <Panel x={56} y={72} width={432} height={320} title="Replica A: split before red">
-                        <BlockTextBox x={116} y={134} label="initial" text="the red dog" />
-                        <BlockTextBox x={116} y={238} width={150} label="B1" text="the " />
-                        <BlockTextBox x={286} y={238} width={168} label="B2" text="red dog" variant="accent" />
+                    <Panel x={54} y={64} width={934} height={300} title="Replica A: split before red">
+                        <BlockTextBox x={118} y={138} label="initial" text="the red dog" />
+                        <BlockTextBox x={396} y={138} width={150} label="B1" text="the " />
+                        <BlockTextBox x={596} y={138} width={210} label="B2" text="red dog" variant="accent" />
+                        <Tag x={596} y={224} label="red: intentional" variant="accent" width={150} />
+                        <Tag x={756} y={224} label="dog: incidental" variant="warm" width={150} />
                         <Callout
-                            x={260}
-                            y={134}
-                            width={180}
+                            x={118}
+                            y={238}
+                            width={250}
                             title="A"
-                            lines={['red moves intentionally', 'dog moves incidentally']}
+                            lines={['red starts B2; dog is pulled along.']}
                             compact
                         />
                     </Panel>
-                    <Panel x={552} y={72} width={432} height={320} title="Replica B: split before dog">
-                        <BlockTextBox x={612} y={134} label="initial" text="the red dog" />
-                        <BlockTextBox x={612} y={238} width={150} label="B2" text="red " variant="accent" />
-                        <BlockTextBox x={782} y={238} width={150} label="B3" text="dog" variant="warning" />
+                    <Panel x={54} y={414} width={934} height={300} title="Replica B: split before dog">
+                        <BlockTextBox x={118} y={488} label="initial" text="the red dog" />
+                        <BlockTextBox x={396} y={488} width={150} label="B2" text="red " variant="accent" />
+                        <BlockTextBox x={596} y={488} width={150} label="B3" text="dog" variant="warning" />
+                        <Tag x={596} y={574} label="dog: intentional" variant="warning" width={156} />
                         <Callout
-                            x={752}
-                            y={134}
-                            width={180}
+                            x={118}
+                            y={588}
+                            width={250}
                             title="B"
-                            lines={['dog moves intentionally', 'into its own block']}
+                            lines={['dog starts its own block B3.']}
                             compact
                         />
                     </Panel>
-                    <Panel x={110} y={454} width={820} height={320} title="plain LWW merge">
-                        <BlockTextBox x={186} y={522} width={150} label="B1" text="the " />
-                        <BlockTextBox x={366} y={522} width={170} label="B2" text="red dog" variant="accent" />
-                        <BlockTextBox x={566} y={522} width={150} label="B3" text="empty" variant="muted" />
+                    <Panel x={54} y={764} width={934} height={300} title="plain LWW merge">
+                        <BlockTextBox x={168} y={838} width={150} label="B1" text="the " />
+                        <BlockTextBox x={390} y={838} width={210} label="B2" text="red dog" variant="accent" />
+                        <BlockTextBox x={672} y={838} width={150} label="B3" text="empty" variant="warning" />
+                        <Tag x={672} y={924} label="lost split" variant="warning" width={112} />
                         <Callout
-                            x={388}
-                            y={652}
+                            x={340}
+                            y={964}
                             width={350}
                             title="later timestamp wins"
                             lines={['A incidental move overwrites', 'B intentional split before dog.']}
@@ -470,50 +495,34 @@ function IncidentalResolutionFigure() {
             idPrefix="incidental-resolution"
             title="Incidental metadata lets the more specific split win"
             desc="The figure shows tagged replica states and the final merge where B3 keeps dog."
-            viewBox="0 0 1040 880"
+            viewBox="0 0 1040 1180"
         >
-            {(markers) => (
+            {() => (
                 <>
-                    <Panel x={56} y={72} width={432} height={340} title="Replica A: tagged split before red">
-                        <BlockTextBox x={116} y={128} width={150} label="B1" text="the " />
-                        <BlockTextBox x={286} y={128} width={168} label="B2" text="red dog" variant="accent" />
-                        <CodeCallout
-                            x={116}
-                            y={240}
-                            width={312}
-                            lines={[
-                                'red.parent := B2',
-                                'dog.parent := tail(B2)',
-                                'kind := incidental',
-                                'splitPath := [B1, _, r]',
-                            ]}
-                            compact
-                        />
+                    <Panel x={54} y={64} width={934} height={320} title="Replica A: tagged split before red">
+                        <BlockTextBox x={118} y={138} label="initial" text="the red dog" />
+                        <BlockTextBox x={396} y={138} width={150} label="B1" text="the " />
+                        <BlockTextBox x={596} y={138} width={210} label="B2" text="red dog" variant="accent" />
+                        <Tag x={596} y={224} label="red: intentional" variant="accent" width={150} />
+                        <Tag x={756} y={224} label="dog: incidental" variant="warm" width={150} />
+                        <Tag x={596} y={270} label="splitPath: [B1, _, r]" variant="muted" width={220} />
                     </Panel>
-                    <Panel x={552} y={72} width={432} height={340} title="Replica B: split before dog">
-                        <BlockTextBox x={612} y={128} width={150} label="B2" text="red " variant="accent" />
-                        <BlockTextBox x={782} y={128} width={150} label="B3" text="dog" variant="warning" />
-                        <CodeCallout
-                            x={610}
-                            y={240}
-                            width={322}
-                            lines={[
-                                'dog.parent := B3',
-                                'kind := intentional',
-                                'beats incidental tail move',
-                            ]}
-                            compact
-                        />
+                    <Panel x={54} y={434} width={934} height={300} title="Replica B: split before dog">
+                        <BlockTextBox x={118} y={508} label="initial" text="the red dog" />
+                        <BlockTextBox x={396} y={508} width={150} label="B2" text="red " variant="accent" />
+                        <BlockTextBox x={596} y={508} width={150} label="B3" text="dog" variant="warning" />
+                        <Tag x={596} y={594} label="dog: intentional" variant="warning" width={156} />
+                        <Tag x={762} y={594} label="dog.parent := B3" variant="warning" width={170} />
                     </Panel>
-                    <Panel x={58} y={474} width={924} height={322} title="merged materialization">
-                        <BlockTextBox x={112} y={560} label="B1" text="the " />
-                        <BlockTextBox x={390} y={560} label="B2" text="red " variant="accent" />
-                        <BlockTextBox x={668} y={560} label="B3" text="dog" variant="warning" />
-                        <PathArrow d="M 594 594 C 626 620 646 620 680 594" kind="warning" markers={markers} />
+                    <Panel x={54} y={784} width={934} height={300} title="merged materialization">
+                        <BlockTextBox x={168} y={858} width={150} label="B1" text="the " />
+                        <BlockTextBox x={390} y={858} width={150} label="B2" text="red " variant="accent" />
+                        <BlockTextBox x={612} y={858} width={150} label="B3" text="dog" variant="warning" />
+                        <Tag x={612} y={944} label="intentional wins" variant="warning" width={156} />
                         <Callout
-                            x={330}
-                            y={692}
-                            width={378}
+                            x={340}
+                            y={984}
+                            width={380}
                             title="intentional split before dog wins"
                             lines={['The incidental move yields to the more specific rightward split.']}
                         />
@@ -531,7 +540,7 @@ function FormattingMarksFigure() {
             idPrefix="formatting-marks"
             title="Formatting marks resolve from character ID anchors"
             desc="The figure shows add and remove bold records, their anchored ranges, and the resolved spans."
-            viewBox="0 0 1040 570"
+            viewBox="0 0 1040 610"
         >
             {() => (
                 <>
@@ -562,14 +571,16 @@ function FormattingMarksFigure() {
                     <text className="demoSvgEyebrow" x="66" y="342">
                         resolved spans
                     </text>
-                    <ResolvedSpan x={66} y={376} width={192} label="plain" text="the " />
-                    <ResolvedSpan x={258} y={376} width={72} label="bold" text="r" variant="accent" />
-                    <ResolvedSpan x={330} y={376} width={128} label="plain" text="ed" />
-                    <ResolvedSpan x={458} y={376} width={74} label="bold" text="_" variant="accent" />
-                    <ResolvedSpan x={532} y={376} width={192} label="plain" text="dog" />
+                    <g transform="translate(66 376) scale(1.15)">
+                        <ResolvedSpan x={0} y={0} width={210} label="plain" text="the " />
+                        <ResolvedSpan x={210} y={0} width={86} label="bold" text="r" variant="accent" />
+                        <ResolvedSpan x={296} y={0} width={140} label="plain" text="ed" />
+                        <ResolvedSpan x={436} y={0} width={86} label="bold" text="_" variant="accent" />
+                        <ResolvedSpan x={522} y={0} width={210} label="plain" text="dog" />
+                    </g>
                     <Callout
                         x={66}
-                        y={470}
+                        y={500}
                         width={616}
                         title="split-aware traversal"
                         lines={['Marks keep character-ID anchors as text splits, joins, and moves reshape the document.']}
@@ -586,10 +597,11 @@ function BlockCycleFigure() {
             idPrefix="block-cycle"
             title="A raw parent cycle materializes by ignoring one edge"
             desc="The figure shows A and B pointing at each other, then root to A to B with one ignored raw edge."
+            viewBox="0 0 1040 500"
         >
             {(markers) => (
                 <>
-                    <Panel x={58} y={70} width={410} height={348} title="raw graph">
+                    <Panel x={58} y={70} width={410} height={360} title="raw graph">
                         <BlockNode x={178} y={154} label="A" />
                         <BlockNode x={178} y={278} label="B" />
                         <PathArrow d="M 260 180 C 334 190 334 270 260 286" kind="accent" markers={markers} />
@@ -602,7 +614,7 @@ function BlockCycleFigure() {
                             compact
                         />
                     </Panel>
-                    <Panel x={572} y={70} width={410} height={348} title="materialized order">
+                    <Panel x={572} y={70} width={410} height={360} title="materialized order">
                         <RootNode x={628} y={130} label="root" />
                         <BlockNode x={750} y={130} label="A" />
                         <BlockNode x={750} y={270} label="B" />
@@ -612,14 +624,15 @@ function BlockCycleFigure() {
                         <text className="demoSvgNote" x="642" y="296">
                             ignored edge
                         </text>
+                        <Callout
+                            x={616}
+                            y={334}
+                            width={318}
+                            title="deterministic tie-break"
+                            lines={['Every replica ignores the same cycle edge.']}
+                            compact
+                        />
                     </Panel>
-                    <Callout
-                        x={238}
-                        y={448}
-                        width={564}
-                        title="deterministic tie-break"
-                        lines={['Every replica orders the raw edges the same way and ignores the same cycle-forming edge.']}
-                    />
                 </>
             )}
         </SvgCanvas>
@@ -764,15 +777,17 @@ function BlockSequence({
 }: {
     x: number;
     y: number;
-    label: string;
+    label?: string;
     chars: string[];
     accents?: Record<number, 'accent' | 'warm' | 'warning' | 'muted'>;
 }) {
     return (
         <g>
-            <text className="demoBlockLabel" x={x} y={y - 18}>
-                {label}
-            </text>
+            {label ? (
+                <text className="demoBlockLabel" x={x} y={y - 18}>
+                    {label}
+                </text>
+            ) : null}
             {chars.map((char, index) => (
                 <CharNode key={`${char}-${index}`} x={x + index * 100} y={y} label={char} variant={accents[index]} />
             ))}
@@ -961,9 +976,43 @@ function CodeCallout({
     );
 }
 
-function MiniTree({x, y, highlight = false}: {x: number; y: number; highlight?: boolean}) {
+function Tag({
+    x,
+    y,
+    label,
+    variant,
+    width,
+}: {
+    x: number;
+    y: number;
+    label: string;
+    variant: 'accent' | 'warning' | 'muted' | 'warm';
+    width?: number;
+}) {
+    const tagWidth = width ?? Math.max(92, label.length * 8 + 28);
     return (
-        <g transform={`translate(${x} ${y}) scale(0.58)`}>
+        <g transform={`translate(${x} ${y})`}>
+            <rect className={`demoTag demoTag-${variant}`} width={tagWidth} height="32" rx="16" />
+            <text className="demoTagText" x={tagWidth / 2} y="21" textAnchor="middle">
+                {label}
+            </text>
+        </g>
+    );
+}
+
+function MiniTree({
+    x,
+    y,
+    highlight = false,
+    scale = 0.58,
+}: {
+    x: number;
+    y: number;
+    highlight?: boolean;
+    scale?: number;
+}) {
+    return (
+        <g transform={`translate(${x} ${y}) scale(${scale})`}>
             <CharNode x={0} y={0} label="t" />
             <CharNode x={0} y={62} label="h" />
             <CharNode x={0} y={124} label="e" />
@@ -984,9 +1033,19 @@ function MiniTree({x, y, highlight = false}: {x: number; y: number; highlight?: 
     );
 }
 
-function NaiveAfterTree({x, y, markers}: {x: number; y: number; markers: MarkerSet}) {
+function NaiveAfterTree({
+    x,
+    y,
+    markers,
+    scale = 0.56,
+}: {
+    x: number;
+    y: number;
+    markers: MarkerSet;
+    scale?: number;
+}) {
     return (
-        <g transform={`translate(${x} ${y}) scale(0.56)`}>
+        <g transform={`translate(${x} ${y}) scale(${scale})`}>
             <RootNode x={-16} y={0} label="B1" />
             <CharNode x={0} y={82} label="t" />
             <CharNode x={0} y={144} label="h" />
@@ -1015,14 +1074,16 @@ function CorrectAfterTree({
     y,
     markers,
     includeDog,
+    scale = 0.58,
 }: {
     x: number;
     y: number;
     markers: MarkerSet;
     includeDog: boolean;
+    scale?: number;
 }) {
     return (
-        <g transform={`translate(${x} ${y}) scale(0.58)`}>
+        <g transform={`translate(${x} ${y}) scale(${scale})`}>
             <RootNode x={-16} y={0} label="B1" />
             <CharNode x={0} y={82} label="t" />
             <CharNode x={0} y={144} label="h" />
@@ -1142,7 +1203,14 @@ function ResolvedSpan({
             <text className="demoResolvedLabel" x={width / 2} y="20" textAnchor="middle">
                 {label}
             </text>
-            <text className="demoResolvedText" x={width / 2} y="43" textAnchor="middle">
+            <text
+                className={['demoResolvedText', variant ? `demoResolvedText-${variant}` : '']
+                    .filter(Boolean)
+                    .join(' ')}
+                x={width / 2}
+                y="43"
+                textAnchor="middle"
+            >
                 {text}
             </text>
         </g>

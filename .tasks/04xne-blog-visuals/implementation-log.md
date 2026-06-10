@@ -65,3 +65,16 @@
 - Updated the App test that previously clicked `After split` so it now verifies the formerly staged states are present at once.
 - Verification after static scroll pass: `npm run build --prefix examples/block-rich-text` passed.
 - Verification after static scroll pass: `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx` passed with 58 tests.
+
+## 02 Feedback Implementation Pass
+
+- Responded to `.tasks/04xne-blog-visuals/02-feedback.md`.
+- Figure 02: added concrete `B1` / `B2` root pills above first characters and moved `d.parent := B2` beside the `B2` after-state.
+- Figure 03: reflowed from a three-column layout into full-width vertical rows for before tree, intended rendered result, and naive after tree.
+- Figure 04: reflowed into larger full-width rows and simplified the final row around `B1`, `B2`, and a larger rendered-order strip.
+- Figure 05: reflowed into stacked replica/result rows and added `intentional`, `incidental`, and `lost split` tags.
+- Figure 06: mirrored figure 05's arrangement and replaced tiny code blocks with larger semantic metadata tags.
+- Figure 07: enlarged the resolved-spans strip and made bold spans more visually prominent.
+- Figure 08: moved the deterministic tie-break callout into the materialized-order panel.
+- Verification after 02 feedback pass: `npm run build --prefix examples/block-rich-text` passed.
+- Verification after 02 feedback pass: `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx` passed with 58 tests.
