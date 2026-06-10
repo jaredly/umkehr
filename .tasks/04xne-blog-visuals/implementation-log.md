@@ -37,3 +37,19 @@
 - `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx` passed with 58 tests.
 - `npm run build --prefix examples/block-rich-text` passed.
 - Issue: requested Vite port 5174 was already in use. Workaround: Vite selected port 5175, so visual QA used `http://127.0.0.1:5175/?demos`.
+- Issue: sandboxed commands could not reach the Vite dev server on newly started ports. Workaround attempted: reran local HTTP checks outside the sandbox.
+- Issue: `pnpm exec playwright` failed because the Playwright binary is not installed in this repo. Workaround attempted: use local Chrome headless.
+- Issue: Chrome headless became noisy/unstable during screenshot capture and the turn was interrupted. Mobile screenshot partially wrote to `/tmp/blog-demos-mobile.png`, but visual QA was not completed in that pass.
+
+## Feedback Pass
+
+- Reversed parent-pointer arrows so they point from child to parent instead of parent to child.
+- Fixed figure 02 sequence arrow alignment and added first-character parent pointers up to the block labels.
+- Reworked figure 03 to include a naive after-tree beside the before tree and user intent.
+- Reworked figure 04 to include staged after-tree states and removed ambiguous movement arrows.
+- Reworked figure 05 to use `the red dog` as the visible context and show `B1`, `B2`, and `B3` states without the previous wonky arrows.
+- Reworked figure 06 to mirror figure 05 more closely while showing the metadata/tie-break reason for the merged result.
+- Fixed figure 07 mark range bars so the add/remove bands start under the intended characters.
+- Reversed figure 08 materialized parent arrows while preserving the ignored raw edge callout.
+- Verification after feedback: `npm run build --prefix examples/block-rich-text` passed.
+- Verification after feedback: `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx` passed with 58 tests.
