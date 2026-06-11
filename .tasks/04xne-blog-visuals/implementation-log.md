@@ -78,3 +78,30 @@
 - Figure 08: moved the deterministic tie-break callout into the materialized-order panel.
 - Verification after 02 feedback pass: `npm run build --prefix examples/block-rich-text` passed.
 - Verification after 02 feedback pass: `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx` passed with 58 tests.
+
+## 03 Feedback Implementation Pass
+
+- Responded to `.tasks/04xne-blog-visuals/03-feedback.md`.
+- Figure 04: replaced the old split-path/pending-dog state with a two-step operation sequence: first `dog.parent := tail(red)`, then `red.parent := B2`.
+- Figure 05: rebuilt the conflict visualization around character trees with explicit parent pointers, and fixed Replica B so `B1` contains `the red` while `B3` contains `dog`.
+- Figure 06: rebuilt the resolution visualization to mirror figure 05's character-tree layout, with metadata tags explaining why the intentional dog split wins.
+- Figure 08: moved the ignored `A -> B` edge to the right side of the materialized-order panel to mirror the raw graph.
+- Verification after 03 feedback pass: `npm run build --prefix examples/block-rich-text` passed.
+- Verification after 03 feedback pass: `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx` passed with 58 tests.
+
+## 04 Feedback Implementation Pass
+
+- Responded to `.tasks/04xne-blog-visuals/04-feedback.md`.
+- Figure 04: simplified the final rendered order card to show only rendered block results, including `B1: the` and `B2: red dog`, and removed the extra `red dog` character strip.
+- Figure 05: swapped Replica A and Replica B actions so A is the split before dog and B is the split before red / `red dog` move. Updated the LWW callout to match the new story.
+- Updated the demo-route test to assert the swapped Replica A/B labels.
+- Verification after 04 feedback pass: `npm run build --prefix examples/block-rich-text` passed.
+- Verification after 04 feedback pass: `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx` passed with 58 tests.
+
+## Figure 06 Role Swap
+
+- Updated figure 06 to use the same Replica A/B action swap as figure 05: A splits before dog, B performs the tagged split before red with incidental dog metadata.
+- Updated the merge callout to explain that B's incidental metadata yields to A's intentional dog split.
+- Issue: the demo-route test initially used a singular text query for `Replica A: split before dog`, but figures 05 and 06 now both contain that label. Fix: changed the test to assert two matching labels.
+- Verification after figure 06 role swap: `npm run build --prefix examples/block-rich-text` passed.
+- Verification after figure 06 role swap: `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx` passed with 58 tests.

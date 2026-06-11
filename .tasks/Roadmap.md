@@ -1,4 +1,13 @@
 
+# Next steps
+
+- make the visualization parametric
+- refactor umkehr to have pluggable leaf CRDTs
+- do a blog post about umkehr/history and umkehr/basic
+
+
+#
+
 Block Rich Text is really shaping up.
 
 - we want undo/redo thx

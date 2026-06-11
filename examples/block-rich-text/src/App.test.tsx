@@ -279,9 +279,14 @@ describe('Block rich text example UI', () => {
         window.history.pushState({}, '', '/?demos');
         const view = render(<App />);
 
-        expect(view.getByText('d.parent := B2')).toBeTruthy();
-        expect(view.getByText('after tree: split path')).toBeTruthy();
-        expect(view.getByText('after tree: following siblings moved')).toBeTruthy();
+        expect(view.getByText('dog.parent := tail(red)')).toBeTruthy();
+        expect(view.getByText('red.parent := B2')).toBeTruthy();
+        expect(view.getByText('1. reparent dog onto the end of red')).toBeTruthy();
+        expect(view.getByText('2. reparent red to B2')).toBeTruthy();
+        expect(view.getAllByText('Replica A: split before dog')).toHaveLength(2);
+        expect(view.getByText('Replica B: split before red')).toBeTruthy();
+        expect(view.getByText('Replica B: tagged split before red')).toBeTruthy();
+        expect(view.getAllByText('B1: the red').length).toBeGreaterThan(0);
         expect(view.getByText('plain LWW merge')).toBeTruthy();
         expect(view.queryByRole('button', {name: 'After split'})).toBeNull();
         expect(view.container.querySelectorAll('.editorPanel')).toHaveLength(0);
