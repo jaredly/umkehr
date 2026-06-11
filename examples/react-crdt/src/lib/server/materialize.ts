@@ -434,17 +434,24 @@ function pathForUpdate<TState>(
     update: CrdtUpdate,
     referenceDoc: CrdtDocument<TState>,
 ): CrdtPathSegment[] {
-    if (update.op === 'set' || update.op === 'delete') return update.path;
-    if (update.op === 'insert') {
-        const array = getMetaAtPath(referenceDoc.meta, update.arrayPath);
-        if (array?.kind === 'array') {
-            return [
-                ...update.arrayPath,
-                {type: 'arrayItem', id: update.id, parentCreated: array.created},
-            ];
+    switch (update.op) {
+        case 'set':
+        case 'delete':
+        case 'richText':
+            return update.path;
+        case 'insert': {
+            const array = getMetaAtPath(referenceDoc.meta, update.arrayPath);
+            if (array?.kind === 'array') {
+                return [
+                    ...update.arrayPath,
+                    {type: 'arrayItem', id: update.id, parentCreated: array.created},
+                ];
+            }
+            return update.arrayPath;
         }
+        case 'setOrder':
+            return update.arrayPath;
     }
-    return update.arrayPath;
 }
 
 function createRestoreUpdates<TState>(

@@ -5,6 +5,7 @@
         "noEmit": true,
         "paths": {
             "umkehr": ["../../src/index.ts"],
+            "umkehr/migration": ["../../src/migration/index.ts"],
             "umkehr/validation": ["../../src/validation/index.ts"],
             "umkehr/react": ["../../src/react/react.tsx"]
         }

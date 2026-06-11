@@ -1,3 +1,4 @@
+import type {IValidation} from 'typia';
 import typia from 'typia';
 import {hlc} from 'umkehr/crdt';
 
@@ -61,7 +62,8 @@ export type WhiteboardState = {
 
 export const WHITEBOARD_DOC_ID = 'umkehr-react-crdt-whiteboard-v3';
 export const whiteboardSchema = typia.json.schemas<[WhiteboardState], '3.1'>();
-export const validateWhiteboardState = typia.createValidate<WhiteboardState>();
+export const validateWhiteboardState: (input: unknown) => IValidation<WhiteboardState> =
+    typia.createValidate<WhiteboardState>();
 
 export const initialWhiteboardState: WhiteboardState = {
     background: '#f8fafc',
