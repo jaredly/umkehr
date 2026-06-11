@@ -8,6 +8,16 @@ export default defineConfig({
     plugins: [UnpluginTypia()],
     resolve: {
         alias: [
+            {find: /^react\/(.+)$/, replacement: fileURLToPath(new URL('./node_modules/react/$1', import.meta.url))},
+            {find: 'react', replacement: fileURLToPath(new URL('./node_modules/react/index.js', import.meta.url))},
+            {
+                find: /^react-dom\/(.+)$/,
+                replacement: fileURLToPath(new URL('./node_modules/react-dom/$1', import.meta.url)),
+            },
+            {
+                find: 'react-dom',
+                replacement: fileURLToPath(new URL('./node_modules/react-dom/index.js', import.meta.url)),
+            },
             {
                 find: /^umkehr\/block-crdt\/(.+)$/,
                 replacement: fileURLToPath(new URL('./src/block-crdt/$1.ts', import.meta.url)),
