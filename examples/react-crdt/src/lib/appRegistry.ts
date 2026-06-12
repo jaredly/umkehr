@@ -22,6 +22,12 @@ import {
 } from '../apps/rich-notes/RichNotesApp';
 import type {RichNotesState} from '../apps/rich-notes/model';
 import {
+    blockNotesApp,
+    blockNotesCrdtRuntime,
+    blockNotesHistoryRuntime,
+} from '../apps/block-notes/BlockNotesApp';
+import type {BlockNotesState} from '../apps/block-notes/model';
+import {
     todoFixtureMigration,
     todoFixtureMigrationConfig,
     todoFixtureV3MigrationConfig,
@@ -118,12 +124,19 @@ export const registeredApps = [
         history: richNotesHistoryRuntime,
         serverSchemaConfig: undefined,
     },
+    {
+        app: blockNotesApp,
+        crdt: blockNotesCrdtRuntime,
+        history: blockNotesHistoryRuntime,
+        serverSchemaConfig: undefined,
+    },
 ] satisfies [
     RegisteredApp<TodoState>,
     RegisteredApp<TodoFixtureStateV1>,
     RegisteredApp<TodoFixtureStateV3>,
     RegisteredEphemeralApp<WhiteboardState, WhiteboardEphemeralData>,
     RegisteredApp<RichNotesState>,
+    RegisteredApp<BlockNotesState>,
 ];
 export type AppOption = {
     id: string;

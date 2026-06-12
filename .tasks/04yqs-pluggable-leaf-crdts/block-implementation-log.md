@@ -19,12 +19,16 @@
 - Added optional batch leaf undo/redo hooks to the plugin contract. Core CRDT history now groups adjacent leaf effects by plugin/path for plugins that need command-level planning.
 - Implemented block rich text undo/redo with `planUndoOps(...)`. Undo plans from the original block op batch; redo plans from the undo command's captured block op batch so redo gets fresh Lamport IDs instead of replaying tombstoned originals.
 - Added target checks for block effects so undo/redo is blocked when an operation has been deleted, superseded, or points at a missing target.
+- Added the option-B example integration as `examples/react-crdt/src/apps/block-notes`. It registers `blockRichTextLeafPlugin`, exposes a minimal block-backed panel, and leaves the larger standalone `examples/block-rich-text` app unchanged.
+- Added registry tests proving the block notes app is discoverable, includes the block plugin in its schema fingerprint, validates generated `$block` leaf updates through the archive/protocol validator path, and fails initial CRDT document creation without the required plugin.
+- Raised the package smoke import test timeout to 15s. Under the full Vitest suite, built-package dynamic imports can exceed the default 5s while other files are transforming; focused smoke runs were passing and the longer timeout made the full suite deterministic.
 - Verification passed:
   - `npm run typecheck`
   - `npm run typecheck:tests`
   - `npm test`
   - `npm run typecheck:examples`
+  - `cd examples/react-crdt && npm exec vitest -- run src/lib/appRegistry.test.ts`
 
 ## Known Limitations
 
-- Option B integration was implemented as focused library/package/type tests, not a migration of the larger `examples/block-rich-text` app.
+- The larger standalone `examples/block-rich-text` app is still not migrated to the core `CrdtDocument<{body: BlockRichText}>` path.
