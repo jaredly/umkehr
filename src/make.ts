@@ -2,13 +2,17 @@ import {_get, type EqualFn} from './internal.js';
 import {createPatchBuilderWithContext} from './helper.js';
 import {pathToString, type Patch, type DraftPatch} from './types.js';
 import {ops, rebase} from './ops.js';
+import type {LeafBuilderExtensionAny} from './builderExtensions.js';
 
 const describePath = (path: DraftPatch<unknown>['path']) => pathToString(path) || '<root>';
 
-export function realizeDraftPatch<T, V, Tag extends PropertyKey, Extra>(
-    base: T,
-    draft: DraftPatch<V, Tag, Extra>,
-): Patch<V> {
+export function realizeDraftPatch<
+    T,
+    V,
+    Tag extends PropertyKey,
+    Extra,
+    Extensions extends readonly LeafBuilderExtensionAny[] = [],
+>(base: T, draft: DraftPatch<V, Tag, Extra, Extensions>): Patch<V> {
     switch (draft.op) {
         case 'add': {
             const prev = _get(base, draft.path);
@@ -113,9 +117,14 @@ export type MaybeNested<T> = T | MaybeNested<T>[];
 
 export const asFlat = <T>(v: MaybeNested<T>): T[] => asArray(v).flat() as T[];
 
-export function resolveAndApply<T, Extra, Tag extends string = 'type'>(
+export function resolveAndApply<
+    T,
+    Extra,
+    Tag extends string = 'type',
+    Extensions extends readonly LeafBuilderExtensionAny[] = [],
+>(
     current: T,
-    draft: MaybeNested<DraftPatch<T, Tag, Extra>>,
+    draft: MaybeNested<DraftPatch<T, Tag, Extra, Extensions>>,
     extra: Extra,
     tag: Tag,
     equal: EqualFn,
@@ -123,10 +132,17 @@ export function resolveAndApply<T, Extra, Tag extends string = 'type'>(
     const changes = asFlat(draft).flatMap((op) => {
         if (op.op === 'nested') {
             const value = _get(current, op.path);
-            const inner = op.make(value, createPatchBuilderWithContext(tag, extra));
-            const next = resolveAndApply<T, Extra, Tag>(
+            const inner = op.make(
+                value,
+                createPatchBuilderWithContext(tag, extra, {
+                    builderExtensions: (op.builderExtensions ?? []) as unknown as Extensions,
+                }),
+            );
+            const next = resolveAndApply<T, Extra, Tag, Extensions>(
                 current,
-                asArray(inner).map((i) => rebase(i, op.path) as DraftPatch<T, Tag, Extra>),
+                asArray(inner).map(
+                    (i) => rebase(i, op.path) as DraftPatch<T, Tag, Extra, Extensions>,
+                ),
                 extra,
                 tag,
                 equal,
@@ -134,7 +150,7 @@ export function resolveAndApply<T, Extra, Tag extends string = 'type'>(
             current = next.current;
             return next.changes;
         }
-        const ready = realizeDraftPatch(current, op);
+        const ready = realizeDraftPatch<T, T, Tag, Extra, Extensions>(current, op);
         if (ready.op !== 'leaf') current = ops.apply(current, ready, equal);
         return ready;
     });

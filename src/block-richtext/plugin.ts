@@ -18,6 +18,7 @@ import {
     type State as BlockState,
 } from '../block-crdt/index.js';
 import {initialState} from '../block-crdt/initialState.js';
+import {defineLeafBuilderExtension} from '../builderExtensions.js';
 import {deepEqual as equal} from '../deepEqual.js';
 import type {LeafCrdtPlugin} from '../crdt/plugins.js';
 import {normalPathForCrdtPath} from '../crdt/path.js';
@@ -93,6 +94,54 @@ export type BlockRichTextPatchChange =
     | BlockRichTextMoveBlockChange
     | BlockRichTextSetBlockMetaChange;
 
+export type BlockRichTextOpsCommand = Omit<BlockRichTextOpsChange, 'kind'>;
+export type BlockRichTextInsertTextCommand = Omit<BlockRichTextInsertTextChange, 'kind'>;
+export type BlockRichTextDeleteRangeCommand = Omit<BlockRichTextDeleteRangeChange, 'kind'>;
+export type BlockRichTextSplitBlockCommand = Omit<BlockRichTextSplitBlockChange, 'kind'>;
+export type BlockRichTextJoinBlocksCommand = Omit<BlockRichTextJoinBlocksChange, 'kind'>;
+export type BlockRichTextMoveBlockCommand = BlockRichTextMoveBlockArgs;
+export type BlockRichTextSetBlockMetaCommand = Omit<BlockRichTextSetBlockMetaChange, 'kind'>;
+
+export const blockRichTextBuilderExtension = defineLeafBuilderExtension<
+    BlockRichText,
+    BlockRichTextPatchChange
+>()({
+    key: '$block',
+    plugin: BLOCK_RICH_TEXT_LEAF_PLUGIN_ID,
+    commands: {
+        ops: (change: BlockRichTextOpsCommand): BlockRichTextOpsChange => ({
+            kind: 'ops',
+            ...change,
+        }),
+        insertText: (change: BlockRichTextInsertTextCommand): BlockRichTextInsertTextChange => ({
+            kind: 'insertText',
+            ...change,
+        }),
+        deleteRange: (change: BlockRichTextDeleteRangeCommand): BlockRichTextDeleteRangeChange => ({
+            kind: 'deleteRange',
+            ...change,
+        }),
+        splitBlock: (change: BlockRichTextSplitBlockCommand): BlockRichTextSplitBlockChange => ({
+            kind: 'splitBlock',
+            ...change,
+        }),
+        joinBlocks: (change: BlockRichTextJoinBlocksCommand): BlockRichTextJoinBlocksChange => ({
+            kind: 'joinBlocks',
+            ...change,
+        }),
+        moveBlock: (change: BlockRichTextMoveBlockCommand): BlockRichTextMoveBlockChange => ({
+            kind: 'moveBlock',
+            ...change,
+        }),
+        setBlockMeta: (
+            change: BlockRichTextSetBlockMetaCommand,
+        ): BlockRichTextSetBlockMetaChange => ({
+            kind: 'setBlockMeta',
+            ...change,
+        }),
+    },
+});
+
 export const blockRichTextLeafPlugin: LeafCrdtPlugin<
     typeof BLOCK_RICH_TEXT_LEAF_PLUGIN_ID,
     JsonValue,
@@ -102,8 +151,11 @@ export const blockRichTextLeafPlugin: LeafCrdtPlugin<
 > = {
     id: BLOCK_RICH_TEXT_LEAF_PLUGIN_ID,
     version: BLOCK_RICH_TEXT_LEAF_PLUGIN_VERSION,
+    builder: blockRichTextBuilderExtension,
     empty() {
-        return blockRichTextJson(initialState(BLOCK_RICH_TEXT_INITIAL_SESSION, BLOCK_RICH_TEXT_INITIAL_TS));
+        return blockRichTextJson(
+            initialState(BLOCK_RICH_TEXT_INITIAL_SESSION, BLOCK_RICH_TEXT_INITIAL_TS),
+        );
     },
     isValue(value): value is JsonValue {
         return isBlockRichTextJson(value);
@@ -111,7 +163,9 @@ export const blockRichTextLeafPlugin: LeafCrdtPlugin<
     init({value}) {
         const nextValue = isBlockRichTextJson(value)
             ? value
-            : blockRichTextJson(initialState(BLOCK_RICH_TEXT_INITIAL_SESSION, BLOCK_RICH_TEXT_INITIAL_TS));
+            : blockRichTextJson(
+                  initialState(BLOCK_RICH_TEXT_INITIAL_SESSION, BLOCK_RICH_TEXT_INITIAL_TS),
+              );
         return {
             value: nextValue,
             meta: {maxSeenCount: blockStateFromJson(nextValue).maxSeenCount},
@@ -288,13 +342,15 @@ function createBlockRichTextUndoUpdates(
         {actor: sessionId, ts: () => ts},
     );
     if (!plan.complete) return [];
-    return plan.ops.map((op): CrdtUpdate => ({
-        op: 'leaf',
-        plugin: BLOCK_RICH_TEXT_LEAF_PLUGIN_ID,
-        path: first.path,
-        change: op as unknown as JsonValue,
-        ts,
-    }));
+    return plan.ops.map(
+        (op): CrdtUpdate => ({
+            op: 'leaf',
+            plugin: BLOCK_RICH_TEXT_LEAF_PLUGIN_ID,
+            path: first.path,
+            change: op as unknown as JsonValue,
+            ts,
+        }),
+    );
 }
 
 function checkBlockRichTextEffectTarget(
@@ -321,10 +377,7 @@ function checkBlockRichTextEffectTarget(
     }
 }
 
-function blockOperationTargetIssue(
-    state: BlockState,
-    op: Op,
-): BlockedEffect['reason'] | null {
+function blockOperationTargetIssue(state: BlockState, op: Op): BlockedEffect['reason'] | null {
     switch (op.type) {
         case 'char': {
             const char = state.chars[lamportToString(op.char.id)];
@@ -393,24 +446,24 @@ function blockRichTextAtCrdtPath(
 function isBlockRichTextJson(value: unknown): value is JsonValue {
     return Boolean(
         value &&
-            typeof value === 'object' &&
-            (value as {kind?: unknown}).kind === 'block-rich-text' &&
-            (value as {version?: unknown}).version === 1 &&
-            valueHasBlockState((value as {state?: unknown}).state),
+        typeof value === 'object' &&
+        (value as {kind?: unknown}).kind === 'block-rich-text' &&
+        (value as {version?: unknown}).version === 1 &&
+        valueHasBlockState((value as {state?: unknown}).state),
     );
 }
 
 function valueHasBlockState(value: unknown): value is BlockState {
     return Boolean(
         value &&
-            typeof value === 'object' &&
-            !Array.isArray(value) &&
-            (value as {chars?: unknown}).chars &&
-            (value as {blocks?: unknown}).blocks &&
-            (value as {marks?: unknown}).marks &&
-            (value as {splits?: unknown}).splits &&
-            (value as {joins?: unknown}).joins &&
-            typeof (value as {maxSeenCount?: unknown}).maxSeenCount === 'number',
+        typeof value === 'object' &&
+        !Array.isArray(value) &&
+        (value as {chars?: unknown}).chars &&
+        (value as {blocks?: unknown}).blocks &&
+        (value as {marks?: unknown}).marks &&
+        (value as {splits?: unknown}).splits &&
+        (value as {joins?: unknown}).joins &&
+        typeof (value as {maxSeenCount?: unknown}).maxSeenCount === 'number',
     );
 }
 

@@ -1,5 +1,5 @@
 import type {AppDefinition, CrdtRuntime, HistoryRuntime} from '../../lib/crdtApp';
-import {richTextLeafPlugin} from 'umkehr/richtext';
+import {richTextBuilderExtension, richTextLeafPlugin} from 'umkehr/richtext';
 import {
     initialRichNotesState,
     initialRichNotesTimestamp,
@@ -10,17 +10,19 @@ import {
     useRichNotes,
     useRichNotesHistory,
     validateRichNotesState,
+    type RichNotesBuilderExtensions,
     type RichNotesState,
 } from './model';
 import {RichNotesPanel} from './RichNotesPanel';
 
-export const richNotesApp: AppDefinition<RichNotesState> = {
+export const richNotesApp: AppDefinition<RichNotesState, never, RichNotesBuilderExtensions> = {
     id: 'rich-notes',
     title: 'Rich Notes',
     schemaVersion: 1,
     tagKey: 'type',
     schema: richNotesSchema,
     leafPlugins: [richTextLeafPlugin],
+    builderExtensions: [richTextBuilderExtension],
     validateState: validateRichNotesState,
     initialState: initialRichNotesState,
     initialTimestamp: initialRichNotesTimestamp,
@@ -37,11 +39,12 @@ export const richNotesApp: AppDefinition<RichNotesState> = {
     },
 };
 
-export const richNotesCrdtRuntime: CrdtRuntime<RichNotesState> = {
-    docId: RICH_NOTES_DOC_ID,
-    Provider: ProvideRichNotes,
-    useEditorContext: useRichNotes,
-};
+export const richNotesCrdtRuntime: CrdtRuntime<RichNotesState, never, RichNotesBuilderExtensions> =
+    {
+        docId: RICH_NOTES_DOC_ID,
+        Provider: ProvideRichNotes,
+        useEditorContext: useRichNotes,
+    };
 
 export const richNotesHistoryRuntime: HistoryRuntime<RichNotesState> = {
     Provider: ProvideRichNotesHistory,

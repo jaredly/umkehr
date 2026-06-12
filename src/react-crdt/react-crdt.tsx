@@ -1,6 +1,6 @@
 import {createContext, useContext, useEffect, useMemo, useRef, useState} from 'react';
 import {deepEqual as equal} from '../deepEqual.js';
-import {createPatchDispatcher, getPath} from '../helper.js';
+import {createPatchDispatcher, getPath, type PatchBuilder} from '../helper.js';
 import {type EqualFn} from '../internal.js';
 import {asFlat, type MaybeNested, resolveAndApply} from '../make.js';
 import {
@@ -13,6 +13,7 @@ import {
     getMetaAtPath,
     redoLocalCommand,
     undoLocalCommand,
+    builderExtensionsFromLeafPlugins,
     hlc,
     type CrdtMeta,
     type CrdtDocument,
@@ -38,6 +39,7 @@ import {
 } from '../react-core/index.js';
 import {pathToString, type ApplyTiming, type DraftPatch, type Path} from '../types.js';
 import type {PatchBuilderInternal} from '../types.js';
+import type {LeafBuilderExtensionAny, PatchBuilderOptions} from '../builderExtensions.js';
 import {useLatest} from '../react/useLatest.js';
 import {type RichCollaborativeText, type RichTextImportSnapshot} from '../richtext/index.js';
 import {materializeRichTextState} from '../peritext/materialize.js';
@@ -62,7 +64,12 @@ export type SyncedTransport = {
     clearEphemeralActor?(actor: string): void;
 };
 
-export type SyncedContext<T, Tag extends string = 'type', EphemeralData = never> = {
+export type SyncedContext<
+    T,
+    Tag extends string = 'type',
+    EphemeralData = never,
+    Extensions extends readonly LeafBuilderExtensionAny[] = [],
+> = {
     latest(): T;
     clearPreview(): void;
     publishEphemeral(messages: EphemeralMessage<EphemeralData>[]): void;
@@ -74,16 +81,16 @@ export type SyncedContext<T, Tag extends string = 'type', EphemeralData = never>
     redo(): void;
     useLocalHistory(): CrdtLocalHistory<T>;
     useCrdtPath<Current>(
-        node: PatchBuilderInternal<unknown, Current, Tag, unknown, Context>,
+        node: PatchBuilderInternal<unknown, Current, Tag, unknown, Context, Extensions>,
     ): CrdtPathSegment[];
     useCrdtMeta<Current>(
-        node: PatchBuilderInternal<unknown, Current, Tag, unknown, Context>,
+        node: PatchBuilderInternal<unknown, Current, Tag, unknown, Context, Extensions>,
     ): CrdtMeta | undefined;
     useRichText(
-        node: PatchBuilderInternal<unknown, RichCollaborativeText, Tag, void, Context>,
+        node: PatchBuilderInternal<unknown, RichCollaborativeText, Tag, void, Context, Extensions>,
     ): RichTextBinding;
-    $: ReturnType<typeof createPatchDispatcher<T, Context, Tag, void>>;
-    dispatch(v: MaybeNested<DraftPatch<T, Tag, Context>>, when?: ApplyTiming): void;
+    $: PatchBuilder<T, Tag, void, Context, Extensions>;
+    dispatch(v: MaybeNested<DraftPatch<T, Tag, Context, Extensions>>, when?: ApplyTiming): void;
 };
 
 export type RichTextBinding = {
@@ -108,14 +115,24 @@ export type RichTextBinding = {
     };
 };
 
-type QueuedChanges<T, Tag extends string = 'type'> = DraftPatch<T, Tag, Context>[];
+type QueuedChanges<
+    T,
+    Tag extends string = 'type',
+    Extensions extends readonly LeafBuilderExtensionAny[] = [],
+> = DraftPatch<T, Tag, Context, Extensions>[];
 
-type SyncedContextBase<T, Tag extends string, EphemeralData> = {
+type SyncedContextBase<
+    T,
+    Tag extends string,
+    EphemeralData,
+    Extensions extends readonly LeafBuilderExtensionAny[] = [],
+> = {
     history: CrdtLocalHistory<T>;
     transport: SyncedTransport;
     ephemeralConfig?: EphemeralConfig<EphemeralData>;
     ephemeralStore: EphemeralStore;
     tag: Tag;
+    builderExtensions: Extensions;
     equalFn: EqualFn;
     save: (history: CrdtLocalHistory<T>) => void;
     listeners: (() => void)[];
@@ -124,21 +141,27 @@ type SyncedContextBase<T, Tag extends string, EphemeralData> = {
     externalPreviewHistory: null | CrdtLocalHistory<T>;
     scheduled?: ScheduledTask;
     listenersByPath: PathListenerNode;
-    queuedChanges: QueuedChanges<T, Tag>;
-    activePreviewChanges: QueuedChanges<T, Tag>;
+    queuedChanges: QueuedChanges<T, Tag, Extensions>;
+    activePreviewChanges: QueuedChanges<T, Tag, Extensions>;
     previewPaths: Record<string, Path>;
     statuses: StatusStore;
 };
 
-export const createSyncedContext = <T, Tag extends string = 'type', EphemeralData = never>(
+export const createSyncedContext = <
+    T,
+    Tag extends string = 'type',
+    EphemeralData = never,
+    Extensions extends readonly LeafBuilderExtensionAny[] = [],
+>(
     tag: Tag,
     equalFn: EqualFn = equal,
     ephemeralConfig?: EphemeralConfig<EphemeralData>,
+    options?: PatchBuilderOptions<Extensions>,
 ) => {
-    const Ctx = createContext<SyncedContextBase<T, Tag, EphemeralData>>(null as any);
+    const Ctx = createContext<SyncedContextBase<T, Tag, EphemeralData, Extensions>>(null as any);
 
     return [
-        makeProvider(Ctx, tag, equalFn, ephemeralConfig),
+        makeProvider(Ctx, tag, equalFn, ephemeralConfig, options),
 
         function useSyncedContext() {
             const ctx = useContext(Ctx);
@@ -148,7 +171,7 @@ export const createSyncedContext = <T, Tag extends string = 'type', EphemeralDat
                 );
             }
 
-            return useMemo((): SyncedContext<T, Tag, EphemeralData> => {
+            return useMemo((): SyncedContext<T, Tag, EphemeralData, Extensions> => {
                 const {dispatch, $} = makeDispatch(ctx, tag, equalFn);
 
                 return {
@@ -274,13 +297,52 @@ export const createSyncedContext = <T, Tag extends string = 'type', EphemeralDat
                         return {
                             view,
                             commands: {
-                                insert: (index, text) => node.$text.insert({index}, text),
-                                delete: (start, end) => node.$text.delete({start, end}),
+                                insert: (index, text) =>
+                                    dispatch({
+                                        op: 'leaf',
+                                        plugin: 'umkehr.rich-text',
+                                        path,
+                                        change: {kind: 'insert', at: {index}, text},
+                                    } as DraftPatch<T, Tag, Context, Extensions>),
+                                delete: (start, end) =>
+                                    dispatch({
+                                        op: 'leaf',
+                                        plugin: 'umkehr.rich-text',
+                                        path,
+                                        change: {kind: 'delete', range: {start, end}},
+                                    } as DraftPatch<T, Tag, Context, Extensions>),
                                 mark: (start, end, markType, value, preset) =>
-                                    node.$text.mark({start, end}, markType, value, preset),
+                                    dispatch({
+                                        op: 'leaf',
+                                        plugin: 'umkehr.rich-text',
+                                        path,
+                                        change: {
+                                            kind: 'mark',
+                                            range: {start, end},
+                                            markType,
+                                            value,
+                                            preset,
+                                        },
+                                    } as DraftPatch<T, Tag, Context, Extensions>),
                                 unmark: (start, end, markType, preset) =>
-                                    node.$text.unmark({start, end}, markType, preset),
-                                replace: (snapshot) => node.$text.replace(snapshot),
+                                    dispatch({
+                                        op: 'leaf',
+                                        plugin: 'umkehr.rich-text',
+                                        path,
+                                        change: {
+                                            kind: 'unmark',
+                                            range: {start, end},
+                                            markType,
+                                            preset,
+                                        },
+                                    } as DraftPatch<T, Tag, Context, Extensions>),
+                                replace: (snapshot) =>
+                                    dispatch({
+                                        op: 'leaf',
+                                        plugin: 'umkehr.rich-text',
+                                        path,
+                                        change: {kind: 'replace', snapshot},
+                                    } as DraftPatch<T, Tag, Context, Extensions>),
                             },
                         };
                     },
@@ -315,28 +377,33 @@ function valueAtPath(root: unknown, path: Path) {
 }
 
 function isRichTextState(value: unknown): value is RichTextState {
-    return Boolean(value && typeof value === 'object' && Array.isArray((value as {chars?: unknown}).chars));
+    return Boolean(
+        value && typeof value === 'object' && Array.isArray((value as {chars?: unknown}).chars),
+    );
 }
 
 function tryCrdtPathForExisting<T>(doc: CrdtDocument<T>, path: Path) {
     try {
         return crdtPathForExisting(doc, path);
     } catch (error) {
-        if (
-            error instanceof Error &&
-            error.message.startsWith('Cannot translate CRDT path:')
-        ) {
+        if (error instanceof Error && error.message.startsWith('Cannot translate CRDT path:')) {
             return null;
         }
         throw error;
     }
 }
 
-function makeProvider<T, Tag extends string, EphemeralData>(
-    Ctx: React.Context<SyncedContextBase<T, Tag, EphemeralData>>,
+function makeProvider<
+    T,
+    Tag extends string,
+    EphemeralData,
+    Extensions extends readonly LeafBuilderExtensionAny[],
+>(
+    Ctx: React.Context<SyncedContextBase<T, Tag, EphemeralData, Extensions>>,
     tag: Tag,
     equalFn: EqualFn,
     ephemeralConfig?: EphemeralConfig<EphemeralData>,
+    options?: PatchBuilderOptions<Extensions>,
 ) {
     return function Provide({
         children,
@@ -353,12 +420,15 @@ function makeProvider<T, Tag extends string, EphemeralData>(
     }) {
         const latestSave = useLatest(save);
         const internalStatuses = useRef(statuses ?? createStatusStore());
-        const value = useRef<SyncedContextBase<T, Tag, EphemeralData>>({
+        const runtimeBuilderExtensions = (options?.builderExtensions ??
+            builderExtensionsFromLeafPlugins(initial.doc.schema.leafPlugins)) as Extensions;
+        const value = useRef<SyncedContextBase<T, Tag, EphemeralData, Extensions>>({
             history: initial,
             transport,
             ephemeralConfig,
             ephemeralStore: createEphemeralStore(),
             tag,
+            builderExtensions: runtimeBuilderExtensions,
             equalFn,
             save: (history) => latestSave.current?.(history),
             listeners: [],
@@ -374,6 +444,8 @@ function makeProvider<T, Tag extends string, EphemeralData>(
 
         value.current.statuses = statuses ?? internalStatuses.current;
         value.current.ephemeralConfig = ephemeralConfig;
+        value.current.builderExtensions = (options?.builderExtensions ??
+            builderExtensionsFromLeafPlugins(initial.doc.schema.leafPlugins)) as Extensions;
 
         useEffect(() => {
             value.current.transport = transport;
@@ -415,8 +487,8 @@ function makeProvider<T, Tag extends string, EphemeralData>(
     };
 }
 
-function makeDispatch<T, Tag extends string>(
-    ctx: SyncedContextBase<T, Tag, any>,
+function makeDispatch<T, Tag extends string, Extensions extends readonly LeafBuilderExtensionAny[]>(
+    ctx: SyncedContextBase<T, Tag, any, Extensions>,
     tag: Tag,
     equalFn: EqualFn,
 ) {
@@ -425,7 +497,7 @@ function makeDispatch<T, Tag extends string>(
         ctx.listenersByPath,
         () => ctx.statuses,
     );
-    const go = (v: MaybeNested<DraftPatch<T, Tag, Context>>, when?: ApplyTiming) => {
+    const go = (v: MaybeNested<DraftPatch<T, Tag, Context, Extensions>>, when?: ApplyTiming) => {
         if (when === 'preview') {
             queuePreview(ctx, v, extra, tag, equalFn);
             return;
@@ -434,18 +506,20 @@ function makeDispatch<T, Tag extends string>(
     };
     return {
         dispatch: go,
-        $: createPatchDispatcher<T, Context, Tag>(go, extra, tag),
+        $: createPatchDispatcher<T, Context, Tag, void, Extensions>(go, extra, tag, {
+            builderExtensions: ctx.builderExtensions,
+        }),
     };
 }
 
-function queuePreview<T, Tag extends string>(
-    ctx: SyncedContextBase<T, Tag, any>,
-    v: MaybeNested<DraftPatch<T, Tag, Context>>,
+function queuePreview<T, Tag extends string, Extensions extends readonly LeafBuilderExtensionAny[]>(
+    ctx: SyncedContextBase<T, Tag, any, Extensions>,
+    v: MaybeNested<DraftPatch<T, Tag, Context, Extensions>>,
     extra: Context,
     tag: Tag,
     equalFn: EqualFn,
 ) {
-    ctx.queuedChanges.push(...(asFlat(v) as DraftPatch<T, Tag, Context>[]));
+    ctx.queuedChanges.push(...(asFlat(v) as DraftPatch<T, Tag, Context, Extensions>[]));
     if (ctx.scheduled != null) return;
     ctx.scheduled = scheduleTask(() => {
         ctx.scheduled = undefined;
@@ -455,12 +529,11 @@ function queuePreview<T, Tag extends string>(
     });
 }
 
-function recomputePreview<T, Tag extends string>(
-    ctx: SyncedContextBase<T, Tag, any>,
-    extra: Context,
-    tag: Tag,
-    equalFn: EqualFn,
-) {
+function recomputePreview<
+    T,
+    Tag extends string,
+    Extensions extends readonly LeafBuilderExtensionAny[],
+>(ctx: SyncedContextBase<T, Tag, any, Extensions>, extra: Context, tag: Tag, equalFn: EqualFn) {
     const oldPaths = Object.values(ctx.previewPaths);
     ctx.previewState = null;
     ctx.previewPaths = {};
@@ -482,7 +555,11 @@ function recomputePreview<T, Tag extends string>(
     notifyPaths(ctx.listenersByPath, [...oldPaths, ...paths]);
 }
 
-function clearSyncedPreview<T, Tag extends string>(ctx: SyncedContextBase<T, Tag, any>) {
+function clearSyncedPreview<
+    T,
+    Tag extends string,
+    Extensions extends readonly LeafBuilderExtensionAny[],
+>(ctx: SyncedContextBase<T, Tag, any, Extensions>) {
     const previewPaths = Object.values(ctx.previewPaths);
     const hadPreview = ctx.previewState !== null || previewPaths.length > 0;
     ctx.previewState = null;
@@ -498,10 +575,11 @@ function clearSyncedPreview<T, Tag extends string>(ctx: SyncedContextBase<T, Tag
     }
 }
 
-function replaceExternalPreview<T, Tag extends string>(
-    ctx: SyncedContextBase<T, Tag, any>,
-    history: CrdtLocalHistory<T>,
-) {
+function replaceExternalPreview<
+    T,
+    Tag extends string,
+    Extensions extends readonly LeafBuilderExtensionAny[],
+>(ctx: SyncedContextBase<T, Tag, any, Extensions>, history: CrdtLocalHistory<T>) {
     ctx.externalPreviewHistory = history;
     clearSyncedPreview(ctx);
     ctx.listeners.forEach((f) => f());
@@ -509,7 +587,11 @@ function replaceExternalPreview<T, Tag extends string>(
     ctx.localHistoryListeners.forEach((f) => f());
 }
 
-function clearExternalPreview<T, Tag extends string>(ctx: SyncedContextBase<T, Tag, any>) {
+function clearExternalPreview<
+    T,
+    Tag extends string,
+    Extensions extends readonly LeafBuilderExtensionAny[],
+>(ctx: SyncedContextBase<T, Tag, any, Extensions>) {
     if (ctx.externalPreviewHistory === null) return;
     ctx.externalPreviewHistory = null;
     ctx.listeners.forEach((f) => f());
@@ -517,17 +599,27 @@ function clearExternalPreview<T, Tag extends string>(ctx: SyncedContextBase<T, T
     ctx.localHistoryListeners.forEach((f) => f());
 }
 
-function visibleState<T, Tag extends string>(ctx: SyncedContextBase<T, Tag, any>) {
+function visibleState<T, Tag extends string, Extensions extends readonly LeafBuilderExtensionAny[]>(
+    ctx: SyncedContextBase<T, Tag, any, Extensions>,
+) {
     return ctx.previewState ?? visibleHistory(ctx).doc.state;
 }
 
-function visibleHistory<T, Tag extends string>(ctx: SyncedContextBase<T, Tag, any>) {
+function visibleHistory<
+    T,
+    Tag extends string,
+    Extensions extends readonly LeafBuilderExtensionAny[],
+>(ctx: SyncedContextBase<T, Tag, any, Extensions>) {
     return ctx.externalPreviewHistory ?? ctx.history;
 }
 
-function applyLocalDraft<T, Tag extends string>(
-    ctx: SyncedContextBase<T, Tag, any>,
-    v: MaybeNested<DraftPatch<T, Tag, Context>>,
+function applyLocalDraft<
+    T,
+    Tag extends string,
+    Extensions extends readonly LeafBuilderExtensionAny[],
+>(
+    ctx: SyncedContextBase<T, Tag, any, Extensions>,
+    v: MaybeNested<DraftPatch<T, Tag, Context, Extensions>>,
     extra: Context,
     tag: Tag,
     equalFn: EqualFn,
@@ -545,10 +637,11 @@ function applyLocalDraft<T, Tag extends string>(
     ctx.transport.publish(result.updates);
 }
 
-function receiveRemoteUpdate<T, Tag extends string>(
-    ctx: SyncedContextBase<T, Tag, any>,
-    update: CrdtUpdate,
-) {
+function receiveRemoteUpdate<
+    T,
+    Tag extends string,
+    Extensions extends readonly LeafBuilderExtensionAny[],
+>(ctx: SyncedContextBase<T, Tag, any, Extensions>, update: CrdtUpdate) {
     const before = ctx.history.doc;
     const history = applyRemoteHistoryUpdate(ctx.history, update);
     ctx.history = history;
@@ -570,17 +663,24 @@ function receiveRemoteUpdate<T, Tag extends string>(
     else notifyAll(ctx);
 }
 
-function receiveRemoteEphemeral<T, Tag extends string, EphemeralData>(
-    ctx: SyncedContextBase<T, Tag, EphemeralData>,
-    message: EphemeralMessage<unknown>,
-) {
+function receiveRemoteEphemeral<
+    T,
+    Tag extends string,
+    EphemeralData,
+    Extensions extends readonly LeafBuilderExtensionAny[],
+>(ctx: SyncedContextBase<T, Tag, EphemeralData, Extensions>, message: EphemeralMessage<unknown>) {
     if (message.actor === ctx.transport.actor) return;
     if (!isValidEphemeralMessage(ctx, message)) return;
     ctx.ephemeralStore.add([message as EphemeralMessage<EphemeralData>]);
 }
 
-function isValidEphemeralMessage<T, Tag extends string, EphemeralData>(
-    ctx: SyncedContextBase<T, Tag, EphemeralData>,
+function isValidEphemeralMessage<
+    T,
+    Tag extends string,
+    EphemeralData,
+    Extensions extends readonly LeafBuilderExtensionAny[],
+>(
+    ctx: SyncedContextBase<T, Tag, EphemeralData, Extensions>,
     message: EphemeralMessage<unknown>,
 ): message is EphemeralMessage<EphemeralData> {
     const config = ctx.ephemeralConfig;
@@ -597,7 +697,9 @@ function isValidEphemeralMessage<T, Tag extends string, EphemeralData>(
     return config.validateEphemeralData(message.data);
 }
 
-function applyUndo<T, Tag extends string>(ctx: SyncedContextBase<T, Tag, any>) {
+function applyUndo<T, Tag extends string, Extensions extends readonly LeafBuilderExtensionAny[]>(
+    ctx: SyncedContextBase<T, Tag, any, Extensions>,
+) {
     clearSyncedPreview(ctx);
     clearExternalPreview(ctx);
     const before = ctx.history.doc;
@@ -609,7 +711,9 @@ function applyUndo<T, Tag extends string>(ctx: SyncedContextBase<T, Tag, any>) {
     ctx.transport.publish(result.updates);
 }
 
-function applyRedo<T, Tag extends string>(ctx: SyncedContextBase<T, Tag, any>) {
+function applyRedo<T, Tag extends string, Extensions extends readonly LeafBuilderExtensionAny[]>(
+    ctx: SyncedContextBase<T, Tag, any, Extensions>,
+) {
     clearSyncedPreview(ctx);
     clearExternalPreview(ctx);
     const before = ctx.history.doc;
@@ -621,8 +725,12 @@ function applyRedo<T, Tag extends string>(ctx: SyncedContextBase<T, Tag, any>) {
     ctx.transport.publish(result.updates);
 }
 
-function notifyCrdtUpdates<T, Tag extends string>(
-    ctx: SyncedContextBase<T, Tag, any>,
+function notifyCrdtUpdates<
+    T,
+    Tag extends string,
+    Extensions extends readonly LeafBuilderExtensionAny[],
+>(
+    ctx: SyncedContextBase<T, Tag, any, Extensions>,
     before: CrdtDocument<T>,
     after: CrdtDocument<T>,
     updates: CrdtUpdate[],
@@ -641,13 +749,19 @@ function notifyCrdtUpdates<T, Tag extends string>(
     else notifyChanged(ctx, paths);
 }
 
-function notifyChanged<T, Tag extends string>(ctx: SyncedContextBase<T, Tag, any>, paths: Path[]) {
+function notifyChanged<
+    T,
+    Tag extends string,
+    Extensions extends readonly LeafBuilderExtensionAny[],
+>(ctx: SyncedContextBase<T, Tag, any, Extensions>, paths: Path[]) {
     ctx.listeners.forEach((f) => f());
     notifyPaths(ctx.listenersByPath, paths);
     ctx.localHistoryListeners.forEach((f) => f());
 }
 
-function notifyAll<T, Tag extends string>(ctx: SyncedContextBase<T, Tag, any>) {
+function notifyAll<T, Tag extends string, Extensions extends readonly LeafBuilderExtensionAny[]>(
+    ctx: SyncedContextBase<T, Tag, any, Extensions>,
+) {
     ctx.listeners.forEach((f) => f());
     notifyAllPaths(ctx.listenersByPath);
     ctx.localHistoryListeners.forEach((f) => f());

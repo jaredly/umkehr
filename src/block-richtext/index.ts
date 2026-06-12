@@ -18,17 +18,25 @@ export {
     BLOCK_RICH_TEXT_INITIAL_TS,
     BLOCK_RICH_TEXT_LEAF_PLUGIN_ID,
     BLOCK_RICH_TEXT_LEAF_PLUGIN_VERSION,
+    blockRichTextBuilderExtension,
     blockRichTextLeafPlugin,
     type BlockRichTextDeleteRangeChange,
+    type BlockRichTextDeleteRangeCommand,
     type BlockRichTextInsertTextChange,
+    type BlockRichTextInsertTextCommand,
     type BlockRichTextJoinBlocksChange,
+    type BlockRichTextJoinBlocksCommand,
     type BlockRichTextLeafMeta,
     type BlockRichTextMoveBlockArgs,
     type BlockRichTextMoveBlockChange,
+    type BlockRichTextMoveBlockCommand,
     type BlockRichTextOpsChange,
+    type BlockRichTextOpsCommand,
     type BlockRichTextPatchChange,
     type BlockRichTextSetBlockMetaChange,
+    type BlockRichTextSetBlockMetaCommand,
     type BlockRichTextSplitBlockChange,
+    type BlockRichTextSplitBlockCommand,
 } from './plugin.js';
 
 declare const blockRichTextBrand: unique symbol;
@@ -38,9 +46,9 @@ export type BlockRichText = {
     version: 1;
     state: BlockRichTextState;
 } & tags.JsonSchemaPlugin<{
-        'x-umkehr-leaf-crdt': 'umkehr.block-rich-text';
-        'x-umkehr-leaf-crdt-version': 1;
-    }> & {
+    'x-umkehr-leaf-crdt': 'umkehr.block-rich-text';
+    'x-umkehr-leaf-crdt-version': 1;
+}> & {
         readonly [blockRichTextBrand]?: never;
     };
 
@@ -70,10 +78,7 @@ export function cachedBlockRichTextValue(value: BlockRichText): CachedState {
     return cachedState(value.state);
 }
 
-export function materializeBlockRichText<T>(
-    doc: CrdtDocument<T>,
-    path: Path,
-): FormattedBlock[] {
+export function materializeBlockRichText<T>(doc: CrdtDocument<T>, path: Path): FormattedBlock[] {
     const crdtPath = crdtPathForExisting(doc, path);
     const meta = getMetaAtPath(doc.meta, crdtPath);
     if (
@@ -107,24 +112,24 @@ function assertBlockRichTextValue(value: unknown): asserts value is BlockRichTex
 export function isBlockRichTextValue(value: unknown): value is BlockRichText {
     return Boolean(
         value &&
-            typeof value === 'object' &&
-            (value as {kind?: unknown}).kind === 'block-rich-text' &&
-            (value as {version?: unknown}).version === 1 &&
-            valueHasBlockState((value as {state?: unknown}).state),
+        typeof value === 'object' &&
+        (value as {kind?: unknown}).kind === 'block-rich-text' &&
+        (value as {version?: unknown}).version === 1 &&
+        valueHasBlockState((value as {state?: unknown}).state),
     );
 }
 
 function valueHasBlockState(value: unknown): value is BlockRichTextState {
     return Boolean(
         value &&
-            typeof value === 'object' &&
-            !Array.isArray(value) &&
-            (value as {chars?: unknown}).chars &&
-            (value as {blocks?: unknown}).blocks &&
-            (value as {marks?: unknown}).marks &&
-            (value as {splits?: unknown}).splits &&
-            (value as {joins?: unknown}).joins &&
-            typeof (value as {maxSeenCount?: unknown}).maxSeenCount === 'number',
+        typeof value === 'object' &&
+        !Array.isArray(value) &&
+        (value as {chars?: unknown}).chars &&
+        (value as {blocks?: unknown}).blocks &&
+        (value as {marks?: unknown}).marks &&
+        (value as {splits?: unknown}).splits &&
+        (value as {joins?: unknown}).joins &&
+        typeof (value as {maxSeenCount?: unknown}).maxSeenCount === 'number',
     );
 }
 

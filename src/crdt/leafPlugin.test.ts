@@ -4,6 +4,7 @@ import {insertTextOps} from '../block-crdt/index.js';
 import {
     BLOCK_RICH_TEXT_LEAF_PLUGIN_ID,
     blockRichText,
+    blockRichTextBuilderExtension,
     blockRichTextLeafPlugin,
     blockRichTextRootBlockId,
     blockRichTextToString,
@@ -34,6 +35,12 @@ type BlockDoc = {
     body: BlockRichText;
 };
 
+type BlockBuilderExtensions = [typeof blockRichTextBuilderExtension];
+const createBlockPatchBuilder = () =>
+    createPatchBuilder<BlockDoc, BlockBuilderExtensions>({
+        builderExtensions: [blockRichTextBuilderExtension],
+    });
+
 const blockSchema = {
     schemas: [
         {
@@ -55,11 +62,10 @@ const aliceTs = '000000000000010:00000:alice';
 const bobTs = '000000000000011:00000:bob';
 
 const createDoc = (actor = 'seed') =>
-    createCrdtDocument(
-        {body: blockRichText(actor, seedTs)},
-        blockSchema,
-        {timestamp: seedTs, leafPlugins: [blockRichTextLeafPlugin]},
-    );
+    createCrdtDocument({body: blockRichText(actor, seedTs)}, blockSchema, {
+        timestamp: seedTs,
+        leafPlugins: [blockRichTextLeafPlugin],
+    });
 
 const leafPatch = (change: JsonValue): Patch<BlockDoc> => ({
     op: 'leaf',
@@ -207,10 +213,10 @@ describe('leaf CRDT plugins', () => {
 
     it('undoes and redoes grouped block rich text inserts with fresh operations', () => {
         const base = createCrdtLocalHistory(createDoc('seed'));
-        const $ = createPatchBuilder<BlockDoc>();
+        const $ = createBlockPatchBuilder();
         const applied = applyLocalCommand(
             base,
-            $.body.$block.insertText(blockRichTextRootBlockId(), 0, 'hi'),
+            $.body.$block.insertText({block: blockRichTextRootBlockId(), offset: 0, text: 'hi'}),
             hlc.init('local', 10),
         );
 
@@ -237,16 +243,20 @@ describe('leaf CRDT plugins', () => {
 
     it('undoes and redoes block rich text deletes', () => {
         let history = createCrdtLocalHistory(createDoc('seed'));
-        const $ = createPatchBuilder<BlockDoc>();
+        const $ = createBlockPatchBuilder();
         const inserted = applyLocalCommand(
             history,
-            $.body.$block.insertText(blockRichTextRootBlockId(), 0, 'hi'),
+            $.body.$block.insertText({block: blockRichTextRootBlockId(), offset: 0, text: 'hi'}),
             hlc.init('local', 10),
         );
         history = inserted.history;
         const deleted = applyLocalCommand(
             history,
-            $.body.$block.deleteRange(blockRichTextRootBlockId(), 0, 2),
+            $.body.$block.deleteRange({
+                block: blockRichTextRootBlockId(),
+                startOffset: 0,
+                endOffset: 2,
+            }),
             inserted.clock,
         );
 
@@ -267,15 +277,16 @@ describe('leaf CRDT plugins', () => {
 
     it('blocks undo when a local block insert was deleted remotely', () => {
         const base = createCrdtLocalHistory(createDoc('seed'));
-        const $ = createPatchBuilder<BlockDoc>();
+        const $ = createBlockPatchBuilder();
         const applied = applyLocalCommand(
             base,
-            $.body.$block.insertText(blockRichTextRootBlockId(), 0, 'h'),
+            $.body.$block.insertText({block: blockRichTextRootBlockId(), offset: 0, text: 'h'}),
             hlc.init('local', 10),
         );
-        const inserted = applied.updates[0]?.op === 'leaf'
-            ? (applied.updates[0].change as {char?: {id?: unknown}}).char?.id
-            : undefined;
+        const inserted =
+            applied.updates[0]?.op === 'leaf'
+                ? (applied.updates[0].change as {char?: {id?: unknown}}).char?.id
+                : undefined;
         if (!Array.isArray(inserted)) throw new Error('missing inserted char id');
 
         const remote = applyRemoteHistoryUpdate(applied.history, {

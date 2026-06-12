@@ -1,5 +1,6 @@
 import {createHistoryContext} from 'umkehr/react';
 import {createSyncedContext} from 'umkehr/react-crdt';
+import {blockRichTextBuilderExtension} from 'umkehr/block-richtext';
 import type {BlockNotesState} from './schema';
 
 export {
@@ -16,4 +17,10 @@ export const [ProvideBlockNotesHistory, useBlockNotesHistory] = createHistoryCon
     never,
     'type'
 >('type');
-export const [ProvideBlockNotes, useBlockNotes] = createSyncedContext<BlockNotesState>('type');
+export type BlockNotesBuilderExtensions = [typeof blockRichTextBuilderExtension];
+export const [ProvideBlockNotes, useBlockNotes] = createSyncedContext<
+    BlockNotesState,
+    'type',
+    never,
+    BlockNotesBuilderExtensions
+>('type', undefined, undefined, {builderExtensions: [blockRichTextBuilderExtension]});

@@ -10,18 +10,27 @@ import {applyRichTextOperation} from '../peritext/apply.js';
 import {maxOpCounterAfterOperation} from '../peritext/ids.js';
 import {materializeRichTextState} from '../peritext/materialize.js';
 import {validateRichTextOperation} from '../peritext/validation.js';
+import {defineLeafBuilderExtension} from '../builderExtensions.js';
 import * as hlc from '../crdt/hlc.js';
 import {getMetaAtPath, normalPathForCrdtPath} from '../crdt/path.js';
 import type {
     RichTextActorId,
     RichTextAnchor,
+    RichTextImportSnapshot,
+    RichTextJsonValue,
     RichTextOpId,
     RichTextOperation,
     RichTextState,
 } from '../peritext/types.js';
 import type {LeafCrdtPlugin} from '../crdt/plugins.js';
-import type {CrdtDocument, CrdtPathSegment, CrdtUpdate, HlcTimestamp, JsonValue, LeafMeta} from '../crdt/types.js';
-import type {RichTextPatchChange} from '../types.js';
+import type {
+    CrdtDocument,
+    CrdtPathSegment,
+    CrdtUpdate,
+    HlcTimestamp,
+    JsonValue,
+    LeafMeta,
+} from '../crdt/types.js';
 import type {BlockedEffect, LocalEffect} from '../crdt/history.js';
 
 export const RICH_TEXT_LEAF_PLUGIN_ID = 'umkehr.rich-text';
@@ -30,6 +39,79 @@ export const RICH_TEXT_LEAF_PLUGIN_VERSION = 1;
 export type RichTextLeafMeta = {
     maxOpCounter: number;
 };
+
+export type RichTextBuilderValue = {
+    kind: 'rich-text';
+    version: 1;
+    chars: RichTextState['chars'];
+    pending?: RichTextState['pending'];
+};
+
+export type RichTextIndexPosition = {index: number};
+export type RichTextIndexRange = {start: number; end: number};
+export type RichTextMarkPreset = 'inclusive' | 'exclusive' | 'none';
+
+export type RichTextPatchChange =
+    | {kind: 'insert'; at: RichTextIndexPosition; text: string}
+    | {kind: 'delete'; range: RichTextIndexRange}
+    | {
+          kind: 'mark';
+          range: RichTextIndexRange;
+          markType: string;
+          value: RichTextJsonValue;
+          preset?: RichTextMarkPreset;
+      }
+    | {
+          kind: 'unmark';
+          range: RichTextIndexRange;
+          markType: string;
+          preset?: RichTextMarkPreset;
+      }
+    | {kind: 'replace'; snapshot: RichTextImportSnapshot};
+
+export type RichTextInsertCommand = Omit<Extract<RichTextPatchChange, {kind: 'insert'}>, 'kind'>;
+export type RichTextDeleteCommand = Omit<Extract<RichTextPatchChange, {kind: 'delete'}>, 'kind'>;
+export type RichTextMarkCommand = Omit<Extract<RichTextPatchChange, {kind: 'mark'}>, 'kind'>;
+export type RichTextUnmarkCommand = Omit<Extract<RichTextPatchChange, {kind: 'unmark'}>, 'kind'>;
+export type RichTextReplaceCommand = Omit<Extract<RichTextPatchChange, {kind: 'replace'}>, 'kind'>;
+
+export const richTextBuilderExtension = defineLeafBuilderExtension<
+    RichTextBuilderValue,
+    RichTextPatchChange
+>()({
+    key: '$text',
+    plugin: RICH_TEXT_LEAF_PLUGIN_ID,
+    commands: {
+        insert: (
+            change: RichTextInsertCommand,
+        ): Extract<RichTextPatchChange, {kind: 'insert'}> => ({
+            kind: 'insert',
+            ...change,
+        }),
+        delete: (
+            change: RichTextDeleteCommand,
+        ): Extract<RichTextPatchChange, {kind: 'delete'}> => ({
+            kind: 'delete',
+            ...change,
+        }),
+        mark: (change: RichTextMarkCommand): Extract<RichTextPatchChange, {kind: 'mark'}> => ({
+            kind: 'mark',
+            ...change,
+        }),
+        unmark: (
+            change: RichTextUnmarkCommand,
+        ): Extract<RichTextPatchChange, {kind: 'unmark'}> => ({
+            kind: 'unmark',
+            ...change,
+        }),
+        replace: (
+            change: RichTextReplaceCommand,
+        ): Extract<RichTextPatchChange, {kind: 'replace'}> => ({
+            kind: 'replace',
+            ...change,
+        }),
+    },
+});
 
 export const richTextLeafPlugin: LeafCrdtPlugin<
     typeof RICH_TEXT_LEAF_PLUGIN_ID,
@@ -40,6 +122,7 @@ export const richTextLeafPlugin: LeafCrdtPlugin<
 > = {
     id: RICH_TEXT_LEAF_PLUGIN_ID,
     version: RICH_TEXT_LEAF_PLUGIN_VERSION,
+    builder: richTextBuilderExtension,
     empty() {
         return {kind: 'rich-text', version: 1, ...emptyRichTextState()} as JsonValue;
     },
@@ -113,7 +196,8 @@ function createRichTextOperations(
             const opIds = allocateOpIdsFromMeta(meta.data.maxOpCounter, actorId, chars.length);
             return chars.map((char, index) => {
                 const opId = opIds[index];
-                if (!opId) throw new Error('Cannot create rich text insert: missing allocated opId.');
+                if (!opId)
+                    throw new Error('Cannot create rich text insert: missing allocated opId.');
                 const operation: RichTextOperation = {action: 'insert', opId, afterId, char};
                 afterId = opId;
                 return operation;
@@ -124,7 +208,8 @@ function createRichTextOperations(
             const opIds = allocateOpIdsFromMeta(meta.data.maxOpCounter, actorId, ids.length);
             return ids.map((removedId, index) => {
                 const opId = opIds[index];
-                if (!opId) throw new Error('Cannot create rich text remove: missing allocated opId.');
+                if (!opId)
+                    throw new Error('Cannot create rich text remove: missing allocated opId.');
                 return {action: 'remove', opId, removedId};
             });
         }
@@ -156,22 +241,18 @@ function createRichTextOperations(
         case 'replace': {
             const imported = importRichTextSnapshot(change.snapshot, actorId);
             const offset = meta.data.maxOpCounter;
-            return imported.operations.map((operation) => remapRichTextOperation(operation, offset));
+            return imported.operations.map((operation) =>
+                remapRichTextOperation(operation, offset),
+            );
         }
     }
 }
 
-function allocateOpIdsFromMeta(
-    maxOpCounter: number,
-    actorId: RichTextActorId,
-    count: number,
-) {
+function allocateOpIdsFromMeta(maxOpCounter: number, actorId: RichTextActorId, count: number) {
     if (!Number.isInteger(count) || count < 0) {
         throw new Error(`Cannot allocate rich text opIds: count must be a non-negative integer.`);
     }
-    return Array.from({length: count}, (_, index) =>
-        formatOpId(maxOpCounter + index + 1, actorId),
-    );
+    return Array.from({length: count}, (_, index) => formatOpId(maxOpCounter + index + 1, actorId));
 }
 
 function remapRichTextOperation(operation: RichTextOperation, offset: number): RichTextOperation {
@@ -321,11 +402,7 @@ function createRichTextRedoUpdate(
     }
 }
 
-function nextRichTextOpId(
-    doc: CrdtDocument<unknown>,
-    path: CrdtPathSegment[],
-    ts: HlcTimestamp,
-) {
+function nextRichTextOpId(doc: CrdtDocument<unknown>, path: CrdtPathSegment[], ts: HlcTimestamp) {
     const meta = getMetaAtPath(doc.meta, path);
     if (!meta || meta.kind !== 'leaf' || meta.plugin !== RICH_TEXT_LEAF_PLUGIN_ID) {
         throw new Error('Cannot create rich text undo/redo update: target is not rich text.');
@@ -397,8 +474,6 @@ function cloneRichTextStateAtCrdtPath(
 
 function isRichTextState(value: unknown): value is RichTextState {
     return Boolean(
-        value &&
-            typeof value === 'object' &&
-            Array.isArray((value as {chars?: unknown}).chars),
+        value && typeof value === 'object' && Array.isArray((value as {chars?: unknown}).chars),
     );
 }

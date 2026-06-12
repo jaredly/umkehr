@@ -5,6 +5,7 @@ import {resolveAndApply} from '../make.js';
 import {
     BLOCK_RICH_TEXT_LEAF_PLUGIN_ID,
     blockRichText,
+    blockRichTextBuilderExtension,
     blockRichTextRootBlockId,
     type BlockRichText,
 } from './index.js';
@@ -14,18 +15,26 @@ type State = {
     body: BlockRichText;
 };
 
+type BlockRichTextBuilderExtensions = [typeof blockRichTextBuilderExtension];
+const createBlockRichTextPatchBuilder = () =>
+    createPatchBuilder<State, BlockRichTextBuilderExtensions>({
+        builderExtensions: [blockRichTextBuilderExtension],
+    });
+
 describe('block rich text builder surface', () => {
     it('creates block rich text draft patches', () => {
-        const $ = createPatchBuilder<State>();
+        const $ = createBlockRichTextPatchBuilder();
         const rootBlockId = blockRichTextRootBlockId();
 
-        expect($.body.$block.insertText(rootBlockId, 0, 'hi')).toEqual({
+        expect($.body.$block.insertText({block: rootBlockId, offset: 0, text: 'hi'})).toEqual({
             op: 'leaf',
             plugin: BLOCK_RICH_TEXT_LEAF_PLUGIN_ID,
             path: [{type: 'key', key: 'body'}],
             change: {kind: 'insertText', block: rootBlockId, offset: 0, text: 'hi'},
         });
-        expect($.body.$block.deleteRange(rootBlockId, 0, 2)).toEqual({
+        expect(
+            $.body.$block.deleteRange({block: rootBlockId, startOffset: 0, endOffset: 2}),
+        ).toEqual({
             op: 'leaf',
             plugin: BLOCK_RICH_TEXT_LEAF_PLUGIN_ID,
             path: [{type: 'key', key: 'body'}],
@@ -35,11 +44,11 @@ describe('block rich text builder surface', () => {
 
     it('resolveAndApply carries block patches without mutating public state', () => {
         const initial: State = {title: 'Draft', body: blockRichText()};
-        const $ = createPatchBuilder<State>();
+        const $ = createBlockRichTextPatchBuilder();
         const rootBlockId = blockRichTextRootBlockId();
         const result = resolveAndApply(
             initial,
-            $.body.$block.insertText(rootBlockId, 0, 'hi'),
+            $.body.$block.insertText({block: rootBlockId, offset: 0, text: 'hi'}),
             undefined,
             'type',
             Object.is,
@@ -58,10 +67,17 @@ describe('block rich text builder surface', () => {
 
     it('rejects block rich text patches in non-CRDT history', () => {
         const initial: State = {title: 'Draft', body: blockRichText()};
-        const $ = createPatchBuilder<State>();
+        const $ = createBlockRichTextPatchBuilder();
 
         expect(() =>
-            dispatch(blankHistory(initial), $.body.$block.insertText(blockRichTextRootBlockId(), 0, 'hi')),
+            dispatch(
+                blankHistory(initial),
+                $.body.$block.insertText({
+                    block: blockRichTextRootBlockId(),
+                    offset: 0,
+                    text: 'hi',
+                }),
+            ),
         ).toThrow(/CRDT history/);
     });
 });

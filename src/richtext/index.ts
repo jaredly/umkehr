@@ -17,8 +17,19 @@ import {RICH_TEXT_LEAF_PLUGIN_ID} from './plugin.js';
 export {
     RICH_TEXT_LEAF_PLUGIN_ID,
     RICH_TEXT_LEAF_PLUGIN_VERSION,
+    richTextBuilderExtension,
     richTextLeafPlugin,
+    type RichTextBuilderValue,
+    type RichTextDeleteCommand,
+    type RichTextInsertCommand,
+    type RichTextIndexPosition,
+    type RichTextIndexRange,
     type RichTextLeafMeta,
+    type RichTextMarkCommand,
+    type RichTextMarkPreset,
+    type RichTextPatchChange,
+    type RichTextReplaceCommand,
+    type RichTextUnmarkCommand,
 } from './plugin.js';
 
 declare const richTextBrand: unique symbol;

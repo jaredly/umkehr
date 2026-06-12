@@ -4,6 +4,7 @@ import {
     type ApplyTiming,
     type DraftPatch,
     type History,
+    type LeafBuilderExtensionAny,
     type MaybeNested,
     type PatchBuilder,
     type PatchBuilderInternal,
@@ -30,15 +31,22 @@ import type {ReactElement} from 'react';
 
 export type GridSlot = 'left' | 'right';
 
-export type AppEditorBase<TState, Tag extends string = 'type'> = {
+export type AppEditorBase<
+    TState,
+    Tag extends string = 'type',
+    Extensions extends readonly LeafBuilderExtensionAny[] = [],
+> = {
     latest(): TState;
     clearPreview(): void;
     canUndo(): boolean;
     canRedo(): boolean;
     undo(): void;
     redo(): void;
-    $: PatchBuilder<TState, Tag, void, Context>;
-    dispatch(v: MaybeNested<DraftPatch<TState, Tag, Context>>, when?: ApplyTiming): void;
+    $: PatchBuilder<TState, Tag, void, Context, Extensions>;
+    dispatch(
+        v: MaybeNested<DraftPatch<TState, Tag, Context, Extensions>>,
+        when?: ApplyTiming,
+    ): void;
 };
 
 export type AppEphemeralContext<EphemeralData = never> = {
@@ -50,22 +58,24 @@ export type AppEditorContext<
     TState,
     Tag extends string = 'type',
     EphemeralData = never,
-> = AppEditorBase<TState, Tag> & AppEphemeralContext<EphemeralData>;
+    Extensions extends readonly LeafBuilderExtensionAny[] = [],
+> = AppEditorBase<TState, Tag, Extensions> & AppEphemeralContext<EphemeralData>;
 
 export type CrdtEditorContext<
     TState,
     Tag extends string = 'type',
     EphemeralData = never,
-> = AppEditorContext<TState, Tag, EphemeralData> & {
-        previewHistory(history: CrdtLocalHistory<TState> | null): void;
-        useLocalHistory(): CrdtLocalHistory<TState>;
-        useCrdtPath<Current>(
-            node: PatchBuilderInternal<unknown, Current, Tag, unknown, Context>,
-        ): CrdtPathSegment[];
-        useCrdtMeta<Current>(
-            node: PatchBuilderInternal<unknown, Current, Tag, unknown, Context>,
-        ): CrdtMeta | undefined;
-    };
+    Extensions extends readonly LeafBuilderExtensionAny[] = [],
+> = AppEditorContext<TState, Tag, EphemeralData, Extensions> & {
+    previewHistory(history: CrdtLocalHistory<TState> | null): void;
+    useLocalHistory(): CrdtLocalHistory<TState>;
+    useCrdtPath<Current>(
+        node: PatchBuilderInternal<unknown, Current, Tag, unknown, Context, Extensions>,
+    ): CrdtPathSegment[];
+    useCrdtMeta<Current>(
+        node: PatchBuilderInternal<unknown, Current, Tag, unknown, Context, Extensions>,
+    ): CrdtMeta | undefined;
+};
 
 export type HistoryEditorContext<TState, TAnnotations = never> = Omit<
     AppEditorBase<TState>,
@@ -83,8 +93,12 @@ export type HistoryEditorContext<TState, TAnnotations = never> = Omit<
     previewJump(id: string): void;
 };
 
-export type AppPanelProps<TState, EphemeralData = never> = {
-    editor: AppEditorContext<TState, 'type', EphemeralData>;
+export type AppPanelProps<
+    TState,
+    EphemeralData = never,
+    Extensions extends readonly LeafBuilderExtensionAny[] = [],
+> = {
+    editor: AppEditorContext<TState, 'type', EphemeralData, Extensions>;
     actor: string;
     title: string;
     gridSlot?: GridSlot | 'full';
@@ -106,23 +120,32 @@ export type HistoryProvider<TState, TAnnotations> = (props: {
     save?(history: History<TState, TAnnotations>): void;
 }) => ReactElement;
 
-export type AppDefinition<TState, EphemeralData = never> = {
+export type AppDefinition<
+    TState,
+    EphemeralData = never,
+    Extensions extends readonly LeafBuilderExtensionAny[] = [],
+> = {
     id: string;
     title: string;
     schemaVersion: number;
     tagKey: string;
     schema: IJsonSchemaCollection<'3.1', [TState]>;
     leafPlugins?: readonly LeafCrdtPluginAny[];
+    builderExtensions?: Extensions;
     validateState(input: unknown): IValidation<TState>;
     initialState: TState;
     initialTimestamp?: HlcTimestamp;
-    renderPanel(props: AppPanelProps<TState, EphemeralData>): ReactElement;
+    renderPanel(props: AppPanelProps<TState, EphemeralData, Extensions>): ReactElement;
 };
 
-export type CrdtRuntime<TState, EphemeralData = never> = {
+export type CrdtRuntime<
+    TState,
+    EphemeralData = never,
+    Extensions extends readonly LeafBuilderExtensionAny[] = [],
+> = {
     docId: string;
     Provider: SyncedProvider<TState>;
-    useEditorContext(): CrdtEditorContext<TState, 'type', EphemeralData>;
+    useEditorContext(): CrdtEditorContext<TState, 'type', EphemeralData, Extensions>;
 };
 
 export type HistoryRuntime<TState, TAnnotations = never> = {
@@ -130,16 +153,21 @@ export type HistoryRuntime<TState, TAnnotations = never> = {
     useEditorContext(): HistoryEditorContext<TState, TAnnotations>;
 };
 
-export type RegisteredApp<TState, TAnnotations = never, EphemeralData = never> = {
-    app: AppDefinition<TState, EphemeralData>;
-    crdt?: CrdtRuntime<TState, EphemeralData>;
+export type RegisteredApp<
+    TState,
+    TAnnotations = never,
+    EphemeralData = never,
+    Extensions extends readonly LeafBuilderExtensionAny[] = [],
+> = {
+    app: AppDefinition<TState, EphemeralData, Extensions>;
+    crdt?: CrdtRuntime<TState, EphemeralData, Extensions>;
     history?: HistoryRuntime<TState, TAnnotations>;
 };
 
 const defaultInitialTimestamp = hlc.pack(hlc.init('seed', 0));
 
 export function createInitialCrdtHistory<TState, EphemeralData = never>(
-    app: AppDefinition<TState, EphemeralData>,
+    app: AppDefinition<TState, EphemeralData, readonly LeafBuilderExtensionAny[]>,
 ): CrdtLocalHistory<TState> {
     return createCrdtLocalHistory(
         createCrdtDocument(app.initialState, app.schema, {
@@ -150,12 +178,12 @@ export function createInitialCrdtHistory<TState, EphemeralData = never>(
 }
 
 export function createInitialHistory<TState, TAnnotations = never>(
-    app: AppDefinition<TState, any>,
+    app: AppDefinition<TState, any, readonly LeafBuilderExtensionAny[]>,
 ): History<TState, TAnnotations> {
     return blankHistory<TState, TAnnotations>(app.initialState);
 }
 
-export function withDisabledEphemeral<TState, TEditor extends AppEditorBase<TState>, EphemeralData>(
+export function withDisabledEphemeral<TEditor, EphemeralData>(
     editor: TEditor,
 ): TEditor & AppEphemeralContext<EphemeralData> {
     return {

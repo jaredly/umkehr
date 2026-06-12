@@ -1,13 +1,10 @@
 import {describe, expect, it} from 'vitest';
 import {apps, registeredAppForId, routeIdForRegisteredApp} from './appRegistry';
 import {createPatchBuilder} from 'umkehr';
-import {
-    applyCrdtUpdate,
-    createCrdtUpdates,
-    hlc,
-} from 'umkehr/crdt';
+import {applyCrdtUpdate, createCrdtUpdates, hlc} from 'umkehr/crdt';
 import {
     BLOCK_RICH_TEXT_LEAF_PLUGIN_ID,
+    blockRichTextBuilderExtension,
     blockRichTextRootBlockId,
     blockRichTextToString,
 } from 'umkehr/block-richtext';
@@ -35,10 +32,12 @@ describe('app registry', () => {
         expect(schemaFingerprint(blockNotesApp)).toContain(BLOCK_RICH_TEXT_LEAF_PLUGIN_ID);
 
         const history = createInitialCrdtHistory(blockNotesApp);
-        const $ = createPatchBuilder<BlockNotesState>();
+        const $ = createPatchBuilder<BlockNotesState, [typeof blockRichTextBuilderExtension]>({
+            builderExtensions: [blockRichTextBuilderExtension],
+        });
         const updates = createCrdtUpdates(
             history.doc,
-            $.body.$block.insertText(blockRichTextRootBlockId(), 0, 'hi'),
+            $.body.$block.insertText({block: blockRichTextRootBlockId(), offset: 0, text: 'hi'}),
             hlc.pack(hlc.init('alice', 1)),
             {sessionId: 'alice'},
         );

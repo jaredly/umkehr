@@ -1,10 +1,7 @@
 import {useValue} from 'umkehr/react';
-import {
-    blockRichTextRootBlockId,
-    materializeBlockRichTextValue,
-} from 'umkehr/block-richtext';
+import {blockRichTextRootBlockId, materializeBlockRichTextValue} from 'umkehr/block-richtext';
 import type {AppEditorContext, GridSlot} from '../../lib/crdtApp';
-import type {BlockNotesState} from './model';
+import type {BlockNotesBuilderExtensions, BlockNotesState} from './model';
 
 export function BlockNotesPanel({
     editor,
@@ -13,7 +10,7 @@ export function BlockNotesPanel({
     gridSlot = 'full',
     readOnly = false,
 }: {
-    editor: AppEditorContext<BlockNotesState>;
+    editor: AppEditorContext<BlockNotesState, 'type', never, BlockNotesBuilderExtensions>;
     actor: string;
     title: string;
     gridSlot?: GridSlot | 'full';
@@ -43,11 +40,11 @@ export function BlockNotesPanel({
                     type="button"
                     disabled={readOnly}
                     onClick={() => {
-                        editor.$.body.$block.insertText(
-                            rootBlockId,
-                            Array.from(firstText).length,
-                            firstText ? ` ${actor}` : actor,
-                        );
+                        editor.$.body.$block.insertText({
+                            block: rootBlockId,
+                            offset: Array.from(firstText).length,
+                            text: firstText ? ` ${actor}` : actor,
+                        });
                         editor.$.updatedAt(new Date().toISOString());
                     }}
                 >

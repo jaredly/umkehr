@@ -9,6 +9,7 @@ import type {
     ReplaceOp,
     ReorderOp,
 } from './types.js';
+import type {LeafBuilderExtensionAny} from './builderExtensions.js';
 
 function add<T, V>(base: T, op: AddOp<V>) {
     return _add(base, op.path, op.value);
@@ -71,10 +72,12 @@ function reorder<T, V>(base: T, op: ReorderOp<V>, equal: EqualFn) {
     );
 }
 
-export function rebase<T, A extends PropertyKey, B>(
-    op: DraftPatch<T, A, B>,
-    path: Path,
-): DraftPatch<T, A, B> {
+export function rebase<
+    T,
+    A extends PropertyKey,
+    B,
+    Extensions extends readonly LeafBuilderExtensionAny[] = [],
+>(op: DraftPatch<T, A, B, Extensions>, path: Path): DraftPatch<T, A, B, Extensions> {
     switch (op.op) {
         case 'move':
             return {

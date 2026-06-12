@@ -1,8 +1,4 @@
-import type {
-    BlockedEffect,
-    CrdtLocalHistory,
-    LocalEffect,
-} from './history.js';
+import type {BlockedEffect, CrdtLocalHistory, LocalEffect} from './history.js';
 import type {
     CrdtDocument,
     CrdtPathSegment,
@@ -12,6 +8,7 @@ import type {
     LeafMeta,
     Schema,
 } from './types.js';
+import type {LeafBuilderExtension, LeafBuilderExtensionAny} from '../builderExtensions.js';
 
 export type LeafPluginDescriptor = {
     id: string;
@@ -85,15 +82,17 @@ export type LeafCrdtPlugin<
 > = {
     id: TId;
     version: number;
+    builder?: LeafBuilderExtension<TValue, string, TId, any>;
     empty(input: {schema: Schema}): TValue;
     isValue(value: unknown): value is TValue;
     init(input: LeafInitInput<TValue>): {value: TValue; meta: TMetaData};
     createOperations(
         input: LeafCreateOperationsInput<TValue, TMetaData, TPatchChange>,
     ): TOperation[];
-    applyOperation(
-        input: LeafApplyOperationInput<TValue, TMetaData, TOperation>,
-    ): {value: TValue; meta: TMetaData};
+    applyOperation(input: LeafApplyOperationInput<TValue, TMetaData, TOperation>): {
+        value: TValue;
+        meta: TMetaData;
+    };
     validateOperation(input: unknown): LeafOperationValidationResult<TOperation>;
     captureEffect?(
         input: LeafEffectInput<TValue, TMetaData, TOperation>,
@@ -131,21 +130,19 @@ export type LeafCrdtPlugin<
     }): BlockedEffect | null;
 };
 
-export type LeafCrdtPluginAny = LeafCrdtPlugin<
-    string,
-    JsonValue,
-    unknown,
-    JsonValue,
-    JsonValue
->;
+export type LeafCrdtPluginAny = LeafCrdtPlugin<string, JsonValue, unknown, JsonValue, JsonValue>;
 
 export type LeafPluginRegistry = Record<string, LeafCrdtPluginAny>;
 
-export function leafPluginDescriptor(plugin: Pick<LeafCrdtPluginAny, 'id' | 'version'>): LeafPluginDescriptor {
+export function leafPluginDescriptor(
+    plugin: Pick<LeafCrdtPluginAny, 'id' | 'version'>,
+): LeafPluginDescriptor {
     return {id: plugin.id, version: plugin.version};
 }
 
-export function createLeafPluginRegistry(plugins: readonly LeafCrdtPluginAny[] = []): LeafPluginRegistry {
+export function createLeafPluginRegistry(
+    plugins: readonly LeafCrdtPluginAny[] = [],
+): LeafPluginRegistry {
     const registry: LeafPluginRegistry = {};
     for (const plugin of plugins) {
         const existing = registry[plugin.id];
@@ -184,4 +181,20 @@ export function assertRequiredLeafPlugins(
             );
         }
     }
+}
+
+export function builderExtensionsFromLeafPlugins(
+    plugins: LeafPluginRegistry | readonly LeafCrdtPluginAny[] = [],
+): LeafBuilderExtensionAny[] {
+    const entries = Array.isArray(plugins) ? plugins : Object.values(plugins);
+    return entries.flatMap((plugin) => {
+        const builder = plugin.builder;
+        if (!builder) return [];
+        if (builder.plugin !== plugin.id) {
+            throw new Error(
+                `Leaf CRDT plugin "${plugin.id}" has builder extension for plugin "${builder.plugin}".`,
+            );
+        }
+        return [builder as LeafBuilderExtensionAny];
+    });
 }

@@ -19,6 +19,7 @@ export * as hlc from './hlc.js';
 export {materialize} from './materialize.js';
 export {
     assertRequiredLeafPlugins,
+    builderExtensionsFromLeafPlugins,
     createLeafPluginRegistry,
     leafPluginDescriptor,
     sortLeafPluginDescriptors,

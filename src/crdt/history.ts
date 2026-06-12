@@ -1,4 +1,5 @@
 import {deepEqual as equal} from '../deepEqual.js';
+import type {LeafBuilderExtensionAny} from '../builderExtensions.js';
 import type {EqualFn} from '../internal.js';
 import type {DraftPatch, Patch} from '../types.js';
 import {resolveAndApply, type MaybeNested} from '../make.js';
@@ -137,12 +138,19 @@ export function canUndoLocalCommand<T>(history: CrdtLocalHistory<T>, actor: stri
 export function canRedoLocalCommand<T>(history: CrdtLocalHistory<T>, actor: string) {
     const command = getUndoCache(history, actor).redoStack.at(-1);
     if (!command) return false;
-    return checkEffects(history.doc, command, command.redoGuardEffects ?? command.effects).length === 0;
+    return (
+        checkEffects(history.doc, command, command.redoGuardEffects ?? command.effects).length === 0
+    );
 }
 
-export function applyLocalCommand<T, Tag extends string = 'type', Context = undefined>(
+export function applyLocalCommand<
+    T,
+    Tag extends string = 'type',
+    Context = undefined,
+    Extensions extends readonly LeafBuilderExtensionAny[] = [],
+>(
     history: CrdtLocalHistory<T>,
-    draft: MaybeNested<DraftPatch<T, Tag, Context>>,
+    draft: MaybeNested<DraftPatch<T, Tag, Context, Extensions>>,
     clock: hlc.HLC,
     extra?: Context,
     tag?: Tag,
@@ -255,7 +263,9 @@ function createLocalCrdtCommand<T>(
 
     for (const patch of patches) {
         const ts = nextTs();
-        for (const update of createCrdtUpdates(current, patch, ts, {sessionId: sessionIdFromTimestamp(ts)})) {
+        for (const update of createCrdtUpdates(current, patch, ts, {
+            sessionId: sessionIdFromTimestamp(ts),
+        })) {
             const next = applyCrdtUpdate(current, update);
             updates.push(update);
             current = next;
@@ -318,10 +328,7 @@ function carryUndoCaches<T>(
     undoCaches.set(next as CrdtLocalHistory<unknown>, nextCaches);
 }
 
-function getUndoCache<T>(
-    history: CrdtLocalHistory<T>,
-    actor: string,
-): DerivedUndoCache<T> {
+function getUndoCache<T>(history: CrdtLocalHistory<T>, actor: string): DerivedUndoCache<T> {
     const key = history as CrdtLocalHistory<unknown>;
     let caches = undoCaches.get(key);
     if (!caches) {
@@ -512,11 +519,15 @@ function captureEffect<T>(
     if (update.op === 'insert') {
         const array = getMetaAtPath(afterDoc.meta, update.arrayPath);
         if (!array || array.kind !== 'array') {
-            throw new Error('Cannot capture local CRDT insert effect: array is missing after apply.');
+            throw new Error(
+                'Cannot capture local CRDT insert effect: array is missing after apply.',
+            );
         }
         const item = array.items[update.id];
         if (!item || item.kind !== 'live') {
-            throw new Error('Cannot capture local CRDT insert effect: item is missing after apply.');
+            throw new Error(
+                'Cannot capture local CRDT insert effect: item is missing after apply.',
+            );
         }
         return {
             kind: 'insert',
@@ -536,10 +547,13 @@ function captureEffect<T>(
     if (update.op === 'leaf') {
         const afterMeta = getMetaAtPath(afterDoc.meta, update.path);
         if (!afterMeta || afterMeta.kind !== 'leaf') {
-            throw new Error('Cannot capture local CRDT leaf effect: target is missing after apply.');
+            throw new Error(
+                'Cannot capture local CRDT leaf effect: target is missing after apply.',
+            );
         }
         const after = cloneLeafValueAtCrdtPath(afterDoc, update.path);
-        if (!after) throw new Error('Cannot capture local CRDT leaf effect: state is missing after apply.');
+        if (!after)
+            throw new Error('Cannot capture local CRDT leaf effect: state is missing after apply.');
         const plugin = afterDoc.schema.leafPlugins[update.plugin];
         const fallback = {
             kind: 'leaf' as const,
@@ -633,12 +647,13 @@ function createUndoUpdates<T>(
                     });
                     index += group.length - 1;
                 } else {
-                    leafUpdates = plugin?.createUndoOperations?.({
-                        doc: current as CrdtDocument<unknown>,
-                        effect,
-                        ts,
-                        context: {sessionId: sessionIdFromTimestamp(ts)},
-                    }) ?? [];
+                    leafUpdates =
+                        plugin?.createUndoOperations?.({
+                            doc: current as CrdtDocument<unknown>,
+                            effect,
+                            ts,
+                            context: {sessionId: sessionIdFromTimestamp(ts)},
+                        }) ?? [];
                 }
                 for (const update of leafUpdates) {
                     updates.push(update);
@@ -696,24 +711,24 @@ function createRedoUpdates<T>(
                     leafUpdates = plugin.createRedoOperationsForEffects({
                         doc: current as CrdtDocument<unknown>,
                         effects: group,
-                        redoGuardEffects: command.redoGuardEffects
-                            ?.filter(
-                                (guard): guard is Extract<LocalEffect, {kind: 'leaf'}> =>
-                                    guard.kind === 'leaf' &&
-                                    guard.plugin === effect.plugin &&
-                                    sameCrdtPath(guard.path, effect.path),
-                            ),
+                        redoGuardEffects: command.redoGuardEffects?.filter(
+                            (guard): guard is Extract<LocalEffect, {kind: 'leaf'}> =>
+                                guard.kind === 'leaf' &&
+                                guard.plugin === effect.plugin &&
+                                sameCrdtPath(guard.path, effect.path),
+                        ),
                         ts,
                         context: {sessionId: sessionIdFromTimestamp(ts)},
                     });
                     index += group.length - 1;
                 } else {
-                    leafUpdates = plugin?.createRedoOperations?.({
-                        doc: current as CrdtDocument<unknown>,
-                        effect,
-                        ts,
-                        context: {sessionId: sessionIdFromTimestamp(ts)},
-                    }) ?? [];
+                    leafUpdates =
+                        plugin?.createRedoOperations?.({
+                            doc: current as CrdtDocument<unknown>,
+                            effect,
+                            ts,
+                            context: {sessionId: sessionIdFromTimestamp(ts)},
+                        }) ?? [];
                 }
                 for (const update of leafUpdates) {
                     updates.push(update);

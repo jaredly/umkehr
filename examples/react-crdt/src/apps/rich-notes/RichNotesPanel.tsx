@@ -4,7 +4,7 @@ import {RichTextEditor, type RichTextBinding} from 'umkehr/react-crdt';
 import {RICH_TEXT_LEAF_PLUGIN_ID, materializeRichTextValue, richText} from 'umkehr/richtext';
 import type {AppEditorContext, GridSlot} from '../../lib/crdtApp';
 import {noteFieldPath, noteListItems, notePath, noteTitle} from './helpers';
-import type {RichNote, RichNotesState} from './model';
+import type {RichNote, RichNotesBuilderExtensions, RichNotesState} from './model';
 
 const hashPrefix = 'rich-note=';
 
@@ -15,7 +15,7 @@ export function RichNotesPanel({
     gridSlot = 'full',
     readOnly = false,
 }: {
-    editor: AppEditorContext<RichNotesState>;
+    editor: AppEditorContext<RichNotesState, 'type', never, RichNotesBuilderExtensions>;
     actor: string;
     title: string;
     gridSlot?: GridSlot | 'full';
@@ -237,7 +237,7 @@ function SelectedNoteEditor({
     note,
     readOnly,
 }: {
-    editor: AppEditorContext<RichNotesState>;
+    editor: AppEditorContext<RichNotesState, 'type', never, RichNotesBuilderExtensions>;
     note: RichNote;
     readOnly: boolean;
 }) {
@@ -256,27 +256,36 @@ function SelectedNoteEditor({
                 insert(index, text) {
                     if (readOnly || !text) return;
                     touch();
-                    editor.$.notes[note.id].body.$text.insert({index}, text);
+                    editor.$.notes[note.id].body.$text.insert({at: {index}, text});
                 },
                 delete(start, end) {
                     if (readOnly || start === end) return;
                     touch();
-                    editor.$.notes[note.id].body.$text.delete({start, end});
+                    editor.$.notes[note.id].body.$text.delete({range: {start, end}});
                 },
                 mark(start, end, markType, value, preset) {
                     if (readOnly || start === end) return;
                     touch();
-                    editor.$.notes[note.id].body.$text.mark({start, end}, markType, value, preset);
+                    editor.$.notes[note.id].body.$text.mark({
+                        range: {start, end},
+                        markType,
+                        value,
+                        preset,
+                    });
                 },
                 unmark(start, end, markType, preset) {
                     if (readOnly || start === end) return;
                     touch();
-                    editor.$.notes[note.id].body.$text.unmark({start, end}, markType, preset);
+                    editor.$.notes[note.id].body.$text.unmark({
+                        range: {start, end},
+                        markType,
+                        preset,
+                    });
                 },
                 replace(snapshot) {
                     if (readOnly) return;
                     touch();
-                    editor.$.notes[note.id].body.$text.replace(snapshot);
+                    editor.$.notes[note.id].body.$text.replace({snapshot});
                 },
             },
         };

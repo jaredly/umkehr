@@ -1,5 +1,6 @@
 export {
     createPatchDispatcher,
+    defineLeafBuilderExtension,
     applyPatch,
     createPatchBuilder,
     createPatchBuilderWithContext,
@@ -14,6 +15,12 @@ export {
     type PatchBuilder,
     type PatchBuilderInternal,
     type DraftPatch,
+    type LeafBuilderCommand,
+    type LeafBuilderCommandMap,
+    type LeafBuilderExtension,
+    type LeafBuilderExtensionAny,
+    type PatchBuilderOptions,
+    type PatchBuilderRuntimeExtension,
 } from './core.js';
 export {blankHistory, dispatch, jump, type Annotations, type History} from './history/history.js';
 export {createStatusStore} from './statuses.js';
