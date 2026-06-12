@@ -1,4 +1,11 @@
 
+# Block plungin and such
+
+Not sure how I feel about the whole 'Patches use char-indexes' thing. Maybe I want them to only do OPs? idk.
+
+Documents are no longer json-serializable, we need to fix this.
+
+
 # Next steps
 
 - make the visualization parametric
