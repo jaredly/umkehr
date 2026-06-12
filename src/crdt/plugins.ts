@@ -104,9 +104,22 @@ export type LeafCrdtPlugin<
         ts: HlcTimestamp;
         context: LeafPluginContext;
     }): CrdtUpdate[];
+    createUndoOperationsForEffects?(input: {
+        doc: CrdtDocument<unknown>;
+        effects: Extract<LocalEffect, {kind: 'leaf'}>[];
+        ts: HlcTimestamp;
+        context: LeafPluginContext;
+    }): CrdtUpdate[];
     createRedoOperations?(input: {
         doc: CrdtDocument<unknown>;
         effect: Extract<LocalEffect, {kind: 'leaf'}>;
+        ts: HlcTimestamp;
+        context: LeafPluginContext;
+    }): CrdtUpdate[];
+    createRedoOperationsForEffects?(input: {
+        doc: CrdtDocument<unknown>;
+        effects: Extract<LocalEffect, {kind: 'leaf'}>[];
+        redoGuardEffects?: Extract<LocalEffect, {kind: 'leaf'}>[];
         ts: HlcTimestamp;
         context: LeafPluginContext;
     }): CrdtUpdate[];
@@ -172,4 +185,3 @@ export function assertRequiredLeafPlugins(
         }
     }
 }
-

@@ -1,4 +1,10 @@
 import type {RichCollaborativeText} from './richtext/index.js';
+import type {
+    BlockRichText,
+    BlockRichTextMoveBlockArgs,
+    BlockRichTextPatchChange,
+} from './block-richtext/index.js';
+import type {DefaultBlockMeta, Lamport, Op} from './block-crdt/index.js';
 import type {RichTextImportSnapshot, RichTextJsonValue} from './peritext/types.js';
 
 /* -------------- utility types ---------------- */
@@ -92,6 +98,12 @@ export type LeafPatch<_T, TPlugin extends string = string, TChange = unknown> = 
 };
 
 export type RichTextPatch<T> = LeafPatch<T, 'umkehr.rich-text', RichTextPatchChange>;
+
+export type BlockRichTextPatch<T> = LeafPatch<
+    T,
+    'umkehr.block-rich-text',
+    BlockRichTextPatchChange
+>;
 
 export type Patch<T> =
     | AddOp<T>
@@ -187,6 +199,23 @@ type RichTextBuilderMethods<R> = {
     };
 };
 
+type BlockRichTextBuilderMethods<R> = {
+    $block: {
+        ops(ops: Op[], when?: ApplyTiming): R;
+        insertText(block: string | Lamport, offset: number, text: string, when?: ApplyTiming): R;
+        deleteRange(
+            block: string | Lamport,
+            startOffset: number,
+            endOffset: number,
+            when?: ApplyTiming,
+        ): R;
+        splitBlock(block: string | Lamport, offset: number, when?: ApplyTiming): R;
+        joinBlocks(left: string | Lamport, right: string | Lamport, when?: ApplyTiming): R;
+        moveBlock(args: BlockRichTextMoveBlockArgs, when?: ApplyTiming): R;
+        setBlockMeta(block: string | Lamport, meta: DefaultBlockMeta, when?: ApplyTiming): R;
+    };
+};
+
 export const getPathSymbol = Symbol('get path');
 export const getExtraSymbol = Symbol('get extra');
 
@@ -206,6 +235,8 @@ export type PatchBuilderInternal<
     // navigation
     (NonNullish<Current> extends RichCollaborativeText
         ? RichTextBuilderMethods<R>
+        : NonNullish<Current> extends BlockRichText
+          ? BlockRichTextBuilderMethods<R>
     // 🔹 tagged union → must choose an arm via variant()
     : IsTaggedUnion<Current, Tag> extends true
         ? {

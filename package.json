@@ -73,6 +73,14 @@
             "types": "./dist/src/block-crdt/*.d.ts",
             "import": "./dist/src/block-crdt/*.js"
         },
+        "./block-richtext": {
+            "types": "./dist/src/block-richtext/index.d.ts",
+            "import": "./dist/src/block-richtext/index.js"
+        },
+        "./block-richtext/*": {
+            "types": "./dist/src/block-richtext/*.d.ts",
+            "import": "./dist/src/block-richtext/*.js"
+        },
         "./react-rich-text": {
             "types": "./dist/src/react-rich-text/index.d.ts",
             "import": "./dist/src/react-rich-text/index.js"

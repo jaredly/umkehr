@@ -54,6 +54,17 @@ describe('package exports', () => {
         expect(typeof richTextPkg.materializeRichTextValue).toBe('function');
     });
 
+    it('imports the built block rich text entry point separately', async () => {
+        expect(existsSync('dist/src/block-richtext/index.js')).toBe(true);
+
+        const blockRichTextPkg = await import('umkehr/block-richtext');
+
+        expect(typeof blockRichTextPkg.blockRichText).toBe('function');
+        expect(typeof blockRichTextPkg.blockRichTextLeafPlugin).toBe('object');
+        expect(typeof blockRichTextPkg.materializeBlockRichTextValue).toBe('function');
+        expect(blockRichTextPkg.BLOCK_RICH_TEXT_LEAF_PLUGIN_ID).toBe('umkehr.block-rich-text');
+    });
+
     it('imports the built React entry point separately', async () => {
         expect(existsSync('dist/src/react/index.js')).toBe(true);
 

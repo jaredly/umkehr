@@ -26,6 +26,14 @@ export default defineConfig({
                 find: 'umkehr/block-crdt',
                 replacement: fileURLToPath(new URL('./src/block-crdt/index.ts', import.meta.url)),
             },
+            {
+                find: /^umkehr\/block-richtext\/(.+)$/,
+                replacement: fileURLToPath(new URL('./src/block-richtext/$1.ts', import.meta.url)),
+            },
+            {
+                find: 'umkehr/block-richtext',
+                replacement: fileURLToPath(new URL('./src/block-richtext/index.ts', import.meta.url)),
+            },
             {find: 'umkehr/crdt', replacement: fileURLToPath(new URL('./src/crdt/index.ts', import.meta.url))},
             {
                 find: 'umkehr/richtext',

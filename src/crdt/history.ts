@@ -593,7 +593,9 @@ function createUndoUpdates<T>(
 ) {
     const updates: CrdtUpdate[] = [];
     let current = doc;
-    for (const effect of command.effects.toReversed()) {
+    const effects = command.effects.toReversed();
+    for (let index = 0; index < effects.length; index++) {
+        const effect = effects[index];
         switch (effect.kind) {
             case 'insert':
                 updates.push({op: 'delete', path: effect.path, ts: nextTs()});
@@ -620,12 +622,24 @@ function createUndoUpdates<T>(
             case 'leaf': {
                 const ts = nextTs();
                 const plugin = current.schema.leafPlugins[effect.plugin];
-                const leafUpdates = plugin?.createUndoOperations?.({
-                    doc: current as CrdtDocument<unknown>,
-                    effect,
-                    ts,
-                    context: {sessionId: sessionIdFromTimestamp(ts)},
-                }) ?? [];
+                let leafUpdates: CrdtUpdate[];
+                if (plugin?.createUndoOperationsForEffects) {
+                    const group = sameLeafEffectRun(effects, index);
+                    leafUpdates = plugin.createUndoOperationsForEffects({
+                        doc: current as CrdtDocument<unknown>,
+                        effects: group.toReversed(),
+                        ts,
+                        context: {sessionId: sessionIdFromTimestamp(ts)},
+                    });
+                    index += group.length - 1;
+                } else {
+                    leafUpdates = plugin?.createUndoOperations?.({
+                        doc: current as CrdtDocument<unknown>,
+                        effect,
+                        ts,
+                        context: {sessionId: sessionIdFromTimestamp(ts)},
+                    }) ?? [];
+                }
                 for (const update of leafUpdates) {
                     updates.push(update);
                     current = applyCrdtUpdate(current, update);
@@ -644,7 +658,9 @@ function createRedoUpdates<T>(
 ) {
     const updates: CrdtUpdate[] = [];
     let current = doc;
-    for (const effect of command.effects) {
+    const effects = command.effects;
+    for (let index = 0; index < effects.length; index++) {
+        const effect = effects[index];
         switch (effect.kind) {
             case 'insert':
                 updates.push({
@@ -674,12 +690,31 @@ function createRedoUpdates<T>(
             case 'leaf': {
                 const ts = nextTs();
                 const plugin = current.schema.leafPlugins[effect.plugin];
-                const leafUpdates = plugin?.createRedoOperations?.({
-                    doc: current as CrdtDocument<unknown>,
-                    effect,
-                    ts,
-                    context: {sessionId: sessionIdFromTimestamp(ts)},
-                }) ?? [];
+                let leafUpdates: CrdtUpdate[];
+                if (plugin?.createRedoOperationsForEffects) {
+                    const group = sameLeafEffectRun(effects, index);
+                    leafUpdates = plugin.createRedoOperationsForEffects({
+                        doc: current as CrdtDocument<unknown>,
+                        effects: group,
+                        redoGuardEffects: command.redoGuardEffects
+                            ?.filter(
+                                (guard): guard is Extract<LocalEffect, {kind: 'leaf'}> =>
+                                    guard.kind === 'leaf' &&
+                                    guard.plugin === effect.plugin &&
+                                    sameCrdtPath(guard.path, effect.path),
+                            ),
+                        ts,
+                        context: {sessionId: sessionIdFromTimestamp(ts)},
+                    });
+                    index += group.length - 1;
+                } else {
+                    leafUpdates = plugin?.createRedoOperations?.({
+                        doc: current as CrdtDocument<unknown>,
+                        effect,
+                        ts,
+                        context: {sessionId: sessionIdFromTimestamp(ts)},
+                    }) ?? [];
+                }
                 for (const update of leafUpdates) {
                     updates.push(update);
                     current = applyCrdtUpdate(current, update);
@@ -689,6 +724,28 @@ function createRedoUpdates<T>(
         }
     }
     return updates;
+}
+
+function sameLeafEffectRun(effects: LocalEffect[], start: number) {
+    const first = effects[start];
+    if (!first || first.kind !== 'leaf') return [];
+    const group: Extract<LocalEffect, {kind: 'leaf'}>[] = [first];
+    for (let index = start + 1; index < effects.length; index++) {
+        const effect = effects[index];
+        if (
+            effect.kind !== 'leaf' ||
+            effect.plugin !== first.plugin ||
+            !sameCrdtPath(effect.path, first.path)
+        ) {
+            break;
+        }
+        group.push(effect);
+    }
+    return group;
+}
+
+function sameCrdtPath(a: CrdtPathSegment[], b: CrdtPathSegment[]) {
+    return equal(a, b);
 }
 
 function metaToUpdate(

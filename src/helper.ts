@@ -12,6 +12,11 @@ import {
 } from './types.js';
 import type {RichTextImportSnapshot, RichTextJsonValue} from './peritext/types.js';
 import {RICH_TEXT_LEAF_PLUGIN_ID} from './richtext/plugin.js';
+import {
+    BLOCK_RICH_TEXT_LEAF_PLUGIN_ID,
+    type BlockRichTextMoveBlockArgs,
+} from './block-richtext/index.js';
+import type {DefaultBlockMeta, Lamport, Op} from './block-crdt/index.js';
 
 export type PatchBuilder<
     T,
@@ -260,6 +265,114 @@ export function createPatchDispatcher<T, Extra, Tag extends string = 'type', R =
                                         plugin: RICH_TEXT_LEAF_PLUGIN_ID,
                                         path,
                                         change: {kind: 'replace', snapshot: snapshot as RichTextImportSnapshot},
+                                        ...ghost,
+                                    },
+                                    when,
+                                ),
+                        };
+                    }
+                    return proxyCache[k];
+                }
+
+                if (prop === '$block') {
+                    const k = pathString + '/blockRichText';
+                    if (!proxyCache[k]) {
+                        proxyCache[k] = {
+                            ops: (ops: Op[], when?: ApplyTiming) =>
+                                apply(
+                                    {
+                                        op: 'leaf',
+                                        plugin: BLOCK_RICH_TEXT_LEAF_PLUGIN_ID,
+                                        path,
+                                        change: {kind: 'ops', ops},
+                                        ...ghost,
+                                    },
+                                    when,
+                                ),
+                            insertText: (
+                                block: string | Lamport,
+                                offset: number,
+                                text: string,
+                                when?: ApplyTiming,
+                            ) =>
+                                apply(
+                                    {
+                                        op: 'leaf',
+                                        plugin: BLOCK_RICH_TEXT_LEAF_PLUGIN_ID,
+                                        path,
+                                        change: {kind: 'insertText', block, offset, text},
+                                        ...ghost,
+                                    },
+                                    when,
+                                ),
+                            deleteRange: (
+                                block: string | Lamport,
+                                startOffset: number,
+                                endOffset: number,
+                                when?: ApplyTiming,
+                            ) =>
+                                apply(
+                                    {
+                                        op: 'leaf',
+                                        plugin: BLOCK_RICH_TEXT_LEAF_PLUGIN_ID,
+                                        path,
+                                        change: {kind: 'deleteRange', block, startOffset, endOffset},
+                                        ...ghost,
+                                    },
+                                    when,
+                                ),
+                            splitBlock: (
+                                block: string | Lamport,
+                                offset: number,
+                                when?: ApplyTiming,
+                            ) =>
+                                apply(
+                                    {
+                                        op: 'leaf',
+                                        plugin: BLOCK_RICH_TEXT_LEAF_PLUGIN_ID,
+                                        path,
+                                        change: {kind: 'splitBlock', block, offset},
+                                        ...ghost,
+                                    },
+                                    when,
+                                ),
+                            joinBlocks: (
+                                left: string | Lamport,
+                                right: string | Lamport,
+                                when?: ApplyTiming,
+                            ) =>
+                                apply(
+                                    {
+                                        op: 'leaf',
+                                        plugin: BLOCK_RICH_TEXT_LEAF_PLUGIN_ID,
+                                        path,
+                                        change: {kind: 'joinBlocks', left, right},
+                                        ...ghost,
+                                    },
+                                    when,
+                                ),
+                            moveBlock: (args: BlockRichTextMoveBlockArgs, when?: ApplyTiming) =>
+                                apply(
+                                    {
+                                        op: 'leaf',
+                                        plugin: BLOCK_RICH_TEXT_LEAF_PLUGIN_ID,
+                                        path,
+                                        change: {kind: 'moveBlock', ...args},
+                                        ...ghost,
+                                    },
+                                    when,
+                                ),
+                            setBlockMeta: (
+                                block: string | Lamport,
+                                meta: DefaultBlockMeta,
+                                when?: ApplyTiming,
+                            ) =>
+                                apply(
+                                    {
+                                        op: 'leaf',
+                                        plugin: BLOCK_RICH_TEXT_LEAF_PLUGIN_ID,
+                                        path,
+                                        change: {kind: 'setBlockMeta', block, meta},
                                         ...ghost,
                                     },
                                     when,

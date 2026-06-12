@@ -1,4 +1,5 @@
 import {createPatchBuilder, type DraftPatch, type PatchBuilder} from '../src/core';
+import type {BlockRichText} from '../src/block-richtext';
 
 type Expect<T extends true> = T;
 type IsAssignable<Actual, Expected> = Actual extends Expected ? true : false;
@@ -10,6 +11,7 @@ type State = {
     title: string;
     maybe?: string;
     maybeNested?: {label: string};
+    blockBody: BlockRichText;
     items: Array<{id: string; done: boolean}>;
     byId: Record<string, number>;
     shape: Shape;
@@ -32,6 +34,11 @@ const movePatch: DraftPatch<State, 'type', undefined> = builder.items.$move({
 });
 const reorderPatch: DraftPatch<State, 'type', undefined> = builder.items.$reorder([1, 0]);
 const recordPatch: DraftPatch<State, 'type', undefined> = builder.byId.someKey(1);
+const blockPatch: DraftPatch<State, 'type', undefined> = builder.blockBody.$block.insertText(
+    '0000-seed',
+    0,
+    'hi',
+);
 const circlePatch: DraftPatch<State, 'type', undefined> = builder.shape.$variant('circle').radius(2);
 const customPatch: DraftPatch<State, 'kind', undefined> = customBuilder.customShape
     .$variant('rect')
@@ -52,6 +59,7 @@ type _ItemPatch = Expect<IsAssignable<typeof itemPatch, DraftPatch<State, 'type'
 type _MovePatch = Expect<IsAssignable<typeof movePatch, DraftPatch<State, 'type', undefined>>>;
 type _ReorderPatch = Expect<IsAssignable<typeof reorderPatch, DraftPatch<State, 'type', undefined>>>;
 type _RecordPatch = Expect<IsAssignable<typeof recordPatch, DraftPatch<State, 'type', undefined>>>;
+type _BlockPatch = Expect<IsAssignable<typeof blockPatch, DraftPatch<State, 'type', undefined>>>;
 type _CirclePatch = Expect<IsAssignable<typeof circlePatch, DraftPatch<State, 'type', undefined>>>;
 type _CustomPatch = Expect<IsAssignable<typeof customPatch, DraftPatch<State, 'kind', undefined>>>;
 
@@ -66,6 +74,12 @@ builder.items[0].missing(true);
 
 // @ts-expect-error object builders do not expose array move
 builder.byId.$move({fromIdx: 0, targetIdx: 1, after: true});
+
+// @ts-expect-error block offset must be a number
+builder.blockBody.$block.insertText('0000-seed', '0', 'hi');
+
+// @ts-expect-error plain strings do not expose block rich text methods
+builder.title.$block.insertText('0000-seed', 0, 'hi');
 
 // @ts-expect-error circle variant does not expose rect-only fields
 builder.shape.$variant('circle').width(2);
