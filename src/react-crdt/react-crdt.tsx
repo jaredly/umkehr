@@ -300,7 +300,7 @@ function getMetaAtExistingPath<T>(doc: CrdtDocument<T>, path: Path) {
 function richTextViewAtPath<T>(doc: CrdtDocument<T>, path: Path): RichTextRenderView {
     const meta = getMetaAtExistingPath(doc, path);
     const value = valueAtPath(doc.state, path);
-    return meta?.kind === 'richText' && isRichTextState(value)
+    return meta?.kind === 'leaf' && meta.plugin === 'umkehr.rich-text' && isRichTextState(value)
         ? materializeRichTextState(value)
         : {plainText: '', spans: []};
 }

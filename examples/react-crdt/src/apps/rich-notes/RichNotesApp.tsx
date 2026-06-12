@@ -1,4 +1,5 @@
 import type {AppDefinition, CrdtRuntime, HistoryRuntime} from '../../lib/crdtApp';
+import {richTextLeafPlugin} from 'umkehr/richtext';
 import {
     initialRichNotesState,
     initialRichNotesTimestamp,
@@ -19,6 +20,7 @@ export const richNotesApp: AppDefinition<RichNotesState> = {
     schemaVersion: 1,
     tagKey: 'type',
     schema: richNotesSchema,
+    leafPlugins: [richTextLeafPlugin],
     validateState: validateRichNotesState,
     initialState: initialRichNotesState,
     initialTimestamp: initialRichNotesTimestamp,

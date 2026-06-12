@@ -189,6 +189,7 @@ function LocalFirstReadyApp<TState, EphemeralData>({
         docId: loaded.docId,
         title: loaded.title,
         schema: app.schema,
+        leafPlugins: app.leafPlugins,
         tagKey: app.tagKey,
         validateState: app.validateState,
         schemaFingerprint: loaded.schemaFingerprint,

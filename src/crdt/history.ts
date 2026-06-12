@@ -7,8 +7,6 @@ import * as hlc from './hlc.js';
 import {materialize} from './materialize.js';
 import {cloneMeta} from './metadata.js';
 import {getMetaAtPath, normalPathForCrdtPath} from './path.js';
-import {formatOpId} from '../peritext/ids.js';
-import {materializeRichTextState} from '../peritext/materialize.js';
 import {createCrdtUpdates} from './updates.js';
 import type {
     CrdtDocument,
@@ -22,7 +20,6 @@ import type {
     ItemId,
     JsonValue,
 } from './types.js';
-import type {RichTextOperation, RichTextState} from '../peritext/types.js';
 
 export type CrdtLocalHistory<T> = {
     base: CrdtDocument<T>;
@@ -71,18 +68,19 @@ export type LocalEffect =
           after: Record<ItemId, {value: FractionalIndex; ts: HlcTimestamp}>;
       }
     | {
-          kind: 'richText';
+          kind: 'leaf';
+          plugin: string;
           path: CrdtPathSegment[];
           localTs: HlcTimestamp;
-          before: RichTextState | undefined;
-          after: RichTextState;
-          change: RichTextOperation;
+          before: JsonValue | undefined;
+          after: JsonValue;
+          change: JsonValue;
       };
 
 export type BlockedEffect = {
     command: {id: HlcTimestamp};
     effect: LocalEffect;
-    reason: 'missing-target' | 'superseded' | 'wrong-incarnation' | 'deleted';
+    reason: 'missing-target' | 'superseded' | 'wrong-incarnation' | 'deleted' | 'unsupported';
 };
 
 type SetOrderEffect = Extract<LocalEffect, {kind: 'setOrder'}>;
@@ -257,7 +255,7 @@ function createLocalCrdtCommand<T>(
 
     for (const patch of patches) {
         const ts = nextTs();
-        for (const update of createCrdtUpdates(current, patch, ts)) {
+        for (const update of createCrdtUpdates(current, patch, ts, {sessionId: sessionIdFromTimestamp(ts)})) {
             const next = applyCrdtUpdate(current, update);
             updates.push(update);
             current = next;
@@ -483,7 +481,7 @@ function captureBefore<T>(doc: CrdtDocument<T>, update: CrdtUpdate) {
         }
         return before;
     }
-    if (update.op === 'richText') return cloneRichTextStateAtCrdtPath(doc, update.path);
+    if (update.op === 'leaf') return cloneLeafValueAtCrdtPath(doc, update.path);
     if (update.op === 'insert') return undefined;
     return cloneEffectMeta(getMetaAtPath(doc.meta, update.path));
 }
@@ -492,7 +490,7 @@ function captureEffect<T>(
     beforeDoc: CrdtDocument<T>,
     afterDoc: CrdtDocument<T>,
     update: CrdtUpdate,
-    before: CrdtMeta | RichTextState | undefined | SetOrderEffect['before'],
+    before: CrdtMeta | JsonValue | undefined | SetOrderEffect['before'],
 ): LocalEffect {
     if (update.op === 'setOrder') {
         const array = getMetaAtPath(afterDoc.meta, update.arrayPath);
@@ -535,21 +533,34 @@ function captureEffect<T>(
         };
     }
 
-    if (update.op === 'richText') {
+    if (update.op === 'leaf') {
         const afterMeta = getMetaAtPath(afterDoc.meta, update.path);
-        if (!afterMeta || afterMeta.kind !== 'richText') {
-            throw new Error('Cannot capture local CRDT rich text effect: target is missing after apply.');
+        if (!afterMeta || afterMeta.kind !== 'leaf') {
+            throw new Error('Cannot capture local CRDT leaf effect: target is missing after apply.');
         }
-        const beforeState = before as RichTextState | undefined;
-        const after = cloneRichTextStateAtCrdtPath(afterDoc, update.path);
-        if (!after) throw new Error('Cannot capture local CRDT rich text effect: state is missing after apply.');
-        return {
-            kind: 'richText',
+        const after = cloneLeafValueAtCrdtPath(afterDoc, update.path);
+        if (!after) throw new Error('Cannot capture local CRDT leaf effect: state is missing after apply.');
+        const plugin = afterDoc.schema.leafPlugins[update.plugin];
+        const fallback = {
+            kind: 'leaf' as const,
+            plugin: update.plugin,
             path: update.path,
             localTs: update.ts,
-            before: beforeState,
+            before: before as JsonValue | undefined,
             after,
             change: update.change,
+        };
+        const captured = plugin?.captureEffect?.({
+            path: update.path,
+            localTs: update.ts,
+            before: before as JsonValue | undefined,
+            after,
+            meta: afterMeta,
+            operation: update.change,
+        });
+        return {
+            ...fallback,
+            ...captured,
         };
     }
 
@@ -606,9 +617,16 @@ function createUndoUpdates<T>(
                 }
                 break;
             }
-            case 'richText': {
-                const update = createRichTextUndoUpdate(current, effect, nextTs());
-                if (update) {
+            case 'leaf': {
+                const ts = nextTs();
+                const plugin = current.schema.leafPlugins[effect.plugin];
+                const leafUpdates = plugin?.createUndoOperations?.({
+                    doc: current as CrdtDocument<unknown>,
+                    effect,
+                    ts,
+                    context: {sessionId: sessionIdFromTimestamp(ts)},
+                }) ?? [];
+                for (const update of leafUpdates) {
                     updates.push(update);
                     current = applyCrdtUpdate(current, update);
                 }
@@ -653,9 +671,16 @@ function createRedoUpdates<T>(
                 updates.push({op: 'setOrder', arrayPath: effect.arrayPath, orders});
                 break;
             }
-            case 'richText': {
-                const update = createRichTextRedoUpdate(current, effect, nextTs());
-                if (update) {
+            case 'leaf': {
+                const ts = nextTs();
+                const plugin = current.schema.leafPlugins[effect.plugin];
+                const leafUpdates = plugin?.createRedoOperations?.({
+                    doc: current as CrdtDocument<unknown>,
+                    effect,
+                    ts,
+                    context: {sessionId: sessionIdFromTimestamp(ts)},
+                }) ?? [];
+                for (const update of leafUpdates) {
                     updates.push(update);
                     current = applyCrdtUpdate(current, update);
                 }
@@ -664,139 +689,6 @@ function createRedoUpdates<T>(
         }
     }
     return updates;
-}
-
-function createRichTextUndoUpdate<T>(
-    doc: CrdtDocument<T>,
-    effect: Extract<LocalEffect, {kind: 'richText'}>,
-    ts: HlcTimestamp,
-): CrdtUpdate | null {
-    const opId = nextRichTextOpId(doc, effect.path, ts);
-    switch (effect.change.action) {
-        case 'insert':
-            return {
-                op: 'richText',
-                path: effect.path,
-                ts,
-                change: {action: 'remove', opId, removedId: effect.change.opId},
-            };
-        case 'remove': {
-            const change = effect.change as Extract<RichTextOperation, {action: 'remove'}>;
-            const removed = effect.before?.chars.find((char) => char.opId === change.removedId);
-            if (!removed) return null;
-            return {
-                op: 'richText',
-                path: effect.path,
-                ts,
-                change: {
-                    action: 'insert',
-                    opId,
-                    afterId: removed.afterId,
-                    char: removed.char,
-                },
-            };
-        }
-        case 'addMark':
-            return {
-                op: 'richText',
-                path: effect.path,
-                ts,
-                change: {
-                    action: 'removeMark',
-                    opId,
-                    start: effect.change.start,
-                    end: effect.change.end,
-                    markType: effect.change.markType,
-                },
-            };
-        case 'removeMark':
-            return {
-                op: 'richText',
-                path: effect.path,
-                ts,
-                change: {
-                    action: 'addMark',
-                    opId,
-                    start: effect.change.start,
-                    end: effect.change.end,
-                    markType: effect.change.markType,
-                    value: richTextMarkValueBefore(effect),
-                },
-            };
-    }
-}
-
-function createRichTextRedoUpdate<T>(
-    doc: CrdtDocument<T>,
-    effect: Extract<LocalEffect, {kind: 'richText'}>,
-    ts: HlcTimestamp,
-): CrdtUpdate | null {
-    const opId = nextRichTextOpId(doc, effect.path, ts);
-    switch (effect.change.action) {
-        case 'insert':
-            return {
-                op: 'richText',
-                path: effect.path,
-                ts,
-                change: {
-                    action: 'insert',
-                    opId,
-                    afterId: effect.change.afterId,
-                    char: effect.change.char,
-                },
-            };
-        case 'remove':
-            return {
-                op: 'richText',
-                path: effect.path,
-                ts,
-                change: {
-                    action: 'remove',
-                    opId,
-                    removedId: effect.change.removedId,
-                },
-            };
-        case 'addMark':
-            return {
-                op: 'richText',
-                path: effect.path,
-                ts,
-                change: {
-                    ...effect.change,
-                    opId,
-                },
-            };
-        case 'removeMark':
-            return {
-                op: 'richText',
-                path: effect.path,
-                ts,
-                change: {
-                    ...effect.change,
-                    opId,
-                },
-            };
-    }
-}
-
-function nextRichTextOpId<T>(
-    doc: CrdtDocument<T>,
-    path: CrdtPathSegment[],
-    ts: HlcTimestamp,
-) {
-    const meta = getMetaAtPath(doc.meta, path);
-    if (!meta || meta.kind !== 'richText') {
-        throw new Error('Cannot create rich text undo/redo update: target is not rich text.');
-    }
-    const unpacked = hlc.unpack(ts);
-    return formatOpId(meta.maxOpCounter + 1, `${unpacked.node}:${unpacked.suffix ?? 'main'}`);
-}
-
-function richTextMarkValueBefore(effect: Extract<LocalEffect, {kind: 'richText'}>) {
-    const markType = effect.change.action === 'removeMark' ? effect.change.markType : undefined;
-    if (!markType || !effect.before) return undefined;
-    return materializeRichTextState(effect.before).spans.find((span) => span.marks?.[markType] !== undefined)
-        ?.marks?.[markType];
 }
 
 function metaToUpdate(
@@ -848,11 +740,22 @@ function checkEffect<T>(
         return null;
     }
 
-    if (effect.kind === 'richText') {
+    if (effect.kind === 'leaf') {
         const target = getMetaAtPath(doc.meta, effect.path);
         if (!target) return {command, effect, reason: 'missing-target'};
-        if (target.kind !== 'richText') return {command, effect, reason: 'wrong-incarnation'};
-        return checkRichTextEffectTarget(doc, command, effect);
+        if (target.kind !== 'leaf' || target.plugin !== effect.plugin) {
+            return {command, effect, reason: 'wrong-incarnation'};
+        }
+        const plugin = doc.schema.leafPlugins[effect.plugin];
+        if (plugin?.checkEffect) {
+            return plugin.checkEffect({
+                doc: doc as CrdtDocument<unknown>,
+                history: createCrdtLocalHistory(doc) as CrdtLocalHistory<unknown>,
+                command,
+                effect,
+            });
+        }
+        return {command, effect, reason: 'unsupported'};
     }
 
     const target = getMetaAtPath(doc.meta, effect.path);
@@ -866,43 +769,6 @@ function checkEffect<T>(
         return {command, effect, reason: 'superseded'};
     }
     return null;
-}
-
-function checkRichTextEffectTarget<T>(
-    doc: CrdtDocument<T>,
-    command: DerivedCommand,
-    effect: Extract<LocalEffect, {kind: 'richText'}>,
-): BlockedEffect | null {
-    const target = cloneRichTextStateAtCrdtPath(doc, effect.path);
-    if (!target) return {command, effect, reason: 'missing-target'};
-    switch (effect.change.action) {
-        case 'insert': {
-            const char = target.chars.find((candidate) => candidate.opId === effect.change.opId);
-            if (!char) return {command, effect, reason: 'missing-target'};
-            if (char.deleted) return {command, effect, reason: 'deleted'};
-            return null;
-        }
-        case 'remove': {
-            const change = effect.change as Extract<RichTextOperation, {action: 'remove'}>;
-            const char = target.chars.find((candidate) => candidate.opId === change.removedId);
-            if (!char) return {command, effect, reason: 'missing-target'};
-            if (!char.deleted) return {command, effect, reason: 'superseded'};
-            return null;
-        }
-        case 'addMark':
-        case 'removeMark':
-            return richTextHasMarkOperation(target, effect.change.opId)
-                ? null
-                : {command, effect, reason: 'missing-target'};
-    }
-}
-
-function richTextHasMarkOperation(state: RichTextState, opId: string) {
-    return state.chars.some(
-        (char) =>
-            char.markOpsBefore?.some((operation) => operation.opId === opId) ||
-            char.markOpsAfter?.some((operation) => operation.opId === opId),
-    );
 }
 
 function withCommand(
@@ -929,10 +795,10 @@ function cloneEffectMeta(meta: CrdtMeta | undefined): CrdtMeta | undefined {
     return meta ? cloneMeta(meta) : undefined;
 }
 
-function cloneRichTextStateAtCrdtPath<T>(
+function cloneLeafValueAtCrdtPath<T>(
     doc: CrdtDocument<T>,
     path: CrdtPathSegment[],
-): RichTextState | undefined {
+): JsonValue | undefined {
     const normalPath = normalPathForCrdtPath(doc, path);
     if (!normalPath) return undefined;
     let value: unknown = doc.state;
@@ -940,16 +806,13 @@ function cloneRichTextStateAtCrdtPath<T>(
         if (!value || typeof value !== 'object') return undefined;
         value = (value as Record<string | number, unknown>)[segment.key];
     }
-    if (!value || typeof value !== 'object' || !Array.isArray((value as {chars?: unknown}).chars)) {
-        return undefined;
-    }
-    return structuredClone(value) as RichTextState;
+    return isJsonValue(value) ? structuredClone(value) : undefined;
 }
 
 function cloneDocumentWithoutPending<T>(doc: CrdtDocument<T>): CrdtDocument<T> {
     const meta = cloneMeta(doc.meta);
     return {
-        state: materialize(meta, doc.state) as T,
+        state: materialize(meta, doc.state, doc.schema) as T,
         meta,
         pending: [],
         schema: doc.schema,
@@ -983,4 +846,18 @@ export function latestCrdtUpdateBatchTimestamp(
         .filter((timestamp): timestamp is HlcTimestamp => timestamp !== undefined)
         .sort()
         .at(-1);
+}
+
+function sessionIdFromTimestamp(ts: HlcTimestamp) {
+    return hlc.unpack(ts).node;
+}
+
+function isJsonValue(value: unknown): value is JsonValue {
+    if (value === null) return true;
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+        return true;
+    }
+    if (Array.isArray(value)) return value.every(isJsonValue);
+    if (typeof value !== 'object') return false;
+    return Object.values(value).every((item) => item === undefined || isJsonValue(item));
 }

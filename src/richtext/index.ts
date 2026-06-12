@@ -13,6 +13,13 @@ import type {
     RichTextSpan,
 } from '../peritext/types.js';
 import type {Path} from '../types.js';
+import {RICH_TEXT_LEAF_PLUGIN_ID} from './plugin.js';
+export {
+    RICH_TEXT_LEAF_PLUGIN_ID,
+    RICH_TEXT_LEAF_PLUGIN_VERSION,
+    richTextLeafPlugin,
+    type RichTextLeafMeta,
+} from './plugin.js';
 
 declare const richTextBrand: unique symbol;
 
@@ -22,8 +29,8 @@ export type RichCollaborativeText = {
     chars: RichTextState['chars'];
     pending?: RichTextState['pending'];
 } & tags.JsonSchemaPlugin<{
-    'x-umkehr-crdt': 'rich-text';
-    'x-umkehr-rich-text-version': 1;
+    'x-umkehr-leaf-crdt': 'umkehr.rich-text';
+    'x-umkehr-leaf-crdt-version': 1;
 }> & {
         readonly [richTextBrand]?: never;
     };
@@ -47,7 +54,11 @@ export function richTextFromSpans(spans: RichTextSpan[]): RichTextImportSnapshot
 export function materializeRichText<T>(doc: CrdtDocument<T>, path: Path): RichTextRenderView {
     const crdtPath = crdtPathForExisting(doc, path);
     const meta = getMetaAtPath(doc.meta, crdtPath);
-    if (!meta || (meta as {kind?: string}).kind !== 'richText') {
+    if (
+        !meta ||
+        (meta as {kind?: string}).kind !== 'leaf' ||
+        (meta as {plugin?: string}).plugin !== RICH_TEXT_LEAF_PLUGIN_ID
+    ) {
         throw new Error('Cannot materialize rich text: path does not point to a rich-text field.');
     }
     const value = getValueAtPath(doc.state, path);

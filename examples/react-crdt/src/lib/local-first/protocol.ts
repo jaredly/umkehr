@@ -4,6 +4,7 @@ import {
     type CrdtDocument,
     type CrdtMeta,
     type CrdtUpdate,
+    type LeafCrdtPluginAny,
     type PendingUpdate,
 } from 'umkehr/crdt';
 import type {IJsonSchemaCollection, IValidation} from 'typia';
@@ -91,6 +92,7 @@ export type LocalFirstProtocolConfig<TState> = {
     schemaFingerprintHash: string;
     schema: IJsonSchemaCollection<'3.1', [TState]>;
     tagKey: string;
+    leafPlugins?: readonly LeafCrdtPluginAny[];
     validateState(input: unknown): IValidation<TState>;
 };
 
@@ -189,7 +191,9 @@ function validateBatch<TState>(
     if (!isVersionVector(input.vectorAfter)) return null;
     if (typeof input.receivedAt !== 'string' || input.receivedAt.length === 0) return null;
 
-    const validator = createCrdtUpdateValidator<TState>(config.schema);
+    const validator = createCrdtUpdateValidator<TState>(config.schema, {
+        leafPlugins: config.leafPlugins,
+    });
     const updates: CrdtUpdate[] = [];
     for (const update of input.updates) {
         const result = validator.validate(update);
@@ -249,7 +253,9 @@ function validatePendingUpdate<TState>(
         return false;
     }
     if (!isHlcTimestamp(input.queuedAt)) return false;
-    return createCrdtUpdateValidator<TState>(config.schema).is(input.update);
+    return createCrdtUpdateValidator<TState>(config.schema, {
+        leafPlugins: config.leafPlugins,
+    }).is(input.update);
 }
 
 function validateCrdtMeta(input: unknown): input is CrdtMeta {

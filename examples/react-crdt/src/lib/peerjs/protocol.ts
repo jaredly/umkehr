@@ -5,6 +5,7 @@ import {
     type CrdtDocument,
     type CrdtMeta,
     type CrdtUpdate,
+    type LeafCrdtPluginAny,
     type PendingUpdate,
 } from 'umkehr/crdt';
 import type {PeerRole} from './types';
@@ -16,6 +17,7 @@ export type PeerProtocolConfig<TState> = {
     docId: string;
     tagKey: string;
     schema: IJsonSchemaCollection<'3.1', [TState]>;
+    leafPlugins?: readonly LeafCrdtPluginAny[];
     validateState(input: unknown): IValidation<TState>;
 };
 
@@ -73,7 +75,9 @@ export function parsePeerMessage<TState>(
     if (input.kind === 'updates') {
         if (typeof input.batchId !== 'string' || input.batchId.length === 0) return null;
         if (!Array.isArray(input.updates) || input.updates.length === 0) return null;
-        const updateValidator = createCrdtUpdateValidator<TState>(config.schema);
+        const updateValidator = createCrdtUpdateValidator<TState>(config.schema, {
+            leafPlugins: config.leafPlugins,
+        });
         const updates: CrdtUpdate[] = [];
         for (const update of input.updates) {
             const result = updateValidator.validate(update);
@@ -131,7 +135,9 @@ function validatePendingUpdate<TState>(
         return false;
     }
     if (typeof input.queuedAt !== 'string' || input.queuedAt.length === 0) return false;
-    const updateValidator = createCrdtUpdateValidator<TState>(config.schema);
+    const updateValidator = createCrdtUpdateValidator<TState>(config.schema, {
+        leafPlugins: config.leafPlugins,
+    });
     return updateValidator.is(input.update);
 }
 

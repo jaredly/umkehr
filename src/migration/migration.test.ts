@@ -31,6 +31,7 @@ import {
     type SchemaMigrationConfig,
     type VersionedSchema,
 } from './index.js';
+import {richTextLeafPlugin} from '../richtext/index.js';
 
 type V1 = {title: string};
 type V2 = {title: string; done: boolean};
@@ -347,7 +348,8 @@ describe('CRDT history migration core', () => {
         const richV1 = versionedSchema<unknown>(1, 'rich-v1-hash', (_): _ is unknown => true);
         const richV2 = versionedSchema<unknown>(2, 'rich-v2-hash', (_): _ is unknown => true);
         const update: CrdtUpdate = {
-            op: 'richText',
+            op: 'leaf',
+            plugin: 'umkehr.rich-text',
             path: [{type: 'objectField', key: 'body', parentCreated: baseTs}],
             ts: updateTs,
             change: {
@@ -384,7 +386,8 @@ describe('CRDT history migration core', () => {
 
         expect(result.value).toHaveLength(1);
         expect(result.value[0]).toMatchObject({
-            op: 'richText',
+            op: 'leaf',
+            plugin: 'umkehr.rich-text',
             path: [{type: 'objectField', key: 'content'}],
         });
     });
@@ -789,7 +792,8 @@ describe('migration rewrite helpers', () => {
         expect(dropCrdtObjectField(update, 'title')).toBeNull();
 
         const richTextUpdate: CrdtUpdate = {
-            op: 'richText',
+            op: 'leaf',
+            plugin: 'umkehr.rich-text',
             path: [{type: 'objectField', key: 'title', parentCreated: baseTs}],
             ts: updateTs,
             change: {
@@ -800,7 +804,8 @@ describe('migration rewrite helpers', () => {
             },
         };
         expect(renameCrdtObjectField(richTextUpdate, 'title', 'label')).toMatchObject({
-            op: 'richText',
+            op: 'leaf',
+            plugin: 'umkehr.rich-text',
             path: [{type: 'objectField', key: 'label'}],
         });
         expect(dropCrdtObjectField(richTextUpdate, 'title')).toBeNull();
@@ -905,6 +910,7 @@ function versionedSchema<T>(
         fingerprint: `${fingerprintHash}-full`,
         fingerprintHash,
         tagKey: 'type',
+        leafPlugins: fingerprintHash.startsWith('rich-') ? [richTextLeafPlugin] : undefined,
         validateState(input): IValidation<T> {
             return guard(input)
                 ? {success: true, data: input}
@@ -1050,8 +1056,8 @@ function richTextObjectSchema(field: string) {
                 version: {const: 1},
             },
             required: ['kind', 'version'],
-            'x-umkehr-crdt': 'rich-text',
-            'x-umkehr-rich-text-version': 1,
+            'x-umkehr-leaf-crdt': 'umkehr.rich-text',
+            'x-umkehr-leaf-crdt-version': 1,
         },
     });
 }

@@ -10,7 +10,9 @@ import type {
     JsonValue,
     PendingUpdate,
 } from '../crdt/types.js';
+import type {LeafCrdtPluginAny} from '../crdt/plugins.js';
 import {createCrdtUpdateValidator} from '../crdt/validation.js';
+import {collectRequiredLeafPlugins} from '../crdt/schema.js';
 import {deepEqual} from '../deepEqual.js';
 import type {History} from '../history/history.js';
 import {ops} from '../ops.js';
@@ -23,6 +25,7 @@ export type VersionedSchema<TState> = {
     fingerprint: string;
     fingerprintHash: string;
     tagKey: string;
+    leafPlugins?: readonly LeafCrdtPluginAny[];
     validateState(input: unknown): IValidation<TState>;
 };
 
@@ -313,6 +316,7 @@ export function migrateCrdtHistory<TCurrent>(
     const migratedBase = createCrdtDocument(migratedBaseState, config.current.schema, {
         timestamp,
         tagKey: config.current.tagKey,
+        leafPlugins: config.current.leafPlugins,
     });
     const migratedUpdates = migrateCrdtUpdateList(config, history.updates, from, path);
     let replayed = migratedBase;
@@ -454,6 +458,7 @@ export function schemaFingerprintInput<TState>(
         root: schema.schemas[0],
         components: schema.components,
         tagKey,
+        leafPlugins: collectRequiredLeafPlugins(schema.schemas[0], schema.components),
     };
 }
 
@@ -713,7 +718,10 @@ function validateCrdtUpdates(
     stage: 'source' | 'target',
     migrationId?: string,
 ) {
-    const validator = createCrdtUpdateValidator(schema.schema, {tagKey: schema.tagKey});
+    const validator = createCrdtUpdateValidator(schema.schema, {
+        tagKey: schema.tagKey,
+        leafPlugins: schema.leafPlugins,
+    });
     for (let index = 0; index < updates.length; index++) {
         const result = validator.validate(updates[index]);
         if (result.success) {

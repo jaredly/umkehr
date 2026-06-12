@@ -11,6 +11,7 @@ import {
     type ArrayMove,
 } from './types.js';
 import type {RichTextImportSnapshot, RichTextJsonValue} from './peritext/types.js';
+import {RICH_TEXT_LEAF_PLUGIN_ID} from './richtext/plugin.js';
 
 export type PatchBuilder<
     T,
@@ -193,12 +194,24 @@ export function createPatchDispatcher<T, Extra, Tag extends string = 'type', R =
                         proxyCache[k] = {
                             insert: (at: {index: number}, text: string, when?: ApplyTiming) =>
                                 apply(
-                                    {op: 'richText', path, change: {kind: 'insert', at, text}, ...ghost},
+                                    {
+                                        op: 'leaf',
+                                        plugin: RICH_TEXT_LEAF_PLUGIN_ID,
+                                        path,
+                                        change: {kind: 'insert', at, text},
+                                        ...ghost,
+                                    },
                                     when,
                                 ),
                             delete: (range: {start: number; end: number}, when?: ApplyTiming) =>
                                 apply(
-                                    {op: 'richText', path, change: {kind: 'delete', range}, ...ghost},
+                                    {
+                                        op: 'leaf',
+                                        plugin: RICH_TEXT_LEAF_PLUGIN_ID,
+                                        path,
+                                        change: {kind: 'delete', range},
+                                        ...ghost,
+                                    },
                                     when,
                                 ),
                             mark: (
@@ -210,7 +223,8 @@ export function createPatchDispatcher<T, Extra, Tag extends string = 'type', R =
                             ) =>
                                 apply(
                                     {
-                                        op: 'richText',
+                                        op: 'leaf',
+                                        plugin: RICH_TEXT_LEAF_PLUGIN_ID,
                                         path,
                                         change: {
                                             kind: 'mark',
@@ -231,7 +245,8 @@ export function createPatchDispatcher<T, Extra, Tag extends string = 'type', R =
                             ) =>
                                 apply(
                                     {
-                                        op: 'richText',
+                                        op: 'leaf',
+                                        plugin: RICH_TEXT_LEAF_PLUGIN_ID,
                                         path,
                                         change: {kind: 'unmark', range, markType, preset},
                                         ...ghost,
@@ -241,7 +256,8 @@ export function createPatchDispatcher<T, Extra, Tag extends string = 'type', R =
                             replace: (snapshot: unknown, when?: ApplyTiming) =>
                                 apply(
                                     {
-                                        op: 'richText',
+                                        op: 'leaf',
+                                        plugin: RICH_TEXT_LEAF_PLUGIN_ID,
                                         path,
                                         change: {kind: 'replace', snapshot: snapshot as RichTextImportSnapshot},
                                         ...ghost,

@@ -1,8 +1,9 @@
 import type {IJsonSchemaCollection, OpenApi} from 'typia';
-import {validateRichTextOperation} from '../peritext/validation.js';
+import {assertRequiredLeafPlugins, createLeafPluginRegistry} from './plugins.js';
 import {tryUnpack} from './hlc.js';
-import {isRichTextSchema} from './schema.js';
+import {collectRequiredLeafPlugins, leafPluginDescriptorForSchema} from './schema.js';
 import type {CrdtPathSegment, CrdtUpdate, HlcTimestamp, JsonValue} from './types.js';
+import type {LeafPluginRegistry, LeafCrdtPluginAny} from './plugins.js';
 
 export type CrdtUpdateValidationIssue = {
     path: string;
@@ -24,6 +25,7 @@ export type CrdtUpdateValidator<T> = {
 export type CrdtUpdateValidatorOptions = {
     schemaIndex?: number;
     tagKey?: string;
+    leafPlugins?: readonly LeafCrdtPluginAny[];
 };
 
 type Schema = OpenApi.IJsonSchema;
@@ -33,6 +35,7 @@ type SchemaContext = {
     root: Schema;
     components: Components;
     tagKey: string;
+    leafPlugins: LeafPluginRegistry;
 };
 
 type RefContext = {
@@ -54,10 +57,14 @@ export function createCrdtUpdateValidator<T>(
             `Cannot create CRDT update validator: schema index ${options.schemaIndex ?? 0} is missing.`,
         );
     }
+    const leafPlugins = createLeafPluginRegistry(options.leafPlugins);
+    const requiredLeafPlugins = collectRequiredLeafPlugins(root, collection.components);
+    assertRequiredLeafPlugins(requiredLeafPlugins, leafPlugins);
     const ctx: SchemaContext = {
         root,
         components: collection.components,
         tagKey: options.tagKey ?? 'type',
+        leafPlugins,
     };
 
     const validate = (input: unknown): CrdtUpdateValidationResult<T> => {
@@ -103,7 +110,7 @@ function validateEnvelope(input: unknown): CrdtUpdateValidationResult<unknown> {
     if (typeof input.op !== 'string') {
         return fail(input, {path: 'op', message: 'CRDT update op must be a string.', value: input.op});
     }
-    if (!['insert', 'set', 'delete', 'setOrder', 'richText'].includes(input.op)) {
+    if (!['insert', 'set', 'delete', 'setOrder', 'leaf'].includes(input.op)) {
         return fail(input, {path: 'op', message: `Unknown CRDT update op "${input.op}".`, value: input.op});
     }
     const commandIssue = validateCommandInfo(input.command);
@@ -181,19 +188,15 @@ function validateEnvelope(input: unknown): CrdtUpdateValidationResult<unknown> {
             }
             return {success: true, data: input as CrdtUpdate};
         }
-        case 'richText': {
+        case 'leaf': {
             const pathIssue = validateCrdtPathEnvelope(input.path, 'path');
             if (pathIssue) return fail(input, pathIssue);
+            if (typeof input.plugin !== 'string' || input.plugin.length === 0) {
+                return fail(input, {path: 'plugin', message: '"leaf" requires a non-empty plugin id.', value: input.plugin});
+            }
             const tsIssue = validateTimestamp(input.ts, 'ts');
             if (tsIssue) return fail(input, tsIssue);
-            const richText = validateRichTextOperation(input.change);
-            if (!richText.success) {
-                return fail(input, {
-                    path: `change/${richText.errors[0]?.path ?? '<operation>'}`,
-                    message: richText.errors[0]?.message ?? 'Invalid rich text operation.',
-                    value: input.change,
-                });
-            }
+            if (!('change' in input)) return fail(input, {path: 'change', message: '"leaf" requires change.'});
             return {success: true, data: input as CrdtUpdate};
         }
     }
@@ -349,15 +352,57 @@ function validateUpdateSchema(update: CrdtUpdate, ctx: SchemaContext) {
         }
         return errors;
     }
-    if (update.op === 'richText') {
+    if (update.op === 'leaf') {
         const target = walkCrdtPath(ctx, update.path, 'path');
         if (!target.ok) {
             errors.push(target.issue);
-        } else if (!isRichTextSchema(resolveSchemaForCheck(ctx.components, target.schema))) {
+            return errors;
+        }
+        const descriptor = leafPluginDescriptorForSchema(resolveSchemaForCheck(ctx.components, target.schema));
+        if (!descriptor) {
             errors.push({
                 path: 'path',
-                message: `richText path "${pathToIssuePath(update.path)}" must point to a rich-text field.`,
-                expected: 'rich-text',
+                message: `leaf path "${pathToIssuePath(update.path)}" must point to a leaf CRDT field.`,
+                expected: 'leaf CRDT',
+            });
+            return errors;
+        }
+        if (descriptor.id !== update.plugin) {
+            errors.push({
+                path: 'plugin',
+                message: `leaf update plugin "${update.plugin}" does not match schema plugin "${descriptor.id}".`,
+                expected: descriptor.id,
+                value: update.plugin,
+            });
+            return errors;
+        }
+        const plugin = ctx.leafPlugins[descriptor.id];
+        if (!plugin) {
+            errors.push({
+                path: 'plugin',
+                message: `Missing required leaf CRDT plugin "${descriptor.id}" version ${descriptor.version}.`,
+                expected: `${descriptor.id}@${descriptor.version}`,
+                value: update.plugin,
+            });
+            return errors;
+        }
+        if (plugin.version !== descriptor.version) {
+            errors.push({
+                path: 'plugin',
+                message: `Leaf CRDT plugin "${descriptor.id}" version mismatch.`,
+                expected: `${descriptor.id}@${descriptor.version}`,
+                value: `${plugin.id}@${plugin.version}`,
+            });
+            return errors;
+        }
+        const operation = plugin.validateOperation(update.change);
+        if (!operation.success) {
+            const first = operation.errors[0];
+            errors.push({
+                path: first ? `change/${first.path}` : 'change',
+                message: first?.message ?? 'Invalid leaf CRDT operation.',
+                expected: first?.expected,
+                value: first?.value ?? update.change,
             });
         }
         return errors;

@@ -59,6 +59,7 @@ export function PeerJsApp<TState, EphemeralData = never>({
             docId: activeDocId,
             tagKey: app.tagKey,
             schema: app.schema,
+            leafPlugins: app.leafPlugins,
             validateState: app.validateState,
         }),
         [activeDocId, app],

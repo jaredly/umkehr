@@ -18,6 +18,7 @@ import type {CrdtMeta, ObjectMeta} from './index.js';
 import {
     materializeRichText,
     richText,
+    richTextLeafPlugin,
     richTextFromPlainText,
     type RichCollaborativeText,
 } from '../richtext/index.js';
@@ -30,34 +31,32 @@ type State = {
 
 const schema = typia.json.schemas<[State], '3.1'>();
 const ts = (count: number) => `000000000000001:${count.toString(36).padStart(5, '0')}:alice`;
+const createRichTextDoc = (timestamp = '001') =>
+    createCrdtDocument({title: 'Draft', body: richText()}, schema, {
+        timestamp,
+        leafPlugins: [richTextLeafPlugin],
+    });
 
 describe('crdt rich text metadata', () => {
     it('builds rich-text metadata from the schema marker', () => {
-        const doc = createCrdtDocument(
-            {title: 'Draft', body: richText()},
-            schema,
-            {timestamp: '001'},
-        );
+        const doc = createRichTextDoc();
 
         expect(doc.state).toEqual({title: 'Draft', body: {kind: 'rich-text', version: 1, chars: []}});
         expect(doc.meta).toMatchObject({
             kind: 'object',
             fields: {
                 body: {
-                    kind: 'richText',
+                    kind: 'leaf',
+                    plugin: 'umkehr.rich-text',
                     created: '001',
-                    maxOpCounter: 0,
+                    data: {maxOpCounter: 0},
                 },
             },
         });
     });
 
     it('materializes rich text through the explicit helper', () => {
-        const doc = createCrdtDocument(
-            {title: 'Draft', body: richText()},
-            schema,
-            {timestamp: '001'},
-        );
+        const doc = createRichTextDoc();
 
         expect(materializeRichText(doc, [{type: 'key', key: 'body'}])).toEqual({
             plainText: '',
@@ -66,21 +65,19 @@ describe('crdt rich text metadata', () => {
     });
 
     it('translates and applies rich-text insert updates', () => {
-        let doc = createCrdtDocument(
-            {title: 'Draft', body: richText()},
-            schema,
-            {timestamp: '001'},
-        );
+        let doc = createRichTextDoc();
         const $ = createPatchBuilder<State>();
         const updates = createCrdtUpdates(doc, $.body.$text.insert({index: 0}, 'hi'), ts(1));
 
         expect(updates).toMatchObject([
             {
-                op: 'richText',
+                op: 'leaf',
+                plugin: 'umkehr.rich-text',
                 change: {action: 'insert', opId: '1@alice:main', afterId: null, char: 'h'},
             },
             {
-                op: 'richText',
+                op: 'leaf',
+                plugin: 'umkehr.rich-text',
                 change: {action: 'insert', opId: '2@alice:main', afterId: '1@alice:main', char: 'i'},
             },
         ]);
@@ -93,11 +90,7 @@ describe('crdt rich text metadata', () => {
     });
 
     it('applies rich-text updates without mutating previous metadata', () => {
-        const doc = createCrdtDocument(
-            {title: 'Draft', body: richText()},
-            schema,
-            {timestamp: '001'},
-        );
+        const doc = createRichTextDoc();
         const beforeMeta = structuredClone(doc.meta) as CrdtMeta;
         const titleMeta = objectField(doc.meta, 'title');
         const bodyMeta = objectField(doc.meta, 'body');
@@ -118,11 +111,7 @@ describe('crdt rich text metadata', () => {
     });
 
     it('applies marks and reports the rich-text field as changed', () => {
-        let doc = createCrdtDocument(
-            {title: 'Draft', body: richText()},
-            schema,
-            {timestamp: '001'},
-        );
+        let doc = createRichTextDoc();
         const $ = createPatchBuilder<State>();
         for (const update of createCrdtUpdates(doc, $.body.$text.insert({index: 0}, 'hi'), ts(1))) {
             doc = applyCrdtUpdate(doc, update);
@@ -145,12 +134,8 @@ describe('crdt rich text metadata', () => {
     });
 
     it('validates rich-text update envelopes', () => {
-        const validator = createCrdtUpdateValidator(schema);
-        const doc = createCrdtDocument(
-            {title: 'Draft', body: richText()},
-            schema,
-            {timestamp: ts(0)},
-        );
+        const validator = createCrdtUpdateValidator(schema, {leafPlugins: [richTextLeafPlugin]});
+        const doc = createRichTextDoc(ts(0));
         const [update] = createCrdtUpdates(
             doc,
             createPatchBuilder<State>().body.$text.replace(richTextFromPlainText('h')),
@@ -169,11 +154,7 @@ describe('crdt rich text metadata', () => {
 
     it('undoes and redoes grouped rich-text inserts with fresh operations', () => {
         const base = createCrdtLocalHistory(
-            createCrdtDocument(
-                {title: 'Draft', body: richText()},
-                schema,
-                {timestamp: ts(0)},
-            ),
+            createRichTextDoc(ts(0)),
         );
         const $ = createPatchBuilder<State>();
         const applied = applyLocalCommand(
@@ -195,7 +176,7 @@ describe('crdt rich text metadata', () => {
             '',
         );
         expect(undone.updates).toHaveLength(2);
-        expect(undone.updates.every((update) => update.op === 'richText')).toBe(true);
+        expect(undone.updates.every((update) => update.op === 'leaf')).toBe(true);
         expect(canRedoLocalCommand(undone.history, 'local')).toBe(true);
 
         const redone = redoLocalCommand(undone.history, 'local', undone.clock);
@@ -205,18 +186,14 @@ describe('crdt rich text metadata', () => {
             'hi',
         );
         expect(redone.updates).toHaveLength(2);
-        expect(redone.updates[0]?.op === 'richText' ? redone.updates[0].change.opId : '').not.toBe(
-            applied.updates[0]?.op === 'richText' ? applied.updates[0].change.opId : '',
+        expect(redone.updates[0]?.op === 'leaf' ? (redone.updates[0].change as {opId: string}).opId : '').not.toBe(
+            applied.updates[0]?.op === 'leaf' ? (applied.updates[0].change as {opId: string}).opId : '',
         );
     });
 
     it('undoes and redoes rich-text marks with fresh operations', () => {
         let history = createCrdtLocalHistory(
-            createCrdtDocument(
-                {title: 'Draft', body: richText()},
-                schema,
-                {timestamp: ts(0)},
-            ),
+            createRichTextDoc(ts(0)),
         );
         const $ = createPatchBuilder<State>();
         const inserted = applyLocalCommand(

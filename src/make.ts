@@ -100,7 +100,7 @@ export function realizeDraftPatch<T, V, Tag extends PropertyKey, Extra>(
             }
             return draft;
         }
-        case 'richText':
+        case 'leaf':
             return draft;
         case 'nested': {
             throw new Error(`Cannot realize nested patch directly. Use resolveAndApply instead.`);
@@ -135,7 +135,7 @@ export function resolveAndApply<T, Extra, Tag extends string = 'type'>(
             return next.changes;
         }
         const ready = realizeDraftPatch(current, op);
-        if (ready.op !== 'richText') current = ops.apply(current, ready, equal);
+        if (ready.op !== 'leaf') current = ops.apply(current, ready, equal);
         return ready;
     });
     return {current, changes};

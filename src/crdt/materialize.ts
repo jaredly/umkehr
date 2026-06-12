@@ -1,8 +1,11 @@
 import {compareStrings} from './fractionalIndex.js';
-import {emptyRichTextState} from '../peritext/sequence.js';
-import type {CrdtMeta, JsonValue} from './types.js';
+import type {CrdtMeta, CrdtSchemaContext, JsonValue} from './types.js';
 
-export function materialize(meta: CrdtMeta, previous?: unknown): JsonValue | undefined {
+export function materialize(
+    meta: CrdtMeta,
+    previous?: unknown,
+    ctx?: CrdtSchemaContext,
+): JsonValue | undefined {
     switch (meta.kind) {
         case 'primitive':
             return meta.value;
@@ -15,7 +18,7 @@ export function materialize(meta: CrdtMeta, previous?: unknown): JsonValue | und
                     previous && typeof previous === 'object'
                         ? (previous as Record<string, unknown>)[key]
                         : undefined;
-                const next = materialize(field, previousField);
+                const next = materialize(field, previousField, ctx);
                 if (next !== undefined) value[key] = next;
             }
             return value;
@@ -27,7 +30,7 @@ export function materialize(meta: CrdtMeta, previous?: unknown): JsonValue | und
                     previous && typeof previous === 'object'
                         ? (previous as Record<string, unknown>)[key]
                         : undefined;
-                const next = materialize(entry, previousEntry);
+                const next = materialize(entry, previousEntry, ctx);
                 if (next !== undefined) value[key] = next;
             }
             return value;
@@ -49,6 +52,7 @@ export function materialize(meta: CrdtMeta, previous?: unknown): JsonValue | und
                                   : previous && typeof previous === 'object'
                                     ? (previous as Record<string, unknown>)[id]
                                     : undefined,
+                              ctx,
                           )
                         : undefined,
                 )
@@ -60,16 +64,15 @@ export function materialize(meta: CrdtMeta, previous?: unknown): JsonValue | und
                     previous && typeof previous === 'object'
                         ? (previous as Record<string, unknown>)[key]
                         : undefined;
-                const next = materialize(field, previousField);
+                const next = materialize(field, previousField, ctx);
                 if (next !== undefined) value[key] = next;
             }
             return value;
         }
-        case 'richText':
-            return isRichTextValue(previous) ? (previous as JsonValue) : (emptyRichTextState() as JsonValue);
+        case 'leaf': {
+            const plugin = ctx?.leafPlugins[meta.plugin];
+            if (plugin?.isValue(previous)) return previous as JsonValue;
+            return plugin ? plugin.empty({schema: ctx.root}) : (previous as JsonValue | undefined);
+        }
     }
-}
-
-function isRichTextValue(value: unknown) {
-    return Boolean(value && typeof value === 'object' && Array.isArray((value as {chars?: unknown}).chars));
 }

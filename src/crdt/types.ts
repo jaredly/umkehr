@@ -1,5 +1,5 @@
 import type {OpenApi} from 'typia';
-import type {RichTextOperation} from '../peritext/types.js';
+import type {LeafCrdtPluginAny, LeafPluginDescriptor, LeafPluginRegistry} from './plugins.js';
 
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | {[key: string]: JsonValue | undefined};
@@ -21,6 +21,8 @@ export type CrdtSchemaContext = {
     root: Schema;
     components: Components;
     tagKey: string;
+    leafPlugins: LeafPluginRegistry;
+    requiredLeafPlugins: LeafPluginDescriptor[];
 };
 
 export type PrimitiveMeta = {
@@ -72,10 +74,11 @@ export type TombstoneMeta = {
     deleted: HlcTimestamp;
 };
 
-export type RichTextMeta = {
-    kind: 'richText';
+export type LeafMeta<TData extends JsonValue = JsonValue> = {
+    kind: 'leaf';
+    plugin: string;
     created: HlcTimestamp;
-    maxOpCounter: number;
+    data: TData;
 };
 
 export type CrdtMeta =
@@ -85,7 +88,7 @@ export type CrdtMeta =
     | ArrayMeta
     | TaggedUnionMeta
     | TombstoneMeta
-    | RichTextMeta;
+    | LeafMeta;
 
 export type CrdtPathSegment =
     | {type: 'objectField'; key: string; parentCreated: HlcTimestamp}
@@ -143,10 +146,11 @@ export type CrdtSetOrderUpdate = {
     command?: CrdtCommandInfo;
 };
 
-export type CrdtRichTextUpdate = {
-    op: 'richText';
+export type CrdtLeafUpdate<TOperation extends JsonValue = JsonValue> = {
+    op: 'leaf';
+    plugin: string;
     path: CrdtPathSegment[];
-    change: RichTextOperation;
+    change: TOperation;
     ts: HlcTimestamp;
     command?: CrdtCommandInfo;
 };
@@ -156,7 +160,7 @@ export type CrdtUpdate =
     | CrdtSetUpdate
     | CrdtDeleteUpdate
     | CrdtSetOrderUpdate
-    | CrdtRichTextUpdate;
+    | CrdtLeafUpdate;
 
 export type PendingUpdate = {
     update: CrdtUpdate;
@@ -168,4 +172,6 @@ export type CreateCrdtDocumentOptions = {
     timestamp: HlcTimestamp;
     tagKey?: string;
     schemaIndex?: number;
+    leafPlugins?: readonly LeafCrdtPluginAny[];
+    sessionId?: string;
 };

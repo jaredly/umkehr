@@ -12,6 +12,7 @@ import {
     createCrdtDocument,
     createCrdtLocalHistory,
     hlc,
+    type LeafCrdtPluginAny,
     type CrdtMeta,
     type CrdtLocalHistory,
     type CrdtPathSegment,
@@ -111,6 +112,7 @@ export type AppDefinition<TState, EphemeralData = never> = {
     schemaVersion: number;
     tagKey: string;
     schema: IJsonSchemaCollection<'3.1', [TState]>;
+    leafPlugins?: readonly LeafCrdtPluginAny[];
     validateState(input: unknown): IValidation<TState>;
     initialState: TState;
     initialTimestamp?: HlcTimestamp;
@@ -142,6 +144,7 @@ export function createInitialCrdtHistory<TState, EphemeralData = never>(
     return createCrdtLocalHistory(
         createCrdtDocument(app.initialState, app.schema, {
             timestamp: app.initialTimestamp ?? defaultInitialTimestamp,
+            leafPlugins: app.leafPlugins,
         }),
     );
 }

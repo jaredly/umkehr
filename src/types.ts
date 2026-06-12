@@ -84,11 +84,14 @@ export type RichTextPatchChange =
       }
     | {kind: 'replace'; snapshot: RichTextImportSnapshot};
 
-export type RichTextPatch<_T> = {
-    op: 'richText';
+export type LeafPatch<_T, TPlugin extends string = string, TChange = unknown> = {
+    op: 'leaf';
+    plugin: TPlugin;
     path: Path;
-    change: RichTextPatchChange;
+    change: TChange;
 };
+
+export type RichTextPatch<T> = LeafPatch<T, 'umkehr.rich-text', RichTextPatchChange>;
 
 export type Patch<T> =
     | AddOp<T>
@@ -96,7 +99,7 @@ export type Patch<T> =
     | RemoveOp<T>
     | MoveOp<T>
     | ReorderOp<T>
-    | RichTextPatch<T>;
+    | LeafPatch<T>;
 
 export type DraftReplace<_T> = {
     op: 'replace';
@@ -127,7 +130,7 @@ export type DraftPatch<T, Tag extends PropertyKey = 'type', Extra = unknown> =
     | DraftPush<T>
     | ReorderOp<T>
     | DraftRemove<T>
-    | RichTextPatch<T>
+    | LeafPatch<T>
     | DraftNested<T, unknown, Tag, Extra>
     | MoveOp<T>;
 

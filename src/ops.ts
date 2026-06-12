@@ -86,7 +86,7 @@ export function rebase<T, A extends PropertyKey, B>(
         case 'reorder':
         case 'replace':
         case 'remove':
-        case 'richText':
+        case 'leaf':
             return {...op, path: [...path, ...op.path]};
         case 'nested':
             throw new Error(
@@ -123,8 +123,8 @@ export function invertPatch<T>(op: Patch<T>): Patch<T> {
             });
             return {...op, indices: inverse};
         }
-        case 'richText':
-            throw new Error('Cannot invert rich text patch outside CRDT history.');
+        case 'leaf':
+            throw new Error('Cannot invert leaf CRDT patch outside CRDT history.');
     }
     throw new Error('Cannot invert unknown patch operation.');
 }
@@ -141,8 +141,8 @@ export function applyPatch<T>(base: T, op: Patch<T>, equal: EqualFn) {
             return move(base, op, equal);
         case 'reorder':
             return reorder(base, op, equal);
-        case 'richText':
-            throw new Error('Cannot apply rich text patch outside CRDT history.');
+        case 'leaf':
+            throw new Error('Cannot apply leaf CRDT patch outside CRDT history.');
     }
     throw new Error('Cannot apply unknown patch operation.');
 }

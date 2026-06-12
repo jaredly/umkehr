@@ -169,7 +169,7 @@ export function changedNormalPathsForCrdtUpdate<T>(
     after: CrdtDocument<T>,
     update: CrdtUpdate,
 ): Path[] | null {
-    if (update.op === 'richText') {
+    if (update.op === 'leaf') {
         const path =
             normalPathForCrdtPath(after, update.path) ??
             normalPathForCrdtPath(before, update.path);

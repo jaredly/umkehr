@@ -1,8 +1,8 @@
 import {fractionalIndexBetween} from './fractionalIndex.js';
 import {
     arrayItemSchema,
+    leafPluginDescriptorForSchema,
     isRecordSchema,
-    isRichTextSchema,
     isTaggedUnionSchema,
     propertySchema,
     recordValueSchema,
@@ -28,11 +28,18 @@ export function buildMeta(
 ): CrdtMeta {
     if (value === undefined) return {kind: 'tombstone', deleted: ts};
     const schema = resolveRef(ctx, inputSchema);
-    if (isRichTextSchema(schema) || isRichTextValue(value)) {
+    const leafPlugin = leafPluginForValue(ctx, schema, value);
+    if (leafPlugin) {
+        const initialized = leafPlugin.plugin.init({
+            value: value as never,
+            schema,
+            ts,
+        });
         return {
-            kind: 'richText',
+            kind: 'leaf',
+            plugin: leafPlugin.plugin.id,
             created: ts,
-            maxOpCounter: 0,
+            data: initialized.meta,
         };
     }
     if (value === null || typeof value !== 'object') return {kind: 'primitive', ts, value};
@@ -85,14 +92,26 @@ export function buildMeta(
     return {kind: 'object', created: ts, fields};
 }
 
-function isRichTextValue(value: JsonValue | undefined) {
-    return Boolean(
-        value &&
-            typeof value === 'object' &&
-            !Array.isArray(value) &&
-            (value as {kind?: unknown}).kind === 'rich-text' &&
-            Array.isArray((value as {chars?: unknown}).chars),
-    );
+function leafPluginForValue(
+    ctx: CrdtSchemaContext,
+    schema: Schema,
+    value: JsonValue | undefined,
+) {
+    const descriptor = leafPluginDescriptorForSchema(schema);
+    if (descriptor) {
+        const plugin = ctx.leafPlugins[descriptor.id];
+        if (!plugin) {
+            throw new Error(`Missing required leaf CRDT plugin "${descriptor.id}" version ${descriptor.version}.`);
+        }
+        if (plugin.version !== descriptor.version) {
+            throw new Error(
+                `Leaf CRDT plugin "${descriptor.id}" version mismatch: schema requires ${descriptor.version}, registered ${plugin.version}.`,
+            );
+        }
+        return {plugin};
+    }
+    const plugin = Object.values(ctx.leafPlugins).find((candidate) => candidate.isValue(value));
+    return plugin ? {plugin} : null;
 }
 
 export function cloneMeta(meta: CrdtMeta): CrdtMeta {
@@ -107,7 +126,7 @@ export function versionOf(meta: CrdtMeta): HlcTimestamp | undefined {
         case 'record':
         case 'array':
         case 'tagged':
-        case 'richText':
+        case 'leaf':
             return meta.created;
         case 'tombstone':
             return meta.deleted;
@@ -120,7 +139,7 @@ export function createdOf(meta: CrdtMeta): HlcTimestamp | undefined {
         case 'record':
         case 'array':
         case 'tagged':
-        case 'richText':
+        case 'leaf':
             return meta.created;
         default:
             return undefined;

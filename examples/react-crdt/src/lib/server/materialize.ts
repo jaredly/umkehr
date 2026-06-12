@@ -437,7 +437,7 @@ function pathForUpdate<TState>(
     switch (update.op) {
         case 'set':
         case 'delete':
-        case 'richText':
+        case 'leaf':
             return update.path;
         case 'insert': {
             const array = getMetaAtPath(referenceDoc.meta, update.arrayPath);
