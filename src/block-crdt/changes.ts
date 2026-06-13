@@ -1,15 +1,44 @@
 import {applyMany, charOp} from './apply.js';
 import {ROOT_ID, materializedBlockParent, materializedBlockPath} from './blocks.js';
-import {lamportToString, parseLamportString} from './ids.js';
+import {assertActorId, lamportToString, parseLamportString} from './ids.js';
 import {createLseqIdBetween, LseqOptions} from './lseq.js';
+import {markRange} from './marks.js';
 import {
     charAtVisibleOffset,
     charRecord,
     findTail,
     orderedCharIdsForBlock,
+    visibleBlockOutline,
     visibleBlockChildren,
 } from './traversal.js';
-import {Block, CachedState, Char, DefaultBlockMeta, HLC, Lamport, Op, TimestampedBlockMeta} from './types.js';
+import {Block, CachedState, Char, DefaultBlockMeta, HLC, JsonValue, Lamport, Op, TimestampedBlockMeta} from './types.js';
+
+export type InsertBlockOpsOptions<M extends TimestampedBlockMeta> = {
+    actor: string;
+    parent: Lamport;
+    before?: Lamport | null;
+    after?: Lamport | null;
+    meta: M;
+    ts: HLC;
+    options?: LseqOptions;
+};
+
+export type DeleteBlockMode = 'block-only' | 'subtree';
+
+export type DeleteBlockOpsOptions = {
+    block: Lamport;
+    mode?: DeleteBlockMode;
+};
+
+export type MarkRangePoint = {
+    block: Lamport;
+    offset: number;
+};
+
+export type MarkRange = {
+    start: MarkRangePoint;
+    end: MarkRangePoint;
+};
 
 export const addChars = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
     state: CachedState<M>,
@@ -122,6 +151,94 @@ export const splitBlockOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>
     return split(state, {block, char, previous}, ts, actor, options);
 };
 
+export const insertBlockOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
+    state: CachedState<M>,
+    {
+        actor,
+        parent,
+        before = null,
+        after = null,
+        meta,
+        ts,
+        options,
+    }: InsertBlockOpsOptions<M>,
+): Op<M>[] => {
+    assertActorId(actor);
+    const parentId = lamportToString(parent);
+    const beforeId = before ? lamportToString(before) : null;
+    const afterId = after ? lamportToString(after) : null;
+
+    if (parentId !== ROOT_ID) {
+        const parentBlock = state.state.blocks[parentId];
+        if (!parentBlock || parentBlock.deleted || state.cache.joinedBlocks[parentId]) {
+            throw new Error(`insert parent block not found or hidden`);
+        }
+    }
+
+    const siblings = visibleBlockChildren(state, parentId);
+    const beforeIndex = beforeId === null ? -1 : siblings.indexOf(beforeId);
+    const afterIndex = afterId === null ? siblings.length : siblings.indexOf(afterId);
+    if (beforeId !== null && beforeIndex < 0) {
+        throw new Error(`insert before block is not a visible child of the target parent`);
+    }
+    if (afterId !== null && afterIndex < 0) {
+        throw new Error(`insert after block is not a visible child of the target parent`);
+    }
+    if (beforeId !== null && afterId !== null && beforeId === afterId) {
+        throw new Error(`insert before/after anchors must be distinct`);
+    }
+    if (afterIndex !== beforeIndex + 1) {
+        throw new Error(`insert before/after anchors must be adjacent siblings`);
+    }
+
+    const id: Lamport = [state.state.maxSeenCount + 1, actor];
+    const parentPath = parentId === ROOT_ID ? [] : materializedBlockPath(state, parentId);
+    return [
+        {
+            type: 'block',
+            block: blockBetween(
+                id,
+                meta,
+                parentPath,
+                beforeId ? state.state.blocks[beforeId].order.index : null,
+                afterId ? state.state.blocks[afterId].order.index : null,
+                ts,
+                actor,
+                options,
+            ),
+        },
+    ];
+};
+
+export const deleteBlockOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
+    state: CachedState<M>,
+    {block, mode = 'block-only'}: DeleteBlockOpsOptions,
+): Op<M>[] => {
+    const blockId = lamportToString(block);
+    const current = state.state.blocks[blockId];
+    if (!current) {
+        throw new Error(`delete block not found`);
+    }
+    if (current.deleted || state.cache.joinedBlocks[blockId]) {
+        throw new Error(`delete block not found or hidden`);
+    }
+    if (mode !== 'block-only' && mode !== 'subtree') {
+        throw new Error(`delete block mode must be block-only or subtree`);
+    }
+    if (mode === 'block-only') {
+        return [{type: 'block:delete', id: block}];
+    }
+    const visible = visibleBlockOutline(state);
+    const target = visible.find((entry) => entry.id === blockId);
+    if (!target) {
+        throw new Error(`delete block not found or hidden`);
+    }
+    return [blockId, ...visibleDescendantIds(visible, blockId)].map((id) => ({
+        type: 'block:delete',
+        id: state.state.blocks[id].id,
+    }));
+};
+
 export const joinBlocksOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
     state: CachedState<M>,
     {actor, left, right, ts}: {actor: string; left: Lamport; right: Lamport; ts: HLC},
@@ -131,6 +248,75 @@ export const setBlockMetaOps = <M extends TimestampedBlockMeta = DefaultBlockMet
     _state: CachedState<M>,
     {block, meta}: {block: Lamport; meta: M},
 ): Op<M>[] => [{type: 'block:meta', id: block, meta}];
+
+export const markRangesOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
+    state: CachedState<M>,
+    ranges: MarkRange[],
+    type: string,
+    data: JsonValue | undefined,
+    remove: boolean,
+    options: {
+        actor: string;
+        ts?: HLC;
+        nextId?: () => Lamport;
+    },
+): Op<M>[] => {
+    assertActorId(options.actor);
+    let next = state.state.maxSeenCount + 1;
+    const nextId = options.nextId ?? (() => [next++, options.actor] as Lamport);
+    const ops: Op<M>[] = [];
+    for (const range of ranges) {
+        if (lamportToString(range.start.block) !== lamportToString(range.end.block)) {
+            throw new Error(`mark range must be within one block`);
+        }
+        if (range.start.offset < range.end.offset) {
+            ops.push(markRange(state, range.start.block, range.start.offset, range.end.offset, type, data, remove, nextId()));
+        }
+    }
+    return ops;
+};
+
+export const markSelectionOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
+    state: CachedState<M>,
+    selection: {
+        anchor: {blockId: string; offset: number};
+        focus: {blockId: string; offset: number};
+    },
+    type: string,
+    data: JsonValue | undefined,
+    remove: boolean,
+    options: {
+        actor: string;
+        ts?: HLC;
+        nextId?: () => Lamport;
+    },
+): Op<M>[] => {
+    const blocks = visibleBlockOutline(state).map((entry) => entry.id);
+    const anchorIndex = blocks.indexOf(selection.anchor.blockId);
+    const focusIndex = blocks.indexOf(selection.focus.blockId);
+    if (anchorIndex < 0 || focusIndex < 0) {
+        throw new Error(`mark selection block not found or hidden`);
+    }
+    const forward =
+        anchorIndex < focusIndex ||
+        (anchorIndex === focusIndex && selection.anchor.offset <= selection.focus.offset);
+    const start = forward ? selection.anchor : selection.focus;
+    const end = forward ? selection.focus : selection.anchor;
+    const startIndex = blocks.indexOf(start.blockId);
+    const endIndex = blocks.indexOf(end.blockId);
+    const ranges: MarkRange[] = [];
+    for (let index = startIndex; index <= endIndex; index++) {
+        const blockId = blocks[index];
+        const block = state.state.blocks[blockId].id;
+        const length = orderedCharIdsForBlock(state, blockId, {visibleOnly: true}).length;
+        const startOffset = index === startIndex ? Math.max(0, Math.min(start.offset, length)) : 0;
+        const endOffset = index === endIndex ? Math.max(0, Math.min(end.offset, length)) : length;
+        if (startOffset < endOffset) {
+            ranges.push({start: {block, offset: startOffset}, end: {block, offset: endOffset}});
+        }
+    }
+    return markRangesOps(state, ranges, type, data, remove, options);
+};
 
 export const moveBlockOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
     state: CachedState<M>,
@@ -430,5 +616,18 @@ const isBlockDescendantOf = <M extends TimestampedBlockMeta>(
     blockId: string,
     ancestorId: string,
 ): boolean => materializedBlockPath(state, blockId).map(lamportToString).includes(ancestorId);
+
+const visibleDescendantIds = (outline: {id: string; parentId: string}[], blockId: string): string[] => {
+    const result: string[] = [];
+    const visit = (parent: string) => {
+        for (const entry of outline) {
+            if (entry.parentId !== parent) continue;
+            result.push(entry.id);
+            visit(entry.id);
+        }
+    };
+    visit(blockId);
+    return result;
+};
 
 const lastMoveTs = (ts: Char['parent']['ts']) => (typeof ts === 'string' ? ts : ts[2]);

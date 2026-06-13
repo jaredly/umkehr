@@ -23,13 +23,24 @@ export type {
 export {
     addChars,
     deleteRangeOps,
+    deleteBlockOps,
     insertTextOps,
+    insertBlockOps,
     join,
     joinBlocksOps,
+    markRangesOps,
+    markSelectionOps,
     moveBlockOps,
     setBlockMetaOps,
     split,
     splitBlockOps,
+} from './changes.js';
+export type {
+    DeleteBlockMode,
+    DeleteBlockOpsOptions,
+    InsertBlockOpsOptions,
+    MarkRange,
+    MarkRangePoint,
 } from './changes.js';
 
 export {
@@ -89,17 +100,33 @@ export {
 export type {UndoPlan, UndoUnsupported} from './undo.js';
 
 export {
+    blockIdAtVisiblePath,
     blockContents,
+    clampBlockPoint,
     charToString,
     findTail,
+    graphemeLength,
+    graphemeOffsetToUtf16Offset,
     hasJoinStyleParent,
     orderedCharIdsForBlock,
+    resolvePoint,
+    resolveSelection,
+    retainPoint,
+    retainSelection,
     rootBlockIds,
+    segmentGraphemes,
     stateToString,
+    utf16OffsetToGraphemeOffset,
+    visibleBlockEntryAtPath,
     visibleBlockChildren,
     visibleBlockOutline,
+    visibleGraphemeIdsForBlock,
+    visibleLengthForBlock,
+    visiblePathForBlockId,
+    visibleSiblingAnchorsForPath,
+    visibleTextForBlock,
 } from './traversal.js';
-export type {VisibleBlockOutlineEntry} from './traversal.js';
+export type {BlockPoint, RetainedPoint, RetainedSelection, VisibleBlockOutlineEntry, VisibleBlockPath} from './traversal.js';
 
 export {
     blockOrderVersionWins,

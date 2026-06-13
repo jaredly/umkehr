@@ -99,16 +99,56 @@ The public helpers return related `Op[]` batches. They do not introduce a transa
 ```ts
 insertTextOps(state, {actor, block, offset, text, ts});
 deleteRangeOps(state, {block, startOffset, endOffset});
+insertBlockOps(state, {actor, parent, before, after, meta, ts, options});
+deleteBlockOps(state, {block, mode});
 splitBlockOps(state, {actor, block, offset, ts, options});
 joinBlocksOps(state, {actor, left, right, ts});
 moveBlockOps(state, {actor, block, parent, before, after, ts, options});
 setBlockMetaOps(state, {block, meta});
 markRangeOp(state, block, startOffset, endOffset, type, data, remove, id);
+markRangesOps(state, ranges, type, data, remove, {actor, nextId});
+markSelectionOps(state, selection, type, data, remove, {actor, nextId});
 ```
 
 Offsets are visible text offsets inside a visible block. Text insertion uses `Intl.Segmenter`, so ids are allocated per grapheme cluster rather than per UTF-16 code unit.
 
+`insertBlockOps` creates a visible block under a visible parent between adjacent visible sibling anchors. Use `visibleSiblingAnchorsForPath` when an editor reports insertion positions as `number[]` paths.
+
+`deleteBlockOps` defaults to `mode: 'block-only'`: the target block is tombstoned, its own text disappears, and visible descendants are spliced into the nearest visible ancestor by traversal. Use `mode: 'subtree'` to tombstone the target and all currently visible descendants.
+
 `moveBlockOps` takes a visible logical parent. Hidden deleted/joined parents are not public move targets. If a hidden block has visible descendants, those descendants are treated as logical children of the nearest visible ancestor for `visibleBlockChildren`, `visibleBlockOutline`, and move placement.
+
+## Visible Paths
+
+Visible paths are adapter-local addresses, not durable ids. Convert them to stable Lamport ids as soon as possible:
+
+```ts
+const blockId = blockIdAtVisiblePath(state, [2, 0]);
+const path = visiblePathForBlockId(state, blockId);
+const anchors = visibleSiblingAnchorsForPath(state, [3]);
+```
+
+Path lookup returns `null` for missing, deleted, or joined blocks. Insertion anchor lookup allows the position after the last child.
+
+## Selections And Positions
+
+Use retained selections when a selection must survive remote edits:
+
+```ts
+const retained = retainSelection(state, selection);
+const currentSelection = resolveSelection(nextState, retained);
+```
+
+Retained points anchor to stable character ids where possible. Resolving them counts only visible graphemes while still scanning tombstones, splits, and joined text streams, so inactive selections stay near the same logical content after inserts, deletes, splits, and joins.
+
+Editor DOM APIs often report UTF-16 offsets. Convert those offsets before calling text, mark, or selection helpers:
+
+```ts
+const graphemeOffset = utf16OffsetToGraphemeOffset(text, domOffset);
+const domOffset = graphemeOffsetToUtf16Offset(text, graphemeOffset);
+```
+
+`visibleTextForBlock`, `visibleGraphemeIdsForBlock`, `visibleLengthForBlock`, and `clampBlockPoint` provide adapter-friendly wrappers for common visible text and position operations.
 
 ## Applying Ops
 
@@ -234,7 +274,7 @@ Known pre-release changes already made:
 
 Before publishing a release that includes `umkehr/block-crdt`:
 
-- run `npm exec vitest -- run src/block-crdt/index.test.ts src/block-crdt/formatting.test.ts examples/block-rich-text/src`,
+- run `npm exec vitest -- run src/block-crdt/index.test.ts src/block-crdt/formatting.test.ts src/block-crdt/adapter-additions.test.ts examples/block-rich-text/src`,
 - run `npm run typecheck`,
 - run `npm run build`,
 - run `npm exec tsc -- -p examples/block-rich-text/tsconfig.json --noEmit`,
