@@ -168,6 +168,46 @@ describe('plim block crdt adapter', () => {
         });
     });
 
+    it('retains selection in the new empty block after splitting at block end', () => {
+        const adapter = createAdapterState(createFixtureState());
+        const tx = {
+            ops: [
+                {
+                    kind: 'splitBlock',
+                    path: [0],
+                    offset: 'Hello 👩‍💻'.length,
+                } satisfies TransactionOp,
+            ],
+        };
+        const postPlim = {
+            doc: {
+                ...adapter.plim.doc,
+                children: [
+                    adapter.plim.doc.children[0],
+                    {
+                        id: 'temporary-empty-split-id',
+                        type: 'paragraph',
+                        attrs: {tone: 'plain'},
+                    },
+                    ...adapter.plim.doc.children.slice(1),
+                ],
+            },
+            selection: {
+                anchor: {path: [1], offset: 0},
+                head: {path: [1], offset: 0},
+            },
+        };
+
+        const next = applyLocalTransaction(adapter, tx, {actor: 'bob', ts: makeTs(100)}, postPlim);
+
+        expect(next.plim.selection).toEqual({
+            anchor: {path: [1], offset: 0},
+            head: {path: [1], offset: 0},
+        });
+        expect(next.plim.doc.children[1].id).not.toBe('temporary-empty-split-id');
+        expect(next.plim.doc.children[1].text).toEqual([]);
+    });
+
     it('translates split, join, insert block, block-only remove, move, metadata, and marks', () => {
         const state = createFixtureState();
         const doc = crdtToPlimDocument(state);

@@ -370,6 +370,120 @@ describe('Plim block CRDT example app', () => {
         });
     });
 
+    it('moves selection to the new block after pressing Enter in an empty block', async () => {
+        const view = render(<App />);
+        const left = await editorPane(view, 'Editor A');
+        const content = firstContent(left);
+
+        setDomCaretAtEnd(content);
+        fireEvent(document, new window.Event('selectionchange', {bubbles: false}));
+        await waitFor(() => expect(plimState(view, 'Editor A').selection.head.offset).toBe('Hello 👩‍💻'.length));
+
+        fireEvent(
+            content,
+            new InputEvent('beforeinput', {
+                bubbles: true,
+                cancelable: true,
+                inputType: 'insertParagraph',
+            }),
+        );
+
+        const firstEmpty = await waitFor(() => {
+            const state = plimState(view, 'Editor A');
+            expect(state.selection.head.path).toEqual([1]);
+            expect(state.selection.head.offset).toBe(0);
+            return blockContent(left, state.doc.children[1].id);
+        });
+
+        fireEvent(
+            firstEmpty,
+            new InputEvent('beforeinput', {
+                bubbles: true,
+                cancelable: true,
+                inputType: 'insertParagraph',
+            }),
+        );
+
+        await waitFor(() => {
+            const state = plimState(view, 'Editor A');
+            expect(state.selection.head.path).toEqual([2]);
+            expect(state.selection.head.offset).toBe(0);
+            const active = left.querySelector<HTMLElement>('[data-caret-active="true"]');
+            expect(active?.dataset.blockId).toBe(state.doc.children[2].id);
+            expect(plimState(view, 'Editor B').doc.children[2].text).toEqual([]);
+        });
+    });
+
+    it('joins the current empty block into the previous block on Backspace', async () => {
+        const view = render(<App />);
+        const left = await editorPane(view, 'Editor A');
+        const right = await editorPane(view, 'Editor B');
+        const content = firstContent(left);
+
+        setDomCaretAtEnd(content);
+        fireEvent(document, new window.Event('selectionchange', {bubbles: false}));
+        await waitFor(() => expect(plimState(view, 'Editor A').selection.head.offset).toBe('Hello 👩‍💻'.length));
+
+        fireEvent(
+            content,
+            new InputEvent('beforeinput', {
+                bubbles: true,
+                cancelable: true,
+                inputType: 'insertParagraph',
+            }),
+        );
+
+        const firstEmpty = await waitFor(() => {
+            const state = plimState(view, 'Editor A');
+            expect(state.selection.head.path).toEqual([1]);
+            return blockContent(left, state.doc.children[1].id);
+        });
+
+        fireEvent(
+            firstEmpty,
+            new InputEvent('beforeinput', {
+                bubbles: true,
+                cancelable: true,
+                inputType: 'insertParagraph',
+            }),
+        );
+
+        const secondEmpty = await waitFor(() => {
+            const state = plimState(view, 'Editor A');
+            expect(state.selection.head.path).toEqual([2]);
+            expect(state.doc.children.length).toBeGreaterThanOrEqual(4);
+            return blockContent(left, state.doc.children[2].id);
+        });
+
+        secondEmpty.closest<HTMLElement>('.plim-editor')?.focus();
+        setDomCaretAtEnd(secondEmpty);
+        fireEvent(document, new window.Event('selectionchange', {bubbles: false}));
+        await waitFor(() => {
+            const state = plimState(view, 'Editor A');
+            expect(state.selection.head.path).toEqual([2]);
+            expect(state.selection.head.offset).toBe(0);
+        });
+
+        fireEvent(
+            secondEmpty,
+            new InputEvent('beforeinput', {
+                bubbles: true,
+                cancelable: true,
+                inputType: 'deleteContentBackward',
+            }),
+        );
+
+        await waitFor(() => {
+            const leftState = plimState(view, 'Editor A');
+            const rightState = plimState(view, 'Editor B');
+            expect(leftState.selection.head.path).toEqual([1]);
+            expect(leftState.selection.head.offset).toBe(0);
+            expect(leftState.doc.children.length).toBe(rightState.doc.children.length);
+            expect(leftState.doc.children[2].text?.map((span) => span.text).join('')).toBe('Roadmap');
+            expect(editorText(right)).toContain('Roadmap');
+        });
+    });
+
     it('restores the pre-split selection when undoing a split', async () => {
         const view = render(<App />);
         const left = await editorPane(view, 'Editor A');
@@ -403,6 +517,99 @@ describe('Plim block CRDT example app', () => {
             expect(leftState.selection.anchor).toEqual(leftState.selection.head);
             expect(leftState.doc.children[0].text?.map((span) => span.text).join('')).toBe('Hello 👩‍💻');
             expect(plimState(view, 'Editor B').doc.children[0].text?.map((span) => span.text).join('')).toBe('Hello 👩‍💻');
+        });
+    });
+
+    it('restores the pre-join selection when undoing a join', async () => {
+        const view = render(<App />);
+        const left = await editorPane(view, 'Editor A');
+        const content = headingContent(left);
+
+        setDomCaret(content, 4);
+        fireEvent(document, new window.Event('selectionchange', {bubbles: false}));
+        await waitFor(() => {
+            const state = plimState(view, 'Editor A');
+            expect(state.selection.head.path).toEqual([1]);
+            expect(state.selection.head.offset).toBe(4);
+        });
+
+        fireEvent(
+            content,
+            new InputEvent('beforeinput', {
+                bubbles: true,
+                cancelable: true,
+                inputType: 'insertParagraph',
+            }),
+        );
+
+        await waitFor(() => {
+            const state = plimState(view, 'Editor A');
+            expect(state.selection.head.path).toEqual([2]);
+            expect(state.selection.head.offset).toBe(0);
+        });
+
+        const splitContent = await waitFor(() => {
+            const nodes = [...left.querySelectorAll<HTMLElement>('[data-block-content]')];
+            const node = nodes.find((item) => item.textContent === 'map');
+            if (!node) throw new Error('missing split block content');
+            return node;
+        });
+        splitContent.closest<HTMLElement>('.plim-editor')?.focus();
+        setDomCaret(splitContent, 0);
+        fireEvent(document, new window.Event('selectionchange', {bubbles: false}));
+        await waitFor(() => {
+            const state = plimState(view, 'Editor A');
+            expect(state.selection.head.path).toEqual([2]);
+            expect(state.selection.head.offset).toBe(0);
+        });
+
+        fireEvent(
+            splitContent,
+            new InputEvent('beforeinput', {
+                bubbles: true,
+                cancelable: true,
+                inputType: 'deleteContentBackward',
+            }),
+        );
+
+        await waitFor(() => {
+            const state = plimState(view, 'Editor A');
+            expect(state.doc.children[2].type).toBe('paragraph');
+            expect(state.selection.head.path).toEqual([2]);
+            expect(state.selection.head.offset).toBe(0);
+        });
+        const convertedContent = await waitFor(() => {
+            const nodes = [...left.querySelectorAll<HTMLElement>('[data-block-content]')];
+            const node = nodes.find((item) => item.textContent === 'map');
+            if (!node) throw new Error('missing converted split block content');
+            return node;
+        });
+
+        fireEvent(
+            convertedContent,
+            new InputEvent('beforeinput', {
+                bubbles: true,
+                cancelable: true,
+                inputType: 'deleteContentBackward',
+            }),
+        );
+
+        await waitFor(() => {
+            const state = plimState(view, 'Editor A');
+            expect(state.doc.children[1].text?.map((span) => span.text).join('')).toBe('Roadmap');
+            expect(state.selection.head.path).toEqual([1]);
+            expect(state.selection.head.offset).toBe(4);
+        });
+
+        fireEvent.click(within(left).getByRole('button', {name: 'Undo'}));
+
+        await waitFor(() => {
+            const state = plimState(view, 'Editor A');
+            expect(state.doc.children[1].text?.map((span) => span.text).join('')).toBe('Road');
+            expect(state.doc.children[2].text?.map((span) => span.text).join('')).toBe('map');
+            expect(state.selection.head.path).toEqual([2]);
+            expect(state.selection.head.offset).toBe(0);
+            expect(state.selection.anchor).toEqual(state.selection.head);
         });
     });
 });
@@ -451,6 +658,13 @@ const headingContent = (container: HTMLElement): HTMLElement => {
     return node;
 };
 
+const blockContent = (container: HTMLElement, blockId: string): HTMLElement => {
+    const block = container.querySelector<HTMLElement>(`[data-block-id="${CSS.escape(blockId)}"]`);
+    const content = block?.querySelector<HTMLElement>(':scope > [data-block-content]');
+    if (!content) throw new Error(`missing content for block ${blockId}`);
+    return content;
+};
+
 const plimState = (view: ReturnType<typeof render>, label: string) =>
     JSON.parse(debugSection(view, label, 'Plim JSON').querySelector('pre')?.textContent ?? '{}') as {
         doc: {
@@ -490,6 +704,16 @@ const setDomCaret = (node: HTMLElement, offset: number) => {
     const range = document.createRange();
     range.setStart(text, Math.min(offset, text.textContent?.length ?? 0));
     range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+};
+
+const setDomCaretAtEnd = (node: HTMLElement) => {
+    const selection = window.getSelection();
+    if (!selection) throw new Error('cannot set DOM caret');
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    range.collapse(false);
     selection.removeAllRanges();
     selection.addRange(range);
 };

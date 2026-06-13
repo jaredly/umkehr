@@ -2,10 +2,12 @@ import {
     applyRemoteOps,
     createAdapterState,
     createPlimEditorState,
+    selectionToRetained,
     type AdapterState,
     type PlimBlockMeta,
 } from './plimBlockCrdtAdapter';
 import {createFixtureState, makeTs} from './fixtures';
+import {getBlockAt, type Selection} from '@plim/core';
 import {planUndoOps, type CachedState, type HLC, type Op, type RetainedSelection} from 'umkehr/block-crdt';
 
 export type EditorId = 'left' | 'right';
@@ -28,6 +30,8 @@ export type UndoEntry = {
     label: string;
     beforeSelection: RetainedSelection | null;
     afterSelection: RetainedSelection | null;
+    beforePlimSelection: Selection;
+    afterPlimSelection: Selection;
     undoBefore?: CachedState<PlimBlockMeta>;
     undoOps?: Op<PlimBlockMeta>[];
 };
@@ -57,7 +61,12 @@ export const applyLocalAdapterChange = (
     id: EditorId,
     adapter: AdapterState,
     ops: Op<PlimBlockMeta>[],
-    history?: {before: CachedState<PlimBlockMeta>; beforeSelection: RetainedSelection | null; label: string},
+    history?: {
+        before: CachedState<PlimBlockMeta>;
+        beforeSelection: RetainedSelection | null;
+        beforePlimSelection: Selection;
+        label: string;
+    },
 ): ApplyChangeResult => {
     let source = {...demo[id], adapter};
     const peerKey = peerId(id);
@@ -74,6 +83,8 @@ export const applyLocalAdapterChange = (
                         before: history.before,
                         beforeSelection: history.beforeSelection,
                         afterSelection: adapter.retainedSelection,
+                        beforePlimSelection: cloneSelection(history.beforePlimSelection),
+                        afterPlimSelection: cloneSelection(adapter.plim.selection),
                         ops,
                         label: history.label,
                     },
@@ -114,7 +125,7 @@ export const applyUndo = (demo: DemoState, id: EditorId): ApplyChangeResult => {
     }
     if (!plan.ops.length) return {demo, messages: [`${id} undo skipped: no effect`]};
 
-    const nextAdapter = applyOpsWithSelection(source.adapter, plan.ops, entry.beforeSelection);
+    const nextAdapter = applyOpsWithSelection(source.adapter, plan.ops, entry.beforeSelection, entry.beforePlimSelection);
     const nextSource: Replica = {
         ...source,
         adapter: nextAdapter,
@@ -145,7 +156,7 @@ export const applyRedo = (demo: DemoState, id: EditorId): ApplyChangeResult => {
     }
     if (!plan.ops.length) return {demo, messages: [`${id} redo skipped: no effect`]};
 
-    const nextAdapter = applyOpsWithSelection(source.adapter, plan.ops, entry.afterSelection);
+    const nextAdapter = applyOpsWithSelection(source.adapter, plan.ops, entry.afterSelection, entry.afterPlimSelection);
     const nextSource: Replica = {
         ...source,
         adapter: nextAdapter,
@@ -155,6 +166,8 @@ export const applyRedo = (demo: DemoState, id: EditorId): ApplyChangeResult => {
                 before: entry.before,
                 beforeSelection: entry.beforeSelection,
                 afterSelection: entry.afterSelection,
+                beforePlimSelection: cloneSelection(entry.beforePlimSelection),
+                afterPlimSelection: cloneSelection(entry.afterPlimSelection),
                 ops: entry.ops,
                 label: entry.label,
             },
@@ -248,11 +261,46 @@ const applyOpsWithSelection = (
     adapter: AdapterState,
     ops: Op<PlimBlockMeta>[],
     retainedSelection: RetainedSelection | null,
+    plimSelection: Selection,
 ): AdapterState => {
     const next = applyRemoteOps(adapter, ops);
+    const plim = createPlimEditorState(next.crdt, retainedSelection);
+    const validPlimSelection = clampPlimSelection(plim.doc, plimSelection);
+    if (validPlimSelection) {
+        return {
+            crdt: next.crdt,
+            plim: {...plim, selection: validPlimSelection},
+            retainedSelection:
+                selectionToRetained(next.crdt, plim.doc, validPlimSelection) ?? retainedSelection,
+        };
+    }
     return {
         crdt: next.crdt,
-        plim: createPlimEditorState(next.crdt, retainedSelection),
+        plim,
         retainedSelection,
     };
 };
+
+const cloneSelection = (selection: Selection): Selection => ({
+    anchor: {path: [...selection.anchor.path], offset: selection.anchor.offset},
+    head: {path: [...selection.head.path], offset: selection.head.offset},
+});
+
+const clampPlimSelection = (doc: AdapterState['plim']['doc'], selection: Selection): Selection | null => {
+    const anchorBlock = getBlockAt(doc, selection.anchor.path);
+    const headBlock = getBlockAt(doc, selection.head.path);
+    if (!anchorBlock || !headBlock) return null;
+    return {
+        anchor: {
+            path: [...selection.anchor.path],
+            offset: Math.max(0, Math.min(selection.anchor.offset, blockTextLength(anchorBlock))),
+        },
+        head: {
+            path: [...selection.head.path],
+            offset: Math.max(0, Math.min(selection.head.offset, blockTextLength(headBlock))),
+        },
+    };
+};
+
+const blockTextLength = (block: NonNullable<ReturnType<typeof getBlockAt>>): number =>
+    block.text?.reduce((sum, span) => sum + span.text.length, 0) ?? 0;

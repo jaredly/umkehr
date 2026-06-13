@@ -1639,6 +1639,21 @@ it('plans undo for split as char moves plus hiding the split block', () => {
     expect(blockLines(state)).toEqual(['abcd']);
 });
 
+it('splits an empty block after the current block', () => {
+    const state = cachedState(initialState('self', '00001'));
+
+    const ops = splitBlockOps(state, {
+        actor: 'alice',
+        block: [0, 'self'],
+        offset: 0,
+        ts: '00002',
+        options: {random: () => 0},
+    });
+    const next = applyMany(state, ops);
+
+    expect(rootBlockIds(next)).toEqual(['0000-self', '0001-alice']);
+});
+
 it('plans undo for join as a split-style move without recreating or deleting chars', () => {
     const ts = mts(2);
     const remoteTs = mts(100);

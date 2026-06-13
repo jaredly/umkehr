@@ -9,7 +9,7 @@ import type {
     Transaction,
     TransactionOp,
 } from '@plim/core';
-import {applyOp, getBlockAt} from '@plim/core';
+import {applyOp, getBlockAt, prevBlockPath} from '@plim/core';
 import {
     applyMany,
     applyRemoteMany,
@@ -108,10 +108,12 @@ export const crdtToPlimDocument = (state: CachedState<PlimBlockMeta>): DocumentN
             id: entry.id,
             type: block.meta.type || 'paragraph',
             attrs: block.meta.attrs ? {...block.meta.attrs} : undefined,
-            text: formattedBlock?.runs.map((run) => ({
-                text: run.text,
-                marks: marksToPlim(run.marks),
-            })),
+            text: atomicBlockTypes.has(block.meta.type)
+                ? undefined
+                : (formattedBlock?.runs.map((run) => ({
+                    text: run.text,
+                    marks: marksToPlim(run.marks),
+                })) ?? []),
             children: [],
         });
     }
@@ -204,7 +206,8 @@ export const translateTransaction = (
             }
             case 'joinBackward': {
                 const blockId = plimPathToBlockId(plimState.doc, op.path);
-                const previous = blockId ? previousVisibleBlockId(state, blockId) : null;
+                const previousPath = prevBlockPath(plimState.doc, op.path);
+                const previous = previousPath ? plimPathToBlockId(plimState.doc, previousPath) : null;
                 if (!blockId || !previous) {
                     unsupported.push(op);
                     break;
@@ -600,9 +603,10 @@ const pruneEmptyChildren = (nodes: BlockNode[]) => {
         } else {
             delete node.children;
         }
-        if (!node.text?.length) delete node.text;
     }
 };
+
+const atomicBlockTypes = new Set(['divider', 'image', 'embed', 'raw_html', 'table']);
 
 const plimSiblingAnchorsForPath = (
     doc: DocumentNode,
@@ -621,12 +625,6 @@ const plimSiblingAnchorsForPath = (
         before: index > 0 ? parseLamportString(siblingIds[index - 1]) : null,
         after: index < siblingIds.length ? parseLamportString(siblingIds[index]) : null,
     };
-};
-
-const previousVisibleBlockId = (state: CachedState<PlimBlockMeta>, blockId: string): string | null => {
-    const ids = visibleBlockOutline(state).map((entry) => entry.id);
-    const index = ids.indexOf(blockId);
-    return index > 0 ? ids[index - 1] : null;
 };
 
 const createdBlockId = (ops: Op<PlimBlockMeta>[]): Lamport | null => {

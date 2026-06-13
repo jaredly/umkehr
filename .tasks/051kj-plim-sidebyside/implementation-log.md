@@ -36,3 +36,21 @@
 - Re-ran `npm test -- src/App.test.tsx`; passed with 15 tests.
 - Re-ran full `npm test`; passed with 2 test files and 26 tests.
 - Re-ran `npm run build`; TypeScript and Vite production build passed.
+- Bug encountered: undoing a join could still lose selection because the undo planner may recreate the joined-away block with a fresh id, so retained selection anchors alone cannot resolve the pre-join right-block caret.
+- Fix: undo entries now also store before/after Plim path-offset selections. Undo/redo still prefer CRDT rematerialization, but then restore a valid stored Plim selection and re-retain it against the new CRDT state. This covers fresh block ids from join undo.
+- Added a regression test for undoing a join after splitting a heading. Test note: Plim's first Backspace on a split heading converts the right fragment to paragraph; a second Backspace performs the join, so the test mirrors that behavior.
+- Re-ran `npm test -- src/App.test.tsx`; passed with 16 tests.
+- Re-ran full `npm test`; passed with 2 test files and 27 tests.
+- Re-ran `npm run build`; TypeScript and Vite production build passed.
+- Bug encountered: pressing Enter in an empty block created another block but left the selection on the old block. Root cause was `splitBlockOps` treating offset `0` as "insert before" even when the block has no visible characters; for an empty block, offset `0` is also end-of-block and should create the split block after the current block.
+- Fix: changed `splitBlockOps` to check `offset === chars.length` before `offset === 0`, so empty-block splits use the end-of-block path. Added a core CRDT regression for empty block split ordering and an app regression for Enter in an empty Plim block moving selection to the new block.
+- Re-ran `npm test -- src/plimBlockCrdtAdapter.test.ts src/App.test.tsx`; passed with 2 test files and 29 tests.
+- Re-ran root `npm test -- src/block-crdt/index.test.ts`; passed with 76 tests.
+- Re-ran `npm test` in `examples/plim-block-crdt`; passed with 2 test files and 29 tests.
+- Re-ran `npm run build` in `examples/plim-block-crdt`; TypeScript and Vite production build passed.
+- Bug encountered: Backspace from a newly-created empty paragraph did not join. Plim emitted `removeBlock` instead of `joinBackward` because CRDT materialization stripped empty `text` arrays, making empty editable paragraphs look atomic (`text === undefined`) to Plim.
+- Fix: empty editable blocks now materialize as `text: []`; known atomic block types still materialize with no `text`. The join translator also now resolves the previous block with Plim's `prevBlockPath(...)`, matching the transaction semantics.
+- Test note: the empty-block tests now find DOM content by block id because `[data-block-content]` includes nested child blocks and DOM-order indexing can target the fixture todo child.
+- Re-ran `npm test -- src/plimBlockCrdtAdapter.test.ts src/App.test.tsx`; passed with 2 test files and 30 tests.
+- Re-ran `npm test` in `examples/plim-block-crdt`; passed with 2 test files and 30 tests.
+- Re-ran `npm run build` in `examples/plim-block-crdt`; TypeScript and Vite production build passed.

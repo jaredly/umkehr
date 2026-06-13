@@ -69,6 +69,7 @@ export function App() {
                     {
                         before: source.adapter.crdt,
                         beforeSelection: source.adapter.retainedSelection,
+                        beforePlimSelection: source.adapter.plim.selection,
                         label: tx.ops.map((op) => op.kind).join(', ') || 'edit',
                     },
                 );

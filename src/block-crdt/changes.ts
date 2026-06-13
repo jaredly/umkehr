@@ -135,10 +135,10 @@ export const splitBlockOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>
         throw new Error(`split offset out of bounds`);
     }
     const char =
-        offset === 0
-            ? block
-            : offset === chars.length
-              ? null
+        offset === chars.length
+            ? null
+            : offset === 0
+              ? block
               : state.state.chars[chars[offset]].id;
     const previous =
         char === null
