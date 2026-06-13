@@ -19,10 +19,20 @@ Object.defineProperty(globalThis, 'NodeFilter', {
     configurable: true,
 });
 
+Object.defineProperty(globalThis, 'Range', {
+    value: window.Range,
+    configurable: true,
+});
+
 Object.defineProperty(globalThis, 'CSS', {
     value: {escape: (value: string) => value.replace(/"/g, '\\"')},
     configurable: true,
 });
+
+HTMLElement.prototype.scrollIntoView ??= function () {};
+window.Range.prototype.getClientRects ??= function () {
+    return [new DOMRect(0, 0, 1, 16)] as unknown as DOMRectList;
+};
 
 afterEach(() => {
     cleanup();
@@ -101,6 +111,27 @@ describe('Plim block CRDT example app', () => {
         });
         expect(editorText(view.container)).toContain('XYHello 👩‍💻');
         expect(debugSection(view, 'Log').textContent).toContain('local tx: replaceText');
+    });
+
+    it('opens the Plim slash command menu when typing the trigger', async () => {
+        const view = render(<App />);
+
+        const content = await waitFor(() => {
+            const node = view.container.querySelector<HTMLElement>('[data-block-content]');
+            if (!node) throw new Error('missing Plim content node');
+            return node;
+        });
+
+        setDomCaret(content, 0);
+        fireEvent(document, new window.Event('selectionchange', {bubbles: false}));
+        fireEvent.keyDown(content, {key: '/', code: 'Slash'});
+
+        await waitFor(() => {
+            expect(document.body.querySelector('.slash-menu')).not.toBeNull();
+        });
+        expect(within(document.body).getByRole('listbox')).toBeTruthy();
+        expect(document.body.textContent).toContain('Basic blocks');
+        expect(document.body.textContent).toContain('Heading 1');
     });
 
     it('preserves a clicked Plim selection instead of resetting to document start', async () => {

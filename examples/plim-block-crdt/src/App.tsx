@@ -1,6 +1,6 @@
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {PlimDriver} from '@plim/core';
-import {PlimEditor, useEditorHandle} from '@plim/react';
+import {PlimEditor, SlashCommandMenu, slashCommandExtension, useEditorHandle} from '@plim/react';
 import type {EditorState, Transaction} from '@plim/core';
 import {
     insertTextOps,
@@ -24,7 +24,7 @@ const actor = 'plimlocal';
 
 export function App() {
     const ts = useMemo(() => makeTs(500), []);
-    const plim = useMemo(() => new PlimDriver(), []);
+    const plim = useMemo(() => new PlimDriver({extensions: [slashCommandExtension()]}), []);
     const handle = useEditorHandle();
     const applyingFromCrdt = useRef(false);
     const [adapter, setAdapter] = useState<AdapterState>(() => createAdapterState(createFixtureState()));
@@ -125,6 +125,7 @@ export function App() {
                     onTransaction={onTransaction}
                     className="plimHost"
                 />
+                <SlashCommandMenu editor={handle} />
             </section>
             <aside className="debugPane">
                 <section>
