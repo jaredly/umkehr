@@ -1,0 +1,13 @@
+{
+    "extends": "../../tsconfig.json",
+    "compilerOptions": {
+        "baseUrl": ".",
+        "noEmit": true,
+        "jsx": "react-jsx",
+        "paths": {
+            "umkehr/block-crdt": ["../../src/block-crdt/index.ts"],
+            "umkehr/block-crdt/*": ["../../src/block-crdt/*"]
+        }
+    },
+    "include": ["src/**/*.ts", "src/**/*.tsx"]
+}

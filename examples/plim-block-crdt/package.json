@@ -1,0 +1,23 @@
+{
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "dev": "vite --host 127.0.0.1",
+        "build": "tsc -p tsconfig.json --noEmit && vite build",
+        "test": "vitest run"
+    },
+    "dependencies": {
+        "@plim/core": "0.0.4",
+        "@plim/editor": "0.0.4",
+        "@plim/react": "0.0.4",
+        "react": "^19.2.6",
+        "react-dom": "^19.2.6",
+        "vite": "^7.2.7"
+    },
+    "devDependencies": {
+        "@types/react": "^19.2.0",
+        "@types/react-dom": "^19.2.3",
+        "typescript": "^5.9.3",
+        "vitest": "^4.1.6"
+    }
+}
