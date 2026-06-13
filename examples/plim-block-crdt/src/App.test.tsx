@@ -39,88 +39,89 @@ afterEach(() => {
 });
 
 describe('Plim block CRDT example app', () => {
-    it('renders the initial CRDT document in the editor and debug panes', async () => {
+    it('renders two initial CRDT-backed editor panes and collapsed debug panes', async () => {
         const view = render(<App />);
 
-        await waitFor(() => expect(view.container.querySelector('[data-block-content]')).not.toBeNull());
+        const left = await editorPane(view, 'Editor A');
+        const right = await editorPane(view, 'Editor B');
 
-        expect(view.getByRole('button', {name: 'Remote Insert'})).toBeTruthy();
-        expect(view.getByRole('button', {name: 'Remote Split'})).toBeTruthy();
-        expect(editorText(view.container)).toContain('Hello 👩‍💻');
-        expect(editorText(view.container)).toContain('Roadmap');
-        expect(editorText(view.container)).toContain('Ship adapter');
-        expect(debugSection(view, 'CRDT Text').textContent).toContain('Hello 👩‍💻');
-        expect(debugSection(view, 'Plim JSON').textContent).toContain('"type": "heading"');
-        expect(debugSection(view, 'Log').textContent).toContain('Initialized CRDT-backed Plim example.');
+        expect(view.queryByRole('button', {name: 'Remote Insert'})).toBeNull();
+        expect(view.queryByRole('button', {name: 'Remote Split'})).toBeNull();
+        for (const pane of [left, right]) {
+            expect(editorText(pane)).toContain('Hello 👩‍💻');
+            expect(editorText(pane)).toContain('Roadmap');
+            expect(editorText(pane)).toContain('Ship adapter');
+            expect(within(pane).getByText('0 queued')).toBeTruthy();
+        }
+        expect(debugDetails(view, 'Editor A').open).toBe(false);
+        expect(debugDetails(view, 'Editor B').open).toBe(false);
+        expect(debugSection(view, 'Editor A', 'CRDT Text').textContent).toContain('Hello 👩‍💻');
+        expect(debugSection(view, 'Editor B', 'Plim JSON').textContent).toContain('"type": "heading"');
     });
 
-    it('applies the scripted remote insert through the adapter', async () => {
+    it('syncs text inserted in the left pane to the right pane', async () => {
         const view = render(<App />);
+        const left = await editorPane(view, 'Editor A');
+        const right = await editorPane(view, 'Editor B');
 
-        fireEvent.click(view.getByRole('button', {name: 'Remote Insert'}));
+        fireBeforeInput(firstContent(left), 'X');
 
         await waitFor(() => {
-            expect(debugSection(view, 'CRDT Text').textContent).toContain('Remote Hello 👩‍💻');
+            expect(editorText(left)).toContain('XHello 👩‍💻');
+            expect(editorText(right)).toContain('XHello 👩‍💻');
+            expect(debugSection(view, 'Editor A', 'CRDT Text').textContent).toContain('XHello 👩‍💻');
+            expect(debugSection(view, 'Editor B', 'CRDT Text').textContent).toContain('XHello 👩‍💻');
         });
-        expect(editorText(view.container)).toContain('Remote Hello 👩‍💻');
-        expect(debugSection(view, 'Log').textContent).toContain('remote insert -> applied');
+        expect(plimState(view, 'Editor A').selection.head.offset).toBe(1);
+        expect(logDetails(view).textContent).toContain('left tx: replaceText');
+        expect(logDetails(view).textContent).toContain('left sync -> right');
     });
 
-    it('applies the scripted remote split and rematerializes multiple Plim blocks', async () => {
+    it('syncs text inserted in the right pane to the left pane', async () => {
         const view = render(<App />);
+        const left = await editorPane(view, 'Editor A');
+        const right = await editorPane(view, 'Editor B');
 
-        fireEvent.click(view.getByRole('button', {name: 'Remote Split'}));
+        fireBeforeInput(firstContent(right), 'Z');
 
         await waitFor(() => {
-            const text = debugSection(view, 'CRDT Text').textContent ?? '';
-            expect(text).toContain('Hell');
-            expect(text).toContain('o 👩‍💻');
+            expect(editorText(right)).toContain('ZHello 👩‍💻');
+            expect(editorText(left)).toContain('ZHello 👩‍💻');
         });
-        expect(view.container.querySelectorAll('[data-block-id]').length).toBeGreaterThanOrEqual(4);
-        expect(debugSection(view, 'Log').textContent).toContain('remote split -> applied');
+        expect(plimState(view, 'Editor B').selection.head.offset).toBe(1);
+        expect(logDetails(view).textContent).toContain('right sync -> left');
     });
 
-    it('translates a basic Plim beforeinput text insertion into CRDT ops', async () => {
+    it('queues edits while a peer is offline and flushes them on reconnect', async () => {
         const view = render(<App />);
+        const left = await editorPane(view, 'Editor A');
+        const right = await editorPane(view, 'Editor B');
 
-        const content = await waitFor(() => {
-            const node = view.container.querySelector<HTMLElement>('[data-block-content]');
-            if (!node) throw new Error('missing Plim content node');
-            return node;
-        });
+        fireEvent.click(within(right).getByRole('button', {name: 'Online'}));
+        expect(within(right).getByRole('button', {name: 'Offline'})).toBeTruthy();
 
-        fireEvent(
-            content,
-            new InputEvent('beforeinput', {
-                bubbles: true,
-                cancelable: true,
-                inputType: 'insertText',
-                data: 'X',
-            }),
-        );
+        fireBeforeInput(firstContent(left), 'Q');
 
         await waitFor(() => {
-            expect(debugSection(view, 'CRDT Text').textContent).toContain('XHello 👩‍💻');
-            expect(plimState(view).selection.head.offset).toBe(1);
+            expect(editorText(left)).toContain('QHello 👩‍💻');
+            expect(editorText(right)).not.toContain('QHello 👩‍💻');
+            expect(within(left).getByText('1 queued')).toBeTruthy();
         });
-        fireBeforeInput(content, 'Y');
+        expect(logDetails(view).textContent).toContain('left queued');
+
+        fireEvent.click(within(right).getByRole('button', {name: 'Offline'}));
 
         await waitFor(() => {
-            expect(debugSection(view, 'CRDT Text').textContent).toContain('XYHello 👩‍💻');
-            expect(plimState(view).selection.head.offset).toBe(2);
+            expect(editorText(right)).toContain('QHello 👩‍💻');
+            expect(within(left).getByText('0 queued')).toBeTruthy();
         });
-        expect(editorText(view.container)).toContain('XYHello 👩‍💻');
-        expect(debugSection(view, 'Log').textContent).toContain('local tx: replaceText');
+        expect(logDetails(view).textContent).toContain('left flushed 1 batch -> right');
     });
 
-    it('opens the Plim slash command menu when typing the trigger', async () => {
+    it('opens the Plim slash command menu for the active pane', async () => {
         const view = render(<App />);
-
-        const content = await waitFor(() => {
-            const node = view.container.querySelector<HTMLElement>('[data-block-content]');
-            if (!node) throw new Error('missing Plim content node');
-            return node;
-        });
+        const left = await editorPane(view, 'Editor A');
+        const content = firstContent(left);
 
         setDomCaret(content, 0);
         fireEvent(document, new window.Event('selectionchange', {bubbles: false}));
@@ -134,108 +135,106 @@ describe('Plim block CRDT example app', () => {
         expect(document.body.textContent).toContain('Heading 1');
     });
 
-    it('toggles bold and italic marks from keyboard shortcuts on selected text', async () => {
+    it('syncs bold and italic shortcuts to the peer pane', async () => {
         const view = render(<App />);
-
-        const content = await waitFor(() => {
-            const node = view.container.querySelector<HTMLElement>('[data-block-content]');
-            if (!node) throw new Error('missing Plim content node');
-            return node;
-        });
+        const left = await editorPane(view, 'Editor A');
+        const content = firstContent(left);
 
         setDomSelection(content, 0, 5);
         fireEvent(document, new window.Event('selectionchange', {bubbles: false}));
 
         await waitFor(() => {
-            expect(plimState(view).selection.anchor.offset).toBe(0);
-            expect(plimState(view).selection.head.offset).toBe(5);
+            expect(plimState(view, 'Editor A').selection.anchor.offset).toBe(0);
+            expect(plimState(view, 'Editor A').selection.head.offset).toBe(5);
         });
 
         fireEvent.keyDown(content, {key: 'i', code: 'KeyI', metaKey: true});
 
         await waitFor(() => {
-            const marks = firstSpanMarks(view);
-            expect(marks).toContain('bold');
-            expect(marks).toContain('italic');
+            expect(firstSpanMarks(view, 'Editor A')).toContain('italic');
+            expect(firstSpanMarks(view, 'Editor B')).toContain('italic');
         });
 
         fireEvent.keyDown(content, {key: 'b', code: 'KeyB', metaKey: true});
 
         await waitFor(() => {
-            const marks = firstSpanMarks(view);
-            expect(marks).not.toContain('bold');
-            expect(marks).toContain('italic');
+            expect(firstSpanMarks(view, 'Editor A')).not.toContain('bold');
+            expect(firstSpanMarks(view, 'Editor B')).not.toContain('bold');
+            expect(firstSpanMarks(view, 'Editor B')).toContain('italic');
         });
-        expect(debugSection(view, 'Log').textContent).toContain('local tx: toggleMark');
+        expect(logDetails(view).textContent).toContain('left tx: toggleMark');
     });
 
-    it('applies bold shortcuts across a multi-block selection', async () => {
+    it('applies bold shortcuts across a multi-block selection and syncs the result', async () => {
         const view = render(<App />);
+        const left = await editorPane(view, 'Editor A');
 
         const contents = await waitFor(() => {
-            const nodes = [...view.container.querySelectorAll<HTMLElement>('[data-block-content]')];
+            const nodes = [...left.querySelectorAll<HTMLElement>('[data-block-content]')];
             if (nodes.length < 3) throw new Error('missing Plim content nodes');
             return nodes;
         });
-        const firstContent = contents[0];
-        const headingContent = contents.find((node) => node.textContent === 'Roadmap');
-        if (!headingContent) throw new Error('missing heading content');
+        const first = contents[0];
+        const heading = contents.find((node) => node.textContent === 'Roadmap');
+        if (!heading) throw new Error('missing heading content');
 
-        setDomSelectionBetween(firstContent, 0, headingContent, 'Roadmap'.length);
+        setDomSelectionBetween(first, 0, heading, 'Roadmap'.length);
         fireEvent(document, new window.Event('selectionchange', {bubbles: false}));
 
         await waitFor(() => {
-            const selection = plimState(view).selection;
+            const selection = plimState(view, 'Editor A').selection;
             expect(selection.anchor.path).toEqual([0]);
             expect(selection.head.path).toEqual([1]);
         });
 
-        fireEvent.keyDown(firstContent, {key: 'b', code: 'KeyB', metaKey: true});
+        fireEvent.keyDown(first, {key: 'b', code: 'KeyB', metaKey: true});
 
         await waitFor(() => {
-            const state = plimState(view);
-            expect(blockSpansHaveMark(state.doc.children[0], 'bold')).toBe(true);
-            expect(blockSpansHaveMark(state.doc.children[0].children?.[0], 'bold')).toBe(true);
-            expect(blockSpansHaveMark(state.doc.children[1], 'bold')).toBe(true);
+            const leftState = plimState(view, 'Editor A');
+            const rightState = plimState(view, 'Editor B');
+            expect(blockSpansHaveMark(leftState.doc.children[0], 'bold')).toBe(true);
+            expect(blockSpansHaveMark(leftState.doc.children[0].children?.[0], 'bold')).toBe(true);
+            expect(blockSpansHaveMark(leftState.doc.children[1], 'bold')).toBe(true);
+            expect(blockSpansHaveMark(rightState.doc.children[1], 'bold')).toBe(true);
         });
     });
 
-    it('preserves a clicked Plim selection instead of resetting to document start', async () => {
+    it('preserves a peer selection across remote rematerialization', async () => {
         const view = render(<App />);
+        const left = await editorPane(view, 'Editor A');
+        const right = await editorPane(view, 'Editor B');
 
-        const headingContent = await waitFor(() => {
-            const node = [...view.container.querySelectorAll<HTMLElement>('[data-block-content]')].find(
-                (item) => item.textContent === 'Roadmap',
-            );
-            if (!node) throw new Error('missing heading content');
-            return node;
-        });
-
-        setDomCaret(headingContent, 4);
+        const heading = headingContent(right);
+        setDomCaret(heading, 4);
         fireEvent(document, new window.Event('selectionchange', {bubbles: false}));
 
         await waitFor(() => {
-            const active = view.container.querySelector<HTMLElement>('[data-caret-active="true"]');
-            expect(active?.dataset.blockType).toBe('heading');
-            expect(active?.textContent).toContain('Roadmap');
+            const selection = plimState(view, 'Editor B').selection;
+            expect(selection.head.path).toEqual([1]);
+            expect(selection.head.offset).toBe(4);
+        });
+
+        fireBeforeInput(firstContent(left), 'X');
+
+        await waitFor(() => {
+            expect(editorText(right)).toContain('XHello 👩‍💻');
+            const selection = plimState(view, 'Editor B').selection;
+            expect(selection.head.path).toEqual([1]);
+            expect(selection.head.offset).toBe(4);
         });
     });
 
     it('keeps selection in the new block after splitting with Enter', async () => {
         const view = render(<App />);
+        const left = await editorPane(view, 'Editor A');
+        const content = firstContent(left);
 
-        const firstContent = await waitFor(() => {
-            const node = view.container.querySelector<HTMLElement>('[data-block-content]');
-            if (!node) throw new Error('missing first content');
-            return node;
-        });
-
-        setDomCaret(firstContent, 5);
+        setDomCaret(content, 5);
         fireEvent(document, new window.Event('selectionchange', {bubbles: false}));
-        await waitFor(() => expect(plimState(view).selection.head.offset).toBe(5));
+        await waitFor(() => expect(plimState(view, 'Editor A').selection.head.offset).toBe(5));
 
         fireEvent(
-            firstContent,
+            content,
             new InputEvent('beforeinput', {
                 bubbles: true,
                 cancelable: true,
@@ -244,21 +243,40 @@ describe('Plim block CRDT example app', () => {
         );
 
         await waitFor(() => {
-            const state = plimState(view);
+            const state = plimState(view, 'Editor A');
             expect(state.selection.head.path).toEqual([1]);
             expect(state.selection.head.offset).toBe(0);
-            const active = view.container.querySelector<HTMLElement>('[data-caret-active="true"]');
+            const active = left.querySelector<HTMLElement>('[data-caret-active="true"]');
             expect(active?.dataset.blockId).toBe(state.doc.children[1].id);
             expect(active?.dataset.blockId).not.toBe('0000-alice');
+            expect(plimState(view, 'Editor B').doc.children[1].id).toBe(state.doc.children[1].id);
         });
     });
 });
 
-const debugSection = (view: ReturnType<typeof render>, heading: string): HTMLElement => {
-    const title = view.getByText(heading);
+const editorPane = async (view: ReturnType<typeof render>, label: string): Promise<HTMLElement> =>
+    waitFor(() => view.getByRole('region', {name: label}));
+
+const debugDetails = (view: ReturnType<typeof render>, label: string): HTMLDetailsElement => {
+    const summary = view.getByText(`${label} Debug`);
+    const details = summary.closest('details');
+    if (!details) throw new Error(`missing debug details for ${label}`);
+    return details as HTMLDetailsElement;
+};
+
+const debugSection = (view: ReturnType<typeof render>, label: string, heading: string): HTMLElement => {
+    const details = debugDetails(view, label);
+    const title = within(details).getByText(heading);
     const section = title.closest('section');
     if (!section) throw new Error(`missing section ${heading}`);
     return section as HTMLElement;
+};
+
+const logDetails = (view: ReturnType<typeof render>): HTMLElement => {
+    const summary = view.getByText(/^Log \(/);
+    const details = summary.closest('details');
+    if (!details) throw new Error('missing log details');
+    return details as HTMLElement;
 };
 
 const editorText = (container: HTMLElement): string =>
@@ -266,8 +284,22 @@ const editorText = (container: HTMLElement): string =>
         .map((node) => node.textContent ?? '')
         .join('\n');
 
-const plimState = (view: ReturnType<typeof render>) =>
-    JSON.parse(debugSection(view, 'Plim JSON').querySelector('pre')?.textContent ?? '{}') as {
+const firstContent = (container: HTMLElement): HTMLElement => {
+    const node = container.querySelector<HTMLElement>('[data-block-content]');
+    if (!node) throw new Error('missing Plim content node');
+    return node;
+};
+
+const headingContent = (container: HTMLElement): HTMLElement => {
+    const node = [...container.querySelectorAll<HTMLElement>('[data-block-content]')].find(
+        (item) => item.textContent === 'Roadmap',
+    );
+    if (!node) throw new Error('missing heading content');
+    return node;
+};
+
+const plimState = (view: ReturnType<typeof render>, label: string) =>
+    JSON.parse(debugSection(view, label, 'Plim JSON').querySelector('pre')?.textContent ?? '{}') as {
         doc: {
             children: Array<{
                 id: string;
@@ -278,8 +310,8 @@ const plimState = (view: ReturnType<typeof render>) =>
         selection: {head: {path: number[]; offset: number}; anchor: {path: number[]; offset: number}};
     };
 
-const firstSpanMarks = (view: ReturnType<typeof render>): string[] =>
-    plimState(view).doc.children[0].text?.[0].marks?.map((mark) => mark.type) ?? [];
+const firstSpanMarks = (view: ReturnType<typeof render>, label: string): string[] =>
+    plimState(view, label).doc.children[0].text?.[0].marks?.map((mark) => mark.type) ?? [];
 
 const blockSpansHaveMark = (
     block: {text?: Array<{text: string; marks?: Array<{type: string}>}>} | undefined,

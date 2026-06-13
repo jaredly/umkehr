@@ -1,29 +1,131 @@
-import {useEffect, useMemo, useRef, useState} from 'react';
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {defineAction, PlimDriver, triggers} from '@plim/core';
 import {PlimEditor, SlashCommandMenu, slashCommandExtension, useEditorHandle} from '@plim/react';
 import type {EditorState, Transaction} from '@plim/core';
-import {
-    insertTextOps,
-    splitBlockOps,
-    stateToString,
-    visibleBlockChildren,
-    visibleLengthForBlock,
-} from 'umkehr/block-crdt';
+import {stateToString} from 'umkehr/block-crdt';
 import {
     applyLocalTransaction,
-    applyRemoteOps,
-    createAdapterState,
     selectionToRetained,
-    type AdapterOptions,
     type AdapterState,
 } from './plimBlockCrdtAdapter';
-import {createFixtureState, makeTs} from './fixtures';
+import {
+    applyLocalAdapterChange,
+    createDemoState,
+    toggleReplicaOnline,
+    type EditorId,
+    type Replica,
+} from './plimDemoRuntime';
 import './style.css';
 
-const actor = 'plimlocal';
-
 export function App() {
-    const ts = useMemo(() => makeTs(500), []);
+    const [demo, setDemo] = useState(createDemoState);
+    const [log, setLog] = useState<string[]>(['Initialized side-by-side CRDT-backed Plim example.']);
+
+    const appendMessages = useCallback((messages: string[]) => {
+        if (!messages.length) return;
+        setLog((items) => [...items, ...messages]);
+    }, []);
+
+    const onTransaction = useCallback(
+        (id: EditorId, tx: Transaction, state: EditorState) => {
+            setDemo((current) => {
+                const source = current[id];
+                if (tx.ops.every((op) => op.kind === 'setSelection')) {
+                    const adapter: AdapterState = {
+                        crdt: source.adapter.crdt,
+                        plim: state,
+                        retainedSelection:
+                            selectionToRetained(source.adapter.crdt, state.doc, state.selection) ??
+                            source.adapter.retainedSelection,
+                    };
+                    return {...current, [id]: {...source, adapter}};
+                }
+
+                const next = applyLocalTransaction(
+                    source.adapter,
+                    tx,
+                    {actor: source.actor, ts: source.ts},
+                    state,
+                );
+                const messages = [
+                    `${id} tx: ${tx.ops.map((op) => op.kind).join(', ') || 'empty'} -> ${next.ops.length} ops`,
+                    ...(
+                        next.unsupported.length
+                            ? [`${id} unsupported: ${next.unsupported.map((op) => op.kind).join(', ')}`]
+                            : []
+                    ),
+                ];
+                const result = applyLocalAdapterChange(
+                    current,
+                    id,
+                    {
+                        crdt: next.crdt,
+                        plim: next.plim,
+                        retainedSelection: next.retainedSelection,
+                    },
+                    next.ops,
+                );
+                appendMessages([...messages, ...result.messages]);
+                return result.demo;
+            });
+        },
+        [appendMessages],
+    );
+
+    const onToggleOnline = useCallback(
+        (id: EditorId) => {
+            setDemo((current) => {
+                const result = toggleReplicaOnline(current, id);
+                appendMessages(result.messages);
+                return result.demo;
+            });
+        },
+        [appendMessages],
+    );
+
+    return (
+        <main className="appShell">
+            <header className="topBar">
+                <h1>Plim Block CRDT</h1>
+                <p>Two Plim editors exchange block CRDT operations.</p>
+            </header>
+            <section className="editorGrid" aria-label="Synced Plim editors">
+                <PlimReplicaEditor
+                    replica={demo.left}
+                    onTransaction={onTransaction}
+                    onToggleOnline={onToggleOnline}
+                />
+                <PlimReplicaEditor
+                    replica={demo.right}
+                    onTransaction={onTransaction}
+                    onToggleOnline={onToggleOnline}
+                />
+            </section>
+            <section className="debugGrid" aria-label="Debug output">
+                <ReplicaDebug replica={demo.left} />
+                <ReplicaDebug replica={demo.right} />
+                <details className="logPane">
+                    <summary>Log ({log.length})</summary>
+                    <ol>
+                        {log.slice(-12).map((item, index) => (
+                            <li key={`${index}-${item}`}>{item}</li>
+                        ))}
+                    </ol>
+                </details>
+            </section>
+        </main>
+    );
+}
+
+function PlimReplicaEditor({
+    replica,
+    onTransaction,
+    onToggleOnline,
+}: {
+    replica: Replica;
+    onTransaction(id: EditorId, tx: Transaction, state: EditorState): void;
+    onToggleOnline(id: EditorId): void;
+}) {
     const plim = useMemo(
         () =>
             new PlimDriver({
@@ -34,131 +136,75 @@ export function App() {
     );
     const handle = useEditorHandle();
     const applyingFromCrdt = useRef(false);
-    const [adapter, setAdapter] = useState<AdapterState>(() => createAdapterState(createFixtureState()));
-    const adapterRef = useRef(adapter);
-    const [log, setLog] = useState<string[]>(['Initialized CRDT-backed Plim example.']);
 
     useEffect(() => {
-        adapterRef.current = adapter;
         const editor = handle.current;
         if (!editor) return;
         applyingFromCrdt.current = true;
-        editor.setState(adapter.plim);
+        editor.setState(replica.adapter.plim);
         queueMicrotask(() => {
             applyingFromCrdt.current = false;
         });
-    }, [adapter, handle]);
+    }, [handle, replica.adapter.plim]);
 
-    const options: AdapterOptions = useMemo(() => ({actor, ts}), [ts]);
-
-    const onTransaction = (tx: Transaction, state: EditorState) => {
-        if (applyingFromCrdt.current) return;
-        setAdapter((current) => {
-            if (tx.ops.every((op) => op.kind === 'setSelection')) {
-                return {
-                    crdt: current.crdt,
-                    plim: state,
-                    retainedSelection:
-                        selectionToRetained(current.crdt, state.doc, state.selection) ?? current.retainedSelection,
-                };
-            }
-            const next = applyLocalTransaction(current, tx, options, state);
-            appendLog(setLog, `local tx: ${tx.ops.map((op) => op.kind).join(', ') || 'empty'} -> ${next.ops.length} ops`);
-            if (next.unsupported.length) {
-                appendLog(setLog, `unsupported: ${next.unsupported.map((op) => op.kind).join(', ')}`);
-            }
-            return {
-                crdt: next.crdt,
-                plim: next.plim,
-                retainedSelection: next.retainedSelection,
-            };
-        });
-    };
-
-    const applyRemoteInsert = () => {
-        setAdapter((current) => {
-            const blockId = visibleBlockChildren(current.crdt, '0000-root')[0];
-            if (!blockId) return current;
-            const block = current.crdt.state.blocks[blockId].id;
-            const ops = insertTextOps(current.crdt, {
-                actor: 'remote',
-                block,
-                offset: 0,
-                text: 'Remote ',
-                ts,
-            });
-            const next = applyRemoteOps(current, ops);
-            appendLog(setLog, `remote insert -> applied ${next.applied.length}, pending ${next.pending.length}`);
-            return {
-                crdt: next.crdt,
-                plim: next.plim,
-                retainedSelection: next.retainedSelection,
-            };
-        });
-    };
-
-    const applyRemoteSplit = () => {
-        setAdapter((current) => {
-            const blockId = visibleBlockChildren(current.crdt, '0000-root')[0];
-            if (!blockId) return current;
-            const block = current.crdt.state.blocks[blockId].id;
-            const ops = splitBlockOps(current.crdt, {
-                actor: 'remote',
-                block,
-                offset: Math.min(4, visibleLengthForBlock(current.crdt, blockId)),
-                ts: ts(),
-            });
-            const next = applyRemoteOps(current, ops);
-            appendLog(setLog, `remote split -> applied ${next.applied.length}, pending ${next.pending.length}`);
-            return {
-                crdt: next.crdt,
-                plim: next.plim,
-                retainedSelection: next.retainedSelection,
-            };
-        });
-    };
+    const handleTransaction = useCallback(
+        (tx: Transaction, state: EditorState) => {
+            if (applyingFromCrdt.current) return;
+            onTransaction(replica.id, tx, state);
+        },
+        [onTransaction, replica.id],
+    );
 
     return (
-        <main className="appShell">
-            <section className="editorPane">
-                <div className="toolbar">
-                    <button type="button" onClick={applyRemoteInsert}>Remote Insert</button>
-                    <button type="button" onClick={applyRemoteSplit}>Remote Split</button>
+        <section className="editorPane" aria-label={replica.label} data-editor-id={replica.id}>
+            <div className="paneHeader">
+                <div>
+                    <h2>{replica.label}</h2>
+                    <p>actor: {replica.actor}</p>
                 </div>
-                <PlimEditor
-                    plim={plim}
-                    handle={handle}
-                    initialContent={adapter.plim.doc}
-                    onTransaction={onTransaction}
-                    className="plimHost"
-                />
-                <SlashCommandMenu editor={handle} />
-            </section>
-            <aside className="debugPane">
-                <section>
-                    <h2>CRDT Text</h2>
-                    <pre>{stateToString(adapter.crdt)}</pre>
-                </section>
-                <section>
-                    <h2>Plim JSON</h2>
-                    <pre>{JSON.stringify(adapter.plim, null, 2)}</pre>
-                </section>
-                <section>
-                    <h2>Log</h2>
-                    <ol>
-                        {log.slice(-8).map((item, index) => (
-                            <li key={`${index}-${item}`}>{item}</li>
-                        ))}
-                    </ol>
-                </section>
-            </aside>
-        </main>
+                <div className="paneActions">
+                    <span className="queueBadge">{replica.queue.length} queued</span>
+                    <button
+                        type="button"
+                        className={replica.online ? 'onlineToggle isOnline' : 'onlineToggle'}
+                        aria-pressed={replica.online}
+                        onClick={() => onToggleOnline(replica.id)}
+                    >
+                        {replica.online ? 'Online' : 'Offline'}
+                    </button>
+                </div>
+            </div>
+            <PlimEditor
+                plim={plim}
+                handle={handle}
+                initialContent={replica.adapter.plim.doc}
+                onTransaction={handleTransaction}
+                className="plimHost"
+            />
+            <SlashCommandMenu editor={handle} />
+        </section>
     );
 }
 
-const appendLog = (setLog: (fn: (items: string[]) => string[]) => void, message: string) => {
-    setLog((items) => [...items, message]);
-};
+function ReplicaDebug({replica}: {replica: Replica}) {
+    return (
+        <details className="debugPane">
+            <summary>{replica.label} Debug</summary>
+            <section>
+                <h2>CRDT Text</h2>
+                <pre>{stateToString(replica.adapter.crdt)}</pre>
+            </section>
+            <section>
+                <h2>Plim JSON</h2>
+                <pre>{JSON.stringify(replica.adapter.plim, null, 2)}</pre>
+            </section>
+            <section>
+                <h2>Status</h2>
+                <pre>{JSON.stringify({online: replica.online, queuedBatches: replica.queue.length}, null, 2)}</pre>
+            </section>
+        </details>
+    );
+}
 
 const markShortcutAction = (mark: 'bold' | 'italic', key: 'B' | 'I') =>
     defineAction(`${mark}Shortcut`, {
