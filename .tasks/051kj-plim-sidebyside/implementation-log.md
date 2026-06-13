@@ -54,3 +54,8 @@
 - Re-ran `npm test -- src/plimBlockCrdtAdapter.test.ts src/App.test.tsx`; passed with 2 test files and 30 tests.
 - Re-ran `npm test` in `examples/plim-block-crdt`; passed with 2 test files and 30 tests.
 - Re-ran `npm run build` in `examples/plim-block-crdt`; TypeScript and Vite production build passed.
+- Bug encountered: undo after a Plim markdown list shortcut could get stuck on `undo skipped: no effect`. Plim commits the typed marker chars first, then commits an input-rule transaction that deletes those chars and changes block metadata. Undoing the input-rule transaction restores the deleted chars with fresh CRDT ids, leaving the earlier char-insert history entries pointed at tombstoned ids.
+- Fix: after a successful undo that restores deleted chars, the demo runtime retargets older char-insert history entries from the deleted char ids to the fresh restored ids. This lets the next undo remove the visible restored marker text instead of becoming a no-op.
+- Added a regression for typing `- ` into an empty block, undoing the list conversion, then undoing the restored marker text.
+- Re-ran `npm test` in `examples/plim-block-crdt`; passed with 2 test files and 31 tests.
+- Re-ran `npm run build` in `examples/plim-block-crdt`; TypeScript and Vite production build passed.

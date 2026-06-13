@@ -8,7 +8,7 @@ import {
 } from './plimBlockCrdtAdapter';
 import {createFixtureState, makeTs} from './fixtures';
 import {getBlockAt, type Selection} from '@plim/core';
-import {planUndoOps, type CachedState, type HLC, type Op, type RetainedSelection} from 'umkehr/block-crdt';
+import {lamportToString, planUndoOps, type CachedState, type HLC, type Lamport, type Op, type RetainedSelection} from 'umkehr/block-crdt';
 
 export type EditorId = 'left' | 'right';
 
@@ -126,10 +126,11 @@ export const applyUndo = (demo: DemoState, id: EditorId): ApplyChangeResult => {
     if (!plan.ops.length) return {demo, messages: [`${id} undo skipped: no effect`]};
 
     const nextAdapter = applyOpsWithSelection(source.adapter, plan.ops, entry.beforeSelection, entry.beforePlimSelection);
+    const undoStack = retargetRestoredCharInsertHistory(source.undoStack.slice(0, -1), entry.ops, plan.ops);
     const nextSource: Replica = {
         ...source,
         adapter: nextAdapter,
-        undoStack: source.undoStack.slice(0, -1),
+        undoStack,
         redoStack: [
             ...source.redoStack,
             {...entry, undoBefore: source.adapter.crdt, undoOps: plan.ops},
@@ -304,3 +305,39 @@ const clampPlimSelection = (doc: AdapterState['plim']['doc'], selection: Selecti
 
 const blockTextLength = (block: NonNullable<ReturnType<typeof getBlockAt>>): number =>
     block.text?.reduce((sum, span) => sum + span.text.length, 0) ?? 0;
+
+const retargetRestoredCharInsertHistory = (
+    undoStack: UndoEntry[],
+    undoneOps: Op<PlimBlockMeta>[],
+    undoOps: Op<PlimBlockMeta>[],
+): UndoEntry[] => {
+    const restored = restoredCharIdsByDeletedId(undoneOps, undoOps);
+    if (!restored.size) return undoStack;
+    return undoStack.map((entry) => {
+        let changed = false;
+        const ops = entry.ops.map((op) => {
+            if (op.type !== 'char') return op;
+            const replacement = restored.get(lamportToString(op.char.id));
+            if (!replacement) return op;
+            changed = true;
+            return {...op, char: {...op.char, id: replacement}};
+        });
+        return changed ? {...entry, ops} : entry;
+    });
+};
+
+const restoredCharIdsByDeletedId = (
+    undoneOps: Op<PlimBlockMeta>[],
+    undoOps: Op<PlimBlockMeta>[],
+): Map<string, Lamport> => {
+    const deleted = undoneOps
+        .filter((op): op is Op<PlimBlockMeta> & {type: 'char:delete'} => op.type === 'char:delete')
+        .slice()
+        .reverse();
+    const restored = undoOps.filter((op): op is Op<PlimBlockMeta> & {type: 'char'} => op.type === 'char');
+    const result = new Map<string, Lamport>();
+    for (let index = 0; index < Math.min(deleted.length, restored.length); index++) {
+        result.set(lamportToString(deleted[index].id), restored[index].char.id);
+    }
+    return result;
+};

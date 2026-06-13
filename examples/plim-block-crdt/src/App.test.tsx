@@ -126,6 +126,64 @@ describe('Plim block CRDT example app', () => {
         });
     });
 
+    it('undoes a markdown list shortcut and then the restored marker text', async () => {
+        const view = render(<App />);
+        const left = await editorPane(view, 'Editor A');
+        const content = firstContent(left);
+
+        setDomCaretAtEnd(content);
+        fireEvent(document, new window.Event('selectionchange', {bubbles: false}));
+        await waitFor(() => expect(plimState(view, 'Editor A').selection.head.offset).toBe('Hello 👩‍💻'.length));
+
+        fireEvent(
+            content,
+            new InputEvent('beforeinput', {
+                bubbles: true,
+                cancelable: true,
+                inputType: 'insertParagraph',
+            }),
+        );
+
+        const empty = await waitFor(() => {
+            const state = plimState(view, 'Editor A');
+            expect(state.selection.head.path).toEqual([1]);
+            return blockContent(left, state.doc.children[1].id);
+        });
+
+        fireBeforeInput(empty, '-');
+        const marker = await waitFor(() => {
+            const state = plimState(view, 'Editor A');
+            expect(state.doc.children[1].text?.map((span) => span.text).join('')).toBe('-');
+            return blockContent(left, state.doc.children[1].id);
+        });
+        fireBeforeInput(marker, ' ');
+
+        await waitFor(() => {
+            const state = plimState(view, 'Editor A');
+            expect(state.doc.children[1].type).toBe('bulleted_list_item');
+            expect(state.doc.children[1].text).toEqual([]);
+        });
+
+        const editor = left.querySelector<HTMLElement>('.plim-editor');
+        editor?.focus();
+        fireEvent.keyDown(editor ?? left, {key: 'z', code: 'KeyZ', ctrlKey: true});
+
+        await waitFor(() => {
+            const state = plimState(view, 'Editor A');
+            expect(state.doc.children[1].type).toBe('paragraph');
+            expect(state.doc.children[1].text?.map((span) => span.text).join('')).toBe('- ');
+        });
+
+        fireEvent.keyDown(editor ?? left, {key: 'z', code: 'KeyZ', ctrlKey: true});
+
+        await waitFor(() => {
+            const state = plimState(view, 'Editor A');
+            expect(state.doc.children[1].type).toBe('paragraph');
+            expect(state.doc.children[1].text?.map((span) => span.text).join('')).toBe('-');
+            expect(logDetails(view).textContent).not.toContain('undo skipped: no effect');
+        });
+    });
+
     it('does not move focus to the peer pane after an online sync', async () => {
         const view = render(<App />);
         const left = await editorPane(view, 'Editor A');
