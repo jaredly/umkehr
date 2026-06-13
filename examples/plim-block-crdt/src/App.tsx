@@ -1,24 +1,26 @@
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {PlimDriver} from '@plim/core';
 import {PlimEditor, useEditorHandle} from '@plim/react';
-import type {Transaction} from '@plim/core';
+import type {EditorState, Transaction} from '@plim/core';
 import {
     insertTextOps,
     splitBlockOps,
     stateToString,
     visibleBlockChildren,
+    visibleLengthForBlock,
 } from 'umkehr/block-crdt';
 import {
     applyLocalTransaction,
     applyRemoteOps,
     createAdapterState,
+    selectionToRetained,
     type AdapterOptions,
     type AdapterState,
 } from './plimBlockCrdtAdapter';
 import {createFixtureState, makeTs} from './fixtures';
 import './style.css';
 
-const actor = 'plim-local';
+const actor = 'plimlocal';
 
 export function App() {
     const ts = useMemo(() => makeTs(500), []);
@@ -42,9 +44,17 @@ export function App() {
 
     const options: AdapterOptions = useMemo(() => ({actor, ts}), [ts]);
 
-    const onTransaction = (tx: Transaction) => {
+    const onTransaction = (tx: Transaction, state: EditorState) => {
         if (applyingFromCrdt.current) return;
         setAdapter((current) => {
+            if (tx.ops.every((op) => op.kind === 'setSelection')) {
+                return {
+                    crdt: current.crdt,
+                    plim: state,
+                    retainedSelection:
+                        selectionToRetained(current.crdt, state.doc, state.selection) ?? current.retainedSelection,
+                };
+            }
             const next = applyLocalTransaction(current, tx, options);
             appendLog(setLog, `local tx: ${tx.ops.map((op) => op.kind).join(', ') || 'empty'} -> ${next.ops.length} ops`);
             if (next.unsupported.length) {
@@ -88,7 +98,7 @@ export function App() {
             const ops = splitBlockOps(current.crdt, {
                 actor: 'remote',
                 block,
-                offset: Math.min(4, current.crdt.cache.charContents[blockId]?.length ?? 0),
+                offset: Math.min(4, visibleLengthForBlock(current.crdt, blockId)),
                 ts: ts(),
             });
             const next = applyRemoteOps(current, ops);
