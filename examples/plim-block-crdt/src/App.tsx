@@ -10,6 +10,8 @@ import {
 } from './plimBlockCrdtAdapter';
 import {
     applyLocalAdapterChange,
+    applyRedo,
+    applyUndo,
     createDemoState,
     toggleReplicaOnline,
     type EditorId,
@@ -64,8 +66,35 @@ export function App() {
                         retainedSelection: next.retainedSelection,
                     },
                     next.ops,
+                    {
+                        before: source.adapter.crdt,
+                        beforeSelection: source.adapter.retainedSelection,
+                        label: tx.ops.map((op) => op.kind).join(', ') || 'edit',
+                    },
                 );
                 appendMessages([...messages, ...result.messages]);
+                return result.demo;
+            });
+        },
+        [appendMessages],
+    );
+
+    const onUndo = useCallback(
+        (id: EditorId) => {
+            setDemo((current) => {
+                const result = applyUndo(current, id);
+                appendMessages(result.messages);
+                return result.demo;
+            });
+        },
+        [appendMessages],
+    );
+
+    const onRedo = useCallback(
+        (id: EditorId) => {
+            setDemo((current) => {
+                const result = applyRedo(current, id);
+                appendMessages(result.messages);
                 return result.demo;
             });
         },
@@ -93,11 +122,15 @@ export function App() {
                 <PlimReplicaEditor
                     replica={demo.left}
                     onTransaction={onTransaction}
+                    onUndo={onUndo}
+                    onRedo={onRedo}
                     onToggleOnline={onToggleOnline}
                 />
                 <PlimReplicaEditor
                     replica={demo.right}
                     onTransaction={onTransaction}
+                    onUndo={onUndo}
+                    onRedo={onRedo}
                     onToggleOnline={onToggleOnline}
                 />
             </section>
@@ -120,10 +153,14 @@ export function App() {
 function PlimReplicaEditor({
     replica,
     onTransaction,
+    onUndo,
+    onRedo,
     onToggleOnline,
 }: {
     replica: Replica;
     onTransaction(id: EditorId, tx: Transaction, state: EditorState): void;
+    onUndo(id: EditorId): void;
+    onRedo(id: EditorId): void;
     onToggleOnline(id: EditorId): void;
 }) {
     const plim = useMemo(
@@ -131,9 +168,14 @@ function PlimReplicaEditor({
             new PlimDriver({
                 extensions: [slashCommandExtension()],
                 registeredMarks: [boldMark, italicMark, codeMark, linkMark],
-                registeredActions: [markShortcutAction('bold', 'B'), markShortcutAction('italic', 'I')],
+                registeredActions: [
+                    markShortcutAction('bold', 'B'),
+                    markShortcutAction('italic', 'I'),
+                    undoShortcutAction(() => onUndo(replica.id)),
+                    redoShortcutAction(() => onRedo(replica.id)),
+                ],
             }),
-        [],
+        [onRedo, onUndo, replica.id],
     );
     const handle = useEditorHandle();
     const applyingFromCrdt = useRef(false);
@@ -170,6 +212,12 @@ function PlimReplicaEditor({
                     <p>actor: {replica.actor}</p>
                 </div>
                 <div className="paneActions">
+                    <button type="button" onClick={() => onUndo(replica.id)} disabled={!replica.undoStack.length}>
+                        Undo
+                    </button>
+                    <button type="button" onClick={() => onRedo(replica.id)} disabled={!replica.redoStack.length}>
+                        Redo
+                    </button>
                     <span className="queueBadge">{replica.queue.length} queued</span>
                     <button
                         type="button"
@@ -225,6 +273,22 @@ const markShortcutAction = (mark: 'bold' | 'italic', key: 'B' | 'I') =>
             });
             tx.commit();
         },
+    });
+
+const undoShortcutAction = (perform: () => void) =>
+    defineAction('undoShortcut', {
+        trigger: [triggers.keyboard.shortcut('Mod+z'), triggers.keyboard.shortcut('Ctrl+z')],
+        perform: () => perform(),
+    });
+
+const redoShortcutAction = (perform: () => void) =>
+    defineAction('redoShortcut', {
+        trigger: [
+            triggers.keyboard.shortcut('Mod+Shift+z'),
+            triggers.keyboard.shortcut('Ctrl+Shift+z'),
+            triggers.keyboard.shortcut('Ctrl+y'),
+        ],
+        perform: () => perform(),
     });
 
 const snapshotFocusAndSelection = (): (() => void) | null => {

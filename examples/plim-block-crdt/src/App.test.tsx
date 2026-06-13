@@ -80,6 +80,52 @@ describe('Plim block CRDT example app', () => {
         expect(logDetails(view).textContent).toContain('left sync -> right');
     });
 
+    it('undoes and redoes a local edit through CRDT ops', async () => {
+        const view = render(<App />);
+        const left = await editorPane(view, 'Editor A');
+        const right = await editorPane(view, 'Editor B');
+
+        fireBeforeInput(firstContent(left), 'U');
+        await waitFor(() => {
+            expect(editorText(left)).toContain('UHello 👩‍💻');
+            expect(editorText(right)).toContain('UHello 👩‍💻');
+        });
+
+        fireEvent.click(within(left).getByRole('button', {name: 'Undo'}));
+        await waitFor(() => {
+            expect(editorText(left)).not.toContain('UHello 👩‍💻');
+            expect(editorText(right)).not.toContain('UHello 👩‍💻');
+            expect((within(left).getByRole('button', {name: 'Redo'}) as HTMLButtonElement).disabled).toBe(false);
+        });
+        expect(logDetails(view).textContent).toContain('left undo replaceText');
+
+        fireEvent.click(within(left).getByRole('button', {name: 'Redo'}));
+        await waitFor(() => {
+            expect(editorText(left)).toContain('UHello 👩‍💻');
+            expect(editorText(right)).toContain('UHello 👩‍💻');
+        });
+        expect(logDetails(view).textContent).toContain('left redo replaceText');
+    });
+
+    it('handles keyboard undo in the active pane', async () => {
+        const view = render(<App />);
+        const left = await editorPane(view, 'Editor A');
+        const right = await editorPane(view, 'Editor B');
+        const content = firstContent(left);
+
+        fireBeforeInput(content, 'K');
+        await waitFor(() => expect(editorText(right)).toContain('KHello 👩‍💻'));
+
+        const editor = content.closest<HTMLElement>('.plim-editor');
+        editor?.focus();
+        fireEvent.keyDown(editor ?? content, {key: 'z', code: 'KeyZ', ctrlKey: true});
+
+        await waitFor(() => {
+            expect(editorText(left)).not.toContain('KHello 👩‍💻');
+            expect(editorText(right)).not.toContain('KHello 👩‍💻');
+        });
+    });
+
     it('does not move focus to the peer pane after an online sync', async () => {
         const view = render(<App />);
         const left = await editorPane(view, 'Editor A');
@@ -141,6 +187,31 @@ describe('Plim block CRDT example app', () => {
         expect(logDetails(view).textContent).toContain('left flushed 1 batch -> right');
     });
 
+    it('queues undo while a peer is offline and flushes it on reconnect', async () => {
+        const view = render(<App />);
+        const left = await editorPane(view, 'Editor A');
+        const right = await editorPane(view, 'Editor B');
+
+        fireBeforeInput(firstContent(left), 'O');
+        await waitFor(() => expect(editorText(right)).toContain('OHello 👩‍💻'));
+
+        fireEvent.click(within(right).getByRole('button', {name: 'Online'}));
+        fireEvent.click(within(left).getByRole('button', {name: 'Undo'}));
+
+        await waitFor(() => {
+            expect(editorText(left)).not.toContain('OHello 👩‍💻');
+            expect(editorText(right)).toContain('OHello 👩‍💻');
+            expect(within(left).getByText('1 queued')).toBeTruthy();
+        });
+
+        fireEvent.click(within(right).getByRole('button', {name: 'Offline'}));
+
+        await waitFor(() => {
+            expect(editorText(right)).not.toContain('OHello 👩‍💻');
+            expect(within(left).getByText('0 queued')).toBeTruthy();
+        });
+    });
+
     it('opens the Plim slash command menu for the active pane', async () => {
         const view = render(<App />);
         const left = await editorPane(view, 'Editor A');
@@ -163,8 +234,8 @@ describe('Plim block CRDT example app', () => {
         const left = await editorPane(view, 'Editor A');
         const content = firstContent(left);
 
-        setDomSelection(content, 0, 5);
         content.closest<HTMLElement>('.plim-editor')?.focus();
+        setDomSelection(content, 0, 5);
         fireEvent(document, new window.Event('selectionchange', {bubbles: false}));
 
         const toolbar = await waitFor(() => within(document.body).getByRole('toolbar', {name: 'Formatting'}));
@@ -296,6 +367,42 @@ describe('Plim block CRDT example app', () => {
             expect(active?.dataset.blockId).toBe(state.doc.children[1].id);
             expect(active?.dataset.blockId).not.toBe('0000-alice');
             expect(plimState(view, 'Editor B').doc.children[1].id).toBe(state.doc.children[1].id);
+        });
+    });
+
+    it('restores the pre-split selection when undoing a split', async () => {
+        const view = render(<App />);
+        const left = await editorPane(view, 'Editor A');
+        const right = await editorPane(view, 'Editor B');
+        const content = firstContent(left);
+
+        setDomCaret(content, 5);
+        fireEvent(document, new window.Event('selectionchange', {bubbles: false}));
+        await waitFor(() => expect(plimState(view, 'Editor A').selection.head.offset).toBe(5));
+
+        fireEvent(
+            content,
+            new InputEvent('beforeinput', {
+                bubbles: true,
+                cancelable: true,
+                inputType: 'insertParagraph',
+            }),
+        );
+
+        await waitFor(() => {
+            expect(plimState(view, 'Editor A').selection.head.path).toEqual([1]);
+            expect(editorText(right)).toContain('Hello');
+        });
+
+        fireEvent.click(within(left).getByRole('button', {name: 'Undo'}));
+
+        await waitFor(() => {
+            const leftState = plimState(view, 'Editor A');
+            expect(leftState.selection.head.path).toEqual([0]);
+            expect(leftState.selection.head.offset).toBe(5);
+            expect(leftState.selection.anchor).toEqual(leftState.selection.head);
+            expect(leftState.doc.children[0].text?.map((span) => span.text).join('')).toBe('Hello 👩‍💻');
+            expect(plimState(view, 'Editor B').doc.children[0].text?.map((span) => span.text).join('')).toBe('Hello 👩‍💻');
         });
     });
 });
