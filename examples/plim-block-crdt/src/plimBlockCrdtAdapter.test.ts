@@ -121,6 +121,53 @@ describe('plim block crdt adapter', () => {
         });
     });
 
+    it('retains split selection against canonical CRDT ids instead of Plim temporary ids', () => {
+        const adapter = createAdapterState(createFixtureState());
+        const tx = {
+            ops: [
+                {
+                    kind: 'splitBlock',
+                    path: [0],
+                    offset: 5,
+                } satisfies TransactionOp,
+            ],
+        };
+        const postPlim = {
+            doc: {
+                ...adapter.plim.doc,
+                children: [
+                    {
+                        ...adapter.plim.doc.children[0],
+                        text: [{text: 'Hello'}],
+                    },
+                    {
+                        id: 'temporary-split-id',
+                        type: 'paragraph',
+                        attrs: {tone: 'plain'},
+                        text: [{text: ' 👩‍💻'}],
+                    },
+                    ...adapter.plim.doc.children.slice(1),
+                ],
+            },
+            selection: {
+                anchor: {path: [1], offset: 0},
+                head: {path: [1], offset: 0},
+            },
+        };
+
+        const next = applyLocalTransaction(adapter, tx, {actor: 'bob', ts: makeTs(100)}, postPlim);
+
+        expect(next.plim.selection).toEqual({
+            anchor: {path: [1], offset: 0},
+            head: {path: [1], offset: 0},
+        });
+        expect(next.plim.doc.children[1].id).not.toBe('temporary-split-id');
+        expect(next.retainedSelection).toMatchObject({
+            type: 'caret',
+            point: {blockId: next.plim.doc.children[1].id, charId: null, affinity: 'after'},
+        });
+    });
+
     it('translates split, join, insert block, block-only remove, move, metadata, and marks', () => {
         const state = createFixtureState();
         const doc = crdtToPlimDocument(state);

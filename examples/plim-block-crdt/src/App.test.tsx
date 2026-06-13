@@ -123,6 +123,38 @@ describe('Plim block CRDT example app', () => {
             expect(active?.textContent).toContain('Roadmap');
         });
     });
+
+    it('keeps selection in the new block after splitting with Enter', async () => {
+        const view = render(<App />);
+
+        const firstContent = await waitFor(() => {
+            const node = view.container.querySelector<HTMLElement>('[data-block-content]');
+            if (!node) throw new Error('missing first content');
+            return node;
+        });
+
+        setDomCaret(firstContent, 5);
+        fireEvent(document, new window.Event('selectionchange', {bubbles: false}));
+        await waitFor(() => expect(plimState(view).selection.head.offset).toBe(5));
+
+        fireEvent(
+            firstContent,
+            new InputEvent('beforeinput', {
+                bubbles: true,
+                cancelable: true,
+                inputType: 'insertParagraph',
+            }),
+        );
+
+        await waitFor(() => {
+            const state = plimState(view);
+            expect(state.selection.head.path).toEqual([1]);
+            expect(state.selection.head.offset).toBe(0);
+            const active = view.container.querySelector<HTMLElement>('[data-caret-active="true"]');
+            expect(active?.dataset.blockId).toBe(state.doc.children[1].id);
+            expect(active?.dataset.blockId).not.toBe('0000-alice');
+        });
+    });
 });
 
 const debugSection = (view: ReturnType<typeof render>, heading: string): HTMLElement => {
@@ -139,6 +171,7 @@ const editorText = (container: HTMLElement): string =>
 
 const plimState = (view: ReturnType<typeof render>) =>
     JSON.parse(debugSection(view, 'Plim JSON').querySelector('pre')?.textContent ?? '{}') as {
+        doc: {children: Array<{id: string}>};
         selection: {head: {path: number[]; offset: number}; anchor: {path: number[]; offset: number}};
     };
 

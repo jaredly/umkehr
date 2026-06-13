@@ -361,7 +361,9 @@ export const applyLocalTransaction = (
 ): AdapterState & TranslationResult => {
     const result = translateTransaction(adapter.crdt, adapter.plim.doc, tx, options);
     const crdt = result.ops.length ? applyMany(adapter.crdt, result.ops) : adapter.crdt;
-    const selectionSource = postPlim ? canonicalizePostPlimState(tx.ops, postPlim) : result.plannedPlim;
+    const selectionSource = postPlim
+        ? {...canonicalizePostPlimState(tx.ops, postPlim), doc: result.plannedPlim.doc}
+        : result.plannedPlim;
     const nextRetainedSelection =
         selectionToRetained(crdt, selectionSource.doc, selectionSource.selection) ??
         adapter.retainedSelection;
