@@ -82,6 +82,45 @@ describe('plim block crdt adapter', () => {
         });
     });
 
+    it('uses post-Plim selection after paste-like replaceText transactions', () => {
+        const adapter = createAdapterState(createFixtureState());
+        const tx = {
+            ops: [
+                {
+                    kind: 'replaceText',
+                    path: [0],
+                    from: 0,
+                    to: 0,
+                    insert: [{text: 'Paste '}],
+                } satisfies TransactionOp,
+            ],
+        };
+        const postPlim = {
+            doc: {
+                ...adapter.plim.doc,
+                children: [
+                    {
+                        ...adapter.plim.doc.children[0],
+                        text: [{text: 'Paste Hello 👩‍💻'}],
+                    },
+                    ...adapter.plim.doc.children.slice(1),
+                ],
+            },
+            selection: {
+                anchor: {path: [0], offset: 'Paste '.length},
+                head: {path: [0], offset: 'Paste '.length},
+            },
+        };
+
+        const next = applyLocalTransaction(adapter, tx, {actor: 'bob', ts: makeTs(100)}, postPlim);
+
+        expect(blockContents(next.crdt, '0000-alice')).toBe('Paste Hello 👩‍💻');
+        expect(next.plim.selection).toEqual({
+            anchor: {path: [0], offset: 'Paste '.length},
+            head: {path: [0], offset: 'Paste '.length},
+        });
+    });
+
     it('translates split, join, insert block, block-only remove, move, metadata, and marks', () => {
         const state = createFixtureState();
         const doc = crdtToPlimDocument(state);

@@ -91,8 +91,15 @@ describe('Plim block CRDT example app', () => {
 
         await waitFor(() => {
             expect(debugSection(view, 'CRDT Text').textContent).toContain('XHello 👩‍💻');
+            expect(plimState(view).selection.head.offset).toBe(1);
         });
-        expect(editorText(view.container)).toContain('XHello 👩‍💻');
+        fireBeforeInput(content, 'Y');
+
+        await waitFor(() => {
+            expect(debugSection(view, 'CRDT Text').textContent).toContain('XYHello 👩‍💻');
+            expect(plimState(view).selection.head.offset).toBe(2);
+        });
+        expect(editorText(view.container)).toContain('XYHello 👩‍💻');
         expect(debugSection(view, 'Log').textContent).toContain('local tx: replaceText');
     });
 
@@ -129,6 +136,23 @@ const editorText = (container: HTMLElement): string =>
     [...container.querySelectorAll<HTMLElement>('[data-block-content]')]
         .map((node) => node.textContent ?? '')
         .join('\n');
+
+const plimState = (view: ReturnType<typeof render>) =>
+    JSON.parse(debugSection(view, 'Plim JSON').querySelector('pre')?.textContent ?? '{}') as {
+        selection: {head: {path: number[]; offset: number}; anchor: {path: number[]; offset: number}};
+    };
+
+const fireBeforeInput = (node: HTMLElement, text: string) => {
+    fireEvent(
+        node,
+        new InputEvent('beforeinput', {
+            bubbles: true,
+            cancelable: true,
+            inputType: 'insertText',
+            data: text,
+        }),
+    );
+};
 
 const setDomCaret = (node: HTMLElement, offset: number) => {
     const text = firstTextNode(node);

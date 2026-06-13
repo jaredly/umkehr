@@ -73,6 +73,7 @@ export type AdapterOptions = {
 export type TranslationResult = {
     ops: Op<PlimBlockMeta>[];
     unsupported: TransactionOp[];
+    plannedPlim: EditorState;
 };
 
 const ROOT: Lamport = [0, 'root'];
@@ -349,24 +350,48 @@ export const translateTransaction = (
         }
     }
 
-    return {ops, unsupported};
+    return {ops, unsupported, plannedPlim: plimState};
 };
 
 export const applyLocalTransaction = (
     adapter: AdapterState,
     tx: Pick<Transaction, 'ops'>,
     options: AdapterOptions,
+    postPlim?: EditorState,
 ): AdapterState & TranslationResult => {
-    const retainedSelection = selectionToRetained(adapter.crdt, adapter.plim.doc, adapter.plim.selection);
     const result = translateTransaction(adapter.crdt, adapter.plim.doc, tx, options);
     const crdt = result.ops.length ? applyMany(adapter.crdt, result.ops) : adapter.crdt;
-    const nextRetainedSelection = retainedSelection ?? adapter.retainedSelection;
+    const selectionSource = postPlim ? canonicalizePostPlimState(tx.ops, postPlim) : result.plannedPlim;
+    const nextRetainedSelection =
+        selectionToRetained(crdt, selectionSource.doc, selectionSource.selection) ??
+        adapter.retainedSelection;
     return {
         ...result,
         crdt,
         plim: createPlimEditorState(crdt, nextRetainedSelection),
         retainedSelection: nextRetainedSelection,
     };
+};
+
+const canonicalizePostPlimState = (
+    ops: readonly TransactionOp[],
+    state: EditorState,
+): EditorState => {
+    let selection = state.selection;
+    const lastReplace = ops.findLast((op): op is TransactionOp & {kind: 'replaceText'} => op.kind === 'replaceText');
+    if (lastReplace && selection.anchor.path.join('/') === lastReplace.path.join('/') && selection.head.path.join('/') === lastReplace.path.join('/')) {
+        const collapsedAtInsertion =
+            selection.anchor.offset === lastReplace.from &&
+            selection.head.offset === lastReplace.from;
+        if (collapsedAtInsertion && lastReplace.from === lastReplace.to && lastReplace.insert.length) {
+            const offset = lastReplace.from + lastReplace.insert.reduce((sum, span) => sum + span.text.length, 0);
+            selection = {
+                anchor: {path: lastReplace.path, offset},
+                head: {path: lastReplace.path, offset},
+            };
+        }
+    }
+    return {doc: state.doc, selection};
 };
 
 export const applyRemoteOps = (

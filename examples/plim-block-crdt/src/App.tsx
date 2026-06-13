@@ -55,7 +55,7 @@ export function App() {
                         selectionToRetained(current.crdt, state.doc, state.selection) ?? current.retainedSelection,
                 };
             }
-            const next = applyLocalTransaction(current, tx, options);
+            const next = applyLocalTransaction(current, tx, options, state);
             appendLog(setLog, `local tx: ${tx.ops.map((op) => op.kind).join(', ') || 'empty'} -> ${next.ops.length} ops`);
             if (next.unsupported.length) {
                 appendLog(setLog, `unsupported: ${next.unsupported.map((op) => op.kind).join(', ')}`);
@@ -133,7 +133,7 @@ export function App() {
                 </section>
                 <section>
                     <h2>Plim JSON</h2>
-                    <pre>{JSON.stringify(adapter.plim.doc, null, 2)}</pre>
+                    <pre>{JSON.stringify(adapter.plim, null, 2)}</pre>
                 </section>
                 <section>
                     <h2>Log</h2>
