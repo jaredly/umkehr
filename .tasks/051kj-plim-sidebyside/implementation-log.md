@@ -17,3 +17,5 @@
 - Re-ran `npm test -- src/App.test.tsx`; passed with 10 tests.
 - Re-ran full `npm test`; passed with 2 test files and 21 tests.
 - Re-ran `npm run build`; TypeScript and Vite production build passed.
+- Added Plim's built-in `bold`, `italic`, `code`, and `link` mark descriptors to each pane's driver so the built-in floating formatting toolbar has items to render.
+- Added a regression test that selects text, verifies the floating toolbar buttons appear, and applies `code` through the toolbar with CRDT sync to the peer pane.

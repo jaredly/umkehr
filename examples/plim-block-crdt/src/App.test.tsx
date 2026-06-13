@@ -33,6 +33,9 @@ HTMLElement.prototype.scrollIntoView ??= function () {};
 window.Range.prototype.getClientRects ??= function () {
     return [new DOMRect(0, 0, 1, 16)] as unknown as DOMRectList;
 };
+window.Range.prototype.getBoundingClientRect ??= function () {
+    return new DOMRect(12, 12, 80, 18);
+};
 
 afterEach(() => {
     cleanup();
@@ -153,6 +156,29 @@ describe('Plim block CRDT example app', () => {
         expect(within(document.body).getByRole('listbox')).toBeTruthy();
         expect(document.body.textContent).toContain('Basic blocks');
         expect(document.body.textContent).toContain('Heading 1');
+    });
+
+    it('shows the floating formatting toolbar and syncs a code mark from it', async () => {
+        const view = render(<App />);
+        const left = await editorPane(view, 'Editor A');
+        const content = firstContent(left);
+
+        setDomSelection(content, 0, 5);
+        content.closest<HTMLElement>('.plim-editor')?.focus();
+        fireEvent(document, new window.Event('selectionchange', {bubbles: false}));
+
+        const toolbar = await waitFor(() => within(document.body).getByRole('toolbar', {name: 'Formatting'}));
+        expect(within(toolbar).getByRole('button', {name: /Bold/})).toBeTruthy();
+        expect(within(toolbar).getByRole('button', {name: /Italic/})).toBeTruthy();
+        expect(within(toolbar).getByRole('button', {name: /Code/})).toBeTruthy();
+        expect(within(toolbar).getByRole('button', {name: /Link/})).toBeTruthy();
+
+        fireEvent.click(within(toolbar).getByRole('button', {name: /Code/}));
+
+        await waitFor(() => {
+            expect(firstSpanMarks(view, 'Editor A')).toContain('code');
+            expect(firstSpanMarks(view, 'Editor B')).toContain('code');
+        });
     });
 
     it('syncs bold and italic shortcuts to the peer pane', async () => {

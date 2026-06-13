@@ -1,5 +1,5 @@
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
-import {defineAction, PlimDriver, triggers} from '@plim/core';
+import {boldMark, codeMark, defineAction, italicMark, linkMark, PlimDriver, triggers} from '@plim/core';
 import {PlimEditor, SlashCommandMenu, slashCommandExtension, useEditorHandle} from '@plim/react';
 import type {EditorState, Transaction} from '@plim/core';
 import {stateToString} from 'umkehr/block-crdt';
@@ -130,6 +130,7 @@ function PlimReplicaEditor({
         () =>
             new PlimDriver({
                 extensions: [slashCommandExtension()],
+                registeredMarks: [boldMark, italicMark, codeMark, linkMark],
                 registeredActions: [markShortcutAction('bold', 'B'), markShortcutAction('italic', 'I')],
             }),
         [],
