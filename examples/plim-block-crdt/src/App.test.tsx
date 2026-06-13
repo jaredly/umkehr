@@ -169,6 +169,37 @@ describe('Plim block CRDT example app', () => {
         expect(debugSection(view, 'Log').textContent).toContain('local tx: toggleMark');
     });
 
+    it('applies bold shortcuts across a multi-block selection', async () => {
+        const view = render(<App />);
+
+        const contents = await waitFor(() => {
+            const nodes = [...view.container.querySelectorAll<HTMLElement>('[data-block-content]')];
+            if (nodes.length < 3) throw new Error('missing Plim content nodes');
+            return nodes;
+        });
+        const firstContent = contents[0];
+        const headingContent = contents.find((node) => node.textContent === 'Roadmap');
+        if (!headingContent) throw new Error('missing heading content');
+
+        setDomSelectionBetween(firstContent, 0, headingContent, 'Roadmap'.length);
+        fireEvent(document, new window.Event('selectionchange', {bubbles: false}));
+
+        await waitFor(() => {
+            const selection = plimState(view).selection;
+            expect(selection.anchor.path).toEqual([0]);
+            expect(selection.head.path).toEqual([1]);
+        });
+
+        fireEvent.keyDown(firstContent, {key: 'b', code: 'KeyB', metaKey: true});
+
+        await waitFor(() => {
+            const state = plimState(view);
+            expect(blockSpansHaveMark(state.doc.children[0], 'bold')).toBe(true);
+            expect(blockSpansHaveMark(state.doc.children[0].children?.[0], 'bold')).toBe(true);
+            expect(blockSpansHaveMark(state.doc.children[1], 'bold')).toBe(true);
+        });
+    });
+
     it('preserves a clicked Plim selection instead of resetting to document start', async () => {
         const view = render(<App />);
 
@@ -240,6 +271,7 @@ const plimState = (view: ReturnType<typeof render>) =>
         doc: {
             children: Array<{
                 id: string;
+                children?: Array<{text?: Array<{text: string; marks?: Array<{type: string}>}>}>;
                 text?: Array<{text: string; marks?: Array<{type: string}>}>;
             }>;
         };
@@ -248,6 +280,11 @@ const plimState = (view: ReturnType<typeof render>) =>
 
 const firstSpanMarks = (view: ReturnType<typeof render>): string[] =>
     plimState(view).doc.children[0].text?.[0].marks?.map((mark) => mark.type) ?? [];
+
+const blockSpansHaveMark = (
+    block: {text?: Array<{text: string; marks?: Array<{type: string}>}>} | undefined,
+    markType: string,
+): boolean => !!block?.text?.length && block.text.every((span) => span.marks?.some((mark) => mark.type === markType));
 
 const fireBeforeInput = (node: HTMLElement, text: string) => {
     fireEvent(
@@ -279,6 +316,18 @@ const setDomSelection = (node: HTMLElement, from: number, to: number) => {
     const range = document.createRange();
     range.setStart(text, Math.min(from, text.textContent?.length ?? 0));
     range.setEnd(text, Math.min(to, text.textContent?.length ?? 0));
+    selection.removeAllRanges();
+    selection.addRange(range);
+};
+
+const setDomSelectionBetween = (fromNode: HTMLElement, from: number, toNode: HTMLElement, to: number) => {
+    const start = firstTextNode(fromNode);
+    const end = firstTextNode(toNode);
+    const selection = window.getSelection();
+    if (!start || !end || !selection) throw new Error('cannot set DOM selection');
+    const range = document.createRange();
+    range.setStart(start, Math.min(from, start.textContent?.length ?? 0));
+    range.setEnd(end, Math.min(to, end.textContent?.length ?? 0));
     selection.removeAllRanges();
     selection.addRange(range);
 };

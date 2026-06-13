@@ -195,6 +195,30 @@ describe('plim block crdt adapter', () => {
         expect(nextDoc.children.map((block) => block.type)).toContain('divider');
     });
 
+    it('translates Plim multi-block toggleMark end-of-block sentinels', () => {
+        const state = createFixtureState();
+        const doc = crdtToPlimDocument(state);
+        const headingLength = doc.children[1].text?.[0]?.text.length ?? 0;
+        const tx = {
+            ops: [
+                {kind: 'toggleMark', path: [0], from: 0, to: -1, mark: {type: 'italic'}} satisfies TransactionOp,
+                {kind: 'toggleMark', path: [0, 0], from: 0, to: -1, mark: {type: 'italic'}} satisfies TransactionOp,
+                {kind: 'toggleMark', path: [1], from: 0, to: headingLength, mark: {type: 'italic'}} satisfies TransactionOp,
+            ],
+        };
+
+        const translated = translateTransaction(state, doc, tx, {actor: 'bob', ts: makeTs(100)});
+        const next = applyMany(state, translated.ops);
+        const nextDoc = crdtToPlimDocument(next);
+
+        expect(translated.unsupported).toEqual([]);
+        expect(nextDoc.children[0].text?.every((span) => span.marks?.some((mark) => mark.type === 'italic'))).toBe(true);
+        expect(
+            nextDoc.children[0].children?.[0].text?.every((span) => span.marks?.some((mark) => mark.type === 'italic')),
+        ).toBe(true);
+        expect(nextDoc.children[1].text?.every((span) => span.marks?.some((mark) => mark.type === 'italic'))).toBe(true);
+    });
+
     it('uses block-only deletion and splices visible children upward', () => {
         const state = createFixtureState();
         const doc = crdtToPlimDocument(state);

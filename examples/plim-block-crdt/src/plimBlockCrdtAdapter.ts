@@ -321,7 +321,7 @@ export const translateTransaction = (
                 }
                 const text = plimTextForPath(plimState.doc, op.path);
                 const from = utf16OffsetToGraphemeOffset(text, op.from);
-                const to = utf16OffsetToGraphemeOffset(text, op.to);
+                const to = op.to < 0 ? graphemeLength(text) : utf16OffsetToGraphemeOffset(text, op.to);
                 if (from < to) {
                     append(
                         markSelectionOps(
@@ -637,12 +637,13 @@ const createdBlockId = (ops: Op<PlimBlockMeta>[]): Lamport | null => {
 const markActiveInRange = (doc: DocumentNode, op: TransactionOp & {kind: 'toggleMark'}): boolean => {
     const block = getBlockAt(doc, op.path);
     if (!block?.text?.length) return false;
+    const to = op.to < 0 ? blockText(block).length : op.to;
     let offset = 0;
     for (const span of block.text) {
         const start = offset;
         const end = offset + span.text.length;
         offset = end;
-        if (end <= op.from || start >= op.to) continue;
+        if (end <= op.from || start >= to) continue;
         if (!span.marks?.some((mark) => mark.type === op.mark.type)) return false;
     }
     return true;
