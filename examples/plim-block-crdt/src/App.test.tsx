@@ -77,6 +77,26 @@ describe('Plim block CRDT example app', () => {
         expect(logDetails(view).textContent).toContain('left sync -> right');
     });
 
+    it('does not move focus to the peer pane after an online sync', async () => {
+        const view = render(<App />);
+        const left = await editorPane(view, 'Editor A');
+        const right = await editorPane(view, 'Editor B');
+        const content = firstContent(left);
+
+        setDomCaret(content, 0);
+        content.closest<HTMLElement>('.plim-editor')?.focus();
+
+        fireBeforeInput(content, 'F');
+
+        await waitFor(() => {
+            expect(editorText(right)).toContain('FHello 👩‍💻');
+            expect(left.contains(document.activeElement)).toBe(true);
+            const selection = window.getSelection();
+            expect(selection?.focusNode ? left.contains(selection.focusNode) : false).toBe(true);
+            expect(selection?.focusNode ? right.contains(selection.focusNode) : false).toBe(false);
+        });
+    });
+
     it('syncs text inserted in the right pane to the left pane', async () => {
         const view = render(<App />);
         const left = await editorPane(view, 'Editor A');

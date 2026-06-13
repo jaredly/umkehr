@@ -136,12 +136,18 @@ function PlimReplicaEditor({
     );
     const handle = useEditorHandle();
     const applyingFromCrdt = useRef(false);
+    const paneRef = useRef<HTMLElement>(null);
 
     useEffect(() => {
         const editor = handle.current;
         if (!editor) return;
+        const pane = paneRef.current;
+        const activeElement = document.activeElement;
+        const hasPaneFocus = !!pane && !!activeElement && pane.contains(activeElement);
+        const restoreTarget = hasPaneFocus ? null : snapshotFocusAndSelection();
         applyingFromCrdt.current = true;
         editor.setState(replica.adapter.plim);
+        restoreTarget?.();
         queueMicrotask(() => {
             applyingFromCrdt.current = false;
         });
@@ -156,7 +162,7 @@ function PlimReplicaEditor({
     );
 
     return (
-        <section className="editorPane" aria-label={replica.label} data-editor-id={replica.id}>
+        <section ref={paneRef} className="editorPane" aria-label={replica.label} data-editor-id={replica.id}>
             <div className="paneHeader">
                 <div>
                     <h2>{replica.label}</h2>
@@ -219,3 +225,30 @@ const markShortcutAction = (mark: 'bold' | 'italic', key: 'B' | 'I') =>
             tx.commit();
         },
     });
+
+const snapshotFocusAndSelection = (): (() => void) | null => {
+    const activeElement = document.activeElement;
+    const selection = window.getSelection();
+    const anchorNode = selection?.anchorNode ?? null;
+    const anchorOffset = selection?.anchorOffset ?? 0;
+    const focusNode = selection?.focusNode ?? null;
+    const focusOffset = selection?.focusOffset ?? 0;
+
+    if (!(activeElement instanceof HTMLElement) || !anchorNode || !focusNode) return null;
+
+    return () => {
+        if (!activeElement.isConnected || !anchorNode.isConnected || !focusNode.isConnected) return;
+        activeElement.focus({preventScroll: true});
+        const nextSelection = window.getSelection();
+        if (!nextSelection) return;
+        try {
+            nextSelection.setBaseAndExtent(anchorNode, anchorOffset, focusNode, focusOffset);
+        } catch {
+            const range = document.createRange();
+            range.setStart(anchorNode, anchorOffset);
+            range.setEnd(focusNode, focusOffset);
+            nextSelection.removeAllRanges();
+            nextSelection.addRange(range);
+        }
+    };
+};
