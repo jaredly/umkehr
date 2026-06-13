@@ -1,5 +1,5 @@
 import {useEffect, useMemo, useRef, useState} from 'react';
-import {PlimDriver} from '@plim/core';
+import {defineAction, PlimDriver, triggers} from '@plim/core';
 import {PlimEditor, SlashCommandMenu, slashCommandExtension, useEditorHandle} from '@plim/react';
 import type {EditorState, Transaction} from '@plim/core';
 import {
@@ -24,7 +24,14 @@ const actor = 'plimlocal';
 
 export function App() {
     const ts = useMemo(() => makeTs(500), []);
-    const plim = useMemo(() => new PlimDriver({extensions: [slashCommandExtension()]}), []);
+    const plim = useMemo(
+        () =>
+            new PlimDriver({
+                extensions: [slashCommandExtension()],
+                registeredActions: [markShortcutAction('bold', 'B'), markShortcutAction('italic', 'I')],
+            }),
+        [],
+    );
     const handle = useEditorHandle();
     const applyingFromCrdt = useRef(false);
     const [adapter, setAdapter] = useState<AdapterState>(() => createAdapterState(createFixtureState()));
@@ -152,3 +159,17 @@ export function App() {
 const appendLog = (setLog: (fn: (items: string[]) => string[]) => void, message: string) => {
     setLog((items) => [...items, message]);
 };
+
+const markShortcutAction = (mark: 'bold' | 'italic', key: 'B' | 'I') =>
+    defineAction(`${mark}Shortcut`, {
+        trigger: [triggers.keyboard.shortcut(`Meta+${key}`), triggers.keyboard.shortcut(`Ctrl+${key}`)],
+        triggerValidationRules: ({and}) => and(['selectionNotEmpty', 'blockSupportsDecoration']),
+        perform: (state, ctx) => {
+            const tx = ctx.createTransaction();
+            tx.toggleMark(mark, {
+                from: {path: state.selection.anchor.path, offset: state.selection.anchor.offset},
+                to: {path: state.selection.head.path, offset: state.selection.head.offset},
+            });
+            tx.commit();
+        },
+    });

@@ -134,6 +134,41 @@ describe('Plim block CRDT example app', () => {
         expect(document.body.textContent).toContain('Heading 1');
     });
 
+    it('toggles bold and italic marks from keyboard shortcuts on selected text', async () => {
+        const view = render(<App />);
+
+        const content = await waitFor(() => {
+            const node = view.container.querySelector<HTMLElement>('[data-block-content]');
+            if (!node) throw new Error('missing Plim content node');
+            return node;
+        });
+
+        setDomSelection(content, 0, 5);
+        fireEvent(document, new window.Event('selectionchange', {bubbles: false}));
+
+        await waitFor(() => {
+            expect(plimState(view).selection.anchor.offset).toBe(0);
+            expect(plimState(view).selection.head.offset).toBe(5);
+        });
+
+        fireEvent.keyDown(content, {key: 'i', code: 'KeyI', metaKey: true});
+
+        await waitFor(() => {
+            const marks = firstSpanMarks(view);
+            expect(marks).toContain('bold');
+            expect(marks).toContain('italic');
+        });
+
+        fireEvent.keyDown(content, {key: 'b', code: 'KeyB', metaKey: true});
+
+        await waitFor(() => {
+            const marks = firstSpanMarks(view);
+            expect(marks).not.toContain('bold');
+            expect(marks).toContain('italic');
+        });
+        expect(debugSection(view, 'Log').textContent).toContain('local tx: toggleMark');
+    });
+
     it('preserves a clicked Plim selection instead of resetting to document start', async () => {
         const view = render(<App />);
 
@@ -202,9 +237,17 @@ const editorText = (container: HTMLElement): string =>
 
 const plimState = (view: ReturnType<typeof render>) =>
     JSON.parse(debugSection(view, 'Plim JSON').querySelector('pre')?.textContent ?? '{}') as {
-        doc: {children: Array<{id: string}>};
+        doc: {
+            children: Array<{
+                id: string;
+                text?: Array<{text: string; marks?: Array<{type: string}>}>;
+            }>;
+        };
         selection: {head: {path: number[]; offset: number}; anchor: {path: number[]; offset: number}};
     };
+
+const firstSpanMarks = (view: ReturnType<typeof render>): string[] =>
+    plimState(view).doc.children[0].text?.[0].marks?.map((mark) => mark.type) ?? [];
 
 const fireBeforeInput = (node: HTMLElement, text: string) => {
     fireEvent(
@@ -225,6 +268,17 @@ const setDomCaret = (node: HTMLElement, offset: number) => {
     const range = document.createRange();
     range.setStart(text, Math.min(offset, text.textContent?.length ?? 0));
     range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+};
+
+const setDomSelection = (node: HTMLElement, from: number, to: number) => {
+    const text = firstTextNode(node);
+    const selection = window.getSelection();
+    if (!text || !selection) throw new Error('cannot set DOM selection');
+    const range = document.createRange();
+    range.setStart(text, Math.min(from, text.textContent?.length ?? 0));
+    range.setEnd(text, Math.min(to, text.textContent?.length ?? 0));
     selection.removeAllRanges();
     selection.addRange(range);
 };
