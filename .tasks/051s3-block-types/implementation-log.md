@@ -38,3 +38,11 @@
   - `npm exec vitest -- run examples/block-rich-text/src/multiSelectionCommands.test.ts src/block-crdt/index.test.ts`
   - `npm exec vitest -- run src/block-crdt/index.test.ts src/block-crdt/formatting.test.ts src/block-crdt/adapter-additions.test.ts examples/block-rich-text/src`
   - `npm run build`
+
+## Phase 6
+
+- Added the first annotation mark model for sidebar comments, footnotes, and popovers using a single `annotation` mark with presentation data and the mark Lamport id as the body parent.
+- Added comment/footnote/popover toolbar actions, annotation reference styling, sidebar comment rendering, and document-order footnote rendering.
+- Added explicit mark-based virtual parent ownership so annotation mark ids can validate as block parents without storing annotation identity on body blocks.
+- Routed example replay/remote application through the annotation virtual-parent config so annotation body blocks replay from history and sync to peers.
+- Issue encountered: the existing virtual-parent config only allowed virtual parents declared by block metadata, but annotation parents are declared by marks. Addressed this by adding an explicit `markVirtualParents` config surface to core virtual-parent handling and scanning annotation body blocks directly for sidebar/footnote UI instead of surfacing them in the main visible outline.

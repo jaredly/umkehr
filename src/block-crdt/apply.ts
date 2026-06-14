@@ -297,7 +297,7 @@ const applyBlockMove = <M extends TimestampedBlockMeta>(
     if (!current) {
         return false;
     }
-    const valid = validateBlockOrderPath(state.blocks, id, op.order, config);
+    const valid = validateBlockOrderPath(state, id, op.order, config);
     if (valid === false) {
         return false;
     }
@@ -359,7 +359,7 @@ const applyBlock = <M extends TimestampedBlockMeta>(
     }
 
     const blocks = {...state.blocks, [id]: block};
-    const valid = validateBlockOrderPath(blocks, id, block.order, config);
+    const valid = validateBlockOrderPath({...state, blocks}, id, block.order, config);
     if (valid === false) {
         return false;
     }
@@ -510,7 +510,7 @@ const missingBlockPathDependencies = <M extends TimestampedBlockMeta>(
     self: Lamport,
     config: VirtualBlockParentConfig<M>,
 ): Lamport[] => {
-    const virtualOwners = virtualParentOwners(state.state.blocks, config);
+    const virtualOwners = virtualParentOwners(state, config);
     const missing: Lamport[] = [];
     for (const id of path) {
         const key = lamportToString(id);

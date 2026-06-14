@@ -3,7 +3,7 @@ import {
     ROOT_ID,
     materializedBlockParent,
     materializedBlockPath,
-    virtualParentOwners,
+    virtualParentOwner,
     type VirtualBlockParentConfig,
 } from './blocks.js';
 import {assertActorId, lamportToString, parseLamportString} from './ids.js';
@@ -407,7 +407,7 @@ const virtualParentExists = <M extends TimestampedBlockMeta>(
     state: CachedState<M>,
     parentId: string,
     config: VirtualBlockParentConfig<M>,
-): boolean => Boolean(virtualParentOwners(state.state.blocks, config)[parentId]);
+): boolean => Boolean(virtualParentOwner(state, parentId, config));
 
 const materializedPathForParent = <M extends TimestampedBlockMeta>(
     state: CachedState<M>,
@@ -417,7 +417,7 @@ const materializedPathForParent = <M extends TimestampedBlockMeta>(
     const block = state.state.blocks[parentId];
     if (block) return materializedBlockPath(state, parentId, config);
 
-    const ownerId = virtualParentOwners(state.state.blocks, config)[parentId];
+    const ownerId = virtualParentOwner(state, parentId, config);
     if (!ownerId) throw new Error(`virtual parent not found`);
     return [...materializedBlockPath(state, ownerId, config), parseLamportString(parentId)];
 };

@@ -7,6 +7,7 @@ import {
     orderedCharIdsForBlock,
     visibleBlockOutline,
 } from './traversal.js';
+import {type VirtualBlockParentConfig} from './blocks.js';
 import {Block, CachedState, JsonValue, Lamport, Mark, Op, SplitRecord, TimestampedBlockMeta} from './types.js';
 
 export const splitRecordsByLeft = <M extends TimestampedBlockMeta>(
@@ -81,6 +82,7 @@ export const markRange = <M extends TimestampedBlockMeta = TimestampedBlockMeta>
 
 export const materializeFormattedBlocks = <M extends TimestampedBlockMeta>(
     state: CachedState<M>,
+    config: VirtualBlockParentConfig<M> = {},
 ): FormattedBlock<M>[] => {
     const coveredByMark: Record<string, Mark[]> = {};
     const marks = Object.values(state.state.marks).sort((a, b) => compareLamports(a.id, b.id));
@@ -91,7 +93,7 @@ export const materializeFormattedBlocks = <M extends TimestampedBlockMeta>(
         }
     }
 
-    return visibleBlockOutline(state).map(({id, depth, parentId}) => {
+    return visibleBlockOutline(state, config).map(({id, depth, parentId}) => {
         const runs: FormattedRun[] = [];
         for (const charId of orderedCharIdsForBlock(state, id, {visibleOnly: true})) {
             const char = charRecord(state, charId);

@@ -14,6 +14,12 @@ import {materializeFormattedBlocks} from 'umkehr/block-crdt';
 import type {FormattedBlock} from 'umkehr/block-crdt';
 import {moveBlock, setBlockMeta} from './blockCommands';
 import {
+    annotationVirtualParents,
+    createAnnotation,
+    renderedAnnotations,
+    type AnnotationPresentation,
+} from './annotations';
+import {
     makeCommandContext,
     nextReplicaTs,
     type DemoState,
@@ -384,6 +390,11 @@ function BlockEditor({
     const [hasFocus, setHasFocus] = useState(false);
     const [isExtendingSelection, setIsExtendingSelection] = useState(false);
     const blocks = materializeFormattedBlocks(replica.state);
+    const blocksWithAnnotationBodies = materializeFormattedBlocks(
+        replica.state,
+        annotationVirtualParents(replica.state),
+    );
+    const annotations = renderedAnnotations(replica.state, blocks, blocksWithAnnotationBodies);
     const renderTree = useMemo(() => buildRenderTree(blocks), [blocks]);
     const orderedListNumbers = useMemo(() => deriveOrderedListNumbers(blocks), [blocks]);
     const resolvedSelectionSet = resolveSelectionSet(replica.state, replica.selection);
@@ -857,6 +868,17 @@ function BlockEditor({
                         ),
                     )
                 }
+                onAnnotation={(presentation) =>
+                    runEditCommand((current, selection) => {
+                        const result = createAnnotation(
+                            current.state,
+                            primarySelection(resolveSelectionSet(current.state, selection)),
+                            presentation,
+                            makeCommandContext(current),
+                        );
+                        return {state: result.state, ops: result.ops, selection};
+                    })
+                }
                 onBlockType={(kind) =>
                     runEditCommand((current, selection) =>
                         setBlockTypeEverywhere(current.state, selection, (_blockId, meta) =>
@@ -870,6 +892,7 @@ function BlockEditor({
                     {undoStatus || undoState.undoReason || undoState.redoReason}
                 </p>
             ) : null}
+            <AnnotationSidebar annotations={annotations.filter((item) => item.data.presentation === 'sidebar')} />
             <div
                 ref={rootRef}
                 className="blockList"
@@ -913,6 +936,7 @@ function BlockEditor({
                     }),
                 )}
             </div>
+            <Footnotes annotations={annotations.filter((item) => item.data.presentation === 'footnote')} />
         </article>
     );
 }
@@ -1251,6 +1275,37 @@ const blockTypeMenuValue = (meta: RichBlockMeta | undefined): BlockTypeMenuValue
     }
 };
 
+
+function AnnotationSidebar({annotations}: {annotations: ReturnType<typeof renderedAnnotations>}) {
+    if (!annotations.length) return null;
+    return (
+        <aside className="annotationSidebar" aria-label="Comments">
+            {annotations.map((annotation) => (
+                <section key={annotation.id} className="annotationCard">
+                    <strong>Comment on “{annotation.referenceText}”</strong>
+                    {annotation.bodyBlocks.map((block) => (
+                        <p key={block.id}>{block.text || 'Empty comment'}</p>
+                    ))}
+                </section>
+            ))}
+        </aside>
+    );
+}
+
+function Footnotes({annotations}: {annotations: ReturnType<typeof renderedAnnotations>}) {
+    if (!annotations.length) return null;
+    return (
+        <ol className="footnotes" aria-label="Footnotes">
+            {annotations.map((annotation) => (
+                <li key={annotation.id}>
+                    {annotation.bodyBlocks.map((block) => block.text).join(' ') ||
+                        annotation.referenceText}
+                </li>
+            ))}
+        </ol>
+    );
+}
+
 function Toolbar({
     canUndo,
     canRedo,
@@ -1260,6 +1315,7 @@ function Toolbar({
     onBold,
     onItalic,
     onBlockType,
+    onAnnotation,
 }: {
     canUndo: boolean;
     canRedo: boolean;
@@ -1269,6 +1325,7 @@ function Toolbar({
     onBold(): void;
     onItalic(): void;
     onBlockType(kind: BlockTypeMenuValue): void;
+    onAnnotation(presentation: AnnotationPresentation): void;
 }) {
     return (
         <div className="toolbar" aria-label="Formatting">
@@ -1297,6 +1354,15 @@ function Toolbar({
                 onClick={onItalic}
             >
                 <em>I</em>
+            </button>
+            <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => onAnnotation('sidebar')}>
+                Comment
+            </button>
+            <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => onAnnotation('footnote')}>
+                Footnote
+            </button>
+            <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => onAnnotation('popover')}>
+                Popover
             </button>
             <select
                 aria-label="Block type"
@@ -1987,6 +2053,7 @@ const renderCaretsAtOffset = (
 const applyRunClasses = (span: HTMLElement, run: RichFormattedBlock['runs'][number]) => {
     if (run.marks.bold) span.classList.add('markBold');
     if (run.marks.italic) span.classList.add('markItalic');
+    if (run.marks.annotation) span.classList.add('markAnnotation');
 };
 
 const capitalize = (value: string) => value.slice(0, 1).toUpperCase() + value.slice(1);
