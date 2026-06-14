@@ -4,6 +4,7 @@ import {
     useMemo,
     useRef,
     useState,
+    type ClipboardEvent,
     type CSSProperties,
     type KeyboardEvent,
     type MouseEvent,
@@ -1383,15 +1384,13 @@ function AnnotationBodyBlock({
         command: (current: Replica, context: ReturnType<typeof makeCommandContext>) => CommandResult,
     ): void;
 }) {
-    const editableRef = useRef<HTMLDivElement>(null);
-    const renderedRunsRef = useRef('');
-    const pendingCaretOffsetRef = useRef<number | null>(null);
+    const pendingCaretRestoreBlockIdRef = useRef<string | null>(null);
+    const [selection, setSelection] = useState<EditorSelection>(() => caret(block.id, block.text.length));
 
     const restoreAfter = useCallback((selection: EditorSelection) => {
-        pendingCaretOffsetRef.current =
-            selection.type === 'caret' && selection.point.blockId === block.id
-                ? selection.point.offset
-                : null;
+        pendingCaretRestoreBlockIdRef.current =
+            selection.type === 'caret' && selection.point.blockId === block.id ? block.id : null;
+        setSelection(selection);
     }, [block.id]);
 
     const run = useCallback(
@@ -1412,79 +1411,51 @@ function AnnotationBodyBlock({
         [onBodyCommand, restoreAfter],
     );
 
-    useLayoutEffect(() => {
-        const element = editableRef.current;
-        if (!element) return;
-        const renderedRuns = JSON.stringify(block.runs.map((run) => [run.text, run.marks.bold, run.marks.italic, run.marks.annotation]));
-        if (renderedRunsRef.current !== renderedRuns) {
-            renderedRunsRef.current = renderedRuns;
-            element.replaceChildren(...renderRunNodes(block.runs, null));
-        }
-        if (pendingCaretOffsetRef.current !== null) {
-            const offset = pendingCaretOffsetRef.current;
-            pendingCaretOffsetRef.current = null;
-            if (document.activeElement !== element) element.focus();
-            restoreCaretToDom(element, offset);
-        }
-    }, [block.runs]);
-
-    const readBodySelection = useCallback(() => {
-        const element = editableRef.current;
-        return element ? readSelectionFromDom(element) : null;
-    }, []);
-
     return (
-        <div
-            ref={editableRef}
+        <RichTextEditableSurface
+            blockId={block.id}
+            runs={block.runs}
+            decorations={null}
+            pendingCaretRestoreBlockIdRef={pendingCaretRestoreBlockIdRef}
+            selection={selection}
             className="annotationBodyEditor"
-            contentEditable
-            role="textbox"
-            aria-label="Annotation body"
-            suppressContentEditableWarning
-            spellCheck
-            data-block-id={block.id}
-            data-empty={block.runs.length === 0 ? 'true' : undefined}
-            data-placeholder={fallbackText || 'Annotation body'}
-            onBeforeInput={(event) => {
-                if (event.nativeEvent.isComposing) return;
-                const selection = readBodySelection();
-                if (!selection) return;
-                if (event.nativeEvent.inputType === 'insertText' && event.nativeEvent.data) {
-                    event.preventDefault();
-                    run(selection, (state, selected, context) =>
-                        replaceAnnotationBodySelection(state, selected, event.nativeEvent.data ?? '', context),
-                    );
-                } else if (event.nativeEvent.inputType === 'insertParagraph') {
-                    event.preventDefault();
-                    run(selection, (state, selected, context) =>
-                        replaceAnnotationBodySelection(state, selected, '\n', context),
-                    );
-                } else if (event.nativeEvent.inputType === 'deleteContentBackward') {
-                    event.preventDefault();
-                    run(selection, deleteAnnotationBodyBackward);
-                } else if (event.nativeEvent.inputType === 'deleteContentForward') {
-                    event.preventDefault();
-                    run(selection, deleteAnnotationBodyForward);
-                }
-            }}
+            ariaLabel="Annotation body"
+            placeholder={fallbackText || 'Annotation body'}
+            onInsertText={(text, activeSelection) =>
+                run(activeSelection ?? selection, (state, selected, context) =>
+                    replaceAnnotationBodySelection(state, selected, text, context),
+                )
+            }
+            onDeleteBackward={(activeSelection) =>
+                run(activeSelection ?? selection, deleteAnnotationBodyBackward)
+            }
+            onDeleteForward={(activeSelection) =>
+                run(activeSelection ?? selection, deleteAnnotationBodyForward)
+            }
             onPaste={(event) => {
-                const selection = readBodySelection();
-                if (!selection) return;
                 event.preventDefault();
                 const text = event.clipboardData.getData('text/plain');
-                run(selection, (state, selected, context) =>
+                run(readSelectionFromDom(event.currentTarget) ?? selection, (state, selected, context) =>
                     replaceAnnotationBodySelection(state, selected, text, context),
                 );
             }}
             onKeyDown={(event) => {
+                const currentSelection = readSelectionFromDom(event.currentTarget);
+                if (currentSelection) setSelection(currentSelection);
                 const modifierPressed = event.metaKey || event.ctrlKey;
                 const key = event.key.toLowerCase();
-                if (modifierPressed && (key === 'b' || key === 'i')) {
-                    const selection = readBodySelection();
-                    if (!selection) return;
+                if (event.key === 'Enter') {
                     event.preventDefault();
-                    run(selection, (state, selected, context) =>
-                        toggleAnnotationBodyMark(state, selected, key === 'b' ? 'bold' : 'italic', context),
+                    run(currentSelection ?? selection, (state, selected, context) =>
+                        replaceAnnotationBodySelection(state, selected, '\n', context),
+                    );
+                    return;
+                }
+                if (modifierPressed && (key === 'b' || key === 'i')) {
+                    const selected = currentSelection ?? selection;
+                    event.preventDefault();
+                    run(selected, (state, activeSelection, context) =>
+                        toggleAnnotationBodyMark(state, activeSelection, key === 'b' ? 'bold' : 'italic', context),
                     );
                 }
             }}
@@ -1645,9 +1616,9 @@ function EditableBlock({
     dropTarget: DropTarget | null;
     registerRow(id: string, element: HTMLElement | null): void;
     onStartDrag: ReturnType<typeof useBlockReorder>['startDrag'];
-    onInsertText(text: string): void;
-    onDeleteBackward(): void;
-    onDeleteForward(): void;
+    onInsertText(text: string, selection?: EditorSelection): void;
+    onDeleteBackward(selection?: EditorSelection): void;
+    onDeleteForward(selection?: EditorSelection): void;
     onSplit(): void;
     onForceCodeNewline(): void;
     onIndent(): void;
@@ -1675,56 +1646,9 @@ function EditableBlock({
     onRedo(): void;
     onKeystroke(blockId: string, event: KeyboardEvent<HTMLElement>): void;
 }) {
-    const handledBeforeInputRef = useRef(false);
-    const editableRef = useRef<HTMLDivElement>(null);
-    const renderedRunsRef = useRef('');
     const meta = block.block.meta;
     const codeHasTrailingNewline =
         meta.type === 'code' && block.runs.map((run) => run.text).join('').endsWith('\n');
-
-    useLayoutEffect(() => {
-        const element = editableRef.current;
-        if (!element) return;
-
-        const onBeforeInput = (event: InputEvent) => {
-            if (event.isComposing) return;
-            if (event.inputType === 'insertText' && event.data) {
-                event.preventDefault();
-                handledBeforeInputRef.current = true;
-                onInsertText(event.data);
-            } else if (event.inputType === 'deleteContentBackward') {
-                event.preventDefault();
-                handledBeforeInputRef.current = true;
-                onDeleteBackward();
-            } else if (event.inputType === 'deleteContentForward') {
-                event.preventDefault();
-                handledBeforeInputRef.current = true;
-                onDeleteForward();
-            }
-        };
-
-        element.addEventListener('beforeinput', onBeforeInput);
-        return () => element.removeEventListener('beforeinput', onBeforeInput);
-    }, [onDeleteBackward, onDeleteForward, onInsertText]);
-
-    useLayoutEffect(() => {
-        const element = editableRef.current;
-        if (!element) return;
-        const renderedRuns = serializeRuns(block.runs, decorations, codeHasTrailingNewline);
-        if (renderedRunsRef.current !== renderedRuns) {
-            renderedRunsRef.current = renderedRuns;
-            const children = renderRunNodes(block.runs, decorations, {
-                trailingCodeNewline: codeHasTrailingNewline,
-            });
-            element.replaceChildren(...children);
-        }
-        const point = selection.type === 'caret' ? selection.point : null;
-        if (point?.blockId === block.id && pendingCaretRestoreBlockIdRef.current === block.id) {
-            pendingCaretRestoreBlockIdRef.current = null;
-            if (document.activeElement !== element) element.focus();
-            restoreCaretToDom(element, point.offset);
-        }
-    }, [block.id, block.runs, codeHasTrailingNewline, decorations, pendingCaretRestoreBlockIdRef, selection]);
 
     return (
         <div
@@ -1756,8 +1680,12 @@ function EditableBlock({
                 ⋮⋮
             </button>
             <BlockAffordance meta={meta} listNumber={listNumber} onToggleTodo={onToggleTodo} />
-            <div
-                ref={editableRef}
+            <RichTextEditableSurface
+                blockId={block.id}
+                runs={block.runs}
+                decorations={decorations}
+                pendingCaretRestoreBlockIdRef={pendingCaretRestoreBlockIdRef}
+                selection={selection}
                 className={[
                     'editableBlock',
                     meta.type === 'code' ? 'codeBlock' : '',
@@ -1765,44 +1693,11 @@ function EditableBlock({
                 ]
                     .filter(Boolean)
                     .join(' ')}
-                contentEditable
-                role="textbox"
-                aria-label="Block text"
-                suppressContentEditableWarning
-                spellCheck
-                data-block-id={block.id}
-                data-empty={block.runs.length === 0 ? 'true' : undefined}
-                data-trailing-newline={codeHasTrailingNewline ? 'true' : undefined}
-                onFocus={(event) => {
-                    const nextDecorations = removePrimaryDecorations(decorations);
-                    if (nextDecorations === decorations) return;
-                    event.currentTarget.replaceChildren(
-                        ...renderRunNodes(block.runs, nextDecorations, {
-                            trailingCodeNewline: codeHasTrailingNewline,
-                        }),
-                    );
-                    renderedRunsRef.current = serializeRuns(
-                        block.runs,
-                        nextDecorations,
-                        codeHasTrailingNewline,
-                    );
-                }}
-                onInput={(event) => {
-                    const native = event.nativeEvent as InputEvent;
-                    if (handledBeforeInputRef.current) {
-                        handledBeforeInputRef.current = false;
-                        event.currentTarget.replaceChildren(
-                            ...renderRunNodes(block.runs, decorations, {
-                                trailingCodeNewline: codeHasTrailingNewline,
-                            }),
-                        );
-                        return;
-                    }
-                    if (native.isComposing) return;
-                    if (isJsdom() && native.inputType === 'insertText' && native.data) {
-                        onInsertText(native.data);
-                    }
-                }}
+                ariaLabel="Block text"
+                trailingCodeNewline={codeHasTrailingNewline}
+                onInsertText={onInsertText}
+                onDeleteBackward={onDeleteBackward}
+                onDeleteForward={onDeleteForward}
                 onKeyDown={(event) => {
                     onKeystroke(block.id, event);
                     const modifierPressed = event.metaKey || event.ctrlKey;
@@ -1971,6 +1866,130 @@ function EditableBlock({
                 onSetCalloutKind={onSetCalloutKind}
             />
         </div>
+    );
+}
+
+function RichTextEditableSurface({
+    blockId,
+    runs,
+    decorations,
+    pendingCaretRestoreBlockIdRef,
+    selection,
+    className,
+    ariaLabel,
+    placeholder,
+    trailingCodeNewline = false,
+    onInsertText,
+    onDeleteBackward,
+    onDeleteForward,
+    onKeyDown,
+    onPaste,
+}: {
+    blockId: string;
+    runs: RichFormattedBlock['runs'];
+    decorations: BlockSelectionDecorations | null;
+    pendingCaretRestoreBlockIdRef: MutableRefObject<string | null>;
+    selection: EditorSelection;
+    className: string;
+    ariaLabel: string;
+    placeholder?: string;
+    trailingCodeNewline?: boolean;
+    onInsertText(text: string, selection?: EditorSelection): void;
+    onDeleteBackward(selection?: EditorSelection): void;
+    onDeleteForward(selection?: EditorSelection): void;
+    onKeyDown?(event: KeyboardEvent<HTMLDivElement>): void;
+    onPaste?(event: ClipboardEvent<HTMLDivElement>): void;
+}) {
+    const handledBeforeInputRef = useRef(false);
+    const editableRef = useRef<HTMLDivElement>(null);
+    const renderedRunsRef = useRef('');
+
+    useLayoutEffect(() => {
+        const element = editableRef.current;
+        if (!element) return;
+
+        const onBeforeInput = (event: InputEvent) => {
+            if (event.isComposing) return;
+            const selection = readSelectionFromDom(element) ?? undefined;
+            if (event.inputType === 'insertText' && event.data) {
+                event.preventDefault();
+                handledBeforeInputRef.current = true;
+                onInsertText(event.data, selection);
+            } else if (event.inputType === 'deleteContentBackward') {
+                event.preventDefault();
+                handledBeforeInputRef.current = true;
+                onDeleteBackward(selection);
+            } else if (event.inputType === 'deleteContentForward') {
+                event.preventDefault();
+                handledBeforeInputRef.current = true;
+                onDeleteForward(selection);
+            }
+        };
+
+        element.addEventListener('beforeinput', onBeforeInput);
+        return () => element.removeEventListener('beforeinput', onBeforeInput);
+    }, [onDeleteBackward, onDeleteForward, onInsertText]);
+
+    useLayoutEffect(() => {
+        const element = editableRef.current;
+        if (!element) return;
+        const renderedRuns = serializeRuns(runs, decorations, trailingCodeNewline);
+        if (renderedRunsRef.current !== renderedRuns) {
+            renderedRunsRef.current = renderedRuns;
+            element.replaceChildren(
+                ...renderRunNodes(runs, decorations, {trailingCodeNewline}),
+            );
+        }
+        const point = selection.type === 'caret' ? selection.point : null;
+        if (point?.blockId === blockId && pendingCaretRestoreBlockIdRef.current === blockId) {
+            pendingCaretRestoreBlockIdRef.current = null;
+            if (document.activeElement !== element) element.focus();
+            restoreCaretToDom(element, point.offset);
+        }
+    }, [blockId, decorations, pendingCaretRestoreBlockIdRef, runs, selection, trailingCodeNewline]);
+
+    return (
+        <div
+            ref={editableRef}
+            className={className}
+            contentEditable
+            role="textbox"
+            aria-label={ariaLabel}
+            suppressContentEditableWarning
+            spellCheck
+            data-block-id={blockId}
+            data-empty={runs.length === 0 ? 'true' : undefined}
+            data-placeholder={placeholder}
+            data-trailing-newline={trailingCodeNewline ? 'true' : undefined}
+            onFocus={(event) => {
+                const nextDecorations = removePrimaryDecorations(decorations);
+                if (nextDecorations === decorations) return;
+                event.currentTarget.replaceChildren(
+                    ...renderRunNodes(runs, nextDecorations, {trailingCodeNewline}),
+                );
+                renderedRunsRef.current = serializeRuns(
+                    runs,
+                    nextDecorations,
+                    trailingCodeNewline,
+                );
+            }}
+            onInput={(event) => {
+                const native = event.nativeEvent as InputEvent;
+                if (handledBeforeInputRef.current) {
+                    handledBeforeInputRef.current = false;
+                    event.currentTarget.replaceChildren(
+                        ...renderRunNodes(runs, decorations, {trailingCodeNewline}),
+                    );
+                    return;
+                }
+                if (native.isComposing) return;
+                if (isJsdom() && native.inputType === 'insertText' && native.data) {
+                    onInsertText(native.data, readSelectionFromDom(event.currentTarget) ?? undefined);
+                }
+            }}
+            onKeyDown={onKeyDown}
+            onPaste={onPaste}
+        />
     );
 }
 
