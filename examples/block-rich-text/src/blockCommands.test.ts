@@ -12,6 +12,7 @@ import {
 import {initialState} from 'umkehr/block-crdt/initialState';
 import type {CachedState} from 'umkehr/block-crdt/types';
 import {lamportToString} from 'umkehr/block-crdt/utils';
+import {createAnnotation, annotationBodyBlockIds} from './annotations';
 import {
     deleteBackward,
     deleteForward,
@@ -54,6 +55,25 @@ const expectCache = (state: CachedState) => {
 };
 
 describe('block rich text commands', () => {
+    it('creates annotation body blocks under mark virtual parents without cache errors', () => {
+        const demo = createDemoState();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        const typed = insertText(demo.left.state, caret(blockId, 0), 'hello', makeCommandContext(demo.left));
+
+        const result = createAnnotation(
+            typed.state,
+            {type: 'range', anchor: {blockId, offset: 0}, focus: {blockId, offset: 5}},
+            'sidebar',
+            makeCommandContext(demo.left),
+        );
+
+        const annotationMark = Object.values(result.state.state.marks).find(
+            (mark) => mark.type === 'annotation',
+        );
+        expect(annotationMark).toBeDefined();
+        expect(annotationBodyBlockIds(result.state, annotationMark!.id)).toHaveLength(1);
+    });
+
     it('syncs metadata command updates to the peer replica', () => {
         const demo = createDemoState();
         const blockId = rootBlockIds(demo.left.state)[0];

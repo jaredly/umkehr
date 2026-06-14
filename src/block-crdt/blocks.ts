@@ -1,6 +1,6 @@
 import {compareLamports, lamportToString, parseLamportString} from './ids.js';
 import {compareLseqIds} from './lseq.js';
-import {Block, CachedState, Lamport, State, TimestampedBlockMeta} from './types.js';
+import {Block, CachedState, Char, Lamport, Mark, State, TimestampedBlockMeta} from './types.js';
 
 export type BlockParentDerivation = {
     parents: Record<string, string>;
@@ -10,6 +10,7 @@ export type BlockParentDerivation = {
 
 export type VirtualBlockParentConfig<M extends TimestampedBlockMeta = TimestampedBlockMeta> = {
     virtualParents?: (block: Block<M>) => Lamport[];
+    markVirtualParents?: (mark: Mark) => Lamport[];
 };
 
 type BlockParentDerivationWithPaths = BlockParentDerivation & {
@@ -23,8 +24,14 @@ type BlockParentStrategy = {
 
 export const ROOT_ID = lamportToString([0, 'root']);
 
-const stateBlocks = <M extends TimestampedBlockMeta>(state: State<M> | CachedState<M>) =>
-    'cache' in state ? state.state.blocks : state.blocks;
+const stateBlocks = <M extends TimestampedBlockMeta>(
+    state: Record<string, Block<M>> | State<M> | CachedState<M>,
+): Record<string, Block<M>> => {
+    const value = state as State<M> | CachedState<M>;
+    if ('cache' in value) return value.state.blocks;
+    if ('blocks' in value) return value.blocks;
+    return state as Record<string, Block<M>>;
+};
 
 export const materializedBlockPaths = <M extends TimestampedBlockMeta>(
     state: State<M> | CachedState<M>,
@@ -33,7 +40,7 @@ export const materializedBlockPaths = <M extends TimestampedBlockMeta>(
     materializedBlockPathsFromParents(
         stateBlocks(state),
         deriveBlockParentsForBlocks(stateBlocks(state), config).parents,
-        virtualParentOwners(stateBlocks(state), config),
+        virtualParentOwners(state, config),
     );
 
 export const materializedBlockPath = <M extends TimestampedBlockMeta>(
@@ -43,7 +50,7 @@ export const materializedBlockPath = <M extends TimestampedBlockMeta>(
 ): Lamport[] => {
     const blocks = stateBlocks(state);
     const parents = deriveBlockParentsForBlocks(blocks, config).parents;
-    return materializedBlockPathFromParents(blocks, parents, blockId, undefined, virtualParentOwners(blocks, config));
+    return materializedBlockPathFromParents(blocks, parents, blockId, undefined, virtualParentOwners(state, config));
 };
 
 export const materializedBlockParent = <M extends TimestampedBlockMeta>(
@@ -161,11 +168,12 @@ const deriveBlockParentsLinearStringCached = <M extends TimestampedBlockMeta>(
 };
 
 const deriveBlockParentsLinearSummary = <M extends TimestampedBlockMeta>(
-    blocks: Record<string, Block<M>>,
+    source: Record<string, Block<M>> | State<M> | CachedState<M>,
     config: VirtualBlockParentConfig<M> = {},
 ): BlockParentDerivation => {
+    const blocks = stateBlocks(source);
     const rawParents: Record<string, string | null> = {};
-    const virtualOwners = virtualParentOwners(blocks, config);
+    const virtualOwners = virtualParentOwners(source, config);
     for (const [id, block] of Object.entries(blocks)) {
         rawParents[id] = validateBlockOrderPathSummary(blocks, id, block.order.path, virtualOwners);
     }
@@ -350,12 +358,13 @@ const validateBlockOrderPathSummary = <M extends TimestampedBlockMeta>(
 };
 
 export const validateBlockOrderPath = <M extends TimestampedBlockMeta>(
-    blocks: Record<string, Block<M>>,
+    source: Record<string, Block<M>> | State<M> | CachedState<M>,
     blockId: string,
     order: Block['order'],
     config: VirtualBlockParentConfig<M> = {},
 ): false | void => {
-    const virtualOwners = virtualParentOwners(blocks, config);
+    const blocks = stateBlocks(source);
+    const virtualOwners = virtualParentOwners(source, config);
     if (!order.path.length) {
         throw new Error(`block order path for ${blockId} must not be empty`);
     }
@@ -380,17 +389,70 @@ export const validateBlockOrderPath = <M extends TimestampedBlockMeta>(
 };
 
 export const virtualParentOwners = <M extends TimestampedBlockMeta>(
-    blocks: Record<string, Block<M>>,
+    source: Record<string, Block<M>> | State<M> | CachedState<M>,
     config: VirtualBlockParentConfig<M> = {},
 ): Record<string, string> => {
+    const blocks = stateBlocks(source);
     const owners: Record<string, string> = {};
-    if (!config.virtualParents) return owners;
-    for (const [id, block] of Object.entries(blocks)) {
-        for (const parent of config.virtualParents(block)) {
-            owners[lamportToString(parent)] = id;
+    if (config.virtualParents) {
+        for (const [id, block] of Object.entries(blocks)) {
+            for (const parent of config.virtualParents(block)) {
+                owners[lamportToString(parent)] = id;
+            }
+        }
+    }
+    const marks = stateMarks(source);
+    const chars = stateChars(source);
+    if (marks && chars && config.markVirtualParents) {
+        for (const mark of Object.values(marks)) {
+            const owner = blockContainingChar(blocks, chars, lamportToString(mark.start.id));
+            if (!owner) continue;
+            for (const parent of config.markVirtualParents(mark)) {
+                owners[lamportToString(parent)] = owner;
+            }
         }
     }
     return owners;
+};
+
+export const virtualParentOwner = <M extends TimestampedBlockMeta>(
+    source: Record<string, Block<M>> | State<M> | CachedState<M>,
+    parentId: string,
+    config: VirtualBlockParentConfig<M> = {},
+): string | null => virtualParentOwners(source, config)[parentId] ?? null;
+
+const stateMarks = <M extends TimestampedBlockMeta>(
+    state: Record<string, Block<M>> | State<M> | CachedState<M>,
+): Record<string, Mark> | null => {
+    const value = state as State<M> | CachedState<M>;
+    if ('cache' in value) return value.state.marks;
+    return 'blocks' in value ? value.marks : null;
+};
+
+const stateChars = <M extends TimestampedBlockMeta>(
+    state: Record<string, Block<M>> | State<M> | CachedState<M>,
+): Record<string, Char> | null => {
+    const value = state as State<M> | CachedState<M>;
+    if ('cache' in value) return value.state.chars;
+    return 'blocks' in value ? value.chars : null;
+};
+
+const blockContainingChar = <M extends TimestampedBlockMeta>(
+    blocks: Record<string, Block<M>>,
+    chars: Record<string, Char>,
+    charId: string,
+): string | null => {
+    const seen = new Set<string>();
+    let current: string | undefined = charId;
+    while (current && !seen.has(current)) {
+        seen.add(current);
+        const char = chars[current];
+        if (!char) return null;
+        const parentId = lamportToString(char.parent.id);
+        if (blocks[parentId]) return parentId;
+        current = parentId;
+    }
+    return null;
 };
 
 const parseVirtualParentId = (id: string): Lamport => parseLamportString(id);

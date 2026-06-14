@@ -1,4 +1,5 @@
 import {applyMany, materializeFormattedBlocks, type Op} from 'umkehr/block-crdt';
+import {annotationVirtualParents} from './annotations';
 import * as hlc from '../../../src/crdt/hlc';
 import {
     applyLocalChange,
@@ -144,7 +145,9 @@ export const replayHistory = (
         const current = demo[action.editorId];
         demo = applyLocalChange(demo, {
             editorId: action.editorId,
-            state: action.ops.length ? applyMany(current.state, action.ops) : current.state,
+            state: action.ops.length
+                ? applyMany(current.state, action.ops, annotationVirtualParents(current.state))
+                : current.state,
             selection: action.selection,
             ops: action.ops,
         });

@@ -72,7 +72,7 @@ export const assertCacheConsistent = <M extends TimestampedBlockMeta>(
     state: CachedState<M>,
     config: VirtualBlockParentConfig<M> = {},
 ) => {
-    const expected = organizeState(state.state.blocks, state.state.chars, state.state.joins, config);
+    const expected = organizeState(state.state.blocks, state.state.chars, state.state.joins, config, state.state.marks);
     if (!equal(state.cache, expected)) {
         throw new Error(`cached state is inconsistent`);
     }
@@ -195,7 +195,7 @@ const applyJoinRecord = <M extends TimestampedBlockMeta>(
     };
     return {
         state: nextState,
-        cache: organizeState(nextState.blocks, nextState.chars, nextState.joins),
+        cache: organizeState(nextState.blocks, nextState.chars, nextState.joins, {}, nextState.marks),
     };
 };
 
@@ -297,7 +297,7 @@ const applyBlockMove = <M extends TimestampedBlockMeta>(
     if (!current) {
         return false;
     }
-    const valid = validateBlockOrderPath(state.blocks, id, op.order, config);
+    const valid = validateBlockOrderPath(state, id, op.order, config);
     if (valid === false) {
         return false;
     }
@@ -313,7 +313,7 @@ const applyBlockMove = <M extends TimestampedBlockMeta>(
     };
     return {
         state: nextState,
-        cache: organizeState(nextState.blocks, nextState.chars, nextState.joins, config),
+        cache: organizeState(nextState.blocks, nextState.chars, nextState.joins, config, nextState.marks),
     };
 };
 
@@ -337,7 +337,10 @@ const applyBlockMeta = <M extends TimestampedBlockMeta>(
     };
     return {
         state: nextState,
-        cache: config.virtualParents ? organizeState(nextState.blocks, nextState.chars, nextState.joins, config) : cache,
+        cache:
+            config.virtualParents || config.markVirtualParents
+                ? organizeState(nextState.blocks, nextState.chars, nextState.joins, config, nextState.marks)
+                : cache,
     };
 };
 
@@ -359,7 +362,7 @@ const applyBlock = <M extends TimestampedBlockMeta>(
     }
 
     const blocks = {...state.blocks, [id]: block};
-    const valid = validateBlockOrderPath(blocks, id, block.order, config);
+    const valid = validateBlockOrderPath({...state, blocks}, id, block.order, config);
     if (valid === false) {
         return false;
     }
@@ -370,7 +373,7 @@ const applyBlock = <M extends TimestampedBlockMeta>(
     };
     return {
         state: nextState,
-        cache: organizeState(nextState.blocks, nextState.chars, nextState.joins, config),
+        cache: organizeState(nextState.blocks, nextState.chars, nextState.joins, config, nextState.marks),
     };
 };
 
@@ -510,7 +513,7 @@ const missingBlockPathDependencies = <M extends TimestampedBlockMeta>(
     self: Lamport,
     config: VirtualBlockParentConfig<M>,
 ): Lamport[] => {
-    const virtualOwners = virtualParentOwners(state.state.blocks, config);
+    const virtualOwners = virtualParentOwners(state, config);
     const missing: Lamport[] = [];
     for (const id of path) {
         const key = lamportToString(id);

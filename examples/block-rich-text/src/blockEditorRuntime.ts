@@ -9,6 +9,7 @@ import type {
 } from 'umkehr/block-crdt/types';
 import * as hlc from '../../../src/crdt/hlc';
 import {paragraphMeta, type RichBlockMeta} from './blockMeta';
+import {annotationVirtualParents} from './annotations';
 import {initialRetainedSelectionSet, type RetainedSelectionSet} from './selectionSet';
 
 export type EditorId = 'left' | 'right';
@@ -110,7 +111,7 @@ const createReplica = (id: EditorId, state: CachedState<RichBlockMeta>): Replica
 });
 
 const applyRemoteOps = (replica: Replica, ops: Array<Op<RichBlockMeta>>): Replica => {
-    const state = applyMany(replica.state, ops);
+    const state = applyMany(replica.state, ops, annotationVirtualParents(replica.state));
     return {...replica, state};
 };
 
