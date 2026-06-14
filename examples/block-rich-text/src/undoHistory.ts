@@ -1,11 +1,10 @@
 import {applyMany, planUndoOps, type Op} from 'umkehr/block-crdt';
 import type {CachedState} from 'umkehr/block-crdt/types';
-import {lamportToString} from 'umkehr/block-crdt/utils';
 import {
     applyLocalChange,
     createDemoState,
-    nextReplicaClock,
     nextReplicaTs,
+    previewReplicaTs,
     toggleOnline,
     type DemoState,
     type EditorId,
@@ -231,8 +230,7 @@ const planForRedo = (
 
 const makeTs = (replica: Replica, mutateClock: boolean) => {
     if (mutateClock) return () => nextReplicaTs(replica);
-    let next = nextReplicaClock(replica);
-    return () => lamportToString([next++, replica.actor]);
+    return previewReplicaTs(replica);
 };
 
 const advanceReplicaClocks = (demo: DemoState, actions: HistoryAction[]): DemoState => {

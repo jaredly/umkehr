@@ -1,7 +1,13 @@
 import {applyMany, cachedState, type Op} from 'umkehr/block-crdt';
 import {initialStateWithMeta} from 'umkehr/block-crdt/initialState';
-import type {CachedState} from 'umkehr/block-crdt/types';
-import {lamportToString} from 'umkehr/block-crdt/utils';
+import type {
+    BlockOrderTs,
+    CachedState,
+    CharParentTs,
+    HLC,
+    State,
+} from 'umkehr/block-crdt/types';
+import * as hlc from '../../../src/crdt/hlc';
 import {paragraphMeta, type RichBlockMeta} from './blockMeta';
 import {initialRetainedSelectionSet, type RetainedSelectionSet} from './selectionSet';
 
@@ -14,7 +20,7 @@ export type Replica = {
     selection: RetainedSelectionSet;
     online: boolean;
     queue: Array<Array<Op<RichBlockMeta>>>;
-    clock: number;
+    clock: hlc.HLC;
 };
 
 export type DemoState = {
@@ -30,23 +36,24 @@ export type LocalChange = {
 };
 
 export const createDemoState = (): DemoState => {
-    const state = cachedState(initialStateWithMeta('doc', paragraphMeta('00000')));
+    const state = cachedState(initialStateWithMeta('doc', paragraphMeta(initialTimestamp('doc'))));
     return {
         left: createReplica('left', state),
         right: createReplica('right', state),
     };
 };
 
-export const nextReplicaClock = (replica: Replica) =>
-    Math.max(
-        replica.clock,
-        replica.state.state.maxSeenCount + 1,
-        maxLamportTimestampCounter(replica.state.state) + 1,
-    );
-
 export const nextReplicaTs = (replica: Replica) => {
-    replica.clock = nextReplicaClock(replica);
-    return lamportToString([replica.clock++, replica.actor]);
+    replica.clock = hlc.inc(clockAfterReceivingState(replica), 0);
+    return hlc.pack(replica.clock);
+};
+
+export const previewReplicaTs = (replica: Replica) => {
+    let clock = clockAfterReceivingState(replica);
+    return () => {
+        clock = hlc.inc(clock, 0);
+        return hlc.pack(clock);
+    };
 };
 
 export const makeCommandContext = (replica: Replica) => ({
@@ -99,7 +106,7 @@ const createReplica = (id: EditorId, state: CachedState<RichBlockMeta>): Replica
     selection: initialRetainedSelectionSet(state),
     online: true,
     queue: [],
-    clock: 1,
+    clock: hlc.init(id, 0),
 });
 
 const applyRemoteOps = (replica: Replica, ops: Array<Op<RichBlockMeta>>): Replica => {
@@ -107,19 +114,33 @@ const applyRemoteOps = (replica: Replica, ops: Array<Op<RichBlockMeta>>): Replic
     return {...replica, state};
 };
 
-const maxLamportTimestampCounter = (value: unknown): number => {
-    if (typeof value === 'string') {
-        const match = /^(\d+)-[^-]+$/.exec(value);
-        return match ? Number(match[1]) : 0;
+const initialTimestamp = (node: string) => hlc.pack(hlc.init(node, 0));
+
+const clockAfterReceivingState = (replica: Replica): hlc.HLC => {
+    let clock = replica.clock;
+    for (const timestamp of stateTimestamps(replica.state.state)) {
+        const remote = hlc.tryUnpack(timestamp);
+        if (remote) clock = hlc.recv(clock, remote, 0);
     }
-    if (Array.isArray(value)) {
-        return value.reduce((max, item) => Math.max(max, maxLamportTimestampCounter(item)), 0);
-    }
-    if (typeof value === 'object' && value !== null) {
-        return Object.values(value).reduce(
-            (max, item) => Math.max(max, maxLamportTimestampCounter(item)),
-            0,
-        );
-    }
-    return 0;
+    return clock;
 };
+
+const stateTimestamps = (state: State<RichBlockMeta>): HLC[] => {
+    const timestamps: HLC[] = [];
+    for (const block of Object.values(state.blocks)) {
+        timestamps.push(block.meta.ts, ...blockOrderTimestamps(block.order.ts));
+    }
+    for (const char of Object.values(state.chars)) {
+        timestamps.push(...charParentTimestamps(char.parent.ts));
+    }
+    for (const join of Object.values(state.joins)) {
+        timestamps.push(join.ts);
+    }
+    return timestamps;
+};
+
+const blockOrderTimestamps = (ts: BlockOrderTs): HLC[] =>
+    typeof ts === 'string' ? [ts] : [ts[0], ts[2]];
+
+const charParentTimestamps = (ts: CharParentTs): HLC[] =>
+    typeof ts === 'string' ? [ts] : [ts[0], ts[2]];

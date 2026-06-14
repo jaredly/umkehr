@@ -59,18 +59,22 @@ const insert = (text: string) => (replica: Replica) =>
 const backspace = () => (replica: Replica) =>
     deleteBackwardEverywhere(replica.state, replica.selection, makeCommandContext(replica));
 
-const quote = () => (replica: Replica) =>
-    setBlockTypeEverywhere(replica.state, replica.selection, (_blockId, _meta) => ({
+const quote = () => (replica: Replica) => {
+    const context = makeCommandContext(replica);
+    return setBlockTypeEverywhere(replica.state, replica.selection, (_blockId, _meta) => ({
         type: 'blockquote',
-        ts: '0001-left',
+        ts: context.nextTs(),
     }));
+};
 
-const code = () => (replica: Replica) =>
-    setBlockTypeEverywhere(replica.state, replica.selection, (_blockId, meta) => ({
+const code = () => (replica: Replica) => {
+    const context = makeCommandContext(replica);
+    return setBlockTypeEverywhere(replica.state, replica.selection, (_blockId, meta) => ({
         type: 'code',
         language: meta.type === 'code' ? meta.language : '',
-        ts: '0001-left',
+        ts: context.nextTs(),
     }));
+};
 
 const enter = () => (replica: Replica) =>
     splitBlockEverywhere(replica.state, replica.selection, makeCommandContext(replica));

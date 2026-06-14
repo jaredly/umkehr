@@ -2,6 +2,7 @@ import {describe, expect, it} from 'vitest';
 import {materializeFormattedBlocks, rootBlockIds} from 'umkehr/block-crdt';
 import {indentBlock, moveBlock} from './blockCommands';
 import {makeCommandContext, nextReplicaTs, type EditorId, type Replica} from './blockEditorRuntime';
+import * as hlc from '../../../src/crdt/hlc';
 import {
     appendHistoryAction,
     appendHistoryKeystroke,
@@ -88,12 +89,14 @@ const insert = (text: string) => (replica: Replica) =>
 const split = () => (replica: Replica) =>
     splitBlockEverywhere(replica.state, replica.selection, makeCommandContext(replica));
 
-const heading = () => (replica: Replica) =>
-    setBlockTypeEverywhere(replica.state, replica.selection, (_blockId, _meta) => ({
+const heading = () => (replica: Replica) => {
+    const context = makeCommandContext(replica);
+    return setBlockTypeEverywhere(replica.state, replica.selection, (_blockId, _meta) => ({
         type: 'heading',
         level: 2,
-        ts: '0001-left',
+        ts: context.nextTs(),
     }));
+};
 
 const toggleTodo = () => (replica: Replica) =>
     updateBlockMetaEverywhere(
@@ -242,7 +245,14 @@ describe('block rich text history', () => {
         expect(moved.ops[0].type).toBe('block:move');
         if (moved.ops[0].type !== 'block:move') return;
         expect(moved.ops[0].order.id[0]).toBeGreaterThan(maxSeenBeforeMove);
-        expect(moved.ops[0].order.ts).toBe('0016-right');
+        const previousOrderTs = demo.right.state.state.blocks[third].order.ts;
+        expect(typeof previousOrderTs).toBe('string');
+        if (typeof previousOrderTs !== 'string') return;
+        const previous = hlc.tryUnpack(previousOrderTs);
+        const next = hlc.tryUnpack(moved.ops[0].order.ts);
+        expect(previous).not.toBeNull();
+        expect(next).toMatchObject({node: 'right'});
+        expect(next && previous ? hlc.cmp(next, previous) : 0).toBeGreaterThan(0);
     });
 
     it('round-trips rich block metadata through export/import', () => {
@@ -254,22 +264,23 @@ describe('block rich text history', () => {
         expect('history' in parsed).toBe(true);
         if (!('history' in parsed)) return;
         const replayed = replayHistory(parsed.history.actions, parsed.history.cursor);
-        expect(materializeFormattedBlocks(replayed.left.state)[0].block.meta).toEqual({
+        expect(materializeFormattedBlocks(replayed.left.state)[0].block.meta).toMatchObject({
             type: 'heading',
             level: 2,
-            ts: '0001-left',
         });
+        expect(hlc.tryUnpack(materializeFormattedBlocks(replayed.left.state)[0].block.meta.ts)).not.toBeNull();
     });
 
     it('replays todo toggle metadata through history', () => {
         let history = initialHistoryState();
-        history = appendLocal(history, 'left', (replica) =>
-            setBlockTypeEverywhere(replica.state, replica.selection, (_blockId, _meta) => ({
+        history = appendLocal(history, 'left', (replica) => {
+            const context = makeCommandContext(replica);
+            return setBlockTypeEverywhere(replica.state, replica.selection, (_blockId, _meta) => ({
                 type: 'todo',
                 checked: false,
-                ts: '0001-left',
-            })),
-        );
+                ts: context.nextTs(),
+            }));
+        });
         history = appendLocal(history, 'left', toggleTodo());
 
         const replayed = replayHistory(history.actions, history.cursor);
@@ -347,7 +358,7 @@ describe('block rich text history', () => {
         expect('error' in parsed ? parsed.error : '').toContain('targetCommandId');
     });
 
-    it('advances actor clocks from lamport-string command ids after replay', () => {
+    it('ignores legacy lamport-string command ids when replaying HLC clocks', () => {
         let history = initialHistoryState();
         const demo = replayHistory(history.actions, history.cursor);
         const result = insert('a')(demo.left);
@@ -367,7 +378,8 @@ describe('block rich text history', () => {
 
         const replayed = replayHistory(history.actions, history.cursor);
 
-        expect(replayed.left.clock).toBe(11);
+        expect(replayed.left.clock).toEqual(hlc.init('left', 0));
+        expect(hlc.tryUnpack(nextReplicaTs(replayed.left))).toMatchObject({node: 'left'});
     });
 
     it('rejects malformed imports and removed block status ops', () => {
@@ -428,12 +440,12 @@ describe('block rich text history', () => {
         );
     });
 
-    it('advances actor clocks after replay so new edits use fresh timestamps', () => {
+    it('uses HLC timestamps and fresh Lamport ids after replay', () => {
         let history = initialHistoryState();
         history = appendLocal(history, 'left', insert('a'));
 
         const replayed = replayHistory(history.actions, history.cursor);
-        expect(replayed.left.clock).toBe(2);
+        const maxSeenBeforeSplit = replayed.left.state.state.maxSeenCount;
 
         const result = splitBlockEverywhere(
             replayed.left.state,
@@ -441,8 +453,11 @@ describe('block rich text history', () => {
             makeCommandContext(replayed.left),
         );
 
-        expect(JSON.stringify(result.ops)).toContain('0002-left');
-        expect(JSON.stringify(result.ops)).not.toContain('0001-left');
+        const blockOp = result.ops.find((op) => op.type === 'block');
+        expect(blockOp?.type).toBe('block');
+        if (blockOp?.type !== 'block') return;
+        expect(blockOp.block.id[0]).toBeGreaterThan(maxSeenBeforeSplit);
+        expect(hlc.tryUnpack(blockOp.block.order.ts)).toMatchObject({node: 'left'});
     });
 
     it('replays left-editor indent attempts after offline sync', () => {

@@ -1,4 +1,5 @@
 import {applyMany, materializeFormattedBlocks, type Op} from 'umkehr/block-crdt';
+import * as hlc from '../../../src/crdt/hlc';
 import {
     applyLocalChange,
     createDemoState,
@@ -149,7 +150,7 @@ export const replayHistory = (
         });
     }
 
-    return advanceReplicaClocks(demo, actions.slice(0, limit));
+    return advanceReplicaCommandClocks(demo, actions.slice(0, limit));
 };
 
 export const buildHistorySnapshot = (demo: DemoState): HistorySnapshot => ({
@@ -438,44 +439,23 @@ const isReplicaSnapshot = (value: unknown): value is ReplicaSnapshot =>
             typeof block.text === 'string',
     );
 
-const advanceReplicaClocks = (demo: DemoState, actions: HistoryAction[]): DemoState => {
-    const nextClock: Record<EditorId, number> = {left: demo.left.clock, right: demo.right.clock};
+const advanceReplicaCommandClocks = (demo: DemoState, actions: HistoryAction[]): DemoState => {
+    let leftClock = demo.left.clock;
+    let rightClock = demo.right.clock;
     for (const action of actions) {
-        if (action.type !== 'local-change') continue;
-        scanClockValue(action, nextClock);
+        if (action.type !== 'local-change' || !action.command) continue;
+        const timestamp = hlc.tryUnpack(action.command.id);
+        if (!timestamp) continue;
+        if (action.command.actor === 'left') {
+            leftClock = hlc.recv(leftClock, timestamp, 0);
+        } else {
+            rightClock = hlc.recv(rightClock, timestamp, 0);
+        }
     }
     return {
-        left: {...demo.left, clock: Math.max(demo.left.clock, nextClock.left)},
-        right: {...demo.right, clock: Math.max(demo.right.clock, nextClock.right)},
+        left: {...demo.left, clock: leftClock},
+        right: {...demo.right, clock: rightClock},
     };
-};
-
-const scanClockValue = (value: unknown, nextClock: Record<EditorId, number>) => {
-    if (typeof value === 'string') {
-        const match = /^(left|right)-(\d+)$/.exec(value);
-        if (match) {
-            const actor = match[1] as EditorId;
-            nextClock[actor] = Math.max(nextClock[actor], Number(match[2]) + 1);
-        }
-        const lamportMatch = /^(\d+)-(left|right)$/.exec(value);
-        if (lamportMatch) {
-            const actor = lamportMatch[2] as EditorId;
-            nextClock[actor] = Math.max(nextClock[actor], Number(lamportMatch[1]) + 1);
-        }
-        return;
-    }
-    if (isLamport(value)) {
-        const actor = value[1];
-        if (isEditorId(actor)) nextClock[actor] = Math.max(nextClock[actor], value[0] + 1);
-        return;
-    }
-    if (Array.isArray(value)) {
-        for (const item of value) scanClockValue(item, nextClock);
-        return;
-    }
-    if (isRecord(value)) {
-        for (const item of Object.values(value)) scanClockValue(item, nextClock);
-    }
 };
 
 const isLamport = (value: unknown): value is [number, string] =>
