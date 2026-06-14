@@ -61,6 +61,7 @@ export {
     materializedBlockPath,
     materializedBlockPaths,
 } from './blocks.js';
+export type {VirtualBlockParentConfig} from './blocks.js';
 
 export {
     cachedState,

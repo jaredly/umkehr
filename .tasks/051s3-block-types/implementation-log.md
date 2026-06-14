@@ -23,3 +23,18 @@
 - Follow-up issue: the `<br>` version over-rendered the trailing code newline as two blank lines because `white-space: pre-wrap` already creates the visual line for the model newline. Removed the `<br>` and kept only the zero-width sentinel after the newline as the selectable final caret target.
 - Follow-up issue: undoing the code-block double-Enter exit restored the deleted newline as a fresh replacement char, so the previous newline-insert command then looked like it had no live original char to undo and became blocked. Updated the undo planner to delete a visible replacement char at the same insertion parent when undoing an inserted char whose original id is already tombstoned, and added a regression for undoing exit followed by undoing the newline insert.
 - Follow-up issue: the toolbar block-type dropdown always showed the placeholder/default instead of the selected block's type. Made it controlled from the primary selection's focused block metadata and added a regression for moving between differently typed blocks.
+
+## Phase 4-5
+
+- Added an opt-in `VirtualBlockParentConfig` to core block parent derivation, materialized paths/parents, cache organization, traversal, insert/move ops, and apply/remote dependency checks.
+- Preserved default behavior for callers that do not pass virtual parent config.
+- Added virtual-parent tests for inserting under a virtual parent, moving under a virtual parent, virtual-aware visible traversal/path sibling anchors, remote pending/apply after the declaring block arrives, and cycle safety.
+- Added example `editableBlockIds` traversal and moved text navigation, selection normalization, retained selection fallback, word occurrence search, and multi-selection movement onto editable traversal.
+- Left drag/drop and block structural movement on visible rendered blocks, so non-text operations are not forced through editable-only order.
+- Added regression coverage for skipping `table_row` structural blocks during horizontal caret movement.
+- Verification passed:
+  - `npm run typecheck`
+  - `npm exec vitest -- run src/block-crdt/index.test.ts`
+  - `npm exec vitest -- run examples/block-rich-text/src/multiSelectionCommands.test.ts src/block-crdt/index.test.ts`
+  - `npm exec vitest -- run src/block-crdt/index.test.ts src/block-crdt/formatting.test.ts src/block-crdt/adapter-additions.test.ts examples/block-rich-text/src`
+  - `npm run build`

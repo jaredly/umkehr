@@ -1,5 +1,5 @@
 import equal from 'fast-deep-equal';
-import {validateBlockOrderPath} from './blocks.js';
+import {validateBlockOrderPath, virtualParentOwners, type VirtualBlockParentConfig} from './blocks.js';
 import {organizeState} from './cache.js';
 import {compareLamports, compareLamportStrings, lamportToString} from './ids.js';
 import {maxLamportCounterForOp} from './ops.js';
@@ -25,11 +25,12 @@ export const charOp = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
 export const applyRemote = <M extends TimestampedBlockMeta>(
     state: CachedState<M>,
     op: Op<M>,
+    config: VirtualBlockParentConfig<M> = {},
 ): ApplyResult<M> => {
     try {
-        const result = apply(state, op);
+        const result = apply(state, op, config);
         if (result === false) {
-            return {status: 'pending', state, missing: missingDependenciesForOp(state, op)};
+            return {status: 'pending', state, missing: missingDependenciesForOp(state, op, config)};
         }
         return result === state
             ? {status: 'ignored', state, reason: 'duplicate'}
@@ -39,14 +40,18 @@ export const applyRemote = <M extends TimestampedBlockMeta>(
     }
 };
 
-export const applyRemoteMany = <M extends TimestampedBlockMeta>(state: CachedState<M>, ops: Op<M>[]) => {
+export const applyRemoteMany = <M extends TimestampedBlockMeta>(
+    state: CachedState<M>,
+    ops: Op<M>[],
+    config: VirtualBlockParentConfig<M> = {},
+) => {
     const applied: Op<M>[] = [];
     const ignored: {op: Op<M>; reason: 'stale' | 'duplicate'}[] = [];
     const pending: {op: Op<M>; missing: Lamport[]}[] = [];
     const invalid: {op: Op<M>; error: Error}[] = [];
 
     for (const op of ops) {
-        const result = applyRemote(state, op);
+        const result = applyRemote(state, op, config);
         if (result.status === 'applied') {
             state = result.state;
             applied.push(op);
@@ -63,27 +68,38 @@ export const applyRemoteMany = <M extends TimestampedBlockMeta>(state: CachedSta
     return {state, applied, ignored, pending, invalid};
 };
 
-export const assertCacheConsistent = <M extends TimestampedBlockMeta>(state: CachedState<M>) => {
-    const expected = organizeState(state.state.blocks, state.state.chars, state.state.joins);
+export const assertCacheConsistent = <M extends TimestampedBlockMeta>(
+    state: CachedState<M>,
+    config: VirtualBlockParentConfig<M> = {},
+) => {
+    const expected = organizeState(state.state.blocks, state.state.chars, state.state.joins, config);
     if (!equal(state.cache, expected)) {
         throw new Error(`cached state is inconsistent`);
     }
 };
 
-export const applyStrict = <M extends TimestampedBlockMeta>(state: CachedState<M>, op: Op<M>): CachedState<M> => {
-    const result = apply(state, op);
+export const applyStrict = <M extends TimestampedBlockMeta>(
+    state: CachedState<M>,
+    op: Op<M>,
+    config: VirtualBlockParentConfig<M> = {},
+): CachedState<M> => {
+    const result = apply(state, op, config);
     if (result === false) {
         throw new Error(`op was pending`);
     }
     return result;
 };
 
-export const apply = <M extends TimestampedBlockMeta>(state: CachedState<M>, op: Op<M>): CachedState<M> | false => {
+export const apply = <M extends TimestampedBlockMeta>(
+    state: CachedState<M>,
+    op: Op<M>,
+    config: VirtualBlockParentConfig<M> = {},
+): CachedState<M> | false => {
     switch (op.type) {
         case 'char':
             return applyChar(state, op);
         case 'block':
-            return applyBlock(state, op);
+            return applyBlock(state, op, config);
         case 'block:delete':
             return applyBlockDelete(state, op);
         case 'char:move':
@@ -91,9 +107,9 @@ export const apply = <M extends TimestampedBlockMeta>(state: CachedState<M>, op:
         case 'char:delete':
             return applyCharDelete(state, op);
         case 'block:move':
-            return applyBlockMove(state, op);
+            return applyBlockMove(state, op, config);
         case 'block:meta':
-            return applyBlockMeta(state, op);
+            return applyBlockMeta(state, op, config);
         case 'mark':
             return applyMark(state, op);
         case 'split-record':
@@ -103,9 +119,13 @@ export const apply = <M extends TimestampedBlockMeta>(state: CachedState<M>, op:
     }
 };
 
-export const applyMany = <M extends TimestampedBlockMeta>(state: CachedState<M>, ops: Op<M>[]) => {
+export const applyMany = <M extends TimestampedBlockMeta>(
+    state: CachedState<M>,
+    ops: Op<M>[],
+    config: VirtualBlockParentConfig<M> = {},
+) => {
     ops.forEach((op) => {
-        state = applyStrict(state, op);
+        state = applyStrict(state, op, config);
     });
     return state;
 };
@@ -270,13 +290,14 @@ const applyBlockDelete = <M extends TimestampedBlockMeta>(
 const applyBlockMove = <M extends TimestampedBlockMeta>(
     {state, cache}: CachedState<M>,
     op: Op<M> & {type: 'block:move'},
+    config: VirtualBlockParentConfig<M>,
 ): CachedState<M> | false => {
     const id = lamportToString(op.id);
     const current = state.blocks[id];
     if (!current) {
         return false;
     }
-    const valid = validateBlockOrderPath(state.blocks, id, op.order);
+    const valid = validateBlockOrderPath(state.blocks, id, op.order, config);
     if (valid === false) {
         return false;
     }
@@ -292,13 +313,14 @@ const applyBlockMove = <M extends TimestampedBlockMeta>(
     };
     return {
         state: nextState,
-        cache: organizeState(nextState.blocks, nextState.chars, nextState.joins),
+        cache: organizeState(nextState.blocks, nextState.chars, nextState.joins, config),
     };
 };
 
 const applyBlockMeta = <M extends TimestampedBlockMeta>(
     {state, cache}: CachedState<M>,
     op: Op<M> & {type: 'block:meta'},
+    config: VirtualBlockParentConfig<M>,
 ): CachedState<M> | false => {
     const id = lamportToString(op.id);
     const current = state.blocks[id];
@@ -308,19 +330,21 @@ const applyBlockMeta = <M extends TimestampedBlockMeta>(
     if (op.meta.ts <= current.meta.ts) {
         return {state, cache};
     }
+    const nextState = {
+        ...state,
+        blocks: {...state.blocks, [id]: {...current, meta: op.meta}},
+        maxSeenCount: Math.max(state.maxSeenCount, maxLamportCounterForOp(op)),
+    };
     return {
-        state: {
-            ...state,
-            blocks: {...state.blocks, [id]: {...current, meta: op.meta}},
-            maxSeenCount: Math.max(state.maxSeenCount, maxLamportCounterForOp(op)),
-        },
-        cache,
+        state: nextState,
+        cache: config.virtualParents ? organizeState(nextState.blocks, nextState.chars, nextState.joins, config) : cache,
     };
 };
 
 const applyBlock = <M extends TimestampedBlockMeta>(
     {state}: CachedState<M>,
     {block}: Op<M> & {type: 'block'},
+    config: VirtualBlockParentConfig<M>,
 ): CachedState<M> | false => {
     const id = lamportToString(block.id);
     const current = state.blocks[id];
@@ -335,7 +359,7 @@ const applyBlock = <M extends TimestampedBlockMeta>(
     }
 
     const blocks = {...state.blocks, [id]: block};
-    const valid = validateBlockOrderPath(blocks, id, block.order);
+    const valid = validateBlockOrderPath(blocks, id, block.order, config);
     if (valid === false) {
         return false;
     }
@@ -346,7 +370,7 @@ const applyBlock = <M extends TimestampedBlockMeta>(
     };
     return {
         state: nextState,
-        cache: organizeState(nextState.blocks, nextState.chars, nextState.joins),
+        cache: organizeState(nextState.blocks, nextState.chars, nextState.joins, config),
     };
 };
 
@@ -423,7 +447,11 @@ const parentExists = <M extends TimestampedBlockMeta>(state: CachedState<M>, id:
     return Boolean(state.state.blocks[key] || state.state.chars[key] || state.cache.joinSentinels[key]);
 };
 
-const missingDependenciesForOp = <M extends TimestampedBlockMeta>(state: CachedState<M>, op: Op<M>): Lamport[] => {
+const missingDependenciesForOp = <M extends TimestampedBlockMeta>(
+    state: CachedState<M>,
+    op: Op<M>,
+    config: VirtualBlockParentConfig<M> = {},
+): Lamport[] => {
     switch (op.type) {
         case 'char':
             return parentExists(state, op.char.parent.id) ? [] : [op.char.parent.id];
@@ -440,12 +468,12 @@ const missingDependenciesForOp = <M extends TimestampedBlockMeta>(state: CachedS
         case 'char:delete':
             return state.state.chars[lamportToString(op.id)] ? [] : [op.id];
         case 'block':
-            return op.block.order.path.filter((id) => !state.state.blocks[lamportToString(id)] && compareLamports(id, op.block.id) !== 0);
+            return missingBlockPathDependencies(state, op.block.order.path, op.block.id, config);
         case 'block:move': {
             const missing = state.state.blocks[lamportToString(op.id)] ? [] : [op.id];
             return [
                 ...missing,
-                ...op.order.path.filter((id) => !state.state.blocks[lamportToString(id)] && compareLamports(id, op.id) !== 0),
+                ...missingBlockPathDependencies(state, op.order.path, op.id, config),
             ];
         }
         case 'block:delete':
@@ -474,4 +502,23 @@ const missingDependenciesForOp = <M extends TimestampedBlockMeta>(state: CachedS
             return missing;
         }
     }
+};
+
+const missingBlockPathDependencies = <M extends TimestampedBlockMeta>(
+    state: CachedState<M>,
+    path: Lamport[],
+    self: Lamport,
+    config: VirtualBlockParentConfig<M>,
+): Lamport[] => {
+    const virtualOwners = virtualParentOwners(state.state.blocks, config);
+    const missing: Lamport[] = [];
+    for (const id of path) {
+        const key = lamportToString(id);
+        if (compareLamports(id, self) === 0) continue;
+        if (state.state.blocks[key]) continue;
+        const owner = virtualOwners[key];
+        if (owner && state.state.blocks[owner]) continue;
+        missing.push(id);
+    }
+    return missing;
 };

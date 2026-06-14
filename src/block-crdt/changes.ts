@@ -1,5 +1,11 @@
 import {applyMany, charOp} from './apply.js';
-import {ROOT_ID, materializedBlockParent, materializedBlockPath} from './blocks.js';
+import {
+    ROOT_ID,
+    materializedBlockParent,
+    materializedBlockPath,
+    virtualParentOwners,
+    type VirtualBlockParentConfig,
+} from './blocks.js';
 import {assertActorId, lamportToString, parseLamportString} from './ids.js';
 import {createLseqIdBetween, LseqOptions} from './lseq.js';
 import {markRange} from './marks.js';
@@ -21,6 +27,7 @@ export type InsertBlockOpsOptions<M extends TimestampedBlockMeta> = {
     meta: M;
     ts: HLC;
     options?: LseqOptions;
+    virtualParents?: VirtualBlockParentConfig<M>;
 };
 
 export type DeleteBlockMode = 'block-only' | 'subtree';
@@ -161,6 +168,7 @@ export const insertBlockOps = <M extends TimestampedBlockMeta = DefaultBlockMeta
         meta,
         ts,
         options,
+        virtualParents = {},
     }: InsertBlockOpsOptions<M>,
 ): Op<M>[] => {
     assertActorId(actor);
@@ -168,14 +176,14 @@ export const insertBlockOps = <M extends TimestampedBlockMeta = DefaultBlockMeta
     const beforeId = before ? lamportToString(before) : null;
     const afterId = after ? lamportToString(after) : null;
 
-    if (parentId !== ROOT_ID) {
+    if (parentId !== ROOT_ID && !virtualParentExists(state, parentId, virtualParents)) {
         const parentBlock = state.state.blocks[parentId];
         if (!parentBlock || parentBlock.deleted || state.cache.joinedBlocks[parentId]) {
             throw new Error(`insert parent block not found or hidden`);
         }
     }
 
-    const siblings = visibleBlockChildren(state, parentId);
+    const siblings = visibleBlockChildren(state, parentId, virtualParents);
     const beforeIndex = beforeId === null ? -1 : siblings.indexOf(beforeId);
     const afterIndex = afterId === null ? siblings.length : siblings.indexOf(afterId);
     if (beforeId !== null && beforeIndex < 0) {
@@ -192,7 +200,7 @@ export const insertBlockOps = <M extends TimestampedBlockMeta = DefaultBlockMeta
     }
 
     const id: Lamport = [state.state.maxSeenCount + 1, actor];
-    const parentPath = parentId === ROOT_ID ? [] : materializedBlockPath(state, parentId);
+    const parentPath = parentId === ROOT_ID ? [] : materializedPathForParent(state, parentId, virtualParents);
     return [
         {
             type: 'block',
@@ -328,6 +336,7 @@ export const moveBlockOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
         after = null,
         ts,
         options,
+        virtualParents = {},
     }: {
         actor: string;
         block: Lamport;
@@ -336,6 +345,7 @@ export const moveBlockOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
         after?: Lamport | null;
         ts: HLC;
         options?: LseqOptions;
+        virtualParents?: VirtualBlockParentConfig<M>;
     },
 ): Op<M>[] => {
     const blockId = lamportToString(block);
@@ -346,14 +356,21 @@ export const moveBlockOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
     if (!current || current.deleted || state.cache.joinedBlocks[blockId]) {
         throw new Error(`move block not found or hidden`);
     }
-    if (parentId !== ROOT_ID && (!state.state.blocks[parentId] || state.cache.joinedBlocks[parentId])) {
+    if (
+        parentId !== ROOT_ID &&
+        !virtualParentExists(state, parentId, virtualParents) &&
+        (!state.state.blocks[parentId] || state.cache.joinedBlocks[parentId])
+    ) {
         throw new Error(`move parent block not found or hidden`);
     }
-    if (parentId === blockId || (parentId !== ROOT_ID && isBlockDescendantOf(state, parentId, blockId))) {
+    if (
+        parentId === blockId ||
+        (state.state.blocks[parentId] && parentId !== ROOT_ID && isBlockDescendantOf(state, parentId, blockId))
+    ) {
         throw new Error(`move block cannot be reparented into itself or a descendant`);
     }
 
-    const siblings = visibleBlockChildren(state, parentId).filter((id) => id !== blockId);
+    const siblings = visibleBlockChildren(state, parentId, virtualParents).filter((id) => id !== blockId);
     const beforeIndex = beforeId === null ? -1 : siblings.indexOf(beforeId);
     const afterIndex = afterId === null ? siblings.length : siblings.indexOf(afterId);
     if (beforeId !== null && beforeIndex < 0) {
@@ -366,7 +383,7 @@ export const moveBlockOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
         throw new Error(`move before/after anchors must be adjacent siblings`);
     }
 
-    const parentPath = parentId === ROOT_ID ? [] : materializedBlockPath(state, parentId);
+    const parentPath = parentId === ROOT_ID ? [] : materializedPathForParent(state, parentId, virtualParents);
     return [
         {
             type: 'block:move',
@@ -384,6 +401,25 @@ export const moveBlockOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
             },
         },
     ];
+};
+
+const virtualParentExists = <M extends TimestampedBlockMeta>(
+    state: CachedState<M>,
+    parentId: string,
+    config: VirtualBlockParentConfig<M>,
+): boolean => Boolean(virtualParentOwners(state.state.blocks, config)[parentId]);
+
+const materializedPathForParent = <M extends TimestampedBlockMeta>(
+    state: CachedState<M>,
+    parentId: string,
+    config: VirtualBlockParentConfig<M>,
+): Lamport[] => {
+    const block = state.state.blocks[parentId];
+    if (block) return materializedBlockPath(state, parentId, config);
+
+    const ownerId = virtualParentOwners(state.state.blocks, config)[parentId];
+    if (!ownerId) throw new Error(`virtual parent not found`);
+    return [...materializedBlockPath(state, ownerId, config), parseLamportString(parentId)];
 };
 
 const insertionParentAtVisibleOffset = <M extends TimestampedBlockMeta>(

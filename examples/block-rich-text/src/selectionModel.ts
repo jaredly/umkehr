@@ -1,5 +1,6 @@
 import type {CachedState} from 'umkehr/block-crdt/types';
 import {materializeFormattedBlocks, orderedCharIdsForBlock} from 'umkehr/block-crdt';
+import {isEditableBlock} from './blockMeta';
 import type {RichBlockMeta} from './blockMeta';
 
 export type BlockPoint = {blockId: string; offset: number};
@@ -25,8 +26,13 @@ export const pointTextLength = (state: CachedState<RichBlockMeta>, blockId: stri
 export const visibleBlockIds = (state: CachedState<RichBlockMeta>): string[] =>
     materializeFormattedBlocks(state).map((block) => block.id);
 
+export const editableBlockIds = (state: CachedState<RichBlockMeta>): string[] =>
+    materializeFormattedBlocks(state)
+        .filter((block) => isEditableBlock(block.block.meta))
+        .map((block) => block.id);
+
 export const clampPoint = (state: CachedState<RichBlockMeta>, point: BlockPoint): BlockPoint => {
-    const blocks = visibleBlockIds(state);
+    const blocks = editableBlockIds(state);
     const blockId = blocks.includes(point.blockId) ? point.blockId : blocks[0];
     if (!blockId) return point;
     return {
@@ -60,7 +66,7 @@ export const normalizeSelectionSegments = (
 ): SelectionSegment[] => {
     if (selection.type === 'caret') return [];
 
-    const blocks = visibleBlockIds(state);
+    const blocks = editableBlockIds(state);
     const anchorIndex = blocks.indexOf(selection.anchor.blockId);
     const focusIndex = blocks.indexOf(selection.focus.blockId);
     if (anchorIndex < 0 || focusIndex < 0) return [];

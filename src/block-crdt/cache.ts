@@ -1,4 +1,4 @@
-import {deriveBlockParentsForBlocks} from './blocks.js';
+import {deriveBlockParentsForBlocks, type VirtualBlockParentConfig} from './blocks.js';
 import {compareLamportStrings, lamportToString} from './ids.js';
 import {activeJoinRecords} from './joins.js';
 import {compareLseqIds} from './lseq.js';
@@ -13,9 +13,10 @@ export function organizeState<M extends TimestampedBlockMeta>(
     blocks: Record<string, Block<M>>,
     chars: Record<string, Char>,
     joins: Record<string, JoinRecord> = {},
+    config: VirtualBlockParentConfig<M> = {},
 ): Cache {
     const blockChildren: Record<string, string[]> = {};
-    const {parents} = deriveBlockParentsForBlocks(blocks);
+    const {parents} = deriveBlockParentsForBlocks(blocks, config);
     for (const [id] of Object.entries(blocks)) {
         const pid = parents[id];
         if (!blockChildren[pid]) {

@@ -3,7 +3,8 @@ import {blockContents, cachedState, materializeFormattedBlocks, rootBlockIds} fr
 import {initialState} from 'umkehr/block-crdt/initialState';
 import type {CachedState} from 'umkehr/block-crdt/types';
 import {lamportToString} from 'umkehr/block-crdt/utils';
-import {insertText, pastePlainText, type CommandContext} from './blockCommands';
+import {insertText, pastePlainText, setBlockType, type CommandContext} from './blockCommands';
+import {createDemoState} from './blockEditorRuntime';
 import {caret, type EditorSelection} from './selectionModel';
 import {
     deleteBackwardEverywhere,
@@ -459,5 +460,27 @@ describe('block rich text multi-selection commands', () => {
             [{text: 'ab', marks: {bold: true}}],
             [{text: 'cd', marks: {bold: true}}],
         ]);
+    });
+
+    it('skips structural table rows during horizontal caret movement', () => {
+        const context = ctx();
+        const demo = createDemoState();
+        let result = pastePlainText(demo.left.state, caret(rootBlockIds(demo.left.state)[0], 0), 'a\nrow\nb', context);
+        const [first, row, third] = rootBlockIds(result.state);
+        result = setBlockType(result.state, row, {type: 'table_row', ts: '0005-left'});
+
+        let moved = moveSelectionsHorizontally(
+            result.state,
+            singleRetainedSelectionSet(result.state, caret(first, 1)),
+            'right',
+        );
+        expect(resolveSelectionSet(moved.state, moved.selection).entries[0].selection).toEqual(caret(third, 0));
+
+        moved = moveSelectionsHorizontally(
+            result.state,
+            singleRetainedSelectionSet(result.state, caret(third, 0)),
+            'left',
+        );
+        expect(resolveSelectionSet(moved.state, moved.selection).entries[0].selection).toEqual(caret(first, 1));
     });
 });

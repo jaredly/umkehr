@@ -26,13 +26,13 @@ import {
 } from './selectionSet';
 import {
     caret,
+    editableBlockIds,
     firstPointForSelection,
     focusPoint,
     isCollapsed,
     normalizeSelectionSegments,
     pointTextLength,
     segmentText,
-    visibleBlockIds,
     type BlockPoint,
     type EditorSelection,
 } from './selectionModel';
@@ -246,7 +246,7 @@ const topLevelSelectedBlockIds = (
 const blockIdsForSelection = (state: CachedState<RichBlockMeta>, selection: EditorSelection): string[] => {
     if (selection.type === 'caret') return [selection.point.blockId];
 
-    const blocks = visibleBlockIds(state);
+    const blocks = editableBlockIds(state);
     const anchorIndex = blocks.indexOf(selection.anchor.blockId);
     const focusIndex = blocks.indexOf(selection.focus.blockId);
     if (anchorIndex < 0 || focusIndex < 0) return [];
@@ -410,7 +410,7 @@ const movePointVertically = (
     point: BlockPoint,
     direction: 'up' | 'down',
 ): BlockPoint => {
-    const blocks = visibleBlockIds(state);
+    const blocks = editableBlockIds(state);
     const index = blocks.indexOf(point.blockId);
     const targetBlockId = blocks[direction === 'up' ? index - 1 : index + 1];
     if (!targetBlockId) return point;
@@ -433,7 +433,7 @@ const movePointHorizontally = (
         return movePointByWord(state, point, direction);
     }
 
-    const blocks = visibleBlockIds(state);
+    const blocks = editableBlockIds(state);
     const index = blocks.indexOf(point.blockId);
     if (index < 0) return point;
 
@@ -464,7 +464,7 @@ const movePointByWord = (
             : boundaries.find((offset) => offset > point.offset);
     if (target !== undefined) return {blockId: point.blockId, offset: target};
 
-    const blocks = visibleBlockIds(state);
+    const blocks = editableBlockIds(state);
     const index = blocks.indexOf(point.blockId);
     const targetBlockId = blocks[direction === 'left' ? index - 1 : index + 1];
     if (!targetBlockId) return point;

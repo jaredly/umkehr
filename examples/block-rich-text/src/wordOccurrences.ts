@@ -1,7 +1,7 @@
 import {blockContents} from 'umkehr/block-crdt';
 import type {CachedState} from 'umkehr/block-crdt/types';
 import type {RichBlockMeta} from './blockMeta';
-import {segmentText, visibleBlockIds, type BlockPoint, type EditorSelection} from './selectionModel';
+import {editableBlockIds, segmentText, type BlockPoint, type EditorSelection} from './selectionModel';
 
 type WordRange = {
     text: string;
@@ -33,7 +33,7 @@ export const wordAtPoint = (state: CachedState<RichBlockMeta>, point: BlockPoint
 export const findWordOccurrences = (state: CachedState<RichBlockMeta>, word: string): EditorSelection[] => {
     if (!word) return [];
     const selections: EditorSelection[] = [];
-    for (const blockId of visibleBlockIds(state)) {
+    for (const blockId of editableBlockIds(state)) {
         for (const segment of wordSegments(blockContents(state, blockId))) {
             if (segment.text !== word) continue;
             selections.push({

@@ -1,7 +1,7 @@
 import {orderedCharIdsForBlock} from 'umkehr/block-crdt';
 import type {CachedState} from 'umkehr/block-crdt/types';
 import type {RichBlockMeta} from './blockMeta';
-import {caret, clampPoint, visibleBlockIds, type BlockPoint, type EditorSelection} from './selectionModel';
+import {caret, clampPoint, editableBlockIds, type BlockPoint, type EditorSelection} from './selectionModel';
 
 export type RetainedPoint = {
     blockId: string;
@@ -14,7 +14,7 @@ export type RetainedSelection =
     | {type: 'range'; anchor: RetainedPoint; focus: RetainedPoint};
 
 export const initialRetainedSelection = (state: CachedState<RichBlockMeta>): RetainedSelection => {
-    const blockId = visibleBlockIds(state)[0] ?? allBlockIds(state)[0] ?? '';
+    const blockId = editableBlockIds(state)[0] ?? allBlockIds(state)[0] ?? '';
     return {type: 'caret', point: {blockId, charId: null, affinity: 'after'}};
 };
 
@@ -67,7 +67,7 @@ export const resolvePoint = (state: CachedState<RichBlockMeta>, point: RetainedP
         if (resolved) return resolved;
     }
 
-    const visibleBlocks = visibleBlockIds(state);
+    const visibleBlocks = editableBlockIds(state);
     if (point.blockId && visibleBlocks.includes(point.blockId)) {
         return clampPoint(state, {blockId: point.blockId, offset: 0});
     }
@@ -101,7 +101,7 @@ const visibleCount = (state: CachedState<RichBlockMeta>, charId: string) =>
     state.state.chars[charId] && !state.state.chars[charId].deleted ? 1 : 0;
 
 const visibleBlockOrFallback = (state: CachedState<RichBlockMeta>, blockId: string) => {
-    const visibleBlocks = visibleBlockIds(state);
+    const visibleBlocks = editableBlockIds(state);
     if (visibleBlocks.includes(blockId)) return blockId;
     return visibleBlocks[0] ?? blockId;
 };

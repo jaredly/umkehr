@@ -6,9 +6,9 @@ import {
     focusPoint,
     isCollapsed,
     clampPoint,
+    editableBlockIds,
     normalizeSelectionSegments,
     pointTextLength,
-    visibleBlockIds,
     type BlockPoint,
     type EditorSelection,
     type SelectionSegment,
@@ -306,7 +306,7 @@ export const compareSelections = (
 ): number => comparePoints(state, firstPointForSelection(state, one), firstPointForSelection(state, two));
 
 export const comparePoints = (state: CachedState<RichBlockMeta>, one: BlockPoint, two: BlockPoint): number => {
-    const blocks = visibleBlockIds(state);
+    const blocks = editableBlockIds(state);
     const oneBlock = blocks.indexOf(one.blockId);
     const twoBlock = blocks.indexOf(two.blockId);
     return oneBlock - twoBlock || one.offset - two.offset;
@@ -363,7 +363,7 @@ const retainedPointKey = (state: CachedState<RichBlockMeta>, point: RetainedPoin
 };
 
 const retainedBlockOrder = (state: CachedState<RichBlockMeta>): string[] => {
-    const visible = visibleBlockIds(state);
+    const visible = editableBlockIds(state);
     const seen = new Set(visible);
     const hidden = Object.keys(state.state.blocks)
         .filter((id) => !seen.has(id))

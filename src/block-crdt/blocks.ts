@@ -1,4 +1,4 @@
-import {compareLamports, lamportToString} from './ids.js';
+import {compareLamports, lamportToString, parseLamportString} from './ids.js';
 import {compareLseqIds} from './lseq.js';
 import {Block, CachedState, Lamport, State, TimestampedBlockMeta} from './types.js';
 
@@ -6,6 +6,10 @@ export type BlockParentDerivation = {
     parents: Record<string, string>;
     rawParents: Record<string, string | null>;
     rejectedRoots: Set<string>;
+};
+
+export type VirtualBlockParentConfig<M extends TimestampedBlockMeta = TimestampedBlockMeta> = {
+    virtualParents?: (block: Block<M>) => Lamport[];
 };
 
 type BlockParentDerivationWithPaths = BlockParentDerivation & {
@@ -24,28 +28,36 @@ const stateBlocks = <M extends TimestampedBlockMeta>(state: State<M> | CachedSta
 
 export const materializedBlockPaths = <M extends TimestampedBlockMeta>(
     state: State<M> | CachedState<M>,
+    config: VirtualBlockParentConfig<M> = {},
 ): Record<string, Lamport[]> =>
-    materializedBlockPathsFromParents(stateBlocks(state), deriveBlockParentsForBlocks(stateBlocks(state)).parents);
+    materializedBlockPathsFromParents(
+        stateBlocks(state),
+        deriveBlockParentsForBlocks(stateBlocks(state), config).parents,
+        virtualParentOwners(stateBlocks(state), config),
+    );
 
 export const materializedBlockPath = <M extends TimestampedBlockMeta>(
     state: State<M> | CachedState<M>,
     blockId: string,
+    config: VirtualBlockParentConfig<M> = {},
 ): Lamport[] => {
     const blocks = stateBlocks(state);
-    const parents = deriveBlockParentsForBlocks(blocks).parents;
-    return materializedBlockPathFromParents(blocks, parents, blockId);
+    const parents = deriveBlockParentsForBlocks(blocks, config).parents;
+    return materializedBlockPathFromParents(blocks, parents, blockId, undefined, virtualParentOwners(blocks, config));
 };
 
 export const materializedBlockParent = <M extends TimestampedBlockMeta>(
     state: State<M> | CachedState<M>,
     blockId: string,
+    config: VirtualBlockParentConfig<M> = {},
 ): Lamport => {
     const blocks = stateBlocks(state);
-    const parent = deriveBlockParentsForBlocks(blocks).parents[blockId];
+    const parent = deriveBlockParentsForBlocks(blocks, config).parents[blockId];
     if (parent === undefined) {
         throw new Error(`block ${blockId} not found`);
     }
-    return parent === ROOT_ID ? [0, 'root'] : blocks[parent].id;
+    if (parent === ROOT_ID) return [0, 'root'];
+    return blocks[parent]?.id ?? parseVirtualParentId(parent);
 };
 
 const deriveBlockParentsBaseline = <M extends TimestampedBlockMeta>(
@@ -150,12 +162,14 @@ const deriveBlockParentsLinearStringCached = <M extends TimestampedBlockMeta>(
 
 const deriveBlockParentsLinearSummary = <M extends TimestampedBlockMeta>(
     blocks: Record<string, Block<M>>,
+    config: VirtualBlockParentConfig<M> = {},
 ): BlockParentDerivation => {
     const rawParents: Record<string, string | null> = {};
+    const virtualOwners = virtualParentOwners(blocks, config);
     for (const [id, block] of Object.entries(blocks)) {
-        rawParents[id] = validateBlockOrderPathSummary(blocks, id, block.order.path);
+        rawParents[id] = validateBlockOrderPathSummary(blocks, id, block.order.path, virtualOwners);
     }
-    return parentDerivationFromRawParents(blocks, rawParents);
+    return parentDerivationFromRawParents(blocks, rawParents, virtualOwners);
 };
 
 export const deriveBlockParentsForBlocks = deriveBlockParentsLinearSummary;
@@ -163,8 +177,9 @@ export const deriveBlockParentsForBlocks = deriveBlockParentsLinearSummary;
 const parentDerivationFromRawParents = <M extends TimestampedBlockMeta>(
     blocks: Record<string, Block<M>>,
     rawParents: Record<string, string | null>,
+    virtualOwners: Record<string, string> = {},
 ): BlockParentDerivation => {
-    const rejectedRoots = rejectedRootsForRawParents(blocks, rawParents);
+    const rejectedRoots = rejectedRootsForRawParents(blocks, rawParents, virtualOwners);
     const parents: Record<string, string> = {};
     for (const id of Object.keys(blocks)) {
         parents[id] = rejectedRoots.has(id) || rawParents[id] === null ? ROOT_ID : rawParents[id]!;
@@ -175,6 +190,7 @@ const parentDerivationFromRawParents = <M extends TimestampedBlockMeta>(
 const rejectedRootsForRawParents = <M extends TimestampedBlockMeta>(
     blocks: Record<string, Block<M>>,
     rawParents: Record<string, string | null>,
+    virtualOwners: Record<string, string> = {},
 ): Set<string> => {
     const rejectedRoots = new Set<string>();
     const state: Record<string, 0 | 1 | 2> = {};
@@ -187,6 +203,10 @@ const rejectedRootsForRawParents = <M extends TimestampedBlockMeta>(
         let current: string | null | undefined = start;
 
         while (current && !rejectedRoots.has(current)) {
+            if (!blocks[current]) {
+                current = virtualOwners[current];
+                continue;
+            }
             if (state[current] === 2) break;
 
             const index = stackIndex.get(current);
@@ -202,7 +222,8 @@ const rejectedRootsForRawParents = <M extends TimestampedBlockMeta>(
             state[current] = 1;
             stackIndex.set(current, stack.length);
             stack.push(current);
-            current = rawParents[current];
+            const rawParent: string | null | undefined = rawParents[current];
+            current = rawParent && !blocks[rawParent] ? virtualOwners[rawParent] : rawParent;
         }
 
         for (const item of stack) {
@@ -224,10 +245,11 @@ const parentsFromPaths = (paths: Record<string, Lamport[]>): Record<string, stri
 const materializedBlockPathsFromParents = <M extends TimestampedBlockMeta>(
     blocks: Record<string, Block<M>>,
     parents: Record<string, string>,
+    virtualOwners: Record<string, string> = {},
 ): Record<string, Lamport[]> => {
     const memo: Record<string, Lamport[]> = {};
     for (const id of Object.keys(blocks)) {
-        materializedBlockPathFromParents(blocks, parents, id, memo);
+        materializedBlockPathFromParents(blocks, parents, id, memo, virtualOwners);
     }
     return memo;
 };
@@ -237,6 +259,7 @@ const materializedBlockPathFromParents = <M extends TimestampedBlockMeta>(
     parents: Record<string, string>,
     blockId: string,
     memo: Record<string, Lamport[]> = {},
+    virtualOwners: Record<string, string> = {},
 ): Lamport[] => {
     const existing = memo[blockId];
     if (existing) return existing;
@@ -248,7 +271,20 @@ const materializedBlockPathFromParents = <M extends TimestampedBlockMeta>(
     if (parent === undefined) {
         throw new Error(`materialized parent for ${blockId} not found`);
     }
-    const path = parent === ROOT_ID ? [block.id] : [...materializedBlockPathFromParents(blocks, parents, parent, memo), block.id];
+    let path: Lamport[];
+    if (parent === ROOT_ID) {
+        path = [block.id];
+    } else if (blocks[parent]) {
+        path = [...materializedBlockPathFromParents(blocks, parents, parent, memo, virtualOwners), block.id];
+    } else {
+        const owner = virtualOwners[parent];
+        if (!owner) throw new Error(`virtual parent ${parent} not found`);
+        path = [
+            ...materializedBlockPathFromParents(blocks, parents, owner, memo, virtualOwners),
+            parseVirtualParentId(parent),
+            block.id,
+        ];
+    }
     memo[blockId] = path;
     return path;
 };
@@ -283,6 +319,7 @@ const validateBlockOrderPathSummary = <M extends TimestampedBlockMeta>(
     blocks: Record<string, Block<M>>,
     blockId: string,
     path: Lamport[],
+    virtualOwners: Record<string, string> = {},
 ): string | null => {
     if (!path.length) {
         throw new Error(`block order path for ${blockId} must not be empty`);
@@ -299,7 +336,7 @@ const validateBlockOrderPathSummary = <M extends TimestampedBlockMeta>(
             throw new Error(`block order path for ${blockId} contains duplicate id ${current}`);
         }
         seen.add(current);
-        if (!blocks[current]) {
+        if (!blocks[current] && !virtualOwners[current]) {
             throw new Error(`block order path for ${blockId} references a missing block`);
         }
         if (current !== blockId) {
@@ -316,7 +353,9 @@ export const validateBlockOrderPath = <M extends TimestampedBlockMeta>(
     blocks: Record<string, Block<M>>,
     blockId: string,
     order: Block['order'],
+    config: VirtualBlockParentConfig<M> = {},
 ): false | void => {
+    const virtualOwners = virtualParentOwners(blocks, config);
     if (!order.path.length) {
         throw new Error(`block order path for ${blockId} must not be empty`);
     }
@@ -334,11 +373,27 @@ export const validateBlockOrderPath = <M extends TimestampedBlockMeta>(
             throw new Error(`block order path for ${blockId} contains duplicate id ${id}`);
         }
         seen.add(id);
-        if (!blocks[id]) {
+        if (!blocks[id] && !virtualOwners[id]) {
             return false;
         }
     }
 };
+
+export const virtualParentOwners = <M extends TimestampedBlockMeta>(
+    blocks: Record<string, Block<M>>,
+    config: VirtualBlockParentConfig<M> = {},
+): Record<string, string> => {
+    const owners: Record<string, string> = {};
+    if (!config.virtualParents) return owners;
+    for (const [id, block] of Object.entries(blocks)) {
+        for (const parent of config.virtualParents(block)) {
+            owners[lamportToString(parent)] = id;
+        }
+    }
+    return owners;
+};
+
+const parseVirtualParentId = (id: string): Lamport => parseLamportString(id);
 
 export const blockParentStrategiesForStress: BlockParentStrategy[] = [
     {name: 'baseline', derive: deriveBlockParentsBaseline},

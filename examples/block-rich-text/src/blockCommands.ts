@@ -25,6 +25,7 @@ import {paragraphMeta, sameTypeWithTs, type RichBlockMeta} from './blockMeta';
 import {
     caret,
     clampPoint,
+    editableBlockIds,
     firstPointForSelection,
     focusPoint,
     isCollapsed,
@@ -452,7 +453,7 @@ export const joinWithPrevious = (
     blockId: string,
     context: CommandContext,
 ): CommandResult => {
-    const blocks = visibleBlockIds(state);
+    const blocks = editableBlockIds(state);
     const index = blocks.indexOf(blockId);
     if (index <= 0) return {state, ops: [], selection: caret(blockId, 0)};
 
@@ -476,7 +477,7 @@ export const joinWithNext = (
     blockId: string,
     context: CommandContext,
 ): CommandResult => {
-    const blocks = visibleBlockIds(state);
+    const blocks = editableBlockIds(state);
     const index = blocks.indexOf(blockId);
     const nextBlockId = blocks[index + 1];
     if (index < 0 || !nextBlockId) {
@@ -593,7 +594,7 @@ const deleteSelectionAndJoinBoundaries = (
     const span = normalizedSelectionSpan(state, selection);
     if (!span) return deleteSelection(state, selection);
 
-    const blocks = visibleBlockIds(state);
+    const blocks = editableBlockIds(state);
     const startIndex = blocks.indexOf(span.start.blockId);
     const endIndex = blocks.indexOf(span.end.blockId);
     const blockRun = startIndex >= 0 && endIndex >= startIndex ? blocks.slice(startIndex, endIndex + 1) : [];
@@ -630,7 +631,7 @@ const normalizedSelectionSpan = (
 
     const anchor = clampPoint(state, selection.anchor);
     const focus = clampPoint(state, selection.focus);
-    const blocks = visibleBlockIds(state);
+    const blocks = editableBlockIds(state);
     const anchorBlockIndex = blocks.indexOf(anchor.blockId);
     const focusBlockIndex = blocks.indexOf(focus.blockId);
     if (anchorBlockIndex < 0 || focusBlockIndex < 0) return null;

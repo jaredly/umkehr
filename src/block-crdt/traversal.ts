@@ -1,6 +1,11 @@
-import {lamportToString} from './ids.js';
+import {lamportToString, parseLamportString} from './ids.js';
 import {compareLseqIds} from './lseq.js';
 import {Cache, CachedState, Char, Lamport, TimestampedBlockMeta} from './types.js';
+import {
+    ROOT_ID,
+    deriveBlockParentsForBlocks,
+    type VirtualBlockParentConfig,
+} from './blocks.js';
 
 export type VisibleBlockPath = number[];
 
@@ -123,8 +128,9 @@ const visibleBlock = <M extends TimestampedBlockMeta>(state: CachedState<M>, id:
 export const visibleBlockChildren = <M extends TimestampedBlockMeta>(
     state: CachedState<M>,
     parent: string,
+    config: VirtualBlockParentConfig<M> = {},
 ): string[] => {
-    return logicalVisibleBlockChildren(state, parent, new Set());
+    return logicalVisibleBlockChildren(state, parent, new Set(), config);
 };
 
 export type VisibleBlockOutlineEntry = {
@@ -135,12 +141,13 @@ export type VisibleBlockOutlineEntry = {
 
 export const visibleBlockOutline = <M extends TimestampedBlockMeta>(
     state: CachedState<M>,
+    config: VirtualBlockParentConfig<M> = {},
 ): VisibleBlockOutlineEntry[] => {
     const result: VisibleBlockOutlineEntry[] = [];
     const rootId = lamportToString([0, 'root']);
 
     const visitChildren = (pid: string, depth: number, visibleParentId: string, seen: Set<string>) => {
-        for (const child of logicalVisibleBlockChildren(state, pid, seen)) {
+        for (const child of logicalVisibleBlockChildren(state, pid, seen, config)) {
             result.push({id: child, depth, parentId: visibleParentId});
             visitChildren(child, depth + 1, child, new Set(seen));
         }
@@ -153,12 +160,13 @@ export const visibleBlockOutline = <M extends TimestampedBlockMeta>(
 export const visibleBlockEntryAtPath = <M extends TimestampedBlockMeta>(
     state: CachedState<M>,
     path: VisibleBlockPath,
+    config: VirtualBlockParentConfig<M> = {},
 ): VisibleBlockOutlineEntry | null => {
     validateVisiblePath(path);
     let parentId = lamportToString([0, 'root']);
     let entry: VisibleBlockOutlineEntry | null = null;
     for (let depth = 0; depth < path.length; depth++) {
-        const children = visibleBlockChildren(state, parentId);
+        const children = visibleBlockChildren(state, parentId, config);
         const childId = children[path[depth]];
         if (!childId) return null;
         entry = {id: childId, depth, parentId};
@@ -170,24 +178,30 @@ export const visibleBlockEntryAtPath = <M extends TimestampedBlockMeta>(
 export const blockIdAtVisiblePath = <M extends TimestampedBlockMeta>(
     state: CachedState<M>,
     path: VisibleBlockPath,
-): string | null => visibleBlockEntryAtPath(state, path)?.id ?? null;
+    config: VirtualBlockParentConfig<M> = {},
+): string | null => visibleBlockEntryAtPath(state, path, config)?.id ?? null;
 
 export const visiblePathForBlockId = <M extends TimestampedBlockMeta>(
     state: CachedState<M>,
     blockId: string,
+    config: VirtualBlockParentConfig<M> = {},
 ): VisibleBlockPath | null => {
     const target = state.state.blocks[blockId];
     if (!target || target.deleted || state.cache.joinedBlocks[blockId]) {
         return null;
     }
     const visit = (parentId: string, path: number[]): VisibleBlockPath | null => {
-        const children = visibleBlockChildren(state, parentId);
+        const children = visibleBlockChildren(state, parentId, config);
         for (let index = 0; index < children.length; index++) {
             const childId = children[index];
             const childPath = [...path, index];
             if (childId === blockId) return childPath;
             const nested = visit(childId, childPath);
             if (nested) return nested;
+            for (const virtualParent of virtualParentsForBlock(state, childId, config)) {
+                const virtualNested = visit(virtualParent, childPath);
+                if (virtualNested) return virtualNested;
+            }
         }
         return null;
     };
@@ -197,42 +211,91 @@ export const visiblePathForBlockId = <M extends TimestampedBlockMeta>(
 export const visibleSiblingAnchorsForPath = <M extends TimestampedBlockMeta>(
     state: CachedState<M>,
     path: VisibleBlockPath,
+    config: VirtualBlockParentConfig<M> = {},
 ): {parent: Lamport; before: Lamport | null; after: Lamport | null} | null => {
     validateVisiblePath(path);
     if (path.length === 0) return null;
     const parentPath = path.slice(0, -1);
     const index = path[path.length - 1];
-    const parentId = parentPath.length ? blockIdAtVisiblePath(state, parentPath) : lamportToString([0, 'root']);
+    const parentId = parentPath.length ? blockIdAtVisiblePath(state, parentPath, config) : lamportToString([0, 'root']);
     if (!parentId) return null;
-    const children = visibleBlockChildren(state, parentId);
+    const children = visibleBlockChildren(state, parentId, config);
     if (index > children.length) return null;
     const beforeId = index > 0 ? children[index - 1] : null;
     const afterId = index < children.length ? children[index] : null;
+    const actualParentId = actualParentForSiblingSlot(state, parentId, beforeId, afterId, config);
     return {
-        parent: parentId === lamportToString([0, 'root']) ? [0, 'root'] : state.state.blocks[parentId].id,
+        parent:
+            actualParentId === lamportToString([0, 'root'])
+                ? [0, 'root']
+                : state.state.blocks[actualParentId]?.id ?? parseLamportString(actualParentId),
         before: beforeId ? state.state.blocks[beforeId].id : null,
         after: afterId ? state.state.blocks[afterId].id : null,
     };
+};
+
+const actualParentForSiblingSlot = <M extends TimestampedBlockMeta>(
+    state: CachedState<M>,
+    visibleParentId: string,
+    beforeId: string | null,
+    afterId: string | null,
+    config: VirtualBlockParentConfig<M>,
+): string => {
+    if (!config.virtualParents) return visibleParentId;
+    const {parents} = deriveBlockParentsForBlocks(state.state.blocks, config);
+    if (afterId) return parents[afterId] ?? visibleParentId;
+    if (beforeId) return parents[beforeId] ?? visibleParentId;
+    return visibleParentId;
 };
 
 const logicalVisibleBlockChildren = <M extends TimestampedBlockMeta>(
     state: CachedState<M>,
     parent: string,
     seen: Set<string>,
+    config: VirtualBlockParentConfig<M> = {},
 ): string[] => {
     if (seen.has(parent)) {
         throw new Error(`block traversal cycle at ${parent}`);
     }
     seen.add(parent);
     const result: string[] = [];
-    for (const child of state.cache.blockChildren[parent] ?? []) {
+    for (const child of blockChildrenForParent(state, parent, config)) {
         if (visibleBlock(state, child)) {
             result.push(child);
         } else {
-            result.push(...logicalVisibleBlockChildren(state, child, new Set(seen)));
+            result.push(...logicalVisibleBlockChildren(state, child, new Set(seen), config));
         }
     }
     return result.sort((a, b) => compareLseqIds(state.state.blocks[a].order.index, state.state.blocks[b].order.index));
+};
+
+const blockChildrenForParent = <M extends TimestampedBlockMeta>(
+    state: CachedState<M>,
+    parent: string,
+    config: VirtualBlockParentConfig<M>,
+): string[] => {
+    if (!config.virtualParents) return state.cache.blockChildren[parent] ?? [];
+    const {parents} = deriveBlockParentsForBlocks(state.state.blocks, config);
+    const childParents = new Set<string>([parent]);
+    const parentBlock = state.state.blocks[parent];
+    if (parentBlock) {
+        for (const virtualParent of virtualParentsForBlock(state, parent, config)) {
+            childParents.add(virtualParent);
+        }
+    }
+    return Object.keys(state.state.blocks)
+        .filter((id) => childParents.has(parents[id]))
+        .sort((a, b) => compareLseqIds(state.state.blocks[a].order.index, state.state.blocks[b].order.index));
+};
+
+const virtualParentsForBlock = <M extends TimestampedBlockMeta>(
+    state: CachedState<M>,
+    blockId: string,
+    config: VirtualBlockParentConfig<M>,
+): string[] => {
+    const block = state.state.blocks[blockId];
+    if (!block || !config.virtualParents) return [];
+    return config.virtualParents(block).map(lamportToString);
 };
 
 export const orderedCharIdsForBlock = <M extends TimestampedBlockMeta>(

@@ -29,6 +29,7 @@ import {
     orderedCharIdsForBlock,
     visibleBlockChildren,
     visibleBlockOutline,
+    insertBlockOps,
     insertTextOps,
     deleteRangeOps,
     splitBlockOps,
@@ -40,6 +41,8 @@ import {
     planUndoOps,
     validateOp,
     assertCacheConsistent,
+    visibleSiblingAnchorsForPath,
+    type VirtualBlockParentConfig,
 } from './index';
 import {Block, CachedState, Lamport} from './types';
 import {lamportToString, parseLamportString, selPos} from './utils';
@@ -223,6 +226,143 @@ const insertOps = (
     }
     return ops;
 };
+
+type VirtualParentMeta =
+    | {type: 'table'; rowParent: Lamport; ts: string}
+    | {type: 'paragraph'; ts: string};
+
+const tableVirtualConfig: VirtualBlockParentConfig<VirtualParentMeta> = {
+    virtualParents: (block) => (block.meta.type === 'table' ? [block.meta.rowParent] : []),
+};
+
+const initVirtualParentState = () =>
+    cachedState(
+        initialStateWithMeta<VirtualParentMeta>('self', {
+            type: 'table',
+            rowParent: [100, 'self'],
+            ts: '00001',
+        }),
+    );
+
+it('inserts and traverses blocks under a configured virtual parent', () => {
+    let state = initVirtualParentState();
+    const rowParent = [100, 'self'] as Lamport;
+    const ops = insertBlockOps(state, {
+        actor: 'alice',
+        parent: rowParent,
+        meta: {type: 'paragraph', ts: '00002'},
+        ts: '00002',
+        virtualParents: tableVirtualConfig,
+    });
+
+    state = applyMany(state, ops, tableVirtualConfig);
+    const rowId = lamportToString([1, 'alice']);
+
+    expect(visibleBlockChildren(state, lamportToString(rowParent), tableVirtualConfig)).toEqual([rowId]);
+    expect(visibleBlockChildren(state, lamportToString([0, 'self']), tableVirtualConfig)).toEqual([rowId]);
+    expect(visibleSiblingAnchorsForPath(state, [0, 0], tableVirtualConfig)).toEqual({
+        parent: rowParent,
+        before: null,
+        after: [1, 'alice'],
+    });
+    expect(visibleBlockOutline(state).map((entry) => entry.id)).toEqual([lamportToString([0, 'self'])]);
+    expect(visibleBlockOutline(state, tableVirtualConfig).map((entry) => entry.id)).toEqual([
+        lamportToString([0, 'self']),
+        rowId,
+    ]);
+    expect(materializedBlockParent(state, rowId, tableVirtualConfig)).toEqual(rowParent);
+    expect(materializedBlockPath(state, rowId, tableVirtualConfig)).toEqual([
+        [0, 'self'],
+        rowParent,
+        [1, 'alice'],
+    ]);
+});
+
+it('moves blocks under a configured virtual parent', () => {
+    let state = initVirtualParentState();
+    const rootId = [0, 'self'] as Lamport;
+    const rowParent = [100, 'self'] as Lamport;
+    state = applyMany(
+        state,
+        insertBlockOps(state, {
+            actor: 'alice',
+            parent: rootId,
+            meta: {type: 'paragraph', ts: '00002'},
+            ts: '00002',
+        }),
+    );
+    const movedId = lamportToString([1, 'alice']);
+
+    const ops = moveBlockOps(state, {
+        actor: 'alice',
+        block: [1, 'alice'],
+        parent: rowParent,
+        ts: '00003',
+        virtualParents: tableVirtualConfig,
+    });
+
+    state = applyMany(state, ops, tableVirtualConfig);
+
+    expect(visibleBlockChildren(state, lamportToString(rowParent), tableVirtualConfig)).toEqual([movedId]);
+    expect(materializedBlockParent(state, movedId, tableVirtualConfig)).toEqual(rowParent);
+});
+
+it('applies remote block ops under virtual parents after the declaring block arrives', () => {
+    const rowParent = [100, 'self'] as Lamport;
+    const rowOp = insertBlockOps(initVirtualParentState(), {
+        actor: 'alice',
+        parent: rowParent,
+        meta: {type: 'paragraph', ts: '00002'},
+        ts: '00002',
+        virtualParents: tableVirtualConfig,
+    })[0];
+    let remote = cachedState({
+        ...initialStateWithMeta<VirtualParentMeta>('other', {type: 'paragraph', ts: '00001'}),
+        blocks: {},
+    });
+
+    const pending = applyRemote(remote, rowOp, tableVirtualConfig);
+    expect(pending.status).toBe('pending');
+    expect(pending.status === 'pending' ? pending.missing : []).toEqual([[0, 'self'], rowParent]);
+
+    const tableBlock = initVirtualParentState().state.blocks[lamportToString([0, 'self'])];
+    const appliedTable = applyRemote(remote, {type: 'block', block: tableBlock}, tableVirtualConfig);
+    expect(appliedTable.status).toBe('applied');
+    remote = appliedTable.status === 'applied' ? appliedTable.state : remote;
+
+    const appliedRow = applyRemote(remote, rowOp, tableVirtualConfig);
+    expect(appliedRow.status).toBe('applied');
+});
+
+it('keeps virtual-parent cycles safe by rooting the winning block', () => {
+    const state = cachedState(
+        initialStateWithMeta<VirtualParentMeta>('self', {
+            type: 'table',
+            rowParent: [100, 'self'],
+            ts: '00001',
+        }),
+    );
+    const block = state.state.blocks[lamportToString([0, 'self'])];
+    const cycled = apply(
+        state,
+        {
+            type: 'block:move',
+            id: [0, 'self'],
+            order: {
+                ...block.order,
+                id: [1, 'self'],
+                path: [[100, 'self'], [0, 'self']],
+                ts: '00002',
+            },
+        },
+        tableVirtualConfig,
+    ) as CachedState<VirtualParentMeta>;
+
+    expect(visibleBlockOutline(cycled, tableVirtualConfig).map((entry) => entry.id)).toEqual([
+        lamportToString([0, 'self']),
+    ]);
+    expect(materializedBlockParent(cycled, lamportToString([0, 'self']), tableVirtualConfig)).toEqual([0, 'root']);
+});
 
 class EditorHarness {
     state = cachedState(initialState('self', '00001'));

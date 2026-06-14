@@ -34,11 +34,11 @@ import {
 } from './domSelection';
 import {
     caret,
+    editableBlockIds,
     firstPointForSelection,
     focusPoint,
     pointTextLength,
     segmentText,
-    visibleBlockIds,
     type EditorSelection,
 } from './selectionModel';
 import {
@@ -693,7 +693,7 @@ function BlockEditor({
                     readSelectionFromDom(root) ??
                     primarySelection(resolveSelectionSet(current.state, current.selection));
                 const focus = focusPoint(liveSelection);
-                const blockOrder = visibleBlockIds(current.state);
+                const blockOrder = editableBlockIds(current.state);
                 const index = blockOrder.indexOf(focus.blockId);
                 const targetBlockId = blockOrder[direction === 'up' ? index - 1 : index + 1];
                 if (!targetBlockId) {
