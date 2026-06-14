@@ -319,6 +319,44 @@ describe('plim block crdt adapter', () => {
         expect(stateToString(leftWithRemote.crdt)).toBe(stateToString(rightFinal.crdt));
     });
 
+    it('preserves concurrent text edits when Plim reorders via remove plus insert of the same block', () => {
+        const base = createFixtureState();
+        const left = createAdapterState(base);
+        const right = createAdapterState(base);
+        const movedBlock = left.plim.doc.children[0];
+
+        const reorderTx = {
+            ops: [
+                {kind: 'removeBlock', path: [0]} satisfies TransactionOp,
+                {kind: 'insertBlock', path: [1], block: movedBlock} satisfies TransactionOp,
+            ],
+        };
+        const editTx = {
+            ops: [
+                {
+                    kind: 'replaceText',
+                    path: [0],
+                    from: 'Hello 👩‍💻'.length,
+                    to: 'Hello 👩‍💻'.length,
+                    insert: [{text: '!'}],
+                } satisfies TransactionOp,
+            ],
+        };
+
+        const afterReorder = applyLocalTransaction(left, reorderTx, {actor: 'left', ts: makeTs(100)});
+        const afterEdit = applyLocalTransaction(right, editTx, {actor: 'right', ts: makeTs(200)});
+        const leftFinal = applyRemoteOps(afterReorder, afterEdit.ops);
+        const rightFinal = applyRemoteOps(afterEdit, afterReorder.ops);
+
+        expect(stateToString(leftFinal.crdt)).toBe(stateToString(rightFinal.crdt));
+        expect(leftFinal.plim.doc.children.map((block) => block.id)).toEqual([
+            right.plim.doc.children[1].id,
+            movedBlock.id,
+        ]);
+        expect(blockContents(leftFinal.crdt, movedBlock.id)).toBe('Hello 👩‍💻!');
+        expect(leftFinal.plim.doc.children[1].text?.map((span) => span.text).join('')).toBe('Hello 👩‍💻!');
+    });
+
     it('resolves joined right-block selections into the visible left block stream', () => {
         let state = createFixtureState();
         state = applyMany(state, splitBlockOps(state, {actor: 'alice', block: [0, 'alice'], offset: 6, ts: '00300'}));

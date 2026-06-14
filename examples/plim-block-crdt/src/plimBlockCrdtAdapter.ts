@@ -149,7 +149,8 @@ export const translateTransaction = (
         state = applyMany(state, next);
     };
 
-    for (const op of tx.ops) {
+    for (let index = 0; index < tx.ops.length; index++) {
+        const op = tx.ops[index];
         const remapAfterApply: {path: BlockPath; id: string}[] = [];
         switch (op.kind) {
             case 'setSelection':
@@ -268,6 +269,20 @@ export const translateTransaction = (
                     unsupported.push(op);
                     break;
                 }
+                const existing = state.state.blocks[op.block.id];
+                if (existing && !existing.deleted && !state.cache.joinedBlocks[op.block.id]) {
+                    append(
+                        moveBlockOps(state, {
+                            actor: options.actor,
+                            block: existing.id,
+                            parent: anchors.parent,
+                            before: anchors.before,
+                            after: anchors.after,
+                            ts: options.ts(),
+                        }),
+                    );
+                    break;
+                }
                 const insertOps = insertBlockOps(state, {
                     actor: options.actor,
                     parent: anchors.parent,
@@ -292,6 +307,10 @@ export const translateTransaction = (
                 const blockId = plimPathToBlockId(plimState.doc, op.path);
                 if (!blockId) {
                     unsupported.push(op);
+                    break;
+                }
+                const nextOp = tx.ops[index + 1];
+                if (nextOp?.kind === 'insertBlock' && nextOp.block.id === blockId) {
                     break;
                 }
                 append(deleteBlockOps(state, {block: parseLamportString(blockId), mode: 'block-only'}));
