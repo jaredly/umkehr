@@ -32,7 +32,10 @@ export const createAnnotation = (
     presentation: AnnotationPresentation,
     context: CommandContext,
 ): CommandResult => {
-    const segments = normalizeSelectionSegments(state, selection);
+    const bodyRange = bodySelectionRange(state, selection);
+    const segments = bodyRange
+        ? [{blockId: bodyRange.blockId, startOffset: bodyRange.startOffset, endOffset: bodyRange.endOffset}]
+        : normalizeSelectionSegments(state, selection);
     if (!segments.length) return {state, ops: [], selection};
 
     const markId: Lamport = [state.state.maxSeenCount + 1, context.actor];
@@ -249,6 +252,7 @@ export const renderedAnnotations = (
     blocksWithAnnotationBodies: Array<FormattedBlock<RichBlockMeta>> = blocks,
 ): RenderedAnnotation[] => {
     const formattedBodies = new Map(blocksWithAnnotationBodies.map((block) => [block.id, block]));
+    const referenceBlocks = blocksWithAnnotationBodies;
     return Object.values(state.state.marks)
         .filter((mark) => mark.type === ANNOTATION_MARK && !mark.remove && isAnnotationData(mark.data))
         .map((mark) => {
@@ -258,7 +262,7 @@ export const renderedAnnotations = (
                 id,
                 data: mark.data as unknown as AnnotationMarkData,
                 mark,
-                referenceText: annotationReferenceText(blocks, id),
+                referenceText: annotationReferenceText(referenceBlocks, id),
                 bodyBlocks: bodyIds.map((bodyId) => {
                     const formatted = formattedBodies.get(bodyId);
                     const text = formatted
@@ -270,8 +274,8 @@ export const renderedAnnotations = (
         })
         .filter((annotation) => annotation.referenceText.length > 0)
         .sort((a, b) => {
-            const aPosition = firstPositionForAnnotation(blocks, a.id);
-            const bPosition = firstPositionForAnnotation(blocks, b.id);
+            const aPosition = firstPositionForAnnotation(referenceBlocks, a.id);
+            const bPosition = firstPositionForAnnotation(referenceBlocks, b.id);
             return aPosition.blockIndex - bPosition.blockIndex || aPosition.offset - bPosition.offset;
         });
 };

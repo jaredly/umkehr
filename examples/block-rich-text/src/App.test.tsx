@@ -1269,6 +1269,30 @@ describe('Block rich text example UI', () => {
         expect(domSelectionOffsets(commentBody)).toEqual({anchor: 1, focus: 3});
     });
 
+    it('creates a comment on selected comment body text', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abcd');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abcd'));
+
+        selectRange(blocks(left)[0], 1, 3);
+        fireEvent.click(within(left).getByRole('button', {name: 'Comment'}));
+
+        const commentBody = await waitFor(() =>
+            within(left).getByRole('textbox', {name: 'Annotation body'}),
+        );
+        selectCaret(commentBody, 0);
+        beforeInputText(commentBody, 'note');
+        await waitFor(() => expect(commentBody.textContent).toBe('note'));
+
+        selectRange(commentBody, 1, 3);
+        fireEvent.click(within(left).getByRole('button', {name: 'Comment'}));
+
+        await waitFor(() => expect(within(left).getByText('Comment on “ot”')).toBeTruthy());
+    });
+
     it('pastes newlines as multiple synced blocks', async () => {
         const view = render(<App />);
         const {left, right} = panels(view);

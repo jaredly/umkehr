@@ -246,4 +246,20 @@ describe('block rich text annotations', () => {
             {text: 'note', marks: {italic: true}},
         ]);
     });
+
+    it('creates annotations over annotation body text', () => {
+        const demo = createDemoState();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = insertText(demo.left.state, caret(blockId, 0), 'hello', ctx());
+        result = createAnnotation(result.state, range(blockId, 0, 5), 'sidebar', ctx());
+        const bodyId = annotationsFor(result.state)[0].bodyBlocks[0].id;
+        result = replaceAnnotationBodySelection(result.state, caret(bodyId, 0), 'note', ctx());
+
+        result = createAnnotation(result.state, range(bodyId, 1, 3), 'sidebar', ctx());
+
+        expect(annotationsFor(result.state).map((annotation) => annotation.referenceText)).toEqual([
+            'hello',
+            'ot',
+        ]);
+    });
 });

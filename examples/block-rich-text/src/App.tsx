@@ -394,6 +394,8 @@ function BlockEditor({
     } | null>(null);
     const [hasFocus, setHasFocus] = useState(false);
     const [isExtendingSelection, setIsExtendingSelection] = useState(false);
+    const [activeAnnotationBodySelection, setActiveAnnotationBodySelection] =
+        useState<EditorSelection | null>(null);
     const blocks = materializeFormattedBlocks(replica.state);
     const blocksWithAnnotationBodies = materializeFormattedBlocks(
         replica.state,
@@ -889,15 +891,25 @@ function BlockEditor({
                     )
                 }
                 onAnnotation={(presentation) =>
-                    runEditCommand((current, selection) => {
-                        const result = createAnnotation(
-                            current.state,
-                            primarySelection(resolveSelectionSet(current.state, selection)),
-                            presentation,
-                            makeCommandContext(current),
-                        );
-                        return {state: result.state, ops: result.ops, selection};
-                    })
+                    activeAnnotationBodySelection
+                        ? runBlockControlCommand((current) => {
+                              const result = createAnnotation(
+                                  current.state,
+                                  activeAnnotationBodySelection,
+                                  presentation,
+                                  makeCommandContext(current),
+                              );
+                              return {state: result.state, ops: result.ops, selection: current.selection};
+                          })
+                        : runEditCommand((current, selection) => {
+                              const result = createAnnotation(
+                                  current.state,
+                                  primarySelection(resolveSelectionSet(current.state, selection)),
+                                  presentation,
+                                  makeCommandContext(current),
+                              );
+                              return {state: result.state, ops: result.ops, selection};
+                          })
                 }
                 onBlockType={(kind) =>
                     runEditCommand((current, selection) =>
@@ -915,12 +927,16 @@ function BlockEditor({
             <AnnotationSidebar
                 annotations={annotations.filter((item) => item.data.presentation === 'sidebar')}
                 onBodyCommand={runAnnotationBodyCommand}
+                onBodySelectionChange={setActiveAnnotationBodySelection}
             />
             <AnnotationPopovers annotations={annotations.filter((item) => item.data.presentation === 'popover')} />
             <div
                 ref={rootRef}
                 className="blockList"
-                onFocus={() => setHasFocus(true)}
+                onFocus={() => {
+                    setActiveAnnotationBodySelection(null);
+                    setHasFocus(true);
+                }}
                 onBlur={(event) => {
                     if (event.currentTarget.contains(event.relatedTarget)) return;
                     resetVerticalCaretIntent();
@@ -963,6 +979,7 @@ function BlockEditor({
             <Footnotes
                 annotations={annotations.filter((item) => item.data.presentation === 'footnote')}
                 onBodyCommand={runAnnotationBodyCommand}
+                onBodySelectionChange={setActiveAnnotationBodySelection}
             />
         </article>
     );
@@ -1306,11 +1323,13 @@ const blockTypeMenuValue = (meta: RichBlockMeta | undefined): BlockTypeMenuValue
 function AnnotationSidebar({
     annotations,
     onBodyCommand,
+    onBodySelectionChange,
 }: {
     annotations: ReturnType<typeof renderedAnnotations>;
     onBodyCommand(
         command: (current: Replica, context: ReturnType<typeof makeCommandContext>) => CommandResult,
     ): void;
+    onBodySelectionChange(selection: EditorSelection | null): void;
 }) {
     if (!annotations.length) return null;
     return (
@@ -1319,7 +1338,12 @@ function AnnotationSidebar({
                 <section key={annotation.id} className="annotationCard">
                     <strong>Comment on “{annotation.referenceText}”</strong>
                     {annotation.bodyBlocks.map((block) => (
-                        <AnnotationBodyBlock key={block.id} block={block} onBodyCommand={onBodyCommand} />
+                        <AnnotationBodyBlock
+                            key={block.id}
+                            block={block}
+                            onBodyCommand={onBodyCommand}
+                            onBodySelectionChange={onBodySelectionChange}
+                        />
                     ))}
                 </section>
             ))}
@@ -1330,11 +1354,13 @@ function AnnotationSidebar({
 function Footnotes({
     annotations,
     onBodyCommand,
+    onBodySelectionChange,
 }: {
     annotations: ReturnType<typeof renderedAnnotations>;
     onBodyCommand(
         command: (current: Replica, context: ReturnType<typeof makeCommandContext>) => CommandResult,
     ): void;
+    onBodySelectionChange(selection: EditorSelection | null): void;
 }) {
     if (!annotations.length) return null;
     return (
@@ -1348,6 +1374,7 @@ function Footnotes({
                                   block={block}
                                   fallbackText={annotation.referenceText}
                                   onBodyCommand={onBodyCommand}
+                                  onBodySelectionChange={onBodySelectionChange}
                               />
                           ))
                         : annotation.referenceText}
@@ -1377,12 +1404,14 @@ function AnnotationBodyBlock({
     block,
     fallbackText = '',
     onBodyCommand,
+    onBodySelectionChange,
 }: {
     block: ReturnType<typeof renderedAnnotations>[number]['bodyBlocks'][number];
     fallbackText?: string;
     onBodyCommand(
         command: (current: Replica, context: ReturnType<typeof makeCommandContext>) => CommandResult,
     ): void;
+    onBodySelectionChange(selection: EditorSelection | null): void;
 }) {
     const pendingCaretRestoreBlockIdRef = useRef<string | null>(null);
     const pendingSelectionRestoreRef = useRef<EditorSelection | null>(null);
@@ -1393,7 +1422,13 @@ function AnnotationBodyBlock({
             selection.type === 'caret' && selection.point.blockId === block.id ? block.id : null;
         pendingSelectionRestoreRef.current = selection.type === 'range' ? selection : null;
         setSelection(selection);
-    }, [block.id]);
+        onBodySelectionChange(selection);
+    }, [block.id, onBodySelectionChange]);
+
+    const updateSelection = useCallback((nextSelection: EditorSelection | null) => {
+        setSelection(nextSelection ?? caret(block.id, block.text.length));
+        onBodySelectionChange(nextSelection);
+    }, [block.id, block.text.length, onBodySelectionChange]);
 
     const run = useCallback(
         (
@@ -1424,6 +1459,7 @@ function AnnotationBodyBlock({
             className="annotationBodyEditor"
             ariaLabel="Annotation body"
             placeholder={fallbackText || 'Annotation body'}
+            onSelectionChange={updateSelection}
             onInsertText={(text, activeSelection) =>
                 run(activeSelection ?? selection, (state, selected, context) =>
                     replaceAnnotationBodySelection(state, selected, text, context),
@@ -1444,7 +1480,7 @@ function AnnotationBodyBlock({
             }}
             onKeyDown={(event) => {
                 const currentSelection = readSelectionFromDom(event.currentTarget);
-                if (currentSelection) setSelection(currentSelection);
+                if (currentSelection) updateSelection(currentSelection);
                 const modifierPressed = event.metaKey || event.ctrlKey;
                 const key = event.key.toLowerCase();
                 if (event.key === 'Enter') {
@@ -1886,6 +1922,7 @@ function RichTextEditableSurface({
     onInsertText,
     onDeleteBackward,
     onDeleteForward,
+    onSelectionChange,
     onKeyDown,
     onPaste,
 }: {
@@ -1902,6 +1939,7 @@ function RichTextEditableSurface({
     onInsertText(text: string, selection?: EditorSelection): void;
     onDeleteBackward(selection?: EditorSelection): void;
     onDeleteForward(selection?: EditorSelection): void;
+    onSelectionChange?(selection: EditorSelection | null): void;
     onKeyDown?(event: KeyboardEvent<HTMLDivElement>): void;
     onPaste?(event: ClipboardEvent<HTMLDivElement>): void;
 }) {
@@ -1973,6 +2011,7 @@ function RichTextEditableSurface({
             data-placeholder={placeholder}
             data-trailing-newline={trailingCodeNewline ? 'true' : undefined}
             onFocus={(event) => {
+                onSelectionChange?.(readSelectionFromDom(event.currentTarget));
                 const nextDecorations = removePrimaryDecorations(decorations);
                 if (nextDecorations === decorations) return;
                 event.currentTarget.replaceChildren(
@@ -1984,6 +2023,8 @@ function RichTextEditableSurface({
                     trailingCodeNewline,
                 );
             }}
+            onMouseUp={(event) => onSelectionChange?.(readSelectionFromDom(event.currentTarget))}
+            onKeyUp={(event) => onSelectionChange?.(readSelectionFromDom(event.currentTarget))}
             onInput={(event) => {
                 const native = event.nativeEvent as InputEvent;
                 if (handledBeforeInputRef.current) {
