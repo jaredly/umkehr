@@ -4,6 +4,7 @@ import {lamportToString} from 'umkehr/block-crdt/utils';
 import {
     applyLocalChange,
     createDemoState,
+    nextReplicaClock,
     nextReplicaTs,
     toggleOnline,
     type DemoState,
@@ -230,7 +231,7 @@ const planForRedo = (
 
 const makeTs = (replica: Replica, mutateClock: boolean) => {
     if (mutateClock) return () => nextReplicaTs(replica);
-    let next = replica.clock;
+    let next = nextReplicaClock(replica);
     return () => lamportToString([next++, replica.actor]);
 };
 

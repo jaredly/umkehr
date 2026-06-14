@@ -13,6 +13,7 @@ import {
     applyRedo,
     applyUndo,
     createDemoState,
+    nextReplicaTs,
     toggleReplicaOnline,
     type EditorId,
     type Replica,
@@ -46,7 +47,7 @@ export function App() {
                 const next = applyLocalTransaction(
                     source.adapter,
                     tx,
-                    {actor: source.actor, ts: source.ts},
+                    {actor: source.actor, ts: () => nextReplicaTs(source)},
                     state,
                 );
                 const messages = [

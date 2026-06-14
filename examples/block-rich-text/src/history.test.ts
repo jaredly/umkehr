@@ -1,7 +1,7 @@
 import {describe, expect, it} from 'vitest';
-import {materializeFormattedBlocks} from 'umkehr/block-crdt';
-import {indentBlock} from './blockCommands';
-import {makeCommandContext, type EditorId, type Replica} from './blockEditorRuntime';
+import {materializeFormattedBlocks, rootBlockIds} from 'umkehr/block-crdt';
+import {indentBlock, moveBlock} from './blockCommands';
+import {makeCommandContext, nextReplicaTs, type EditorId, type Replica} from './blockEditorRuntime';
 import {
     appendHistoryAction,
     appendHistoryKeystroke,
@@ -41,6 +41,30 @@ const appendLocal = (
     });
 };
 
+const appendEditorCommand = (
+    history: HistoryState,
+    editorId: EditorId,
+    command: (replica: Replica) => MultiCommandResult,
+): HistoryState => {
+    const demo = replayHistory(history.actions, history.cursor);
+    const replica = demo[editorId];
+    const result = command(replica);
+    if (!result.ops.length) return history;
+    return appendHistoryAction(history, {
+        type: 'local-change',
+        editorId,
+        ops: result.ops,
+        selection: result.selection,
+        command: {
+            id: nextReplicaTs(replica),
+            actor: editorId,
+            intent: 'edit',
+            beforeSelection: replica.selection,
+            afterSelection: result.selection,
+        },
+    });
+};
+
 const appendToggle = (history: HistoryState, editorId: EditorId): HistoryState =>
     appendHistoryAction(history, {type: 'toggle-online', editorId});
 
@@ -60,6 +84,9 @@ const paste = (text: string) => (replica: Replica) =>
 
 const insert = (text: string) => (replica: Replica) =>
     insertTextEverywhere(replica.state, replica.selection, text, makeCommandContext(replica));
+
+const split = () => (replica: Replica) =>
+    splitBlockEverywhere(replica.state, replica.selection, makeCommandContext(replica));
 
 const heading = () => (replica: Replica) =>
     setBlockTypeEverywhere(replica.state, replica.selection, (_blockId, _meta) => ({
@@ -178,6 +205,44 @@ describe('block rich text history', () => {
         expect(buildHistorySnapshot(replayHistory(parsed.history.actions, parsed.history.cursor))).toEqual(
             buildHistorySnapshot(replayHistory(history.actions, history.actions.length)),
         );
+    });
+
+    it('keeps replayed peer clocks ahead of imported block ids before a first remote reorder', () => {
+        let history = initialHistoryState();
+        for (const command of [
+            insert('o'),
+            insert('n'),
+            insert('e'),
+            split(),
+            insert('t'),
+            insert('w'),
+            insert('o'),
+            split(),
+            insert('t'),
+            insert('h'),
+            insert('r'),
+            insert('e'),
+            insert('e'),
+        ]) {
+            history = appendEditorCommand(history, 'left', command);
+        }
+        const demo = replayHistory(history.actions);
+        const [first, , third] = rootBlockIds(demo.right.state);
+        const maxSeenBeforeMove = demo.right.state.state.maxSeenCount;
+
+        const moved = moveBlock(
+            demo.right.state,
+            third,
+            {type: 'before', targetBlockId: first},
+            makeCommandContext(demo.right),
+        );
+
+        expect(visibleText({...demo.right, state: moved.state})).toEqual(['three', 'one', 'two']);
+        expect(moved.ops).toHaveLength(1);
+        expect(moved.ops[0].type).toBe('block:move');
+        if (moved.ops[0].type !== 'block:move') return;
+        expect(moved.ops[0].order.id[0]).toBeGreaterThan(maxSeenBeforeMove);
+        expect(moved.ops[0].order.ts).toBe('0016-right');
     });
 
     it('round-trips rich block metadata through export/import', () => {

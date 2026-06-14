@@ -280,6 +280,46 @@ const retainedHighlightText = (block: HTMLElement): string =>
 const childTexts = (block: HTMLElement): string[] =>
     [...block.childNodes].map((node) => node.textContent ?? '');
 
+const installMockBlockRowGeometry = (panel: HTMLElement) => {
+    const rows = blocks(panel).map((block) => block.closest<HTMLElement>('.blockRow')!);
+    rows.forEach((row, index) => {
+        row.getBoundingClientRect = () =>
+            ({
+                left: 0,
+                top: index * 40,
+                width: 320,
+                height: 40,
+                right: 320,
+                bottom: index * 40 + 40,
+                x: 0,
+                y: index * 40,
+                toJSON: () => ({}),
+            }) as DOMRect;
+    });
+};
+
+const dragBlockHandle = (panel: HTMLElement, fromIndex: number, clientX: number, clientY: number) => {
+    const handles = within(panel).getAllByRole('button', {name: 'Move block'});
+    const handle = handles[fromIndex] as HTMLElement & {setPointerCapture?: (pointerId: number) => void};
+    handle.setPointerCapture = () => {};
+    fireEvent.pointerDown(handle, {
+        button: 0,
+        buttons: 1,
+        isPrimary: true,
+        pointerId: 1,
+        clientX,
+        clientY,
+    });
+    fireEvent.pointerUp(window, {
+        button: 0,
+        buttons: 0,
+        isPrimary: true,
+        pointerId: 1,
+        clientX,
+        clientY,
+    });
+};
+
 describe('Block rich text example UI', () => {
     it('renders the blog visual demo gallery for the demos query', () => {
         window.history.pushState({}, '', '/?demos');
@@ -459,6 +499,20 @@ describe('Block rich text example UI', () => {
 
         await waitFor(() => expect(blocks(left)[0].textContent).toBe('abc'));
         expect(blocks(right)[0].textContent).toBe('abc');
+    });
+
+    it('drags a peer-created third block to the top on the first attempt', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        pasteText(blocks(left)[0], 'a\nb\nc');
+        await waitForBlockTexts(right, ['a', 'b', 'c']);
+        installMockBlockRowGeometry(right);
+
+        dragBlockHandle(right, 2, 20, 5);
+
+        await waitForBlockTexts(right, ['c', 'a', 'b']);
+        expect(blockTexts(left)).toEqual(['c', 'a', 'b']);
     });
 
     it('undoes and redoes text through editor toolbar buttons', async () => {

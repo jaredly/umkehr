@@ -6,7 +6,7 @@ import {
     type AdapterState,
     type PlimBlockMeta,
 } from './plimBlockCrdtAdapter';
-import {createFixtureState, makeTs} from './fixtures';
+import {createFixtureState} from './fixtures';
 import {getBlockAt, type Selection} from '@plim/core';
 import {lamportToString, planUndoOps, type CachedState, type HLC, type Lamport, type Op, type RetainedSelection} from 'umkehr/block-crdt';
 
@@ -21,7 +21,7 @@ export type Replica = {
     queue: Op<PlimBlockMeta>[][];
     undoStack: UndoEntry[];
     redoStack: UndoEntry[];
-    ts: () => HLC;
+    clock: number;
 };
 
 export type UndoEntry = {
@@ -49,12 +49,21 @@ export type ApplyChangeResult = {
 export const createDemoState = (): DemoState => {
     const initial = createFixtureState();
     return {
-        left: createReplica('left', 'Editor A', createAdapterState(initial), makeTs(500)),
-        right: createReplica('right', 'Editor B', createAdapterState(initial), makeTs(5000)),
+        left: createReplica('left', 'Editor A', createAdapterState(initial), 500),
+        right: createReplica('right', 'Editor B', createAdapterState(initial), 5000),
     };
 };
 
 export const peerId = (id: EditorId): EditorId => (id === 'left' ? 'right' : 'left');
+
+export const nextReplicaTs = (replica: Replica): HLC => {
+    replica.clock = Math.max(
+        replica.clock,
+        replica.adapter.crdt.state.maxSeenCount + 1,
+        maxNumericTimestampCounter(replica.adapter.crdt.state) + 1,
+    );
+    return (replica.clock++).toString().padStart(5, '0') as HLC;
+};
 
 export const applyLocalAdapterChange = (
     demo: DemoState,
@@ -115,7 +124,7 @@ export const applyUndo = (demo: DemoState, id: EditorId): ApplyChangeResult => {
 
     const plan = planUndoOps(entry.before, source.adapter.crdt, entry.ops, {
         actor: source.actor,
-        ts: source.ts,
+        ts: () => nextReplicaTs(source),
     });
     if (!plan.complete) {
         return {
@@ -147,7 +156,7 @@ export const applyRedo = (demo: DemoState, id: EditorId): ApplyChangeResult => {
 
     const plan = planUndoOps(entry.undoBefore, source.adapter.crdt, entry.undoOps, {
         actor: source.actor,
-        ts: source.ts,
+        ts: () => nextReplicaTs(source),
     });
     if (!plan.complete) {
         return {
@@ -219,7 +228,7 @@ const createReplica = (
     id: EditorId,
     label: string,
     adapter: AdapterState,
-    ts: () => HLC,
+    clock: number,
 ): Replica => ({
     id,
     label,
@@ -229,7 +238,7 @@ const createReplica = (
     queue: [],
     undoStack: [],
     redoStack: [],
-    ts,
+    clock,
 });
 
 const applySourceOps = (
@@ -301,6 +310,22 @@ const clampPlimSelection = (doc: AdapterState['plim']['doc'], selection: Selecti
             offset: Math.max(0, Math.min(selection.head.offset, blockTextLength(headBlock))),
         },
     };
+};
+
+const maxNumericTimestampCounter = (value: unknown): number => {
+    if (typeof value === 'string') {
+        return /^\d+$/.test(value) ? Number(value) : 0;
+    }
+    if (Array.isArray(value)) {
+        return value.reduce((max, item) => Math.max(max, maxNumericTimestampCounter(item)), 0);
+    }
+    if (typeof value === 'object' && value !== null) {
+        return Object.values(value).reduce(
+            (max, item) => Math.max(max, maxNumericTimestampCounter(item)),
+            0,
+        );
+    }
+    return 0;
 };
 
 const blockTextLength = (block: NonNullable<ReturnType<typeof getBlockAt>>): number =>

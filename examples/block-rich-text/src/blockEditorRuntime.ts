@@ -37,8 +37,15 @@ export const createDemoState = (): DemoState => {
     };
 };
 
+export const nextReplicaClock = (replica: Replica) =>
+    Math.max(
+        replica.clock,
+        replica.state.state.maxSeenCount + 1,
+        maxLamportTimestampCounter(replica.state.state) + 1,
+    );
+
 export const nextReplicaTs = (replica: Replica) => {
-    replica.clock = Math.max(replica.clock, replica.state.state.maxSeenCount + 1);
+    replica.clock = nextReplicaClock(replica);
     return lamportToString([replica.clock++, replica.actor]);
 };
 
@@ -98,4 +105,21 @@ const createReplica = (id: EditorId, state: CachedState<RichBlockMeta>): Replica
 const applyRemoteOps = (replica: Replica, ops: Array<Op<RichBlockMeta>>): Replica => {
     const state = applyMany(replica.state, ops);
     return {...replica, state};
+};
+
+const maxLamportTimestampCounter = (value: unknown): number => {
+    if (typeof value === 'string') {
+        const match = /^(\d+)-[^-]+$/.exec(value);
+        return match ? Number(match[1]) : 0;
+    }
+    if (Array.isArray(value)) {
+        return value.reduce((max, item) => Math.max(max, maxLamportTimestampCounter(item)), 0);
+    }
+    if (typeof value === 'object' && value !== null) {
+        return Object.values(value).reduce(
+            (max, item) => Math.max(max, maxLamportTimestampCounter(item)),
+            0,
+        );
+    }
+    return 0;
 };
