@@ -1,0 +1,128 @@
+name: Cloudflare Pages preview
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+concurrency:
+  group: cloudflare-pages-preview-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  preview:
+    name: Build and deploy Vite examples
+    runs-on: ubuntu-latest
+    env:
+      PREVIEW_DIST: preview-dist
+      CLOUDFLARE_PAGES_PROJECT_NAME: ${{ vars.CLOUDFLARE_PAGES_PROJECT_NAME }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build package
+        run: pnpm run build
+
+      - name: Install example dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          for example in examples/react examples/react-crdt examples/block-rich-text examples/plim-block-crdt; do
+            pnpm --dir "$example" --ignore-workspace install --no-frozen-lockfile
+          done
+
+      - name: Build preview site
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rm -rf "$PREVIEW_DIST"
+          mkdir -p "$PREVIEW_DIST"
+
+          cat > "$PREVIEW_DIST/index.html" <<'HTML'
+          <!doctype html>
+          <html lang="en">
+            <head>
+              <meta charset="utf-8" />
+              <meta name="viewport" content="width=device-width, initial-scale=1" />
+              <title>umkehr preview</title>
+              <style>
+                body { font-family: system-ui, sans-serif; margin: 2rem; line-height: 1.5; }
+                code { background: #f4f4f5; padding: 0.1rem 0.25rem; border-radius: 0.25rem; }
+              </style>
+            </head>
+            <body>
+              <h1>umkehr preview</h1>
+              <p>Static Vite example builds for this commit.</p>
+              <ul>
+          HTML
+
+          examples=(
+            "examples/react"
+            "examples/react-crdt"
+            "examples/block-rich-text"
+            "examples/plim-block-crdt"
+          )
+
+          for example in "${examples[@]}"; do
+            name="${example#examples/}"
+            base="/$name/"
+            pnpm --dir "$example" exec tsc -p tsconfig.json --noEmit
+            pnpm --dir "$example" exec vite build --base="$base"
+            mkdir -p "$PREVIEW_DIST/$name"
+            cp -a "$example/dist/." "$PREVIEW_DIST/$name/"
+            printf '                <li><a href="./%s/">%s</a> <code>%s</code></li>\n' "$name" "$name" "$example" >> "$PREVIEW_DIST/index.html"
+          done
+
+          cat >> "$PREVIEW_DIST/index.html" <<'HTML'
+              </ul>
+            </body>
+          </html>
+          HTML
+
+      - name: Upload preview artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloudflare-pages-preview
+          path: ${{ env.PREVIEW_DIST }}
+          retention-days: 5
+
+      - name: Check Cloudflare configuration
+        id: cloudflare-config
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "$CLOUDFLARE_PAGES_PROJECT_NAME" && -n "$CLOUDFLARE_ACCOUNT_ID" && -n "$CLOUDFLARE_API_TOKEN" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping Cloudflare deploy. Configure vars.CLOUDFLARE_PAGES_PROJECT_NAME plus secrets.CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN."
+          fi
+
+      - name: Deploy to Cloudflare Pages
+        if: steps.cloudflare-config.outputs.enabled == 'true'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy ${{ env.PREVIEW_DIST }} --project-name=${{ vars.CLOUDFLARE_PAGES_PROJECT_NAME }} --branch=${{ github.head_ref || github.ref_name }}
