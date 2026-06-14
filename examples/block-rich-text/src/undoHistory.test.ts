@@ -12,6 +12,7 @@ import {
     deleteBackwardEverywhere,
     insertTextEverywhere,
     setBlockTypeEverywhere,
+    splitBlockEverywhere,
     type MultiCommandResult,
 } from './multiSelectionCommands';
 import {deriveUndoState, createRedoAction, createUndoAction} from './undoHistory';
@@ -63,6 +64,16 @@ const quote = () => (replica: Replica) =>
         type: 'blockquote',
         ts: '0001-left',
     }));
+
+const code = () => (replica: Replica) =>
+    setBlockTypeEverywhere(replica.state, replica.selection, (_blockId, meta) => ({
+        type: 'code',
+        language: meta.type === 'code' ? meta.language : '',
+        ts: '0001-left',
+    }));
+
+const enter = () => (replica: Replica) =>
+    splitBlockEverywhere(replica.state, replica.selection, makeCommandContext(replica));
 
 const visibleText = (history: HistoryState, editorId: EditorId = 'left'): string[] =>
     materializeFormattedBlocks(replayHistory(history.actions, history.cursor)[editorId].state).map((block) =>
@@ -170,5 +181,22 @@ describe('block rich text undo history', () => {
         expect(
             materializeFormattedBlocks(replayHistory(history.actions, history.cursor).left.state)[0].block.meta,
         ).toMatchObject({type: 'blockquote'});
+    });
+
+    it('keeps undo available after undoing code block double-enter exit', () => {
+        let history = initialHistoryState();
+        history = appendEdit(history, 'left', insert('ab'), 'insert text');
+        history = appendEdit(history, 'left', code(), 'code block');
+        history = appendEdit(history, 'left', enter(), 'code newline');
+        history = appendEdit(history, 'left', enter(), 'exit code');
+
+        expect(visibleText(history)).toEqual(['ab', '']);
+
+        history = appendActionResult(history, createUndoAction(history, 'left'));
+        expect(visibleText(history)).toEqual(['ab\n']);
+        expect(deriveUndoState(history, 'left').canUndo).toBe(true);
+
+        history = appendActionResult(history, createUndoAction(history, 'left'));
+        expect(visibleText(history)).toEqual(['ab']);
     });
 });

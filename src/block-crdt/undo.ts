@@ -47,6 +47,11 @@ export const planUndoOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
                 const currentChar = current.state.chars[id];
                 if (currentChar && !currentChar.deleted) {
                     ops.push({type: 'char:delete', id: op.char.id});
+                    break;
+                }
+                const replacement = replacementCharForInsertedChar(before, current, op.char);
+                if (replacement) {
+                    ops.push({type: 'char:delete', id: replacement.id});
                 }
                 break;
             }
@@ -149,6 +154,22 @@ export const planUndoOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
     }
 
     return {complete: unsupported.length === 0, ops, unsupported};
+};
+
+const replacementCharForInsertedChar = <M extends TimestampedBlockMeta>(
+    before: CachedState<M>,
+    current: CachedState<M>,
+    inserted: Char,
+): Char | null => {
+    for (const candidate of Object.values(current.state.chars)) {
+        const candidateId = lamportToString(candidate.id);
+        if (candidate.deleted || candidateId === lamportToString(inserted.id)) continue;
+        if (before.state.chars[candidateId]) continue;
+        if (candidate.text !== inserted.text) continue;
+        if (!sameLamport(candidate.parent.id, inserted.parent.id)) continue;
+        return candidate;
+    }
+    return null;
 };
 
 const restoreDeletedChar = <M extends TimestampedBlockMeta>(
@@ -277,3 +298,5 @@ const previousWinningMark = <M extends TimestampedBlockMeta>(
 
 const sameBoundary = (one: Mark['start'], two: Mark['start']) =>
     one.at === two.at && lamportToString(one.id) === lamportToString(two.id);
+
+const sameLamport = (one: Lamport, two: Lamport) => one[0] === two[0] && one[1] === two[1];
