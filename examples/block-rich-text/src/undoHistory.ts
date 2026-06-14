@@ -1,5 +1,6 @@
 import {applyMany, planUndoOps, type Op} from 'umkehr/block-crdt';
 import type {CachedState} from 'umkehr/block-crdt/types';
+import * as hlc from '../../../src/crdt/hlc';
 import {
     applyLocalChange,
     createDemoState,
@@ -234,39 +235,20 @@ const makeTs = (replica: Replica, mutateClock: boolean) => {
 };
 
 const advanceReplicaClocks = (demo: DemoState, actions: HistoryAction[]): DemoState => {
-    const nextClock: Record<EditorId, number> = {left: demo.left.clock, right: demo.right.clock};
-    for (const action of actions) scanClockValue(action, nextClock);
+    let leftClock = demo.left.clock;
+    let rightClock = demo.right.clock;
+    for (const action of actions) {
+        if (action.type !== 'local-change' || !action.command) continue;
+        const timestamp = hlc.tryUnpack(action.command.id);
+        if (!timestamp) continue;
+        if (action.command.actor === 'left') {
+            leftClock = hlc.recv(leftClock, timestamp, 0);
+        } else {
+            rightClock = hlc.recv(rightClock, timestamp, 0);
+        }
+    }
     return {
-        left: {...demo.left, clock: Math.max(demo.left.clock, nextClock.left)},
-        right: {...demo.right, clock: Math.max(demo.right.clock, nextClock.right)},
+        left: {...demo.left, clock: leftClock},
+        right: {...demo.right, clock: rightClock},
     };
 };
-
-const scanClockValue = (value: unknown, nextClock: Record<EditorId, number>) => {
-    if (typeof value === 'string') {
-        const lamportMatch = /^(\d+)-(left|right)$/.exec(value);
-        if (lamportMatch) {
-            const actor = lamportMatch[2] as EditorId;
-            nextClock[actor] = Math.max(nextClock[actor], Number(lamportMatch[1]) + 1);
-        }
-        return;
-    }
-    if (isLamport(value)) {
-        const actor = value[1];
-        if (actor === 'left' || actor === 'right') nextClock[actor] = Math.max(nextClock[actor], value[0] + 1);
-        return;
-    }
-    if (Array.isArray(value)) {
-        for (const item of value) scanClockValue(item, nextClock);
-        return;
-    }
-    if (typeof value === 'object' && value !== null) {
-        for (const item of Object.values(value)) scanClockValue(item, nextClock);
-    }
-};
-
-const isLamport = (value: unknown): value is [number, string] =>
-    Array.isArray(value) &&
-    value.length === 2 &&
-    Number.isInteger(value[0]) &&
-    typeof value[1] === 'string';

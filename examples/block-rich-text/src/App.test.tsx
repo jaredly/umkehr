@@ -372,6 +372,30 @@ describe('Block rich text example UI', () => {
         expect(blocks(right)[0].classList.contains('headingLevel2')).toBe(true);
     });
 
+    it('reflects the selected block type in the toolbar dropdown', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        const typeSelect = within(left).getByRole('combobox', {name: 'Block type'}) as HTMLSelectElement;
+
+        pasteText(blocks(left)[0], 'title\nbody');
+        await waitForBlockTexts(left, ['title', 'body']);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'heading1');
+        await waitFor(() => expect(typeSelect.value).toBe('heading1'));
+
+        selectCaret(blocks(left)[1], 0);
+        fireEvent.mouseUp(blocks(left)[1]);
+        await waitFor(() => expect(typeSelect.value).toBe('paragraph'));
+
+        setBlockType(left, 'callout-warning');
+        await waitFor(() => expect(typeSelect.value).toBe('callout-warning'));
+
+        selectCaret(blocks(left)[0], 0);
+        fireEvent.mouseUp(blocks(left)[0]);
+        await waitFor(() => expect(typeSelect.value).toBe('heading1'));
+    });
+
     it('wraps blockquote descendants in one grouped subtree container', async () => {
         const view = render(<App />);
         const {left} = panels(view);

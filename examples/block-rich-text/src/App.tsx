@@ -388,6 +388,9 @@ function BlockEditor({
     const orderedListNumbers = useMemo(() => deriveOrderedListNumbers(blocks), [blocks]);
     const resolvedSelectionSet = resolveSelectionSet(replica.state, replica.selection);
     const primaryResolvedSelection = primarySelection(resolvedSelectionSet);
+    const selectedBlockType = blockTypeMenuValue(
+        replica.state.state.blocks[focusPoint(primaryResolvedSelection).blockId]?.meta,
+    );
     const decorationsByBlock = useMemo(
         () =>
             decorationsForSelectionSet(replica.state, resolvedSelectionSet, {
@@ -831,6 +834,7 @@ function BlockEditor({
             <Toolbar
                 canUndo={undoState.canUndo}
                 canRedo={undoState.canRedo}
+                blockType={selectedBlockType}
                 onUndo={onUndo}
                 onRedo={onRedo}
                 onBold={() =>
@@ -1220,9 +1224,37 @@ const blockTypeMeta = (
     }
 };
 
+const blockTypeMenuValue = (meta: RichBlockMeta | undefined): BlockTypeMenuValue => {
+    if (!meta) return 'paragraph';
+    switch (meta.type) {
+        case 'paragraph':
+            return 'paragraph';
+        case 'heading':
+            return meta.level === 1 ? 'heading1' : meta.level === 2 ? 'heading2' : 'heading3';
+        case 'list_item':
+            return meta.kind;
+        case 'todo':
+            return 'todo';
+        case 'blockquote':
+            return 'blockquote';
+        case 'code':
+            return 'code';
+        case 'callout':
+            return meta.kind === 'info'
+                ? 'callout-info'
+                : meta.kind === 'warning'
+                  ? 'callout-warning'
+                  : 'callout-error';
+        case 'table':
+        case 'table_row':
+            return 'paragraph';
+    }
+};
+
 function Toolbar({
     canUndo,
     canRedo,
+    blockType,
     onUndo,
     onRedo,
     onBold,
@@ -1231,6 +1263,7 @@ function Toolbar({
 }: {
     canUndo: boolean;
     canRedo: boolean;
+    blockType: BlockTypeMenuValue;
     onUndo(): void;
     onRedo(): void;
     onBold(): void;
@@ -1267,10 +1300,9 @@ function Toolbar({
             </button>
             <select
                 aria-label="Block type"
-                defaultValue="paragraph"
+                value={blockType}
                 onChange={(event) => {
                     onBlockType(event.currentTarget.value as BlockTypeMenuValue);
-                    event.currentTarget.value = 'paragraph';
                 }}
             >
                 <option value="paragraph">Paragraph</option>
