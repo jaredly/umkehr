@@ -43,13 +43,12 @@ jobs:
       - name: Build package
         run: pnpm run build
 
-      - name: Link local package into examples
+      - name: Install example dependencies
         shell: bash
         run: |
           set -euo pipefail
           for example in examples/react examples/react-crdt examples/block-rich-text examples/plim-block-crdt; do
-            mkdir -p "$example/node_modules"
-            ln -sfn ../../.. "$example/node_modules/umkehr"
+            pnpm --dir "$example" --ignore-workspace install --no-frozen-lockfile
           done
 
       - name: Build preview site
