@@ -1,5 +1,6 @@
 import {orderedCharIdsForBlock} from 'umkehr/block-crdt';
 import type {CachedState} from 'umkehr/block-crdt/types';
+import type {RichBlockMeta} from './blockMeta';
 import {caret, clampPoint, visibleBlockIds, type BlockPoint, type EditorSelection} from './selectionModel';
 
 export type RetainedPoint = {
@@ -12,13 +13,13 @@ export type RetainedSelection =
     | {type: 'caret'; point: RetainedPoint}
     | {type: 'range'; anchor: RetainedPoint; focus: RetainedPoint};
 
-export const initialRetainedSelection = (state: CachedState): RetainedSelection => {
+export const initialRetainedSelection = (state: CachedState<RichBlockMeta>): RetainedSelection => {
     const blockId = visibleBlockIds(state)[0] ?? allBlockIds(state)[0] ?? '';
     return {type: 'caret', point: {blockId, charId: null, affinity: 'after'}};
 };
 
 export const retainSelection = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     selection: EditorSelection,
 ): RetainedSelection => {
     if (selection.type === 'caret') {
@@ -31,7 +32,7 @@ export const retainSelection = (
     };
 };
 
-export const retainPoint = (state: CachedState, point: BlockPoint): RetainedPoint => {
+export const retainPoint = (state: CachedState<RichBlockMeta>, point: BlockPoint): RetainedPoint => {
     const clamped = clampPoint(state, point);
     if (clamped.offset <= 0) {
         return {blockId: clamped.blockId, charId: null, affinity: 'after'};
@@ -42,7 +43,7 @@ export const retainPoint = (state: CachedState, point: BlockPoint): RetainedPoin
 };
 
 export const resolveSelection = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     selection: RetainedSelection,
 ): EditorSelection => {
     if (selection.type === 'caret') {
@@ -60,7 +61,7 @@ export const resolveSelection = (
     };
 };
 
-export const resolvePoint = (state: CachedState, point: RetainedPoint): BlockPoint => {
+export const resolvePoint = (state: CachedState<RichBlockMeta>, point: RetainedPoint): BlockPoint => {
     if (point.charId) {
         const resolved = resolveCharPoint(state, point);
         if (resolved) return resolved;
@@ -77,7 +78,7 @@ export const resolvePoint = (state: CachedState, point: RetainedPoint): BlockPoi
     return {blockId: point.blockId, offset: 0};
 };
 
-const resolveCharPoint = (state: CachedState, point: RetainedPoint): BlockPoint | null => {
+const resolveCharPoint = (state: CachedState<RichBlockMeta>, point: RetainedPoint): BlockPoint | null => {
     for (const blockId of allBlockIds(state)) {
         const logicalCharIds = orderedCharIdsForBlock(state, blockId);
         let visibleOffset = 0;
@@ -96,16 +97,16 @@ const resolveCharPoint = (state: CachedState, point: RetainedPoint): BlockPoint 
     return null;
 };
 
-const visibleCount = (state: CachedState, charId: string) =>
+const visibleCount = (state: CachedState<RichBlockMeta>, charId: string) =>
     state.state.chars[charId] && !state.state.chars[charId].deleted ? 1 : 0;
 
-const visibleBlockOrFallback = (state: CachedState, blockId: string) => {
+const visibleBlockOrFallback = (state: CachedState<RichBlockMeta>, blockId: string) => {
     const visibleBlocks = visibleBlockIds(state);
     if (visibleBlocks.includes(blockId)) return blockId;
     return visibleBlocks[0] ?? blockId;
 };
 
-const allBlockIds = (state: CachedState): string[] => Object.keys(state.state.blocks).sort();
+const allBlockIds = (state: CachedState<RichBlockMeta>): string[] => Object.keys(state.state.blocks).sort();
 
-export const retainedCaret = (state: CachedState, blockId: string, offset: number): RetainedSelection =>
+export const retainedCaret = (state: CachedState<RichBlockMeta>, blockId: string, offset: number): RetainedSelection =>
     retainSelection(state, caret(blockId, offset));

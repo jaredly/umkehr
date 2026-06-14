@@ -19,6 +19,7 @@ import {
     insertText,
     moveBlock,
     pastePlainText,
+    setBlockType,
     splitBlock,
     toggleMark,
     unindentBlock,
@@ -53,6 +54,59 @@ const expectCache = (state: CachedState) => {
 };
 
 describe('block rich text commands', () => {
+    it('syncs metadata command updates to the peer replica', () => {
+        const demo = createDemoState();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        const result = setBlockType(demo.left.state, blockId, {type: 'heading', level: 2, ts: '00001'});
+
+        const synced = applyLocalChange(demo, {
+            editorId: 'left',
+            state: result.state,
+            selection: demo.left.selection,
+            ops: result.ops,
+        });
+
+        expect(synced.left.state.state.blocks[blockId].meta).toEqual({type: 'heading', level: 2, ts: '00001'});
+        expect(synced.right.state.state.blocks[blockId].meta).toEqual({type: 'heading', level: 2, ts: '00001'});
+    });
+
+    it('turns empty non-paragraph Enter into paragraph metadata', () => {
+        const demo = createDemoState();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        const typed = setBlockType(demo.left.state, blockId, {type: 'blockquote', ts: '00001'});
+
+        const result = splitBlock(typed.state, caret(blockId, 0), ctx());
+
+        expect(rootBlockIds(result.state)).toHaveLength(1);
+        expect(result.state.state.blocks[blockId].meta).toMatchObject({type: 'paragraph'});
+    });
+
+    it('preserves metadata on non-empty splits', () => {
+        const demo = createDemoState();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = insertText(demo.left.state, caret(blockId, 0), 'Title', ctx());
+        result = setBlockType(result.state, blockId, {type: 'heading', level: 1, ts: '00010'});
+
+        result = splitBlock(result.state, caret(blockId, 2), ctx());
+
+        const [first, second] = rootBlockIds(result.state);
+        expect(result.state.state.blocks[first].meta).toMatchObject({type: 'heading', level: 1});
+        expect(result.state.state.blocks[second].meta).toMatchObject({type: 'heading', level: 1});
+        expect(lines(result.state)).toEqual(['Ti', 'tle']);
+    });
+
+    it('inserts newline text instead of splitting code blocks', () => {
+        const demo = createDemoState();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = insertText(demo.left.state, caret(blockId, 0), 'ab', ctx());
+        result = setBlockType(result.state, blockId, {type: 'code', language: 'ts', ts: '00010'});
+
+        result = splitBlock(result.state, caret(blockId, 1), ctx());
+
+        expect(rootBlockIds(result.state)).toEqual([blockId]);
+        expect(lines(result.state)).toEqual(['a\nb']);
+    });
+
     it('inserts text and deletes ordinary backspace inside a block', () => {
         let state = init();
         const blockId = onlyBlock(state);

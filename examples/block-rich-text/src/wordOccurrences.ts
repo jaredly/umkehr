@@ -1,5 +1,6 @@
 import {blockContents} from 'umkehr/block-crdt';
 import type {CachedState} from 'umkehr/block-crdt/types';
+import type {RichBlockMeta} from './blockMeta';
 import {segmentText, visibleBlockIds, type BlockPoint, type EditorSelection} from './selectionModel';
 
 type WordRange = {
@@ -13,7 +14,7 @@ type WordSegment = {
     endOffset: number;
 };
 
-export const wordAtPoint = (state: CachedState, point: BlockPoint): WordRange | null => {
+export const wordAtPoint = (state: CachedState<RichBlockMeta>, point: BlockPoint): WordRange | null => {
     const text = blockContents(state, point.blockId);
     const segment = wordSegments(text).find(
         (segment) => point.offset >= segment.startOffset && point.offset <= segment.endOffset,
@@ -29,7 +30,7 @@ export const wordAtPoint = (state: CachedState, point: BlockPoint): WordRange | 
     };
 };
 
-export const findWordOccurrences = (state: CachedState, word: string): EditorSelection[] => {
+export const findWordOccurrences = (state: CachedState<RichBlockMeta>, word: string): EditorSelection[] => {
     if (!word) return [];
     const selections: EditorSelection[] = [];
     for (const blockId of visibleBlockIds(state)) {

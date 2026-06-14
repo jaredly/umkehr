@@ -10,6 +10,7 @@ import {
     materializedBlockPath,
     moveBlockOps,
     orderedCharIdsForBlock,
+    setBlockMetaOps,
     splitBlockOps,
     visibleBlockChildren,
     visibleBlockOutline,
@@ -18,6 +19,7 @@ import {
 import {createLseqIdBetween} from 'umkehr/block-crdt/lseq';
 import type {BlockOrderTs, CachedState, Lamport} from 'umkehr/block-crdt/types';
 import {lamportToString, parseLamportString} from 'umkehr/block-crdt/utils';
+import {paragraphMeta, sameTypeWithTs, type RichBlockMeta} from './blockMeta';
 import {
     caret,
     clampPoint,
@@ -38,8 +40,8 @@ export type CommandContext = {
 };
 
 export type CommandResult = {
-    state: CachedState;
-    ops: Op[];
+    state: CachedState<RichBlockMeta>;
+    ops: Array<Op<RichBlockMeta>>;
     selection: EditorSelection;
 };
 
@@ -52,14 +54,14 @@ const ROOT: Lamport = [0, 'root'];
 const ROOT_ID = lamportToString(ROOT);
 
 export const insertText = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     selection: EditorSelection,
     text: string,
     context: CommandContext,
 ): CommandResult => {
     let working = state;
     let point = firstPointForSelection(working, selection);
-    const ops: Op[] = [];
+    const ops: Array<Op<RichBlockMeta>> = [];
 
     if (!isCollapsed(selection)) {
         const deleted = deleteSelectionAndJoinBoundaries(working, selection, context);
@@ -76,7 +78,7 @@ export const insertText = (
 };
 
 export const deleteBackward = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     selection: EditorSelection,
     context: CommandContext,
 ): CommandResult => {
@@ -100,7 +102,7 @@ export const deleteBackward = (
 };
 
 export const deleteForward = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     selection: EditorSelection,
     context: CommandContext,
 ): CommandResult => {
@@ -124,13 +126,13 @@ export const deleteForward = (
 };
 
 export const splitBlock = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     selection: EditorSelection,
     context: CommandContext,
 ): CommandResult => {
     let working = state;
     let point = firstPointForSelection(working, selection);
-    const ops: Op[] = [];
+    const ops: Array<Op<RichBlockMeta>> = [];
 
     if (!isCollapsed(selection)) {
         const deleted = deleteSelectionAndJoinBoundaries(working, selection, context);
@@ -142,7 +144,22 @@ export const splitBlock = (
     }
 
     const newBlockId = lamportToString([working.state.maxSeenCount + 1, context.actor]);
-    const splitOps = splitBlockOps(working, {
+    const currentMeta = working.state.blocks[point.blockId]?.meta;
+    if (currentMeta && currentMeta.type !== 'paragraph' && pointTextLength(working, point.blockId) === 0) {
+        const ops = setBlockMetaOps(working, {
+            block: parseLamportString(point.blockId),
+            meta: paragraphMeta(context.nextTs()),
+        });
+        const next = applyMany(working, ops);
+        return {state: next, ops, selection: caret(point.blockId, 0)};
+    }
+
+    if (currentMeta?.type === 'code') {
+        const inserted = insertTextAtPoint(working, point, '\n', context);
+        return {state: inserted.state, ops: inserted.ops, selection: caret(inserted.point.blockId, inserted.point.offset)};
+    }
+
+    const splitOps = splitBlockOps<RichBlockMeta>(working, {
         actor: context.actor,
         block: parseLamportString(point.blockId),
         offset: point.offset,
@@ -154,7 +171,7 @@ export const splitBlock = (
 };
 
 export const pastePlainText = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     selection: EditorSelection,
     text: string,
     context: CommandContext,
@@ -175,7 +192,7 @@ export const pastePlainText = (
 };
 
 export const toggleMark = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     selection: EditorSelection,
     markType: 'bold' | 'italic',
     context: CommandContext,
@@ -185,7 +202,7 @@ export const toggleMark = (
 
     const remove = selectionFullyHasMark(state, segments, markType);
     let working = state;
-    const ops: Op[] = [];
+    const ops: Array<Op<RichBlockMeta>> = [];
     for (const segment of segments) {
         const op = markRangeOp(
             working,
@@ -204,8 +221,46 @@ export const toggleMark = (
     return {state: working, ops, selection};
 };
 
+export const setBlockType = (
+    state: CachedState<RichBlockMeta>,
+    blockId: string,
+    meta: RichBlockMeta,
+): CommandResult => setBlockMeta(state, blockId, meta);
+
+export const setBlockMeta = (
+    state: CachedState<RichBlockMeta>,
+    blockId: string,
+    meta: RichBlockMeta,
+): CommandResult => {
+    const current = state.state.blocks[blockId];
+    if (!current || equal(current.meta, meta)) {
+        return {state, ops: [], selection: caret(blockId, 0)};
+    }
+    const ops = setBlockMetaOps(state, {block: current.id, meta});
+    const next = applyMany(state, ops);
+    return {state: next, ops, selection: caret(blockId, 0)};
+};
+
+export const updateBlockMeta = (
+    state: CachedState<RichBlockMeta>,
+    blockId: string,
+    update: (current: RichBlockMeta, ts: string) => RichBlockMeta,
+    context: CommandContext,
+): CommandResult => {
+    const current = state.state.blocks[blockId];
+    if (!current) return {state, ops: [], selection: caret(blockId, 0)};
+    return setBlockMeta(state, blockId, update(current.meta, context.nextTs()));
+};
+
+export const refreshBlockMetaTimestamp = (
+    state: CachedState<RichBlockMeta>,
+    blockId: string,
+    context: CommandContext,
+): CommandResult =>
+    updateBlockMeta(state, blockId, (meta, ts) => sameTypeWithTs(meta, ts), context);
+
 export const moveBlock = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     movedBlockId: string,
     target: MoveTarget,
     context: CommandContext,
@@ -232,7 +287,7 @@ export const moveBlock = (
 };
 
 const resolveMoveTarget = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     movedBlockId: string,
     target: MoveTarget,
 ): {parentPath: Lamport[]; beforeId: string | null; afterId: string | null} | null => {
@@ -278,22 +333,22 @@ const resolveMoveTarget = (
     return {parentPath, beforeId, afterId};
 };
 
-const isDescendantOrSelf = (state: CachedState, blockId: string, ancestorId: string): boolean =>
+const isDescendantOrSelf = (state: CachedState<RichBlockMeta>, blockId: string, ancestorId: string): boolean =>
     blockId === ancestorId || isDescendantOf(state, blockId, ancestorId);
 
-const rawParentIdForVisibleBlock = (state: CachedState, blockId: string): string | null =>
+const rawParentIdForVisibleBlock = (state: CachedState<RichBlockMeta>, blockId: string): string | null =>
     visibleParentIdForBlock(state, blockId);
 
-const visibleParentIdForBlock = (state: CachedState, blockId: string): string | null =>
+const visibleParentIdForBlock = (state: CachedState<RichBlockMeta>, blockId: string): string | null =>
     visibleBlockOutline(state).find((item) => item.id === blockId)?.parentId ?? null;
 
-const isDescendantOf = (state: CachedState, blockId: string, ancestorId: string): boolean => {
+const isDescendantOf = (state: CachedState<RichBlockMeta>, blockId: string, ancestorId: string): boolean => {
     const path = materializedBlockPath(state, blockId).map(lamportToString);
     return path.includes(ancestorId) && blockId !== ancestorId;
 };
 
 export const indentBlock = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     blockId: string,
     context: CommandContext,
 ): CommandResult => {
@@ -326,7 +381,7 @@ export const indentBlock = (
 };
 
 export const unindentBlock = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     blockId: string,
     context: CommandContext,
 ): CommandResult => {
@@ -357,7 +412,7 @@ export const unindentBlock = (
     const siblings = visibleBlockChildren(state, parentId);
     const blockIndex = siblings.indexOf(blockId);
     const followingSiblings = blockIndex >= 0 ? siblings.slice(blockIndex + 1) : [];
-    const ops: Op[] = moveBlockOps(state, {
+    const ops: Array<Op<RichBlockMeta>> = moveBlockOps(state, {
         actor: context.actor,
         block: current.id,
         parent: parentFromPath(grandparentPath),
@@ -386,7 +441,7 @@ export const unindentBlock = (
 };
 
 export const joinWithPrevious = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     blockId: string,
     context: CommandContext,
 ): CommandResult => {
@@ -410,7 +465,7 @@ export const joinWithPrevious = (
 };
 
 export const joinWithNext = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     blockId: string,
     context: CommandContext,
 ): CommandResult => {
@@ -436,11 +491,11 @@ export const joinWithNext = (
 };
 
 const insertTextAtPoint = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     point: BlockPoint,
     text: string,
     context: CommandContext,
-): {state: CachedState; ops: Op[]; point: BlockPoint} => {
+): {state: CachedState<RichBlockMeta>; ops: Array<Op<RichBlockMeta>>; point: BlockPoint} => {
     if (!text) return {state, ops: [], point};
 
     const ops = insertTextOps(state, {
@@ -459,11 +514,11 @@ const insertTextAtPoint = (
 };
 
 const deleteSelection = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     selection: EditorSelection,
-): {state: CachedState; ops: Op[]; point: BlockPoint} => {
+): {state: CachedState<RichBlockMeta>; ops: Array<Op<RichBlockMeta>>; point: BlockPoint} => {
     const point = firstPointForSelection(state, selection);
-    const ops: Op[] = [];
+    const ops: Array<Op<RichBlockMeta>> = [];
     for (const segment of normalizeSelectionSegments(state, selection)) {
         ops.push(
             ...deleteRangeOps(state, {
@@ -477,10 +532,10 @@ const deleteSelection = (
 };
 
 const deleteSelectionAndJoinBoundaries = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     selection: EditorSelection,
     context: CommandContext,
-): {state: CachedState; ops: Op[]; point: BlockPoint} => {
+): {state: CachedState<RichBlockMeta>; ops: Array<Op<RichBlockMeta>>; point: BlockPoint} => {
     const span = normalizedSelectionSpan(state, selection);
     if (!span) return deleteSelection(state, selection);
 
@@ -514,7 +569,7 @@ const deleteSelectionAndJoinBoundaries = (
 };
 
 const normalizedSelectionSpan = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     selection: EditorSelection,
 ): {start: BlockPoint; end: BlockPoint} | null => {
     if (selection.type === 'caret') return null;
@@ -537,7 +592,7 @@ const parentFromPath = (path: Lamport[]): Lamport => path[path.length - 1] ?? RO
 const lastBlockOrderTs = (ts: BlockOrderTs) => (typeof ts === 'string' ? ts : ts[2]);
 
 const selectionFullyHasMark = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     segments: ReturnType<typeof normalizeSelectionSegments>,
     markType: 'bold' | 'italic',
 ): boolean => {

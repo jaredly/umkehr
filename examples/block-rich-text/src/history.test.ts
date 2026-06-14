@@ -17,7 +17,9 @@ import {
     deleteBackwardEverywhere,
     insertTextEverywhere,
     pastePlainTextEverywhere,
+    setBlockTypeEverywhere,
     splitBlockEverywhere,
+    updateBlockMetaEverywhere,
     type MultiCommandResult,
 } from './multiSelectionCommands';
 import {caret} from './selectionModel';
@@ -58,6 +60,21 @@ const paste = (text: string) => (replica: Replica) =>
 
 const insert = (text: string) => (replica: Replica) =>
     insertTextEverywhere(replica.state, replica.selection, text, makeCommandContext(replica));
+
+const heading = () => (replica: Replica) =>
+    setBlockTypeEverywhere(replica.state, replica.selection, (_blockId, _meta) => ({
+        type: 'heading',
+        level: 2,
+        ts: '0001-left',
+    }));
+
+const toggleTodo = () => (replica: Replica) =>
+    updateBlockMetaEverywhere(
+        replica.state,
+        replica.selection,
+        (meta, ts) => (meta.type === 'todo' ? {type: 'todo', checked: !meta.checked, ts} : meta),
+        makeCommandContext(replica),
+    );
 
 describe('block rich text history', () => {
     it('replays local insert actions into both editors', () => {
@@ -161,6 +178,45 @@ describe('block rich text history', () => {
         expect(buildHistorySnapshot(replayHistory(parsed.history.actions, parsed.history.cursor))).toEqual(
             buildHistorySnapshot(replayHistory(history.actions, history.actions.length)),
         );
+    });
+
+    it('round-trips rich block metadata through export/import', () => {
+        let history = initialHistoryState();
+        history = appendLocal(history, 'left', heading());
+
+        const parsed = parseHistoryExport(serializeHistory(history));
+
+        expect('history' in parsed).toBe(true);
+        if (!('history' in parsed)) return;
+        const replayed = replayHistory(parsed.history.actions, parsed.history.cursor);
+        expect(materializeFormattedBlocks(replayed.left.state)[0].block.meta).toEqual({
+            type: 'heading',
+            level: 2,
+            ts: '0001-left',
+        });
+    });
+
+    it('replays todo toggle metadata through history', () => {
+        let history = initialHistoryState();
+        history = appendLocal(history, 'left', (replica) =>
+            setBlockTypeEverywhere(replica.state, replica.selection, (_blockId, _meta) => ({
+                type: 'todo',
+                checked: false,
+                ts: '0001-left',
+            })),
+        );
+        history = appendLocal(history, 'left', toggleTodo());
+
+        const replayed = replayHistory(history.actions, history.cursor);
+
+        expect(materializeFormattedBlocks(replayed.left.state)[0].block.meta).toMatchObject({
+            type: 'todo',
+            checked: true,
+        });
+        expect(materializeFormattedBlocks(replayed.right.state)[0].block.meta).toMatchObject({
+            type: 'todo',
+            checked: true,
+        });
     });
 
     it('round-trips optional command metadata', () => {

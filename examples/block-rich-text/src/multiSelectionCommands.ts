@@ -1,13 +1,18 @@
 import type {CachedState} from 'umkehr/block-crdt/types';
 import {blockContents, materializeFormattedBlocks, type Op} from 'umkehr/block-crdt';
+import type {RichBlockMeta} from './blockMeta';
 import {
     deleteBackward,
     deleteForward,
     insertText,
     moveBlock,
     pastePlainText,
+    setBlockMeta,
+    setBlockType,
     splitBlock,
     toggleMark,
+    updateBlockMeta,
+    type CommandResult,
     type CommandContext,
 } from './blockCommands';
 import {resolveSelection, retainSelection} from './retainedSelection';
@@ -33,15 +38,15 @@ import {
 } from './selectionModel';
 
 export type MultiCommandResult = {
-    state: CachedState;
-    ops: Op[];
+    state: CachedState<RichBlockMeta>;
+    ops: Array<Op<RichBlockMeta>>;
     selection: RetainedSelectionSet;
 };
 
 export type HorizontalMovementUnit = 'character' | 'word' | 'block';
 
 export const insertTextEverywhere = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     selection: RetainedSelectionSet,
     text: string,
     context: CommandContext,
@@ -51,7 +56,7 @@ export const insertTextEverywhere = (
     );
 
 export const pastePlainTextEverywhere = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     selection: RetainedSelectionSet,
     text: string,
     context: CommandContext,
@@ -61,7 +66,7 @@ export const pastePlainTextEverywhere = (
     );
 
 export const deleteBackwardEverywhere = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     selection: RetainedSelectionSet,
     context: CommandContext,
 ): MultiCommandResult =>
@@ -70,7 +75,7 @@ export const deleteBackwardEverywhere = (
     );
 
 export const deleteForwardEverywhere = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     selection: RetainedSelectionSet,
     context: CommandContext,
 ): MultiCommandResult =>
@@ -79,7 +84,7 @@ export const deleteForwardEverywhere = (
     );
 
 export const splitBlockEverywhere = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     selection: RetainedSelectionSet,
     context: CommandContext,
 ): MultiCommandResult =>
@@ -88,7 +93,7 @@ export const splitBlockEverywhere = (
     );
 
 export const toggleMarkEverywhere = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     selection: RetainedSelectionSet,
     markType: 'bold' | 'italic',
     context: CommandContext,
@@ -101,7 +106,7 @@ export const toggleMarkEverywhere = (
     if (!commandEntries.length) return {state, ops: [], selection: deduped};
 
     let working = state;
-    const ops: Op[] = [];
+    const ops: Array<Op<RichBlockMeta>> = [];
     for (const entry of commandEntries) {
         const result = toggleMark(
             working,
@@ -120,20 +125,50 @@ export const toggleMarkEverywhere = (
     };
 };
 
+export const setBlockTypeEverywhere = (
+    state: CachedState<RichBlockMeta>,
+    selection: RetainedSelectionSet,
+    metaForBlock: (blockId: string, current: RichBlockMeta) => RichBlockMeta,
+): MultiCommandResult =>
+    runBlockMetaCommand(state, selection, (working, blockId) => {
+        const current = working.state.blocks[blockId];
+        return current ? setBlockType(working, blockId, metaForBlock(blockId, current.meta)) : null;
+    });
+
+export const setBlockMetaEverywhere = (
+    state: CachedState<RichBlockMeta>,
+    selection: RetainedSelectionSet,
+    metaForBlock: (blockId: string, current: RichBlockMeta) => RichBlockMeta,
+): MultiCommandResult =>
+    runBlockMetaCommand(state, selection, (working, blockId) => {
+        const current = working.state.blocks[blockId];
+        return current ? setBlockMeta(working, blockId, metaForBlock(blockId, current.meta)) : null;
+    });
+
+export const updateBlockMetaEverywhere = (
+    state: CachedState<RichBlockMeta>,
+    selection: RetainedSelectionSet,
+    update: (current: RichBlockMeta, ts: string) => RichBlockMeta,
+    context: CommandContext,
+): MultiCommandResult =>
+    runBlockMetaCommand(state, selection, (working, blockId) =>
+        updateBlockMeta(working, blockId, update, context),
+    );
+
 export const indentSelections = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     selection: RetainedSelectionSet,
     context: CommandContext,
 ): MultiCommandResult => moveSelectedBlocks(state, selection, 'indent', context);
 
 export const unindentSelections = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     selection: RetainedSelectionSet,
     context: CommandContext,
 ): MultiCommandResult => moveSelectedBlocks(state, selection, 'unindent', context);
 
 export const moveSelectionsHorizontally = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     selection: RetainedSelectionSet,
     direction: 'left' | 'right',
     unit: HorizontalMovementUnit = 'character',
@@ -152,7 +187,7 @@ export const moveSelectionsHorizontally = (
 };
 
 const moveSelectedBlocks = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     selection: RetainedSelectionSet,
     direction: 'indent' | 'unindent',
     context: CommandContext,
@@ -163,7 +198,7 @@ const moveSelectedBlocks = (
     }
 
     let working = state;
-    const ops: Op[] = [];
+    const ops: Array<Op<RichBlockMeta>> = [];
     for (const move of blockMovesForSelection(state, blockIds, direction)) {
         const result = moveBlock(working, move.blockId, move.target, context);
         working = result.state;
@@ -178,7 +213,7 @@ const moveSelectedBlocks = (
 };
 
 const topLevelSelectedBlockIds = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     selection: RetainedSelectionSet,
 ): string[] => {
     const selected = new Set<string>();
@@ -207,7 +242,7 @@ const topLevelSelectedBlockIds = (
     return result;
 };
 
-const blockIdsForSelection = (state: CachedState, selection: EditorSelection): string[] => {
+const blockIdsForSelection = (state: CachedState<RichBlockMeta>, selection: EditorSelection): string[] => {
     if (selection.type === 'caret') return [selection.point.blockId];
 
     const blocks = visibleBlockIds(state);
@@ -220,7 +255,7 @@ const blockIdsForSelection = (state: CachedState, selection: EditorSelection): s
 };
 
 const blockMovesForSelection = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     selectedBlockIds: string[],
     direction: 'indent' | 'unindent',
 ): Array<{blockId: string; target: Parameters<typeof moveBlock>[2]}> => {
@@ -269,7 +304,7 @@ const blockMovesForSelection = (
 };
 
 export const moveSelectionsVertically = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     selection: RetainedSelectionSet,
     direction: 'up' | 'down',
 ): MultiCommandResult => {
@@ -287,7 +322,7 @@ export const moveSelectionsVertically = (
 };
 
 export const extendSelectionsHorizontally = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     selection: RetainedSelectionSet,
     direction: 'left' | 'right',
     unit: HorizontalMovementUnit = 'character',
@@ -306,7 +341,7 @@ export const extendSelectionsHorizontally = (
 };
 
 export const extendSelectionsVertically = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     selection: RetainedSelectionSet,
     direction: 'up' | 'down',
 ): MultiCommandResult => {
@@ -324,7 +359,7 @@ export const extendSelectionsVertically = (
 };
 
 const moveSelectionHorizontally = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     selection: EditorSelection,
     direction: 'left' | 'right',
     unit: HorizontalMovementUnit,
@@ -340,7 +375,7 @@ const moveSelectionHorizontally = (
 };
 
 const extendSelectionHorizontally = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     selection: EditorSelection,
     direction: 'left' | 'right',
     unit: HorizontalMovementUnit,
@@ -351,7 +386,7 @@ const extendSelectionHorizontally = (
 };
 
 const extendSelectionVertically = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     selection: EditorSelection,
     direction: 'up' | 'down',
 ): EditorSelection => {
@@ -361,7 +396,7 @@ const extendSelectionVertically = (
 };
 
 const moveSelectionVertically = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     selection: EditorSelection,
     direction: 'up' | 'down',
 ): EditorSelection => {
@@ -370,7 +405,7 @@ const moveSelectionVertically = (
 };
 
 const movePointVertically = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     point: BlockPoint,
     direction: 'up' | 'down',
 ): BlockPoint => {
@@ -382,7 +417,7 @@ const movePointVertically = (
 };
 
 const movePointHorizontally = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     point: BlockPoint,
     direction: 'left' | 'right',
     unit: HorizontalMovementUnit,
@@ -416,7 +451,7 @@ const movePointHorizontally = (
 };
 
 const movePointByWord = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     point: BlockPoint,
     direction: 'left' | 'right',
 ): BlockPoint => {
@@ -451,7 +486,7 @@ const wordBoundaries = (text: string): number[] => {
 
 const caretAtPoint = (point: BlockPoint): EditorSelection => caret(point.blockId, point.offset);
 
-const lastPointForSelection = (state: CachedState, selection: EditorSelection): BlockPoint => {
+const lastPointForSelection = (state: CachedState<RichBlockMeta>, selection: EditorSelection): BlockPoint => {
     const segments = normalizeSelectionSegments(state, selection);
     const last = segments[segments.length - 1];
     if (!last) return focusPoint(selection);
@@ -459,19 +494,23 @@ const lastPointForSelection = (state: CachedState, selection: EditorSelection): 
 };
 
 const runReplacingCommand = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     selection: RetainedSelectionSet,
     command: (
-        working: CachedState,
+        working: CachedState<RichBlockMeta>,
         entry: RetainedSelectionEntry,
-    ) => {state: CachedState; ops: Op[]; selection: ReturnType<typeof resolveSelection>},
+    ) => {
+        state: CachedState<RichBlockMeta>;
+        ops: Array<Op<RichBlockMeta>>;
+        selection: ReturnType<typeof resolveSelection>;
+    },
 ): MultiCommandResult => {
     const deduped = dedupeSelectionSet(state, selection);
     const commandEntries = reverseSortedRetainedEntries(state, mergeOverlappingRanges(state, deduped));
     if (!commandEntries.length) return {state, ops: [], selection: deduped};
 
     let working = state;
-    const ops: Op[] = [];
+    const ops: Array<Op<RichBlockMeta>> = [];
     const nextEntries: RetainedSelectionEntry[] = [];
 
     for (const entry of commandEntries) {
@@ -489,4 +528,27 @@ const runReplacingCommand = (
             entries: nextEntries,
         }),
     };
+};
+
+const runBlockMetaCommand = (
+    state: CachedState<RichBlockMeta>,
+    selection: RetainedSelectionSet,
+    command: (
+        working: CachedState<RichBlockMeta>,
+        blockId: string,
+    ) => CommandResult | null,
+): MultiCommandResult => {
+    const blockIds = topLevelSelectedBlockIds(state, selection);
+    if (!blockIds.length) return {state, ops: [], selection};
+
+    let working = state;
+    const ops: Array<Op<RichBlockMeta>> = [];
+    for (const blockId of blockIds) {
+        const result = command(working, blockId);
+        if (!result) continue;
+        working = result.state;
+        ops.push(...result.ops);
+    }
+
+    return {state: working, ops, selection: dedupeSelectionSet(working, selection)};
 };

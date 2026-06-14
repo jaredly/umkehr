@@ -39,6 +39,11 @@ const blockTexts = (panel: HTMLElement): string[] =>
 const blockDepth = (block: HTMLElement): string =>
     block.closest<HTMLElement>('.blockRow')?.style.getPropertyValue('--block-depth') ?? '';
 
+const setBlockType = (panel: HTMLElement, value: string) => {
+    const select = within(panel).getByRole('combobox', {name: 'Block type'});
+    fireEvent.change(select, {target: {value}});
+};
+
 const waitForBlockTexts = async (panel: HTMLElement, expected: string[]) => {
     await waitFor(
         () => {
@@ -300,6 +305,59 @@ describe('Block rich text example UI', () => {
         expect(within(right).getByText('Editor B')).toBeTruthy();
         expect(blocks(left)).toHaveLength(1);
         expect(blocks(right)).toHaveLength(1);
+    });
+
+    it('applies block type metadata from the toolbar to both replicas', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        typeText(blocks(left)[0], 'Heading');
+        setBlockType(left, 'heading2');
+
+        await waitFor(() => {
+            expect(blocks(left)[0].classList.contains('headingLevel2')).toBe(true);
+        });
+        expect(blocks(right)[0].classList.contains('headingLevel2')).toBe(true);
+    });
+
+    it('wraps blockquote descendants in one grouped subtree container', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        pasteText(blocks(left)[0], 'quote\nchild');
+        await waitForBlockTexts(left, ['quote', 'child']);
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'blockquote');
+        selectCaret(blocks(left)[1], 0);
+        fireEvent.keyDown(blocks(left)[1], {key: 'Tab'});
+
+        await waitFor(() => {
+            const group = left.querySelector<HTMLElement>('.blockquoteGroup');
+            expect(group).toBeTruthy();
+            expect(within(group!).getAllByRole('textbox', {name: 'Block text'}).map((block) => block.textContent)).toEqual([
+                'quote',
+                'child',
+            ]);
+        });
+    });
+
+    it('keeps code Enter and Tab inside the same block', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        typeText(blocks(left)[0], 'ab');
+        setBlockType(left, 'code');
+        selectCaret(blocks(left)[0], 1);
+        fireEvent.keyDown(blocks(left)[0], {key: 'Enter'});
+        await waitForBlockTexts(left, ['a\nb']);
+
+        selectCaret(blocks(left)[0], 2);
+        fireEvent.keyDown(blocks(left)[0], {key: 'Tab'});
+
+        await waitForBlockTexts(left, ['a\n    b']);
+        expect(blockTexts(right)).toEqual(['a\n    b']);
     });
 
     it('types in one editor and syncs text to the other editor', async () => {

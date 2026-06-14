@@ -10,6 +10,7 @@ import {
     type EditorId,
     type Replica,
 } from './blockEditorRuntime';
+import type {RichBlockMeta} from './blockMeta';
 import {
     type BlockCommandInfo,
     type HistoryAction,
@@ -23,9 +24,9 @@ type DerivedBlockCommand = {
     intent: BlockCommandInfo['intent'];
     targetCommandId?: string;
     actionIndex: number;
-    before: CachedState;
-    after: CachedState;
-    ops: Op[];
+    before: CachedState<RichBlockMeta>;
+    after: CachedState<RichBlockMeta>;
+    ops: Array<Op<RichBlockMeta>>;
     beforeSelection: RetainedSelectionSet;
     afterSelection: RetainedSelectionSet;
     label?: string;
@@ -203,7 +204,7 @@ const planForUndo = (
     replica: Replica,
     command: DerivedBlockCommand,
     mutateClock = false,
-): {ok: true; ops: Op[]} | {ok: false; error: string} => {
+): {ok: true; ops: Array<Op<RichBlockMeta>>} | {ok: false; error: string} => {
     const ts = makeTs(replica, mutateClock);
     const plan = planUndoOps(command.before, replica.state, command.ops, {actor: replica.actor, ts});
     if (!plan.complete) return {ok: false, error: plan.unsupported[0]?.reason ?? 'Undo is blocked.'};
@@ -215,7 +216,7 @@ const planForRedo = (
     replica: Replica,
     command: DerivedBlockCommand,
     mutateClock = false,
-): {ok: true; ops: Op[]} | {ok: false; error: string} => {
+): {ok: true; ops: Array<Op<RichBlockMeta>>} | {ok: false; error: string} => {
     if (!command.undoCommand) return {ok: false, error: 'Redo is missing its undo command.'};
     const ts = makeTs(replica, mutateClock);
     const plan = planUndoOps(command.undoCommand.before, replica.state, command.undoCommand.ops, {

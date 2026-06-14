@@ -1,5 +1,6 @@
 import type {CachedState} from 'umkehr/block-crdt/types';
 import {materializeFormattedBlocks, orderedCharIdsForBlock} from 'umkehr/block-crdt';
+import type {RichBlockMeta} from './blockMeta';
 
 export type BlockPoint = {blockId: string; offset: number};
 
@@ -18,13 +19,13 @@ export const caret = (blockId: string, offset: number): EditorSelection => ({
     point: {blockId, offset},
 });
 
-export const pointTextLength = (state: CachedState, blockId: string): number =>
+export const pointTextLength = (state: CachedState<RichBlockMeta>, blockId: string): number =>
     orderedCharIdsForBlock(state, blockId, {visibleOnly: true}).length;
 
-export const visibleBlockIds = (state: CachedState): string[] =>
+export const visibleBlockIds = (state: CachedState<RichBlockMeta>): string[] =>
     materializeFormattedBlocks(state).map((block) => block.id);
 
-export const clampPoint = (state: CachedState, point: BlockPoint): BlockPoint => {
+export const clampPoint = (state: CachedState<RichBlockMeta>, point: BlockPoint): BlockPoint => {
     const blocks = visibleBlockIds(state);
     const blockId = blocks.includes(point.blockId) ? point.blockId : blocks[0];
     if (!blockId) return point;
@@ -34,7 +35,7 @@ export const clampPoint = (state: CachedState, point: BlockPoint): BlockPoint =>
     };
 };
 
-export const clampSelection = (state: CachedState, selection: EditorSelection): EditorSelection => {
+export const clampSelection = (state: CachedState<RichBlockMeta>, selection: EditorSelection): EditorSelection => {
     if (selection.type === 'caret') {
         return {type: 'caret', point: clampPoint(state, selection.point)};
     }
@@ -54,7 +55,7 @@ export const focusPoint = (selection: EditorSelection): BlockPoint =>
     selection.type === 'caret' ? selection.point : selection.focus;
 
 export const normalizeSelectionSegments = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     selection: EditorSelection,
 ): SelectionSegment[] => {
     if (selection.type === 'caret') return [];
@@ -89,7 +90,7 @@ export const normalizeSelectionSegments = (
     return segments;
 };
 
-export const firstPointForSelection = (state: CachedState, selection: EditorSelection): BlockPoint => {
+export const firstPointForSelection = (state: CachedState<RichBlockMeta>, selection: EditorSelection): BlockPoint => {
     if (selection.type === 'caret') return clampPoint(state, selection.point);
     const segments = normalizeSelectionSegments(state, selection);
     if (!segments.length) return clampPoint(state, selection.focus);

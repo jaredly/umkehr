@@ -1,7 +1,8 @@
 import {applyMany, cachedState, type Op} from 'umkehr/block-crdt';
-import {initialState} from 'umkehr/block-crdt/initialState';
+import {initialStateWithMeta} from 'umkehr/block-crdt/initialState';
 import type {CachedState} from 'umkehr/block-crdt/types';
 import {lamportToString} from 'umkehr/block-crdt/utils';
+import {paragraphMeta, type RichBlockMeta} from './blockMeta';
 import {initialRetainedSelectionSet, type RetainedSelectionSet} from './selectionSet';
 
 export type EditorId = 'left' | 'right';
@@ -9,10 +10,10 @@ export type EditorId = 'left' | 'right';
 export type Replica = {
     id: EditorId;
     actor: EditorId;
-    state: CachedState;
+    state: CachedState<RichBlockMeta>;
     selection: RetainedSelectionSet;
     online: boolean;
-    queue: Op[][];
+    queue: Array<Array<Op<RichBlockMeta>>>;
     clock: number;
 };
 
@@ -23,13 +24,13 @@ export type DemoState = {
 
 export type LocalChange = {
     editorId: EditorId;
-    state: CachedState;
+    state: CachedState<RichBlockMeta>;
     selection: RetainedSelectionSet;
-    ops: Op[];
+    ops: Array<Op<RichBlockMeta>>;
 };
 
 export const createDemoState = (): DemoState => {
-    const state = cachedState(initialState('doc', '00000'));
+    const state = cachedState(initialStateWithMeta('doc', paragraphMeta('00000')));
     return {
         left: createReplica('left', state),
         right: createReplica('right', state),
@@ -81,7 +82,7 @@ export const flushQueues = (demo: DemoState): DemoState => {
     return next;
 };
 
-const createReplica = (id: EditorId, state: CachedState): Replica => ({
+const createReplica = (id: EditorId, state: CachedState<RichBlockMeta>): Replica => ({
     id,
     actor: id,
     state,
@@ -91,7 +92,7 @@ const createReplica = (id: EditorId, state: CachedState): Replica => ({
     clock: 1,
 });
 
-const applyRemoteOps = (replica: Replica, ops: Op[]): Replica => {
+const applyRemoteOps = (replica: Replica, ops: Array<Op<RichBlockMeta>>): Replica => {
     const state = applyMany(replica.state, ops);
     return {...replica, state};
 };

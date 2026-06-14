@@ -11,6 +11,7 @@ import {
 import {
     deleteBackwardEverywhere,
     insertTextEverywhere,
+    setBlockTypeEverywhere,
     type MultiCommandResult,
 } from './multiSelectionCommands';
 import {deriveUndoState, createRedoAction, createUndoAction} from './undoHistory';
@@ -56,6 +57,12 @@ const insert = (text: string) => (replica: Replica) =>
 
 const backspace = () => (replica: Replica) =>
     deleteBackwardEverywhere(replica.state, replica.selection, makeCommandContext(replica));
+
+const quote = () => (replica: Replica) =>
+    setBlockTypeEverywhere(replica.state, replica.selection, (_blockId, _meta) => ({
+        type: 'blockquote',
+        ts: '0001-left',
+    }));
 
 const visibleText = (history: HistoryState, editorId: EditorId = 'left'): string[] =>
     materializeFormattedBlocks(replayHistory(history.actions, history.cursor)[editorId].state).map((block) =>
@@ -144,5 +151,24 @@ describe('block rich text undo history', () => {
         history = appendActionResult(history, createUndoAction(history, 'left'));
 
         expect(visibleText(history)).toEqual(['ab']);
+    });
+
+    it('supports undo and redo for block type changes', () => {
+        let history = initialHistoryState();
+        history = appendEdit(history, 'left', quote(), 'quote block');
+
+        expect(
+            materializeFormattedBlocks(replayHistory(history.actions, history.cursor).left.state)[0].block.meta,
+        ).toMatchObject({type: 'blockquote'});
+
+        history = appendActionResult(history, createUndoAction(history, 'left'));
+        expect(
+            materializeFormattedBlocks(replayHistory(history.actions, history.cursor).left.state)[0].block.meta,
+        ).toMatchObject({type: 'paragraph'});
+
+        history = appendActionResult(history, createRedoAction(history, 'left'));
+        expect(
+            materializeFormattedBlocks(replayHistory(history.actions, history.cursor).left.state)[0].block.meta,
+        ).toMatchObject({type: 'blockquote'});
     });
 });

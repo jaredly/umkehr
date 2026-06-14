@@ -6,13 +6,14 @@ import {
     type DemoState,
     type EditorId,
 } from './blockEditorRuntime';
+import type {RichBlockMeta} from './blockMeta';
 import type {RetainedSelectionSet} from './selectionSet';
 
 export type HistoryAction =
     | {
           type: 'local-change';
           editorId: EditorId;
-          ops: Op[];
+          ops: Array<Op<RichBlockMeta>>;
           selection: RetainedSelectionSet;
           command?: BlockCommandInfo;
       }
@@ -248,7 +249,7 @@ const parseAction = (value: unknown): {action: HistoryAction} | {error: string} 
         action: {
             type: 'local-change',
             editorId: value.editorId,
-            ops: value.ops as Op[],
+            ops: value.ops as Array<Op<RichBlockMeta>>,
             selection: value.selection,
             ...(command.command ? {command: command.command} : {}),
         },
@@ -336,6 +337,14 @@ const validateOp = (value: unknown): string | null => {
         if (typeof value.block.deleted !== 'boolean') return 'block must use deleted boolean.';
         if (!isBlockOrder(value.block.order)) return 'block has invalid order.';
         if ('status' in value.block) return 'block uses removed status shape.';
+        if (!isRichBlockMeta(value.block.meta)) {
+            return 'block has invalid rich block metadata.';
+        }
+    }
+    if (value.type === 'block:meta') {
+        if (!isRichBlockMeta(value.meta)) {
+            return 'has invalid rich block metadata.';
+        }
     }
     if (value.type === 'join-record' && !isRecord(value.join)) {
         return 'has invalid join record.';
@@ -359,6 +368,32 @@ const isBlockOrderTs = (value: unknown): boolean =>
         typeof value[0] === 'string' &&
         isRecord(value[1]) &&
         typeof value[2] === 'string');
+
+const isRichBlockMeta = (value: unknown): value is RichBlockMeta => {
+    if (!isRecord(value) || typeof value.type !== 'string' || typeof value.ts !== 'string') {
+        return false;
+    }
+    switch (value.type) {
+        case 'paragraph':
+        case 'blockquote':
+        case 'table_row':
+            return true;
+        case 'heading':
+            return value.level === 1 || value.level === 2 || value.level === 3;
+        case 'list_item':
+            return value.kind === 'ordered' || value.kind === 'unordered';
+        case 'todo':
+            return typeof value.checked === 'boolean';
+        case 'code':
+            return typeof value.language === 'string';
+        case 'callout':
+            return value.kind === 'info' || value.kind === 'warning' || value.kind === 'error';
+        case 'table':
+            return isLamport(value.rowParent);
+        default:
+            return false;
+    }
+};
 
 const isRetainedSelectionSet = (value: unknown): value is RetainedSelectionSet => {
     if (!isRecord(value) || typeof value.primaryId !== 'string' || !Array.isArray(value.entries)) {

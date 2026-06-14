@@ -8,11 +8,19 @@ import {
     type KeyboardEvent,
     type MouseEvent,
     type MutableRefObject,
+    type ReactElement,
 } from 'react';
 import {materializeFormattedBlocks} from 'umkehr/block-crdt';
 import type {FormattedBlock} from 'umkehr/block-crdt';
 import {moveBlock} from './blockCommands';
-import {makeCommandContext, nextReplicaTs, type DemoState, type EditorId, type Replica} from './blockEditorRuntime';
+import {
+    makeCommandContext,
+    nextReplicaTs,
+    type DemoState,
+    type EditorId,
+    type Replica,
+} from './blockEditorRuntime';
+import {paragraphMeta, type RichBlockMeta} from './blockMeta';
 import {
     closestCaretOffsetForHorizontalIntent,
     isCaretOnFirstVisualLine,
@@ -43,8 +51,10 @@ import {
     moveSelectionsHorizontally,
     moveSelectionsVertically,
     pastePlainTextEverywhere,
+    setBlockTypeEverywhere,
     splitBlockEverywhere,
     toggleMarkEverywhere,
+    updateBlockMetaEverywhere,
     unindentSelections,
     type HorizontalMovementUnit,
     type MultiCommandResult,
@@ -77,6 +87,8 @@ import {
 } from './history';
 import {createRedoAction, createUndoAction, deriveUndoState} from './undoHistory';
 import {BlogVisualDemos} from './BlogVisualDemos';
+
+type RichFormattedBlock = FormattedBlock<RichBlockMeta>;
 
 export function App() {
     return hasDemoQuery() ? <BlogVisualDemos /> : <EditorApp />;
@@ -164,11 +176,7 @@ function EditorApp() {
     }, []);
 
     const recordKeystroke = useCallback(
-        (
-            editorId: EditorId,
-            blockId: string,
-            event: KeyboardEvent<HTMLElement>,
-        ) => {
+        (editorId: EditorId, blockId: string, event: KeyboardEvent<HTMLElement>) => {
             setHistory((current) =>
                 appendHistoryKeystroke(current, {
                     editorId,
@@ -225,7 +233,9 @@ function EditorApp() {
     const runUndoCommand = useCallback(
         (editorId: EditorId, direction: 'undo' | 'redo') => {
             const result =
-                direction === 'undo' ? createUndoAction(history, editorId) : createRedoAction(history, editorId);
+                direction === 'undo'
+                    ? createUndoAction(history, editorId)
+                    : createRedoAction(history, editorId);
             if ('error' in result) {
                 setUndoStatus((current) => ({...current, [editorId]: result.error}));
                 return;
@@ -290,7 +300,9 @@ function EditorApp() {
                         {history.keystrokes.slice(-120).map((keystroke) => (
                             <li key={keystroke.sequence}>
                                 <span>#{keystroke.sequence}</span>
-                                <span>{keystroke.editorId === 'left' ? 'Editor A' : 'Editor B'}</span>
+                                <span>
+                                    {keystroke.editorId === 'left' ? 'Editor A' : 'Editor B'}
+                                </span>
                                 <span>{formatKeystroke(keystroke)}</span>
                                 <span>at {keystroke.actionIndex}</span>
                             </li>
@@ -372,6 +384,8 @@ function BlockEditor({
     const [hasFocus, setHasFocus] = useState(false);
     const [isExtendingSelection, setIsExtendingSelection] = useState(false);
     const blocks = materializeFormattedBlocks(replica.state);
+    const renderTree = useMemo(() => buildRenderTree(blocks), [blocks]);
+    const orderedListNumbers = useMemo(() => deriveOrderedListNumbers(blocks), [blocks]);
     const resolvedSelectionSet = resolveSelectionSet(replica.state, replica.selection);
     const primaryResolvedSelection = primarySelection(resolvedSelectionSet);
     const decorationsByBlock = useMemo(
@@ -466,7 +480,11 @@ function BlockEditor({
             if (event.type === 'mouseup' && pendingAddSelectionClickRef.current) {
                 const pendingClick = pendingAddSelectionClickRef.current;
                 pendingAddSelectionClickRef.current = null;
-                if (isSameClick(pendingClick, event) && 'metaKey' in event && (event.metaKey || event.ctrlKey)) {
+                if (
+                    isSameClick(pendingClick, event) &&
+                    'metaKey' in event &&
+                    (event.metaKey || event.ctrlKey)
+                ) {
                     const selection = caret(pendingClick.point.blockId, pendingClick.point.offset);
                     scheduleSelectionRestore(selection);
                     onCommand((current) => ({
@@ -599,9 +617,7 @@ function BlockEditor({
     }, []);
 
     const runEditCommand = useCallback(
-        (
-            command: (current: Replica, selection: RetainedSelectionSet) => MultiCommandResult,
-        ) => {
+        (command: (current: Replica, selection: RetainedSelectionSet) => MultiCommandResult) => {
             onCommand((current) => {
                 resetVerticalCaretIntent();
                 const selection = liveSelectionSet(current);
@@ -674,7 +690,11 @@ function BlockEditor({
                     return {
                         state: current.state,
                         ops: [],
-                        selection: replacePrimarySelection(current.state, current.selection, liveSelection),
+                        selection: replacePrimarySelection(
+                            current.state,
+                            current.selection,
+                            liveSelection,
+                        ),
                     };
                 }
 
@@ -685,13 +705,18 @@ function BlockEditor({
                     return {
                         state: current.state,
                         ops: [],
-                        selection: replacePrimarySelection(current.state, current.selection, liveSelection),
+                        selection: replacePrimarySelection(
+                            current.state,
+                            current.selection,
+                            liveSelection,
+                        ),
                     };
                 }
 
                 if (verticalCaretXRef.current === null) {
                     const intent =
-                        readSelectionFocusHorizontalIntent(root) ?? readCaretHorizontalIntent(sourceBlock);
+                        readSelectionFocusHorizontalIntent(root) ??
+                        readCaretHorizontalIntent(sourceBlock);
                     if (!intent) {
                         return {
                             state: current.state,
@@ -711,14 +736,19 @@ function BlockEditor({
                 });
                 const nextSelection: EditorSelection = {
                     type: 'range',
-                    anchor: liveSelection.type === 'caret' ? liveSelection.point : liveSelection.anchor,
+                    anchor:
+                        liveSelection.type === 'caret' ? liveSelection.point : liveSelection.anchor,
                     focus: {blockId: targetBlockId, offset},
                 };
                 scheduleSelectionRestore(nextSelection);
                 return {
                     state: current.state,
                     ops: [],
-                    selection: replacePrimarySelection(current.state, current.selection, nextSelection),
+                    selection: replacePrimarySelection(
+                        current.state,
+                        current.selection,
+                        nextSelection,
+                    ),
                 };
             });
         },
@@ -816,6 +846,13 @@ function BlockEditor({
                         ),
                     )
                 }
+                onBlockType={(kind) =>
+                    runEditCommand((current, selection) =>
+                        setBlockTypeEverywhere(current.state, selection, (_blockId, meta) =>
+                            blockTypeMeta(kind, meta, nextReplicaTs(current)),
+                        ),
+                    )
+                }
             />
             {undoStatus || undoState.undoReason || undoState.redoReason ? (
                 <p className="editorUndoStatus">
@@ -836,124 +873,334 @@ function BlockEditor({
                 onMouseUp={captureSelection}
                 onKeyUp={captureSelection}
             >
-                {blocks.map((block, index) => (
-                    <EditableBlock
-                        key={block.id}
-                        block={block}
-                        previousBlockId={blocks[index - 1]?.id ?? null}
-                        previousBlockLength={
-                            blocks[index - 1]
-                                ? pointTextLength(replica.state, blocks[index - 1].id)
-                                : 0
-                        }
-                        blockLength={pointTextLength(replica.state, block.id)}
-                        nextBlockId={blocks[index + 1]?.id ?? null}
-                        selection={primaryResolvedSelection}
-                        hasMultipleSelections={resolvedSelectionSet.entries.length > 1}
-                        decorations={decorationsByBlock.get(block.id) ?? null}
-                        pendingCaretRestoreBlockIdRef={pendingCaretRestoreBlockIdRef}
-                        isDragging={draggingSubtreeIds.has(block.id)}
-                        isDraggingRoot={draggingId === block.id}
-                        dropTarget={dropTarget?.indicatorBlockId === block.id ? dropTarget : null}
-                        registerRow={registerRow}
-                        onStartDrag={startDrag}
-                        onInsertText={(text) =>
-                            runEditCommand((current, selection) =>
-                                insertTextEverywhere(
-                                    current.state,
-                                    selection,
-                                    text,
-                                    makeCommandContext(current),
-                                ),
-                            )
-                        }
-                        onDeleteBackward={() =>
-                            runEditCommand((current, selection) =>
-                                deleteBackwardEverywhere(
-                                    current.state,
-                                    selection,
-                                    makeCommandContext(current),
-                                ),
-                            )
-                        }
-                        onDeleteForward={() =>
-                            runEditCommand((current, selection) =>
-                                deleteForwardEverywhere(
-                                    current.state,
-                                    selection,
-                                    makeCommandContext(current),
-                                ),
-                            )
-                        }
-                        onSplit={() =>
-                            runEditCommand((current, selection) =>
-                                splitBlockEverywhere(
-                                    current.state,
-                                    selection,
-                                    makeCommandContext(current),
-                                ),
-                            )
-                        }
-                        onIndent={() =>
-                            runEditCommand((current, selection) =>
-                                indentSelections(current.state, selection, makeCommandContext(current)),
-                            )
-                        }
-                        onUnindent={() =>
-                            runEditCommand((current, selection) =>
-                                unindentSelections(current.state, selection, makeCommandContext(current)),
-                            )
-                        }
-                        onToggleBold={() =>
-                            runEditCommand((current, selection) =>
-                                toggleMarkEverywhere(
-                                    current.state,
-                                    selection,
-                                    'bold',
-                                    makeCommandContext(current),
-                                ),
-                            )
-                        }
-                        onToggleItalic={() =>
-                            runEditCommand((current, selection) =>
-                                toggleMarkEverywhere(
-                                    current.state,
-                                    selection,
-                                    'italic',
-                                    makeCommandContext(current),
-                                ),
-                            )
-                        }
-                        onPasteText={(text) =>
-                            runEditCommand((current, selection) =>
-                                pastePlainTextEverywhere(
-                                    current.state,
-                                    selection,
-                                    text,
-                                    makeCommandContext(current),
-                                ),
-                            )
-                        }
-                        onMoveCaret={(selection) => {
-                            moveCaretHorizontally(selection);
-                        }}
-                        onMoveCaretVertically={moveCaretVertically}
-                        onMoveSelectionsHorizontally={moveSelectionsHorizontallyEverywhere}
-                        onMoveSelectionsVertically={moveSelectionsVerticallyEverywhere}
-                        onExtendSelectionsHorizontally={extendSelectionsHorizontallyEverywhere}
-                        onExtendSelectionsVertically={extendSelectionsVerticallyEverywhere}
-                        onExtendSelectionVerticallyWithVisualIntent={
-                            extendSelectionVerticallyWithVisualIntent
-                        }
-                        onUndo={onUndo}
-                        onRedo={onRedo}
-                        onKeystroke={onKeystroke}
-                    />
-                ))}
+                {renderTree.map((node) =>
+                    renderBlockNode(node, {
+                        blocks,
+                        state: replica.state,
+                        selection: primaryResolvedSelection,
+                        hasMultipleSelections: resolvedSelectionSet.entries.length > 1,
+                        decorationsByBlock,
+                        pendingCaretRestoreBlockIdRef,
+                        draggingSubtreeIds,
+                        draggingId,
+                        dropTarget,
+                        registerRow,
+                        startDrag,
+                        orderedListNumbers,
+                        runEditCommand,
+                        moveCaretHorizontally,
+                        moveCaretVertically,
+                        moveSelectionsHorizontallyEverywhere,
+                        moveSelectionsVerticallyEverywhere,
+                        extendSelectionsHorizontallyEverywhere,
+                        extendSelectionsVerticallyEverywhere,
+                        extendSelectionVerticallyWithVisualIntent,
+                        onUndo,
+                        onRedo,
+                        onKeystroke,
+                    }),
+                )}
             </div>
         </article>
     );
 }
+
+type RenderTreeNode = {
+    block: RichFormattedBlock;
+    children: RenderTreeNode[];
+};
+
+type BlockTypeMenuValue =
+    | 'paragraph'
+    | 'heading1'
+    | 'heading2'
+    | 'heading3'
+    | 'unordered'
+    | 'ordered'
+    | 'todo'
+    | 'blockquote'
+    | 'code'
+    | 'callout-info'
+    | 'callout-warning'
+    | 'callout-error';
+
+type RenderBlockContext = {
+    blocks: RichFormattedBlock[];
+    state: Replica['state'];
+    selection: EditorSelection;
+    hasMultipleSelections: boolean;
+    decorationsByBlock: Map<string, BlockSelectionDecorations>;
+    pendingCaretRestoreBlockIdRef: MutableRefObject<string | null>;
+    draggingSubtreeIds: Set<string>;
+    draggingId: string | null;
+    dropTarget: DropTarget | null;
+    registerRow(id: string, element: HTMLElement | null): void;
+    startDrag: ReturnType<typeof useBlockReorder>['startDrag'];
+    orderedListNumbers: Map<string, number>;
+    runEditCommand(
+        command: (current: Replica, selection: RetainedSelectionSet) => MultiCommandResult,
+    ): void;
+    moveCaretHorizontally(selection: EditorSelection): void;
+    moveCaretVertically(sourceBlock: HTMLElement, targetBlockId: string): void;
+    moveSelectionsHorizontallyEverywhere(
+        direction: 'left' | 'right',
+        unit?: HorizontalMovementUnit,
+    ): void;
+    moveSelectionsVerticallyEverywhere(direction: 'up' | 'down'): void;
+    extendSelectionsHorizontallyEverywhere(
+        direction: 'left' | 'right',
+        unit?: HorizontalMovementUnit,
+    ): void;
+    extendSelectionsVerticallyEverywhere(direction: 'up' | 'down'): void;
+    extendSelectionVerticallyWithVisualIntent(
+        direction: 'up' | 'down',
+        sourceBlock: HTMLElement,
+    ): void;
+    onUndo(): void;
+    onRedo(): void;
+    onKeystroke(blockId: string, event: KeyboardEvent<HTMLElement>): void;
+};
+
+const buildRenderTree = (blocks: RichFormattedBlock[]): RenderTreeNode[] => {
+    const roots: RenderTreeNode[] = [];
+    const stack: RenderTreeNode[] = [];
+    for (const block of blocks) {
+        const node = {block, children: []};
+        while (stack.length && stack[stack.length - 1].block.depth >= block.depth) stack.pop();
+        const parent = stack[stack.length - 1];
+        if (parent) {
+            parent.children.push(node);
+        } else {
+            roots.push(node);
+        }
+        stack.push(node);
+    }
+    return roots;
+};
+
+const renderBlockNode = (node: RenderTreeNode, context: RenderBlockContext): ReactElement => {
+    const meta = node.block.block.meta;
+    if (meta.type === 'blockquote' || meta.type === 'callout') {
+        return (
+            <div
+                key={node.block.id}
+                className={[
+                    'groupedSubtree',
+                    meta.type === 'blockquote' ? 'blockquoteGroup' : 'calloutGroup',
+                    meta.type === 'callout' ? `callout${capitalize(meta.kind)}` : '',
+                ]
+                    .filter(Boolean)
+                    .join(' ')}
+                style={{'--group-depth': node.block.depth} as CSSProperties}
+            >
+                {renderEditableBlock(node.block, context)}
+                {node.children.map((child) => renderBlockNode(child, context))}
+            </div>
+        );
+    }
+
+    return (
+        <div key={node.block.id} className="renderTreeBranch">
+            {renderEditableBlock(node.block, context)}
+            {node.children.map((child) => renderBlockNode(child, context))}
+        </div>
+    );
+};
+
+const renderEditableBlock = (block: RichFormattedBlock, context: RenderBlockContext) => {
+    const index = context.blocks.findIndex((candidate) => candidate.id === block.id);
+    const previousBlock = context.blocks[index - 1] ?? null;
+    const nextBlock = context.blocks[index + 1] ?? null;
+    return (
+        <EditableBlock
+            key={block.id}
+            block={block}
+            listNumber={context.orderedListNumbers.get(block.id) ?? null}
+            previousBlockId={previousBlock?.id ?? null}
+            previousBlockLength={
+                previousBlock ? pointTextLength(context.state, previousBlock.id) : 0
+            }
+            blockLength={pointTextLength(context.state, block.id)}
+            nextBlockId={nextBlock?.id ?? null}
+            selection={context.selection}
+            hasMultipleSelections={context.hasMultipleSelections}
+            decorations={context.decorationsByBlock.get(block.id) ?? null}
+            pendingCaretRestoreBlockIdRef={context.pendingCaretRestoreBlockIdRef}
+            isDragging={context.draggingSubtreeIds.has(block.id)}
+            isDraggingRoot={context.draggingId === block.id}
+            dropTarget={
+                context.dropTarget?.indicatorBlockId === block.id ? context.dropTarget : null
+            }
+            registerRow={context.registerRow}
+            onStartDrag={context.startDrag}
+            onInsertText={(text) =>
+                context.runEditCommand((current, selection) =>
+                    insertTextEverywhere(
+                        current.state,
+                        selection,
+                        text,
+                        makeCommandContext(current),
+                    ),
+                )
+            }
+            onDeleteBackward={() =>
+                context.runEditCommand((current, selection) =>
+                    deleteBackwardEverywhere(current.state, selection, makeCommandContext(current)),
+                )
+            }
+            onDeleteForward={() =>
+                context.runEditCommand((current, selection) =>
+                    deleteForwardEverywhere(current.state, selection, makeCommandContext(current)),
+                )
+            }
+            onSplit={() =>
+                context.runEditCommand((current, selection) =>
+                    splitBlockEverywhere(current.state, selection, makeCommandContext(current)),
+                )
+            }
+            onIndent={() =>
+                context.runEditCommand((current, selection) =>
+                    indentSelections(current.state, selection, makeCommandContext(current)),
+                )
+            }
+            onUnindent={() =>
+                context.runEditCommand((current, selection) =>
+                    unindentSelections(current.state, selection, makeCommandContext(current)),
+                )
+            }
+            onToggleBold={() =>
+                context.runEditCommand((current, selection) =>
+                    toggleMarkEverywhere(
+                        current.state,
+                        selection,
+                        'bold',
+                        makeCommandContext(current),
+                    ),
+                )
+            }
+            onToggleItalic={() =>
+                context.runEditCommand((current, selection) =>
+                    toggleMarkEverywhere(
+                        current.state,
+                        selection,
+                        'italic',
+                        makeCommandContext(current),
+                    ),
+                )
+            }
+            onToggleTodo={() =>
+                context.runEditCommand((current, selection) =>
+                    updateBlockMetaEverywhere(
+                        current.state,
+                        selection,
+                        (currentMeta, ts) =>
+                            currentMeta.type === 'todo'
+                                ? {type: 'todo', checked: !currentMeta.checked, ts}
+                                : currentMeta,
+                        makeCommandContext(current),
+                    ),
+                )
+            }
+            onSetCodeLanguage={(language) =>
+                context.runEditCommand((current, selection) =>
+                    updateBlockMetaEverywhere(
+                        current.state,
+                        selection,
+                        (currentMeta, ts) =>
+                            currentMeta.type === 'code'
+                                ? {type: 'code', language, ts}
+                                : currentMeta,
+                        makeCommandContext(current),
+                    ),
+                )
+            }
+            onSetCalloutKind={(kind) =>
+                context.runEditCommand((current, selection) =>
+                    updateBlockMetaEverywhere(
+                        current.state,
+                        selection,
+                        (currentMeta, ts) =>
+                            currentMeta.type === 'callout'
+                                ? {type: 'callout', kind, ts}
+                                : currentMeta,
+                        makeCommandContext(current),
+                    ),
+                )
+            }
+            onPasteText={(text) =>
+                context.runEditCommand((current, selection) =>
+                    pastePlainTextEverywhere(
+                        current.state,
+                        selection,
+                        text,
+                        makeCommandContext(current),
+                    ),
+                )
+            }
+            onMoveCaret={context.moveCaretHorizontally}
+            onMoveCaretVertically={context.moveCaretVertically}
+            onMoveSelectionsHorizontally={context.moveSelectionsHorizontallyEverywhere}
+            onMoveSelectionsVertically={context.moveSelectionsVerticallyEverywhere}
+            onExtendSelectionsHorizontally={context.extendSelectionsHorizontallyEverywhere}
+            onExtendSelectionsVertically={context.extendSelectionsVerticallyEverywhere}
+            onExtendSelectionVerticallyWithVisualIntent={
+                context.extendSelectionVerticallyWithVisualIntent
+            }
+            onUndo={context.onUndo}
+            onRedo={context.onRedo}
+            onKeystroke={context.onKeystroke}
+        />
+    );
+};
+
+const deriveOrderedListNumbers = (blocks: RichFormattedBlock[]): Map<string, number> => {
+    const result = new Map<string, number>();
+    const counters = new Map<string, number>();
+    for (const block of blocks) {
+        const parentKey = block.parentId;
+        if (block.block.meta.type === 'list_item' && block.block.meta.kind === 'ordered') {
+            const next = (counters.get(parentKey) ?? 0) + 1;
+            counters.set(parentKey, next);
+            result.set(block.id, next);
+        } else {
+            counters.set(parentKey, 0);
+        }
+    }
+    return result;
+};
+
+const blockTypeMeta = (
+    kind: BlockTypeMenuValue,
+    current: RichBlockMeta,
+    ts: string,
+): RichBlockMeta => {
+    switch (kind) {
+        case 'paragraph':
+            return paragraphMeta(ts);
+        case 'heading1':
+            return {type: 'heading', level: 1, ts};
+        case 'heading2':
+            return {type: 'heading', level: 2, ts};
+        case 'heading3':
+            return {type: 'heading', level: 3, ts};
+        case 'unordered':
+            return {type: 'list_item', kind: 'unordered', ts};
+        case 'ordered':
+            return {type: 'list_item', kind: 'ordered', ts};
+        case 'todo':
+            return {type: 'todo', checked: current.type === 'todo' ? current.checked : false, ts};
+        case 'blockquote':
+            return {type: 'blockquote', ts};
+        case 'code':
+            return {type: 'code', language: current.type === 'code' ? current.language : '', ts};
+        case 'callout-info':
+            return {type: 'callout', kind: 'info', ts};
+        case 'callout-warning':
+            return {type: 'callout', kind: 'warning', ts};
+        case 'callout-error':
+            return {type: 'callout', kind: 'error', ts};
+    }
+};
 
 function Toolbar({
     canUndo,
@@ -962,6 +1209,7 @@ function Toolbar({
     onRedo,
     onBold,
     onItalic,
+    onBlockType,
 }: {
     canUndo: boolean;
     canRedo: boolean;
@@ -969,6 +1217,7 @@ function Toolbar({
     onRedo(): void;
     onBold(): void;
     onItalic(): void;
+    onBlockType(kind: BlockTypeMenuValue): void;
 }) {
     return (
         <div className="toolbar" aria-label="Formatting">
@@ -998,12 +1247,35 @@ function Toolbar({
             >
                 <em>I</em>
             </button>
+            <select
+                aria-label="Block type"
+                defaultValue="paragraph"
+                onMouseDown={(event) => event.preventDefault()}
+                onChange={(event) => {
+                    onBlockType(event.currentTarget.value as BlockTypeMenuValue);
+                    event.currentTarget.value = 'paragraph';
+                }}
+            >
+                <option value="paragraph">Paragraph</option>
+                <option value="heading1">Heading 1</option>
+                <option value="heading2">Heading 2</option>
+                <option value="heading3">Heading 3</option>
+                <option value="unordered">Bulleted list</option>
+                <option value="ordered">Numbered list</option>
+                <option value="todo">Todo</option>
+                <option value="blockquote">Quote</option>
+                <option value="code">Code</option>
+                <option value="callout-info">Info callout</option>
+                <option value="callout-warning">Warning callout</option>
+                <option value="callout-error">Error callout</option>
+            </select>
         </div>
     );
 }
 
 function EditableBlock({
     block,
+    listNumber,
     previousBlockId,
     previousBlockLength,
     blockLength,
@@ -1025,6 +1297,9 @@ function EditableBlock({
     onUnindent,
     onToggleBold,
     onToggleItalic,
+    onToggleTodo,
+    onSetCodeLanguage,
+    onSetCalloutKind,
     onPasteText,
     onMoveCaret,
     onMoveCaretVertically,
@@ -1037,7 +1312,8 @@ function EditableBlock({
     onRedo,
     onKeystroke,
 }: {
-    block: FormattedBlock;
+    block: RichFormattedBlock;
+    listNumber: number | null;
     previousBlockId: string | null;
     previousBlockLength: number;
     blockLength: number;
@@ -1059,12 +1335,18 @@ function EditableBlock({
     onUnindent(): void;
     onToggleBold(): void;
     onToggleItalic(): void;
+    onToggleTodo(): void;
+    onSetCodeLanguage(language: string): void;
+    onSetCalloutKind(kind: 'info' | 'warning' | 'error'): void;
     onPasteText(text: string): void;
     onMoveCaret(selection: EditorSelection): void;
     onMoveCaretVertically(sourceBlock: HTMLElement, targetBlockId: string): void;
     onMoveSelectionsHorizontally(direction: 'left' | 'right', unit?: HorizontalMovementUnit): void;
     onMoveSelectionsVertically(direction: 'up' | 'down'): void;
-    onExtendSelectionsHorizontally(direction: 'left' | 'right', unit?: HorizontalMovementUnit): void;
+    onExtendSelectionsHorizontally(
+        direction: 'left' | 'right',
+        unit?: HorizontalMovementUnit,
+    ): void;
     onExtendSelectionsVertically(direction: 'up' | 'down'): void;
     onExtendSelectionVerticallyWithVisualIntent(
         direction: 'up' | 'down',
@@ -1120,11 +1402,15 @@ function EditableBlock({
         }
     }, [block.id, block.runs, decorations, pendingCaretRestoreBlockIdRef, selection]);
 
+    const meta = block.block.meta;
+
     return (
         <div
             ref={(element) => registerRow(block.id, element)}
             className={[
                 'blockRow',
+                `blockType-${meta.type}`,
+                meta.type === 'callout' ? `callout${capitalize(meta.kind)}` : '',
                 isDragging ? 'dragging' : '',
                 isDraggingRoot ? 'draggingRoot' : '',
                 dropTarget ? `drop${capitalize(dropTarget.indicatorPlacement)}` : '',
@@ -1147,9 +1433,16 @@ function EditableBlock({
             >
                 ⋮⋮
             </button>
+            <BlockAffordance meta={meta} listNumber={listNumber} onToggleTodo={onToggleTodo} />
             <div
                 ref={editableRef}
-                className="editableBlock"
+                className={[
+                    'editableBlock',
+                    meta.type === 'code' ? 'codeBlock' : '',
+                    meta.type === 'heading' ? `headingLevel${meta.level}` : '',
+                ]
+                    .filter(Boolean)
+                    .join(' ')}
                 contentEditable
                 role="textbox"
                 aria-label="Block text"
@@ -1160,7 +1453,9 @@ function EditableBlock({
                 onFocus={(event) => {
                     const nextDecorations = removePrimaryDecorations(decorations);
                     if (nextDecorations === decorations) return;
-                    event.currentTarget.replaceChildren(...renderRunNodes(block.runs, nextDecorations));
+                    event.currentTarget.replaceChildren(
+                        ...renderRunNodes(block.runs, nextDecorations),
+                    );
                     renderedRunsRef.current = serializeRuns(block.runs, nextDecorations);
                 }}
                 onInput={(event) => {
@@ -1201,7 +1496,9 @@ function EditableBlock({
                         onSplit();
                     } else if (event.key === 'Tab' && !event.altKey && !modifierPressed) {
                         event.preventDefault();
-                        if (event.shiftKey) {
+                        if (meta.type === 'code') {
+                            onInsertText('    ');
+                        } else if (event.shiftKey) {
                             onUnindent();
                         } else {
                             onIndent();
@@ -1244,9 +1541,7 @@ function EditableBlock({
                                 event.key === 'ArrowLeft' ? 'left' : 'right',
                             );
                         } else if (hasMultipleSelections) {
-                            onExtendSelectionsVertically(
-                                event.key === 'ArrowUp' ? 'up' : 'down',
-                            );
+                            onExtendSelectionsVertically(event.key === 'ArrowUp' ? 'up' : 'down');
                         } else {
                             onExtendSelectionVerticallyWithVisualIntent(
                                 event.key === 'ArrowUp' ? 'up' : 'down',
@@ -1335,8 +1630,85 @@ function EditableBlock({
                     onPasteText(event.clipboardData.getData('text/plain'));
                 }}
             />
+            <BlockInlineControls
+                meta={meta}
+                onSetCodeLanguage={onSetCodeLanguage}
+                onSetCalloutKind={onSetCalloutKind}
+            />
         </div>
     );
+}
+
+function BlockAffordance({
+    meta,
+    listNumber,
+    onToggleTodo,
+}: {
+    meta: RichBlockMeta;
+    listNumber: number | null;
+    onToggleTodo(): void;
+}) {
+    if (meta.type === 'list_item') {
+        return (
+            <span className="blockMarker">
+                {meta.kind === 'ordered' ? `${listNumber ?? 1}.` : '•'}
+            </span>
+        );
+    }
+    if (meta.type === 'todo') {
+        return (
+            <input
+                className="todoToggle"
+                type="checkbox"
+                checked={meta.checked}
+                aria-label="Toggle todo"
+                onMouseDown={(event) => event.preventDefault()}
+                onChange={onToggleTodo}
+            />
+        );
+    }
+    return <span className="blockMarker" aria-hidden="true" />;
+}
+
+function BlockInlineControls({
+    meta,
+    onSetCodeLanguage,
+    onSetCalloutKind,
+}: {
+    meta: RichBlockMeta;
+    onSetCodeLanguage(language: string): void;
+    onSetCalloutKind(kind: 'info' | 'warning' | 'error'): void;
+}) {
+    if (meta.type === 'code') {
+        return (
+            <input
+                className="codeLanguage"
+                value={meta.language}
+                placeholder="plain"
+                aria-label="Code language"
+                onMouseDown={(event) => event.stopPropagation()}
+                onChange={(event) => onSetCodeLanguage(event.currentTarget.value)}
+            />
+        );
+    }
+    if (meta.type === 'callout') {
+        return (
+            <select
+                className="calloutKind"
+                value={meta.kind}
+                aria-label="Callout kind"
+                onMouseDown={(event) => event.preventDefault()}
+                onChange={(event) =>
+                    onSetCalloutKind(event.currentTarget.value as 'info' | 'warning' | 'error')
+                }
+            >
+                <option value="info">Info</option>
+                <option value="warning">Warning</option>
+                <option value="error">Error</option>
+            </select>
+        );
+    }
+    return null;
 }
 
 const isJsdom = () => navigator.userAgent.includes('jsdom');
@@ -1367,7 +1739,9 @@ const removePrimaryDecorations = (
         carets: decorations.carets.filter((caret) => !caret.primary),
         segments: decorations.segments.filter((segment) => !segment.primary),
     };
-    return nextDecorations.carets.length || nextDecorations.segments.length ? nextDecorations : null;
+    return nextDecorations.carets.length || nextDecorations.segments.length
+        ? nextDecorations
+        : null;
 };
 
 const overlayTransientSelections = (
@@ -1422,7 +1796,7 @@ const sameSelectionRange = (one: EditorSelection, two: EditorSelection) => {
 };
 
 const serializeRuns = (
-    runs: FormattedBlock['runs'],
+    runs: RichFormattedBlock['runs'],
     decorations: BlockSelectionDecorations | null,
 ) =>
     JSON.stringify({
@@ -1431,7 +1805,7 @@ const serializeRuns = (
     });
 
 const renderRunNodes = (
-    runs: FormattedBlock['runs'],
+    runs: RichFormattedBlock['runs'],
     decorations: BlockSelectionDecorations | null,
 ): Node[] => {
     if (!decorations || (!decorations.carets.length && !decorations.segments.length)) {
@@ -1513,7 +1887,7 @@ const renderCaretsAtOffset = (
     }
 };
 
-const applyRunClasses = (span: HTMLElement, run: FormattedBlock['runs'][number]) => {
+const applyRunClasses = (span: HTMLElement, run: RichFormattedBlock['runs'][number]) => {
     if (run.marks.bold) span.classList.add('markBold');
     if (run.marks.italic) span.classList.add('markItalic');
 };

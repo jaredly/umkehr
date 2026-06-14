@@ -1,5 +1,6 @@
 import {orderedCharIdsForBlock} from 'umkehr/block-crdt';
 import type {CachedState} from 'umkehr/block-crdt/types';
+import type {RichBlockMeta} from './blockMeta';
 import {
     firstPointForSelection,
     focusPoint,
@@ -53,13 +54,13 @@ export type BlockSelectionDecorations = {
 
 const DEFAULT_SELECTION_ID = 'sel-0';
 
-export const initialRetainedSelectionSet = (state: CachedState): RetainedSelectionSet => ({
+export const initialRetainedSelectionSet = (state: CachedState<RichBlockMeta>): RetainedSelectionSet => ({
     primaryId: DEFAULT_SELECTION_ID,
     entries: [{id: DEFAULT_SELECTION_ID, selection: initialRetainedSelection(state)}],
 });
 
 export const singleRetainedSelectionSet = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     selection: EditorSelection,
     id = DEFAULT_SELECTION_ID,
 ): RetainedSelectionSet => ({
@@ -68,7 +69,7 @@ export const singleRetainedSelectionSet = (
 });
 
 export const resolveSelectionSet = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     set: RetainedSelectionSet,
 ): EditorSelectionSet => {
     const entries = set.entries.map((entry) => ({
@@ -79,7 +80,7 @@ export const resolveSelectionSet = (
 };
 
 export const retainSelectionSet = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     set: EditorSelectionSet,
 ): RetainedSelectionSet => {
     const entries = set.entries.map((entry) => ({
@@ -97,13 +98,13 @@ export const primaryEntry = <T extends {primaryId: string; entries: Array<{id: s
 ): T['entries'][number] => set.entries.find((entry) => entry.id === set.primaryId) ?? set.entries[0];
 
 export const replaceSelectionSet = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     selection: EditorSelection,
     id = DEFAULT_SELECTION_ID,
 ): RetainedSelectionSet => singleRetainedSelectionSet(state, selection, id);
 
 export const replacePrimarySelection = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     set: RetainedSelectionSet,
     selection: EditorSelection,
 ): RetainedSelectionSet => {
@@ -118,7 +119,7 @@ export const replacePrimarySelection = (
 };
 
 export const appendSelection = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     set: RetainedSelectionSet,
     selection: EditorSelection,
     id: string,
@@ -129,7 +130,7 @@ export const appendSelection = (
     });
 
 export const dedupeSelectionSet = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     set: RetainedSelectionSet,
 ): RetainedSelectionSet => {
     const caretWinners = new Map<string, RetainedSelectionEntry>();
@@ -159,7 +160,7 @@ export const dedupeSelectionSet = (
 };
 
 export const sortedResolvedEntries = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     set: RetainedSelectionSet,
 ): EditorSelectionEntry[] =>
     resolveSelectionSet(state, dedupeSelectionSet(state, set)).entries.sort((a, b) =>
@@ -167,7 +168,7 @@ export const sortedResolvedEntries = (
     );
 
 export const reverseSortedRetainedEntries = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     entries: RetainedSelectionEntry[],
 ): RetainedSelectionEntry[] =>
     entries
@@ -175,7 +176,7 @@ export const reverseSortedRetainedEntries = (
         .sort((a, b) => compareRetainedSelections(state, b.selection, a.selection));
 
 export const mergeOverlappingRanges = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     set: RetainedSelectionSet,
 ): RetainedSelectionEntry[] => {
     const deduped = dedupeSelectionSet(state, set);
@@ -227,7 +228,7 @@ export const mergeOverlappingRanges = (
 };
 
 export const decorationsForSelectionSet = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     set: EditorSelectionSet,
     options: {includePrimary: boolean; includePrimaryBoundaryCaret?: boolean},
 ): Map<string, BlockSelectionDecorations> => {
@@ -280,7 +281,7 @@ type SelectionSpan = {
     end: BlockPoint;
 };
 
-const normalizedSpan = (state: CachedState, selection: EditorSelection): SelectionSpan | null => {
+const normalizedSpan = (state: CachedState<RichBlockMeta>, selection: EditorSelection): SelectionSpan | null => {
     const segments = normalizeSelectionSegments(state, selection);
     if (!segments.length) {
         if (selection.type === 'caret') return null;
@@ -299,12 +300,12 @@ const normalizedSpan = (state: CachedState, selection: EditorSelection): Selecti
 };
 
 export const compareSelections = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     one: EditorSelection,
     two: EditorSelection,
 ): number => comparePoints(state, firstPointForSelection(state, one), firstPointForSelection(state, two));
 
-export const comparePoints = (state: CachedState, one: BlockPoint, two: BlockPoint): number => {
+export const comparePoints = (state: CachedState<RichBlockMeta>, one: BlockPoint, two: BlockPoint): number => {
     const blocks = visibleBlockIds(state);
     const oneBlock = blocks.indexOf(one.blockId);
     const twoBlock = blocks.indexOf(two.blockId);
@@ -312,7 +313,7 @@ export const comparePoints = (state: CachedState, one: BlockPoint, two: BlockPoi
 };
 
 const compareRetainedSelections = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     one: RetainedSelection,
     two: RetainedSelection,
 ): number => compareRetainedPoints(state, retainedStart(one), retainedStart(two));
@@ -321,7 +322,7 @@ const retainedStart = (selection: RetainedSelection): RetainedPoint =>
     selection.type === 'caret' ? selection.point : selection.anchor;
 
 const compareRetainedPoints = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     one: RetainedPoint,
     two: RetainedPoint,
 ): number => {
@@ -335,7 +336,7 @@ const compareRetainedPoints = (
     );
 };
 
-const retainedPointKey = (state: CachedState, point: RetainedPoint) => {
+const retainedPointKey = (state: CachedState<RichBlockMeta>, point: RetainedPoint) => {
     const blocks = retainedBlockOrder(state);
     const fallbackBlock = point.blockId ? blocks.indexOf(point.blockId) : -1;
     if (!point.charId) {
@@ -361,7 +362,7 @@ const retainedPointKey = (state: CachedState, point: RetainedPoint) => {
     };
 };
 
-const retainedBlockOrder = (state: CachedState): string[] => {
+const retainedBlockOrder = (state: CachedState<RichBlockMeta>): string[] => {
     const visible = visibleBlockIds(state);
     const seen = new Set(visible);
     const hidden = Object.keys(state.state.blocks)
@@ -375,7 +376,7 @@ const affinityRank = (affinity: RetainedPoint['affinity']) => (affinity === 'bef
 const visiblePointKey = (point: BlockPoint) => `${point.blockId}:${point.offset}`;
 
 const addRangeEdgeCarets = (
-    state: CachedState,
+    state: CachedState<RichBlockMeta>,
     map: Map<string, BlockSelectionDecorations>,
     id: string,
     selection: EditorSelection,
@@ -393,7 +394,7 @@ const addRangeEdgeCarets = (
     }
 };
 
-const isBlockEdgePoint = (state: CachedState, point: BlockPoint): boolean =>
+const isBlockEdgePoint = (state: CachedState<RichBlockMeta>, point: BlockPoint): boolean =>
     point.offset === 0 || point.offset === pointTextLength(state, point.blockId);
 
 const addCaretDecoration = (
