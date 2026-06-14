@@ -12,7 +12,7 @@ import {
 } from 'react';
 import {materializeFormattedBlocks} from 'umkehr/block-crdt';
 import type {FormattedBlock} from 'umkehr/block-crdt';
-import {moveBlock} from './blockCommands';
+import {moveBlock, setBlockMeta} from './blockCommands';
 import {
     makeCommandContext,
     nextReplicaTs,
@@ -632,6 +632,13 @@ function BlockEditor({
         [liveSelectionSet, onCommand, resetVerticalCaretIntent, scheduleSelectionRestore],
     );
 
+    const runBlockControlCommand = useCallback(
+        (command: (current: Replica) => MultiCommandResult) => {
+            onCommand((current) => command(current));
+        },
+        [onCommand],
+    );
+
     const moveSelectionsHorizontallyEverywhere = useCallback(
         (direction: 'left' | 'right', unit: HorizontalMovementUnit = 'character') => {
             handledNavigationKeyRef.current = true;
@@ -888,6 +895,7 @@ function BlockEditor({
                         startDrag,
                         orderedListNumbers,
                         runEditCommand,
+                        runBlockControlCommand,
                         moveCaretHorizontally,
                         moveCaretVertically,
                         moveSelectionsHorizontallyEverywhere,
@@ -940,6 +948,7 @@ type RenderBlockContext = {
     runEditCommand(
         command: (current: Replica, selection: RetainedSelectionSet) => MultiCommandResult,
     ): void;
+    runBlockControlCommand(command: (current: Replica) => MultiCommandResult): void;
     moveCaretHorizontally(selection: EditorSelection): void;
     moveCaretVertically(sourceBlock: HTMLElement, targetBlockId: string): void;
     moveSelectionsHorizontallyEverywhere(
@@ -1102,30 +1111,32 @@ const renderEditableBlock = (block: RichFormattedBlock, context: RenderBlockCont
                 )
             }
             onSetCodeLanguage={(language) =>
-                context.runEditCommand((current, selection) =>
-                    updateBlockMetaEverywhere(
-                        current.state,
-                        selection,
-                        (currentMeta, ts) =>
-                            currentMeta.type === 'code'
-                                ? {type: 'code', language, ts}
-                                : currentMeta,
-                        makeCommandContext(current),
-                    ),
-                )
+                context.runBlockControlCommand((current) => {
+                    const currentBlock = current.state.state.blocks[block.id];
+                    if (!currentBlock || currentBlock.meta.type !== 'code') {
+                        return {state: current.state, ops: [], selection: current.selection};
+                    }
+                    const result = setBlockMeta(current.state, block.id, {
+                        type: 'code',
+                        language,
+                        ts: nextReplicaTs(current),
+                    });
+                    return {state: result.state, ops: result.ops, selection: current.selection};
+                })
             }
             onSetCalloutKind={(kind) =>
-                context.runEditCommand((current, selection) =>
-                    updateBlockMetaEverywhere(
-                        current.state,
-                        selection,
-                        (currentMeta, ts) =>
-                            currentMeta.type === 'callout'
-                                ? {type: 'callout', kind, ts}
-                                : currentMeta,
-                        makeCommandContext(current),
-                    ),
-                )
+                context.runBlockControlCommand((current) => {
+                    const currentBlock = current.state.state.blocks[block.id];
+                    if (!currentBlock || currentBlock.meta.type !== 'callout') {
+                        return {state: current.state, ops: [], selection: current.selection};
+                    }
+                    const result = setBlockMeta(current.state, block.id, {
+                        type: 'callout',
+                        kind,
+                        ts: nextReplicaTs(current),
+                    });
+                    return {state: result.state, ops: result.ops, selection: current.selection};
+                })
             }
             onPasteText={(text) =>
                 context.runEditCommand((current, selection) =>
@@ -1250,7 +1261,6 @@ function Toolbar({
             <select
                 aria-label="Block type"
                 defaultValue="paragraph"
-                onMouseDown={(event) => event.preventDefault()}
                 onChange={(event) => {
                     onBlockType(event.currentTarget.value as BlockTypeMenuValue);
                     event.currentTarget.value = 'paragraph';
@@ -1686,7 +1696,10 @@ function BlockInlineControls({
                 value={meta.language}
                 placeholder="plain"
                 aria-label="Code language"
-                onMouseDown={(event) => event.stopPropagation()}
+                onPointerDown={stopEditorControlEvent}
+                onMouseDown={stopEditorControlEvent}
+                onMouseUp={stopEditorControlEvent}
+                onClick={stopEditorControlEvent}
                 onChange={(event) => onSetCodeLanguage(event.currentTarget.value)}
             />
         );
@@ -1697,7 +1710,10 @@ function BlockInlineControls({
                 className="calloutKind"
                 value={meta.kind}
                 aria-label="Callout kind"
-                onMouseDown={(event) => event.preventDefault()}
+                onPointerDown={stopEditorControlEvent}
+                onMouseDown={stopEditorControlEvent}
+                onMouseUp={stopEditorControlEvent}
+                onClick={stopEditorControlEvent}
                 onChange={(event) =>
                     onSetCalloutKind(event.currentTarget.value as 'info' | 'warning' | 'error')
                 }
@@ -1710,6 +1726,10 @@ function BlockInlineControls({
     }
     return null;
 }
+
+const stopEditorControlEvent = (event: {stopPropagation(): void}) => {
+    event.stopPropagation();
+};
 
 const isJsdom = () => navigator.userAgent.includes('jsdom');
 

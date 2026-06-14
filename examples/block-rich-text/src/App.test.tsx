@@ -342,6 +342,25 @@ describe('Block rich text example UI', () => {
         });
     });
 
+    it('changes callout kind from the inline dropdown', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        typeText(blocks(left)[0], 'Heads up');
+        setBlockType(left, 'callout-info');
+
+        await waitFor(() => expect(left.querySelector('.calloutGroup')).toBeTruthy());
+        const kind = within(left).getByRole('combobox', {name: 'Callout kind'});
+        fireEvent.mouseDown(kind);
+        fireEvent.change(kind, {target: {value: 'warning'}});
+
+        await waitFor(() => {
+            expect(left.querySelector('.calloutWarning')).toBeTruthy();
+        });
+        expect(right.querySelector('.calloutWarning')).toBeTruthy();
+    });
+
     it('keeps code Enter and Tab inside the same block', async () => {
         const view = render(<App />);
         const {left, right} = panels(view);
@@ -358,6 +377,25 @@ describe('Block rich text example UI', () => {
 
         await waitForBlockTexts(left, ['a\n    b']);
         expect(blockTexts(right)).toEqual(['a\n    b']);
+    });
+
+    it('keeps focus in the code language field while typing', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'code');
+        const language = within(left).getByRole('textbox', {name: 'Code language'});
+
+        language.focus();
+        fireEvent.change(language, {target: {value: 't'}});
+        await waitFor(() => expect(document.activeElement).toBe(language));
+
+        fireEvent.change(language, {target: {value: 'ts'}});
+        await waitFor(() => {
+            expect(document.activeElement).toBe(language);
+            expect((within(right).getByRole('textbox', {name: 'Code language'}) as HTMLInputElement).value).toBe('ts');
+        });
     });
 
     it('types in one editor and syncs text to the other editor', async () => {
