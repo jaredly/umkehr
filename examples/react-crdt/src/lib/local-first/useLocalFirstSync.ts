@@ -78,6 +78,7 @@ export function useLocalFirstSync<TState>({
     docId,
     title,
     schema,
+    leafPlugins,
     tagKey,
     validateState,
     schemaFingerprint,
@@ -95,6 +96,7 @@ export function useLocalFirstSync<TState>({
     docId: string;
     title: string;
     schema: IJsonSchemaCollection<'3.1', [TState]>;
+    leafPlugins?: LocalFirstProtocolConfig<TState>['leafPlugins'];
     tagKey: string;
     validateState(input: unknown): IValidation<TState>;
     schemaFingerprint: string;
@@ -125,6 +127,7 @@ export function useLocalFirstSync<TState>({
     const protocolRef = useRef<LocalFirstProtocolConfig<TState>>({
         docId,
         schema,
+        leafPlugins,
         tagKey,
         validateState,
         schemaVersion,
@@ -142,6 +145,7 @@ export function useLocalFirstSync<TState>({
         schemaFingerprint,
         schemaFingerprintHash,
         schema,
+        leafPlugins,
         tagKey,
         validateState,
     };

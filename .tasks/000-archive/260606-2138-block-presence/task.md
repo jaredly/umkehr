@@ -1,0 +1,2 @@
+I want the examples/block-rich-text example to retain & display the selection state of the currently-inactive editor so we can showcase the 'selection retention' functionality of the CRDT. I'm thinking that we hang on to the most recent selection per editor, and show a little caret (or highlight) for the selection state, if the given input isn't currently focused.
+We'll need to make sure we are doing proper selection retention / adjustment upon receiving concurrent edits.

@@ -17,7 +17,7 @@ import {type Updater} from '../react';
 import {createContext, useContext} from 'react';
 import React from 'react';
 import {deepEqual as equal} from '../deepEqual';
-import {richText, type RichCollaborativeText} from '../richtext';
+import {richText, richTextLeafPlugin, type RichCollaborativeText} from '../richtext';
 import {restoreSelection} from '../react-rich-text/selection';
 
 type State = {
@@ -126,8 +126,8 @@ const richTextSchema = {
                         version: {const: 1},
                     },
                     required: ['kind', 'version'],
-                    'x-umkehr-crdt': 'rich-text',
-                    'x-umkehr-rich-text-version': 1,
+                    'x-umkehr-leaf-crdt': 'umkehr.rich-text',
+                    'x-umkehr-leaf-crdt-version': 1,
                 },
             },
         },
@@ -137,7 +137,10 @@ const richTextSchema = {
 
 const createRichTextHistory = () =>
     createCrdtLocalHistory(
-        createCrdtDocument({body: richText()}, richTextSchema, {timestamp: startTs}),
+        createCrdtDocument({body: richText()}, richTextSchema, {
+            timestamp: startTs,
+            leafPlugins: [richTextLeafPlugin],
+        }),
     );
 
 const listSchema = {
@@ -267,7 +270,7 @@ describe('createSyncedContext', () => {
 
         await waitFor(() => expect(editor.textContent).toBe('hello'));
         expect(transport.published.at(-1)).toHaveLength(5);
-        expect(transport.published.at(-1)?.every((update) => update.op === 'richText')).toBe(true);
+        expect(transport.published.at(-1)?.every((update) => update.op === 'leaf')).toBe(true);
     });
 
     it('handles sequential rich text keyboard insertion', async () => {

@@ -35,7 +35,7 @@ describe('richtext public api', () => {
             properties?: Record<string, Record<string, unknown>>;
         };
 
-        expect(root.properties?.body?.['x-umkehr-crdt']).toBe('rich-text');
-        expect(root.properties?.body?.['x-umkehr-rich-text-version']).toBe(1);
+        expect(root.properties?.body?.['x-umkehr-leaf-crdt']).toBe('umkehr.rich-text');
+        expect(root.properties?.body?.['x-umkehr-leaf-crdt-version']).toBe(1);
     });
 });

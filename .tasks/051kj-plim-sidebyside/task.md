@@ -1,0 +1,1 @@
+I want to expand our plim example (examples/plim-block-crdt) to be two-paned, similar to the block-rich-text example (examples/block-rich-text). We can remove the "Remote insert" and "remote split" buttons as they'll be redundant.

@@ -10,70 +10,128 @@ import {
     type OpMaker,
     type ArrayMove,
 } from './types.js';
-import type {RichTextImportSnapshot, RichTextJsonValue} from './peritext/types.js';
+import {
+    normalizeBuilderExtensions,
+    type LeafBuilderExtensionAny,
+    type PatchBuilderOptions,
+} from './builderExtensions.js';
 
 export type PatchBuilder<
     T,
     Tag extends PropertyKey = 'type',
     R = void,
     Context = unknown,
-> = PatchBuilderInternal<T, T, Tag, R, Context>;
+    Extensions extends readonly LeafBuilderExtensionAny[] = [],
+> = PatchBuilderInternal<T, T, Tag, R, Context, Extensions>;
 
 export function createPatchBuilder<T>(): PatchBuilder<
     T,
     'type',
     DraftPatch<T, 'type', undefined>,
-    undefined
+    undefined,
+    []
 >;
-export function createPatchBuilder<T, Tag extends string>(tag: Tag): PatchBuilder<
-    T,
-    Tag,
-    DraftPatch<T, Tag, undefined>,
-    undefined
->;
-export function createPatchBuilder<T, Tag extends string = 'type'>(tag?: Tag) {
-    return createPatchBuilderWithContext<T, undefined, Tag>((tag ?? 'type') as Tag, undefined);
-}
-
-export function createPatchBuilderWithContext<T, Context, Tag extends string = 'type'>(
+export function createPatchBuilder<T, Extensions extends readonly LeafBuilderExtensionAny[]>(
+    options: PatchBuilderOptions<Extensions>,
+): PatchBuilder<T, 'type', DraftPatch<T, 'type', undefined, Extensions>, undefined, Extensions>;
+export function createPatchBuilder<T, Tag extends string>(
     tag: Tag,
-    context: Context,
-) {
-    return createPatchDispatcher<T, Context, Tag, DraftPatch<T, Tag, Context>>(
-        (x) => x,
-        context,
+): PatchBuilder<T, Tag, DraftPatch<T, Tag, undefined>, undefined, []>;
+export function createPatchBuilder<
+    T,
+    Tag extends string,
+    Extensions extends readonly LeafBuilderExtensionAny[],
+>(
+    tag: Tag,
+    options: PatchBuilderOptions<Extensions>,
+): PatchBuilder<T, Tag, DraftPatch<T, Tag, undefined, Extensions>, undefined, Extensions>;
+export function createPatchBuilder<T>(
+    tagOrOptions?: string | PatchBuilderOptions<readonly LeafBuilderExtensionAny[]>,
+    maybeOptions?: PatchBuilderOptions<readonly LeafBuilderExtensionAny[]>,
+): any {
+    const tag = typeof tagOrOptions === 'string' ? tagOrOptions : 'type';
+    const options = typeof tagOrOptions === 'string' ? maybeOptions : tagOrOptions;
+    return createPatchBuilderWithContext<T, undefined, string, readonly LeafBuilderExtensionAny[]>(
         tag,
+        undefined,
+        options,
     );
 }
 
-export const getPath = <A, B, T extends PropertyKey, C, E>(
-    builder: PatchBuilderInternal<A, B, T, C, E>,
+export function createPatchBuilderWithContext<
+    T,
+    Context,
+    Tag extends string = 'type',
+    Extensions extends readonly LeafBuilderExtensionAny[] = [],
+>(tag: Tag, context: Context, options?: PatchBuilderOptions<Extensions>) {
+    return createPatchDispatcher<
+        T,
+        Context,
+        Tag,
+        DraftPatch<T, Tag, Context, Extensions>,
+        Extensions
+    >((x) => x, context, tag, options);
+}
+
+export const getPath = <
+    A,
+    B,
+    T extends PropertyKey,
+    C,
+    E,
+    Extensions extends readonly LeafBuilderExtensionAny[] = [],
+>(
+    builder: PatchBuilderInternal<A, B, T, C, E, Extensions>,
 ) => builder[getPathSymbol];
 
-export const getExtra = <A, B, T extends PropertyKey, C, E>(
-    builder: PatchBuilderInternal<A, B, T, C, E>,
+export const getExtra = <
+    A,
+    B,
+    T extends PropertyKey,
+    C,
+    E,
+    Extensions extends readonly LeafBuilderExtensionAny[] = [],
+>(
+    builder: PatchBuilderInternal<A, B, T, C, E, Extensions>,
 ): E => builder[getExtraSymbol];
 
-export function createPatchDispatcher<T, Extra, Tag extends string = 'type', R = void>(
-    apply: (v: DraftPatch<T, Tag, Extra>, when?: ApplyTiming) => R,
+export function createPatchDispatcher<
+    T,
+    Extra,
+    Tag extends string = 'type',
+    R = void,
+    Extensions extends readonly LeafBuilderExtensionAny[] = [],
+>(
+    apply: (v: DraftPatch<T, Tag, Extra, Extensions>, when?: ApplyTiming) => R,
     extra: Extra,
     tag: Tag,
-): PatchBuilder<T, Tag, R, Extra> {
+    options?: PatchBuilderOptions<Extensions>,
+): PatchBuilder<T, Tag, R, Extra, Extensions> {
     // biome-ignore lint: this one is fine
     const cache: Record<string, (v: any, b: any) => R> = {};
     // biome-ignore lint: this one is fine
     const proxyCache: Record<string, any> = {};
+    const builderExtensions = normalizeBuilderExtensions(options?.builderExtensions);
     const ghost = {}; // {_t: T} a phantom type kinda thing
     // biome-ignore lint: this one is fine
     function makeProxy(path: Array<PathSegment>): any {
         const pathString = JSON.stringify(path);
 
-        const updateFn = (value: T | OpMaker<T, Tag, Extra>, when?: ApplyTiming) => {
+        const updateFn = (value: T | OpMaker<T, Tag, Extra, Extensions>, when?: ApplyTiming) => {
             if (typeof value !== 'function') {
                 return apply({op: 'replace', path, value, ...ghost}, when);
             }
             // biome-ignore lint: this one is fine
-            return apply({op: 'nested', make: value as any, path, ...ghost}, when);
+            return apply(
+                {
+                    op: 'nested',
+                    make: value as any,
+                    path,
+                    builderExtensions: options?.builderExtensions,
+                    ...ghost,
+                },
+                when,
+            );
         };
 
         // biome-ignore lint: this one is fine
@@ -187,68 +245,27 @@ export function createPatchDispatcher<T, Extra, Tag extends string = 'type', R =
                     return cache[k];
                 }
 
-                if (prop === '$text') {
-                    const k = pathString + '/richText';
+                if (typeof prop === 'string' && builderExtensions.has(prop)) {
+                    const extension = builderExtensions.get(prop);
+                    if (!extension) return undefined;
+                    const k = pathString + '/extension/' + prop;
                     if (!proxyCache[k]) {
-                        proxyCache[k] = {
-                            insert: (at: {index: number}, text: string, when?: ApplyTiming) =>
-                                apply(
-                                    {op: 'richText', path, change: {kind: 'insert', at, text}, ...ghost},
-                                    when,
-                                ),
-                            delete: (range: {start: number; end: number}, when?: ApplyTiming) =>
-                                apply(
-                                    {op: 'richText', path, change: {kind: 'delete', range}, ...ghost},
-                                    when,
-                                ),
-                            mark: (
-                                range: {start: number; end: number},
-                                markType: string,
-                                value: unknown,
-                                preset?: 'inclusive' | 'exclusive' | 'none',
-                                when?: ApplyTiming,
-                            ) =>
-                                apply(
-                                    {
-                                        op: 'richText',
-                                        path,
-                                        change: {
-                                            kind: 'mark',
-                                            range,
-                                            markType,
-                                            value: value as RichTextJsonValue,
-                                            preset,
+                        proxyCache[k] = Object.fromEntries(
+                            Object.entries(extension.commands).map(([commandName, command]) => [
+                                commandName,
+                                (arg: unknown, when?: ApplyTiming) =>
+                                    apply(
+                                        {
+                                            op: 'leaf',
+                                            plugin: extension.plugin,
+                                            path,
+                                            change: command(arg),
+                                            ...ghost,
                                         },
-                                        ...ghost,
-                                    },
-                                    when,
-                                ),
-                            unmark: (
-                                range: {start: number; end: number},
-                                markType: string,
-                                preset?: 'inclusive' | 'exclusive' | 'none',
-                                when?: ApplyTiming,
-                            ) =>
-                                apply(
-                                    {
-                                        op: 'richText',
-                                        path,
-                                        change: {kind: 'unmark', range, markType, preset},
-                                        ...ghost,
-                                    },
-                                    when,
-                                ),
-                            replace: (snapshot: unknown, when?: ApplyTiming) =>
-                                apply(
-                                    {
-                                        op: 'richText',
-                                        path,
-                                        change: {kind: 'replace', snapshot: snapshot as RichTextImportSnapshot},
-                                        ...ghost,
-                                    },
-                                    when,
-                                ),
-                        };
+                                        when,
+                                    ),
+                            ]),
+                        );
                     }
                     return proxyCache[k];
                 }
@@ -286,5 +303,5 @@ export function createPatchDispatcher<T, Extra, Tag extends string = 'type', R =
 
         return new Proxy(updateFn, handler);
     }
-    return makeProxy([]) as PatchBuilder<T, Tag, R, Extra>;
+    return makeProxy([]) as PatchBuilder<T, Tag, R, Extra, Extensions>;
 }

@@ -1,4 +1,28 @@
 
+# Block plungin and such
+
+Not sure how I feel about the whole 'Patches use char-indexes' thing. Maybe I want them to only do OPs? idk.
+
+Documents are no longer json-serializable, we need to fix this.
+
+
+# Next steps
+
+- make the visualization parametric
+- refactor umkehr to have pluggable leaf CRDTs
+- do a blog post about umkehr/history and umkehr/basic
+
+
+#
+
+Block Rich Text is really shaping up.
+
+- we want undo/redo thx
+- we want a history scrubber with full state import/export
+
+
+#
+
 Next things to tackle:
 - [x] peerjs for react-crdt example
 - [x] the react-crdt example, lots can be generic, can we put it in like src/lib?
@@ -30,9 +54,12 @@ Testing findings
 NEEDS TO TEST:
 - migration definiteily
 
+ID: can you look at task.md and write up a research.md, including any open questions?
+
+
 ok can you write up a plan.md detailing what needs to be done?
 
 Ok I've answered questions inline.
 Can you write up a plan.md detailing what needs to be done? Split it up into logical phases if helpful.
 
-Ok, go ahead and implement phase by phase, keeping a concise log of your progress in implementation-log.md. Be sure to call out any issues or bugs encountered.
+Ok, go ahead and implement phase by phase, keeping a concise log of your progress in implementation-log.md. Be sure to call out any issues, workarounds or bugs encountered.

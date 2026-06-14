@@ -1,0 +1,120 @@
+# Implementation Log: Block Rich Text UI Example
+
+## 2026-06-06
+
+- Started implementation from `plan.md`.
+- Phase 1 in progress: creating a standalone `examples/block-rich-text` Vite example instead of adding another app to `examples/react-crdt`, per the answered research question.
+- Noted package-boundary issue: `src/block-crdt` is not a public package export, so the standalone example uses local Vite/TypeScript aliases to import the source module directly.
+- Avoided adding `@vitejs/plugin-react`; Vite's built-in TSX handling is enough for this example and keeps the scaffold aligned with the existing `examples/react` app.
+- Found and fixed an offset mismatch while wiring split commands: `selPos(state, block, n)` returns the character after `n` visible positions, so splitting at a caret offset uses `selPos(offset + 1)` for the right character and `selPos(offset)` for the previous character.
+- DOM selection mapping converts between UTF-16 DOM offsets and grapheme offsets so CRDT commands stay aligned with `Intl.Segmenter` insertion.
+- Phase 2/3 in progress: added an in-memory two-replica runtime, CRDT command helpers, and focused command/runtime tests.
+- Added `umkehr/block-crdt` aliases to `vitest.config.ts` for the example tests.
+- First targeted Vitest run failed because subpath imports such as `umkehr/block-crdt/initialState` were not resolved by the initial alias object. Switched Vite/Vitest config to regex subpath aliases.
+- A join test initially appeared to leave the joined-away block visible. Root cause was the test using a fresh timestamp generator per command, so the join's `block:status` timestamp was older than the split-created block status. Updated tests to reuse monotonic command contexts; the UI runtime already uses a per-replica clock.
+- `npm run build` in the new example initially failed because this checkout has no local `vite` install for `examples/block-rich-text` or the repo root. Changed the Vite config to export a plain object so an existing Vite binary can load it without resolving `vite` from the config itself.
+- Verification passed:
+  - `npm exec vitest -- examples/block-rich-text/src/App.test.tsx examples/block-rich-text/src/blockCommands.test.ts` passed with 12 tests.
+  - `../../node_modules/.bin/tsc -p tsconfig.json --noEmit` passed from `examples/block-rich-text`.
+  - `../react-crdt/node_modules/.bin/vite build` passed from `examples/block-rich-text`.
+- Workaround: the normal `npm run build` in `examples/block-rich-text` still requires installing that example's local dependencies. In this checkout, Vite is available under `examples/react-crdt/node_modules`, so verification used that binary instead.
+- Started the dev server with `../react-crdt/node_modules/.bin/vite --host 127.0.0.1 --port 5174`.
+- `curl -I http://127.0.0.1:5174/` returns `200 OK` when run outside the sandbox network namespace. A non-escalated curl could not connect, which appears to be a sandbox networking limitation.
+- Attempted a Playwright screenshot using the installed `examples/react-crdt` Playwright binary. It hung after navigation and had to be terminated; browser screenshot verification is inconclusive in this environment.
+- After user feedback, stopped browser-level verification and added Testing Library coverage for the rendered editor workflow.
+- First RTL run failed because `fireEvent.beforeInput` is not available in this Testing Library version. Switched the test helper to dispatch a real `InputEvent('beforeinput')`.
+- RTL paste test found a real sync bug: `pastePlainText` dropped the first inserted line's ops while aggregating split/insert batches, so the peer only received later lines. Fixed paste op aggregation to preserve all batches.
+- Dispatching `InputEvent('beforeinput')` still did not reach React's `onBeforeInput` path in jsdom. Added an `onInput` fallback for insertText and switched RTL typing to dispatch `InputEvent('input')`. Browser editing still uses `beforeinput` to prevent default DOM mutation first.
+- Testing Library coverage now exercises rendering two editors, typing and online sync, offline queue/flush, Enter split, and newline paste.
+- User reported real browser typing duplicated characters in the source editor while the peer editor rendered correctly. Root cause was the jsdom `onInput` fallback also running after browser `beforeinput` had already applied the CRDT insert. Added a per-block guard so `onInput` is skipped immediately after a handled `beforeinput`.
+- Added an RTL regression that dispatches both `beforeinput` and `input` for one character and verifies both editors render a single character.
+- Verification passed after the duplicate-input fix:
+  - `npm exec vitest -- examples/block-rich-text/src/App.test.tsx examples/block-rich-text/src/blockCommands.test.ts` passed with 13 tests.
+  - `../../node_modules/.bin/tsc -p tsconfig.json --noEmit` passed from `examples/block-rich-text`.
+  - `../react-crdt/node_modules/.bin/vite build` passed from `examples/block-rich-text`.
+- User reported duplication still happened in the browser. The remaining issue was likely stale browser-mutated DOM surviving inside React-managed `contenteditable` children. Changed `EditableBlock` to render formatted runs imperatively in a layout effect with `replaceChildren(...)`, and gated the `onInput` insert fallback to jsdom only. Production text insertion now goes through `beforeinput`; every CRDT render replaces the editable DOM with exactly the materialized runs.
+- Verification passed after the imperative contenteditable render fix:
+  - `npm exec vitest -- examples/block-rich-text/src/App.test.tsx examples/block-rich-text/src/blockCommands.test.ts` passed with 13 tests.
+  - `../../node_modules/.bin/tsc -p tsconfig.json --noEmit` passed from `examples/block-rich-text`.
+  - `../react-crdt/node_modules/.bin/vite build` passed from `examples/block-rich-text`.
+- User reported input stopped working after relying on React's synthetic `onBeforeInput`. Switched insertion to a native `beforeinput` listener registered on the editable element. Kept `onInput` only as the jsdom fallback. Added a regression proving native `beforeinput` alone inserts and syncs text.
+- Verification passed after the native `beforeinput` listener fix:
+  - `npm exec vitest -- examples/block-rich-text/src/App.test.tsx examples/block-rich-text/src/blockCommands.test.ts` passed with 14 tests.
+  - `../../node_modules/.bin/tsc -p tsconfig.json --noEmit` passed from `examples/block-rich-text`.
+  - `../react-crdt/node_modules/.bin/vite build` passed from `examples/block-rich-text`.
+- User reported Backspace's new selection needed to be shifted over. The command-level selection was already shifting left, so the likely issue was stale React selection state when the DOM caret moved without a captured selection event. Edit commands now read the live DOM selection synchronously before insert/delete/split/paste. Added regressions for ordinary Backspace caret restore and stale-selection Backspace.
+- Verification passed after the live-selection fix:
+  - `npm exec vitest -- examples/block-rich-text/src/App.test.tsx examples/block-rich-text/src/blockCommands.test.ts` passed with 16 tests.
+  - `../../node_modules/.bin/tsc -p tsconfig.json --noEmit` passed from `examples/block-rich-text`.
+  - `../react-crdt/node_modules/.bin/vite build` passed from `examples/block-rich-text`.
+- User reported Backspace still restored incorrectly: at the end it jumped to start, and in the middle it jumped forward. A tighter regression exposed the real mapping bug: `readSelectionFromDom` treated a caret whose focus node was the block element itself as offset `0`, ignoring the DOM child offset. This happened after restoring end-of-text carets to the editable element boundary. Fixed block-element selection reading by summing grapheme lengths of child nodes before `focusOffset`.
+- Verification passed after the block-element caret offset fix:
+  - `npm exec vitest -- examples/block-rich-text/src/App.test.tsx examples/block-rich-text/src/blockCommands.test.ts` passed with 17 tests.
+  - `../../node_modules/.bin/tsc -p tsconfig.json --noEmit` passed from `examples/block-rich-text`.
+  - `../react-crdt/node_modules/.bin/vite build` passed from `examples/block-rich-text`.
+- User correctly pushed back that the middle Backspace issue was logic, not timing. Removed the delayed restore workaround.
+- Reworked caret rendering/restoration logic. First pass used one DOM child per grapheme, which fixed mapping but was too inefficient.
+- Replaced that with run-level spans again:
+  - formatted text renders one span per materialized run;
+  - caret restoration for collapsed selections is owned by the focused `EditableBlock` immediately after it performs `replaceChildren(...)`;
+  - parent editor no longer restores collapsed caret selections and only handles range selections;
+  - active block tracking uses a synchronous ref so the same event that edits text can restore into the right block;
+  - selection read/restore logic walks text nodes and translates grapheme offsets to UTF-16 offsets for run-level spans.
+- Verification passed after the caret logic fix:
+  - `npm exec vitest -- examples/block-rich-text/src/App.test.tsx examples/block-rich-text/src/blockCommands.test.ts` passed with 17 tests.
+  - `../../node_modules/.bin/tsc -p tsconfig.json --noEmit` passed from `examples/block-rich-text`.
+  - `../react-crdt/node_modules/.bin/vite build` passed from `examples/block-rich-text`.
+- User requested in-browser diagnostics. Added a capped debug log panel to each editor showing captured selections, command begin/end state, operation counts, and per-block text before/after commands.
+- Initial debug implementation logged from the caret-restore layout effect, which caused a render loop because log updates re-rendered materialized block runs and retriggered the effect. Removed effect-level restore logging; logs now come from user-triggered command and selection-capture paths only.
+- User reported `captureSelection` log spam while idle. Root cause was the `onSelect` listener on the contenteditable list: browsers can fire `select` for programmatic selection changes caused by our own restore path. Removed `onSelect`; command handlers already read live DOM selection synchronously, and mouse/key capture remains for explicit user interactions.
+- Verification passed after debug logging:
+  - `npm exec vitest -- examples/block-rich-text/src/App.test.tsx examples/block-rich-text/src/blockCommands.test.ts` passed with 19 tests.
+  - `../../node_modules/.bin/tsc -p tsconfig.json --noEmit` passed from `examples/block-rich-text`.
+  - `../react-crdt/node_modules/.bin/vite build` passed from `examples/block-rich-text`.
+- Audited the Backspace diagnostics and caret-restoration code after removing `onSelect`.
+- Removed the remaining restore-effect debug log; it was not tied to explicit user input and could make the browser log look noisy while idle.
+- Removed the extra React focused-block state. The caret restore path now uses only a synchronous active-block ref, because the value is needed for DOM ownership rather than rendering.
+- Kept the block-local caret restore after `replaceChildren(...)`. This is not a timing workaround: after imperative contenteditable rendering, the active block is the component that owns collapsed-caret restoration. Removing it caused live DOM selection reads to fall back to offset `0`, which reversed typed text in tests.
+- Current debug logs are limited to command begin/end and explicit mouse/key selection capture. `onSelect` remains removed.
+- Verification passed after the cleanup:
+  - `npm exec vitest -- examples/block-rich-text/src/App.test.tsx examples/block-rich-text/src/blockCommands.test.ts` passed with 19 tests.
+  - `../../node_modules/.bin/tsc -p tsconfig.json --noEmit` passed from `examples/block-rich-text`; the shell printed `Error connecting to agent: Operation not permitted`, but the command exited `0`.
+  - `../react-crdt/node_modules/.bin/vite build` passed from `examples/block-rich-text`.
+- User reported selecting a range in the right editor could cause the left editor to capture focus/selection. Root cause was that range restoration was guarded only by `document.activeElement`, which can be stale while the user starts selecting in the other editor.
+- Added explicit active-editor tracking at the app/editor boundary. Pointer/focus activity marks the owning editor active, and range restoration is now allowed only for that editor.
+- Removed the old activeElement containment dependency for range restoration. With active-editor ownership in place, the active editor may restore its own range even if the browser has not updated `document.activeElement` yet, while inactive editors cannot write to the global DOM selection.
+- Added a regression where the left editor has a stored range, the user edits a selected range in the right editor, and synced peer updates make the left editor re-render. The selection remains owned by the right editor.
+- Verification passed after the active-editor selection fix:
+  - `npm exec vitest -- examples/block-rich-text/src/App.test.tsx examples/block-rich-text/src/blockCommands.test.ts` passed with 20 tests.
+  - `../../node_modules/.bin/tsc -p tsconfig.json --noEmit` passed from `examples/block-rich-text`; the shell printed `Error connecting to agent: Operation not permitted`, but the command exited `0`.
+  - `../react-crdt/node_modules/.bin/vite build` passed from `examples/block-rich-text`.
+- User asked whether any focus stealing is needed. Removed editor-level range restoration entirely; stored range selections are still captured for commands, but the app no longer replays them into `window.getSelection()`.
+- Removed the unused `restoreSelectionToDom` helper as well, so there is no remaining range-replay API in the example code.
+- Removed the active-editor tracking that had been added to guard range restoration, since there is no longer any range restoration to guard.
+- Found the remaining selection disruption: selection-only state updates caused `EditableBlock` to call `replaceChildren(...)` even when text/marks were unchanged, destroying the browser's live range. Added a rendered-runs signature so the editable DOM is only rewritten when materialized text or marks actually change.
+- Kept only the block-local collapsed-caret restore after a real content rewrite. This is still needed for typed/deleted text after the app replaces the active block's DOM.
+- Tightened that caret restore so it only runs when the same editable element is `document.activeElement`; stale active-block refs from another editor can no longer restore a peer editor's caret during remote updates.
+- Verification passed after removing range focus restoration:
+  - `npm exec vitest -- examples/block-rich-text/src/App.test.tsx examples/block-rich-text/src/blockCommands.test.ts` passed with 20 tests.
+  - `../../node_modules/.bin/tsc -p tsconfig.json --noEmit` passed from `examples/block-rich-text`; the shell printed `Error connecting to agent: Operation not permitted`, but the command exited `0`.
+  - `../react-crdt/node_modules/.bin/vite build` passed from `examples/block-rich-text`.
+- User reported that splitting a block should place the cursor at the start of the new block. Added a Testing Library regression that failed because DOM selection remained in the old block after Enter.
+- The split command already returned `caret(newBlockId, 0)`; the DOM restore path did not follow command results across block boundaries. Replaced the persistent active-block restore ref with a one-shot pending local caret restore ref set from each local command result.
+- The one-shot restore focuses/restores only the block named by the local command result, then clears itself. This lets Enter move focus to the newly-created block without allowing remote peer updates or stale refs to steal focus later.
+- Verification passed after the split caret fix:
+  - `npm exec vitest -- examples/block-rich-text/src/App.test.tsx examples/block-rich-text/src/blockCommands.test.ts` passed with 21 tests.
+  - `../../node_modules/.bin/tsc -p tsconfig.json --noEmit` passed from `examples/block-rich-text`; the shell printed `Error connecting to agent: Operation not permitted`, but the command exited `0`.
+  - `../react-crdt/node_modules/.bin/vite build` passed from `examples/block-rich-text`.
+- User reported that selecting text and clicking Bold collapsed the caret to the start of the line. Added a Testing Library regression that failed with DOM selection offsets `{anchor: 0, focus: 0}` after Bold instead of the selected `{anchor: 1, focus: 3}` range.
+- Implemented a one-shot local range restore for command results that return a range selection, currently used by toolbar mark commands. It is separate from the one-shot caret restore and is guarded by the editor root still containing `document.activeElement`, so it does not become a general range-replay/focus-stealing effect.
+- Reintroduced `restoreSelectionToDom` only for this local pending-range restore path.
+- Verification passed after the Bold range restore fix:
+  - `npm exec vitest -- examples/block-rich-text/src/App.test.tsx examples/block-rich-text/src/blockCommands.test.ts` passed with 22 tests.
+  - `../../node_modules/.bin/tsc -p tsconfig.json --noEmit` passed from `examples/block-rich-text`; the shell printed `Error connecting to agent: Operation not permitted`, but the command exited `0`.
+  - `../react-crdt/node_modules/.bin/vite build` passed from `examples/block-rich-text`.
+- User reported that Cmd+B did not bold the first selected range in a newly-created block, while clicking the Bold button worked. Added a Testing Library regression for the keyboard shortcut path.
+- Root cause: the example had no explicit Cmd/Ctrl+B or Cmd/Ctrl+I handling, so the keyboard shortcut never entered the CRDT command path. Added editable-block shortcut handling that prevents default native contenteditable formatting and calls the same `toggleMark` commands used by the toolbar.
+- Verification passed after the keyboard shortcut formatting fix:
+  - `npm exec vitest -- examples/block-rich-text/src/App.test.tsx examples/block-rich-text/src/blockCommands.test.ts` passed with 23 tests.
+  - `../../node_modules/.bin/tsc -p tsconfig.json --noEmit` passed from `examples/block-rich-text`; the shell printed `Error connecting to agent: Operation not permitted`, but the command exited `0`.
+  - `../react-crdt/node_modules/.bin/vite build` passed from `examples/block-rich-text`.

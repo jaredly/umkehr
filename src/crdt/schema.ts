@@ -1,4 +1,5 @@
 import type {PathSegment} from '../types.js';
+import type {LeafPluginDescriptor} from './plugins.js';
 import type {CrdtPathSegment, CrdtSchemaContext, Schema} from './types.js';
 
 export function schemaAtCrdtPath(ctx: CrdtSchemaContext, path: CrdtPathSegment[]) {
@@ -56,8 +57,67 @@ export function isArraySchema(schema: Schema): schema is Extract<Schema, {type: 
     return (schema as {type?: string}).type === 'array';
 }
 
-export function isRichTextSchema(schema: Schema) {
-    return (schema as Record<string, unknown>)['x-umkehr-crdt'] === 'rich-text';
+export function leafPluginDescriptorForSchema(schema: Schema): LeafPluginDescriptor | null {
+    const record = schema as Record<string, unknown>;
+    const id = record['x-umkehr-leaf-crdt'];
+    const version = record['x-umkehr-leaf-crdt-version'];
+    if (id === undefined && version === undefined) return null;
+    if (typeof id !== 'string' || id.length === 0) {
+        throw new Error('Invalid leaf CRDT schema marker: x-umkehr-leaf-crdt must be a non-empty string.');
+    }
+    if (typeof version !== 'number' || !Number.isInteger(version) || version < 1) {
+        throw new Error('Invalid leaf CRDT schema marker: x-umkehr-leaf-crdt-version must be a positive integer.');
+    }
+    return {id, version};
+}
+
+export function isLeafSchema(schema: Schema) {
+    return leafPluginDescriptorForSchema(schema) !== null;
+}
+
+export function collectRequiredLeafPlugins(root: Schema, components: CrdtSchemaContext['components']) {
+    const found = new Map<string, LeafPluginDescriptor>();
+    const seenRefs = new Set<string>();
+    const visit = (schema: Schema | undefined) => {
+        if (!schema) return;
+        const ref = (schema as {$ref?: string}).$ref;
+        if (ref) {
+            if (seenRefs.has(ref)) return;
+            seenRefs.add(ref);
+            const name = ref.split('/').at(-1);
+            const resolved = name ? (components.schemas?.[name] as Schema | undefined) : undefined;
+            if (resolved) visit(resolved);
+            return;
+        }
+
+        const descriptor = leafPluginDescriptorForSchema(schema);
+        if (descriptor) {
+            const existing = found.get(descriptor.id);
+            if (existing && existing.version !== descriptor.version) {
+                throw new Error(
+                    `Schema requires leaf CRDT plugin "${descriptor.id}" at versions ${existing.version} and ${descriptor.version}.`,
+                );
+            }
+            found.set(descriptor.id, descriptor);
+        }
+
+        const properties = (schema as {properties?: Record<string, Schema>}).properties;
+        if (properties) Object.values(properties).forEach(visit);
+        const additional = (schema as {additionalProperties?: true | Schema}).additionalProperties;
+        if (additional && additional !== true) visit(additional);
+        const items = (schema as {items?: Schema}).items;
+        if (items) visit(items);
+        const prefixItems = (schema as {prefixItems?: Schema[]}).prefixItems;
+        if (prefixItems) prefixItems.forEach(visit);
+        const oneOf = (schema as {oneOf?: Schema[]}).oneOf;
+        if (oneOf) oneOf.forEach(visit);
+        const anyOf = (schema as {anyOf?: Schema[]}).anyOf;
+        if (anyOf) anyOf.forEach(visit);
+        const allOf = (schema as {allOf?: Schema[]}).allOf;
+        if (allOf) allOf.forEach(visit);
+    };
+    visit(root);
+    return Array.from(found.values()).sort((a, b) => a.id.localeCompare(b.id) || a.version - b.version);
 }
 
 export function arrayItemSchema(schema: Schema): Schema {

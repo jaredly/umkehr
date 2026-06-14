@@ -566,7 +566,7 @@ export function validateCrdtUpdatesForApp<TState>(
     app: AppDefinition<TState>,
 ): CrdtUpdate[] {
     if (!Array.isArray(updates)) throw new Error('Imported CRDT updates must be an array.');
-    const validator = createCrdtUpdateValidator(app.schema);
+    const validator = createCrdtUpdateValidator(app.schema, {leafPlugins: app.leafPlugins});
     return updates.map((update, index) => {
         const result = validator.validate(update);
         if (!result.success) throw new Error(`Imported CRDT update ${index} is invalid.`);

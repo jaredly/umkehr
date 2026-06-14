@@ -582,7 +582,11 @@ export function useServerSync<TState>({
         });
 
         socket.addEventListener('message', (event) => {
-            const parsed = parseServerMessage<TState>(safeJsonParse(event.data), {docId, schema});
+            const parsed = parseServerMessage<TState>(safeJsonParse(event.data), {
+                docId,
+                schema,
+                leafPlugins: app.leafPlugins,
+            });
             if (!parsed) {
                 stateStore.setSnapshot({
                     kind: 'error',

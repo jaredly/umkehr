@@ -1,0 +1,1 @@
+Our plim integration has an issue. Doing a concurrent (reorder block) with (edit block text) loses the text edit, which makes me think we're doing a destructive reorder (remove + add a block w/ the same text) instead of the proper thing.

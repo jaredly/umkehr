@@ -1,0 +1,61 @@
+# Implementation Log: Plim Side-by-Side CRDT Example
+
+## 2026-06-13
+
+- Started implementation from `plan.md`.
+- Confirmed `App.tsx` is still single-pane and uses scripted `Remote Insert` / `Remote Split` controls.
+- Confirmed `App.test.tsx` still asserts the old remote-button behavior and will need pane-scoped updates.
+- Phase 1: added `examples/plim-block-crdt/src/plimDemoRuntime.ts` with left/right replicas, per-replica timestamps, online state, queued op batches, and queue flushing.
+- Phase 2/3: rewrote `App.tsx` around two reusable Plim panes with independent drivers/handles and parent-managed local transaction replication.
+- Phase 4: replaced the single-editor/sidebar CSS with a two-column editor grid and collapsed per-side debug panels below.
+- Phase 5: replaced app tests with pane-scoped coverage for initial render, bidirectional text sync, offline queue flushing, slash menu behavior, mark sync, selection retention, and split behavior.
+- Phase 6: ran `npm test` in `examples/plim-block-crdt`; passed with 2 test files and 20 tests.
+- Phase 6: ran `npm run build` in `examples/plim-block-crdt`; TypeScript and Vite production build passed.
+- Issue noted: both npm commands printed `Error connecting to agent: Operation not permitted` before running. It did not fail either command, so no workaround was needed.
+- Bug encountered after manual use: when both panes were online, typing in the left pane moved the browser selection/focus to the right pane after replication.
+- Fix: Plim view updates reapply model selection globally, so inactive pane `setState` calls now snapshot and restore the current focused element and DOM selection. Added a regression test for left-to-right online sync preserving focus in the left pane.
+- Re-ran `npm test -- src/App.test.tsx`; passed with 10 tests.
+- Re-ran full `npm test`; passed with 2 test files and 21 tests.
+- Re-ran `npm run build`; TypeScript and Vite production build passed.
+- Added Plim's built-in `bold`, `italic`, `code`, and `link` mark descriptors to each pane's driver so the built-in floating formatting toolbar has items to render.
+- Added a regression test that selects text, verifies the floating toolbar buttons appear, and applies `code` through the toolbar with CRDT sync to the peer pane.
+- Test note: jsdom needed the editor root focused before setting the DOM selection; otherwise Plim's toolbar visibility check treated focus as outside the editor and kept the toolbar hidden.
+- Re-ran `npm test -- src/App.test.tsx`; passed with 11 tests.
+- Re-ran full `npm test`; passed with 2 test files and 22 tests.
+- Re-ran `npm run build`; TypeScript and Vite production build passed.
+- Added CRDT-aware undo/redo stacks per replica. Local edits record their pre-edit CRDT state and op batch; undo/redo uses `planUndoOps(...)` to emit normal CRDT ops so the result syncs or queues like any other local edit.
+- Added per-pane Undo/Redo buttons and keyboard shortcuts: Ctrl/Mod+Z for undo, Ctrl/Mod+Shift+Z and Ctrl+Y for redo.
+- Added tests for button undo/redo syncing to the peer, keyboard undo in the active pane, and queued undo while the peer is offline.
+- Test note: Plim's shortcut matcher treats `Mod` as Ctrl in jsdom because the environment is not Mac-like, so the keyboard undo regression fires Ctrl+Z.
+- Re-ran `npm test -- src/App.test.tsx`; passed with 14 tests.
+- Re-ran full `npm test`; passed with 2 test files and 25 tests.
+- Re-ran `npm run build`; TypeScript and Vite production build passed.
+- Bug encountered: undoing a split restored the document but left the retained selection pointing at the split-created block, which could no longer resolve after undo and fell back to document start.
+- Fix: undo history entries now store both before-edit and after-edit retained selections. Undo rematerializes the source adapter with the before selection; redo rematerializes with the after selection.
+- Added a regression test for split undo restoring the caret to offset 5 in the original block instead of resetting to offset 0.
+- Re-ran `npm test -- src/App.test.tsx`; passed with 15 tests.
+- Re-ran full `npm test`; passed with 2 test files and 26 tests.
+- Re-ran `npm run build`; TypeScript and Vite production build passed.
+- Bug encountered: undoing a join could still lose selection because the undo planner may recreate the joined-away block with a fresh id, so retained selection anchors alone cannot resolve the pre-join right-block caret.
+- Fix: undo entries now also store before/after Plim path-offset selections. Undo/redo still prefer CRDT rematerialization, but then restore a valid stored Plim selection and re-retain it against the new CRDT state. This covers fresh block ids from join undo.
+- Added a regression test for undoing a join after splitting a heading. Test note: Plim's first Backspace on a split heading converts the right fragment to paragraph; a second Backspace performs the join, so the test mirrors that behavior.
+- Re-ran `npm test -- src/App.test.tsx`; passed with 16 tests.
+- Re-ran full `npm test`; passed with 2 test files and 27 tests.
+- Re-ran `npm run build`; TypeScript and Vite production build passed.
+- Bug encountered: pressing Enter in an empty block created another block but left the selection on the old block. Root cause was `splitBlockOps` treating offset `0` as "insert before" even when the block has no visible characters; for an empty block, offset `0` is also end-of-block and should create the split block after the current block.
+- Fix: changed `splitBlockOps` to check `offset === chars.length` before `offset === 0`, so empty-block splits use the end-of-block path. Added a core CRDT regression for empty block split ordering and an app regression for Enter in an empty Plim block moving selection to the new block.
+- Re-ran `npm test -- src/plimBlockCrdtAdapter.test.ts src/App.test.tsx`; passed with 2 test files and 29 tests.
+- Re-ran root `npm test -- src/block-crdt/index.test.ts`; passed with 76 tests.
+- Re-ran `npm test` in `examples/plim-block-crdt`; passed with 2 test files and 29 tests.
+- Re-ran `npm run build` in `examples/plim-block-crdt`; TypeScript and Vite production build passed.
+- Bug encountered: Backspace from a newly-created empty paragraph did not join. Plim emitted `removeBlock` instead of `joinBackward` because CRDT materialization stripped empty `text` arrays, making empty editable paragraphs look atomic (`text === undefined`) to Plim.
+- Fix: empty editable blocks now materialize as `text: []`; known atomic block types still materialize with no `text`. The join translator also now resolves the previous block with Plim's `prevBlockPath(...)`, matching the transaction semantics.
+- Test note: the empty-block tests now find DOM content by block id because `[data-block-content]` includes nested child blocks and DOM-order indexing can target the fixture todo child.
+- Re-ran `npm test -- src/plimBlockCrdtAdapter.test.ts src/App.test.tsx`; passed with 2 test files and 30 tests.
+- Re-ran `npm test` in `examples/plim-block-crdt`; passed with 2 test files and 30 tests.
+- Re-ran `npm run build` in `examples/plim-block-crdt`; TypeScript and Vite production build passed.
+- Bug encountered: undo after a Plim markdown list shortcut could get stuck on `undo skipped: no effect`. Plim commits the typed marker chars first, then commits an input-rule transaction that deletes those chars and changes block metadata. Undoing the input-rule transaction restores the deleted chars with fresh CRDT ids, leaving the earlier char-insert history entries pointed at tombstoned ids.
+- Fix: after a successful undo that restores deleted chars, the demo runtime retargets older char-insert history entries from the deleted char ids to the fresh restored ids. This lets the next undo remove the visible restored marker text instead of becoming a no-op.
+- Added a regression for typing `- ` into an empty block, undoing the list conversion, then undoing the restored marker text.
+- Re-ran `npm test` in `examples/plim-block-crdt`; passed with 2 test files and 31 tests.
+- Re-ran `npm run build` in `examples/plim-block-crdt`; TypeScript and Vite production build passed.

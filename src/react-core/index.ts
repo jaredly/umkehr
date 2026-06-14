@@ -5,6 +5,7 @@ import {type EqualFn} from '../internal.js';
 import {pathToString, type PatchBuilderInternal} from '../types.js';
 import {useLatest} from '../react/useLatest.js';
 import type {Context} from '../framework-core/index.js';
+import type {LeafBuilderExtensionAny} from '../builderExtensions.js';
 import type {Status, StatusQuery, StatusStore} from '../statuses.js';
 
 export {
@@ -32,29 +33,45 @@ export {
 export const useResettingState = <T>(f: () => T, r: unknown[]) => {
     const [_t, setT] = useState(0);
     const v = useMemo(() => ({current: f()}), r);
-    const setV = useCallback((nv: T) => {
-        if (!equal(v.current, nv)) {
-            v.current = nv;
-            setT((t) => t + 1);
-        }
-    }, [v]);
+    const setV = useCallback(
+        (nv: T) => {
+            if (!equal(v.current, nv)) {
+                v.current = nv;
+                setT((t) => t + 1);
+            }
+        },
+        [v],
+    );
     return [v.current, setV] as const;
 };
 
-export const useValue: (<Current, Return, Tag extends PropertyKey>(
-    node: PatchBuilderInternal<unknown, Current, Tag, unknown, Context>,
+export function useValue<
+    Current,
+    Return,
+    Tag extends PropertyKey,
+    Extensions extends readonly LeafBuilderExtensionAny[] = [],
+>(
+    node: PatchBuilderInternal<unknown, Current, Tag, unknown, Context, Extensions>,
     mod: (v: Current) => Return,
     exact?: boolean,
     equalFn?: EqualFn,
-) => Return) &
-    (<Current, Tag extends PropertyKey>(
-        node: PatchBuilderInternal<unknown, Current, Tag, unknown, Context>,
-    ) => Current) = <Current, Return, Tag extends PropertyKey>(
-    node: PatchBuilderInternal<unknown, Current, Tag, unknown, Context>,
+): Return;
+export function useValue<
+    Current,
+    Tag extends PropertyKey,
+    Extensions extends readonly LeafBuilderExtensionAny[] = [],
+>(node: PatchBuilderInternal<unknown, Current, Tag, unknown, Context, Extensions>): Current;
+export function useValue<
+    Current,
+    Return,
+    Tag extends PropertyKey,
+    Extensions extends readonly LeafBuilderExtensionAny[] = [],
+>(
+    node: PatchBuilderInternal<unknown, Current, Tag, unknown, Context, Extensions>,
     mod: (v: Current) => Return = (v) => v as any,
     exact = true,
     equalFn: EqualFn = equal,
-) => {
+) {
     const path = getPath(node);
     const extra = getExtra(node);
     const [v, setV] = useResettingState(() => mod(extra.getForPath<Current>(path)), [path]);
@@ -72,10 +89,14 @@ export const useValue: (<Current, Return, Tag extends PropertyKey>(
         [extra, path, lv, lmod, exact, equalFn, setV],
     );
     return v;
-};
+}
 
-export function useStatusesFromStore<Current, Tag extends PropertyKey>(
-    node: PatchBuilderInternal<unknown, Current, Tag, unknown, Context>,
+export function useStatusesFromStore<
+    Current,
+    Tag extends PropertyKey,
+    Extensions extends readonly LeafBuilderExtensionAny[] = [],
+>(
+    node: PatchBuilderInternal<unknown, Current, Tag, unknown, Context, Extensions>,
     store: StatusStore,
     query?: StatusQuery,
 ): Status[] {
@@ -98,8 +119,12 @@ export function useStatusesFromStore<Current, Tag extends PropertyKey>(
     return statuses;
 }
 
-export function useStatuses<Current, Tag extends PropertyKey>(
-    node: PatchBuilderInternal<unknown, Current, Tag, unknown, Context>,
+export function useStatuses<
+    Current,
+    Tag extends PropertyKey,
+    Extensions extends readonly LeafBuilderExtensionAny[] = [],
+>(
+    node: PatchBuilderInternal<unknown, Current, Tag, unknown, Context, Extensions>,
     query?: StatusQuery,
 ): Status[] {
     const extra = getExtra(node);

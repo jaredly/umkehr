@@ -1,0 +1,71 @@
+# Implementation Log: Block Drag Anywhere
+
+## 2026-06-08
+
+- Started implementation from `plan.md`.
+- Noted pre-existing worktree changes in `examples/block-rich-text/src/blockCommands.test.ts` and other CRDT/editor files. I am preserving them and only editing the files needed for this task.
+- Phase 1 in progress: generalizing `moveBlock` from root-only before/after moves to parent-aware before/after/child moves.
+- First focused command test run exposed incorrect test assertions that read `CachedState.blocks` instead of `CachedState.state.blocks`; fixed the assertions.
+- Phase 1 command model implemented:
+  - `MoveTarget` now supports `before`, `after`, and `child` targets.
+  - `moveBlock` computes parent-aware order paths and rejects self/descendant/no-op moves.
+  - Added command tests for root moves, child insertion, nested moves, subtree moves, and invalid moves.
+  - `npm exec vitest -- run examples/block-rich-text/src/blockCommands.test.ts` passes.
+- Phase 2/3 hook and UI wiring implemented:
+  - `useBlockReorder` now accepts full visible outline items and returns command targets plus indicator metadata.
+  - Bottom-row drops resolve after the hovered block's whole subtree.
+  - Child drops require rightward horizontal intent and use vertical position for start/end.
+  - `App.tsx` enables all visible drag handles, keeps descendants dimmed, and preserves selection after drop.
+  - `style.css` draws depth-aware indicators without shifting layout.
+  - `npm --prefix examples/block-rich-text run build` passes.
+- Phase 4 deleted/non-visible parent regression added:
+  - Initial fixture used a root grandparent, which correctly rendered spliced children at root depth; adjusted it to put the deleted parent under a visible block.
+  - Added tests for reordering visibly spliced children and moving one out to root.
+  - `npm exec vitest -- run examples/block-rich-text/src/blockCommands.test.ts` passes with 29 tests.
+- Final verification:
+  - `npm exec vitest -- run examples/block-rich-text/src/blockCommands.test.ts examples/block-rich-text/src/retainedSelection.test.ts examples/block-rich-text/src/App.test.tsx` passes with 86 tests.
+  - `npm --prefix examples/block-rich-text run build` passes.
+  - Starting the Vite server inside the sandbox failed with `listen EPERM` on `127.0.0.1:5174`; reran with approval and the server started successfully.
+  - Verified `curl -I http://127.0.0.1:5174/` returns HTTP 200.
+- Follow-up note:
+  - No full browser drag automation was added; the highest-risk behavior is covered in command tests, while pointer geometry remains manually verifiable in the running Vite app.
+- Follow-up fix after manual review:
+  - Added the missing regression for dropping an outside block into the middle of visible children whose logical parent is a deleted block.
+  - Reproduced the bug in `moveBlock`: sibling `before/after` targets used the visible parent, which appended the moved block after the deleted parent's whole subtree instead of interleaving it among the deleted parent's logical children.
+  - Fixed sibling target resolution to use `materializedBlockParent(targetBlockId)` for `before/after` moves. This keeps drops between spliced children logically under the deleted/joined parent while rendering them under the visible grandparent.
+  - Updated the joined-parent regression expectations to assert the raw/logical parent remains the joined block.
+  - `npm exec vitest -- run examples/block-rich-text/src/blockCommands.test.ts examples/block-rich-text/src/retainedSelection.test.ts examples/block-rich-text/src/App.test.tsx` passes with 87 tests.
+  - `npm --prefix examples/block-rich-text run build` passes.
+- Tab follow-up:
+  - Removed the offset-zero requirement from `Tab` / `Shift+Tab` handling, so caret position within the block no longer matters.
+  - Added an app regression test that indents and unindents the second block with the caret at offset 2.
+  - `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx` passes with 49 tests.
+  - `npm --prefix examples/block-rich-text run build` passes.
+- Selection-preserving Tab follow-up:
+  - `indentBlock` and `unindentBlock` still return `caret(blockId, 0)` for command-level callers, but the UI no longer replaces the active retained selection with that command selection.
+  - Extended the Tab app regression to assert the DOM caret remains at offset 2 after both indent and unindent.
+  - `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx` passes with 49 tests.
+  - `npm --prefix examples/block-rich-text run build` passes.
+- Multi-select/range Tab follow-up:
+  - Added `indentSelections` and `unindentSelections` multi-selection commands.
+  - Selected blocks are derived from every caret and from every block touched by a range selection. Descendants of already selected blocks are ignored so parent subtrees move as a unit.
+  - Adjacent selected sibling runs are moved together, avoiding the old repeated-`indentBlock` cascade where `b,c` could become `b > c`.
+  - Updated the Tab handler to always delegate to the editor-root live selection path instead of reading selection from only the event block; this fixes cross-block ranges.
+  - Added command tests for multi-caret indent, cross-block range indent, and multi-caret unindent.
+  - Added app tests for multi-caret Tab/Shift+Tab and range-spanning Tab.
+  - `npm exec vitest -- run examples/block-rich-text/src/blockCommands.test.ts examples/block-rich-text/src/retainedSelection.test.ts examples/block-rich-text/src/multiSelectionCommands.test.ts examples/block-rich-text/src/App.test.tsx` passes with 108 tests.
+  - `npm --prefix examples/block-rich-text run build` passes.
+- Multi-cursor navigation follow-up:
+  - Added horizontal movement units for character, word, and block-boundary movement.
+  - `Option+ArrowLeft/Right` now moves every cursor by word.
+  - `Cmd/Ctrl+ArrowLeft/Right`, `Home`, and `End` now move every cursor to the current block boundary.
+  - Shift with these keys extends every selection through the same multi-selection path.
+  - Added command tests for word and block-boundary multi-cursor movement.
+  - Added app tests for `Option+ArrowRight`, `Cmd+ArrowLeft`, and `End` with multiple cursors.
+  - `npm exec vitest -- run examples/block-rich-text/src/blockCommands.test.ts examples/block-rich-text/src/retainedSelection.test.ts examples/block-rich-text/src/multiSelectionCommands.test.ts examples/block-rich-text/src/App.test.tsx` passes with 113 tests.
+  - `npm --prefix examples/block-rich-text run build` passes.
+- Retained cursor visual follow-up:
+  - Changed retained caret styling from an inline-block border with negative margin to a layout-neutral inline marker with an absolutely positioned pseudo-element.
+  - This avoids the retained cursor contributing inline metrics at word boundaries, which could visibly shift text/kerning by a pixel.
+  - `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx` passes with 54 tests.
+  - `npm --prefix examples/block-rich-text run build` passes.

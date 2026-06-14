@@ -2,8 +2,6 @@ import {compareTimestamps, newer} from './clock.js';
 import {materialize} from './materialize.js';
 import {buildMeta, versionOf} from './metadata.js';
 import {getChild, getMetaAtPath, normalPathForCrdtPath} from './path.js';
-import {applyRichTextOperation} from '../peritext/apply.js';
-import {maxOpCounterAfterOperation} from '../peritext/ids.js';
 import {arrayItemSchema, resolveRef, schemaAtCrdtPath} from './schema.js';
 import {checkParent} from './traversal.js';
 import type {
@@ -13,9 +11,9 @@ import type {
     CrdtPathSegment,
     CrdtSetOrderUpdate,
     CrdtUpdate,
+    HlcTimestamp,
     PendingUpdate,
 } from './types.js';
-import type {RichTextState} from '../peritext/types.js';
 import type {Path} from '../types.js';
 
 type WalkResult =
@@ -62,7 +60,7 @@ export function applyCrdtUpdate<T>(doc: CrdtDocument<T>, update: CrdtUpdate): Cr
     });
     return {
         ...retried,
-        state: materialize(retried.meta, retried.state) as T,
+        state: materialize(retried.meta, retried.state, retried.schema) as T,
     };
 }
 
@@ -76,7 +74,7 @@ function applyOne<T>(
 ): ApplyResult<T> {
     if (update.op === 'insert') return applyInsert(doc, update);
     if (update.op === 'setOrder') return applySetOrder(doc, update);
-    if (update.op === 'richText') return applyRichText(doc, update);
+    if (update.op === 'leaf') return applyLeaf(doc, update);
     if (!update.path.length) {
         if (update.op === 'delete') {
             const version = versionOf(doc.meta);
@@ -151,30 +149,37 @@ function retryPending<T>(doc: CrdtDocument<T>) {
     return current;
 }
 
-function applyRichText<T>(
+function applyLeaf<T>(
     doc: CrdtDocument<T>,
-    update: Extract<CrdtUpdate, {op: 'richText'}>,
+    update: Extract<CrdtUpdate, {op: 'leaf'}>,
 ): ApplyResult<T> {
     const meta = getMetaAtPath(doc.meta, update.path);
     if (!meta) return pendingResult(pendingReason(doc, update));
     if (meta.kind === 'tombstone') return {status: 'discarded'};
-    if (meta.kind !== 'richText') return {status: 'discarded'};
+    if (meta.kind !== 'leaf') return {status: 'discarded'};
+    if (meta.plugin !== update.plugin) return {status: 'discarded'};
+    const plugin = doc.schema.leafPlugins[update.plugin];
+    if (!plugin) return {status: 'discarded'};
     const path = normalPathForCrdtPath(doc, update.path);
     if (!path) return pendingResult('missing-parent');
-    const state = richTextStateAtPath(doc.state, path);
-    const next = applyRichTextOperation(state, update.change);
+    const state = valueAtPath(doc.state, path);
+    if (!plugin.isValue(state)) return {status: 'discarded'};
+    const next = plugin.applyOperation({
+        value: state,
+        meta,
+        operation: update.change,
+        ts: update.ts,
+        context: {sessionId: sessionIdFromTimestamp(update.ts)},
+    });
     const cloned = clonePathToTarget(doc.meta, update.path);
     if (cloned.status === 'pending') return pendingResult(cloned.reason);
     if (cloned.status === 'discard') return {status: 'discarded'};
-    if (cloned.target.kind !== 'richText') return {status: 'discarded'};
-    cloned.target.maxOpCounter = maxOpCounterAfterOperation(
-        cloned.target.maxOpCounter,
-        update.change,
-    );
+    if (cloned.target.kind !== 'leaf') return {status: 'discarded'};
+    cloned.target.data = next.meta;
     return {
         status: 'applied',
         meta: cloned.root,
-        state: setValueAtPath(doc.state, path, next) as T,
+        state: setValueAtPath(doc.state, path, next.value) as T,
     };
 }
 
@@ -311,7 +316,7 @@ function cloneMetaNode(meta: CrdtMeta): CrdtMeta {
             return {...meta, fields: {...meta.fields}};
         case 'primitive':
         case 'tombstone':
-        case 'richText':
+        case 'leaf':
             return {...meta};
     }
 }
@@ -399,14 +404,6 @@ function setChild(parent: CrdtMeta, segment: CrdtPathSegment, value: CrdtMeta) {
     }
 }
 
-function richTextStateAtPath(root: unknown, path: Path): RichTextState {
-    const value = valueAtPath(root, path);
-    if (!isRichTextState(value)) {
-        throw new Error('Cannot apply rich text update: state value is not rich-text data.');
-    }
-    return value;
-}
-
 function valueAtPath(root: unknown, path: Path) {
     let current = root;
     for (const segment of path) {
@@ -432,14 +429,10 @@ function setValueAtPath(root: unknown, path: Path, value: unknown): unknown {
     return clone;
 }
 
-function isRichTextState(value: unknown): value is RichTextState {
-    return Boolean(value && typeof value === 'object' && Array.isArray((value as {chars?: unknown}).chars));
-}
-
 function pendingReason<T>(doc: CrdtDocument<T>, update: CrdtUpdate): PendingUpdate['reason'] {
     if (update.op === 'setOrder') return 'missing-parent';
     if (update.op === 'insert') return 'missing-parent';
-    if (update.op === 'richText') return getMetaAtPath(doc.meta, update.path) ? 'future-incarnation' : 'missing-parent';
+    if (update.op === 'leaf') return getMetaAtPath(doc.meta, update.path) ? 'future-incarnation' : 'missing-parent';
     const walked = walkToLeaf(doc.meta, update.path);
     return walked.status === 'pending' ? walked.reason : 'missing-parent';
 }
@@ -448,4 +441,9 @@ function updateTimestamp(update: CrdtUpdate) {
     if (update.op === 'insert') return update.ts;
     if (update.op !== 'setOrder') return update.ts;
     return Object.values(update.orders).sort((a, b) => compareTimestamps(b.ts, a.ts))[0]?.ts ?? '';
+}
+
+function sessionIdFromTimestamp(ts: HlcTimestamp) {
+    const [, , node] = ts.split(':');
+    return node || 'remote';
 }

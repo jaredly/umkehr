@@ -1,0 +1,2 @@
+in our src/block-crdt, concurrent move+join can create a cycle between two blocks, where both blocks get tombstoned and the contents just have pointers to each other.
+It would be really nice to architect things in such a way that block/join cycles don't happen. I have this vague idea in my mind about causal ancestry tracking (which we use for splits), that it might be leveraged to make the two joins conflict with each other explicitly, such that one would always win and the other always be skipped.

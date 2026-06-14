@@ -1,0 +1,1 @@
+In .tasks/04yqs-pluggable-leaf-crdts/implementation-log.md we punted on the "more general typed third-party builder extension API" as a future design task. It's time to figure this out so we're not hard-coding $text and $block anymore.

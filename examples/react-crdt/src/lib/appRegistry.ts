@@ -1,4 +1,5 @@
 import type {AppDefinition, CrdtRuntime, HistoryRuntime} from './crdtApp';
+import type {LeafBuilderExtensionAny} from 'umkehr';
 import {todoApp, todoCrdtRuntime, todoHistoryRuntime} from '../apps/todos/TodoApp';
 import type {TodoState} from '../apps/todos/model';
 import {
@@ -20,7 +21,13 @@ import {
     richNotesCrdtRuntime,
     richNotesHistoryRuntime,
 } from '../apps/rich-notes/RichNotesApp';
-import type {RichNotesState} from '../apps/rich-notes/model';
+import type {RichNotesBuilderExtensions, RichNotesState} from '../apps/rich-notes/model';
+import {
+    blockNotesApp,
+    blockNotesCrdtRuntime,
+    blockNotesHistoryRuntime,
+} from '../apps/block-notes/BlockNotesApp';
+import type {BlockNotesBuilderExtensions, BlockNotesState} from '../apps/block-notes/model';
 import {
     todoFixtureMigration,
     todoFixtureMigrationConfig,
@@ -31,24 +38,25 @@ import {
 import type {ServerSchemaConfig} from './server/schemaConfig';
 import type {ServerOldPendingChangesPolicy} from './server/types';
 import type {LocalFirstSchemaConfig} from './local-first/schemaConfig';
-import {
-    schemaFingerprint,
-    schemaFingerprintHash,
-} from './local-first/schemaFingerprint';
+import {schemaFingerprint, schemaFingerprintHash} from './local-first/schemaFingerprint';
 
-type RegisteredApp<TState = unknown> = {
+type RegisteredApp<TState = unknown, Extensions extends readonly LeafBuilderExtensionAny[] = []> = {
     routeId?: string;
-    app: AppDefinition<TState>;
-    crdt: CrdtRuntime<TState>;
+    app: AppDefinition<TState, never, Extensions>;
+    crdt: CrdtRuntime<TState, never, Extensions>;
     history: HistoryRuntime<TState>;
     serverSchemaConfig?: ServerSchemaConfig<TState>;
     localFirstSchemaConfig?: LocalFirstSchemaConfig<TState>;
     serverOldPendingChangesPolicy?: ServerOldPendingChangesPolicy;
 };
 
-type RegisteredEphemeralApp<TState, EphemeralData> = Omit<RegisteredApp<TState>, 'app' | 'crdt'> & {
-    app: AppDefinition<TState, EphemeralData>;
-    crdt: CrdtRuntime<TState, EphemeralData>;
+type RegisteredEphemeralApp<
+    TState,
+    EphemeralData,
+    Extensions extends readonly LeafBuilderExtensionAny[] = [],
+> = Omit<RegisteredApp<TState, Extensions>, 'app' | 'crdt'> & {
+    app: AppDefinition<TState, EphemeralData, Extensions>;
+    crdt: CrdtRuntime<TState, EphemeralData, Extensions>;
 };
 
 const todoMigrationServerSchemaConfig: ServerSchemaConfig<TodoState> = {
@@ -118,12 +126,19 @@ export const registeredApps = [
         history: richNotesHistoryRuntime,
         serverSchemaConfig: undefined,
     },
+    {
+        app: blockNotesApp,
+        crdt: blockNotesCrdtRuntime,
+        history: blockNotesHistoryRuntime,
+        serverSchemaConfig: undefined,
+    },
 ] satisfies [
     RegisteredApp<TodoState>,
     RegisteredApp<TodoFixtureStateV1>,
     RegisteredApp<TodoFixtureStateV3>,
     RegisteredEphemeralApp<WhiteboardState, WhiteboardEphemeralData>,
-    RegisteredApp<RichNotesState>,
+    RegisteredApp<RichNotesState, RichNotesBuilderExtensions>,
+    RegisteredApp<BlockNotesState, BlockNotesBuilderExtensions>,
 ];
 export type AppOption = {
     id: string;

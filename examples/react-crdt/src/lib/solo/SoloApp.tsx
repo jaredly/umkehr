@@ -54,7 +54,8 @@ export function SoloApp<TState, TAnnotations = never, EphemeralData = never>({
         createInitialHistory<TState, TAnnotations>(app),
     );
     const {Provider} = runtime;
-    const activeTitle = documents.find((document) => document.docId === activeDocId)?.title ?? activeDocId;
+    const activeTitle =
+        documents.find((document) => document.docId === activeDocId)?.title ?? activeDocId;
 
     const refreshDocuments = useCallback(() => {
         void listSoloDocumentSummaries().then(setDocuments);
@@ -62,15 +63,13 @@ export function SoloApp<TState, TAnnotations = never, EphemeralData = never>({
 
     useEffect(() => {
         let alive = true;
-        loadOrCreateSoloDocument<TState, TAnnotations>(
-            app,
-            activeDocId,
-            fingerprintHash,
-        ).then((document) => {
-            if (!alive) return;
-            setHistorySnapshot(document.history as any);
-            refreshDocuments();
-        });
+        loadOrCreateSoloDocument<TState, TAnnotations>(app, activeDocId, fingerprintHash).then(
+            (document) => {
+                if (!alive) return;
+                setHistorySnapshot(document.history as any);
+                refreshDocuments();
+            },
+        );
         return () => {
             alive = false;
         };
@@ -168,10 +167,7 @@ export function SoloApp<TState, TAnnotations = never, EphemeralData = never>({
         },
         [activeDocId, app.id, defaultDocId, switchDocument],
     );
-    const topBarControls = useMemo<TopBarControls>(
-        () => ({}),
-        [],
-    );
+    const topBarControls = useMemo<TopBarControls>(() => ({}), []);
 
     return (
         <Provider initial={historySnapshot} save={saveHistory}>
@@ -266,7 +262,7 @@ function SoloDocument<TState, TAnnotations, EphemeralData>({
         [activeDocId, app, editor, onImported, schemaFingerprint, schemaFingerprintHash],
     );
     const panelEditor = useMemo(
-        () => withDisabledEphemeral<TState, typeof editor, EphemeralData>(editor),
+        () => withDisabledEphemeral<typeof editor, EphemeralData>(editor),
         [editor],
     );
     const registeredTopBarControls = useMemo(

@@ -1,17 +1,41 @@
 import {describe, expect, it} from 'vitest';
-import {createPatchBuilder, createPatchBuilderWithContext, getExtra, getPath} from './helper';
+import {
+    createPatchBuilder,
+    createPatchBuilderWithContext,
+    createPatchDispatcher,
+    getExtra,
+    getPath,
+} from './helper';
+import {defineLeafBuilderExtension} from './builderExtensions';
 import {resolveAndApply} from './make';
 import {ops} from './ops';
 
 const moveBuilder = createPatchBuilderWithContext<
     {items: string[]; map: Record<string, number>},
     string
->(
-    'type',
-    'hello',
-);
+>('type', 'hello');
 
 const cheapEqual = (a: any, b: any) => JSON.stringify(a) === JSON.stringify(b);
+
+type FancyLeaf = {kind: 'fancy'; value: string};
+type FancyChange = {kind: 'set'; value: string};
+type FancyState = {leaf: FancyLeaf; nested: {leaf: FancyLeaf}};
+
+const fancyBuilderExtension = defineLeafBuilderExtension<FancyLeaf, FancyChange>()({
+    key: '$fancy',
+    plugin: 'test.fancy',
+    commands: {
+        set: (arg: {value: string}) => ({kind: 'set', value: arg.value}),
+    },
+});
+
+const duplicateFancyBuilderExtension = defineLeafBuilderExtension<FancyLeaf, FancyChange>()({
+    key: '$fancy',
+    plugin: 'test.other-fancy',
+    commands: {
+        set: (arg: {value: string}) => ({kind: 'set', value: arg.value}),
+    },
+});
 
 describe('helper2 path', () => {
     it('gets the path out', () => {
@@ -25,6 +49,96 @@ describe('helper2 path', () => {
 describe('helper2 extr', () => {
     it('gets the extra', () => {
         expect(getExtra(moveBuilder.items[2])).toEqual('hello');
+    });
+});
+
+describe('builder extensions', () => {
+    it('emits plugin-tagged leaf patches from configured extension commands', () => {
+        const builder = createPatchBuilder<FancyState, [typeof fancyBuilderExtension]>({
+            builderExtensions: [fancyBuilderExtension],
+        });
+
+        expect(builder.leaf.$fancy.set({value: 'hello'})).toEqual({
+            op: 'leaf',
+            plugin: 'test.fancy',
+            path: [{type: 'key', key: 'leaf'}],
+            change: {kind: 'set', value: 'hello'},
+        });
+    });
+
+    it('passes preview timing through extension commands', () => {
+        const events: Array<{patch: unknown; when: unknown}> = [];
+        const builder = createPatchDispatcher<
+            FancyState,
+            undefined,
+            'type',
+            void,
+            [typeof fancyBuilderExtension]
+        >((patch, when) => events.push({patch, when}), undefined, 'type', {
+            builderExtensions: [fancyBuilderExtension],
+        });
+
+        builder.leaf.$fancy.set({value: 'previewed'}, 'preview');
+
+        expect(events).toEqual([
+            {
+                patch: {
+                    op: 'leaf',
+                    plugin: 'test.fancy',
+                    path: [{type: 'key', key: 'leaf'}],
+                    change: {kind: 'set', value: 'previewed'},
+                },
+                when: 'preview',
+            },
+        ]);
+    });
+
+    it('rejects duplicate extension keys', () => {
+        expect(() =>
+            createPatchBuilder<
+                FancyState,
+                [typeof fancyBuilderExtension, typeof duplicateFancyBuilderExtension]
+            >({
+                builderExtensions: [fancyBuilderExtension, duplicateFancyBuilderExtension],
+            }),
+        ).toThrow(/Duplicate patch builder extension key "\$fancy"/);
+    });
+
+    it('carries configured extensions through nested patch builders', () => {
+        const builder = createPatchBuilder<FancyState, [typeof fancyBuilderExtension]>({
+            builderExtensions: [fancyBuilderExtension],
+        });
+        const op = builder.nested.$update((_nested, update) =>
+            update.leaf.$fancy.set({value: 'nested'}),
+        );
+
+        const result = resolveAndApply<
+            FancyState,
+            undefined,
+            'type',
+            [typeof fancyBuilderExtension]
+        >(
+            {
+                leaf: {kind: 'fancy', value: ''},
+                nested: {leaf: {kind: 'fancy', value: ''}},
+            },
+            op,
+            undefined,
+            'type',
+            cheapEqual,
+        );
+
+        expect(result.changes).toEqual([
+            {
+                op: 'leaf',
+                plugin: 'test.fancy',
+                path: [
+                    {type: 'key', key: 'nested'},
+                    {type: 'key', key: 'leaf'},
+                ],
+                change: {kind: 'set', value: 'nested'},
+            },
+        ]);
     });
 });
 

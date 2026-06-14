@@ -1,0 +1,1 @@
+I've got a repro for a bug where I'm trying to indent an item and it just refuses to do anything. Here's the history file -- it's the last couple of events / keystrokes. [bug.json](./bug.json). What's weird is if I try to indent it from the right editor, it works fine.

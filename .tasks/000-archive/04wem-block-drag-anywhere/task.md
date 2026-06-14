@@ -1,0 +1,1 @@
+examples/block-rich-text: drag & drop of blocks was implemented before nested blocks were supposed by the editor. currently nested blocks have disabled drag handles. I'd like to support full drag & drop to any valid position. This includes as the child position of a block without any current children. Children should move with a dragged parent.

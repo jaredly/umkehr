@@ -1,4 +1,10 @@
-import {createCrdtUpdateValidator, hlc, type CrdtUpdate, type HlcTimestamp} from 'umkehr/crdt';
+import {
+    createCrdtUpdateValidator,
+    hlc,
+    type CrdtUpdate,
+    type HlcTimestamp,
+    type LeafCrdtPluginAny,
+} from 'umkehr/crdt';
 import type {IJsonSchemaCollection} from 'typia';
 import type {
     ServerBranch,
@@ -289,9 +295,11 @@ export function parseServerMessage<TState>(
     {
         docId,
         schema,
+        leafPlugins,
     }: {
         docId: string;
         schema: IJsonSchemaCollection<'3.1', [TState]>;
+        leafPlugins?: readonly LeafCrdtPluginAny[];
     },
 ): ServerClientMessage | null {
     if (!isRecord(input)) return null;
@@ -325,7 +333,7 @@ export function parseServerMessage<TState>(
         if (input.docId !== docId) return null;
         if (typeof input.branchId !== 'string' || input.branchId.length === 0) return null;
         if (!Array.isArray(input.events)) return null;
-        const validator = createCrdtUpdateValidator<TState>(schema);
+        const validator = createCrdtUpdateValidator<TState>(schema, {leafPlugins});
         const events: ServerBranchEvent[] = [];
         for (const event of input.events) {
             const parsed = parseBranchEvent(event, input.branchId, validator);

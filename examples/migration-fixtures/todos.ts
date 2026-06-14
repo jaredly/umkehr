@@ -525,10 +525,13 @@ function migrateTodoFixtureCrdtUpdateV2ToV3(input: CrdtUpdate): CrdtUpdate {
             value: migrateUnknownValueV2ToV3(input.value) as JsonValue,
         };
     }
-    return {
-        ...input,
-        value: migrateUnknownValueV2ToV3(input.value) as JsonValue,
-    };
+    if (input.op === 'set') {
+        return {
+            ...input,
+            value: migrateUnknownValueV2ToV3(input.value) as JsonValue,
+        };
+    }
+    return input;
 }
 
 function patchValues(input: Patch<TodoFixtureStateV1>) {

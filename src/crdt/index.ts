@@ -18,6 +18,13 @@ export {
 export * as hlc from './hlc.js';
 export {materialize} from './materialize.js';
 export {
+    assertRequiredLeafPlugins,
+    builderExtensionsFromLeafPlugins,
+    createLeafPluginRegistry,
+    leafPluginDescriptor,
+    sortLeafPluginDescriptors,
+} from './plugins.js';
+export {
     changedNormalPathsForCrdtUpdate,
     crdtPathForExisting,
     getMetaAtPath,
@@ -42,4 +49,12 @@ export type {
     CrdtUpdateValidator,
     CrdtUpdateValidatorOptions,
 } from './validation.js';
+export type {
+    LeafCrdtPlugin,
+    LeafCrdtPluginAny,
+    LeafOperationValidationIssue,
+    LeafOperationValidationResult,
+    LeafPluginDescriptor,
+    LeafPluginRegistry,
+} from './plugins.js';
 export type * from './types.js';
