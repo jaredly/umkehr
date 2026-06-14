@@ -1385,11 +1385,13 @@ function AnnotationBodyBlock({
     ): void;
 }) {
     const pendingCaretRestoreBlockIdRef = useRef<string | null>(null);
+    const pendingSelectionRestoreRef = useRef<EditorSelection | null>(null);
     const [selection, setSelection] = useState<EditorSelection>(() => caret(block.id, block.text.length));
 
     const restoreAfter = useCallback((selection: EditorSelection) => {
         pendingCaretRestoreBlockIdRef.current =
             selection.type === 'caret' && selection.point.blockId === block.id ? block.id : null;
+        pendingSelectionRestoreRef.current = selection.type === 'range' ? selection : null;
         setSelection(selection);
     }, [block.id]);
 
@@ -1417,6 +1419,7 @@ function AnnotationBodyBlock({
             runs={block.runs}
             decorations={null}
             pendingCaretRestoreBlockIdRef={pendingCaretRestoreBlockIdRef}
+            pendingSelectionRestoreRef={pendingSelectionRestoreRef}
             selection={selection}
             className="annotationBodyEditor"
             ariaLabel="Annotation body"
@@ -1874,6 +1877,7 @@ function RichTextEditableSurface({
     runs,
     decorations,
     pendingCaretRestoreBlockIdRef,
+    pendingSelectionRestoreRef,
     selection,
     className,
     ariaLabel,
@@ -1889,6 +1893,7 @@ function RichTextEditableSurface({
     runs: RichFormattedBlock['runs'];
     decorations: BlockSelectionDecorations | null;
     pendingCaretRestoreBlockIdRef: MutableRefObject<string | null>;
+    pendingSelectionRestoreRef?: MutableRefObject<EditorSelection | null>;
     selection: EditorSelection;
     className: string;
     ariaLabel: string;
@@ -1946,7 +1951,13 @@ function RichTextEditableSurface({
             if (document.activeElement !== element) element.focus();
             restoreCaretToDom(element, point.offset);
         }
-    }, [blockId, decorations, pendingCaretRestoreBlockIdRef, runs, selection, trailingCodeNewline]);
+        const rangeSelection = pendingSelectionRestoreRef?.current;
+        if (rangeSelection) {
+            pendingSelectionRestoreRef.current = null;
+            if (document.activeElement !== element) element.focus();
+            restoreSelectionToDom(element, rangeSelection);
+        }
+    }, [blockId, decorations, pendingCaretRestoreBlockIdRef, pendingSelectionRestoreRef, runs, selection, trailingCodeNewline]);
 
     return (
         <div

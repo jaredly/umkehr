@@ -208,7 +208,10 @@ const domPointForOffset = (
     blockId: string,
     wantedOffset: number,
 ): {node: Node; offset: number} | null => {
-    const block = root.querySelector<HTMLElement>(`[data-block-id="${CSS.escape(blockId)}"]`);
+    const block =
+        root.dataset.blockId === blockId
+            ? root
+            : root.querySelector<HTMLElement>(`[data-block-id="${CSS.escape(blockId)}"]`);
     if (!block) return null;
     return domPointInBlockForOffset(block, wantedOffset);
 };
