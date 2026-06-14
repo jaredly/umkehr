@@ -1,7 +1,9 @@
 import equal from 'fast-deep-equal';
 import {
     applyMany,
+    blockContents,
     deleteRangeOps,
+    insertBlockOps,
     insertTextOps,
     joinBlocksOps,
     markRangeOp,
@@ -129,6 +131,7 @@ export const splitBlock = (
     state: CachedState<RichBlockMeta>,
     selection: EditorSelection,
     context: CommandContext,
+    options: {forceCodeNewline?: boolean} = {},
 ): CommandResult => {
     let working = state;
     let point = firstPointForSelection(working, selection);
@@ -152,6 +155,10 @@ export const splitBlock = (
         });
         const next = applyMany(working, ops);
         return {state: next, ops, selection: caret(point.blockId, 0)};
+    }
+
+    if (currentMeta?.type === 'code' && !options.forceCodeNewline && shouldExitCodeBlock(working, point)) {
+        return exitCodeBlock(working, point.blockId, context);
     }
 
     if (currentMeta?.type === 'code') {
@@ -488,6 +495,53 @@ export const joinWithNext = (
     );
     const next = applyMany(state, ops);
     return {state: next, ops, selection: caret(blockId, currentLength)};
+};
+
+const shouldExitCodeBlock = (state: CachedState<RichBlockMeta>, point: BlockPoint): boolean =>
+    point.offset === pointTextLength(state, point.blockId) &&
+    blockContents(state, point.blockId).endsWith('\n');
+
+const exitCodeBlock = (
+    state: CachedState<RichBlockMeta>,
+    blockId: string,
+    context: CommandContext,
+): CommandResult => {
+    const length = pointTextLength(state, blockId);
+    let working = state;
+    const ops: Array<Op<RichBlockMeta>> = [];
+
+    if (length > 0 && blockContents(working, blockId).endsWith('\n')) {
+        const deleteOps = deleteRangeOps(working, {
+            block: parseLamportString(blockId),
+            startOffset: length - 1,
+            endOffset: length,
+        });
+        working = applyMany(working, deleteOps);
+        ops.push(...deleteOps);
+    }
+
+    const parentId = visibleParentIdForBlock(working, blockId);
+    if (parentId === null) return {state: working, ops, selection: caret(blockId, pointTextLength(working, blockId))};
+
+    const siblings = visibleBlockChildren(working, parentId);
+    const index = siblings.indexOf(blockId);
+    if (index < 0) return {state: working, ops, selection: caret(blockId, pointTextLength(working, blockId))};
+
+    const afterId = siblings[index + 1] ?? null;
+    const ts = context.nextTs();
+    const newBlockId = lamportToString([working.state.maxSeenCount + 1, context.actor]);
+    const insertOps = insertBlockOps(working, {
+        actor: context.actor,
+        parent: parentId === ROOT_ID ? ROOT : parseLamportString(parentId),
+        before: parseLamportString(blockId),
+        after: afterId ? parseLamportString(afterId) : null,
+        meta: paragraphMeta(ts),
+        ts,
+    });
+    working = applyMany(working, insertOps);
+    ops.push(...insertOps);
+
+    return {state: working, ops, selection: caret(newBlockId, 0)};
 };
 
 const insertTextAtPoint = (

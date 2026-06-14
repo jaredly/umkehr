@@ -1067,6 +1067,13 @@ const renderEditableBlock = (block: RichFormattedBlock, context: RenderBlockCont
                     splitBlockEverywhere(current.state, selection, makeCommandContext(current)),
                 )
             }
+            onForceCodeNewline={() =>
+                context.runEditCommand((current, selection) =>
+                    splitBlockEverywhere(current.state, selection, makeCommandContext(current), {
+                        forceCodeNewline: true,
+                    }),
+                )
+            }
             onIndent={() =>
                 context.runEditCommand((current, selection) =>
                     indentSelections(current.state, selection, makeCommandContext(current)),
@@ -1303,6 +1310,7 @@ function EditableBlock({
     onDeleteBackward,
     onDeleteForward,
     onSplit,
+    onForceCodeNewline,
     onIndent,
     onUnindent,
     onToggleBold,
@@ -1341,6 +1349,7 @@ function EditableBlock({
     onDeleteBackward(): void;
     onDeleteForward(): void;
     onSplit(): void;
+    onForceCodeNewline(): void;
     onIndent(): void;
     onUnindent(): void;
     onToggleBold(): void;
@@ -1369,6 +1378,9 @@ function EditableBlock({
     const handledBeforeInputRef = useRef(false);
     const editableRef = useRef<HTMLDivElement>(null);
     const renderedRunsRef = useRef('');
+    const meta = block.block.meta;
+    const codeHasTrailingNewline =
+        meta.type === 'code' && block.runs.map((run) => run.text).join('').endsWith('\n');
 
     useLayoutEffect(() => {
         const element = editableRef.current;
@@ -1398,10 +1410,12 @@ function EditableBlock({
     useLayoutEffect(() => {
         const element = editableRef.current;
         if (!element) return;
-        const renderedRuns = serializeRuns(block.runs, decorations);
+        const renderedRuns = serializeRuns(block.runs, decorations, codeHasTrailingNewline);
         if (renderedRunsRef.current !== renderedRuns) {
             renderedRunsRef.current = renderedRuns;
-            const children = renderRunNodes(block.runs, decorations);
+            const children = renderRunNodes(block.runs, decorations, {
+                trailingCodeNewline: codeHasTrailingNewline,
+            });
             element.replaceChildren(...children);
         }
         const point = selection.type === 'caret' ? selection.point : null;
@@ -1410,9 +1424,7 @@ function EditableBlock({
             if (document.activeElement !== element) element.focus();
             restoreCaretToDom(element, point.offset);
         }
-    }, [block.id, block.runs, decorations, pendingCaretRestoreBlockIdRef, selection]);
-
-    const meta = block.block.meta;
+    }, [block.id, block.runs, codeHasTrailingNewline, decorations, pendingCaretRestoreBlockIdRef, selection]);
 
     return (
         <div
@@ -1460,20 +1472,29 @@ function EditableBlock({
                 spellCheck
                 data-block-id={block.id}
                 data-empty={block.runs.length === 0 ? 'true' : undefined}
+                data-trailing-newline={codeHasTrailingNewline ? 'true' : undefined}
                 onFocus={(event) => {
                     const nextDecorations = removePrimaryDecorations(decorations);
                     if (nextDecorations === decorations) return;
                     event.currentTarget.replaceChildren(
-                        ...renderRunNodes(block.runs, nextDecorations),
+                        ...renderRunNodes(block.runs, nextDecorations, {
+                            trailingCodeNewline: codeHasTrailingNewline,
+                        }),
                     );
-                    renderedRunsRef.current = serializeRuns(block.runs, nextDecorations);
+                    renderedRunsRef.current = serializeRuns(
+                        block.runs,
+                        nextDecorations,
+                        codeHasTrailingNewline,
+                    );
                 }}
                 onInput={(event) => {
                     const native = event.nativeEvent as InputEvent;
                     if (handledBeforeInputRef.current) {
                         handledBeforeInputRef.current = false;
                         event.currentTarget.replaceChildren(
-                            ...renderRunNodes(block.runs, decorations),
+                            ...renderRunNodes(block.runs, decorations, {
+                                trailingCodeNewline: codeHasTrailingNewline,
+                            }),
                         );
                         return;
                     }
@@ -1503,7 +1524,11 @@ function EditableBlock({
                         onToggleItalic();
                     } else if (event.key === 'Enter') {
                         event.preventDefault();
-                        onSplit();
+                        if (meta.type === 'code' && event.shiftKey) {
+                            onForceCodeNewline();
+                        } else {
+                            onSplit();
+                        }
                     } else if (event.key === 'Tab' && !event.altKey && !modifierPressed) {
                         event.preventDefault();
                         if (meta.type === 'code') {
@@ -1818,23 +1843,29 @@ const sameSelectionRange = (one: EditorSelection, two: EditorSelection) => {
 const serializeRuns = (
     runs: RichFormattedBlock['runs'],
     decorations: BlockSelectionDecorations | null,
+    trailingCodeNewline = false,
 ) =>
     JSON.stringify({
         runs: runs.map((run) => [run.text, run.marks.bold, run.marks.italic]),
         decorations,
+        trailingCodeNewline,
     });
 
 const renderRunNodes = (
     runs: RichFormattedBlock['runs'],
     decorations: BlockSelectionDecorations | null,
+    options: {trailingCodeNewline?: boolean} = {},
 ): Node[] => {
     if (!decorations || (!decorations.carets.length && !decorations.segments.length)) {
-        return runs.map((run) => {
+        return appendTrailingCodeNewlineSentinel(
+            runs.map((run) => {
             const span = document.createElement('span');
             span.textContent = run.text;
             applyRunClasses(span, run);
             return span;
-        });
+            }),
+            options,
+        );
     }
 
     const nodes: Node[] = [];
@@ -1886,7 +1917,21 @@ const renderRunNodes = (
         offset = runEnd;
     }
     renderCaretsAtOffset(nodes, decorations, renderedCarets, offset);
-    return nodes;
+    return appendTrailingCodeNewlineSentinel(nodes, options);
+};
+
+const appendTrailingCodeNewlineSentinel = (
+    nodes: Node[],
+    options: {trailingCodeNewline?: boolean},
+): Node[] => {
+    if (!options.trailingCodeNewline) return nodes;
+
+    const caretTarget = document.createElement('span');
+    caretTarget.dataset.offsetSentinel = 'true';
+    caretTarget.dataset.trailingCodeNewline = 'true';
+    caretTarget.append(document.createTextNode('\u200b'));
+
+    return [...nodes, caretTarget];
 };
 
 const addBoundaryInRun = (boundaries: Set<number>, boundary: number, runLength: number) => {

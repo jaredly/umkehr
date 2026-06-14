@@ -165,6 +165,12 @@ const pointFromDom = (
     const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
     let current: Node | null;
     while ((current = walker.nextNode())) {
+        if (isOffsetSentinel(current)) {
+            if (current === node) {
+                return {blockId: block.dataset.blockId!, offset};
+            }
+            continue;
+        }
         if (current === node) {
             return {
                 blockId: block.dataset.blockId!,
@@ -183,6 +189,7 @@ const pointFromDom = (
 const textLengthBeforeChild = (block: HTMLElement, childOffset: number): number => {
     let offset = 0;
     for (let index = 0; index < childOffset && index < block.childNodes.length; index++) {
+        if (isOffsetSentinel(block.childNodes[index])) continue;
         offset += segmentText(block.childNodes[index].textContent ?? '').length;
     }
     return offset;
@@ -214,12 +221,18 @@ const domPointInBlockForOffset = (
     const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
     let current: Node | null;
     while ((current = walker.nextNode())) {
+        if (isOffsetSentinel(current)) continue;
         const text = current.textContent ?? '';
         const segments = segmentText(text);
         if (offset < segments.length) {
             return {node: current, offset: utf16OffsetForGraphemeOffset(text, offset)};
         }
         offset -= segments.length;
+    }
+    const trailingCodeNewline = block.querySelector<HTMLElement>('[data-trailing-code-newline="true"]');
+    const trailingText = trailingCodeNewline?.firstChild;
+    if (trailingText?.nodeType === Node.TEXT_NODE) {
+        return {node: trailingText, offset: trailingText.textContent?.length ?? 0};
     }
     return {node: block, offset: block.childNodes.length};
 };
@@ -233,7 +246,16 @@ const collapsedRangeIn = (root: HTMLElement): Range | null => {
     return range;
 };
 
-const blockTextLength = (block: HTMLElement): number => segmentText(block.textContent ?? '').length;
+const blockTextLength = (block: HTMLElement): number => {
+    let length = 0;
+    const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+    let current: Node | null;
+    while ((current = walker.nextNode())) {
+        if (isOffsetSentinel(current)) continue;
+        length += segmentText(current.textContent ?? '').length;
+    }
+    return length;
+};
 
 const caretRectForBlockOffset = (block: HTMLElement, offset: number): CaretRect => {
     const point = domPointInBlockForOffset(block, offset);
@@ -299,4 +321,9 @@ const closestBlock = (root: HTMLElement, node: Node): HTMLElement | null => {
     const element = node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement;
     const block = element?.closest<HTMLElement>('[data-block-id]');
     return block && root.contains(block) ? block : null;
+};
+
+const isOffsetSentinel = (node: Node): boolean => {
+    const element = node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement;
+    return Boolean(element?.closest('[data-offset-sentinel="true"]'));
 };

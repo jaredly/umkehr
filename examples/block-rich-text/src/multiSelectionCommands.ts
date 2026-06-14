@@ -87,9 +87,10 @@ export const splitBlockEverywhere = (
     state: CachedState<RichBlockMeta>,
     selection: RetainedSelectionSet,
     context: CommandContext,
+    options: {forceCodeNewline?: boolean} = {},
 ): MultiCommandResult =>
     runReplacingCommand(state, selection, (working, entry) =>
-        splitBlock(working, resolveSelection(working, entry.selection), context),
+        splitBlock(working, resolveSelection(working, entry.selection), context, options),
     );
 
 export const toggleMarkEverywhere = (

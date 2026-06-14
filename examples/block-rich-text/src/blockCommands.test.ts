@@ -107,6 +107,35 @@ describe('block rich text commands', () => {
         expect(lines(result.state)).toEqual(['a\nb']);
     });
 
+    it('exits a code block on Enter at a trailing blank line', () => {
+        const demo = createDemoState();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = insertText(demo.left.state, caret(blockId, 0), 'ab', ctx());
+        result = setBlockType(result.state, blockId, {type: 'code', language: 'ts', ts: '00010'});
+        result = splitBlock(result.state, caret(blockId, 2), ctx());
+
+        result = splitBlock(result.state, result.selection, ctx());
+
+        const [code, paragraph] = rootBlockIds(result.state);
+        expect(result.selection).toEqual(caret(paragraph, 0));
+        expect(lines(result.state)).toEqual(['ab', '']);
+        expect(result.state.state.blocks[code].meta).toMatchObject({type: 'code'});
+        expect(result.state.state.blocks[paragraph].meta).toMatchObject({type: 'paragraph'});
+    });
+
+    it('keeps Shift+Enter as a newline inside code blocks', () => {
+        const demo = createDemoState();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = insertText(demo.left.state, caret(blockId, 0), 'ab', ctx());
+        result = setBlockType(result.state, blockId, {type: 'code', language: 'ts', ts: '00010'});
+        result = splitBlock(result.state, caret(blockId, 2), ctx());
+
+        result = splitBlock(result.state, result.selection, ctx(), {forceCodeNewline: true});
+
+        expect(rootBlockIds(result.state)).toEqual([blockId]);
+        expect(lines(result.state)).toEqual(['ab\n\n']);
+    });
+
     it('inserts text and deletes ordinary backspace inside a block', () => {
         let state = init();
         const blockId = onlyBlock(state);

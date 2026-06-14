@@ -34,7 +34,18 @@ const panels = (view: ReturnType<typeof render>) => {
 const blocks = (panel: HTMLElement) => within(panel).getAllByRole('textbox', {name: 'Block text'});
 
 const blockTexts = (panel: HTMLElement): string[] =>
-    blocks(panel).map((block) => block.textContent ?? '');
+    blocks(panel).map(blockText);
+
+const blockText = (block: HTMLElement): string => {
+    let text = '';
+    const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+    let current: Node | null;
+    while ((current = walker.nextNode())) {
+        if (current.parentElement?.closest('[data-offset-sentinel="true"]')) continue;
+        text += current.textContent ?? '';
+    }
+    return text;
+};
 
 const blockDepth = (block: HTMLElement): string =>
     block.closest<HTMLElement>('.blockRow')?.style.getPropertyValue('--block-depth') ?? '';
@@ -377,6 +388,46 @@ describe('Block rich text example UI', () => {
 
         await waitForBlockTexts(left, ['a\n    b']);
         expect(blockTexts(right)).toEqual(['a\n    b']);
+    });
+
+    it('shows trailing code newlines and exits code on a second Enter', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        typeText(blocks(left)[0], 'ab');
+        setBlockType(left, 'code');
+        selectCaret(blocks(left)[0], 2);
+        fireEvent.keyDown(blocks(left)[0], {key: 'Enter'});
+
+        await waitForBlockTexts(left, ['ab\n']);
+        expect(blocks(left)[0].dataset.trailingNewline).toBe('true');
+        const trailingTarget = blocks(left)[0].querySelector('[data-trailing-code-newline="true"]');
+        await waitFor(() => {
+            expect(trailingTarget?.contains(window.getSelection()?.anchorNode ?? null)).toBe(true);
+        });
+
+        fireEvent.keyDown(blocks(left)[0], {key: 'Enter'});
+
+        await waitForBlockTexts(left, ['ab', '']);
+        expect(blocks(right).map((block) => block.classList.contains('codeBlock'))).toEqual([true, false]);
+    });
+
+    it('keeps Shift+Enter as a newline inside a code trailing blank line', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        typeText(blocks(left)[0], 'ab');
+        setBlockType(left, 'code');
+        selectCaret(blocks(left)[0], 2);
+        fireEvent.keyDown(blocks(left)[0], {key: 'Enter'});
+        await waitForBlockTexts(left, ['ab\n']);
+
+        fireEvent.keyDown(blocks(left)[0], {key: 'Enter', shiftKey: true});
+
+        await waitForBlockTexts(left, ['ab\n\n']);
+        expect(blockTexts(right)).toEqual(['ab\n\n']);
     });
 
     it('keeps focus in the code language field while typing', async () => {
