@@ -37,7 +37,10 @@ export const createDemoState = (): DemoState => {
     };
 };
 
-export const nextReplicaTs = (replica: Replica) => lamportToString([replica.clock++, replica.actor]);
+export const nextReplicaTs = (replica: Replica) => {
+    replica.clock = Math.max(replica.clock, replica.state.state.maxSeenCount + 1);
+    return lamportToString([replica.clock++, replica.actor]);
+};
 
 export const makeCommandContext = (replica: Replica) => ({
     actor: replica.actor,

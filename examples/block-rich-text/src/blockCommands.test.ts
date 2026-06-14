@@ -366,6 +366,30 @@ describe('block rich text commands', () => {
         expectCache(result.state);
     });
 
+    it('moves a peer-created second root block before the first root block', () => {
+        let demo = createDemoState();
+        const first = onlyBlock(demo.left.state);
+        const pasted = pastePlainText(demo.left.state, caret(first, 0), 'a\nb', makeCommandContext(demo.left));
+        demo = applyLocalChange(demo, {
+            editorId: 'left',
+            state: pasted.state,
+            selection: demo.left.selection,
+            ops: pasted.ops,
+        });
+        const [rightFirst, rightSecond] = rootBlockIds(demo.right.state);
+
+        const moved = moveBlock(
+            demo.right.state,
+            rightSecond,
+            {type: 'before', targetBlockId: rightFirst},
+            makeCommandContext(demo.right),
+        );
+
+        expect(lines(moved.state)).toEqual(['b', 'a']);
+        expect(moved.ops).toHaveLength(1);
+        expectCache(moved.state);
+    });
+
     it('moves a root block as the first child of an empty block', () => {
         const context = ctx();
         let result = pastePlainText(init(), caret(onlyBlock(init()), 0), 'a\nb', context);
