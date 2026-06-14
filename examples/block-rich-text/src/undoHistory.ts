@@ -12,6 +12,7 @@ import {
     type Replica,
 } from './blockEditorRuntime';
 import type {RichBlockMeta} from './blockMeta';
+import {annotationVirtualParents} from './annotations';
 import {
     type BlockCommandInfo,
     type HistoryAction,
@@ -143,7 +144,7 @@ const deriveUndoIndex = (history: HistoryState, editorId: EditorId): DerivedUndo
 
         const beforeReplica = demo[action.editorId];
         const before = beforeReplica.state;
-        const after = action.ops.length ? applyMany(before, action.ops) : before;
+        const after = action.ops.length ? applyMany(before, action.ops, annotationVirtualParents(before)) : before;
         demo = applyLocalChange(demo, {
             editorId: action.editorId,
             state: after,

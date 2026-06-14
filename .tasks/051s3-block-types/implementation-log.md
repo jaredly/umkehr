@@ -46,3 +46,15 @@
 - Added explicit mark-based virtual parent ownership so annotation mark ids can validate as block parents without storing annotation identity on body blocks.
 - Routed example replay/remote application through the annotation virtual-parent config so annotation body blocks replay from history and sync to peers.
 - Issue encountered: the existing virtual-parent config only allowed virtual parents declared by block metadata, but annotation parents are declared by marks. Addressed this by adding an explicit `markVirtualParents` config surface to core virtual-parent handling and scanning annotation body blocks directly for sidebar/footnote UI instead of surfacing them in the main visible outline.
+- Follow-up review found phase 6 gaps: annotation bodies were static, popovers were creatable but not rendered, body rich-text runs were ignored, same-block footnotes sorted by creation order, and there was no phase 6 acceptance coverage.
+- Made `markVirtualParents` first-class in core parent derivation, traversal, cache organization, split ops, and join-record apply. This removed the need for raw path scanning and lets configured formatted outlines include annotation body blocks.
+- Updated annotation rendering to use formatted body runs, added prompt-backed sidebar/footnote body editing that records ordinary CRDT text ops on body blocks, and rendered popover annotations.
+- Added phase 6 regression coverage for annotation sync, virtual body parents, history export/import replay, split/join mark survival, footnote document order, deleted-reference hiding, shared annotation mark type, and formatted body runs.
+- Issue encountered: normal example commands that derive block paths must pass the annotation virtual-parent config once annotation body blocks exist. Threaded `annotationVirtualParents(state)` through the example block command apply/path/sibling helpers.
+- Verification passed:
+  - `npm exec vitest -- run examples/block-rich-text/src/annotations.test.ts`
+  - `npm exec vitest -- run src/block-crdt/index.test.ts src/block-crdt/formatting.test.ts src/block-crdt/adapter-additions.test.ts examples/block-rich-text/src`
+  - `npm run typecheck`
+  - `npm exec tsc -- -p examples/block-rich-text/tsconfig.json --noEmit`
+- Follow-up issue: clicking Comment crashed undo-state derivation because `undoHistory` replayed command ops with plain `applyMany`, so the annotation body block under a mark virtual parent was pending. Fixed undo replay to pass `annotationVirtualParents(before)` and added a regression for deriving undo availability after creating a comment.
+- Follow-up issue: annotation body editing was initially exposed through a prompt, which made it a CRDT text replacement but not a usable rich-text block editor. Replaced the prompt UI with embedded contentEditable body blocks that render formatted runs and emit normal body-block text/delete/mark ops for typing, paste, Backspace/Delete, Enter-as-newline, and Cmd/Ctrl+B/I.

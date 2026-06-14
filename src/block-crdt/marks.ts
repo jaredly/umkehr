@@ -87,7 +87,7 @@ export const materializeFormattedBlocks = <M extends TimestampedBlockMeta>(
     const coveredByMark: Record<string, Mark[]> = {};
     const marks = Object.values(state.state.marks).sort((a, b) => compareLamports(a.id, b.id));
     for (const mark of marks) {
-        for (const charId of coveredCharIdsForMark(state, mark)) {
+        for (const charId of coveredCharIdsForMark(state, mark, config)) {
             coveredByMark[charId] = coveredByMark[charId] ?? [];
             coveredByMark[charId].push(mark);
         }
@@ -139,8 +139,12 @@ const crossedSplitsBetween = <M extends TimestampedBlockMeta>(
     return crossed;
 };
 
-const coveredCharIdsForMark = <M extends TimestampedBlockMeta>(state: CachedState<M>, mark: Mark): string[] => {
-    const sequence = allCharIds(state);
+const coveredCharIdsForMark = <M extends TimestampedBlockMeta>(
+    state: CachedState<M>,
+    mark: Mark,
+    config: VirtualBlockParentConfig<M>,
+): string[] => {
+    const sequence = allCharIds(state, config);
     const nextById = nextIdMap(sequence);
     const splitRecords = splitRecordsByLeft(state);
     const crossed = new Set(mark.crossedSplits.map(lamportToString));
@@ -183,8 +187,10 @@ const coveredCharIdsForMark = <M extends TimestampedBlockMeta>(state: CachedStat
     return covered;
 };
 
-const allCharIds = <M extends TimestampedBlockMeta>(state: CachedState<M>): string[] =>
-    visibleBlockOutline(state).flatMap(({id}) => orderedCharIdsForBlock(state, id));
+const allCharIds = <M extends TimestampedBlockMeta>(
+    state: CachedState<M>,
+    config: VirtualBlockParentConfig<M> = {},
+): string[] => visibleBlockOutline(state, config).flatMap(({id}) => orderedCharIdsForBlock(state, id));
 
 const nextIdMap = (sequence: string[]): Record<string, string> => {
     const result: Record<string, string> = {};

@@ -2,7 +2,7 @@ import {deriveBlockParentsForBlocks, type VirtualBlockParentConfig} from './bloc
 import {compareLamportStrings, lamportToString} from './ids.js';
 import {activeJoinRecords} from './joins.js';
 import {compareLseqIds} from './lseq.js';
-import {Block, Cache, CachedState, Char, JoinRecord, State, TimestampedBlockMeta} from './types.js';
+import {Block, Cache, CachedState, Char, JoinRecord, Mark, State, TimestampedBlockMeta} from './types.js';
 
 export const cachedState = <M extends TimestampedBlockMeta>(state: State<M>): CachedState<M> => ({
     state,
@@ -14,9 +14,10 @@ export function organizeState<M extends TimestampedBlockMeta>(
     chars: Record<string, Char>,
     joins: Record<string, JoinRecord> = {},
     config: VirtualBlockParentConfig<M> = {},
+    marks: Record<string, Mark> = {},
 ): Cache {
     const blockChildren: Record<string, string[]> = {};
-    const {parents} = deriveBlockParentsForBlocks(blocks, config);
+    const {parents} = deriveBlockParentsForBlocks({blocks, chars, marks} as State<M>, config);
     for (const [id] of Object.entries(blocks)) {
         const pid = parents[id];
         if (!blockChildren[pid]) {

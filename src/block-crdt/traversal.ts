@@ -4,6 +4,7 @@ import {Cache, CachedState, Char, Lamport, TimestampedBlockMeta} from './types.j
 import {
     ROOT_ID,
     deriveBlockParentsForBlocks,
+    virtualParentOwners,
     type VirtualBlockParentConfig,
 } from './blocks.js';
 
@@ -241,8 +242,8 @@ const actualParentForSiblingSlot = <M extends TimestampedBlockMeta>(
     afterId: string | null,
     config: VirtualBlockParentConfig<M>,
 ): string => {
-    if (!config.virtualParents) return visibleParentId;
-    const {parents} = deriveBlockParentsForBlocks(state.state.blocks, config);
+    if (!hasVirtualParentConfig(config)) return visibleParentId;
+    const {parents} = deriveBlockParentsForBlocks(state, config);
     if (afterId) return parents[afterId] ?? visibleParentId;
     if (beforeId) return parents[beforeId] ?? visibleParentId;
     return visibleParentId;
@@ -274,8 +275,8 @@ const blockChildrenForParent = <M extends TimestampedBlockMeta>(
     parent: string,
     config: VirtualBlockParentConfig<M>,
 ): string[] => {
-    if (!config.virtualParents) return state.cache.blockChildren[parent] ?? [];
-    const {parents} = deriveBlockParentsForBlocks(state.state.blocks, config);
+    if (!hasVirtualParentConfig(config)) return state.cache.blockChildren[parent] ?? [];
+    const {parents} = deriveBlockParentsForBlocks(state, config);
     const childParents = new Set<string>([parent]);
     const parentBlock = state.state.blocks[parent];
     if (parentBlock) {
@@ -294,9 +295,24 @@ const virtualParentsForBlock = <M extends TimestampedBlockMeta>(
     config: VirtualBlockParentConfig<M>,
 ): string[] => {
     const block = state.state.blocks[blockId];
-    if (!block || !config.virtualParents) return [];
-    return config.virtualParents(block).map(lamportToString);
+    if (!block) return [];
+    const result = new Set<string>();
+    if (config.virtualParents) {
+        for (const parent of config.virtualParents(block)) {
+            result.add(lamportToString(parent));
+        }
+    }
+    if (config.markVirtualParents) {
+        for (const [parent, owner] of Object.entries(virtualParentOwners(state, config))) {
+            if (owner === blockId) result.add(parent);
+        }
+    }
+    return [...result];
 };
+
+const hasVirtualParentConfig = <M extends TimestampedBlockMeta>(
+    config: VirtualBlockParentConfig<M>,
+): boolean => Boolean(config.virtualParents || config.markVirtualParents);
 
 export const orderedCharIdsForBlock = <M extends TimestampedBlockMeta>(
     state: CachedState<M>,

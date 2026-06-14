@@ -72,7 +72,7 @@ export const assertCacheConsistent = <M extends TimestampedBlockMeta>(
     state: CachedState<M>,
     config: VirtualBlockParentConfig<M> = {},
 ) => {
-    const expected = organizeState(state.state.blocks, state.state.chars, state.state.joins, config);
+    const expected = organizeState(state.state.blocks, state.state.chars, state.state.joins, config, state.state.marks);
     if (!equal(state.cache, expected)) {
         throw new Error(`cached state is inconsistent`);
     }
@@ -115,7 +115,7 @@ export const apply = <M extends TimestampedBlockMeta>(
         case 'split-record':
             return applySplitRecord(state, op);
         case 'join-record':
-            return applyJoinRecord(state, op);
+            return applyJoinRecord(state, op, config);
     }
 };
 
@@ -179,6 +179,7 @@ const applySplitRecord = <M extends TimestampedBlockMeta>(
 const applyJoinRecord = <M extends TimestampedBlockMeta>(
     {state, cache}: CachedState<M>,
     op: Op<M> & {type: 'join-record'},
+    config: VirtualBlockParentConfig<M>,
 ): CachedState<M> | false => {
     const id = lamportToString(op.join.id);
     const current = state.joins[id];
@@ -195,7 +196,7 @@ const applyJoinRecord = <M extends TimestampedBlockMeta>(
     };
     return {
         state: nextState,
-        cache: organizeState(nextState.blocks, nextState.chars, nextState.joins),
+        cache: organizeState(nextState.blocks, nextState.chars, nextState.joins, config, nextState.marks),
     };
 };
 
@@ -313,7 +314,7 @@ const applyBlockMove = <M extends TimestampedBlockMeta>(
     };
     return {
         state: nextState,
-        cache: organizeState(nextState.blocks, nextState.chars, nextState.joins, config),
+        cache: organizeState(nextState.blocks, nextState.chars, nextState.joins, config, nextState.marks),
     };
 };
 
@@ -337,7 +338,9 @@ const applyBlockMeta = <M extends TimestampedBlockMeta>(
     };
     return {
         state: nextState,
-        cache: config.virtualParents ? organizeState(nextState.blocks, nextState.chars, nextState.joins, config) : cache,
+        cache: config.virtualParents || config.markVirtualParents
+            ? organizeState(nextState.blocks, nextState.chars, nextState.joins, config, nextState.marks)
+            : cache,
     };
 };
 
@@ -370,7 +373,7 @@ const applyBlock = <M extends TimestampedBlockMeta>(
     };
     return {
         state: nextState,
-        cache: organizeState(nextState.blocks, nextState.chars, nextState.joins, config),
+        cache: organizeState(nextState.blocks, nextState.chars, nextState.joins, config, nextState.marks),
     };
 };
 

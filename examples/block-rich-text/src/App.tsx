@@ -12,11 +12,15 @@ import {
 } from 'react';
 import {materializeFormattedBlocks} from 'umkehr/block-crdt';
 import type {FormattedBlock} from 'umkehr/block-crdt';
-import {moveBlock, setBlockMeta} from './blockCommands';
+import {moveBlock, setBlockMeta, type CommandResult} from './blockCommands';
 import {
     annotationVirtualParents,
     createAnnotation,
+    deleteAnnotationBodyBackward,
+    deleteAnnotationBodyForward,
     renderedAnnotations,
+    replaceAnnotationBodySelection,
+    toggleAnnotationBodyMark,
     type AnnotationPresentation,
 } from './annotations';
 import {
@@ -653,6 +657,21 @@ function BlockEditor({
         [onCommand],
     );
 
+    const runAnnotationBodyCommand = useCallback(
+        (
+            command: (
+                current: Replica,
+                context: ReturnType<typeof makeCommandContext>,
+            ) => CommandResult,
+        ) => {
+            runBlockControlCommand((current) => {
+                const result = command(current, makeCommandContext(current));
+                return {state: result.state, ops: result.ops, selection: current.selection};
+            });
+        },
+        [runBlockControlCommand],
+    );
+
     const moveSelectionsHorizontallyEverywhere = useCallback(
         (direction: 'left' | 'right', unit: HorizontalMovementUnit = 'character') => {
             handledNavigationKeyRef.current = true;
@@ -892,7 +911,11 @@ function BlockEditor({
                     {undoStatus || undoState.undoReason || undoState.redoReason}
                 </p>
             ) : null}
-            <AnnotationSidebar annotations={annotations.filter((item) => item.data.presentation === 'sidebar')} />
+            <AnnotationSidebar
+                annotations={annotations.filter((item) => item.data.presentation === 'sidebar')}
+                onBodyCommand={runAnnotationBodyCommand}
+            />
+            <AnnotationPopovers annotations={annotations.filter((item) => item.data.presentation === 'popover')} />
             <div
                 ref={rootRef}
                 className="blockList"
@@ -936,7 +959,10 @@ function BlockEditor({
                     }),
                 )}
             </div>
-            <Footnotes annotations={annotations.filter((item) => item.data.presentation === 'footnote')} />
+            <Footnotes
+                annotations={annotations.filter((item) => item.data.presentation === 'footnote')}
+                onBodyCommand={runAnnotationBodyCommand}
+            />
         </article>
     );
 }
@@ -1276,7 +1302,15 @@ const blockTypeMenuValue = (meta: RichBlockMeta | undefined): BlockTypeMenuValue
 };
 
 
-function AnnotationSidebar({annotations}: {annotations: ReturnType<typeof renderedAnnotations>}) {
+function AnnotationSidebar({
+    annotations,
+    onBodyCommand,
+}: {
+    annotations: ReturnType<typeof renderedAnnotations>;
+    onBodyCommand(
+        command: (current: Replica, context: ReturnType<typeof makeCommandContext>) => CommandResult,
+    ): void;
+}) {
     if (!annotations.length) return null;
     return (
         <aside className="annotationSidebar" aria-label="Comments">
@@ -1284,7 +1318,7 @@ function AnnotationSidebar({annotations}: {annotations: ReturnType<typeof render
                 <section key={annotation.id} className="annotationCard">
                     <strong>Comment on “{annotation.referenceText}”</strong>
                     {annotation.bodyBlocks.map((block) => (
-                        <p key={block.id}>{block.text || 'Empty comment'}</p>
+                        <AnnotationBodyBlock key={block.id} block={block} onBodyCommand={onBodyCommand} />
                     ))}
                 </section>
             ))}
@@ -1292,19 +1326,187 @@ function AnnotationSidebar({annotations}: {annotations: ReturnType<typeof render
     );
 }
 
-function Footnotes({annotations}: {annotations: ReturnType<typeof renderedAnnotations>}) {
+function Footnotes({
+    annotations,
+    onBodyCommand,
+}: {
+    annotations: ReturnType<typeof renderedAnnotations>;
+    onBodyCommand(
+        command: (current: Replica, context: ReturnType<typeof makeCommandContext>) => CommandResult,
+    ): void;
+}) {
     if (!annotations.length) return null;
     return (
         <ol className="footnotes" aria-label="Footnotes">
             {annotations.map((annotation) => (
                 <li key={annotation.id}>
-                    {annotation.bodyBlocks.map((block) => block.text).join(' ') ||
-                        annotation.referenceText}
+                    {annotation.bodyBlocks.length
+                        ? annotation.bodyBlocks.map((block) => (
+                              <AnnotationBodyBlock
+                                  key={block.id}
+                                  block={block}
+                                  fallbackText={annotation.referenceText}
+                                  onBodyCommand={onBodyCommand}
+                              />
+                          ))
+                        : annotation.referenceText}
                 </li>
             ))}
         </ol>
     );
 }
+
+function AnnotationPopovers({annotations}: {annotations: ReturnType<typeof renderedAnnotations>}) {
+    if (!annotations.length) return null;
+    return (
+        <aside className="annotationPopovers" aria-label="Popovers">
+            {annotations.map((annotation) => (
+                <section key={annotation.id} className="annotationCard">
+                    <strong>Popover on “{annotation.referenceText}”</strong>
+                    {annotation.bodyBlocks.map((block) => (
+                        <p key={block.id}>{block.text ? renderStaticRuns(block.runs) : 'Empty popover'}</p>
+                    ))}
+                </section>
+            ))}
+        </aside>
+    );
+}
+
+function AnnotationBodyBlock({
+    block,
+    fallbackText = '',
+    onBodyCommand,
+}: {
+    block: ReturnType<typeof renderedAnnotations>[number]['bodyBlocks'][number];
+    fallbackText?: string;
+    onBodyCommand(
+        command: (current: Replica, context: ReturnType<typeof makeCommandContext>) => CommandResult,
+    ): void;
+}) {
+    const editableRef = useRef<HTMLDivElement>(null);
+    const renderedRunsRef = useRef('');
+    const pendingCaretOffsetRef = useRef<number | null>(null);
+
+    const restoreAfter = useCallback((selection: EditorSelection) => {
+        pendingCaretOffsetRef.current =
+            selection.type === 'caret' && selection.point.blockId === block.id
+                ? selection.point.offset
+                : null;
+    }, [block.id]);
+
+    const run = useCallback(
+        (
+            selection: EditorSelection,
+            apply: (
+                state: Replica['state'],
+                selection: EditorSelection,
+                context: ReturnType<typeof makeCommandContext>,
+            ) => CommandResult,
+        ) => {
+            onBodyCommand((current, context) => {
+                const result = apply(current.state, selection, context);
+                restoreAfter(result.selection);
+                return result;
+            });
+        },
+        [onBodyCommand, restoreAfter],
+    );
+
+    useLayoutEffect(() => {
+        const element = editableRef.current;
+        if (!element) return;
+        const renderedRuns = JSON.stringify(block.runs.map((run) => [run.text, run.marks.bold, run.marks.italic, run.marks.annotation]));
+        if (renderedRunsRef.current !== renderedRuns) {
+            renderedRunsRef.current = renderedRuns;
+            element.replaceChildren(...renderRunNodes(block.runs, null));
+        }
+        if (pendingCaretOffsetRef.current !== null) {
+            const offset = pendingCaretOffsetRef.current;
+            pendingCaretOffsetRef.current = null;
+            if (document.activeElement !== element) element.focus();
+            restoreCaretToDom(element, offset);
+        }
+    }, [block.runs]);
+
+    const readBodySelection = useCallback(() => {
+        const element = editableRef.current;
+        return element ? readSelectionFromDom(element) : null;
+    }, []);
+
+    return (
+        <div
+            ref={editableRef}
+            className="annotationBodyEditor"
+            contentEditable
+            role="textbox"
+            aria-label="Annotation body"
+            suppressContentEditableWarning
+            spellCheck
+            data-block-id={block.id}
+            data-empty={block.runs.length === 0 ? 'true' : undefined}
+            data-placeholder={fallbackText || 'Annotation body'}
+            onBeforeInput={(event) => {
+                if (event.nativeEvent.isComposing) return;
+                const selection = readBodySelection();
+                if (!selection) return;
+                if (event.nativeEvent.inputType === 'insertText' && event.nativeEvent.data) {
+                    event.preventDefault();
+                    run(selection, (state, selected, context) =>
+                        replaceAnnotationBodySelection(state, selected, event.nativeEvent.data ?? '', context),
+                    );
+                } else if (event.nativeEvent.inputType === 'insertParagraph') {
+                    event.preventDefault();
+                    run(selection, (state, selected, context) =>
+                        replaceAnnotationBodySelection(state, selected, '\n', context),
+                    );
+                } else if (event.nativeEvent.inputType === 'deleteContentBackward') {
+                    event.preventDefault();
+                    run(selection, deleteAnnotationBodyBackward);
+                } else if (event.nativeEvent.inputType === 'deleteContentForward') {
+                    event.preventDefault();
+                    run(selection, deleteAnnotationBodyForward);
+                }
+            }}
+            onPaste={(event) => {
+                const selection = readBodySelection();
+                if (!selection) return;
+                event.preventDefault();
+                const text = event.clipboardData.getData('text/plain');
+                run(selection, (state, selected, context) =>
+                    replaceAnnotationBodySelection(state, selected, text, context),
+                );
+            }}
+            onKeyDown={(event) => {
+                const modifierPressed = event.metaKey || event.ctrlKey;
+                const key = event.key.toLowerCase();
+                if (modifierPressed && (key === 'b' || key === 'i')) {
+                    const selection = readBodySelection();
+                    if (!selection) return;
+                    event.preventDefault();
+                    run(selection, (state, selected, context) =>
+                        toggleAnnotationBodyMark(state, selected, key === 'b' ? 'bold' : 'italic', context),
+                    );
+                }
+            }}
+        />
+    );
+}
+
+const renderStaticRuns = (runs: RichFormattedBlock['runs']): ReactElement[] =>
+    runs.map((run, index) => (
+        <span
+            key={index}
+            className={[
+                run.marks.bold ? 'markBold' : '',
+                run.marks.italic ? 'markItalic' : '',
+                run.marks.annotation ? 'markAnnotation' : '',
+            ]
+                .filter(Boolean)
+                .join(' ')}
+        >
+            {run.text}
+        </span>
+    ));
 
 function Toolbar({
     canUndo,

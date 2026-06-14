@@ -39,7 +39,7 @@ export const materializedBlockPaths = <M extends TimestampedBlockMeta>(
 ): Record<string, Lamport[]> =>
     materializedBlockPathsFromParents(
         stateBlocks(state),
-        deriveBlockParentsForBlocks(stateBlocks(state), config).parents,
+        deriveBlockParentsForBlocks(state, config).parents,
         virtualParentOwners(state, config),
     );
 
@@ -49,7 +49,7 @@ export const materializedBlockPath = <M extends TimestampedBlockMeta>(
     config: VirtualBlockParentConfig<M> = {},
 ): Lamport[] => {
     const blocks = stateBlocks(state);
-    const parents = deriveBlockParentsForBlocks(blocks, config).parents;
+    const parents = deriveBlockParentsForBlocks(state, config).parents;
     return materializedBlockPathFromParents(blocks, parents, blockId, undefined, virtualParentOwners(state, config));
 };
 
@@ -59,7 +59,7 @@ export const materializedBlockParent = <M extends TimestampedBlockMeta>(
     config: VirtualBlockParentConfig<M> = {},
 ): Lamport => {
     const blocks = stateBlocks(state);
-    const parent = deriveBlockParentsForBlocks(blocks, config).parents[blockId];
+    const parent = deriveBlockParentsForBlocks(state, config).parents[blockId];
     if (parent === undefined) {
         throw new Error(`block ${blockId} not found`);
     }
@@ -179,7 +179,18 @@ const deriveBlockParentsLinearSummary = <M extends TimestampedBlockMeta>(
     return parentDerivationFromRawParents(blocks, rawParents, virtualOwners);
 };
 
-export const deriveBlockParentsForBlocks = deriveBlockParentsLinearSummary;
+export const deriveBlockParentsForBlocks = <M extends TimestampedBlockMeta>(
+    source: Record<string, Block<M>> | State<M> | CachedState<M>,
+    config: VirtualBlockParentConfig<M> = {},
+): BlockParentDerivation => {
+    const blocks = stateBlocks(source);
+    const rawParents: Record<string, string | null> = {};
+    const virtualOwners = virtualParentOwners(source, config);
+    for (const [id, block] of Object.entries(blocks)) {
+        rawParents[id] = validateBlockOrderPathSummary(blocks, id, block.order.path, virtualOwners);
+    }
+    return parentDerivationFromRawParents(blocks, rawParents, virtualOwners);
+};
 
 const parentDerivationFromRawParents = <M extends TimestampedBlockMeta>(
     blocks: Record<string, Block<M>>,

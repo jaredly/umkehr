@@ -16,6 +16,8 @@ import {
     type MultiCommandResult,
 } from './multiSelectionCommands';
 import {deriveUndoState, createRedoAction, createUndoAction} from './undoHistory';
+import {createAnnotation} from './annotations';
+import {primarySelection, replacePrimarySelection, resolveSelectionSet} from './selectionSet';
 
 const appendEdit = (
     history: HistoryState,
@@ -79,6 +81,16 @@ const code = () => (replica: Replica) => {
 const enter = () => (replica: Replica) =>
     splitBlockEverywhere(replica.state, replica.selection, makeCommandContext(replica));
 
+const comment = () => (replica: Replica) => {
+    const result = createAnnotation(
+        replica.state,
+        primarySelection(resolveSelectionSet(replica.state, replica.selection)),
+        'sidebar',
+        makeCommandContext(replica),
+    );
+    return {state: result.state, ops: result.ops, selection: replica.selection};
+};
+
 const visibleText = (history: HistoryState, editorId: EditorId = 'left'): string[] =>
     materializeFormattedBlocks(replayHistory(history.actions, history.cursor)[editorId].state).map((block) =>
         block.runs.map((run) => run.text).join(''),
@@ -91,6 +103,43 @@ describe('block rich text undo history', () => {
 
         expect(deriveUndoState(history, 'left').canUndo).toBe(true);
         expect(deriveUndoState(history, 'right').canUndo).toBe(false);
+    });
+
+    it('derives undo availability after creating an annotation body block', () => {
+        let history = initialHistoryState();
+        history = appendEdit(history, 'left', insert('hello'));
+
+        let demo = replayHistory(history.actions, history.cursor);
+        const blockId = materializeFormattedBlocks(demo.left.state)[0].id;
+        demo = {
+            ...demo,
+            left: {
+                ...demo.left,
+                selection: replacePrimarySelection(
+                    demo.left.state,
+                    demo.left.selection,
+                    {type: 'range', anchor: {blockId, offset: 1}, focus: {blockId, offset: 4}},
+                ),
+            },
+        };
+        const result = comment()(demo.left);
+        history = appendHistoryAction(history, {
+            type: 'local-change',
+            editorId: 'left',
+            ops: result.ops,
+            selection: result.selection,
+            command: {
+                id: nextReplicaTs(demo.left),
+                actor: 'left',
+                intent: 'edit',
+                beforeSelection: demo.left.selection,
+                afterSelection: result.selection,
+                label: 'comment',
+            },
+        });
+
+        expect(() => deriveUndoState(history, 'left')).not.toThrow();
+        expect(deriveUndoState(history, 'left').canUndo).toBe(true);
     });
 
     it('creates undo and redo actions as forward local-change actions', () => {
