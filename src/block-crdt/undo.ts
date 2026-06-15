@@ -35,6 +35,9 @@ export const planUndoOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
     const ops: Op<M>[] = [];
     const unsupported: UndoUnsupported<M>[] = [];
     const replacements = new Map<string, Lamport>();
+    const batchInsertedChars = new Set(
+        batch.flatMap((op) => op.type === 'char' ? [lamportToString(op.char.id)] : []),
+    );
 
     const reject = (op: Op<M>, reason: string) => {
         unsupported.push({op, reason});
@@ -58,6 +61,9 @@ export const planUndoOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
             case 'char:move': {
                 const beforeChar = before.state.chars[lamportToString(op.id)];
                 if (!beforeChar) {
+                    if (batchInsertedChars.has(lamportToString(op.id))) {
+                        break;
+                    }
                     reject(op, 'char move undo requires the previous char parent');
                     break;
                 }
@@ -138,7 +144,7 @@ export const planUndoOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
                         ...op.mark,
                         id: nextId(),
                         remove: true,
-                        data: undefined,
+                        data: op.mark.data,
                     },
                 });
                 break;
@@ -151,6 +157,10 @@ export const planUndoOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
                     reject(op, 'join record undo requires the joined right block in the previous state');
                 break;
         }
+    }
+    if (hasMarksToRemap(current, replacements)) {
+        ops.push(...reparentRestoredChars(before, replacements, nextTs));
+        ops.push(...remapMarksForRestoredChars(current, replacements, nextId));
     }
 
     return {complete: unsupported.length === 0, ops, unsupported};
@@ -294,6 +304,63 @@ const previousWinningMark = <M extends TimestampedBlockMeta>(
         }
     }
     return winner;
+};
+
+const remapMarksForRestoredChars = <M extends TimestampedBlockMeta>(
+    current: CachedState<M>,
+    replacements: Map<string, Lamport>,
+    nextId: () => Lamport,
+): Op<M>[] => {
+    if (!replacements.size) return [];
+    const ops: Op<M>[] = [];
+    for (const mark of Object.values(current.state.marks)) {
+        if (mark.remove) continue;
+        const start = replacements.get(lamportToString(mark.start.id));
+        const end = replacements.get(lamportToString(mark.end.id));
+        if (!start && !end) continue;
+        ops.push({
+            type: 'mark',
+            mark: {
+                ...mark,
+                id: nextId(),
+                start: start ? {...mark.start, id: start} : mark.start,
+                end: end ? {...mark.end, id: end} : mark.end,
+            },
+        });
+    }
+    return ops;
+};
+
+const hasMarksToRemap = <M extends TimestampedBlockMeta>(
+    current: CachedState<M>,
+    replacements: Map<string, Lamport>,
+): boolean => {
+    if (!replacements.size) return false;
+    return Object.values(current.state.marks).some(
+        (mark) =>
+            !mark.remove &&
+            (replacements.has(lamportToString(mark.start.id)) || replacements.has(lamportToString(mark.end.id))),
+    );
+};
+
+const reparentRestoredChars = <M extends TimestampedBlockMeta>(
+    before: CachedState<M>,
+    replacements: Map<string, Lamport>,
+    nextTs: () => HLC,
+): Op<M>[] => {
+    const ops: Op<M>[] = [];
+    for (const [oldId, replacement] of replacements) {
+        const beforeChar = before.state.chars[oldId];
+        if (!beforeChar) continue;
+        const replacementParent = replacements.get(lamportToString(beforeChar.parent.id));
+        if (!replacementParent) continue;
+        ops.push({
+            type: 'char:move',
+            id: replacement,
+            parent: {id: replacementParent, ts: nextTs()},
+        });
+    }
+    return ops;
 };
 
 const sameBoundary = (one: Mark['start'], two: Mark['start']) =>

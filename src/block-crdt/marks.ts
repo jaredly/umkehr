@@ -255,6 +255,10 @@ const resolveMarks = <M extends TimestampedBlockMeta>(
             if (!mark.remove) {
                 stacking[mark.type] = stacking[mark.type] ?? [];
                 stacking[mark.type].push(mark);
+            } else if (mark.data === undefined) {
+                stacking[mark.type] = [];
+            } else {
+                stacking[mark.type] = (stacking[mark.type] ?? []).filter((stacked) => !equal(stacked.data, mark.data));
             }
             continue;
         }
@@ -265,6 +269,7 @@ const resolveMarks = <M extends TimestampedBlockMeta>(
     }
     const stackedMarks: Record<string, FormattedMarkValue[]> = {};
     for (const [type, typeMarks] of Object.entries(stacking)) {
+        if (!typeMarks.length) continue;
         stackedMarks[type] = typeMarks
             .sort((a, b) => compareLamports(a.id, b.id))
             .map((mark) => mark.data ?? true);

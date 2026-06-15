@@ -16,7 +16,7 @@ import {
     type MultiCommandResult,
 } from './multiSelectionCommands';
 import {deriveUndoState, createRedoAction, createUndoAction} from './undoHistory';
-import {createAnnotation} from './annotations';
+import {annotationVirtualParents, createAnnotation, renderedAnnotations} from './annotations';
 import {primarySelection, replacePrimarySelection, resolveSelectionSet} from './selectionSet';
 
 const appendEdit = (
@@ -96,6 +96,15 @@ const visibleText = (history: HistoryState, editorId: EditorId = 'left'): string
         block.runs.map((run) => run.text).join(''),
     );
 
+const annotationReferenceText = (history: HistoryState, editorId: EditorId = 'left'): string[] => {
+    const state = replayHistory(history.actions, history.cursor)[editorId].state;
+    return renderedAnnotations(
+        state,
+        materializeFormattedBlocks(state),
+        materializeFormattedBlocks(state, annotationVirtualParents(state)),
+    ).map((annotation) => annotation.referenceText);
+};
+
 describe('block rich text undo history', () => {
     it('derives undo availability from command metadata', () => {
         let history = initialHistoryState();
@@ -140,6 +149,46 @@ describe('block rich text undo history', () => {
 
         expect(() => deriveUndoState(history, 'left')).not.toThrow();
         expect(deriveUndoState(history, 'left').canUndo).toBe(true);
+    });
+
+    it('removes the annotation mark when undoing comment creation', () => {
+        let history = initialHistoryState();
+        history = appendEdit(history, 'left', insert('hello'));
+
+        let demo = replayHistory(history.actions, history.cursor);
+        const blockId = materializeFormattedBlocks(demo.left.state)[0].id;
+        demo = {
+            ...demo,
+            left: {
+                ...demo.left,
+                selection: replacePrimarySelection(
+                    demo.left.state,
+                    demo.left.selection,
+                    {type: 'range', anchor: {blockId, offset: 1}, focus: {blockId, offset: 4}},
+                ),
+            },
+        };
+        const result = comment()(demo.left);
+        history = appendHistoryAction(history, {
+            type: 'local-change',
+            editorId: 'left',
+            ops: result.ops,
+            selection: result.selection,
+            command: {
+                id: nextReplicaTs(demo.left),
+                actor: 'left',
+                intent: 'edit',
+                beforeSelection: demo.left.selection,
+                afterSelection: result.selection,
+                label: 'comment',
+            },
+        });
+        expect(annotationReferenceText(history)).toEqual(['ell']);
+
+        history = appendActionResult(history, createUndoAction(history, 'left'));
+
+        expect(visibleText(history)).toEqual(['hello']);
+        expect(annotationReferenceText(history)).toEqual([]);
     });
 
     it('creates undo and redo actions as forward local-change actions', () => {
@@ -215,6 +264,60 @@ describe('block rich text undo history', () => {
         history = appendActionResult(history, createUndoAction(history, 'left'));
 
         expect(visibleText(history)).toEqual(['ab']);
+    });
+
+    it('keeps annotation marks anchored to the start of a restored deleted word', () => {
+        let history = initialHistoryState();
+        history = appendEdit(history, 'left', insert('word'), 'insert word');
+
+        let demo = replayHistory(history.actions, history.cursor);
+        const blockId = materializeFormattedBlocks(demo.left.state)[0].id;
+        demo = {
+            ...demo,
+            left: {
+                ...demo.left,
+                selection: replacePrimarySelection(
+                    demo.left.state,
+                    demo.left.selection,
+                    {type: 'range', anchor: {blockId, offset: 0}, focus: {blockId, offset: 4}},
+                ),
+            },
+        };
+        const annotated = comment()(demo.left);
+        history = appendHistoryAction(history, {
+            type: 'local-change',
+            editorId: 'left',
+            ops: annotated.ops,
+            selection: annotated.selection,
+            command: {
+                id: nextReplicaTs(demo.left),
+                actor: 'left',
+                intent: 'edit',
+                beforeSelection: demo.left.selection,
+                afterSelection: annotated.selection,
+                label: 'comment',
+            },
+        });
+
+        history = appendEdit(history, 'left', (replica) => {
+            const selected = replacePrimarySelection(
+                replica.state,
+                replica.selection,
+                {type: 'range', anchor: {blockId, offset: 0}, focus: {blockId, offset: 4}},
+            );
+            return deleteBackwardEverywhere(replica.state, selected, makeCommandContext(replica));
+        }, 'delete word');
+        expect(visibleText(history)).toEqual(['']);
+
+        history = appendActionResult(history, createUndoAction(history, 'left'));
+
+        expect(visibleText(history)).toEqual(['word']);
+        expect(annotationReferenceText(history)).toEqual(['word']);
+        expect(deriveUndoState(history, 'left')).toMatchObject({canUndo: true, canRedo: true});
+
+        history = appendActionResult(history, createRedoAction(history, 'left'));
+        expect(visibleText(history)).toEqual(['']);
+        expect(annotationReferenceText(history)).toEqual([]);
     });
 
     it('supports undo and redo for block type changes', () => {

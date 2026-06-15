@@ -1,0 +1,1 @@
+undo bug in examples/block-rich-text: select a word, add a comment mark. Then delete the word. Then undo. the work comes back with the comment mark, but the start of the mark is the second character of the word, not the first.

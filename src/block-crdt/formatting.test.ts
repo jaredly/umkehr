@@ -184,6 +184,30 @@ it('materializes configured stacking marks without same-type LWW collapse', () =
     ]);
 });
 
+it('removes configured stacking marks by matching data', () => {
+    let state = add(init(), 'abc', [0, 'self']);
+    state = apply(
+        state,
+        markRange(state, [0, 'self'], 0, 3, 'annotation', 'first', false, [10, 'self']),
+    ) as CachedState;
+    state = apply(
+        state,
+        markRange(state, [0, 'self'], 1, 2, 'annotation', 'second', false, [11, 'self']),
+    ) as CachedState;
+    state = apply(
+        state,
+        markRange(state, [0, 'self'], 0, 3, 'annotation', 'first', true, [12, 'self']),
+    ) as CachedState;
+
+    expect(
+        materializeFormattedBlocks(state, {markBehavior: {annotation: 'stacking'}})[0].runs,
+    ).toEqual([
+        {text: 'a', marks: {}},
+        {text: 'b', marks: {}, stackedMarks: {annotation: ['second']}},
+        {text: 'c', marks: {}},
+    ]);
+});
+
 it('deleted chars do not render but still preserve mark anchors', () => {
     let state = add(init(), 'abc', [0, 'self']);
     state = apply(

@@ -279,6 +279,7 @@ export const renderedAnnotations = (
 ): RenderedAnnotation[] => {
     const formattedBodies = new Map(blocksWithAnnotationBodies.map((block) => [block.id, block]));
     const referenceBlocks = blocksWithAnnotationBodies;
+    const seen = new Set<string>();
     return Object.values(state.state.marks)
         .filter((mark) => mark.type === ANNOTATION_MARK && !mark.remove && isAnnotationData(mark.data))
         .map((mark) => {
@@ -299,6 +300,11 @@ export const renderedAnnotations = (
             };
         })
         .filter((annotation) => annotation.referenceText.length > 0)
+        .filter((annotation) => {
+            if (seen.has(annotation.id)) return false;
+            seen.add(annotation.id);
+            return true;
+        })
         .sort((a, b) => {
             const aPosition = firstPositionForAnnotation(referenceBlocks, a.id);
             const bPosition = firstPositionForAnnotation(referenceBlocks, b.id);
