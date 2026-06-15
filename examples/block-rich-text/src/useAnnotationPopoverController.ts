@@ -7,6 +7,13 @@ export type ActivePopover = {
     source: 'hover' | 'selection';
 };
 
+export type PopoverPointerTransition = {
+    source: 'trigger' | 'panel';
+    relatedTarget?: EventTarget | null;
+    clientX?: number;
+    clientY?: number;
+};
+
 type PopoverOpenReason = 'hover' | 'selection' | 'focus' | 'activation';
 
 type PopoverReasons = Record<PopoverOpenReason, boolean>;
@@ -238,6 +245,51 @@ const pruneClosedPopovers = (popovers: ManagedPopover[]): ManagedPopover[] => {
     return popovers.filter((popover) => visible.has(popover.id));
 };
 
+const pointerLooksTowardPopover = (
+    popovers: ManagedPopover[],
+    id: string,
+    transition: PopoverPointerTransition,
+): boolean => {
+    if (transition.source !== 'trigger') return false;
+    if (typeof transition.clientX !== 'number' || typeof transition.clientY !== 'number') {
+        return false;
+    }
+    if (transition.clientX === 0 && transition.clientY === 0) return false;
+    const popover = popovers.find((candidate) => candidate.id === id);
+    if (!popover) return false;
+
+    const width = 320;
+    const horizontalSlop = 56;
+    const verticalBridge = 160;
+    const earlyPanelSlop = 32;
+    const x = transition.clientX;
+    const y = transition.clientY;
+    const left = popover.left - horizontalSlop;
+    const right = popover.left + width + horizontalSlop;
+    const top = popover.top;
+
+    return x >= left && x <= right && y >= top - verticalBridge && y <= top + earlyPanelSlop;
+};
+
+const pointerClearIds = (
+    popovers: ManagedPopover[],
+    id: string | undefined,
+    relatedTarget: EventTarget | null,
+): Set<string> => {
+    const ids = id ? descendantsOf(popovers, id) : new Set<string>();
+    if (id) {
+        ids.add(id);
+        for (const ancestorId of ancestorsOf(popovers, id)) {
+            if (!targetIsInsidePopoverSubtree(popovers, ancestorId, relatedTarget)) {
+                ids.add(ancestorId);
+            }
+        }
+    } else {
+        popovers.forEach((popover) => ids.add(popover.id));
+    }
+    return ids;
+};
+
 export const useAnnotationPopoverController = ({
     rootRef,
     selectedPopoverIds,
@@ -251,6 +303,7 @@ export const useAnnotationPopoverController = ({
 }) => {
     const [managedPopovers, setManagedPopovers] = useState<ManagedPopover[]>([]);
     const focusedPopoverIdRef = useRef<string | null>(null);
+    const intentHideTimersRef = useRef<Map<string, number>>(new Map());
 
     const activePopovers = useMemo(
         () => derivedActivePopovers(managedPopovers),
@@ -258,7 +311,17 @@ export const useAnnotationPopoverController = ({
     );
 
     const cancelPopoverHide = useCallback(() => {
-        // Kept for caller compatibility; hover retention is now transition-based.
+        for (const timer of intentHideTimersRef.current.values()) window.clearTimeout(timer);
+        intentHideTimersRef.current.clear();
+    }, []);
+
+    const cancelPopoverHideForIds = useCallback((ids: Set<string>) => {
+        for (const id of ids) {
+            const timer = intentHideTimersRef.current.get(id);
+            if (!timer) continue;
+            window.clearTimeout(timer);
+            intentHideTimersRef.current.delete(id);
+        }
     }, []);
 
     const popoverContainsFocus = useCallback(() => {
@@ -282,26 +345,42 @@ export const useAnnotationPopoverController = ({
     }, [rootRef]);
 
     const schedulePopoverHideFromPointer = useCallback(
-        (id?: string, relatedTarget?: EventTarget | null) => {
+        (id?: string, transition?: PopoverPointerTransition) => {
+            const relatedTarget = transition?.relatedTarget ?? null;
             setManagedPopovers((current) => {
-                if (id && targetIsInsidePopoverSubtree(current, id, relatedTarget ?? null)) {
+                if (id && targetIsInsidePopoverSubtree(current, id, relatedTarget)) {
+                    const timer = intentHideTimersRef.current.get(id);
+                    if (timer) {
+                        window.clearTimeout(timer);
+                        intentHideTimersRef.current.delete(id);
+                    }
                     return current;
                 }
-                const ids = id ? descendantsOf(current, id) : new Set<string>();
-                if (id) {
-                    ids.add(id);
-                    for (const ancestorId of ancestorsOf(current, id)) {
-                        if (!targetIsInsidePopoverSubtree(current, ancestorId, relatedTarget ?? null)) {
-                            ids.add(ancestorId);
-                        }
-                    }
-                } else {
-                    current.forEach((popover) => ids.add(popover.id));
+                const ids = pointerClearIds(current, id, relatedTarget);
+                if (id && transition && pointerLooksTowardPopover(current, id, transition)) {
+                    const existingTimer = intentHideTimersRef.current.get(id);
+                    if (existingTimer) window.clearTimeout(existingTimer);
+                    const timer = window.setTimeout(() => {
+                        intentHideTimersRef.current.delete(id);
+                        setManagedPopovers((latest) => {
+                            if (targetIsInsidePopoverSubtree(latest, id, relatedTarget)) return latest;
+                            return pruneClosedPopovers(
+                                clearReasons(
+                                    latest,
+                                    pointerClearIds(latest, id, relatedTarget),
+                                    ['hover', 'activation'],
+                                ),
+                            );
+                        });
+                    }, 100);
+                    intentHideTimersRef.current.set(id, timer);
+                    return current;
                 }
+                cancelPopoverHideForIds(ids);
                 return pruneClosedPopovers(clearReasons(current, ids, ['hover', 'activation']));
             });
         },
-        [],
+        [cancelPopoverHideForIds],
     );
 
     const showPopover = useCallback(
@@ -346,11 +425,13 @@ export const useAnnotationPopoverController = ({
     );
 
     const closeAllPopovers = useCallback(() => {
+        cancelPopoverHide();
         setManagedPopovers([]);
         focusedPopoverIdRef.current = null;
-    }, []);
+    }, [cancelPopoverHide]);
 
     const closeDeepestPopover = useCallback(() => {
+        cancelPopoverHide();
         setManagedPopovers((current) => {
             const active = derivedActivePopovers(current);
             if (!active.length) return current;
@@ -368,7 +449,7 @@ export const useAnnotationPopoverController = ({
                 clearReasons(current, ids, ['hover', 'selection', 'focus', 'activation']),
             );
         });
-    }, []);
+    }, [cancelPopoverHide]);
 
     const repositionOpenPopovers = useCallback(() => {
         const root = rootRef.current;
@@ -416,6 +497,8 @@ export const useAnnotationPopoverController = ({
         document.addEventListener('mousedown', onMouseDown, true);
         return () => document.removeEventListener('mousedown', onMouseDown, true);
     }, [closeAllPopovers, rootRef]);
+
+    useLayoutEffect(() => () => cancelPopoverHide(), [cancelPopoverHide]);
 
     useLayoutEffect(() => {
         repositionOpenPopovers();

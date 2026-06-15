@@ -86,3 +86,16 @@
   - `npm exec tsc -- -p examples/block-rich-text/tsconfig.json --noEmit` passed.
   - `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx` passed with 80 tests.
   - `npm exec vitest -- run examples/block-rich-text/src` passed with 194 tests across 9 files.
+
+### Intent Delay for Trigger-to-Popover Hover
+
+- Added a 100ms pointer-intent bridge when leaving an inline popover trigger toward the floating popover panel.
+- Kept ordinary panel exits and pointer movement away from the panel immediate.
+- Added per-popover hide timers so overlapping or nested ids do not overwrite one another.
+- Panel mouse enter, popover show, close-all, and Escape dismissal now cancel any pending intent hide timers.
+- Added regression coverage for delayed trigger-to-panel hover and immediate away-from-panel hover.
+- Issue/workaround: JSDOM/React events can provide default `clientX/clientY` values of `0`; the controller treats `(0, 0)` as missing pointer evidence so coordinate-less legacy tests and exits remain immediate.
+- Verification:
+  - `npm exec tsc -- -p examples/block-rich-text/tsconfig.json --noEmit` passed.
+  - `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx` passed with 82 tests.
+  - `npm exec vitest -- run examples/block-rich-text/src` passed with 196 tests across 9 files.

@@ -105,6 +105,7 @@ import {
     popoverIdsForTrigger,
     useAnnotationPopoverController,
     type ActivePopover,
+    type PopoverPointerTransition,
 } from './useAnnotationPopoverController';
 
 type RichFormattedBlock = FormattedBlock<RichBlockMeta>;
@@ -1054,7 +1055,12 @@ function BlockEditor({
                     position={popover}
                     onMouseEnter={cancelPopoverHide}
                     onMouseLeave={(event) =>
-                        schedulePopoverHideFromPointer(popover.id, event.relatedTarget)
+                        schedulePopoverHideFromPointer(popover.id, {
+                            source: 'panel',
+                            relatedTarget: event.relatedTarget,
+                            clientX: event.clientX,
+                            clientY: event.clientY,
+                        })
                     }
                     onFocusChange={setPopoverFocusPinned}
                     onEscape={closeDeepestPopover}
@@ -1131,7 +1137,7 @@ type RenderBlockContext = {
         sourceBlock: HTMLElement,
     ): void;
     onPopoverTriggerEnter(id: string, element: HTMLElement): void;
-    onPopoverTriggerLeave(id?: string, relatedTarget?: EventTarget | null): void;
+    onPopoverTriggerLeave(id?: string, transition?: PopoverPointerTransition): void;
     onUndo(): void;
     onRedo(): void;
     onKeystroke(blockId: string, event: KeyboardEvent<HTMLElement>): void;
@@ -1433,7 +1439,7 @@ function AnnotationSidebar({
     onBodySelectionChange(selection: EditorSelection | null): void;
     popoverTextById: Map<string, string>;
     onPopoverTriggerEnter(id: string, element: HTMLElement): void;
-    onPopoverTriggerLeave(id?: string, relatedTarget?: EventTarget | null): void;
+    onPopoverTriggerLeave(id?: string, transition?: PopoverPointerTransition): void;
 }) {
     if (!annotations.length) return null;
     return (
@@ -1473,7 +1479,7 @@ function Footnotes({
     onBodySelectionChange(selection: EditorSelection | null): void;
     popoverTextById: Map<string, string>;
     onPopoverTriggerEnter(id: string, element: HTMLElement): void;
-    onPopoverTriggerLeave(id?: string, relatedTarget?: EventTarget | null): void;
+    onPopoverTriggerLeave(id?: string, transition?: PopoverPointerTransition): void;
 }) {
     if (!annotations.length) return null;
     return (
@@ -1525,7 +1531,7 @@ function FloatingAnnotationPopover({
     onBodySelectionChange(selection: EditorSelection | null): void;
     popoverTextById: Map<string, string>;
     onPopoverTriggerEnter(id: string, element: HTMLElement): void;
-    onPopoverTriggerLeave(id?: string, relatedTarget?: EventTarget | null): void;
+    onPopoverTriggerLeave(id?: string, transition?: PopoverPointerTransition): void;
 }) {
     if (!annotation || !position) return null;
     return (
@@ -1582,7 +1588,7 @@ function AnnotationBodyBlock({
     onBodySelectionChange(selection: EditorSelection | null): void;
     popoverTextById: Map<string, string>;
     onPopoverTriggerEnter(id: string, element: HTMLElement): void;
-    onPopoverTriggerLeave(id?: string, relatedTarget?: EventTarget | null): void;
+    onPopoverTriggerLeave(id?: string, transition?: PopoverPointerTransition): void;
 }) {
     const pendingCaretRestoreBlockIdRef = useRef<string | null>(null);
     const pendingSelectionRestoreRef = useRef<EditorSelection | null>(null);
@@ -1834,7 +1840,7 @@ function EditableBlock({
     onStartDrag: ReturnType<typeof useBlockReorder>['startDrag'];
     popoverTextById: Map<string, string>;
     onPopoverTriggerEnter(id: string, element: HTMLElement): void;
-    onPopoverTriggerLeave(id?: string, relatedTarget?: EventTarget | null): void;
+    onPopoverTriggerLeave(id?: string, transition?: PopoverPointerTransition): void;
     onInsertText(text: string, selection?: EditorSelection): void;
     onDeleteBackward(selection?: EditorSelection): void;
     onDeleteForward(selection?: EditorSelection): void;
@@ -2128,7 +2134,7 @@ function RichTextEditableSurface({
     onDeleteForward(selection?: EditorSelection): void;
     onSelectionChange?(selection: EditorSelection | null): void;
     onPopoverTriggerEnter?(id: string, element: HTMLElement): void;
-    onPopoverTriggerLeave?(id?: string, relatedTarget?: EventTarget | null): void;
+    onPopoverTriggerLeave?(id?: string, transition?: PopoverPointerTransition): void;
     onKeyDown?(event: KeyboardEvent<HTMLDivElement>): void;
     onPaste?(event: ClipboardEvent<HTMLDivElement>): void;
 }) {
@@ -2235,7 +2241,12 @@ function RichTextEditableSurface({
                 );
                 if (relatedTrigger === trigger) return;
                 for (const id of popoverIdsForTrigger(trigger)) {
-                    onPopoverTriggerLeave?.(id, event.relatedTarget);
+                    onPopoverTriggerLeave?.(id, {
+                        source: 'trigger',
+                        relatedTarget: event.relatedTarget,
+                        clientX: event.clientX,
+                        clientY: event.clientY,
+                    });
                 }
             }}
             onClick={(event) => {

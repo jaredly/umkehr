@@ -1,6 +1,6 @@
 import '../../../src/react/test-dom';
 
-import {cleanup, fireEvent, render, waitFor, within} from '@testing-library/react';
+import {act, cleanup, fireEvent, render, waitFor, within} from '@testing-library/react';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import {App} from './App';
 
@@ -286,6 +286,16 @@ const closePopoversBySelectingMainBlock = async (panel: HTMLElement) => {
     selectCaret(block, 0);
     fireEvent.mouseUp(block);
     await waitFor(() => expect(queryPopoverDialogs(panel)).toHaveLength(0));
+};
+
+const pinElementRect = (
+    element: HTMLElement,
+    rect: Pick<DOMRect, 'left' | 'top' | 'right' | 'bottom' | 'width' | 'height'>,
+) => {
+    Object.defineProperty(element, 'getBoundingClientRect', {
+        configurable: true,
+        value: () => ({...rect, x: rect.left, y: rect.top, toJSON: () => rect}),
+    });
 };
 
 const beforeInputDeleteBackward = (block: HTMLElement) =>
@@ -1388,6 +1398,72 @@ describe('Block rich text example UI', () => {
         expect(popoverDialogs(left)).toEqual([popover]);
 
         await closePopoversBySelectingMainBlock(left);
+    });
+
+    it('keeps a hover popover open briefly when the pointer leaves toward it', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        await createPopoverOnMainText(left, 'abcd', 1, 3);
+        await closePopoversBySelectingMainBlock(left);
+
+        const popoverMark = popoverMarks(blocks(left)[0])[0];
+        if (!popoverMark) throw new Error('missing inline popover mark');
+        pinElementRect(popoverMark, {
+            left: 100,
+            top: 100,
+            right: 140,
+            bottom: 120,
+            width: 40,
+            height: 20,
+        });
+
+        const popover = await openPopoverFromMark(left, popoverMark);
+
+        vi.useFakeTimers();
+        fireEvent.mouseOut(popoverMark, {
+            relatedTarget: document.body,
+            clientX: 120,
+            clientY: 124,
+        });
+
+        expect(popoverDialogs(left)).toEqual([popover]);
+        act(() => vi.advanceTimersByTime(99));
+        expect(popoverDialogs(left)).toEqual([popover]);
+
+        fireEvent.mouseEnter(popover);
+        act(() => vi.advanceTimersByTime(100));
+
+        expect(popoverDialogs(left)).toEqual([popover]);
+    });
+
+    it('closes a hover popover immediately when the pointer leaves away from it', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        await createPopoverOnMainText(left, 'abcd', 1, 3);
+        await closePopoversBySelectingMainBlock(left);
+
+        const popoverMark = popoverMarks(blocks(left)[0])[0];
+        if (!popoverMark) throw new Error('missing inline popover mark');
+        pinElementRect(popoverMark, {
+            left: 100,
+            top: 100,
+            right: 140,
+            bottom: 120,
+            width: 40,
+            height: 20,
+        });
+
+        await openPopoverFromMark(left, popoverMark);
+
+        fireEvent.mouseOut(popoverMark, {
+            relatedTarget: document.body,
+            clientX: 20,
+            clientY: 124,
+        });
+
+        expect(queryPopoverDialogs(left)).toHaveLength(0);
     });
 
     it('keeps a parent popover visible when clicking a child popover', async () => {
