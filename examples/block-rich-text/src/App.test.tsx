@@ -1314,7 +1314,6 @@ describe('Block rich text example UI', () => {
         expect(popoverMark.dataset.popoverId).toBeTruthy();
         expect(within(left).queryByLabelText('Popovers')).toBeNull();
 
-        fireEvent.mouseOver(popoverMark);
         const popover = await waitFor(() =>
             within(left).getByRole('dialog', {name: 'Popover'}),
         );
@@ -1333,9 +1332,21 @@ describe('Block rich text example UI', () => {
         act(() => vi.advanceTimersByTime(300));
         expect(within(left).getByRole('dialog', {name: 'Popover'})).toBe(popover);
 
+        fireEvent.focus(popoverBody);
         fireEvent.mouseLeave(popover, {relatedTarget: document.body});
         act(() => vi.advanceTimersByTime(300));
-        expect(within(left).queryByRole('dialog', {name: 'Popover'})).toBeNull();
+        expect(within(left).getByRole('dialog', {name: 'Popover'})).toBe(popover);
+
+        fireEvent.blur(popoverBody, {relatedTarget: document.body});
+        act(() => vi.advanceTimersByTime(300));
+        expect(within(left).getByRole('dialog', {name: 'Popover'})).toBe(popover);
+
+        vi.useRealTimers();
+        selectCaret(blocks(left)[0], 0);
+        fireEvent.mouseUp(blocks(left)[0]);
+        await waitFor(() =>
+            expect(within(left).queryByRole('dialog', {name: 'Popover'})).toBeNull(),
+        );
     });
 
     it('pastes newlines as multiple synced blocks', async () => {
