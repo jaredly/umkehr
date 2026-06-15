@@ -23,6 +23,8 @@ import {
     deleteAnnotationBodyForward,
     renderedAnnotations,
     replaceAnnotationBodySelection,
+    removeAnnotationBodyLink,
+    setAnnotationBodyLink,
     toggleAnnotationBodyMark,
     type AnnotationMarkData,
     type AnnotationPresentation,
@@ -51,6 +53,7 @@ import {
     editableBlockIds,
     firstPointForSelection,
     focusPoint,
+    normalizeSelectionSegments,
     pointTextLength,
     segmentText,
     type EditorSelection,
@@ -65,6 +68,8 @@ import {
     moveSelectionsHorizontally,
     moveSelectionsVertically,
     pastePlainTextEverywhere,
+    removeLinkMarkEverywhere,
+    setLinkMarkEverywhere,
     setBlockTypeEverywhere,
     splitBlockEverywhere,
     toggleMarkEverywhere,
@@ -107,9 +112,23 @@ import {
     type ActivePopover,
     type PopoverPointerTransition,
 } from './useAnnotationPopoverController';
+import {
+    isLinkLikeText,
+    linkHrefForSelectionSegments,
+    linkRangeAroundOffsetInRuns,
+    LINK_MARK,
+    textForSelectionSegments,
+    type LinkTargetRange,
+} from './inlineMarks';
 
 type RichFormattedBlock = FormattedBlock<RichBlockMeta>;
 type RenderedAnnotation = ReturnType<typeof renderedAnnotations>[number];
+type LinkPopoverState = {
+    ranges: LinkTargetRange[];
+    href: string;
+    top: number;
+    left: number;
+};
 
 export function App() {
     return hasDemoQuery() ? <BlogVisualDemos /> : <EditorApp />;
@@ -406,6 +425,7 @@ function BlockEditor({
     const [isExtendingSelection, setIsExtendingSelection] = useState(false);
     const [activeAnnotationBodySelection, setActiveAnnotationBodySelection] =
         useState<EditorSelection | null>(null);
+    const [linkPopover, setLinkPopover] = useState<LinkPopoverState | null>(null);
     const blocks = materializeFormattedBlocks(replica.state, annotationMarkBehavior);
     const blocksWithAnnotationBodies = materializeFormattedBlocks(
         replica.state,
@@ -519,6 +539,7 @@ function BlockEditor({
         handledTripleClickRef.current = false;
         handledNavigationKeyRef.current = false;
         setIsExtendingSelection(false);
+        setLinkPopover(null);
     }, [resetSignal]);
 
     const captureSelection = useCallback(
@@ -630,6 +651,13 @@ function BlockEditor({
             ) {
                 closeAllPopovers();
             }
+            if (
+                elementConstructor &&
+                event.target instanceof elementConstructor &&
+                !event.target.closest('.linkFloatingPopover')
+            ) {
+                setLinkPopover(null);
+            }
             setIsExtendingSelection(
                 event.detail <= 1 && !event.shiftKey && (event.metaKey || event.ctrlKey),
             );
@@ -731,6 +759,128 @@ function BlockEditor({
         },
         [onCommand],
     );
+
+    const applyLinkToRanges = useCallback(
+        (ranges: LinkTargetRange[], href: string) => {
+            runBlockControlCommand((current) => {
+                const rangeSelection = retainedSelectionSetForLinkRanges(current.state, ranges);
+                const result = setLinkMarkEverywhere(
+                    current.state,
+                    rangeSelection,
+                    href,
+                    makeCommandContext(current),
+                );
+                return {state: result.state, ops: result.ops, selection: current.selection};
+            });
+        },
+        [runBlockControlCommand],
+    );
+
+    const removeLinkFromRanges = useCallback(
+        (ranges: LinkTargetRange[]) => {
+            runBlockControlCommand((current) => {
+                const rangeSelection = retainedSelectionSetForLinkRanges(current.state, ranges);
+                const result = removeLinkMarkEverywhere(
+                    current.state,
+                    rangeSelection,
+                    makeCommandContext(current),
+                );
+                return {state: result.state, ops: result.ops, selection: current.selection};
+            });
+        },
+        [runBlockControlCommand],
+    );
+
+    const openLinkPopoverForRanges = useCallback(
+        (
+            state: Replica['state'],
+            ranges: LinkTargetRange[],
+            position: {top: number; left: number},
+        ) => {
+            if (!ranges.length) return;
+            const formatted = materializeFormattedBlocks(state, annotationMarkBehavior);
+            setLinkPopover({
+                ranges,
+                href: linkHrefForSelectionSegments(formatted, ranges) ?? '',
+                ...position,
+            });
+        },
+        [],
+    );
+
+    const openLinkFromCurrentSelection = useCallback(() => {
+        onCommand((current) => {
+            const selection = liveSelectionSet(current);
+            const ranges = linkRangesForSelectionSet(current.state, selection);
+            const formatted = materializeFormattedBlocks(current.state, annotationMarkBehavior);
+            if (ranges.length) {
+                const selectedText = textForSelectionSegments(formatted, ranges).trim();
+                if (isLinkLikeText(selectedText)) {
+                    const result = setLinkMarkEverywhere(
+                        current.state,
+                        selection,
+                        selectedText,
+                        makeCommandContext(current),
+                    );
+                    setLinkPopover(null);
+                    return result;
+                }
+                openLinkPopoverForRanges(
+                    current.state,
+                    ranges,
+                    linkPopoverPositionFromSelection(rootRef.current),
+                );
+                return {state: current.state, ops: [], selection};
+            }
+
+            const primary = primarySelection(resolveSelectionSet(current.state, selection));
+            if (primary.type === 'caret') {
+                const block = formatted.find((candidate) => candidate.id === primary.point.blockId);
+                const linkRange = block ? linkRangeAroundOffsetInRuns(block.id, block.runs, primary.point.offset) : null;
+                if (linkRange) {
+                    openLinkPopoverForRanges(
+                        current.state,
+                        [linkRange],
+                        linkPopoverPositionFromSelection(rootRef.current),
+                    );
+                }
+            }
+
+            return {state: current.state, ops: [], selection};
+        });
+    }, [liveSelectionSet, onCommand, openLinkPopoverForRanges]);
+
+    const openLinkFromRange = useCallback(
+        (range: LinkTargetRange & {href: string}, element: HTMLElement) => {
+            setLinkPopover({
+                ranges: [{blockId: range.blockId, startOffset: range.startOffset, endOffset: range.endOffset}],
+                href: range.href,
+                ...linkPopoverPositionFromElement(element),
+            });
+        },
+        [],
+    );
+
+    const applyLinkPopover = useCallback(
+        (href: string) => {
+            const ranges = linkPopover?.ranges ?? [];
+            setLinkPopover(null);
+            if (!ranges.length) return;
+            const value = href.trim();
+            if (value) {
+                applyLinkToRanges(ranges, value);
+            } else {
+                removeLinkFromRanges(ranges);
+            }
+        },
+        [applyLinkToRanges, linkPopover?.ranges, removeLinkFromRanges],
+    );
+
+    const removeLinkPopover = useCallback(() => {
+        const ranges = linkPopover?.ranges ?? [];
+        setLinkPopover(null);
+        if (ranges.length) removeLinkFromRanges(ranges);
+    }, [linkPopover?.ranges, removeLinkFromRanges]);
 
     const runAnnotationBodyCommand = useCallback(
         (
@@ -962,6 +1112,17 @@ function BlockEditor({
                         ),
                     )
                 }
+                onStrikethrough={() =>
+                    runEditCommand((current, selection) =>
+                        toggleMarkEverywhere(
+                            current.state,
+                            selection,
+                            'strikethrough',
+                            makeCommandContext(current),
+                        ),
+                    )
+                }
+                onLink={openLinkFromCurrentSelection}
                 onAnnotation={(presentation) =>
                     activeAnnotationBodySelection
                         ? runBlockControlCommand((current) => {
@@ -1045,6 +1206,8 @@ function BlockEditor({
                         footnoteNumberById,
                         onPopoverTriggerEnter: showPopover,
                         onPopoverTriggerLeave: schedulePopoverHideFromPointer,
+                        openLinkFromCurrentSelection,
+                        openLinkFromRange,
                         runEditCommand,
                         runBlockControlCommand,
                         moveCaretHorizontally,
@@ -1084,6 +1247,12 @@ function BlockEditor({
                     onPopoverTriggerLeave={schedulePopoverHideFromPointer}
                 />
             ))}
+            <LinkFloatingPopover
+                state={linkPopover}
+                onApply={applyLinkPopover}
+                onRemove={removeLinkPopover}
+                onClose={() => setLinkPopover(null)}
+            />
             <Footnotes
                 annotations={annotations.filter((item) => item.data.presentation === 'footnote')}
                 onBodyCommand={runAnnotationBodyCommand}
@@ -1153,6 +1322,8 @@ type RenderBlockContext = {
     ): void;
     onPopoverTriggerEnter(id: string, element: HTMLElement): void;
     onPopoverTriggerLeave(id?: string, transition?: PopoverPointerTransition): void;
+    openLinkFromCurrentSelection(): void;
+    openLinkFromRange(range: LinkTargetRange & {href: string}, element: HTMLElement): void;
     onUndo(): void;
     onRedo(): void;
     onKeystroke(blockId: string, event: KeyboardEvent<HTMLElement>): void;
@@ -1296,6 +1467,18 @@ const renderEditableBlock = (block: RichFormattedBlock, context: RenderBlockCont
                     ),
                 )
             }
+            onToggleStrikethrough={() =>
+                context.runEditCommand((current, selection) =>
+                    toggleMarkEverywhere(
+                        current.state,
+                        selection,
+                        'strikethrough',
+                        makeCommandContext(current),
+                    ),
+                )
+            }
+            onOpenLink={context.openLinkFromCurrentSelection}
+            onOpenLinkRange={context.openLinkFromRange}
             onToggleTodo={() =>
                 context.runEditCommand((current, selection) =>
                     updateBlockMetaEverywhere(
@@ -1338,14 +1521,24 @@ const renderEditableBlock = (block: RichFormattedBlock, context: RenderBlockCont
                 })
             }
             onPasteText={(text) =>
-                context.runEditCommand((current, selection) =>
-                    pastePlainTextEverywhere(
+                context.runEditCommand((current, selection) => {
+                    const activeSelection = selection;
+                    const primary = primarySelection(resolveSelectionSet(current.state, activeSelection));
+                    if (isLinkLikeText(text) && primary.type === 'range') {
+                        return setLinkMarkEverywhere(
+                            current.state,
+                            activeSelection,
+                            text.trim(),
+                            makeCommandContext(current),
+                        );
+                    }
+                    return pastePlainTextEverywhere(
                         current.state,
-                        selection,
+                        activeSelection,
                         text,
                         makeCommandContext(current),
-                    ),
-                )
+                    );
+                })
             }
             onMoveCaret={context.moveCaretHorizontally}
             onMoveCaretVertically={context.moveCaretVertically}
@@ -1595,6 +1788,73 @@ function FloatingAnnotationPopover({
     );
 }
 
+function LinkFloatingPopover({
+    state,
+    onApply,
+    onRemove,
+    onClose,
+}: {
+    state: LinkPopoverState | null;
+    onApply(href: string): void;
+    onRemove(): void;
+    onClose(): void;
+}) {
+    const [href, setHref] = useState('');
+
+    useLayoutEffect(() => {
+        setHref(state?.href ?? '');
+    }, [state?.href]);
+
+    if (!state) return null;
+
+    const targetHref = href.trim();
+
+    return (
+        <form
+            className="linkFloatingPopover"
+            role="dialog"
+            aria-label="Link"
+            style={{top: state.top, left: state.left}}
+            onSubmit={(event) => {
+                event.preventDefault();
+                onApply(href);
+            }}
+            onKeyDown={(event) => {
+                if (event.key !== 'Escape') return;
+                event.preventDefault();
+                onClose();
+            }}
+            onMouseDown={(event) => event.stopPropagation()}
+        >
+            <input
+                value={href}
+                autoFocus
+                aria-label="Link target"
+                onChange={(event) => setHref(event.currentTarget.value)}
+            />
+            <button
+                type="button"
+                className="linkOpenButton"
+                aria-label="Open link in new tab"
+                disabled={!targetHref}
+                onClick={() => {
+                    if (targetHref) window.open(targetHref, '_blank', 'noopener,noreferrer');
+                }}
+            >
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path d="M14 5h5v5" />
+                    <path d="M10 14 19 5" />
+                    <path d="M19 14v4a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h4" />
+                </svg>
+            </button>
+            <button type="submit">Apply</button>
+            <button type="button" onClick={onRemove}>
+                Remove
+            </button>
+        </form>
+    );
+}
+
 function AnnotationBodyBlock({
     block,
     fallbackText = '',
@@ -1619,6 +1879,7 @@ function AnnotationBodyBlock({
     const pendingCaretRestoreBlockIdRef = useRef<string | null>(null);
     const pendingSelectionRestoreRef = useRef<EditorSelection | null>(null);
     const [selection, setSelection] = useState<EditorSelection>(() => caret(block.id, block.text.length));
+    const [linkPopover, setLinkPopover] = useState<LinkPopoverState | null>(null);
 
     const restoreAfter = useCallback((selection: EditorSelection) => {
         pendingCaretRestoreBlockIdRef.current =
@@ -1651,61 +1912,159 @@ function AnnotationBodyBlock({
         [onBodyCommand, restoreAfter],
     );
 
+    const rangeSelection = useCallback(
+        (range: LinkTargetRange): EditorSelection => ({
+            type: 'range',
+            anchor: {blockId: range.blockId, offset: range.startOffset},
+            focus: {blockId: range.blockId, offset: range.endOffset},
+        }),
+        [],
+    );
+
+    const openBodyLinkPopover = useCallback(
+        (ranges: LinkTargetRange[], href: string, position: {top: number; left: number}) => {
+            setLinkPopover({ranges, href, ...position});
+        },
+        [],
+    );
+
+    const applyBodyLink = useCallback(
+        (href: string) => {
+            const range = linkPopover?.ranges[0];
+            setLinkPopover(null);
+            if (!range) return;
+            const selected = rangeSelection(range);
+            const value = href.trim();
+            run(selected, (state, activeSelection, context) =>
+                value
+                    ? setAnnotationBodyLink(state, activeSelection, value, context)
+                    : removeAnnotationBodyLink(state, activeSelection, context),
+            );
+        },
+        [linkPopover?.ranges, rangeSelection, run],
+    );
+
+    const removeBodyLink = useCallback(() => {
+        const range = linkPopover?.ranges[0];
+        setLinkPopover(null);
+        if (!range) return;
+        run(rangeSelection(range), removeAnnotationBodyLink);
+    }, [linkPopover?.ranges, rangeSelection, run]);
+
     return (
-        <RichTextEditableSurface
-            blockId={block.id}
-            runs={block.runs}
-            decorations={null}
-            pendingCaretRestoreBlockIdRef={pendingCaretRestoreBlockIdRef}
-            pendingSelectionRestoreRef={pendingSelectionRestoreRef}
-            selection={selection}
-            className="annotationBodyEditor"
-            ariaLabel="Annotation body"
-            placeholder={fallbackText || 'Annotation body'}
-            popoverTextById={popoverTextById}
-            footnoteNumberById={footnoteNumberById}
-            onPopoverTriggerEnter={onPopoverTriggerEnter}
-            onPopoverTriggerLeave={onPopoverTriggerLeave}
-            onSelectionChange={updateSelection}
-            onInsertText={(text, activeSelection) =>
-                run(activeSelection ?? selection, (state, selected, context) =>
-                    replaceAnnotationBodySelection(state, selected, text, context),
-                )
-            }
-            onDeleteBackward={(activeSelection) =>
-                run(activeSelection ?? selection, deleteAnnotationBodyBackward)
-            }
-            onDeleteForward={(activeSelection) =>
-                run(activeSelection ?? selection, deleteAnnotationBodyForward)
-            }
-            onPaste={(event) => {
-                event.preventDefault();
-                const text = event.clipboardData.getData('text/plain');
-                run(readSelectionFromDom(event.currentTarget) ?? selection, (state, selected, context) =>
-                    replaceAnnotationBodySelection(state, selected, text, context),
-                );
-            }}
-            onKeyDown={(event) => {
-                const currentSelection = readSelectionFromDom(event.currentTarget);
-                if (currentSelection) updateSelection(currentSelection);
-                const modifierPressed = event.metaKey || event.ctrlKey;
-                const key = event.key.toLowerCase();
-                if (event.key === 'Enter') {
-                    event.preventDefault();
-                    run(currentSelection ?? selection, (state, selected, context) =>
-                        replaceAnnotationBodySelection(state, selected, '\n', context),
-                    );
-                    return;
+        <>
+            <RichTextEditableSurface
+                blockId={block.id}
+                runs={block.runs}
+                decorations={null}
+                pendingCaretRestoreBlockIdRef={pendingCaretRestoreBlockIdRef}
+                pendingSelectionRestoreRef={pendingSelectionRestoreRef}
+                selection={selection}
+                className="annotationBodyEditor"
+                ariaLabel="Annotation body"
+                placeholder={fallbackText || 'Annotation body'}
+                popoverTextById={popoverTextById}
+                footnoteNumberById={footnoteNumberById}
+                onPopoverTriggerEnter={onPopoverTriggerEnter}
+                onPopoverTriggerLeave={onPopoverTriggerLeave}
+                onLinkClick={(range, element) => openBodyLinkPopover([range], range.href, linkPopoverPositionFromElement(element))}
+                onSelectionChange={updateSelection}
+                onInsertText={(text, activeSelection) =>
+                    run(activeSelection ?? selection, (state, selected, context) =>
+                        replaceAnnotationBodySelection(state, selected, text, context),
+                    )
                 }
-                if (modifierPressed && (key === 'b' || key === 'i')) {
-                    const selected = currentSelection ?? selection;
+                onDeleteBackward={(activeSelection) =>
+                    run(activeSelection ?? selection, deleteAnnotationBodyBackward)
+                }
+                onDeleteForward={(activeSelection) =>
+                    run(activeSelection ?? selection, deleteAnnotationBodyForward)
+                }
+                onPaste={(event) => {
                     event.preventDefault();
+                    const text = event.clipboardData.getData('text/plain');
+                    const selected = readSelectionFromDom(event.currentTarget) ?? selection;
+                    if (isLinkLikeText(text) && selected.type === 'range') {
+                        run(selected, (state, activeSelection, context) =>
+                            setAnnotationBodyLink(state, activeSelection, text.trim(), context),
+                        );
+                        return;
+                    }
                     run(selected, (state, activeSelection, context) =>
-                        toggleAnnotationBodyMark(state, activeSelection, key === 'b' ? 'bold' : 'italic', context),
+                        replaceAnnotationBodySelection(state, activeSelection, text, context),
                     );
-                }
-            }}
-        />
+                }}
+                onKeyDown={(event) => {
+                    const currentSelection = readSelectionFromDom(event.currentTarget);
+                    if (currentSelection) updateSelection(currentSelection);
+                    const selected = currentSelection ?? selection;
+                    const modifierPressed = event.metaKey || event.ctrlKey;
+                    const key = event.key.toLowerCase();
+                    if (event.key === 'Enter') {
+                        event.preventDefault();
+                        run(selected, (state, activeSelection, context) =>
+                            replaceAnnotationBodySelection(state, activeSelection, '\n', context),
+                        );
+                        return;
+                    }
+                    if (modifierPressed && (key === 'b' || key === 'i')) {
+                        event.preventDefault();
+                        run(selected, (state, activeSelection, context) =>
+                            toggleAnnotationBodyMark(state, activeSelection, key === 'b' ? 'bold' : 'italic', context),
+                        );
+                    } else if (modifierPressed && event.shiftKey && key === 'x') {
+                        event.preventDefault();
+                        run(selected, (state, activeSelection, context) =>
+                            toggleAnnotationBodyMark(state, activeSelection, 'strikethrough', context),
+                        );
+                    } else if (modifierPressed && key === 'k') {
+                        event.preventDefault();
+                        if (selected.type === 'range') {
+                            const ranges = [{blockId: block.id, startOffset: Math.min(selected.anchor.offset, selected.focus.offset), endOffset: Math.max(selected.anchor.offset, selected.focus.offset)}];
+                            const selectedText = textForSelectionSegments([
+                                {
+                                    id: block.id,
+                                    runs: block.runs,
+                                    depth: 0,
+                                    parentId: '',
+                                    block: {} as RichFormattedBlock['block'],
+                                },
+                            ], ranges).trim();
+                            if (isLinkLikeText(selectedText)) {
+                                run(selected, (state, activeSelection, context) =>
+                                    setAnnotationBodyLink(state, activeSelection, selectedText, context),
+                                );
+                            } else {
+                                openBodyLinkPopover(
+                                    ranges,
+                                    linkHrefForSelectionSegments([
+                                        {
+                                            id: block.id,
+                                            runs: block.runs,
+                                            depth: 0,
+                                            parentId: '',
+                                            block: {} as RichFormattedBlock['block'],
+                                        },
+                                    ], ranges) ?? '',
+                                    linkPopoverPositionFromSelection(event.currentTarget),
+                                );
+                            }
+                        } else {
+                            const range = linkRangeAroundOffsetInRuns(block.id, block.runs, selected.point.offset);
+                            if (range) {
+                                openBodyLinkPopover([range], range.href, linkPopoverPositionFromSelection(event.currentTarget));
+                            }
+                        }
+                    }
+                }}
+            />
+            <LinkFloatingPopover
+                state={linkPopover}
+                onApply={applyBodyLink}
+                onRemove={removeBodyLink}
+                onClose={() => setLinkPopover(null)}
+            />
+        </>
     );
 }
 
@@ -1716,10 +2075,13 @@ const renderStaticRuns = (runs: RichFormattedBlock['runs']): ReactElement[] =>
             className={[
                 run.marks.bold ? 'markBold' : '',
                 run.marks.italic ? 'markItalic' : '',
+                run.marks.strikethrough ? 'markStrikethrough' : '',
+                typeof run.marks[LINK_MARK] === 'string' ? 'markLink' : '',
                 hasAnnotationMark(run) ? 'markAnnotation' : '',
             ]
                 .filter(Boolean)
                 .join(' ')}
+            data-link-href={typeof run.marks[LINK_MARK] === 'string' ? run.marks[LINK_MARK] : undefined}
         >
             {run.text}
         </span>
@@ -1733,6 +2095,8 @@ function Toolbar({
     onRedo,
     onBold,
     onItalic,
+    onStrikethrough,
+    onLink,
     onBlockType,
     onAnnotation,
 }: {
@@ -1743,6 +2107,8 @@ function Toolbar({
     onRedo(): void;
     onBold(): void;
     onItalic(): void;
+    onStrikethrough(): void;
+    onLink(): void;
     onBlockType(kind: BlockTypeMenuValue): void;
     onAnnotation(presentation: AnnotationPresentation): void;
 }) {
@@ -1773,6 +2139,17 @@ function Toolbar({
                 onClick={onItalic}
             >
                 <em>I</em>
+            </button>
+            <button
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={onStrikethrough}
+                aria-label="Strikethrough"
+            >
+                <span className="toolbarStrike">S</span>
+            </button>
+            <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={onLink}>
+                Link
             </button>
             <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => onAnnotation('sidebar')}>
                 Comment
@@ -1836,6 +2213,9 @@ function EditableBlock({
     onUnindent,
     onToggleBold,
     onToggleItalic,
+    onToggleStrikethrough,
+    onOpenLink,
+    onOpenLinkRange,
     onToggleTodo,
     onSetCodeLanguage,
     onSetCalloutKind,
@@ -1879,6 +2259,9 @@ function EditableBlock({
     onUnindent(): void;
     onToggleBold(): void;
     onToggleItalic(): void;
+    onToggleStrikethrough(): void;
+    onOpenLink(): void;
+    onOpenLinkRange(range: LinkTargetRange & {href: string}, element: HTMLElement): void;
     onToggleTodo(): void;
     onSetCodeLanguage(language: string): void;
     onSetCalloutKind(kind: 'info' | 'warning' | 'error'): void;
@@ -1953,6 +2336,7 @@ function EditableBlock({
                 footnoteNumberById={footnoteNumberById}
                 onPopoverTriggerEnter={onPopoverTriggerEnter}
                 onPopoverTriggerLeave={onPopoverTriggerLeave}
+                onLinkClick={onOpenLinkRange}
                 onInsertText={onInsertText}
                 onDeleteBackward={onDeleteBackward}
                 onDeleteForward={onDeleteForward}
@@ -1975,6 +2359,12 @@ function EditableBlock({
                     } else if (modifierPressed && key === 'i') {
                         event.preventDefault();
                         onToggleItalic();
+                    } else if (modifierPressed && event.shiftKey && key === 'x') {
+                        event.preventDefault();
+                        onToggleStrikethrough();
+                    } else if (modifierPressed && key === 'k') {
+                        event.preventDefault();
+                        onOpenLink();
                     } else if (event.key === 'Enter') {
                         event.preventDefault();
                         if (meta.type === 'code' && event.shiftKey) {
@@ -2146,6 +2536,7 @@ function RichTextEditableSurface({
     onSelectionChange,
     onPopoverTriggerEnter,
     onPopoverTriggerLeave,
+    onLinkClick,
     onKeyDown,
     onPaste,
 }: {
@@ -2167,6 +2558,7 @@ function RichTextEditableSurface({
     onSelectionChange?(selection: EditorSelection | null): void;
     onPopoverTriggerEnter?(id: string, element: HTMLElement): void;
     onPopoverTriggerLeave?(id?: string, transition?: PopoverPointerTransition): void;
+    onLinkClick?(range: LinkTargetRange & {href: string}, element: HTMLElement): void;
     onKeyDown?(event: KeyboardEvent<HTMLDivElement>): void;
     onPaste?(event: ClipboardEvent<HTMLDivElement>): void;
 }) {
@@ -2306,6 +2698,14 @@ function RichTextEditableSurface({
                 }
             }}
             onClick={(event) => {
+                const linkTrigger = linkTriggerFromEvent(event.currentTarget, event.target);
+                if (linkTrigger) {
+                    const point = readPointFromMouseEvent(event.currentTarget, event.nativeEvent);
+                    const range = point
+                        ? linkRangeAroundOffsetInRuns(blockId, runs, point.offset)
+                        : null;
+                    if (range) onLinkClick?.(range, linkTrigger);
+                }
                 const trigger = popoverTriggerFromEvent(event.currentTarget, event.target);
                 if (!trigger) return;
                 for (const id of popoverIdsForTrigger(trigger)) {
@@ -2458,6 +2858,16 @@ const popoverTriggerFromEvent = (
     const elementConstructor = root.ownerDocument.defaultView?.Element;
     if (!elementConstructor || !(target instanceof elementConstructor)) return null;
     const trigger = target.closest<HTMLElement>('[data-popover-id]');
+    return trigger && root.contains(trigger) ? trigger : null;
+};
+
+const linkTriggerFromEvent = (
+    root: HTMLElement,
+    target: EventTarget | null,
+): HTMLElement | null => {
+    const elementConstructor = root.ownerDocument.defaultView?.Element;
+    if (!elementConstructor || !(target instanceof elementConstructor)) return null;
+    const trigger = target.closest<HTMLElement>('[data-link-href]');
     return trigger && root.contains(trigger) ? trigger : null;
 };
 
@@ -2615,6 +3025,48 @@ const selectionSegmentsForBlocks = (
 const formattedBlockTextLength = (block: RichFormattedBlock): number =>
     block.runs.reduce((length, run) => length + segmentText(run.text).length, 0);
 
+const linkRangesForSelectionSet = (
+    state: Replica['state'],
+    selection: RetainedSelectionSet,
+): LinkTargetRange[] =>
+    resolveSelectionSet(state, selection).entries.flatMap((entry) =>
+        normalizeSelectionSegments(state, entry.selection),
+    );
+
+const retainedSelectionSetForLinkRanges = (
+    state: Replica['state'],
+    ranges: LinkTargetRange[],
+): RetainedSelectionSet => {
+    const entries = ranges.map((range, index) => ({
+        id: `link-${index}`,
+        selection: {
+            type: 'range' as const,
+            anchor: {blockId: range.blockId, offset: range.startOffset},
+            focus: {blockId: range.blockId, offset: range.endOffset},
+        },
+    }));
+    return retainSelectionSet(state, {primaryId: entries[0]?.id ?? 'link-0', entries});
+};
+
+const linkPopoverPositionFromSelection = (root: HTMLElement | null): {top: number; left: number} => {
+    const fallbackRect = root?.getBoundingClientRect();
+    const selection = root?.ownerDocument.defaultView?.getSelection();
+    const rect =
+        selection &&
+        selection.rangeCount > 0 &&
+        typeof selection.getRangeAt(0).getBoundingClientRect === 'function'
+            ? selection.getRangeAt(0).getBoundingClientRect()
+            : null;
+    const top = rect && rect.height ? rect.bottom + 8 : (fallbackRect?.top ?? 0) + 28;
+    const left = rect && rect.width ? rect.left : fallbackRect?.left ?? 0;
+    return {top, left};
+};
+
+const linkPopoverPositionFromElement = (element: HTMLElement): {top: number; left: number} => {
+    const rect = element.getBoundingClientRect();
+    return {top: rect.bottom + 8, left: rect.left};
+};
+
 const serializeRuns = (
     runs: RichFormattedBlock['runs'],
     decorations: BlockSelectionDecorations | null,
@@ -2622,7 +3074,13 @@ const serializeRuns = (
     footnoteNumberById: Map<string, number> = new Map(),
 ) =>
     JSON.stringify({
-        runs: runs.map((run) => [run.text, run.marks.bold, run.marks.italic]),
+        runs: runs.map((run) => [
+            run.text,
+            run.marks.bold,
+            run.marks.italic,
+            run.marks.strikethrough,
+            run.marks[LINK_MARK],
+        ]),
         stackedMarks: runs.map((run) => run.stackedMarks),
         decorations,
         trailingCodeNewline,
@@ -2794,6 +3252,11 @@ const applyRunClasses = (
 ) => {
     if (run.marks.bold) span.classList.add('markBold');
     if (run.marks.italic) span.classList.add('markItalic');
+    if (run.marks.strikethrough) span.classList.add('markStrikethrough');
+    if (typeof run.marks[LINK_MARK] === 'string') {
+        span.classList.add('markLink');
+        span.dataset.linkHref = run.marks[LINK_MARK];
+    }
     if (hasAnnotationMark(run)) span.classList.add('markAnnotation');
     const popoverIds = popoverIdsForRun(run, popoverTextById);
     if (popoverIds.length) {

@@ -15,6 +15,7 @@ import {
     insertTextEverywhere,
     moveSelectionsHorizontally,
     moveSelectionsVertically,
+    setLinkMarkEverywhere,
     splitBlockEverywhere,
     toggleMarkEverywhere,
     unindentSelections,
@@ -459,6 +460,35 @@ describe('block rich text multi-selection commands', () => {
         expect(materializeFormattedBlocks(result.state).map((block) => block.runs)).toEqual([
             [{text: 'ab', marks: {bold: true}}],
             [{text: 'cd', marks: {bold: true}}],
+        ]);
+    });
+
+    it('sets links on all selected ranges and ignores carets', () => {
+        const pasted = pastePlainText(init(), caret(onlyBlock(init()), 0), 'ab\ncd', ctx());
+        const [firstBlock, secondBlock] = rootBlockIds(pasted.state);
+        const first: EditorSelection = {
+            type: 'range',
+            anchor: {blockId: firstBlock, offset: 0},
+            focus: {blockId: firstBlock, offset: 2},
+        };
+        const second: EditorSelection = {
+            type: 'range',
+            anchor: {blockId: secondBlock, offset: 0},
+            focus: {blockId: secondBlock, offset: 2},
+        };
+        const withRange = appendSelection(
+            pasted.state,
+            singleRetainedSelectionSet(pasted.state, first, 'first'),
+            second,
+            'second',
+        );
+        const withCaret = appendSelection(pasted.state, withRange, caret(firstBlock, 1), 'caret');
+
+        const result = setLinkMarkEverywhere(pasted.state, withCaret, 'https://example.test', ctx());
+
+        expect(materializeFormattedBlocks(result.state).map((block) => block.runs)).toEqual([
+            [{text: 'ab', marks: {link: 'https://example.test'}}],
+            [{text: 'cd', marks: {link: 'https://example.test'}}],
         ]);
     });
 

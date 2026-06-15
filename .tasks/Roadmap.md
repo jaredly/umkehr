@@ -1,4 +1,9 @@
 
+- strikethrough
+- links
+
+
+
 # Block plungin and such
 
 Not sure how I feel about the whole 'Patches use char-indexes' thing. Maybe I want them to only do OPs? idk.

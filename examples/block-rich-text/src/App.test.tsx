@@ -1321,6 +1321,98 @@ describe('Block rich text example UI', () => {
         expect(domSelectionOffsets(blocks(left)[1])).toEqual({anchor: 1, focus: 3});
     });
 
+    it('toggles strikethrough with Cmd+Shift+X', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abcd');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abcd'));
+
+        selectRange(blocks(left)[0], 1, 3);
+        fireEvent.keyDown(blocks(left)[0], {key: 'x', metaKey: true, shiftKey: true});
+
+        await waitFor(() =>
+            expect(blocks(left)[0].querySelector('.markStrikethrough')?.textContent).toBe('bc'),
+        );
+    });
+
+    it('turns a link-like selection into a link with Cmd+K', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'https://example.test');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('https://example.test'));
+
+        selectRange(blocks(left)[0], 0, 'https://example.test'.length);
+        fireEvent.keyDown(blocks(left)[0], {key: 'k', metaKey: true});
+
+        await waitFor(() => {
+            const link = blocks(left)[0].querySelector<HTMLElement>('.markLink');
+            expect(link?.textContent).toBe('https://example.test');
+            expect(link?.dataset.linkHref).toBe('https://example.test');
+        });
+        expect(within(left).queryByRole('dialog', {name: 'Link'})).toBeNull();
+    });
+
+    it('pastes a link-like target over selected text as a link', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'link text');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('link text'));
+
+        selectRange(blocks(left)[0], 0, 4);
+        pasteText(blocks(left)[0], 'https://example.test');
+
+        await waitFor(() => {
+            expect(blocks(left)[0].textContent).toBe('link text');
+            const link = blocks(left)[0].querySelector<HTMLElement>('.markLink');
+            expect(link?.textContent).toBe('link');
+            expect(link?.dataset.linkHref).toBe('https://example.test');
+        });
+    });
+
+    it('edits and removes an existing link from the link popover', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'https://example.test');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('https://example.test'));
+
+        selectRange(blocks(left)[0], 0, 'https://example.test'.length);
+        fireEvent.keyDown(blocks(left)[0], {key: 'k', metaKey: true});
+        await waitFor(() => expect(blocks(left)[0].querySelector('.markLink')).toBeTruthy());
+
+        selectCaret(blocks(left)[0], 4);
+        fireEvent.keyDown(blocks(left)[0], {key: 'k', metaKey: true});
+        const dialog = await waitFor(() => within(left).getByRole('dialog', {name: 'Link'}));
+        const input = within(dialog).getByRole('textbox', {name: 'Link target'});
+        expect((input as HTMLInputElement).value).toBe('https://example.test');
+        const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+        fireEvent.click(within(dialog).getByRole('button', {name: 'Open link in new tab'}));
+        expect(openSpy).toHaveBeenCalledWith('https://example.test', '_blank', 'noopener,noreferrer');
+        openSpy.mockRestore();
+
+        fireEvent.change(input, {target: {value: 'https://updated.test'}});
+        fireEvent.click(within(dialog).getByRole('button', {name: 'Apply'}));
+        await waitFor(() =>
+            expect(blocks(left)[0].querySelector<HTMLElement>('.markLink')?.dataset.linkHref).toBe(
+                'https://updated.test',
+            ),
+        );
+
+        selectCaret(blocks(left)[0], 4);
+        fireEvent.keyDown(blocks(left)[0], {key: 'k', metaKey: true});
+        const removeDialog = await waitFor(() => within(left).getByRole('dialog', {name: 'Link'}));
+        fireEvent.click(within(removeDialog).getByRole('button', {name: 'Remove'}));
+
+        await waitFor(() => expect(blocks(left)[0].querySelector('.markLink')).toBeNull());
+    });
+
     it('keeps the selected comment body range after Cmd+B', async () => {
         const view = render(<App />);
         const {left} = panels(view);
@@ -1345,6 +1437,42 @@ describe('Block rich text example UI', () => {
         await waitFor(() => expect(commentBody.querySelector('.markBold')?.textContent).toBe('ot'));
         expect(domSelectionBlock()).toBe(commentBody);
         expect(domSelectionOffsets(commentBody)).toEqual({anchor: 1, focus: 3});
+    });
+
+    it('supports strikethrough and links in comment body text', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abcd');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abcd'));
+
+        selectRange(blocks(left)[0], 1, 3);
+        fireEvent.click(within(left).getByRole('button', {name: 'Comment'}));
+
+        const commentBody = await waitFor(() =>
+            within(left).getByRole('textbox', {name: 'Annotation body'}),
+        );
+        selectCaret(commentBody, 0);
+        beforeInputText(commentBody, 'note');
+        await waitFor(() => expect(commentBody.textContent).toBe('note'));
+
+        selectRange(commentBody, 1, 3);
+        fireEvent.keyDown(commentBody, {key: 'x', metaKey: true, shiftKey: true});
+        await waitFor(() => expect(commentBody.querySelector('.markStrikethrough')?.textContent).toBe('ot'));
+
+        selectRange(commentBody, 0, 4);
+        fireEvent.keyDown(commentBody, {key: 'k', metaKey: true});
+        const dialog = await waitFor(() => within(left).getByRole('dialog', {name: 'Link'}));
+        const input = within(dialog).getByRole('textbox', {name: 'Link target'});
+        fireEvent.change(input, {target: {value: 'https://note.test'}});
+        fireEvent.click(within(dialog).getByRole('button', {name: 'Apply'}));
+
+        await waitFor(() => {
+            const links = [...commentBody.querySelectorAll<HTMLElement>('.markLink')];
+            expect(links.map((link) => link.textContent).join('')).toBe('note');
+            expect(links.every((link) => link.dataset.linkHref === 'https://note.test')).toBe(true);
+        });
     });
 
     it('creates a comment on selected comment body text', async () => {

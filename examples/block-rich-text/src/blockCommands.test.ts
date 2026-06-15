@@ -19,7 +19,9 @@ import {
     insertText,
     moveBlock,
     pastePlainText,
+    removeLinkMark,
     setBlockType,
+    setLinkMark,
     splitBlock,
     toggleMark,
     unindentBlock,
@@ -355,6 +357,72 @@ describe('block rich text commands', () => {
             [{text: 'cd', marks: {}}],
         ]);
         expectCache(result.state);
+    });
+
+    it('toggles strikethrough over a range', () => {
+        const context = ctx();
+        let result = insertText(init(), caret(onlyBlock(init()), 0), 'strike', context);
+        const blockId = onlyBlock(result.state);
+        const selection: EditorSelection = {
+            type: 'range',
+            anchor: {blockId, offset: 0},
+            focus: {blockId, offset: 6},
+        };
+
+        result = toggleMark(result.state, selection, 'strikethrough', context);
+        expect(materializeFormattedBlocks(result.state).map((block) => block.runs)).toEqual([
+            [{text: 'strike', marks: {strikethrough: true}}],
+        ]);
+
+        result = toggleMark(result.state, selection, 'strikethrough', context);
+        expect(materializeFormattedBlocks(result.state).map((block) => block.runs)).toEqual([
+            [{text: 'strike', marks: {}}],
+        ]);
+    });
+
+    it('sets, updates, and removes non-stacking link marks', () => {
+        const context = ctx();
+        let result = insertText(init(), caret(onlyBlock(init()), 0), 'link', context);
+        const blockId = onlyBlock(result.state);
+        const selection: EditorSelection = {
+            type: 'range',
+            anchor: {blockId, offset: 0},
+            focus: {blockId, offset: 4},
+        };
+
+        result = setLinkMark(result.state, selection, 'https://one.test', context);
+        expect(materializeFormattedBlocks(result.state).map((block) => block.runs)).toEqual([
+            [{text: 'link', marks: {link: 'https://one.test'}}],
+        ]);
+
+        result = setLinkMark(result.state, selection, 'https://two.test', context);
+        expect(materializeFormattedBlocks(result.state).map((block) => block.runs)).toEqual([
+            [{text: 'link', marks: {link: 'https://two.test'}}],
+        ]);
+        expect(materializeFormattedBlocks(result.state)[0].runs[0].stackedMarks?.link).toBeUndefined();
+
+        result = removeLinkMark(result.state, selection, context);
+        expect(materializeFormattedBlocks(result.state).map((block) => block.runs)).toEqual([
+            [{text: 'link', marks: {}}],
+        ]);
+    });
+
+    it('sets links over a multi-block selection using per-block marks', () => {
+        const context = ctx();
+        let result = pastePlainText(init(), caret(onlyBlock(init()), 0), 'ab\ncd', context);
+        const [first, second] = rootBlockIds(result.state);
+        const selection: EditorSelection = {
+            type: 'range',
+            anchor: {blockId: first, offset: 0},
+            focus: {blockId: second, offset: 2},
+        };
+
+        result = setLinkMark(result.state, selection, 'https://example.test', context);
+
+        expect(materializeFormattedBlocks(result.state).map((block) => block.runs)).toEqual([
+            [{text: 'ab', marks: {link: 'https://example.test'}}],
+            [{text: 'cd', marks: {link: 'https://example.test'}}],
+        ]);
     });
 
     it('moves root blocks with a block:move op', () => {

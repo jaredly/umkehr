@@ -23,6 +23,7 @@ import type {BlockOrderTs, CachedState, Lamport} from 'umkehr/block-crdt/types';
 import {lamportToString, parseLamportString} from 'umkehr/block-crdt/utils';
 import {paragraphMeta, sameTypeWithTs, type RichBlockMeta} from './blockMeta';
 import {annotationVirtualParents} from './annotations';
+import type {BooleanInlineMark} from './inlineMarks';
 import {
     caret,
     clampPoint,
@@ -204,7 +205,7 @@ export const pastePlainText = (
 export const toggleMark = (
     state: CachedState<RichBlockMeta>,
     selection: EditorSelection,
-    markType: 'bold' | 'italic',
+    markType: BooleanInlineMark,
     context: CommandContext,
 ): CommandResult => {
     const segments = normalizeSelectionSegments(state, selection);
@@ -230,6 +231,19 @@ export const toggleMark = (
 
     return {state: working, ops, selection};
 };
+
+export const setLinkMark = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    href: string,
+    context: CommandContext,
+): CommandResult => setValuedMark(state, selection, 'link', href, false, context);
+
+export const removeLinkMark = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    context: CommandContext,
+): CommandResult => setValuedMark(state, selection, 'link', undefined, true, context);
 
 export const setBlockType = (
     state: CachedState<RichBlockMeta>,
@@ -655,7 +669,7 @@ const lastBlockOrderTs = (ts: BlockOrderTs) => (typeof ts === 'string' ? ts : ts
 const selectionFullyHasMark = (
     state: CachedState<RichBlockMeta>,
     segments: ReturnType<typeof normalizeSelectionSegments>,
-    markType: 'bold' | 'italic',
+    markType: BooleanInlineMark,
 ): boolean => {
     const blocks = materializeFormattedBlocks(state);
     const byId = new Map(blocks.map((block) => [block.id, block]));
@@ -672,4 +686,35 @@ const selectionFullyHasMark = (
         const selected = marksByOffset.slice(segment.startOffset, segment.endOffset);
         return selected.length > 0 && selected.every((marks) => equal(marks[markType], true));
     });
+};
+
+const setValuedMark = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    markType: string,
+    value: string | undefined,
+    remove: boolean,
+    context: CommandContext,
+): CommandResult => {
+    const segments = normalizeSelectionSegments(state, selection);
+    if (!segments.length) return {state, ops: [], selection};
+
+    let working = state;
+    const ops: Array<Op<RichBlockMeta>> = [];
+    for (const segment of segments) {
+        const op = markRangeOp(
+            working,
+            parseLamportString(segment.blockId),
+            segment.startOffset,
+            segment.endOffset,
+            markType,
+            value,
+            remove,
+            [working.state.maxSeenCount + 1, context.actor],
+        );
+        working = applyMany(working, [op], annotationVirtualParents(working));
+        ops.push(op);
+    }
+
+    return {state: working, ops, selection};
 };

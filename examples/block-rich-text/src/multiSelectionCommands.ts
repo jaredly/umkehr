@@ -7,7 +7,9 @@ import {
     insertText,
     moveBlock,
     pastePlainText,
+    removeLinkMark,
     setBlockMeta,
+    setLinkMark,
     setBlockType,
     splitBlock,
     toggleMark,
@@ -15,6 +17,7 @@ import {
     type CommandResult,
     type CommandContext,
 } from './blockCommands';
+import type {BooleanInlineMark} from './inlineMarks';
 import {resolveSelection, retainSelection} from './retainedSelection';
 import {
     dedupeSelectionSet,
@@ -96,7 +99,7 @@ export const splitBlockEverywhere = (
 export const toggleMarkEverywhere = (
     state: CachedState<RichBlockMeta>,
     selection: RetainedSelectionSet,
-    markType: 'bold' | 'italic',
+    markType: BooleanInlineMark,
     context: CommandContext,
 ): MultiCommandResult => {
     const deduped = dedupeSelectionSet(state, selection);
@@ -115,6 +118,53 @@ export const toggleMarkEverywhere = (
             markType,
             context,
         );
+        working = result.state;
+        ops.push(...result.ops);
+    }
+
+    return {
+        state: working,
+        ops,
+        selection: dedupeSelectionSet(working, deduped),
+    };
+};
+
+export const setLinkMarkEverywhere = (
+    state: CachedState<RichBlockMeta>,
+    selection: RetainedSelectionSet,
+    href: string,
+    context: CommandContext,
+): MultiCommandResult => runLinkMarkCommand(state, selection, context, (working, selected, commandContext) =>
+    setLinkMark(working, selected, href, commandContext),
+);
+
+export const removeLinkMarkEverywhere = (
+    state: CachedState<RichBlockMeta>,
+    selection: RetainedSelectionSet,
+    context: CommandContext,
+): MultiCommandResult => runLinkMarkCommand(state, selection, context, removeLinkMark);
+
+const runLinkMarkCommand = (
+    state: CachedState<RichBlockMeta>,
+    selection: RetainedSelectionSet,
+    context: CommandContext,
+    command: (
+        state: CachedState<RichBlockMeta>,
+        selection: EditorSelection,
+        context: CommandContext,
+    ) => CommandResult,
+): MultiCommandResult => {
+    const deduped = dedupeSelectionSet(state, selection);
+    const commandEntries = mergeOverlappingRanges(state, deduped).filter((entry) => {
+        const resolved = resolveSelection(state, entry.selection);
+        return !isCollapsed(resolved);
+    });
+    if (!commandEntries.length) return {state, ops: [], selection: deduped};
+
+    let working = state;
+    const ops: Array<Op<RichBlockMeta>> = [];
+    for (const entry of commandEntries) {
+        const result = command(working, resolveSelection(working, entry.selection), context);
         working = result.state;
         ops.push(...result.ops);
     }

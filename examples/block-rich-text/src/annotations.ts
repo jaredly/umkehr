@@ -208,7 +208,7 @@ export const deleteAnnotationBodyForward = (
 export const toggleAnnotationBodyMark = (
     state: CachedState<RichBlockMeta>,
     selection: EditorSelection,
-    markType: 'bold' | 'italic',
+    markType: 'bold' | 'italic' | 'strikethrough',
     context: CommandContext,
 ): CommandResult => {
     const range = bodySelectionRange(state, selection);
@@ -222,6 +222,43 @@ export const toggleAnnotationBodyMark = (
         markType,
         true,
         false,
+        [state.state.maxSeenCount + 1, context.actor],
+    );
+    const next = applyMany(state, [op], annotationVirtualParents(state));
+    return {state: next, ops: [op], selection};
+};
+
+export const setAnnotationBodyLink = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    href: string,
+    context: CommandContext,
+): CommandResult => setAnnotationBodyLinkMark(state, selection, href, false, context);
+
+export const removeAnnotationBodyLink = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    context: CommandContext,
+): CommandResult => setAnnotationBodyLinkMark(state, selection, undefined, true, context);
+
+const setAnnotationBodyLinkMark = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    href: string | undefined,
+    remove: boolean,
+    context: CommandContext,
+): CommandResult => {
+    const range = bodySelectionRange(state, selection);
+    if (!range || range.startOffset === range.endOffset) return {state, ops: [], selection};
+
+    const op = markRangeOp(
+        state,
+        parseLamportString(range.blockId),
+        range.startOffset,
+        range.endOffset,
+        'link',
+        href,
+        remove,
         [state.state.maxSeenCount + 1, context.actor],
     );
     const next = applyMany(state, [op], annotationVirtualParents(state));
