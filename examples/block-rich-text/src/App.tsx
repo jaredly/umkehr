@@ -428,6 +428,16 @@ function BlockEditor({
         }
         return result;
     }, [annotations]);
+    const footnoteNumberById = useMemo(() => {
+        const result = new Map<string, number>();
+        let nextNumber = 1;
+        for (const annotation of annotations) {
+            if (annotation.data.presentation !== 'footnote') continue;
+            result.set(annotation.id, nextNumber);
+            nextNumber++;
+        }
+        return result;
+    }, [annotations]);
     const renderTree = useMemo(() => buildRenderTree(blocks), [blocks]);
     const orderedListNumbers = useMemo(() => deriveOrderedListNumbers(blocks), [blocks]);
     const resolvedSelectionSet = resolveSelectionSet(replica.state, replica.selection);
@@ -991,6 +1001,7 @@ function BlockEditor({
                 onBodyCommand={runAnnotationBodyCommand}
                 onBodySelectionChange={setActiveAnnotationBodySelection}
                 popoverTextById={popoverTextById}
+                footnoteNumberById={footnoteNumberById}
                 onPopoverTriggerEnter={showPopover}
                 onPopoverTriggerLeave={schedulePopoverHideFromPointer}
             />
@@ -1031,6 +1042,7 @@ function BlockEditor({
                         startDrag,
                         orderedListNumbers,
                         popoverTextById,
+                        footnoteNumberById,
                         onPopoverTriggerEnter: showPopover,
                         onPopoverTriggerLeave: schedulePopoverHideFromPointer,
                         runEditCommand,
@@ -1067,6 +1079,7 @@ function BlockEditor({
                     onBodyCommand={runAnnotationBodyCommand}
                     onBodySelectionChange={setActiveAnnotationBodySelection}
                     popoverTextById={popoverTextById}
+                    footnoteNumberById={footnoteNumberById}
                     onPopoverTriggerEnter={showPopover}
                     onPopoverTriggerLeave={schedulePopoverHideFromPointer}
                 />
@@ -1076,6 +1089,7 @@ function BlockEditor({
                 onBodyCommand={runAnnotationBodyCommand}
                 onBodySelectionChange={setActiveAnnotationBodySelection}
                 popoverTextById={popoverTextById}
+                footnoteNumberById={footnoteNumberById}
                 onPopoverTriggerEnter={showPopover}
                 onPopoverTriggerLeave={schedulePopoverHideFromPointer}
             />
@@ -1116,6 +1130,7 @@ type RenderBlockContext = {
     startDrag: ReturnType<typeof useBlockReorder>['startDrag'];
     orderedListNumbers: Map<string, number>;
     popoverTextById: Map<string, string>;
+    footnoteNumberById: Map<string, number>;
     runEditCommand(
         command: (current: Replica, selection: RetainedSelectionSet) => MultiCommandResult,
     ): void;
@@ -1216,6 +1231,7 @@ const renderEditableBlock = (block: RichFormattedBlock, context: RenderBlockCont
             registerRow={context.registerRow}
             onStartDrag={context.startDrag}
             popoverTextById={context.popoverTextById}
+            footnoteNumberById={context.footnoteNumberById}
             onPopoverTriggerEnter={context.onPopoverTriggerEnter}
             onPopoverTriggerLeave={context.onPopoverTriggerLeave}
             onInsertText={(text) =>
@@ -1429,6 +1445,7 @@ function AnnotationSidebar({
     onBodyCommand,
     onBodySelectionChange,
     popoverTextById,
+    footnoteNumberById,
     onPopoverTriggerEnter,
     onPopoverTriggerLeave,
 }: {
@@ -1438,6 +1455,7 @@ function AnnotationSidebar({
     ): void;
     onBodySelectionChange(selection: EditorSelection | null): void;
     popoverTextById: Map<string, string>;
+    footnoteNumberById: Map<string, number>;
     onPopoverTriggerEnter(id: string, element: HTMLElement): void;
     onPopoverTriggerLeave(id?: string, transition?: PopoverPointerTransition): void;
 }) {
@@ -1454,6 +1472,7 @@ function AnnotationSidebar({
                             onBodyCommand={onBodyCommand}
                             onBodySelectionChange={onBodySelectionChange}
                             popoverTextById={popoverTextById}
+                            footnoteNumberById={footnoteNumberById}
                             onPopoverTriggerEnter={onPopoverTriggerEnter}
                             onPopoverTriggerLeave={onPopoverTriggerLeave}
                         />
@@ -1469,6 +1488,7 @@ function Footnotes({
     onBodyCommand,
     onBodySelectionChange,
     popoverTextById,
+    footnoteNumberById,
     onPopoverTriggerEnter,
     onPopoverTriggerLeave,
 }: {
@@ -1478,6 +1498,7 @@ function Footnotes({
     ): void;
     onBodySelectionChange(selection: EditorSelection | null): void;
     popoverTextById: Map<string, string>;
+    footnoteNumberById: Map<string, number>;
     onPopoverTriggerEnter(id: string, element: HTMLElement): void;
     onPopoverTriggerLeave(id?: string, transition?: PopoverPointerTransition): void;
 }) {
@@ -1495,6 +1516,7 @@ function Footnotes({
                                   onBodyCommand={onBodyCommand}
                                   onBodySelectionChange={onBodySelectionChange}
                                   popoverTextById={popoverTextById}
+                                  footnoteNumberById={footnoteNumberById}
                                   onPopoverTriggerEnter={onPopoverTriggerEnter}
                                   onPopoverTriggerLeave={onPopoverTriggerLeave}
                               />
@@ -1516,6 +1538,7 @@ function FloatingAnnotationPopover({
     onBodyCommand,
     onBodySelectionChange,
     popoverTextById,
+    footnoteNumberById,
     onPopoverTriggerEnter,
     onPopoverTriggerLeave,
 }: {
@@ -1530,6 +1553,7 @@ function FloatingAnnotationPopover({
     ): void;
     onBodySelectionChange(selection: EditorSelection | null): void;
     popoverTextById: Map<string, string>;
+    footnoteNumberById: Map<string, number>;
     onPopoverTriggerEnter(id: string, element: HTMLElement): void;
     onPopoverTriggerLeave(id?: string, transition?: PopoverPointerTransition): void;
 }) {
@@ -1562,6 +1586,7 @@ function FloatingAnnotationPopover({
                     onBodyCommand={onBodyCommand}
                     onBodySelectionChange={onBodySelectionChange}
                     popoverTextById={popoverTextById}
+                    footnoteNumberById={footnoteNumberById}
                     onPopoverTriggerEnter={onPopoverTriggerEnter}
                     onPopoverTriggerLeave={onPopoverTriggerLeave}
                 />
@@ -1576,6 +1601,7 @@ function AnnotationBodyBlock({
     onBodyCommand,
     onBodySelectionChange,
     popoverTextById,
+    footnoteNumberById,
     onPopoverTriggerEnter,
     onPopoverTriggerLeave,
 }: {
@@ -1586,6 +1612,7 @@ function AnnotationBodyBlock({
     ): void;
     onBodySelectionChange(selection: EditorSelection | null): void;
     popoverTextById: Map<string, string>;
+    footnoteNumberById: Map<string, number>;
     onPopoverTriggerEnter(id: string, element: HTMLElement): void;
     onPopoverTriggerLeave(id?: string, transition?: PopoverPointerTransition): void;
 }) {
@@ -1636,6 +1663,7 @@ function AnnotationBodyBlock({
             ariaLabel="Annotation body"
             placeholder={fallbackText || 'Annotation body'}
             popoverTextById={popoverTextById}
+            footnoteNumberById={footnoteNumberById}
             onPopoverTriggerEnter={onPopoverTriggerEnter}
             onPopoverTriggerLeave={onPopoverTriggerLeave}
             onSelectionChange={updateSelection}
@@ -1796,6 +1824,7 @@ function EditableBlock({
     registerRow,
     onStartDrag,
     popoverTextById,
+    footnoteNumberById,
     onPopoverTriggerEnter,
     onPopoverTriggerLeave,
     onInsertText,
@@ -1838,6 +1867,7 @@ function EditableBlock({
     registerRow(id: string, element: HTMLElement | null): void;
     onStartDrag: ReturnType<typeof useBlockReorder>['startDrag'];
     popoverTextById: Map<string, string>;
+    footnoteNumberById: Map<string, number>;
     onPopoverTriggerEnter(id: string, element: HTMLElement): void;
     onPopoverTriggerLeave(id?: string, transition?: PopoverPointerTransition): void;
     onInsertText(text: string, selection?: EditorSelection): void;
@@ -1920,6 +1950,7 @@ function EditableBlock({
                 ariaLabel="Block text"
                 trailingCodeNewline={codeHasTrailingNewline}
                 popoverTextById={popoverTextById}
+                footnoteNumberById={footnoteNumberById}
                 onPopoverTriggerEnter={onPopoverTriggerEnter}
                 onPopoverTriggerLeave={onPopoverTriggerLeave}
                 onInsertText={onInsertText}
@@ -2108,6 +2139,7 @@ function RichTextEditableSurface({
     placeholder,
     trailingCodeNewline = false,
     popoverTextById = new Map(),
+    footnoteNumberById = new Map(),
     onInsertText,
     onDeleteBackward,
     onDeleteForward,
@@ -2128,6 +2160,7 @@ function RichTextEditableSurface({
     placeholder?: string;
     trailingCodeNewline?: boolean;
     popoverTextById?: Map<string, string>;
+    footnoteNumberById?: Map<string, number>;
     onInsertText(text: string, selection?: EditorSelection): void;
     onDeleteBackward(selection?: EditorSelection): void;
     onDeleteForward(selection?: EditorSelection): void;
@@ -2170,11 +2203,20 @@ function RichTextEditableSurface({
     useLayoutEffect(() => {
         const element = editableRef.current;
         if (!element) return;
-        const renderedRuns = serializeRuns(runs, decorations, trailingCodeNewline);
+        const renderedRuns = serializeRuns(
+            runs,
+            decorations,
+            trailingCodeNewline,
+            footnoteNumberById,
+        );
         if (renderedRunsRef.current !== renderedRuns) {
             renderedRunsRef.current = renderedRuns;
             element.replaceChildren(
-                ...renderRunNodes(runs, decorations, {trailingCodeNewline, popoverTextById}),
+                ...renderRunNodes(runs, decorations, {
+                    trailingCodeNewline,
+                    popoverTextById,
+                    footnoteNumberById,
+                }),
             );
         }
         const point = selection.type === 'caret' ? selection.point : null;
@@ -2189,7 +2231,17 @@ function RichTextEditableSurface({
             if (document.activeElement !== element) element.focus();
             restoreSelectionToDom(element, rangeSelection);
         }
-    }, [blockId, decorations, pendingCaretRestoreBlockIdRef, pendingSelectionRestoreRef, runs, selection, trailingCodeNewline]);
+    }, [
+        blockId,
+        decorations,
+        footnoteNumberById,
+        pendingCaretRestoreBlockIdRef,
+        pendingSelectionRestoreRef,
+        popoverTextById,
+        runs,
+        selection,
+        trailingCodeNewline,
+    ]);
 
     return (
         <div
@@ -2209,12 +2261,17 @@ function RichTextEditableSurface({
                 const nextDecorations = removePrimaryDecorations(decorations);
                 if (nextDecorations === decorations) return;
                 event.currentTarget.replaceChildren(
-                    ...renderRunNodes(runs, nextDecorations, {trailingCodeNewline, popoverTextById}),
+                    ...renderRunNodes(runs, nextDecorations, {
+                        trailingCodeNewline,
+                        popoverTextById,
+                        footnoteNumberById,
+                    }),
                 );
                 renderedRunsRef.current = serializeRuns(
                     runs,
                     nextDecorations,
                     trailingCodeNewline,
+                    footnoteNumberById,
                 );
             }}
             onMouseUp={(event) => onSelectionChange?.(readSelectionFromDom(event.currentTarget))}
@@ -2260,7 +2317,11 @@ function RichTextEditableSurface({
                 if (handledBeforeInputRef.current) {
                     handledBeforeInputRef.current = false;
                     event.currentTarget.replaceChildren(
-                        ...renderRunNodes(runs, decorations, {trailingCodeNewline, popoverTextById}),
+                        ...renderRunNodes(runs, decorations, {
+                            trailingCodeNewline,
+                            popoverTextById,
+                            footnoteNumberById,
+                        }),
                     );
                     return;
                 }
@@ -2558,64 +2619,38 @@ const serializeRuns = (
     runs: RichFormattedBlock['runs'],
     decorations: BlockSelectionDecorations | null,
     trailingCodeNewline = false,
+    footnoteNumberById: Map<string, number> = new Map(),
 ) =>
     JSON.stringify({
         runs: runs.map((run) => [run.text, run.marks.bold, run.marks.italic]),
         stackedMarks: runs.map((run) => run.stackedMarks),
         decorations,
         trailingCodeNewline,
+        footnoteNumbers: [...footnoteNumberById.entries()].sort(([a], [b]) => a.localeCompare(b)),
     });
 
 const renderRunNodes = (
     runs: RichFormattedBlock['runs'],
     decorations: BlockSelectionDecorations | null,
-    options: {trailingCodeNewline?: boolean; popoverTextById?: Map<string, string>} = {},
+    options: {
+        trailingCodeNewline?: boolean;
+        popoverTextById?: Map<string, string>;
+        footnoteNumberById?: Map<string, number>;
+    } = {},
 ): Node[] => {
-    if (!decorations || (!decorations.carets.length && !decorations.segments.length)) {
-        return appendTrailingCodeNewlineSentinel(
-            runs.map((run) => {
-            const span = document.createElement('span');
-            span.textContent = run.text;
-            applyRunClasses(span, run, options.popoverTextById);
-            return span;
-            }),
-            options,
-        );
-    }
-
+    const chunks = runRenderChunks(runs, decorations);
     const nodes: Node[] = [];
-    let offset = 0;
     const renderedCarets = new Set<string>();
-    for (const run of runs) {
-        const runSegments = segmentText(run.text);
-        const runStart = offset;
-        const runEnd = runStart + runSegments.length;
-        const boundaries = new Set([0, runSegments.length]);
-
-        for (const selectionSegment of decorations.segments) {
-            addBoundaryInRun(
-                boundaries,
-                selectionSegment.startOffset - runStart,
-                runSegments.length,
-            );
-            addBoundaryInRun(boundaries, selectionSegment.endOffset - runStart, runSegments.length);
-        }
-        for (const caret of decorations.carets) {
-            addBoundaryInRun(boundaries, caret.offset - runStart, runSegments.length);
-        }
-
-        const sortedBoundaries = [...boundaries].sort((a, b) => a - b);
-        for (let index = 0; index < sortedBoundaries.length - 1; index++) {
-            const start = sortedBoundaries[index];
-            const end = sortedBoundaries[index + 1];
-            const chunkStart = runStart + start;
-            const chunkEnd = runStart + end;
+    for (let index = 0; index < chunks.length; index++) {
+        const chunk = chunks[index];
+        if (decorations) {
+            const chunkStart = chunk.blockStartOffset;
+            const chunkEnd = chunk.blockEndOffset;
             renderCaretsAtOffset(nodes, decorations, renderedCarets, chunkStart);
-            if (start === end) continue;
 
             const span = document.createElement('span');
-            span.textContent = runSegments.slice(start, end).join('');
-            applyRunClasses(span, run, options.popoverTextById);
+            span.textContent = chunk.text;
+            applyRunClasses(span, chunk.run, options.popoverTextById);
             const highlight = decorations.segments.find(
                 (selectionSegment) =>
                     chunkStart >= selectionSegment.startOffset &&
@@ -2628,11 +2663,96 @@ const renderRunNodes = (
                 span.dataset.selectionPrimary = String(highlight.primary);
             }
             nodes.push(span);
+        } else {
+            const span = document.createElement('span');
+            span.textContent = chunk.text;
+            applyRunClasses(span, chunk.run, options.popoverTextById);
+            nodes.push(span);
+        }
+        nodes.push(
+            ...renderEndingFootnoteReferences(
+                chunk,
+                chunks[index + 1] ?? null,
+                options.footnoteNumberById,
+            ),
+        );
+    }
+    if (decorations) {
+        const finalOffset = chunks.at(-1)?.blockEndOffset ?? formattedRunsTextLength(runs);
+        renderCaretsAtOffset(nodes, decorations, renderedCarets, finalOffset);
+    }
+    return appendTrailingCodeNewlineSentinel(nodes, options);
+};
+
+type RunRenderChunk = {
+    run: RichFormattedBlock['runs'][number];
+    text: string;
+    blockStartOffset: number;
+    blockEndOffset: number;
+};
+
+const runRenderChunks = (
+    runs: RichFormattedBlock['runs'],
+    decorations: BlockSelectionDecorations | null,
+): RunRenderChunk[] => {
+    const chunks: RunRenderChunk[] = [];
+    let offset = 0;
+    for (const run of runs) {
+        const runSegments = segmentText(run.text);
+        const runStart = offset;
+        const runEnd = runStart + runSegments.length;
+        const boundaries = new Set([0, runSegments.length]);
+
+        if (decorations) {
+            for (const selectionSegment of decorations.segments) {
+                addBoundaryInRun(
+                    boundaries,
+                    selectionSegment.startOffset - runStart,
+                    runSegments.length,
+                );
+                addBoundaryInRun(
+                    boundaries,
+                    selectionSegment.endOffset - runStart,
+                    runSegments.length,
+                );
+            }
+            for (const caret of decorations.carets) {
+                addBoundaryInRun(boundaries, caret.offset - runStart, runSegments.length);
+            }
+        }
+
+        const sortedBoundaries = [...boundaries].sort((a, b) => a - b);
+        for (let index = 0; index < sortedBoundaries.length - 1; index++) {
+            const start = sortedBoundaries[index];
+            const end = sortedBoundaries[index + 1];
+            if (start === end) continue;
+            chunks.push({
+                run,
+                text: runSegments.slice(start, end).join(''),
+                blockStartOffset: runStart + start,
+                blockEndOffset: runStart + end,
+            });
         }
         offset = runEnd;
     }
-    renderCaretsAtOffset(nodes, decorations, renderedCarets, offset);
-    return appendTrailingCodeNewlineSentinel(nodes, options);
+    return chunks;
+};
+
+const formattedRunsTextLength = (runs: RichFormattedBlock['runs']): number =>
+    runs.reduce((length, run) => length + segmentText(run.text).length, 0);
+
+const renderEndingFootnoteReferences = (
+    chunk: RunRenderChunk,
+    nextChunk: RunRenderChunk | null,
+    footnoteNumberById: Map<string, number> = new Map(),
+): HTMLElement[] => {
+    const currentIds = footnoteIdsForRun(chunk.run, footnoteNumberById);
+    if (!currentIds.length) return [];
+    const nextIds = nextChunk ? new Set(footnoteIdsForRun(nextChunk.run, footnoteNumberById)) : new Set<string>();
+    return currentIds
+        .filter((id) => !nextIds.has(id))
+        .sort((a, b) => (footnoteNumberById.get(a) ?? 0) - (footnoteNumberById.get(b) ?? 0))
+        .map((id) => renderFootnoteReferenceNumber(footnoteNumberById.get(id) ?? 0));
 };
 
 const appendTrailingCodeNewlineSentinel = (
@@ -2687,20 +2807,34 @@ const applyRunClasses = (
 const hasAnnotationMark = (run: RichFormattedBlock['runs'][number]) =>
     Boolean(run.marks.annotation || run.stackedMarks?.annotation?.length);
 
+const annotationDataForRun = (run: RichFormattedBlock['runs'][number]): AnnotationMarkData[] => {
+    const values = [...(run.stackedMarks?.annotation ?? []), run.marks.annotation];
+    return values.filter(isAnnotationMarkData);
+};
+
 const popoverIdsForRun = (
     run: RichFormattedBlock['runs'][number],
     popoverTextById?: Map<string, string>,
 ): string[] => {
     if (!popoverTextById) return [];
     const result: string[] = [];
-    for (const value of run.stackedMarks?.annotation ?? []) {
-        if (!isAnnotationMarkData(value)) continue;
-        const id = lamportToString(value.id);
-        if (popoverTextById.has(id)) result.push(id);
+    for (const data of annotationDataForRun(run)) {
+        if (data.presentation !== 'popover') continue;
+        const id = lamportToString(data.id);
+        if (popoverTextById.has(id) && !result.includes(id)) result.push(id);
     }
-    if (isAnnotationMarkData(run.marks.annotation)) {
-        const id = lamportToString(run.marks.annotation.id);
-        if (popoverTextById.has(id)) result.push(id);
+    return result;
+};
+
+const footnoteIdsForRun = (
+    run: RichFormattedBlock['runs'][number],
+    footnoteNumberById: Map<string, number>,
+): string[] => {
+    const result: string[] = [];
+    for (const data of annotationDataForRun(run)) {
+        if (data.presentation !== 'footnote') continue;
+        const id = lamportToString(data.id);
+        if (footnoteNumberById.has(id) && !result.includes(id)) result.push(id);
     }
     return result;
 };
@@ -2709,9 +2843,19 @@ const isAnnotationMarkData = (value: unknown): value is AnnotationMarkData =>
     typeof value === 'object' &&
     value !== null &&
     Array.isArray((value as AnnotationMarkData).id) &&
-    (value as AnnotationMarkData).presentation === 'popover';
+    ['sidebar', 'footnote', 'popover'].includes((value as AnnotationMarkData).presentation);
 
 const capitalize = (value: string) => value.slice(0, 1).toUpperCase() + value.slice(1);
+
+const renderFootnoteReferenceNumber = (number: number) => {
+    const sup = document.createElement('sup');
+    sup.className = 'footnoteReferenceNumber';
+    sup.dataset.offsetSentinel = 'true';
+    sup.dataset.footnoteReference = 'true';
+    sup.contentEditable = 'false';
+    sup.textContent = String(number);
+    return sup;
+};
 
 const renderRetainedCaret = (id: string, primary: boolean) => {
     const span = document.createElement('span');

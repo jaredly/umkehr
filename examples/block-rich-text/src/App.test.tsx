@@ -219,6 +219,9 @@ const queryPopoverDialogs = (panel: HTMLElement): HTMLElement[] =>
 const popoverMarks = (scope: HTMLElement): HTMLElement[] =>
     Array.from(scope.querySelectorAll<HTMLElement>('.markPopover'));
 
+const footnoteReferences = (scope: HTMLElement): HTMLElement[] =>
+    Array.from(scope.querySelectorAll<HTMLElement>('.footnoteReferenceNumber'));
+
 const waitForPopoverDialogs = async (panel: HTMLElement, count: number): Promise<HTMLElement[]> =>
     waitFor(() => {
         const dialogs = popoverDialogs(panel);
@@ -1368,6 +1371,99 @@ describe('Block rich text example UI', () => {
         await waitFor(() => expect(within(left).getByText('Comment on “ot”')).toBeTruthy());
     });
 
+    it('renders inline footnote numbers in visible reference order', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        const block = blocks(left)[0];
+
+        selectCaret(block, 0);
+        beforeInputText(block, 'first second');
+        await waitFor(() => expect(blockText(block)).toBe('first second'));
+
+        selectRange(block, 6, 12);
+        fireEvent.click(within(left).getByRole('button', {name: 'Footnote'}));
+        selectRange(block, 0, 5);
+        fireEvent.click(within(left).getByRole('button', {name: 'Footnote'}));
+
+        await waitFor(() => {
+            expect(footnoteReferences(block).map((node) => node.textContent)).toEqual(['1', '2']);
+        });
+        expect(blockText(block)).toBe('first second');
+        expect(within(left).getAllByRole('listitem')).toHaveLength(2);
+    });
+
+    it('renders one footnote number after a multi-run reference', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        const block = blocks(left)[0];
+
+        selectCaret(block, 0);
+        beforeInputText(block, 'abcde');
+        await waitFor(() => expect(blockText(block)).toBe('abcde'));
+
+        selectRange(block, 1, 5);
+        fireEvent.click(within(left).getByRole('button', {name: 'Footnote'}));
+        selectRange(block, 2, 4);
+        fireEvent.click(within(left).getByRole('button', {name: 'B'}));
+
+        await waitFor(() => {
+            const references = footnoteReferences(block);
+            expect(references.map((node) => node.textContent)).toEqual(['1']);
+            expect(references[0].previousSibling?.textContent).toBe('e');
+        });
+    });
+
+    it('renders overlapping footnote numbers at their respective boundaries', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        const block = blocks(left)[0];
+
+        selectCaret(block, 0);
+        beforeInputText(block, 'abcdef');
+        await waitFor(() => expect(blockText(block)).toBe('abcdef'));
+
+        selectRange(block, 1, 4);
+        fireEvent.click(within(left).getByRole('button', {name: 'Footnote'}));
+        selectRange(block, 2, 5);
+        fireEvent.click(within(left).getByRole('button', {name: 'Footnote'}));
+
+        await waitFor(() => {
+            const references = footnoteReferences(block);
+            expect(references.map((node) => node.textContent)).toEqual(['1', '2']);
+            expect(references[0].previousSibling?.textContent?.endsWith('d')).toBe(true);
+            expect(references[1].previousSibling?.textContent).toBe('e');
+        });
+    });
+
+    it('renders inline footnote numbers inside annotation body editors', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        const block = blocks(left)[0];
+
+        selectCaret(block, 0);
+        beforeInputText(block, 'abcd');
+        await waitFor(() => expect(blockText(block)).toBe('abcd'));
+
+        selectRange(block, 1, 3);
+        fireEvent.click(within(left).getByRole('button', {name: 'Comment'}));
+
+        const commentBody = await waitFor(() =>
+            within(left).getByRole('textbox', {name: 'Annotation body'}),
+        );
+        selectCaret(commentBody, 0);
+        beforeInputText(commentBody, 'note');
+        await waitFor(() => expect(blockText(commentBody)).toBe('note'));
+
+        selectRange(commentBody, 1, 3);
+        fireEvent.click(within(left).getByRole('button', {name: 'Footnote'}));
+
+        await waitFor(() => {
+            const references = footnoteReferences(commentBody);
+            expect(references.map((node) => node.textContent)).toEqual(['1']);
+            expect(blockText(commentBody)).toBe('note');
+        });
+    });
+
     it('renders popover annotations inline as editable transition-managed popovers', async () => {
         const view = render(<App />);
         const {left} = panels(view);
@@ -2091,7 +2187,11 @@ describe('Block rich text example UI', () => {
 
 const firstTextNode = (element: HTMLElement): Text | null => {
     const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
-    return walker.nextNode() as Text | null;
+    let current: Text | null;
+    while ((current = walker.nextNode() as Text | null)) {
+        if (!isTestOffsetSentinel(current)) return current;
+    }
+    return null;
 };
 
 const rangeAtBlockOffset = (block: HTMLElement, offset: number): Range => {
@@ -2100,6 +2200,7 @@ const rangeAtBlockOffset = (block: HTMLElement, offset: number): Range => {
     const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
     let current: Text | null;
     while ((current = walker.nextNode() as Text | null)) {
+        if (isTestOffsetSentinel(current)) continue;
         const length = current.textContent?.length ?? 0;
         if (remaining <= length) {
             range.setStart(current, remaining);
@@ -2148,6 +2249,7 @@ const domPointOffset = (block: HTMLElement, node: Node | null, nodeOffset: numbe
     if (node === block) {
         let offset = 0;
         for (let index = 0; index < nodeOffset && index < block.childNodes.length; index++) {
+            if (isTestOffsetSentinel(block.childNodes[index])) continue;
             offset += block.childNodes[index].textContent?.length ?? 0;
         }
         return offset;
@@ -2156,10 +2258,16 @@ const domPointOffset = (block: HTMLElement, node: Node | null, nodeOffset: numbe
     const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
     let current: Node | null;
     while ((current = walker.nextNode())) {
+        if (isTestOffsetSentinel(current)) continue;
         if (current === node) return offset + nodeOffset;
         offset += current.textContent?.length ?? 0;
     }
     return -1;
+};
+
+const isTestOffsetSentinel = (node: Node): boolean => {
+    const element = node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement;
+    return Boolean(element?.closest('[data-offset-sentinel="true"]'));
 };
 
 const installMockCaretGeometry = (

@@ -848,6 +848,16 @@ select {
     border-bottom-style: dotted;
 }
 
+.footnoteReferenceNumber {
+    margin-left: 1px;
+    color: #9a5800;
+    font-size: 0.72em;
+    font-weight: 700;
+    line-height: 0;
+    vertical-align: super;
+    user-select: none;
+}
+
 .annotationFloatingPopover {
     position: fixed;
     z-index: 40;
