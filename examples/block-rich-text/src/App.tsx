@@ -517,10 +517,10 @@ function BlockEditor({
                 if (!id) return current.filter((popover) => popover.source === 'selection');
                 const index = current.findIndex((popover) => popover.id === id);
                 if (index < 0) return current;
-                if (index < current.length - 1) return current;
-                return current.filter(
-                    (popover) => popover.id !== id || popover.source === 'selection',
-                );
+                return [
+                    ...current.slice(0, index),
+                    ...current.slice(index).filter((popover) => popover.source === 'selection'),
+                ];
             });
         }, 300);
     }, [cancelPopoverHide, popoverContainsFocus]);

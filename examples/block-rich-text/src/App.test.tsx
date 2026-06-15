@@ -1478,6 +1478,66 @@ describe('Block rich text example UI', () => {
         );
     });
 
+    it('hides a child popover when leaving the parent popover after hovering the child mark', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abcd');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abcd'));
+
+        selectRange(blocks(left)[0], 1, 3);
+        fireEvent.click(within(left).getByRole('button', {name: 'Popover'}));
+
+        const parentPopover = await waitFor(() =>
+            within(left).getByRole('dialog', {name: 'Popover'}),
+        );
+        const parentBody = within(parentPopover).getByRole('textbox', {name: 'Annotation body'});
+
+        selectCaret(parentBody, 0);
+        beforeInputText(parentBody, 'note');
+        await waitFor(() => expect(parentBody.textContent).toBe('note'));
+
+        const currentParentBody = within(parentPopover).getByRole('textbox', {
+            name: 'Annotation body',
+        });
+        selectRange(currentParentBody, 1, 3);
+        fireEvent.click(within(left).getByRole('button', {name: 'Popover'}));
+        await waitFor(() =>
+            expect(within(left).getAllByRole('dialog', {name: 'Popover'})).toHaveLength(2),
+        );
+
+        selectCaret(blocks(left)[0], 0);
+        fireEvent.mouseUp(blocks(left)[0]);
+        await waitFor(() =>
+            expect(within(left).queryByRole('dialog', {name: 'Popover'})).toBeNull(),
+        );
+
+        const parentMark = blocks(left)[0].querySelector<HTMLElement>('.markPopover');
+        if (!parentMark) throw new Error('missing parent popover mark');
+        fireEvent.mouseOver(parentMark);
+        const reopenedParentPopover = await waitFor(() =>
+            within(left).getByRole('dialog', {name: 'Popover'}),
+        );
+        const reopenedParentBody = within(reopenedParentPopover).getByRole('textbox', {
+            name: 'Annotation body',
+        });
+        const childMark = reopenedParentBody.querySelector<HTMLElement>('.markPopover');
+        if (!childMark) throw new Error('missing child popover mark');
+
+        fireEvent.mouseOver(childMark);
+        await waitFor(() =>
+            expect(within(left).getAllByRole('dialog', {name: 'Popover'})).toHaveLength(2),
+        );
+
+        vi.useFakeTimers();
+        fireEvent.mouseOut(childMark, {relatedTarget: document.body});
+        fireEvent.mouseLeave(reopenedParentPopover, {relatedTarget: document.body});
+        act(() => vi.advanceTimersByTime(300));
+
+        expect(within(left).queryByRole('dialog', {name: 'Popover'})).toBeNull();
+    });
+
     it('closes a child popover when focus returns to the parent unless its mark is selected', async () => {
         const view = render(<App />);
         const {left} = panels(view);
