@@ -107,3 +107,5 @@
   - `npm run typecheck`
   - `npm exec tsc -- -p examples/block-rich-text/tsconfig.json --noEmit`
   - `npm run build`
+- Follow-up polish: removed row up/down arrow controls now that rows can be dragged, added row-level drop indicators, tightened table-cell drop indicators so they do not use the document block offset, and fixed the table-cell grid so hidden markers do not leave a zero-width track over the editable content.
+- Follow-up behavior: Enter at the end of a table cell now moves into an empty cell to the right, or creates the missing cell to the right when the row is sparse. Non-empty right cells still fall through to the normal split behavior.

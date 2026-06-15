@@ -17,6 +17,7 @@ import {lamportToString} from 'umkehr/block-crdt/utils';
 import {
     deleteBackward,
     deleteForward,
+    advanceFromTableCellEnd,
     addTableRow,
     createMissingTableCell,
     createTable,
@@ -218,6 +219,49 @@ describe('block rich text commands', () => {
         expect(shape.rows).toHaveLength(2);
         expect(shape.cells[1]).toHaveLength(2);
         expect(result.selection).toEqual(caret(shape.cells[1][0], 0));
+    });
+
+    it('advances from a cell end into an empty cell to the right on Enter', () => {
+        const demo = createDemoState();
+        const context = ctx();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = createTable(demo.left.state, caret(blockId, 0), context, {rows: 1, columns: 2});
+        const tableId = rootBlockIds(result.state)[1];
+        const [firstCell, secondCell] = tableShape(result.state, tableId).cells[0];
+        result = insertText(result.state, caret(firstCell, 0), 'one', context);
+
+        const advanced = advanceFromTableCellEnd(
+            result.state,
+            caret(firstCell, pointTextLength(result.state, firstCell)),
+            context,
+        );
+
+        expect(advanced).toMatchObject({ops: [], selection: caret(secondCell, 0)});
+    });
+
+    it('creates a missing cell to the right on Enter at cell end', () => {
+        const demo = createDemoState();
+        const context = ctx();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = createTable(demo.left.state, caret(blockId, 0), context, {rows: 2, columns: 1});
+        const tableId = rootBlockIds(result.state)[1];
+        let shape = tableShape(result.state, tableId);
+        result = createMissingTableCell(result.state, shape.rows[1], 1, context);
+        shape = tableShape(result.state, tableId);
+        const firstRowCell = shape.cells[0][0];
+        result = insertText(result.state, caret(firstRowCell, 0), 'one', context);
+
+        const advanced = advanceFromTableCellEnd(
+            result.state,
+            caret(firstRowCell, pointTextLength(result.state, firstRowCell)),
+            context,
+        );
+
+        expect(advanced).not.toBeNull();
+        if (!advanced) return;
+        const nextShape = tableShape(advanced.state, tableId);
+        expect(nextShape.cells[0]).toHaveLength(2);
+        expect(advanced.selection).toEqual(caret(nextShape.cells[0][1], 0));
     });
 
     it('joins cells in the same row but blocks accidental joins across rows', () => {

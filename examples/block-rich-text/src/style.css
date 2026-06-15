@@ -439,10 +439,39 @@ select {
 }
 
 .tableRow {
+    position: relative;
     display: grid;
     grid-auto-flow: column;
     grid-auto-columns: minmax(150px, 1fr);
     border-top: 1px solid #dce4eb;
+}
+
+.tableRow.dropBefore::before,
+.tableRow.dropAfter::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    z-index: 2;
+    height: 3px;
+    border-radius: 999px;
+    background: #1b75bb;
+}
+
+.tableRow.dropBefore::before {
+    top: -2px;
+}
+
+.tableRow.dropAfter::after {
+    bottom: -2px;
+}
+
+.tableRow.dragging {
+    opacity: 0.58;
+}
+
+.tableRow.draggingRoot {
+    opacity: 0.46;
 }
 
 .tableRow:first-child {
@@ -453,7 +482,7 @@ select {
     display: flex;
     align-items: start;
     gap: 4px;
-    min-width: 98px;
+    min-width: 42px;
     padding: 6px;
     border-right: 1px solid #dce4eb;
     background: #f7fafc;
@@ -475,6 +504,22 @@ select {
     gap: 4px;
     margin-left: 0;
     padding: 4px;
+}
+
+.tableCell .blockRow.dropBefore::before,
+.tableCell .blockRow.dropAfter::after {
+    left: 4px;
+    right: 4px;
+    z-index: 2;
+    height: 3px;
+}
+
+.tableCell .blockRow.dropBefore::before {
+    top: 2px;
+}
+
+.tableCell .blockRow.dropAfter::after {
+    bottom: 2px;
 }
 
 .tableCell .blockMarker {

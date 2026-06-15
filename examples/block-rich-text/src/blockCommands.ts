@@ -544,6 +544,35 @@ export const moveTableCellByTab = (
     return {...added, selection: caret(firstCellId ?? blockId, 0)};
 };
 
+export const advanceFromTableCellEnd = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    context: CommandContext,
+): CommandResult | null => {
+    if (selection.type !== 'caret') return null;
+    const point = selection.point;
+    if (point.offset !== pointTextLength(state, point.blockId)) return null;
+    const cell = tableCellContext(state, point.blockId);
+    if (!cell) return null;
+
+    const rows = tableRows(state, cell.tableId);
+    const columnCount = Math.max(
+        1,
+        ...rows.map((rowId) => visibleBlockChildren(state, rowId, annotationVirtualParents(state)).length),
+    );
+    const nextColumn = cell.columnIndex + 1;
+    if (nextColumn >= columnCount) return null;
+
+    const cells = visibleBlockChildren(state, cell.rowId, annotationVirtualParents(state));
+    const nextCellId = cells[nextColumn] ?? null;
+    if (nextCellId) {
+        return pointTextLength(state, nextCellId) === 0
+            ? {state, ops: [], selection: caret(nextCellId, 0)}
+            : null;
+    }
+    return createMissingTableCell(state, cell.rowId, nextColumn, context);
+};
+
 type TableCellContext = {
     tableId: string;
     rowParentId: string;

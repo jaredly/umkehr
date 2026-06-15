@@ -17,11 +17,11 @@ import {lamportToString} from 'umkehr/block-crdt/utils';
 import {
     addTableColumn,
     addTableRow,
+    advanceFromTableCellEnd,
     createMissingTableCell,
     createTable,
     moveBlock,
     moveTableCellByTab,
-    moveTableRow,
     setBlockMeta,
     type CommandResult,
 } from './blockCommands';
@@ -1324,17 +1324,6 @@ function BlockEditor({
                                 );
                                 return {state: result.state, ops: result.ops, selection: current.selection};
                             }),
-                        moveTableRow: (tableId, rowId, direction) =>
-                            runBlockControlCommand((current) => {
-                                const result = moveTableRow(
-                                    current.state,
-                                    tableId,
-                                    rowId,
-                                    direction,
-                                    makeCommandContext(current),
-                                );
-                                return {state: result.state, ops: result.ops, selection: current.selection};
-                            }),
                         runEditCommand,
                         runBlockControlCommand,
                         moveCaretHorizontally,
@@ -1466,7 +1455,6 @@ type RenderBlockContext = {
     createMissingTableCell(tableId: string, rowId: string, columnIndex: number): void;
     addTableRow(tableId: string): void;
     addTableColumn(tableId: string): void;
-    moveTableRow(tableId: string, rowId: string, direction: 'up' | 'down'): void;
     onUndo(): void;
     onRedo(): void;
     onKeystroke(blockId: string, event: KeyboardEvent<HTMLElement>): void;
@@ -1558,7 +1546,16 @@ function TableBlock({
                     <div
                         key={row.block.id}
                         ref={(element) => context.registerRow(row.block.id, element)}
-                        className="tableRow"
+                        className={[
+                            'tableRow',
+                            context.draggingSubtreeIds.has(row.block.id) ? 'dragging' : '',
+                            context.draggingId === row.block.id ? 'draggingRoot' : '',
+                            context.dropTarget?.indicatorBlockId === row.block.id
+                                ? `drop${capitalize(context.dropTarget.indicatorPlacement)}`
+                                : '',
+                        ]
+                            .filter(Boolean)
+                            .join(' ')}
                         role="row"
                         data-row-id={row.block.id}
                     >
@@ -1570,24 +1567,6 @@ function TableBlock({
                                 onPointerDown={(event) => context.startDrag(row.block.id, event)}
                             >
                                 ⋮
-                            </button>
-                            <button
-                                type="button"
-                                aria-label="Move row up"
-                                disabled={rowIndex === 0}
-                                onMouseDown={(event) => event.preventDefault()}
-                                onClick={() => context.moveTableRow(node.block.id, row.block.id, 'up')}
-                            >
-                                ↑
-                            </button>
-                            <button
-                                type="button"
-                                aria-label="Move row down"
-                                disabled={rowIndex === rowNodes.length - 1}
-                                onMouseDown={(event) => event.preventDefault()}
-                                onClick={() => context.moveTableRow(node.block.id, row.block.id, 'down')}
-                            >
-                                ↓
                             </button>
                         </div>
                         {Array.from({length: columnCount}, (_, columnIndex) => {
@@ -1678,6 +1657,31 @@ const renderEditableBlock = (block: RichFormattedBlock, context: RenderBlockCont
                 context.runEditCommand((current, selection) =>
                     splitBlockEverywhere(current.state, selection, makeCommandContext(current)),
                 )
+            }
+            onAdvanceFromTableCellEnd={(selection) =>
+                context.runEditCommand((current) => {
+                    const result = advanceFromTableCellEnd(
+                        current.state,
+                        selection,
+                        makeCommandContext(current),
+                    );
+                    if (!result) {
+                        return splitBlockEverywhere(
+                            current.state,
+                            replacePrimarySelection(current.state, current.selection, selection),
+                            makeCommandContext(current),
+                        );
+                    }
+                    return {
+                        state: result.state,
+                        ops: result.ops,
+                        selection: replacePrimarySelection(
+                            result.state,
+                            current.selection,
+                            result.selection,
+                        ),
+                    };
+                })
             }
             onForceCodeNewline={() =>
                 context.runEditCommand((current, selection) =>
@@ -2555,6 +2559,7 @@ function EditableBlock({
     onDeleteBackward,
     onDeleteForward,
     onSplit,
+    onAdvanceFromTableCellEnd,
     onForceCodeNewline,
     onIndent,
     onUnindent,
@@ -2605,6 +2610,7 @@ function EditableBlock({
     onDeleteBackward(selection?: EditorSelection): void;
     onDeleteForward(selection?: EditorSelection): void;
     onSplit(): void;
+    onAdvanceFromTableCellEnd(selection: EditorSelection): void;
     onForceCodeNewline(): void;
     onIndent(): void;
     onUnindent(): void;
@@ -2725,6 +2731,10 @@ function EditableBlock({
                         event.preventDefault();
                         if (meta.type === 'code' && event.shiftKey) {
                             onForceCodeNewline();
+                        } else if (isTableCell && !event.shiftKey) {
+                            onAdvanceFromTableCellEnd(
+                                readSelectionFromDom(event.currentTarget) ?? caret(block.id, blockLength),
+                            );
                         } else {
                             onSplit();
                         }
