@@ -89,3 +89,21 @@
   - `npm exec vitest -- run src/block-crdt/index.test.ts src/block-crdt/formatting.test.ts src/block-crdt/adapter-additions.test.ts examples/block-rich-text/src`
   - `npm run typecheck`
   - `npm run build`
+
+## Phase 8
+
+- Added table-cell keyboard navigation: Tab moves forward through cells, Shift+Tab moves backward, and Tab from the final cell creates a new row beneath and moves into its first cell.
+- Table creation from the toolbar now restores the caret into the first created cell instead of preserving the pre-table selection.
+- Added deliberate cell-boundary join behavior: Backspace/Delete can join adjacent cells in the same row, but cross-row and table-to-document joins are blocked.
+- Kept split behavior using ordinary block split semantics, so splitting a cell creates another ordinary cell in the same row.
+- Multi-selection text operations now use the full rich-text virtual-parent traversal, and multi-selection marks across table cells are covered by regression tests.
+- Indent/unindent now refuses to move cells out of structural `table_row` parents, both directly and through multi-selection structural movement.
+- Cell drag handles are visible again, allowing cells to be dragged into and out of tables. Table rows now also have drag handles wired through the existing block reorder hook, in addition to row up/down buttons.
+- Issue encountered: generic outline movement in `multiSelectionCommands` still used non-virtual materialization, which made table-aware selected-block movement inconsistent. Fixed it to use the shared rich-text virtual-parent config.
+- Verification passed:
+  - `npm exec vitest -- run examples/block-rich-text/src/blockCommands.test.ts`
+  - `npm exec vitest -- run examples/block-rich-text/src/blockCommands.test.ts examples/block-rich-text/src/App.test.tsx`
+  - `npm exec vitest -- run src/block-crdt/index.test.ts src/block-crdt/formatting.test.ts src/block-crdt/adapter-additions.test.ts examples/block-rich-text/src`
+  - `npm run typecheck`
+  - `npm exec tsc -- -p examples/block-rich-text/tsconfig.json --noEmit`
+  - `npm run build`

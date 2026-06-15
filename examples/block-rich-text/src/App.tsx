@@ -20,6 +20,7 @@ import {
     createMissingTableCell,
     createTable,
     moveBlock,
+    moveTableCellByTab,
     moveTableRow,
     setBlockMeta,
     type CommandResult,
@@ -1225,7 +1226,15 @@ function BlockEditor({
                             primarySelection(resolveSelectionSet(current.state, selection)),
                             makeCommandContext(current),
                         );
-                        return {state: result.state, ops: result.ops, selection};
+                        return {
+                            state: result.state,
+                            ops: result.ops,
+                            selection: replacePrimarySelection(
+                                result.state,
+                                current.selection,
+                                result.selection,
+                            ),
+                        };
                     })
                 }
             />
@@ -1546,8 +1555,22 @@ function TableBlock({
             </div>
             <div className="tableGrid" role="table" aria-label="Table block">
                 {rowNodes.map((row, rowIndex) => (
-                    <div key={row.block.id} className="tableRow" role="row" data-row-id={row.block.id}>
+                    <div
+                        key={row.block.id}
+                        ref={(element) => context.registerRow(row.block.id, element)}
+                        className="tableRow"
+                        role="row"
+                        data-row-id={row.block.id}
+                    >
                         <div className="tableRowControls" role="cell" aria-label={`Row ${rowIndex + 1} controls`}>
+                            <button
+                                type="button"
+                                className="tableRowDrag"
+                                aria-label="Move row"
+                                onPointerDown={(event) => context.startDrag(row.block.id, event)}
+                            >
+                                ⋮
+                            </button>
                             <button
                                 type="button"
                                 aria-label="Move row up"
@@ -1608,6 +1631,7 @@ const renderEditableBlock = (block: RichFormattedBlock, context: RenderBlockCont
         <EditableBlock
             key={block.id}
             block={block}
+            isTableCell={context.state.state.blocks[block.parentId]?.meta.type === 'table_row'}
             listNumber={context.orderedListNumbers.get(block.id) ?? null}
             previousBlockId={previousBlock?.id ?? null}
             previousBlockLength={
@@ -1671,6 +1695,26 @@ const renderEditableBlock = (block: RichFormattedBlock, context: RenderBlockCont
                 context.runEditCommand((current, selection) =>
                     unindentSelections(current.state, selection, makeCommandContext(current)),
                 )
+            }
+            onMoveTableCellByTab={(direction) =>
+                context.runEditCommand((current, selection) => {
+                    const selected = primarySelection(resolveSelectionSet(current.state, selection));
+                    const result = moveTableCellByTab(
+                        current.state,
+                        focusPoint(selected).blockId,
+                        direction,
+                        makeCommandContext(current),
+                    );
+                    return {
+                        state: result.state,
+                        ops: result.ops,
+                        selection: replacePrimarySelection(
+                            result.state,
+                            current.selection,
+                            result.selection,
+                        ),
+                    };
+                })
             }
             onToggleBold={() =>
                 context.runEditCommand((current, selection) =>
@@ -2488,6 +2532,7 @@ function Toolbar({
 
 function EditableBlock({
     block,
+    isTableCell,
     listNumber,
     previousBlockId,
     previousBlockLength,
@@ -2513,6 +2558,7 @@ function EditableBlock({
     onForceCodeNewline,
     onIndent,
     onUnindent,
+    onMoveTableCellByTab,
     onToggleBold,
     onToggleItalic,
     onToggleStrikethrough,
@@ -2536,6 +2582,7 @@ function EditableBlock({
     onKeystroke,
 }: {
     block: RichFormattedBlock;
+    isTableCell: boolean;
     listNumber: number | null;
     previousBlockId: string | null;
     previousBlockLength: number;
@@ -2561,6 +2608,7 @@ function EditableBlock({
     onForceCodeNewline(): void;
     onIndent(): void;
     onUnindent(): void;
+    onMoveTableCellByTab(direction: 'forward' | 'backward'): void;
     onToggleBold(): void;
     onToggleItalic(): void;
     onToggleStrikethrough(): void;
@@ -2684,6 +2732,8 @@ function EditableBlock({
                         event.preventDefault();
                         if (meta.type === 'code') {
                             onInsertText('    ');
+                        } else if (isTableCell) {
+                            onMoveTableCellByTab(event.shiftKey ? 'backward' : 'forward');
                         } else if (event.shiftKey) {
                             onUnindent();
                         } else {

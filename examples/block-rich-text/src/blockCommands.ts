@@ -404,6 +404,7 @@ export const addTableRow = (
     state: CachedState<RichBlockMeta>,
     tableId: string,
     context: CommandContext,
+    afterRowId?: string,
 ): CommandResult => {
     const table = state.state.blocks[tableId];
     if (!table || table.meta.type !== 'table') return {state, ops: [], selection: caret(tableId, 0)};
@@ -412,11 +413,14 @@ export const addTableRow = (
     const columnCount = Math.max(1, ...rows.map((rowId) => visibleBlockChildren(state, rowId, config).length));
     const ops: Array<Op<RichBlockMeta>> = [];
     let working = state;
-    const previousRowId = rows[rows.length - 1] ?? null;
+    const afterIndex = afterRowId ? rows.indexOf(afterRowId) : -1;
+    const previousRowId = afterIndex >= 0 ? rows[afterIndex] : rows[rows.length - 1] ?? null;
+    const nextRowId = afterIndex >= 0 ? rows[afterIndex + 1] ?? null : null;
     const rowOps = insertBlockOps(working, {
         actor: context.actor,
         parent: table.meta.rowParent,
         before: previousRowId ? state.state.blocks[previousRowId].id : null,
+        after: nextRowId ? state.state.blocks[nextRowId].id : null,
         meta: {type: 'table_row', ts: context.nextTs()},
         ts: context.nextTs(),
         virtualParents: annotationVirtualParents(working),
@@ -509,6 +513,102 @@ export const moveTableRow = (
     const next = applyMany(state, ops, annotationVirtualParents(state));
     const firstCellId = visibleBlockChildren(next, rowId, annotationVirtualParents(next))[0];
     return {state: next, ops, selection: caret(firstCellId ?? rowId, 0)};
+};
+
+export const moveTableCellByTab = (
+    state: CachedState<RichBlockMeta>,
+    blockId: string,
+    direction: 'forward' | 'backward',
+    context: CommandContext,
+): CommandResult => {
+    const cell = tableCellContext(state, blockId);
+    if (!cell) return {state, ops: [], selection: caret(blockId, 0)};
+
+    if (direction === 'backward') {
+        const previousCellId = previousTableCellId(state, cell);
+        return previousCellId
+            ? {state, ops: [], selection: caret(previousCellId, pointTextLength(state, previousCellId))}
+            : {state, ops: [], selection: caret(blockId, 0)};
+    }
+
+    const nextCellId = nextTableCellId(state, cell);
+    if (nextCellId) return {state, ops: [], selection: caret(nextCellId, 0)};
+
+    const added = addTableRow(state, cell.tableId, context, cell.rowId);
+    const next = tableCellContext(added.state, blockId);
+    const rows = next ? tableRows(added.state, next.tableId) : [];
+    const insertedRowId = rows[cell.rowIndex + 1] ?? rows[rows.length - 1] ?? null;
+    const firstCellId = insertedRowId
+        ? visibleBlockChildren(added.state, insertedRowId, annotationVirtualParents(added.state))[0]
+        : null;
+    return {...added, selection: caret(firstCellId ?? blockId, 0)};
+};
+
+type TableCellContext = {
+    tableId: string;
+    rowParentId: string;
+    rowId: string;
+    rowIndex: number;
+    columnIndex: number;
+};
+
+const tableCellContext = (
+    state: CachedState<RichBlockMeta>,
+    blockId: string,
+): TableCellContext | null => {
+    const block = state.state.blocks[blockId];
+    if (!block || block.meta.type === 'table_row') return null;
+    const pathIds = materializedBlockPath(state, blockId, annotationVirtualParents(state)).map(lamportToString);
+    const rowIndexInPath = pathIds.findLastIndex((id) => state.state.blocks[id]?.meta.type === 'table_row');
+    if (rowIndexInPath < 2) return null;
+    const rowId = pathIds[rowIndexInPath];
+    const rowParentId = pathIds[rowIndexInPath - 1];
+    const tableId = pathIds[rowIndexInPath - 2];
+    if (state.state.blocks[tableId]?.meta.type !== 'table') return null;
+    const rows = tableRows(state, tableId);
+    const rowIndex = rows.indexOf(rowId);
+    const cells = visibleBlockChildren(state, rowId, annotationVirtualParents(state));
+    const columnIndex = cells.indexOf(blockId);
+    if (rowIndex < 0 || columnIndex < 0) return null;
+    return {tableId, rowParentId, rowId, rowIndex, columnIndex};
+};
+
+const tableRows = (state: CachedState<RichBlockMeta>, tableId: string): string[] => {
+    const table = state.state.blocks[tableId];
+    if (!table || table.meta.type !== 'table') return [];
+    return visibleBlockChildren(state, lamportToString(table.meta.rowParent), annotationVirtualParents(state));
+};
+
+const nextTableCellId = (state: CachedState<RichBlockMeta>, cell: TableCellContext): string | null => {
+    const rows = tableRows(state, cell.tableId);
+    for (let rowIndex = cell.rowIndex; rowIndex < rows.length; rowIndex++) {
+        const cells = visibleBlockChildren(state, rows[rowIndex], annotationVirtualParents(state));
+        const start = rowIndex === cell.rowIndex ? cell.columnIndex + 1 : 0;
+        if (cells[start]) return cells[start];
+    }
+    return null;
+};
+
+const previousTableCellId = (state: CachedState<RichBlockMeta>, cell: TableCellContext): string | null => {
+    const rows = tableRows(state, cell.tableId);
+    for (let rowIndex = cell.rowIndex; rowIndex >= 0; rowIndex--) {
+        const cells = visibleBlockChildren(state, rows[rowIndex], annotationVirtualParents(state));
+        const start = rowIndex === cell.rowIndex ? cell.columnIndex - 1 : cells.length - 1;
+        if (cells[start]) return cells[start];
+    }
+    return null;
+};
+
+const sameTableRowBoundary = (
+    state: CachedState<RichBlockMeta>,
+    oneBlockId: string,
+    otherBlockId: string,
+): boolean => {
+    const one = tableCellContext(state, oneBlockId);
+    const other = tableCellContext(state, otherBlockId);
+    if (!one && !other) return true;
+    if (!one || !other) return false;
+    return one.rowId === other.rowId;
 };
 
 export const moveBlock = (
@@ -611,6 +711,9 @@ export const indentBlock = (
     }
 
     const parentId = lamportToString(materializedBlockParent(state, blockId, annotationVirtualParents(state)));
+    if (state.state.blocks[parentId]?.meta.type === 'table_row') {
+        return {state, ops: [], selection: caret(blockId, 0)};
+    }
     const siblings = visibleBlockChildren(state, parentId, annotationVirtualParents(state));
     const index = siblings.indexOf(blockId);
     const previousBlockId = siblings[index - 1];
@@ -645,6 +748,9 @@ export const unindentBlock = (
     }
 
     const parentId = lamportToString(materializedBlockParent(state, blockId, annotationVirtualParents(state)));
+    if (state.state.blocks[parentId]?.meta.type === 'table_row') {
+        return {state, ops: [], selection: caret(blockId, 0)};
+    }
     if (parentId === ROOT_ID) {
         return {state, ops: [], selection: caret(blockId, 0)};
     }
@@ -705,6 +811,9 @@ export const joinWithPrevious = (
     if (index <= 0) return {state, ops: [], selection: caret(blockId, 0)};
 
     const previousBlockId = blocks[index - 1];
+    if (!sameTableRowBoundary(state, previousBlockId, blockId)) {
+        return {state, ops: [], selection: caret(blockId, 0)};
+    }
     const previousLength = pointTextLength(state, previousBlockId);
     const ops = joinBlocksOps(
         state,
@@ -728,6 +837,9 @@ export const joinWithNext = (
     const index = blocks.indexOf(blockId);
     const nextBlockId = blocks[index + 1];
     if (index < 0 || !nextBlockId) {
+        return {state, ops: [], selection: caret(blockId, pointTextLength(state, blockId))};
+    }
+    if (!sameTableRowBoundary(state, blockId, nextBlockId)) {
         return {state, ops: [], selection: caret(blockId, pointTextLength(state, blockId))};
     }
 

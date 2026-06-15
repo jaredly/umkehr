@@ -449,7 +449,8 @@ describe('Block rich text example UI', () => {
         });
         expect(blocks(left)).toHaveLength(5);
 
-        fireEvent.click(within(left).getByRole('button', {name: 'Add row'}));
+        selectCaret(blocks(left)[4], 0);
+        fireEvent.keyDown(blocks(left)[4], {key: 'Tab'});
         await waitFor(() => expect(blocks(right)).toHaveLength(7));
 
         fireEvent.click(within(left).getByRole('button', {name: 'Add column'}));

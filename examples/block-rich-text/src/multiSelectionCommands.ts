@@ -39,6 +39,7 @@ import {
     type BlockPoint,
     type EditorSelection,
 } from './selectionModel';
+import {richTextVirtualParents} from './virtualParents';
 
 export type MultiCommandResult = {
     state: CachedState<RichBlockMeta>;
@@ -274,7 +275,7 @@ const topLevelSelectedBlockIds = (
         }
     }
 
-    const outline = materializeFormattedBlocks(state);
+    const outline = materializeFormattedBlocks(state, richTextVirtualParents(state));
     const result: string[] = [];
     const selectedAncestorDepths: number[] = [];
     for (const block of outline) {
@@ -311,7 +312,7 @@ const blockMovesForSelection = (
     direction: 'indent' | 'unindent',
 ): Array<{blockId: string; target: Parameters<typeof moveBlock>[2]}> => {
     const selected = new Set(selectedBlockIds);
-    const outline = materializeFormattedBlocks(state);
+    const outline = materializeFormattedBlocks(state, richTextVirtualParents(state));
     const byParent = new Map<string, typeof outline>();
     for (const block of outline) {
         const siblings = byParent.get(block.parentId) ?? [];
@@ -322,9 +323,13 @@ const blockMovesForSelection = (
     const moves: Array<{blockId: string; target: Parameters<typeof moveBlock>[2]}> = [];
     for (const siblings of byParent.values()) {
         for (let index = 0; index < siblings.length; index++) {
-            if (!selected.has(siblings[index].id)) continue;
+            if (!selected.has(siblings[index].id) || isTableCellOutlineItem(state, siblings[index])) continue;
             const start = index;
-            while (index + 1 < siblings.length && selected.has(siblings[index + 1].id)) {
+            while (
+                index + 1 < siblings.length &&
+                selected.has(siblings[index + 1].id) &&
+                !isTableCellOutlineItem(state, siblings[index + 1])
+            ) {
                 index++;
             }
             const run = siblings.slice(start, index + 1);
@@ -353,6 +358,11 @@ const blockMovesForSelection = (
     }
     return moves;
 };
+
+const isTableCellOutlineItem = (
+    state: CachedState<RichBlockMeta>,
+    block: {parentId: string},
+): boolean => state.state.blocks[block.parentId]?.meta.type === 'table_row';
 
 export const moveSelectionsVertically = (
     state: CachedState<RichBlockMeta>,

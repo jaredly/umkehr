@@ -23,6 +23,7 @@ import {
     indentBlock,
     insertText,
     moveBlock,
+    moveTableCellByTab,
     moveTableRow,
     pastePlainText,
     removeLinkMark,
@@ -36,8 +37,9 @@ import {
 import {applyLocalChange, createDemoState, makeCommandContext, toggleOnline} from './blockEditorRuntime';
 import {annotationVirtualParents, createAnnotation} from './annotations';
 import type {RichBlockMeta} from './blockMeta';
+import {toggleMarkEverywhere} from './multiSelectionCommands';
 import {retainSelection} from './retainedSelection';
-import {caret, type EditorSelection} from './selectionModel';
+import {caret, pointTextLength, type EditorSelection} from './selectionModel';
 
 const ctx = (actor = 'left'): CommandContext => {
     let i = 1;
@@ -195,6 +197,113 @@ describe('block rich text commands', () => {
         });
 
         expect(tableShape(demo.right.state, tableId).rows).toEqual(tableShape(demo.left.state, tableId).rows);
+    });
+
+    it('moves across table cells with Tab and creates a row at the final cell', () => {
+        const demo = createDemoState();
+        const context = ctx();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = createTable(demo.left.state, caret(blockId, 0), context, {rows: 1, columns: 2});
+        const tableId = rootBlockIds(result.state)[1];
+        const [firstCell, secondCell] = tableShape(result.state, tableId).cells[0];
+
+        result = moveTableCellByTab(result.state, firstCell, 'forward', context);
+        expect(result.selection).toEqual(caret(secondCell, 0));
+
+        result = moveTableCellByTab(result.state, secondCell, 'backward', context);
+        expect(result.selection).toEqual(caret(firstCell, 0));
+
+        result = moveTableCellByTab(result.state, secondCell, 'forward', context);
+        const shape = tableShape(result.state, tableId);
+        expect(shape.rows).toHaveLength(2);
+        expect(shape.cells[1]).toHaveLength(2);
+        expect(result.selection).toEqual(caret(shape.cells[1][0], 0));
+    });
+
+    it('joins cells in the same row but blocks accidental joins across rows', () => {
+        const demo = createDemoState();
+        const context = ctx();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = createTable(demo.left.state, caret(blockId, 0), context, {rows: 2, columns: 2});
+        const tableId = rootBlockIds(result.state)[1];
+        let shape = tableShape(result.state, tableId);
+        const [rowOneA, rowOneB] = shape.cells[0];
+        const [rowTwoA, rowTwoB] = shape.cells[1];
+        result = insertText(result.state, caret(rowOneA, 0), 'A', context);
+        result = insertText(result.state, caret(rowOneB, 0), 'B', context);
+        result = insertText(result.state, caret(rowTwoA, 0), 'C', context);
+
+        result = deleteBackward(result.state, caret(rowOneB, 0), context);
+        shape = tableShape(result.state, tableId);
+        expect(shape.cells[0]).toEqual([rowOneA]);
+        expect(blockContents(result.state, rowOneA)).toBe('AB');
+
+        result = deleteBackward(result.state, caret(rowTwoA, 0), context);
+        expect(result.ops).toEqual([]);
+        expect(tableShape(result.state, tableId).cells[1]).toEqual([rowTwoA, rowTwoB]);
+
+        result = deleteForward(result.state, caret(rowOneA, pointTextLength(result.state, rowOneA)), context);
+        expect(result.ops).toEqual([]);
+    });
+
+    it('does not indent table cells out of their structural rows', () => {
+        const demo = createDemoState();
+        const context = ctx();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = createTable(demo.left.state, caret(blockId, 0), context, {rows: 1, columns: 2});
+        const tableId = rootBlockIds(result.state)[1];
+        const [, secondCell] = tableShape(result.state, tableId).cells[0];
+
+        result = indentBlock(result.state, secondCell, context);
+
+        expect(result.ops).toEqual([]);
+        expect(tableShape(result.state, tableId).cells[0]).toContain(secondCell);
+    });
+
+    it('applies multi-selection marks across table cells', () => {
+        const demo = createDemoState();
+        const context = ctx();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = createTable(demo.left.state, caret(blockId, 0), context, {rows: 1, columns: 2});
+        const tableId = rootBlockIds(result.state)[1];
+        const [firstCell, secondCell] = tableShape(result.state, tableId).cells[0];
+        result = insertText(result.state, caret(firstCell, 0), 'one', context);
+        result = insertText(result.state, caret(secondCell, 0), 'two', context);
+
+        const marked = toggleMarkEverywhere(
+            result.state,
+            {
+                primaryId: 'one',
+                entries: [
+                    {
+                        id: 'one',
+                        selection: retainSelection(result.state, {
+                            type: 'range',
+                            anchor: {blockId: firstCell, offset: 0},
+                            focus: {blockId: firstCell, offset: 3},
+                        }),
+                    },
+                    {
+                        id: 'two',
+                        selection: retainSelection(result.state, {
+                            type: 'range',
+                            anchor: {blockId: secondCell, offset: 0},
+                            focus: {blockId: secondCell, offset: 3},
+                        }),
+                    },
+                ],
+            },
+            'bold',
+            context,
+        );
+
+        const formatted = materializeFormattedBlocks(marked.state, annotationVirtualParents(marked.state));
+        expect(formatted.find((block) => block.id === firstCell)?.runs).toEqual([
+            {text: 'one', marks: {bold: true}},
+        ]);
+        expect(formatted.find((block) => block.id === secondCell)?.runs).toEqual([
+            {text: 'two', marks: {bold: true}},
+        ]);
     });
 
     it('turns empty non-paragraph Enter into paragraph metadata', () => {

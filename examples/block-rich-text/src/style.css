@@ -419,6 +419,10 @@ select {
     padding: 0;
 }
 
+.tableRowControls .tableRowDrag {
+    cursor: grab;
+}
+
 .tableRowControls button:disabled {
     color: #9aa7b2;
     background: #f2f5f7;
@@ -449,7 +453,7 @@ select {
     display: flex;
     align-items: start;
     gap: 4px;
-    min-width: 68px;
+    min-width: 98px;
     padding: 6px;
     border-right: 1px solid #dce4eb;
     background: #f7fafc;
@@ -467,15 +471,21 @@ select {
 }
 
 .tableCell .blockRow {
-    grid-template-columns: minmax(0, 1fr) minmax(0, auto);
-    gap: 0;
+    grid-template-columns: 30px minmax(0, 1fr) minmax(0, auto);
+    gap: 4px;
     margin-left: 0;
     padding: 4px;
 }
 
-.tableCell .dragHandle,
 .tableCell .blockMarker {
     display: none;
+}
+
+.tableCell .dragHandle {
+    min-width: 26px;
+    width: 26px;
+    height: 28px;
+    margin-top: 4px;
 }
 
 .tableCell .editableBlock {
