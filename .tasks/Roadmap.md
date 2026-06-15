@@ -1,6 +1,18 @@
 
-- strikethrough
-- links
+trello
+whiteboard
+drawboard
+...
+the history/branch trappings I built for umkehr/crdt seem like they'd be just as applicable to block rich text.
+I wonder if I can .. separate them? so that they can work with any crdt.
+
+it would be cool to be able to have block-rich-text be the root (with maybe some umkehr/json as specialized block contents), or the other way around.
+
+
+##
+
+- [x] strikethrough
+- [x] links
 
 
 

@@ -379,6 +379,121 @@ select {
     font-weight: 520;
 }
 
+.tableBlock {
+    margin-left: calc(var(--block-depth, 0) * 24px);
+    padding: 8px 0 10px 42px;
+}
+
+.tableToolbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 6px;
+    color: #566675;
+    font-size: 12px;
+}
+
+.tableToolbar span {
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.tableToolbar button,
+.tableRowControls button,
+.missingTableCell button {
+    min-height: 26px;
+    border: 1px solid #cbd5df;
+    border-radius: 6px;
+    color: #23313d;
+    background: #fff;
+    cursor: pointer;
+}
+
+.tableToolbar button {
+    padding: 0 8px;
+}
+
+.tableRowControls button {
+    width: 26px;
+    padding: 0;
+}
+
+.tableRowControls button:disabled {
+    color: #9aa7b2;
+    background: #f2f5f7;
+    cursor: not-allowed;
+}
+
+.tableGrid {
+    display: grid;
+    width: 100%;
+    overflow-x: auto;
+    border: 1px solid #c9d4de;
+    border-radius: 6px;
+    background: #fff;
+}
+
+.tableRow {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(150px, 1fr);
+    border-top: 1px solid #dce4eb;
+}
+
+.tableRow:first-child {
+    border-top: 0;
+}
+
+.tableRowControls {
+    display: flex;
+    align-items: start;
+    gap: 4px;
+    min-width: 68px;
+    padding: 6px;
+    border-right: 1px solid #dce4eb;
+    background: #f7fafc;
+}
+
+.tableCell {
+    min-width: 150px;
+    min-height: 46px;
+    border-right: 1px solid #dce4eb;
+    background: #fff;
+}
+
+.tableCell:last-child {
+    border-right: 0;
+}
+
+.tableCell .blockRow {
+    grid-template-columns: minmax(0, 1fr) minmax(0, auto);
+    gap: 0;
+    margin-left: 0;
+    padding: 4px;
+}
+
+.tableCell .dragHandle,
+.tableCell .blockMarker {
+    display: none;
+}
+
+.tableCell .editableBlock {
+    min-height: 36px;
+}
+
+.missingTableCell {
+    display: grid;
+    place-items: center;
+    background: #f2f5f7;
+}
+
+.missingTableCell button {
+    padding: 0 8px;
+    color: #6a7784;
+    background: #f9fbfc;
+}
+
 .codeLanguage,
 .calloutKind {
     min-width: 82px;

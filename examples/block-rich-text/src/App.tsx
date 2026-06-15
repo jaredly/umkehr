@@ -11,17 +11,29 @@ import {
     type MutableRefObject,
     type ReactElement,
 } from 'react';
-import {materializeFormattedBlocks} from 'umkehr/block-crdt';
+import {materializeFormattedBlocks, visibleBlockChildren} from 'umkehr/block-crdt';
 import type {FormattedBlock} from 'umkehr/block-crdt';
 import {lamportToString} from 'umkehr/block-crdt/utils';
-import {moveBlock, setBlockMeta, type CommandResult} from './blockCommands';
+import {
+    addTableColumn,
+    addTableRow,
+    createMissingTableCell,
+    createTable,
+    moveBlock,
+    moveTableRow,
+    setBlockMeta,
+    type CommandResult,
+} from './blockCommands';
 import {
     annotationVirtualParents,
+    ANNOTATION_MARK,
     annotationMarkBehavior,
+    annotationBodyBlockIds,
     createAnnotation,
     deleteAnnotationBodyBackward,
     deleteAnnotationBodyForward,
     renderedAnnotations,
+    isAnnotationData,
     replaceAnnotationBodySelection,
     removeAnnotationBodyLink,
     setAnnotationBodyLink,
@@ -429,10 +441,23 @@ function BlockEditor({
         useState<EditorSelection | null>(null);
     const [linkPopover, setLinkPopover] = useState<LinkPopoverState | null>(null);
     const [linkHoverPopover, setLinkHoverPopover] = useState<LinkHoverPopoverState | null>(null);
-    const blocks = materializeFormattedBlocks(replica.state, annotationMarkBehavior);
     const blocksWithAnnotationBodies = materializeFormattedBlocks(
         replica.state,
         annotationVirtualParents(replica.state),
+    );
+    const annotationBodyIds = useMemo(() => {
+        const result = new Set<string>();
+        for (const mark of Object.values(replica.state.state.marks)) {
+            if (mark.type !== ANNOTATION_MARK || mark.remove || !isAnnotationData(mark.data)) continue;
+            for (const bodyId of annotationBodyBlockIds(replica.state, mark.data.id)) {
+                result.add(bodyId);
+            }
+        }
+        return result;
+    }, [replica.state]);
+    const blocks = useMemo(
+        () => blocksWithAnnotationBodies.filter((block) => !annotationBodyIds.has(block.id)),
+        [annotationBodyIds, blocksWithAnnotationBodies],
     );
     const annotations = renderedAnnotations(replica.state, blocks, blocksWithAnnotationBodies);
     const popoverAnnotationsById = useMemo(() => {
@@ -1193,6 +1218,16 @@ function BlockEditor({
                         ),
                     )
                 }
+                onCreateTable={() =>
+                    runEditCommand((current, selection) => {
+                        const result = createTable(
+                            current.state,
+                            primarySelection(resolveSelectionSet(current.state, selection)),
+                            makeCommandContext(current),
+                        );
+                        return {state: result.state, ops: result.ops, selection};
+                    })
+                }
             />
             {undoStatus || undoState.undoReason || undoState.redoReason ? (
                 <p className="editorUndoStatus">
@@ -1252,6 +1287,45 @@ function BlockEditor({
                         openLinkFromRange,
                         showLinkHoverFromRange,
                         hideLinkHover: scheduleLinkHoverHide,
+                        createMissingTableCell: (tableId, rowId, columnIndex) =>
+                            runBlockControlCommand((current) => {
+                                const result = createMissingTableCell(
+                                    current.state,
+                                    rowId,
+                                    columnIndex,
+                                    makeCommandContext(current),
+                                );
+                                return {state: result.state, ops: result.ops, selection: current.selection};
+                            }),
+                        addTableRow: (tableId) =>
+                            runBlockControlCommand((current) => {
+                                const result = addTableRow(
+                                    current.state,
+                                    tableId,
+                                    makeCommandContext(current),
+                                );
+                                return {state: result.state, ops: result.ops, selection: current.selection};
+                            }),
+                        addTableColumn: (tableId) =>
+                            runBlockControlCommand((current) => {
+                                const result = addTableColumn(
+                                    current.state,
+                                    tableId,
+                                    makeCommandContext(current),
+                                );
+                                return {state: result.state, ops: result.ops, selection: current.selection};
+                            }),
+                        moveTableRow: (tableId, rowId, direction) =>
+                            runBlockControlCommand((current) => {
+                                const result = moveTableRow(
+                                    current.state,
+                                    tableId,
+                                    rowId,
+                                    direction,
+                                    makeCommandContext(current),
+                                );
+                                return {state: result.state, ops: result.ops, selection: current.selection};
+                            }),
                         runEditCommand,
                         runBlockControlCommand,
                         moveCaretHorizontally,
@@ -1380,6 +1454,10 @@ type RenderBlockContext = {
     openLinkFromRange(range: LinkTargetRange & {href: string}, element: HTMLElement): void;
     showLinkHoverFromRange(range: LinkTargetRange & {href: string}, element: HTMLElement): void;
     hideLinkHover(): void;
+    createMissingTableCell(tableId: string, rowId: string, columnIndex: number): void;
+    addTableRow(tableId: string): void;
+    addTableColumn(tableId: string): void;
+    moveTableRow(tableId: string, rowId: string, direction: 'up' | 'down'): void;
     onUndo(): void;
     onRedo(): void;
     onKeystroke(blockId: string, event: KeyboardEvent<HTMLElement>): void;
@@ -1404,6 +1482,12 @@ const buildRenderTree = (blocks: RichFormattedBlock[]): RenderTreeNode[] => {
 
 const renderBlockNode = (node: RenderTreeNode, context: RenderBlockContext): ReactElement => {
     const meta = node.block.block.meta;
+    if (meta.type === 'table') {
+        return <TableBlock key={node.block.id} node={node} context={context} />;
+    }
+    if (meta.type === 'table_row') {
+        return <></>;
+    }
     if (meta.type === 'blockquote' || meta.type === 'callout') {
         return (
             <div
@@ -1429,6 +1513,91 @@ const renderBlockNode = (node: RenderTreeNode, context: RenderBlockContext): Rea
             {node.children.map((child) => renderBlockNode(child, context))}
         </div>
     );
+};
+
+function TableBlock({
+    node,
+    context,
+}: {
+    node: RenderTreeNode;
+    context: RenderBlockContext;
+}) {
+    const rowNodes = node.children.filter((child) => child.block.block.meta.type === 'table_row');
+    const normalChildren = node.children.filter((child) => child.block.block.meta.type !== 'table_row');
+    const columnCount = Math.max(
+        1,
+        ...rowNodes.map((row) => row.children.filter((child) => child.block.block.meta.type !== 'table_row').length),
+    );
+
+    return (
+        <div
+            className="tableBlock"
+            style={{'--block-depth': node.block.depth} as CSSProperties}
+            data-table-id={node.block.id}
+        >
+            <div className="tableToolbar" aria-label="Table controls">
+                <span>Table</span>
+                <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => context.addTableRow(node.block.id)}>
+                    Add row
+                </button>
+                <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => context.addTableColumn(node.block.id)}>
+                    Add column
+                </button>
+            </div>
+            <div className="tableGrid" role="table" aria-label="Table block">
+                {rowNodes.map((row, rowIndex) => (
+                    <div key={row.block.id} className="tableRow" role="row" data-row-id={row.block.id}>
+                        <div className="tableRowControls" role="cell" aria-label={`Row ${rowIndex + 1} controls`}>
+                            <button
+                                type="button"
+                                aria-label="Move row up"
+                                disabled={rowIndex === 0}
+                                onMouseDown={(event) => event.preventDefault()}
+                                onClick={() => context.moveTableRow(node.block.id, row.block.id, 'up')}
+                            >
+                                ↑
+                            </button>
+                            <button
+                                type="button"
+                                aria-label="Move row down"
+                                disabled={rowIndex === rowNodes.length - 1}
+                                onMouseDown={(event) => event.preventDefault()}
+                                onClick={() => context.moveTableRow(node.block.id, row.block.id, 'down')}
+                            >
+                                ↓
+                            </button>
+                        </div>
+                        {Array.from({length: columnCount}, (_, columnIndex) => {
+                            const cell = row.children[columnIndex] ?? null;
+                            return (
+                                <div key={`${row.block.id}:${columnIndex}`} className={cell ? 'tableCell' : 'tableCell missingTableCell'} role="cell">
+                                    {cell ? (
+                                        renderTableCell(cell, context)
+                                    ) : (
+                                        <button
+                                            type="button"
+                                            onMouseDown={(event) => event.preventDefault()}
+                                            onClick={() => context.createMissingTableCell(node.block.id, row.block.id, columnIndex)}
+                                        >
+                                            Add cell
+                                        </button>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+                ))}
+            </div>
+            {normalChildren.map((child) => renderBlockNode(child, context))}
+        </div>
+    );
+}
+
+const renderTableCell = (node: RenderTreeNode, context: RenderBlockContext): ReactElement => {
+    if (node.block.block.meta.type === 'table') {
+        return <TableBlock node={node} context={context} />;
+    }
+    return renderEditableBlock({...node.block, depth: 0}, context);
 };
 
 const renderEditableBlock = (block: RichFormattedBlock, context: RenderBlockContext) => {
@@ -2227,6 +2396,7 @@ function Toolbar({
     onLink,
     onBlockType,
     onAnnotation,
+    onCreateTable,
 }: {
     canUndo: boolean;
     canRedo: boolean;
@@ -2239,6 +2409,7 @@ function Toolbar({
     onLink(): void;
     onBlockType(kind: BlockTypeMenuValue): void;
     onAnnotation(presentation: AnnotationPresentation): void;
+    onCreateTable(): void;
 }) {
     return (
         <div className="toolbar" aria-label="Formatting">
@@ -2287,6 +2458,9 @@ function Toolbar({
             </button>
             <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => onAnnotation('popover')}>
                 Popover
+            </button>
+            <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={onCreateTable}>
+                Table
             </button>
             <select
                 aria-label="Block type"

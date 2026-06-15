@@ -2,6 +2,7 @@ import type {CachedState} from 'umkehr/block-crdt/types';
 import {materializeFormattedBlocks, orderedCharIdsForBlock} from 'umkehr/block-crdt';
 import {isEditableBlock} from './blockMeta';
 import type {RichBlockMeta} from './blockMeta';
+import {richTextVirtualParents} from './virtualParents';
 
 export type BlockPoint = {blockId: string; offset: number};
 
@@ -24,10 +25,10 @@ export const pointTextLength = (state: CachedState<RichBlockMeta>, blockId: stri
     orderedCharIdsForBlock(state, blockId, {visibleOnly: true}).length;
 
 export const visibleBlockIds = (state: CachedState<RichBlockMeta>): string[] =>
-    materializeFormattedBlocks(state).map((block) => block.id);
+    materializeFormattedBlocks(state, richTextVirtualParents(state)).map((block) => block.id);
 
 export const editableBlockIds = (state: CachedState<RichBlockMeta>): string[] =>
-    materializeFormattedBlocks(state)
+    materializeFormattedBlocks(state, richTextVirtualParents(state))
         .filter((block) => isEditableBlock(block.block.meta))
         .map((block) => block.id);
 

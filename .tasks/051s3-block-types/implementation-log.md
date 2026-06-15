@@ -73,3 +73,19 @@
 - Follow-up issue: leaving a parent popover while a hover-open child popover was visible left the child stuck open because parent hide requests refused to modify stacks with descendants. Id-specific pointer hides now trim the leaving popover and descendant hover popovers, with coverage for leaving the parent entirely after hovering a child mark.
 - Follow-up issue: focus or selection in a parent popover pinned hover-open child popovers even when the selection did not cover the child mark. The pointer-hide focus guard is now stack-position aware, so parent focus only pins the parent while child hover popovers still close unless the child mark itself is selected or focused.
 - Follow-up issue: the same parent-focus pinning bug still appeared when the pointer left the parent popover entirely because the parent hide path treated focus in the parent as protecting all descendants. The parent-focused hide branch now trims descendant hover popovers while keeping selected descendants, and focused popover id is tracked explicitly instead of relying only on `document.activeElement`.
+
+## Phase 7
+
+- Added table-aware virtual-parent config for the example, combining table row parents with the existing annotation mark virtual parents so commands, replay, selection traversal, and rendering validate the same paths.
+- Added table commands for creating tables, creating missing sparse cells, adding rows, adding columns, and reordering rows under the table's virtual `rowParent`.
+- Table creation now creates a sibling table after the focused block in normal document flow, and converts a focused table cell block into a nested table when invoked inside a row.
+- Rendered table blocks by grouping structural `table_row` children into a grid and rendering row children as ordinary editable cell blocks. Normal children under the table block continue to render outside the grid.
+- Added table toolbar controls plus per-table row/column controls and row up/down controls. Sparse missing cells render as grayed-out "Add cell" buttons.
+- Issue encountered: the main render tree needs annotation virtual parents for path validation, but should not render annotation body blocks in the document flow. Fixed by materializing with the full virtual-parent config and filtering annotation body block ids out of the main tree.
+- Issue encountered: row reordering initially appeared broken in tests because the test used a fresh timestamp generator, causing the move's LWW timestamp to lose to row creation. Fixed the test to reuse a monotonic command context, matching replica clock behavior.
+- Verification passed:
+  - `npm exec tsc -- -p examples/block-rich-text/tsconfig.json --noEmit`
+  - `npm exec vitest -- run examples/block-rich-text/src/blockCommands.test.ts examples/block-rich-text/src/App.test.tsx`
+  - `npm exec vitest -- run src/block-crdt/index.test.ts src/block-crdt/formatting.test.ts src/block-crdt/adapter-additions.test.ts examples/block-rich-text/src`
+  - `npm run typecheck`
+  - `npm run build`

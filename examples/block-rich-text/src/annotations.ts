@@ -12,21 +12,26 @@ import {
 } from 'umkehr/block-crdt';
 import type {CachedState, JsonValue, Lamport, Mark} from 'umkehr/block-crdt/types';
 import {lamportToString, parseLamportString} from 'umkehr/block-crdt/utils';
-import type {VirtualBlockParentConfig} from 'umkehr/block-crdt';
 import {paragraphMeta, type RichBlockMeta} from './blockMeta';
 import {normalizeSelectionSegments, segmentText, type EditorSelection} from './selectionModel';
 import type {CommandContext, CommandResult} from './blockCommands';
 import {applyMany, markRangeOp} from 'umkehr/block-crdt';
+import {
+    ANNOTATION_MARK,
+    annotationMarkBehavior,
+    richTextVirtualParents,
+    type AnnotationMarkData,
+    type AnnotationPresentation,
+} from './virtualParents';
 
-export type AnnotationPresentation = 'sidebar' | 'footnote' | 'popover';
-
-export type AnnotationMarkData = {
-    id: Lamport;
-    presentation: AnnotationPresentation;
-    resolved?: boolean;
+export {
+    ANNOTATION_MARK,
+    annotationMarkBehavior,
+    type AnnotationMarkData,
+    type AnnotationPresentation,
 };
 
-export const ANNOTATION_MARK = 'annotation';
+export const annotationVirtualParents = richTextVirtualParents;
 
 export const createAnnotation = (
     state: CachedState<RichBlockMeta>,
@@ -277,20 +282,6 @@ const bodySelectionRange = (
     const startOffset = Math.max(0, Math.min(anchor.offset, focus.offset, length));
     const endOffset = Math.max(0, Math.min(Math.max(anchor.offset, focus.offset), length));
     return {blockId: anchor.blockId, startOffset, endOffset};
-};
-
-export const annotationVirtualParents = (
-    _state: CachedState<RichBlockMeta>,
-): VirtualBlockParentConfig<RichBlockMeta> => ({
-    ...annotationMarkBehavior,
-    markVirtualParents: (mark) =>
-        mark.type === ANNOTATION_MARK && !mark.remove && isAnnotationData(mark.data)
-            ? [(mark.data as unknown as AnnotationMarkData).id]
-            : [],
-});
-
-export const annotationMarkBehavior: VirtualBlockParentConfig<RichBlockMeta> = {
-    markBehavior: {[ANNOTATION_MARK]: 'stacking'},
 };
 
 export const annotationBodyBlockIds = (

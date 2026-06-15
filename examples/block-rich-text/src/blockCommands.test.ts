@@ -3,10 +3,12 @@ import {
     applyMany,
     blockContents,
     cachedState,
+    insertBlockOps,
     materializedBlockParent,
     materializeFormattedBlocks,
     organizeState,
     rootBlockIds,
+    visibleBlockChildren,
     visibleBlockOutline,
 } from 'umkehr/block-crdt';
 import {initialState} from 'umkehr/block-crdt/initialState';
@@ -15,9 +17,13 @@ import {lamportToString} from 'umkehr/block-crdt/utils';
 import {
     deleteBackward,
     deleteForward,
+    addTableRow,
+    createMissingTableCell,
+    createTable,
     indentBlock,
     insertText,
     moveBlock,
+    moveTableRow,
     pastePlainText,
     removeLinkMark,
     setBlockType,
@@ -29,6 +35,7 @@ import {
 } from './blockCommands';
 import {applyLocalChange, createDemoState, makeCommandContext, toggleOnline} from './blockEditorRuntime';
 import {annotationVirtualParents, createAnnotation} from './annotations';
+import type {RichBlockMeta} from './blockMeta';
 import {retainSelection} from './retainedSelection';
 import {caret, type EditorSelection} from './selectionModel';
 
@@ -56,6 +63,17 @@ const expectCache = (state: CachedState) => {
     expect(state.cache).toEqual(organizeState(state.state.blocks, state.state.chars, state.state.joins));
 };
 
+const tableShape = (state: CachedState<RichBlockMeta>, tableId: string) => {
+    const table = state.state.blocks[tableId];
+    if (!table || table.meta.type !== 'table') throw new Error(`table ${tableId} not found`);
+    const rows = visibleBlockChildren(state, lamportToString(table.meta.rowParent), annotationVirtualParents(state));
+    return {
+        table,
+        rows,
+        cells: rows.map((rowId) => visibleBlockChildren(state, rowId, annotationVirtualParents(state))),
+    };
+};
+
 describe('block rich text commands', () => {
     it('syncs metadata command updates to the peer replica', () => {
         const demo = createDemoState();
@@ -71,6 +89,112 @@ describe('block rich text commands', () => {
 
         expect(synced.left.state.state.blocks[blockId].meta).toEqual({type: 'heading', level: 2, ts: '00001'});
         expect(synced.right.state.state.blocks[blockId].meta).toEqual({type: 'heading', level: 2, ts: '00001'});
+    });
+
+    it('creates a table block with a virtual row parent, rows, and cells', () => {
+        const demo = createDemoState();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        const result = createTable(demo.left.state, caret(blockId, 0), ctx(), {rows: 2, columns: 3});
+        const tableId = rootBlockIds(result.state)[1];
+        const shape = tableShape(result.state, tableId);
+
+        expect(shape.table.meta.type).toBe('table');
+        expect(shape.rows).toHaveLength(2);
+        expect(shape.cells.map((row) => row.length)).toEqual([3, 3]);
+        expect(shape.rows.every((rowId) => result.state.state.blocks[rowId].meta.type === 'table_row')).toBe(true);
+        expect(shape.cells.flat().every((cellId) => result.state.state.blocks[cellId].meta.type === 'paragraph')).toBe(true);
+    });
+
+    it('orders table rows by normal block order under the row virtual parent', () => {
+        const demo = createDemoState();
+        const context = ctx();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = createTable(demo.left.state, caret(blockId, 0), context, {rows: 2, columns: 1});
+        const tableId = rootBlockIds(result.state)[1];
+        const before = tableShape(result.state, tableId).rows;
+
+        result = moveTableRow(result.state, tableId, before[1], 'up', context);
+
+        expect(tableShape(result.state, tableId).rows).toEqual([before[1], before[0]]);
+    });
+
+    it('keeps normal children under a table block outside the row grid', () => {
+        const demo = createDemoState();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = createTable(demo.left.state, caret(blockId, 0), ctx(), {rows: 1, columns: 1});
+        const tableId = rootBlockIds(result.state)[1];
+        const tableChildren = visibleBlockChildren(result.state, tableId, annotationVirtualParents(result.state));
+        const previousChild = tableChildren[tableChildren.length - 1] ?? null;
+        const ops = insertBlockOps(result.state, {
+            actor: 'left',
+            parent: result.state.state.blocks[tableId].id,
+            before: previousChild ? result.state.state.blocks[previousChild].id : null,
+            meta: {type: 'paragraph', ts: '00050'},
+            ts: '00051',
+            virtualParents: annotationVirtualParents(result.state),
+        });
+        const state = applyMany(result.state, ops, annotationVirtualParents(result.state));
+
+        const outline = visibleBlockOutline(state, annotationVirtualParents(state));
+        const normalChild = ops[0].type === 'block' ? lamportToString(ops[0].block.id) : '';
+        expect(outline.find((entry) => entry.id === normalChild)).toMatchObject({
+            parentId: tableId,
+            depth: 1,
+        });
+        expect(tableShape(state, tableId).rows).toHaveLength(1);
+    });
+
+    it('creates sparse missing cells at the clicked column position', () => {
+        const demo = createDemoState();
+        const context = ctx();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = createTable(demo.left.state, caret(blockId, 0), context, {rows: 1, columns: 1});
+        const tableId = rootBlockIds(result.state)[1];
+        result = addTableRow(result.state, tableId, context);
+        const shape = tableShape(result.state, tableId);
+
+        result = createMissingTableCell(result.state, shape.rows[0], 1, context);
+
+        expect(tableShape(result.state, tableId).cells.map((row) => row.length)).toEqual([2, 1]);
+    });
+
+    it('allows a cell block to become a nested table', () => {
+        const demo = createDemoState();
+        const context = ctx();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = createTable(demo.left.state, caret(blockId, 0), context, {rows: 1, columns: 1});
+        const tableId = rootBlockIds(result.state)[1];
+        const cellId = tableShape(result.state, tableId).cells[0][0];
+
+        result = createTable(result.state, caret(cellId, 0), context, {rows: 1, columns: 2});
+
+        expect(result.state.state.blocks[cellId].meta.type).toBe('table');
+        expect(tableShape(result.state, cellId).cells[0]).toHaveLength(2);
+    });
+
+    it('syncs row reordering across replicas', () => {
+        let demo = createDemoState();
+        const context = ctx();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = createTable(demo.left.state, caret(blockId, 0), context, {rows: 2, columns: 1});
+        demo = applyLocalChange(demo, {
+            editorId: 'left',
+            state: result.state,
+            selection: demo.left.selection,
+            ops: result.ops,
+        });
+        const tableId = rootBlockIds(demo.left.state)[1];
+        const rows = tableShape(demo.left.state, tableId).rows;
+
+        result = moveTableRow(demo.left.state, tableId, rows[1], 'up', context);
+        demo = applyLocalChange(demo, {
+            editorId: 'left',
+            state: result.state,
+            selection: demo.left.selection,
+            ops: result.ops,
+        });
+
+        expect(tableShape(demo.right.state, tableId).rows).toEqual(tableShape(demo.left.state, tableId).rows);
     });
 
     it('turns empty non-paragraph Enter into paragraph metadata', () => {

@@ -436,6 +436,26 @@ describe('Block rich text example UI', () => {
         expect(blocks(right)).toHaveLength(1);
     });
 
+    it('creates and edits table structure from the toolbar', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+        selectCaret(blocks(left)[0], 0);
+
+        fireEvent.click(within(left).getByRole('button', {name: 'Table'}));
+
+        await waitFor(() => {
+            expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy();
+            expect(within(right).getByRole('table', {name: 'Table block'})).toBeTruthy();
+        });
+        expect(blocks(left)).toHaveLength(5);
+
+        fireEvent.click(within(left).getByRole('button', {name: 'Add row'}));
+        await waitFor(() => expect(blocks(right)).toHaveLength(7));
+
+        fireEvent.click(within(left).getByRole('button', {name: 'Add column'}));
+        await waitFor(() => expect(blocks(right)).toHaveLength(10));
+    });
+
     it('applies block type metadata from the toolbar to both replicas', async () => {
         const view = render(<App />);
         const {left, right} = panels(view);

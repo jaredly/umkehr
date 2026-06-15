@@ -1,4 +1,5 @@
 import type {HLC, Lamport} from 'umkehr/block-crdt/types';
+import type {Block} from 'umkehr/block-crdt/types';
 
 export type RichBlockMeta =
     | {type: 'paragraph'; ts: HLC}
@@ -49,3 +50,6 @@ export const isEditableBlock = (meta: RichBlockMeta): boolean => !isTableRow(met
 
 export const isWholeSubtreeStyledBlock = (meta: RichBlockMeta): boolean =>
     meta.type === 'blockquote' || meta.type === 'callout';
+
+export const tableVirtualParentsForBlock = (block: Block<RichBlockMeta>): Lamport[] =>
+    block.meta.type === 'table' ? [block.meta.rowParent] : [];
