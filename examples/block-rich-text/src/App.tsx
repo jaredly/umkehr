@@ -101,15 +101,14 @@ import {
 } from './history';
 import {createRedoAction, createUndoAction, deriveUndoState} from './undoHistory';
 import {BlogVisualDemos} from './BlogVisualDemos';
+import {
+    popoverIdsForTrigger,
+    useAnnotationPopoverController,
+    type ActivePopover,
+} from './useAnnotationPopoverController';
 
 type RichFormattedBlock = FormattedBlock<RichBlockMeta>;
 type RenderedAnnotation = ReturnType<typeof renderedAnnotations>[number];
-type ActivePopover = {
-    id: string;
-    top: number;
-    left: number;
-    source: 'hover' | 'selection';
-};
 
 export function App() {
     return hasDemoQuery() ? <BlogVisualDemos /> : <EditorApp />;
@@ -406,10 +405,6 @@ function BlockEditor({
     const [isExtendingSelection, setIsExtendingSelection] = useState(false);
     const [activeAnnotationBodySelection, setActiveAnnotationBodySelection] =
         useState<EditorSelection | null>(null);
-    const [activePopovers, setActivePopovers] = useState<ActivePopover[]>([]);
-    const popoverHideTimerRef = useRef<number | null>(null);
-    const popoverHasFocusRef = useRef(false);
-    const focusedPopoverIdRef = useRef<string | null>(null);
     const blocks = materializeFormattedBlocks(replica.state, annotationMarkBehavior);
     const blocksWithAnnotationBodies = materializeFormattedBlocks(
         replica.state,
@@ -438,15 +433,16 @@ function BlockEditor({
     const primaryResolvedSelection = primarySelection(resolvedSelectionSet);
     const selectedPopoverSelection = activeAnnotationBodySelection ?? primaryResolvedSelection;
     const selectedPopoverSelectionKey = editorSelectionKey(selectedPopoverSelection);
-    const selectedPopoverId = useMemo(
+    const selectedPopoverIds = useMemo(
         () =>
-            selectedPopoverIdForSelection(
+            selectedPopoverIdsForSelection(
                 blocksWithAnnotationBodies,
                 selectedPopoverSelection,
                 popoverTextById,
             ),
         [blocksWithAnnotationBodies, popoverTextById, selectedPopoverSelectionKey],
     );
+    const selectedPopoverIdsKey = selectedPopoverIds.join('\0');
     const selectedBlockType = blockTypeMenuValue(
         replica.state.state.blocks[focusPoint(primaryResolvedSelection).blockId]?.meta,
     );
@@ -482,117 +478,20 @@ function BlockEditor({
         pendingSelectionRestoreRef.current = selection;
     }, []);
 
-    const cancelPopoverHide = useCallback(() => {
-        if (popoverHideTimerRef.current === null) return;
-        window.clearTimeout(popoverHideTimerRef.current);
-        popoverHideTimerRef.current = null;
-    }, []);
-
-    const popoverContainsFocus = useCallback(() => {
-        const panel = rootRef.current?.closest<HTMLElement>('.editorPanel');
-        const popovers = panel
-            ? Array.from(panel.querySelectorAll<HTMLElement>('.annotationFloatingPopover'))
-            : [];
-        return Boolean(
-            document.activeElement instanceof Node &&
-                popovers.some((popover) => popover.contains(document.activeElement)),
-        );
-    }, []);
-
-    const focusedPopoverId = useCallback(() => {
-        const panel = rootRef.current?.closest<HTMLElement>('.editorPanel');
-        if (!(document.activeElement instanceof Node) || !panel) return null;
-        const popover = Array.from(
-            panel.querySelectorAll<HTMLElement>('.annotationFloatingPopover'),
-        ).find((candidate) => candidate.contains(document.activeElement));
-        return popover?.dataset.popoverId ?? null;
-    }, []);
-
-    const schedulePopoverHide = useCallback((id?: string) => {
-        cancelPopoverHide();
-        popoverHideTimerRef.current = window.setTimeout(() => {
-            popoverHideTimerRef.current = null;
-            const focusedId = focusedPopoverIdRef.current ?? focusedPopoverId();
-            setActivePopovers((current) => {
-                const index = current.findIndex((popover) => popover.id === id);
-                if (popoverHasFocusRef.current && focusedId) {
-                    if (!id) return current;
-                    const focusedIndex = current.findIndex((popover) => popover.id === focusedId);
-                    if (focusedIndex > index && index >= 0) return current;
-                    if (focusedIndex === index && index >= 0) {
-                        const selectedIndex = selectedPopoverId
-                            ? current.findIndex((popover) => popover.id === selectedPopoverId)
-                            : -1;
-                        const keepThroughIndex =
-                            selectedIndex > index ? selectedIndex : index;
-                        return current.slice(0, keepThroughIndex + 1);
-                    }
-                }
-                if (!id) return current.filter((popover) => popover.source === 'selection');
-                if (index < 0) return current;
-                return [
-                    ...current.slice(0, index),
-                    ...current.slice(index).filter((popover) => popover.source === 'selection'),
-                ];
-            });
-        }, 300);
-    }, [cancelPopoverHide, focusedPopoverId, selectedPopoverId]);
-
-    const schedulePopoverHideFromPointer = useCallback((id?: string) => {
-        schedulePopoverHide(id);
-    }, [schedulePopoverHide]);
-
-    const showPopover = useCallback(
-        (id: string, element: HTMLElement, source: ActivePopover['source'] = 'hover') => {
-            cancelPopoverHide();
-            const rect = element.getBoundingClientRect();
-            const width = 320;
-            const margin = 12;
-            const availableWidth = window.innerWidth || document.documentElement.clientWidth || width;
-            const nextPopover = {
-                id,
-                top: rect.bottom + 8,
-                left: Math.max(margin, Math.min(rect.left, availableWidth - width - margin)),
-                source,
-            };
-            setActivePopovers((current) => {
-                const existingIndex = current.findIndex((popover) => popover.id === id);
-                if (existingIndex < 0) return [...current, nextPopover];
-                return [
-                    ...current.slice(0, existingIndex),
-                    nextPopover,
-                    ...current.slice(existingIndex + 1),
-                ];
-            });
-        },
-        [cancelPopoverHide],
-    );
-
-    const setPopoverFocusPinned = useCallback(
-        (focused: boolean, id?: string) => {
-            popoverHasFocusRef.current = focused;
-            if (focused) {
-                focusedPopoverIdRef.current = id ?? null;
-                cancelPopoverHide();
-                if (id) {
-                    setActivePopovers((current) => {
-                        const focusedIndex = current.findIndex((popover) => popover.id === id);
-                        if (focusedIndex < 0) return current;
-                        const selectedIndex = selectedPopoverId
-                            ? current.findIndex((popover) => popover.id === selectedPopoverId)
-                            : -1;
-                        const keepThroughIndex =
-                            selectedIndex > focusedIndex ? selectedIndex : focusedIndex;
-                        return current.slice(0, keepThroughIndex + 1);
-                    });
-                }
-            } else {
-                if (!id || focusedPopoverIdRef.current === id) focusedPopoverIdRef.current = null;
-                schedulePopoverHide();
-            }
-        },
-        [cancelPopoverHide, schedulePopoverHide, selectedPopoverId],
-    );
+    const {
+        activePopovers,
+        cancelPopoverHide,
+        closeAllPopovers,
+        closeDeepestPopover,
+        schedulePopoverHideFromPointer,
+        setPopoverFocusPinned,
+        showPopover,
+    } = useAnnotationPopoverController({
+        rootRef,
+        selectedPopoverIds,
+        selectedPopoverIdsKey,
+        selectedPopoverSelectionKey,
+    });
 
     const resetVerticalCaretIntent = useCallback(() => {
         verticalCaretXRef.current = null;
@@ -610,44 +509,6 @@ function BlockEditor({
         handledNavigationKeyRef.current = false;
         setIsExtendingSelection(false);
     }, [resetSignal]);
-
-    useLayoutEffect(
-        () => () => {
-            if (popoverHideTimerRef.current !== null) {
-                window.clearTimeout(popoverHideTimerRef.current);
-            }
-        },
-        [],
-    );
-
-    useLayoutEffect(() => {
-        if (!selectedPopoverId) {
-            setActivePopovers((current) => {
-                const focusedId = focusedPopoverId();
-                if (focusedId) {
-                    const focusedIndex = current.findIndex((popover) => popover.id === focusedId);
-                    if (focusedIndex >= 0) return current.slice(0, focusedIndex + 1);
-                }
-                return popoverContainsFocus()
-                    ? current
-                    : current.filter((popover) => popover.source !== 'selection');
-            });
-            return;
-        }
-        const root = rootRef.current;
-        const panel = root?.closest<HTMLElement>('.editorPanel');
-        const trigger = panel?.querySelector<HTMLElement>(
-            `[data-popover-id="${CSS.escape(selectedPopoverId)}"]`,
-        );
-        if (!trigger) return;
-        showPopover(selectedPopoverId, trigger, 'selection');
-    }, [
-        focusedPopoverId,
-        popoverContainsFocus,
-        selectedPopoverId,
-        selectedPopoverSelectionKey,
-        showPopover,
-    ]);
 
     const captureSelection = useCallback(
         (event: MouseEvent | KeyboardEvent) => {
@@ -750,6 +611,14 @@ function BlockEditor({
 
     const captureMouseDown = useCallback(
         (event: MouseEvent<HTMLElement>) => {
+            const elementConstructor = event.currentTarget.ownerDocument.defaultView?.Element;
+            if (
+                elementConstructor &&
+                event.target instanceof elementConstructor &&
+                !event.target.closest('[data-popover-id]')
+            ) {
+                closeAllPopovers();
+            }
             setIsExtendingSelection(
                 event.detail <= 1 && !event.shiftKey && (event.metaKey || event.ctrlKey),
             );
@@ -813,6 +682,7 @@ function BlockEditor({
         },
         [
             nextSelectionId,
+            closeAllPopovers,
             onCommand,
             resetVerticalCaretIntent,
             resolvedSelectionSet.entries.length,
@@ -1138,6 +1008,11 @@ function BlockEditor({
                 }}
                 onMouseDown={captureMouseDown}
                 onMouseUp={captureSelection}
+                onKeyDown={(event) => {
+                    if (event.key !== 'Escape' || !activePopovers.length) return;
+                    event.preventDefault();
+                    closeDeepestPopover();
+                }}
                 onKeyUp={captureSelection}
             >
                 {renderTree.map((node) =>
@@ -1178,8 +1053,11 @@ function BlockEditor({
                     annotation={popoverAnnotationsById.get(popover.id) ?? null}
                     position={popover}
                     onMouseEnter={cancelPopoverHide}
-                    onMouseLeave={() => schedulePopoverHideFromPointer(popover.id)}
+                    onMouseLeave={(event) =>
+                        schedulePopoverHideFromPointer(popover.id, event.relatedTarget)
+                    }
                     onFocusChange={setPopoverFocusPinned}
+                    onEscape={closeDeepestPopover}
                     onBodyCommand={runAnnotationBodyCommand}
                     onBodySelectionChange={setActiveAnnotationBodySelection}
                     popoverTextById={popoverTextById}
@@ -1253,7 +1131,7 @@ type RenderBlockContext = {
         sourceBlock: HTMLElement,
     ): void;
     onPopoverTriggerEnter(id: string, element: HTMLElement): void;
-    onPopoverTriggerLeave(id?: string): void;
+    onPopoverTriggerLeave(id?: string, relatedTarget?: EventTarget | null): void;
     onUndo(): void;
     onRedo(): void;
     onKeystroke(blockId: string, event: KeyboardEvent<HTMLElement>): void;
@@ -1555,7 +1433,7 @@ function AnnotationSidebar({
     onBodySelectionChange(selection: EditorSelection | null): void;
     popoverTextById: Map<string, string>;
     onPopoverTriggerEnter(id: string, element: HTMLElement): void;
-    onPopoverTriggerLeave(id?: string): void;
+    onPopoverTriggerLeave(id?: string, relatedTarget?: EventTarget | null): void;
 }) {
     if (!annotations.length) return null;
     return (
@@ -1595,7 +1473,7 @@ function Footnotes({
     onBodySelectionChange(selection: EditorSelection | null): void;
     popoverTextById: Map<string, string>;
     onPopoverTriggerEnter(id: string, element: HTMLElement): void;
-    onPopoverTriggerLeave(id?: string): void;
+    onPopoverTriggerLeave(id?: string, relatedTarget?: EventTarget | null): void;
 }) {
     if (!annotations.length) return null;
     return (
@@ -1628,6 +1506,7 @@ function FloatingAnnotationPopover({
     onMouseEnter,
     onMouseLeave,
     onFocusChange,
+    onEscape,
     onBodyCommand,
     onBodySelectionChange,
     popoverTextById,
@@ -1637,15 +1516,16 @@ function FloatingAnnotationPopover({
     annotation: RenderedAnnotation | null;
     position: ActivePopover | null;
     onMouseEnter(): void;
-    onMouseLeave(): void;
-    onFocusChange(focused: boolean, id?: string): void;
+    onMouseLeave(event: MouseEvent<HTMLElement>): void;
+    onFocusChange(focused: boolean, id?: string, relatedTarget?: EventTarget | null): void;
+    onEscape(): void;
     onBodyCommand(
         command: (current: Replica, context: ReturnType<typeof makeCommandContext>) => CommandResult,
     ): void;
     onBodySelectionChange(selection: EditorSelection | null): void;
     popoverTextById: Map<string, string>;
     onPopoverTriggerEnter(id: string, element: HTMLElement): void;
-    onPopoverTriggerLeave(id?: string): void;
+    onPopoverTriggerLeave(id?: string, relatedTarget?: EventTarget | null): void;
 }) {
     if (!annotation || !position) return null;
     return (
@@ -1660,7 +1540,12 @@ function FloatingAnnotationPopover({
             onFocus={() => onFocusChange(true, position.id)}
             onBlur={(event) => {
                 if (event.currentTarget.contains(event.relatedTarget)) return;
-                onFocusChange(false, position.id);
+                onFocusChange(false, position.id, event.relatedTarget);
+            }}
+            onKeyDown={(event) => {
+                if (event.key !== 'Escape') return;
+                event.preventDefault();
+                onEscape();
             }}
         >
             <strong>Popover on “{annotation.referenceText}”</strong>
@@ -1697,7 +1582,7 @@ function AnnotationBodyBlock({
     onBodySelectionChange(selection: EditorSelection | null): void;
     popoverTextById: Map<string, string>;
     onPopoverTriggerEnter(id: string, element: HTMLElement): void;
-    onPopoverTriggerLeave(id?: string): void;
+    onPopoverTriggerLeave(id?: string, relatedTarget?: EventTarget | null): void;
 }) {
     const pendingCaretRestoreBlockIdRef = useRef<string | null>(null);
     const pendingSelectionRestoreRef = useRef<EditorSelection | null>(null);
@@ -1949,7 +1834,7 @@ function EditableBlock({
     onStartDrag: ReturnType<typeof useBlockReorder>['startDrag'];
     popoverTextById: Map<string, string>;
     onPopoverTriggerEnter(id: string, element: HTMLElement): void;
-    onPopoverTriggerLeave(id?: string): void;
+    onPopoverTriggerLeave(id?: string, relatedTarget?: EventTarget | null): void;
     onInsertText(text: string, selection?: EditorSelection): void;
     onDeleteBackward(selection?: EditorSelection): void;
     onDeleteForward(selection?: EditorSelection): void;
@@ -2243,7 +2128,7 @@ function RichTextEditableSurface({
     onDeleteForward(selection?: EditorSelection): void;
     onSelectionChange?(selection: EditorSelection | null): void;
     onPopoverTriggerEnter?(id: string, element: HTMLElement): void;
-    onPopoverTriggerLeave?(id?: string): void;
+    onPopoverTriggerLeave?(id?: string, relatedTarget?: EventTarget | null): void;
     onKeyDown?(event: KeyboardEvent<HTMLDivElement>): void;
     onPaste?(event: ClipboardEvent<HTMLDivElement>): void;
 }) {
@@ -2337,7 +2222,9 @@ function RichTextEditableSurface({
                     event.relatedTarget,
                 );
                 if (relatedTrigger === trigger) return;
-                onPopoverTriggerEnter?.(trigger.dataset.popoverId ?? '', trigger);
+                for (const id of popoverIdsForTrigger(trigger)) {
+                    onPopoverTriggerEnter?.(id, trigger);
+                }
             }}
             onMouseOut={(event) => {
                 const trigger = popoverTriggerFromEvent(event.currentTarget, event.target);
@@ -2347,13 +2234,16 @@ function RichTextEditableSurface({
                     event.relatedTarget,
                 );
                 if (relatedTrigger === trigger) return;
-                onPopoverTriggerLeave?.(trigger.dataset.popoverId);
+                for (const id of popoverIdsForTrigger(trigger)) {
+                    onPopoverTriggerLeave?.(id, event.relatedTarget);
+                }
             }}
             onClick={(event) => {
                 const trigger = popoverTriggerFromEvent(event.currentTarget, event.target);
-                const id = trigger?.dataset.popoverId;
-                if (!trigger || !id) return;
-                onPopoverTriggerEnter?.(id, trigger);
+                if (!trigger) return;
+                for (const id of popoverIdsForTrigger(trigger)) {
+                    onPopoverTriggerEnter?.(id, trigger);
+                }
             }}
             onInput={(event) => {
                 const native = event.nativeEvent as InputEvent;
@@ -2564,13 +2454,13 @@ const editorSelectionKey = (selection: EditorSelection): string => {
     ].join(':');
 };
 
-const selectedPopoverIdForSelection = (
+const selectedPopoverIdsForSelection = (
     blocks: RichFormattedBlock[],
     selection: EditorSelection,
     popoverTextById: Map<string, string>,
-): string | null => {
+): string[] => {
     const segments = selectionSegmentsForBlocks(blocks, selection);
-    if (!segments.length) return null;
+    if (!segments.length) return [];
 
     const selectedByBlock = new Map(segments.map((segment) => [segment.blockId, segment] as const));
     const popoverRanges = new Map<
@@ -2598,6 +2488,7 @@ const selectedPopoverIdForSelection = (
         }
     }
 
+    const result: string[] = [];
     for (const [id, ranges] of popoverRanges) {
         if (
             ranges.every((range) => {
@@ -2609,10 +2500,10 @@ const selectedPopoverIdForSelection = (
                 );
             })
         ) {
-            return id;
+            result.push(id);
         }
     }
-    return null;
+    return result;
 };
 
 const selectionSegmentsForBlocks = (
@@ -2774,10 +2665,11 @@ const applyRunClasses = (
     if (run.marks.bold) span.classList.add('markBold');
     if (run.marks.italic) span.classList.add('markItalic');
     if (hasAnnotationMark(run)) span.classList.add('markAnnotation');
-    const popoverId = popoverIdsForRun(run, popoverTextById)[0] ?? null;
-    if (popoverId) {
+    const popoverIds = popoverIdsForRun(run, popoverTextById);
+    if (popoverIds.length) {
         span.classList.add('markPopover');
-        span.dataset.popoverId = popoverId;
+        span.dataset.popoverId = popoverIds[0];
+        span.dataset.popoverIds = popoverIds.join(' ');
         span.setAttribute('aria-label', 'Popover');
     }
 };
