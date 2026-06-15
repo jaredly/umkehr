@@ -121,30 +121,16 @@ const tripleClickRange = (block: HTMLElement, start: number, end: number) => {
 
 const setDomCaret = (block: HTMLElement, offset = 0) => {
     const selection = window.getSelection()!;
-    const range = document.createRange();
-    const text = firstTextNode(block);
-    if (text) {
-        range.setStart(text, Math.min(offset, text.textContent?.length ?? 0));
-    } else {
-        range.setStart(block, 0);
-    }
-    range.collapse(true);
+    const range = rangeAtBlockOffset(block, offset);
     selection.removeAllRanges();
     selection.addRange(range);
 };
 
 const setDomRange = (block: HTMLElement, start: number, end: number) => {
     const selection = window.getSelection()!;
-    const range = document.createRange();
-    const text = firstTextNode(block);
-    if (text) {
-        const length = text.textContent?.length ?? 0;
-        range.setStart(text, Math.min(start, length));
-        range.setEnd(text, Math.min(end, length));
-    } else {
-        range.setStart(block, 0);
-        range.setEnd(block, 0);
-    }
+    const range = rangeAtBlockOffset(block, start);
+    const endRange = rangeAtBlockOffset(block, end);
+    range.setEnd(endRange.startContainer, endRange.startOffset);
     selection.removeAllRanges();
     selection.addRange(range);
 };
@@ -1400,7 +1386,10 @@ describe('Block rich text example UI', () => {
         beforeInputText(parentBody, 'note');
         await waitFor(() => expect(parentBody.textContent).toBe('note'));
 
-        selectRange(parentBody, 1, 3);
+        const selectedParentBody = within(reopenedParentPopover).getByRole('textbox', {
+            name: 'Annotation body',
+        });
+        selectRange(selectedParentBody, 1, 3);
         vi.useFakeTimers();
         fireEvent.click(within(left).getByRole('button', {name: 'Popover'}));
 
@@ -1411,7 +1400,7 @@ describe('Block rich text example UI', () => {
         const childBody = within(childPopover).getByRole('textbox', {name: 'Annotation body'});
 
         fireEvent.blur(parentBody, {relatedTarget: childBody});
-        fireEvent.focus(childBody);
+        selectCaret(childBody, 0);
         fireEvent.mouseLeave(reopenedParentPopover, {relatedTarget: childPopover});
         fireEvent.mouseDown(childPopover);
         fireEvent.click(childPopover);
@@ -1457,7 +1446,10 @@ describe('Block rich text example UI', () => {
         beforeInputText(parentBody, 'note');
         await waitFor(() => expect(parentBody.textContent).toBe('note'));
 
-        selectRange(parentBody, 1, 3);
+        const currentParentBody = within(parentPopover).getByRole('textbox', {
+            name: 'Annotation body',
+        });
+        selectRange(currentParentBody, 1, 3);
         fireEvent.click(within(left).getByRole('button', {name: 'Popover'}));
         await waitFor(() => expect(within(left).getAllByRole('dialog', {name: 'Popover'})).toHaveLength(2));
 
@@ -1483,6 +1475,63 @@ describe('Block rich text example UI', () => {
         expect(within(left).getAllByRole('dialog', {name: 'Popover'})).toHaveLength(2);
         expect(within(left).getAllByRole('dialog', {name: 'Popover'})[0]).toBe(
             reopenedParentPopover,
+        );
+    });
+
+    it('closes a child popover when focus returns to the parent unless its mark is selected', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abcd');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abcd'));
+
+        selectRange(blocks(left)[0], 1, 3);
+        fireEvent.click(within(left).getByRole('button', {name: 'Popover'}));
+
+        const parentPopover = await waitFor(() =>
+            within(left).getByRole('dialog', {name: 'Popover'}),
+        );
+        const parentBody = within(parentPopover).getByRole('textbox', {name: 'Annotation body'});
+
+        selectCaret(parentBody, 0);
+        beforeInputText(parentBody, 'note');
+        await waitFor(() => expect(parentBody.textContent).toBe('note'));
+
+        const selectedParentBody = within(parentPopover).getByRole('textbox', {
+            name: 'Annotation body',
+        });
+        selectRange(selectedParentBody, 1, 3);
+        fireEvent.click(within(left).getByRole('button', {name: 'Popover'}));
+        await waitFor(() =>
+            expect(within(left).getAllByRole('dialog', {name: 'Popover'})).toHaveLength(2),
+        );
+
+        const childPopover = within(left).getAllByRole('dialog', {name: 'Popover'})[1];
+        const childBody = within(childPopover).getByRole('textbox', {name: 'Annotation body'});
+        fireEvent.focus(childBody);
+        expect(within(left).getAllByRole('dialog', {name: 'Popover'})).toHaveLength(2);
+
+        selectCaret(parentBody, 0);
+        fireEvent.focus(parentBody);
+        await waitFor(() =>
+            expect(within(left).getAllByRole('dialog', {name: 'Popover'})).toHaveLength(1),
+        );
+        expect(within(left).getAllByRole('dialog', {name: 'Popover'})[0]).toBe(parentPopover);
+
+        const childMark = parentBody.querySelector<HTMLElement>('.markPopover');
+        if (!childMark) throw new Error('missing child popover mark');
+        fireEvent.click(childMark);
+        await waitFor(() =>
+            expect(within(left).getAllByRole('dialog', {name: 'Popover'})).toHaveLength(2),
+        );
+
+        const parentBodyWithSelectedChildMark = within(parentPopover).getByRole('textbox', {
+            name: 'Annotation body',
+        });
+        selectRange(parentBodyWithSelectedChildMark, 1, 3);
+        await waitFor(() =>
+            expect(within(left).getAllByRole('dialog', {name: 'Popover'})).toHaveLength(2),
         );
     });
 

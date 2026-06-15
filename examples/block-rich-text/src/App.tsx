@@ -498,6 +498,15 @@ function BlockEditor({
         );
     }, []);
 
+    const focusedPopoverId = useCallback(() => {
+        const panel = rootRef.current?.closest<HTMLElement>('.editorPanel');
+        if (!(document.activeElement instanceof Node) || !panel) return null;
+        const popover = Array.from(
+            panel.querySelectorAll<HTMLElement>('.annotationFloatingPopover'),
+        ).find((candidate) => candidate.contains(document.activeElement));
+        return popover?.dataset.popoverId ?? null;
+    }, []);
+
     const schedulePopoverHide = useCallback((id?: string) => {
         if (popoverHasFocusRef.current && popoverContainsFocus()) return;
         cancelPopoverHide();
@@ -548,15 +557,27 @@ function BlockEditor({
     );
 
     const setPopoverFocusPinned = useCallback(
-        (focused: boolean) => {
+        (focused: boolean, id?: string) => {
             popoverHasFocusRef.current = focused;
             if (focused) {
                 cancelPopoverHide();
+                if (id) {
+                    setActivePopovers((current) => {
+                        const focusedIndex = current.findIndex((popover) => popover.id === id);
+                        if (focusedIndex < 0) return current;
+                        const selectedIndex = selectedPopoverId
+                            ? current.findIndex((popover) => popover.id === selectedPopoverId)
+                            : -1;
+                        const keepThroughIndex =
+                            selectedIndex > focusedIndex ? selectedIndex : focusedIndex;
+                        return current.slice(0, keepThroughIndex + 1);
+                    });
+                }
             } else {
                 schedulePopoverHide();
             }
         },
-        [cancelPopoverHide, schedulePopoverHide],
+        [cancelPopoverHide, schedulePopoverHide, selectedPopoverId],
     );
 
     const resetVerticalCaretIntent = useCallback(() => {
@@ -587,11 +608,16 @@ function BlockEditor({
 
     useLayoutEffect(() => {
         if (!selectedPopoverId) {
-            setActivePopovers((current) =>
-                popoverContainsFocus()
+            setActivePopovers((current) => {
+                const focusedId = focusedPopoverId();
+                if (focusedId) {
+                    const focusedIndex = current.findIndex((popover) => popover.id === focusedId);
+                    if (focusedIndex >= 0) return current.slice(0, focusedIndex + 1);
+                }
+                return popoverContainsFocus()
                     ? current
-                    : current.filter((popover) => popover.source !== 'selection'),
-            );
+                    : current.filter((popover) => popover.source !== 'selection');
+            });
             return;
         }
         const root = rootRef.current;
@@ -601,7 +627,13 @@ function BlockEditor({
         );
         if (!trigger) return;
         showPopover(selectedPopoverId, trigger, 'selection');
-    }, [popoverContainsFocus, selectedPopoverId, selectedPopoverSelectionKey, showPopover]);
+    }, [
+        focusedPopoverId,
+        popoverContainsFocus,
+        selectedPopoverId,
+        selectedPopoverSelectionKey,
+        showPopover,
+    ]);
 
     const captureSelection = useCallback(
         (event: MouseEvent | KeyboardEvent) => {
@@ -1592,7 +1624,7 @@ function FloatingAnnotationPopover({
     position: ActivePopover | null;
     onMouseEnter(): void;
     onMouseLeave(): void;
-    onFocusChange(focused: boolean): void;
+    onFocusChange(focused: boolean, id?: string): void;
     onBodyCommand(
         command: (current: Replica, context: ReturnType<typeof makeCommandContext>) => CommandResult,
     ): void;
@@ -1607,10 +1639,11 @@ function FloatingAnnotationPopover({
             className="annotationFloatingPopover"
             role="dialog"
             aria-label="Popover"
+            data-popover-id={position.id}
             style={{top: position.top, left: position.left}}
             onMouseEnter={onMouseEnter}
             onMouseLeave={onMouseLeave}
-            onFocus={() => onFocusChange(true)}
+            onFocus={() => onFocusChange(true, position.id)}
             onBlur={(event) => {
                 if (event.currentTarget.contains(event.relatedTarget)) return;
                 onFocusChange(false);
