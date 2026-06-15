@@ -409,6 +409,7 @@ function BlockEditor({
     const [activePopovers, setActivePopovers] = useState<ActivePopover[]>([]);
     const popoverHideTimerRef = useRef<number | null>(null);
     const popoverHasFocusRef = useRef(false);
+    const focusedPopoverIdRef = useRef<string | null>(null);
     const blocks = materializeFormattedBlocks(replica.state, annotationMarkBehavior);
     const blocksWithAnnotationBodies = materializeFormattedBlocks(
         replica.state,
@@ -508,14 +509,26 @@ function BlockEditor({
     }, []);
 
     const schedulePopoverHide = useCallback((id?: string) => {
-        if (popoverHasFocusRef.current && popoverContainsFocus()) return;
         cancelPopoverHide();
         popoverHideTimerRef.current = window.setTimeout(() => {
             popoverHideTimerRef.current = null;
-            if (popoverHasFocusRef.current && popoverContainsFocus()) return;
+            const focusedId = focusedPopoverIdRef.current ?? focusedPopoverId();
             setActivePopovers((current) => {
-                if (!id) return current.filter((popover) => popover.source === 'selection');
                 const index = current.findIndex((popover) => popover.id === id);
+                if (popoverHasFocusRef.current && focusedId) {
+                    if (!id) return current;
+                    const focusedIndex = current.findIndex((popover) => popover.id === focusedId);
+                    if (focusedIndex > index && index >= 0) return current;
+                    if (focusedIndex === index && index >= 0) {
+                        const selectedIndex = selectedPopoverId
+                            ? current.findIndex((popover) => popover.id === selectedPopoverId)
+                            : -1;
+                        const keepThroughIndex =
+                            selectedIndex > index ? selectedIndex : index;
+                        return current.slice(0, keepThroughIndex + 1);
+                    }
+                }
+                if (!id) return current.filter((popover) => popover.source === 'selection');
                 if (index < 0) return current;
                 return [
                     ...current.slice(0, index),
@@ -523,12 +536,11 @@ function BlockEditor({
                 ];
             });
         }, 300);
-    }, [cancelPopoverHide, popoverContainsFocus]);
+    }, [cancelPopoverHide, focusedPopoverId, selectedPopoverId]);
 
     const schedulePopoverHideFromPointer = useCallback((id?: string) => {
-        if (popoverHasFocusRef.current && popoverContainsFocus()) return;
         schedulePopoverHide(id);
-    }, [popoverContainsFocus, schedulePopoverHide]);
+    }, [schedulePopoverHide]);
 
     const showPopover = useCallback(
         (id: string, element: HTMLElement, source: ActivePopover['source'] = 'hover') => {
@@ -560,6 +572,7 @@ function BlockEditor({
         (focused: boolean, id?: string) => {
             popoverHasFocusRef.current = focused;
             if (focused) {
+                focusedPopoverIdRef.current = id ?? null;
                 cancelPopoverHide();
                 if (id) {
                     setActivePopovers((current) => {
@@ -574,6 +587,7 @@ function BlockEditor({
                     });
                 }
             } else {
+                if (!id || focusedPopoverIdRef.current === id) focusedPopoverIdRef.current = null;
                 schedulePopoverHide();
             }
         },
@@ -1646,7 +1660,7 @@ function FloatingAnnotationPopover({
             onFocus={() => onFocusChange(true, position.id)}
             onBlur={(event) => {
                 if (event.currentTarget.contains(event.relatedTarget)) return;
-                onFocusChange(false);
+                onFocusChange(false, position.id);
             }}
         >
             <strong>Popover on “{annotation.referenceText}”</strong>

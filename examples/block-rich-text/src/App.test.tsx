@@ -1538,6 +1538,68 @@ describe('Block rich text example UI', () => {
         expect(within(left).queryByRole('dialog', {name: 'Popover'})).toBeNull();
     });
 
+    it('hides a child hover popover when the parent popover has focus but the child mark is not selected', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abcd');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abcd'));
+
+        selectRange(blocks(left)[0], 1, 3);
+        fireEvent.click(within(left).getByRole('button', {name: 'Popover'}));
+
+        const parentPopover = await waitFor(() =>
+            within(left).getByRole('dialog', {name: 'Popover'}),
+        );
+        const parentBody = within(parentPopover).getByRole('textbox', {name: 'Annotation body'});
+
+        selectCaret(parentBody, 0);
+        beforeInputText(parentBody, 'note');
+        await waitFor(() => expect(parentBody.textContent).toBe('note'));
+
+        const currentParentBody = within(parentPopover).getByRole('textbox', {
+            name: 'Annotation body',
+        });
+        selectRange(currentParentBody, 1, 3);
+        fireEvent.click(within(left).getByRole('button', {name: 'Popover'}));
+        await waitFor(() =>
+            expect(within(left).getAllByRole('dialog', {name: 'Popover'})).toHaveLength(2),
+        );
+
+        const parentBodyWithChildMark = within(parentPopover).getByRole('textbox', {
+            name: 'Annotation body',
+        });
+        selectCaret(parentBodyWithChildMark, 0);
+        fireEvent.focus(parentBodyWithChildMark);
+        const childMark = parentBodyWithChildMark.querySelector<HTMLElement>('.markPopover');
+        if (!childMark) throw new Error('missing child popover mark');
+
+        fireEvent.mouseOver(childMark);
+        await waitFor(() =>
+            expect(within(left).getAllByRole('dialog', {name: 'Popover'})).toHaveLength(2),
+        );
+
+        vi.useFakeTimers();
+        fireEvent.mouseOut(childMark, {relatedTarget: parentBodyWithChildMark});
+        act(() => vi.advanceTimersByTime(300));
+
+        const dialogs = within(left).getAllByRole('dialog', {name: 'Popover'});
+        expect(dialogs).toHaveLength(1);
+        expect(dialogs[0]).toBe(parentPopover);
+
+        fireEvent.mouseOver(childMark);
+        expect(within(left).getAllByRole('dialog', {name: 'Popover'})).toHaveLength(2);
+
+        fireEvent.mouseOut(childMark, {relatedTarget: document.body});
+        fireEvent.mouseLeave(parentPopover, {relatedTarget: document.body});
+        act(() => vi.advanceTimersByTime(300));
+
+        const dialogsAfterLeavingParent = within(left).getAllByRole('dialog', {name: 'Popover'});
+        expect(dialogsAfterLeavingParent).toHaveLength(1);
+        expect(dialogsAfterLeavingParent[0]).toBe(parentPopover);
+    });
+
     it('closes a child popover when focus returns to the parent unless its mark is selected', async () => {
         const view = render(<App />);
         const {left} = panels(view);
