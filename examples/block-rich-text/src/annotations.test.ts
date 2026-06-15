@@ -262,4 +262,42 @@ describe('block rich text annotations', () => {
             'ot',
         ]);
     });
+
+    it('renders overlapping annotation marks without newer marks hiding older marks', () => {
+        const demo = createDemoState();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = insertText(demo.left.state, caret(blockId, 0), 'abcdef', ctx());
+
+        result = createAnnotation(result.state, range(blockId, 1, 4), 'sidebar', ctx());
+        result = createAnnotation(result.state, range(blockId, 2, 5), 'sidebar', ctx());
+
+        expect(annotationsFor(result.state).map((annotation) => annotation.referenceText)).toEqual([
+            'bcd',
+            'cde',
+        ]);
+        expect(
+            materializeFormattedBlocks(result.state, annotationVirtualParents(result.state))[0].runs,
+        ).toEqual([
+            {text: 'a', marks: {}},
+            {text: 'b', marks: {}, stackedMarks: {annotation: [annotationsFor(result.state)[0].data]}},
+            {text: 'cd', marks: {}, stackedMarks: {annotation: annotationsFor(result.state).map((annotation) => annotation.data)}},
+            {text: 'e', marks: {}, stackedMarks: {annotation: [annotationsFor(result.state)[1].data]}},
+            {text: 'f', marks: {}},
+        ]);
+    });
+
+    it('adds a new body block instead of a new annotation mark for an exact overlap', () => {
+        const demo = createDemoState();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = insertText(demo.left.state, caret(blockId, 0), 'abcdef', ctx());
+
+        result = createAnnotation(result.state, range(blockId, 1, 4), 'sidebar', ctx());
+        result = createAnnotation(result.state, range(blockId, 1, 4), 'sidebar', ctx());
+
+        const annotations = annotationsFor(result.state);
+        expect(annotations).toHaveLength(1);
+        expect(annotations[0].referenceText).toBe('bcd');
+        expect(annotations[0].bodyBlocks).toHaveLength(2);
+        expect(Object.values(result.state.state.marks).filter((mark) => mark.type === ANNOTATION_MARK)).toHaveLength(1);
+    });
 });

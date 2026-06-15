@@ -16,6 +16,7 @@ import type {FormattedBlock} from 'umkehr/block-crdt';
 import {moveBlock, setBlockMeta, type CommandResult} from './blockCommands';
 import {
     annotationVirtualParents,
+    annotationMarkBehavior,
     createAnnotation,
     deleteAnnotationBodyBackward,
     deleteAnnotationBodyForward,
@@ -396,7 +397,7 @@ function BlockEditor({
     const [isExtendingSelection, setIsExtendingSelection] = useState(false);
     const [activeAnnotationBodySelection, setActiveAnnotationBodySelection] =
         useState<EditorSelection | null>(null);
-    const blocks = materializeFormattedBlocks(replica.state);
+    const blocks = materializeFormattedBlocks(replica.state, annotationMarkBehavior);
     const blocksWithAnnotationBodies = materializeFormattedBlocks(
         replica.state,
         annotationVirtualParents(replica.state),
@@ -1509,7 +1510,7 @@ const renderStaticRuns = (runs: RichFormattedBlock['runs']): ReactElement[] =>
             className={[
                 run.marks.bold ? 'markBold' : '',
                 run.marks.italic ? 'markItalic' : '',
-                run.marks.annotation ? 'markAnnotation' : '',
+                hasAnnotationMark(run) ? 'markAnnotation' : '',
             ]
                 .filter(Boolean)
                 .join(' ')}
@@ -2218,6 +2219,7 @@ const serializeRuns = (
 ) =>
     JSON.stringify({
         runs: runs.map((run) => [run.text, run.marks.bold, run.marks.italic]),
+        stackedMarks: runs.map((run) => run.stackedMarks),
         decorations,
         trailingCodeNewline,
     });
@@ -2326,8 +2328,11 @@ const renderCaretsAtOffset = (
 const applyRunClasses = (span: HTMLElement, run: RichFormattedBlock['runs'][number]) => {
     if (run.marks.bold) span.classList.add('markBold');
     if (run.marks.italic) span.classList.add('markItalic');
-    if (run.marks.annotation) span.classList.add('markAnnotation');
+    if (hasAnnotationMark(run)) span.classList.add('markAnnotation');
 };
+
+const hasAnnotationMark = (run: RichFormattedBlock['runs'][number]) =>
+    Boolean(run.marks.annotation || run.stackedMarks?.annotation?.length);
 
 const capitalize = (value: string) => value.slice(0, 1).toUpperCase() + value.slice(1);
 

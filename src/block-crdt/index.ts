@@ -86,6 +86,7 @@ export {
     markRange,
     markRange as markRangeOp,
     materializeFormattedBlocks,
+    coveredCharIdsForMark,
     splitRecordsByLeft,
 } from './marks.js';
 export type {FormattedBlock, FormattedRun} from './marks.js';

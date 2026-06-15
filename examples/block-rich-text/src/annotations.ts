@@ -3,7 +3,9 @@ import {
     deleteRangeOps,
     insertBlockOps,
     insertTextOps,
+    orderedCharIdsForBlock,
     visibleBlockChildren,
+    coveredCharIdsForMark,
     type FormattedBlock,
     type FormattedRun,
     type Op,
@@ -37,6 +39,25 @@ export const createAnnotation = (
         ? [{blockId: bodyRange.blockId, startOffset: bodyRange.startOffset, endOffset: bodyRange.endOffset}]
         : normalizeSelectionSegments(state, selection);
     if (!segments.length) return {state, ops: [], selection};
+
+    const exact = exactAnnotationForSegments(state, segments);
+    if (exact) {
+        const existingBodies = annotationBodyBlockIds(state, exact);
+        const before = existingBodies.at(-1);
+        const bodyOps = insertBlockOps(state, {
+            actor: context.actor,
+            parent: exact,
+            before: before ? state.state.blocks[before].id : null,
+            meta: paragraphMeta(context.nextTs()),
+            ts: context.nextTs(),
+            virtualParents: annotationVirtualParents(state),
+        });
+        return {
+            state: applyMany(state, bodyOps, annotationVirtualParents(state)),
+            ops: bodyOps,
+            selection,
+        };
+    }
 
     const markId: Lamport = [state.state.maxSeenCount + 1, context.actor];
     const data: AnnotationMarkData = {id: markId, presentation};
@@ -224,11 +245,16 @@ const bodySelectionRange = (
 export const annotationVirtualParents = (
     _state: CachedState<RichBlockMeta>,
 ): VirtualBlockParentConfig<RichBlockMeta> => ({
+    ...annotationMarkBehavior,
     markVirtualParents: (mark) =>
         mark.type === ANNOTATION_MARK && !mark.remove && isAnnotationData(mark.data)
             ? [(mark.data as unknown as AnnotationMarkData).id]
             : [],
 });
+
+export const annotationMarkBehavior: VirtualBlockParentConfig<RichBlockMeta> = {
+    markBehavior: {[ANNOTATION_MARK]: 'stacking'},
+};
 
 export const annotationBodyBlockIds = (
     state: CachedState<RichBlockMeta>,
@@ -285,7 +311,7 @@ export const isAnnotationData = (value: unknown): value is AnnotationMarkData =>
     ['sidebar', 'footnote', 'popover'].includes((value as AnnotationMarkData).presentation);
 
 const annotationReferenceText = (blocks: Array<FormattedBlock<RichBlockMeta>>, id: string): string =>
-    blocks.flatMap((block) => block.runs).filter((run) => run.marks[ANNOTATION_MARK] && lamportToString((run.marks[ANNOTATION_MARK] as unknown as AnnotationMarkData).id) === id).map((run) => run.text).join('');
+    blocks.flatMap((block) => block.runs).filter((run) => annotationDatasForRun(run).some((data) => lamportToString(data.id) === id)).map((run) => run.text).join('');
 
 const firstPositionForAnnotation = (
     blocks: Array<FormattedBlock<RichBlockMeta>>,
@@ -295,8 +321,7 @@ const firstPositionForAnnotation = (
         let offset = 0;
         for (const run of blocks[blockIndex].runs) {
             if (
-                run.marks[ANNOTATION_MARK] &&
-                lamportToString((run.marks[ANNOTATION_MARK] as unknown as AnnotationMarkData).id) === id
+                annotationDatasForRun(run).some((data) => lamportToString(data.id) === id)
             ) {
                 return {blockIndex, offset};
             }
@@ -305,3 +330,33 @@ const firstPositionForAnnotation = (
     }
     return {blockIndex: Number.MAX_SAFE_INTEGER, offset: Number.MAX_SAFE_INTEGER};
 };
+
+const annotationDatasForRun = (run: FormattedRun): AnnotationMarkData[] => {
+    const stacked = run.stackedMarks?.[ANNOTATION_MARK] ?? [];
+    const scalar = run.marks[ANNOTATION_MARK];
+    const values = scalar === undefined ? stacked : [...stacked, scalar];
+    return values.filter(isAnnotationData);
+};
+
+const exactAnnotationForSegments = (
+    state: CachedState<RichBlockMeta>,
+    segments: Array<{blockId: string; startOffset: number; endOffset: number}>,
+): Lamport | null => {
+    if (segments.length !== 1) return null;
+    const segment = segments[0];
+    const selected = orderedVisibleCharIds(state, segment.blockId).slice(segment.startOffset, segment.endOffset);
+    if (!selected.length) return null;
+    const selectedKey = selected.join('\0');
+    for (const mark of Object.values(state.state.marks)) {
+        if (mark.type !== ANNOTATION_MARK || mark.remove || !isAnnotationData(mark.data)) continue;
+        const covered = coveredCharIdsForMark(state, mark, annotationVirtualParents(state))
+            .filter((id) => !state.state.chars[id]?.deleted);
+        if (covered.join('\0') === selectedKey) {
+            return (mark.data as unknown as AnnotationMarkData).id;
+        }
+    }
+    return null;
+};
+
+const orderedVisibleCharIds = (state: CachedState<RichBlockMeta>, blockId: string): string[] =>
+    orderedCharIdsForBlock(state, blockId, {visibleOnly: true});
