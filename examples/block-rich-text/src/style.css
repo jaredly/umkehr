@@ -843,8 +843,32 @@ select {
     border-bottom: 2px solid #f59e0b;
 }
 
-.annotationSidebar,
-.annotationPopovers {
+.markPopover {
+    position: relative;
+    border-bottom-style: dotted;
+}
+
+.markPopover:hover::after,
+.markPopover:focus::after {
+    content: attr(data-popover);
+    position: absolute;
+    z-index: 20;
+    left: 0;
+    bottom: calc(100% + 6px);
+    min-width: 160px;
+    max-width: 260px;
+    padding: 8px 10px;
+    border: 1px solid #9ca3af;
+    border-radius: 6px;
+    background: #111827;
+    color: #f9fafb;
+    box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+    font: 0.85rem/1.35 system-ui, sans-serif;
+    white-space: pre-wrap;
+    pointer-events: none;
+}
+
+.annotationSidebar {
     margin: 0 0 12px;
     padding: 8px 10px;
     border: 1px solid #fbbf24;

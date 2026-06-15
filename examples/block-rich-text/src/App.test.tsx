@@ -1293,6 +1293,27 @@ describe('Block rich text example UI', () => {
         await waitFor(() => expect(within(left).getByText('Comment on “ot”')).toBeTruthy());
     });
 
+    it('renders popover annotations inline on the marked text', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abcd');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abcd'));
+
+        selectRange(blocks(left)[0], 1, 3);
+        fireEvent.click(within(left).getByRole('button', {name: 'Popover'}));
+
+        const popoverMark = await waitFor(() => {
+            const mark = blocks(left)[0].querySelector<HTMLElement>('.markPopover');
+            if (!mark) throw new Error('missing inline popover mark');
+            return mark;
+        });
+        expect(popoverMark.textContent).toBe('bc');
+        expect(popoverMark.dataset.popover).toBe('Empty popover');
+        expect(within(left).queryByLabelText('Popovers')).toBeNull();
+    });
+
     it('pastes newlines as multiple synced blocks', async () => {
         const view = render(<App />);
         const {left, right} = panels(view);

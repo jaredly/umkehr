@@ -13,6 +13,7 @@ import {
 } from 'react';
 import {materializeFormattedBlocks} from 'umkehr/block-crdt';
 import type {FormattedBlock} from 'umkehr/block-crdt';
+import {lamportToString} from 'umkehr/block-crdt/utils';
 import {moveBlock, setBlockMeta, type CommandResult} from './blockCommands';
 import {
     annotationVirtualParents,
@@ -23,6 +24,7 @@ import {
     renderedAnnotations,
     replaceAnnotationBodySelection,
     toggleAnnotationBodyMark,
+    type AnnotationMarkData,
     type AnnotationPresentation,
 } from './annotations';
 import {
@@ -403,6 +405,15 @@ function BlockEditor({
         annotationVirtualParents(replica.state),
     );
     const annotations = renderedAnnotations(replica.state, blocks, blocksWithAnnotationBodies);
+    const popoverTextById = useMemo(() => {
+        const result = new Map<string, string>();
+        for (const annotation of annotations) {
+            if (annotation.data.presentation !== 'popover') continue;
+            const text = annotation.bodyBlocks.map((block) => block.text).filter(Boolean).join('\n');
+            result.set(annotation.id, text || 'Empty popover');
+        }
+        return result;
+    }, [annotations]);
     const renderTree = useMemo(() => buildRenderTree(blocks), [blocks]);
     const orderedListNumbers = useMemo(() => deriveOrderedListNumbers(blocks), [blocks]);
     const resolvedSelectionSet = resolveSelectionSet(replica.state, replica.selection);
@@ -929,8 +940,8 @@ function BlockEditor({
                 annotations={annotations.filter((item) => item.data.presentation === 'sidebar')}
                 onBodyCommand={runAnnotationBodyCommand}
                 onBodySelectionChange={setActiveAnnotationBodySelection}
+                popoverTextById={popoverTextById}
             />
-            <AnnotationPopovers annotations={annotations.filter((item) => item.data.presentation === 'popover')} />
             <div
                 ref={rootRef}
                 className="blockList"
@@ -962,6 +973,7 @@ function BlockEditor({
                         registerRow,
                         startDrag,
                         orderedListNumbers,
+                        popoverTextById,
                         runEditCommand,
                         runBlockControlCommand,
                         moveCaretHorizontally,
@@ -981,6 +993,7 @@ function BlockEditor({
                 annotations={annotations.filter((item) => item.data.presentation === 'footnote')}
                 onBodyCommand={runAnnotationBodyCommand}
                 onBodySelectionChange={setActiveAnnotationBodySelection}
+                popoverTextById={popoverTextById}
             />
         </article>
     );
@@ -1018,6 +1031,7 @@ type RenderBlockContext = {
     registerRow(id: string, element: HTMLElement | null): void;
     startDrag: ReturnType<typeof useBlockReorder>['startDrag'];
     orderedListNumbers: Map<string, number>;
+    popoverTextById: Map<string, string>;
     runEditCommand(
         command: (current: Replica, selection: RetainedSelectionSet) => MultiCommandResult,
     ): void;
@@ -1115,6 +1129,7 @@ const renderEditableBlock = (block: RichFormattedBlock, context: RenderBlockCont
             }
             registerRow={context.registerRow}
             onStartDrag={context.startDrag}
+            popoverTextById={context.popoverTextById}
             onInsertText={(text) =>
                 context.runEditCommand((current, selection) =>
                     insertTextEverywhere(
@@ -1325,12 +1340,14 @@ function AnnotationSidebar({
     annotations,
     onBodyCommand,
     onBodySelectionChange,
+    popoverTextById,
 }: {
     annotations: ReturnType<typeof renderedAnnotations>;
     onBodyCommand(
         command: (current: Replica, context: ReturnType<typeof makeCommandContext>) => CommandResult,
     ): void;
     onBodySelectionChange(selection: EditorSelection | null): void;
+    popoverTextById: Map<string, string>;
 }) {
     if (!annotations.length) return null;
     return (
@@ -1344,6 +1361,7 @@ function AnnotationSidebar({
                             block={block}
                             onBodyCommand={onBodyCommand}
                             onBodySelectionChange={onBodySelectionChange}
+                            popoverTextById={popoverTextById}
                         />
                     ))}
                 </section>
@@ -1356,12 +1374,14 @@ function Footnotes({
     annotations,
     onBodyCommand,
     onBodySelectionChange,
+    popoverTextById,
 }: {
     annotations: ReturnType<typeof renderedAnnotations>;
     onBodyCommand(
         command: (current: Replica, context: ReturnType<typeof makeCommandContext>) => CommandResult,
     ): void;
     onBodySelectionChange(selection: EditorSelection | null): void;
+    popoverTextById: Map<string, string>;
 }) {
     if (!annotations.length) return null;
     return (
@@ -1376,6 +1396,7 @@ function Footnotes({
                                   fallbackText={annotation.referenceText}
                                   onBodyCommand={onBodyCommand}
                                   onBodySelectionChange={onBodySelectionChange}
+                                  popoverTextById={popoverTextById}
                               />
                           ))
                         : annotation.referenceText}
@@ -1385,27 +1406,12 @@ function Footnotes({
     );
 }
 
-function AnnotationPopovers({annotations}: {annotations: ReturnType<typeof renderedAnnotations>}) {
-    if (!annotations.length) return null;
-    return (
-        <aside className="annotationPopovers" aria-label="Popovers">
-            {annotations.map((annotation) => (
-                <section key={annotation.id} className="annotationCard">
-                    <strong>Popover on “{annotation.referenceText}”</strong>
-                    {annotation.bodyBlocks.map((block) => (
-                        <p key={block.id}>{block.text ? renderStaticRuns(block.runs) : 'Empty popover'}</p>
-                    ))}
-                </section>
-            ))}
-        </aside>
-    );
-}
-
 function AnnotationBodyBlock({
     block,
     fallbackText = '',
     onBodyCommand,
     onBodySelectionChange,
+    popoverTextById,
 }: {
     block: ReturnType<typeof renderedAnnotations>[number]['bodyBlocks'][number];
     fallbackText?: string;
@@ -1413,6 +1419,7 @@ function AnnotationBodyBlock({
         command: (current: Replica, context: ReturnType<typeof makeCommandContext>) => CommandResult,
     ): void;
     onBodySelectionChange(selection: EditorSelection | null): void;
+    popoverTextById: Map<string, string>;
 }) {
     const pendingCaretRestoreBlockIdRef = useRef<string | null>(null);
     const pendingSelectionRestoreRef = useRef<EditorSelection | null>(null);
@@ -1460,6 +1467,7 @@ function AnnotationBodyBlock({
             className="annotationBodyEditor"
             ariaLabel="Annotation body"
             placeholder={fallbackText || 'Annotation body'}
+            popoverTextById={popoverTextById}
             onSelectionChange={updateSelection}
             onInsertText={(text, activeSelection) =>
                 run(activeSelection ?? selection, (state, selected, context) =>
@@ -1617,6 +1625,7 @@ function EditableBlock({
     dropTarget,
     registerRow,
     onStartDrag,
+    popoverTextById,
     onInsertText,
     onDeleteBackward,
     onDeleteForward,
@@ -1656,6 +1665,7 @@ function EditableBlock({
     dropTarget: DropTarget | null;
     registerRow(id: string, element: HTMLElement | null): void;
     onStartDrag: ReturnType<typeof useBlockReorder>['startDrag'];
+    popoverTextById: Map<string, string>;
     onInsertText(text: string, selection?: EditorSelection): void;
     onDeleteBackward(selection?: EditorSelection): void;
     onDeleteForward(selection?: EditorSelection): void;
@@ -1735,6 +1745,7 @@ function EditableBlock({
                     .join(' ')}
                 ariaLabel="Block text"
                 trailingCodeNewline={codeHasTrailingNewline}
+                popoverTextById={popoverTextById}
                 onInsertText={onInsertText}
                 onDeleteBackward={onDeleteBackward}
                 onDeleteForward={onDeleteForward}
@@ -1920,6 +1931,7 @@ function RichTextEditableSurface({
     ariaLabel,
     placeholder,
     trailingCodeNewline = false,
+    popoverTextById = new Map(),
     onInsertText,
     onDeleteBackward,
     onDeleteForward,
@@ -1937,6 +1949,7 @@ function RichTextEditableSurface({
     ariaLabel: string;
     placeholder?: string;
     trailingCodeNewline?: boolean;
+    popoverTextById?: Map<string, string>;
     onInsertText(text: string, selection?: EditorSelection): void;
     onDeleteBackward(selection?: EditorSelection): void;
     onDeleteForward(selection?: EditorSelection): void;
@@ -1981,7 +1994,7 @@ function RichTextEditableSurface({
         if (renderedRunsRef.current !== renderedRuns) {
             renderedRunsRef.current = renderedRuns;
             element.replaceChildren(
-                ...renderRunNodes(runs, decorations, {trailingCodeNewline}),
+                ...renderRunNodes(runs, decorations, {trailingCodeNewline, popoverTextById}),
             );
         }
         const point = selection.type === 'caret' ? selection.point : null;
@@ -2016,7 +2029,7 @@ function RichTextEditableSurface({
                 const nextDecorations = removePrimaryDecorations(decorations);
                 if (nextDecorations === decorations) return;
                 event.currentTarget.replaceChildren(
-                    ...renderRunNodes(runs, nextDecorations, {trailingCodeNewline}),
+                    ...renderRunNodes(runs, nextDecorations, {trailingCodeNewline, popoverTextById}),
                 );
                 renderedRunsRef.current = serializeRuns(
                     runs,
@@ -2031,7 +2044,7 @@ function RichTextEditableSurface({
                 if (handledBeforeInputRef.current) {
                     handledBeforeInputRef.current = false;
                     event.currentTarget.replaceChildren(
-                        ...renderRunNodes(runs, decorations, {trailingCodeNewline}),
+                        ...renderRunNodes(runs, decorations, {trailingCodeNewline, popoverTextById}),
                     );
                     return;
                 }
@@ -2227,14 +2240,14 @@ const serializeRuns = (
 const renderRunNodes = (
     runs: RichFormattedBlock['runs'],
     decorations: BlockSelectionDecorations | null,
-    options: {trailingCodeNewline?: boolean} = {},
+    options: {trailingCodeNewline?: boolean; popoverTextById?: Map<string, string>} = {},
 ): Node[] => {
     if (!decorations || (!decorations.carets.length && !decorations.segments.length)) {
         return appendTrailingCodeNewlineSentinel(
             runs.map((run) => {
             const span = document.createElement('span');
             span.textContent = run.text;
-            applyRunClasses(span, run);
+            applyRunClasses(span, run, options.popoverTextById);
             return span;
             }),
             options,
@@ -2273,7 +2286,7 @@ const renderRunNodes = (
 
             const span = document.createElement('span');
             span.textContent = runSegments.slice(start, end).join('');
-            applyRunClasses(span, run);
+            applyRunClasses(span, run, options.popoverTextById);
             const highlight = decorations.segments.find(
                 (selectionSegment) =>
                     chunkStart >= selectionSegment.startOffset &&
@@ -2325,14 +2338,46 @@ const renderCaretsAtOffset = (
     }
 };
 
-const applyRunClasses = (span: HTMLElement, run: RichFormattedBlock['runs'][number]) => {
+const applyRunClasses = (
+    span: HTMLElement,
+    run: RichFormattedBlock['runs'][number],
+    popoverTextById?: Map<string, string>,
+) => {
     if (run.marks.bold) span.classList.add('markBold');
     if (run.marks.italic) span.classList.add('markItalic');
     if (hasAnnotationMark(run)) span.classList.add('markAnnotation');
+    const popoverText = popoverTextForRun(run, popoverTextById);
+    if (popoverText) {
+        span.classList.add('markPopover');
+        span.dataset.popover = popoverText;
+        span.setAttribute('aria-label', popoverText);
+    }
 };
 
 const hasAnnotationMark = (run: RichFormattedBlock['runs'][number]) =>
     Boolean(run.marks.annotation || run.stackedMarks?.annotation?.length);
+
+const popoverTextForRun = (
+    run: RichFormattedBlock['runs'][number],
+    popoverTextById?: Map<string, string>,
+): string | null => {
+    if (!popoverTextById) return null;
+    for (const value of run.stackedMarks?.annotation ?? []) {
+        if (!isAnnotationMarkData(value)) continue;
+        const text = popoverTextById.get(lamportToString(value.id));
+        if (text) return text;
+    }
+    if (isAnnotationMarkData(run.marks.annotation)) {
+        return popoverTextById.get(lamportToString(run.marks.annotation.id)) ?? null;
+    }
+    return null;
+};
+
+const isAnnotationMarkData = (value: unknown): value is AnnotationMarkData =>
+    typeof value === 'object' &&
+    value !== null &&
+    Array.isArray((value as AnnotationMarkData).id) &&
+    (value as AnnotationMarkData).presentation === 'popover';
 
 const capitalize = (value: string) => value.slice(0, 1).toUpperCase() + value.slice(1);
 
