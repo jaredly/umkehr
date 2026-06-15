@@ -65,6 +65,17 @@ const descendantsOf = (popovers: ManagedPopover[], id: string): Set<string> => {
     return result;
 };
 
+const ancestorsOf = (popovers: ManagedPopover[], id: string): Set<string> => {
+    const result = new Set<string>();
+    let parentId = popovers.find((popover) => popover.id === id)?.parentId ?? null;
+    while (parentId) {
+        if (result.has(parentId)) break;
+        result.add(parentId);
+        parentId = popovers.find((popover) => popover.id === parentId)?.parentId ?? null;
+    }
+    return result;
+};
+
 const visiblePopoverIds = (popovers: ManagedPopover[]): Set<string> => {
     const visible = new Set<string>();
     for (const popover of popovers) {
@@ -277,8 +288,16 @@ export const useAnnotationPopoverController = ({
                     return current;
                 }
                 const ids = id ? descendantsOf(current, id) : new Set<string>();
-                if (id) ids.add(id);
-                else current.forEach((popover) => ids.add(popover.id));
+                if (id) {
+                    ids.add(id);
+                    for (const ancestorId of ancestorsOf(current, id)) {
+                        if (!targetIsInsidePopoverSubtree(current, ancestorId, relatedTarget ?? null)) {
+                            ids.add(ancestorId);
+                        }
+                    }
+                } else {
+                    current.forEach((popover) => ids.add(popover.id));
+                }
                 return pruneClosedPopovers(clearReasons(current, ids, ['hover', 'activation']));
             });
         },

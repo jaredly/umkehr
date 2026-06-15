@@ -1475,6 +1475,31 @@ describe('Block rich text example UI', () => {
         expect(queryPopoverDialogs(left)).toHaveLength(0);
     });
 
+    it('hides the parent when leaving a child popover and the parent has no remaining reason', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        const {popover: parentPopover} = await createPopoverOnMainText(left, 'abcd', 1, 3);
+        await typePopoverBody(parentPopover, 'note');
+        await createChildPopover(left, parentPopover, 1, 3);
+        await closePopoversBySelectingMainBlock(left);
+
+        const parentMark = popoverMarks(blocks(left)[0])[0];
+        if (!parentMark) throw new Error('missing parent popover mark');
+        const reopenedParentPopover = await openPopoverFromMark(left, parentMark);
+        const childMark = popoverMarks(
+            within(reopenedParentPopover).getByRole('textbox', {name: 'Annotation body'}),
+        )[0];
+        if (!childMark) throw new Error('missing child popover mark');
+
+        fireEvent.mouseOver(childMark);
+        const childPopover = (await waitForPopoverDialogs(left, 2))[1];
+
+        fireEvent.mouseLeave(childPopover, {relatedTarget: document.body});
+
+        expect(queryPopoverDialogs(left)).toHaveLength(0);
+    });
+
     it('hides a child hover popover when the parent popover has focus but the child mark is not selected', async () => {
         const view = render(<App />);
         const {left} = panels(view);

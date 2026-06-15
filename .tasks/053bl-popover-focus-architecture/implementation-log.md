@@ -75,3 +75,14 @@
 - `npm exec tsc -- -p examples/block-rich-text/tsconfig.json --noEmit` passed.
 - `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx` passed with 79 tests.
 - `npm exec vitest -- run examples/block-rich-text/src` passed with 193 tests across 9 files.
+
+### Bug Fix: Parent Left Visible After Child Leave
+
+- Fixed a bug where leaving a child popover to outside could hide only the child while leaving a parent visible with a stale hover/activation reason.
+- The controller now clears hover/activation reasons from ancestors too when the related target is outside that ancestor's popover subtree.
+- Parents with real remaining reasons, such as focus or selection, are still preserved.
+- Added regression coverage for leaving a child popover when the parent has no remaining reason.
+- Verification:
+  - `npm exec tsc -- -p examples/block-rich-text/tsconfig.json --noEmit` passed.
+  - `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx` passed with 80 tests.
+  - `npm exec vitest -- run examples/block-rich-text/src` passed with 194 tests across 9 files.
