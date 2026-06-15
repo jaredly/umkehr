@@ -1,6 +1,6 @@
 import '../../../src/react/test-dom';
 
-import {cleanup, fireEvent, render, waitFor, within} from '@testing-library/react';
+import {act, cleanup, fireEvent, render, waitFor, within} from '@testing-library/react';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import {App} from './App';
 
@@ -19,6 +19,7 @@ let restoreCaretGeometry: (() => void) | null = null;
 afterEach(() => {
     restoreCaretGeometry?.();
     restoreCaretGeometry = null;
+    vi.useRealTimers();
     cleanup();
     window.history.pushState({}, '', '/');
 });
@@ -1293,7 +1294,7 @@ describe('Block rich text example UI', () => {
         await waitFor(() => expect(within(left).getByText('Comment on “ot”')).toBeTruthy());
     });
 
-    it('renders popover annotations inline on the marked text', async () => {
+    it('renders popover annotations inline as editable delayed-hide popovers', async () => {
         const view = render(<App />);
         const {left} = panels(view);
 
@@ -1310,8 +1311,31 @@ describe('Block rich text example UI', () => {
             return mark;
         });
         expect(popoverMark.textContent).toBe('bc');
-        expect(popoverMark.dataset.popover).toBe('Empty popover');
+        expect(popoverMark.dataset.popoverId).toBeTruthy();
         expect(within(left).queryByLabelText('Popovers')).toBeNull();
+
+        fireEvent.mouseOver(popoverMark);
+        const popover = await waitFor(() =>
+            within(left).getByRole('dialog', {name: 'Popover'}),
+        );
+        const popoverBody = within(popover).getByRole('textbox', {name: 'Annotation body'});
+
+        selectCaret(popoverBody, 0);
+        beforeInputText(popoverBody, 'note');
+        await waitFor(() => expect(popoverBody.textContent).toBe('note'));
+
+        vi.useFakeTimers();
+        fireEvent.mouseOut(popoverMark, {relatedTarget: document.body});
+        act(() => vi.advanceTimersByTime(200));
+        expect(within(left).getByRole('dialog', {name: 'Popover'})).toBe(popover);
+
+        fireEvent.mouseEnter(popover);
+        act(() => vi.advanceTimersByTime(300));
+        expect(within(left).getByRole('dialog', {name: 'Popover'})).toBe(popover);
+
+        fireEvent.mouseLeave(popover, {relatedTarget: document.body});
+        act(() => vi.advanceTimersByTime(300));
+        expect(within(left).queryByRole('dialog', {name: 'Popover'})).toBeNull();
     });
 
     it('pastes newlines as multiple synced blocks', async () => {
