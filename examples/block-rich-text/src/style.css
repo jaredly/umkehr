@@ -892,7 +892,7 @@ select {
     position: fixed;
     z-index: 45;
     display: grid;
-    grid-template-columns: minmax(160px, 1fr) 32px auto auto;
+    grid-template-columns: minmax(160px, 1fr) auto auto;
     gap: 6px;
     width: min(420px, calc(100vw - 24px));
     padding: 8px;
@@ -900,6 +900,31 @@ select {
     border-radius: 8px;
     background: #fff;
     box-shadow: 0 12px 32px rgb(0 0 0 / 20%);
+}
+
+.linkHoverPopover {
+    position: fixed;
+    z-index: 44;
+    display: flex;
+    /*grid-template-columns: minmax(140px, 1fr) auto;*/
+    align-items: center;
+    gap: 6px;
+    /*width: min(380px, calc(100vw - 24px));*/
+    padding: 6px;
+    border: 1px solid #9ca3af;
+    border-radius: 8px;
+    background: #fff;
+    box-shadow: 0 10px 26px rgb(0 0 0 / 18%);
+}
+
+.linkHoverUrl {
+    min-width: 0;
+    overflow: hidden;
+    color: #0b63b6;
+    /*font-size: 13px;*/
+    text-overflow: ellipsis;
+    text-decoration-line: underline;
+    white-space: nowrap;
 }
 
 .linkFloatingPopover input {
@@ -910,7 +935,8 @@ select {
     border-radius: 6px;
 }
 
-.linkFloatingPopover button {
+.linkFloatingPopover button,
+.linkHoverPopover button {
     height: 32px;
     padding: 0 10px;
     border: 1px solid #cbd5df;
@@ -920,11 +946,13 @@ select {
     cursor: pointer;
 }
 
-.linkFloatingPopover button:hover {
+.linkFloatingPopover button:hover,
+.linkHoverPopover button:hover {
     background: #eef3f7;
 }
 
-.linkFloatingPopover button:disabled {
+.linkFloatingPopover button:disabled,
+.linkHoverPopover button:disabled {
     color: #8a96a3;
     background: #f3f6f8;
     cursor: not-allowed;

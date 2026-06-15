@@ -98,3 +98,28 @@ Verification:
 
 - `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx`
 - `npx tsc -p examples/block-rich-text/tsconfig.json --noEmit`
+
+## Follow-up: Link Hover Tooltip Delay and URL Display
+
+- Changed the link hover tooltip to render the URL as a clickable anchor instead of an open-in-new-tab icon button.
+- Added a 100ms delayed hide after leaving a link mark so the pointer can move into the tooltip.
+- The tooltip cancels the pending hide while hovered and schedules it again on mouse leave.
+- Applied the same delayed hover behavior to annotation body link tooltips.
+
+Verification:
+
+- `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx`
+- `npx tsc -p examples/block-rich-text/tsconfig.json --noEmit`
+
+## Follow-up: Link Hover Actions
+
+- Replaced the unreliable primary click-to-edit interaction with a hover tooltip for existing link marks.
+- The hover tooltip exposes `Edit` and icon-only `Open link in new tab` actions.
+- `Edit` opens the existing URL editor for the contiguous link range; `Open` uses the link target directly with `noopener,noreferrer`.
+- Link spans now carry rendered offset metadata so hover actions can resolve the link range without depending on click coordinates.
+- The same hover action behavior is wired through annotation body editors.
+
+Verification:
+
+- `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx`
+- `npx tsc -p examples/block-rich-text/tsconfig.json --noEmit`

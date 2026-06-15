@@ -129,6 +129,7 @@ type LinkPopoverState = {
     top: number;
     left: number;
 };
+type LinkHoverPopoverState = LinkPopoverState;
 
 export function App() {
     return hasDemoQuery() ? <BlogVisualDemos /> : <EditorApp />;
@@ -421,11 +422,13 @@ function BlockEditor({
         x: number;
         y: number;
     } | null>(null);
+    const linkHoverHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [hasFocus, setHasFocus] = useState(false);
     const [isExtendingSelection, setIsExtendingSelection] = useState(false);
     const [activeAnnotationBodySelection, setActiveAnnotationBodySelection] =
         useState<EditorSelection | null>(null);
     const [linkPopover, setLinkPopover] = useState<LinkPopoverState | null>(null);
+    const [linkHoverPopover, setLinkHoverPopover] = useState<LinkHoverPopoverState | null>(null);
     const blocks = materializeFormattedBlocks(replica.state, annotationMarkBehavior);
     const blocksWithAnnotationBodies = materializeFormattedBlocks(
         replica.state,
@@ -540,7 +543,17 @@ function BlockEditor({
         handledNavigationKeyRef.current = false;
         setIsExtendingSelection(false);
         setLinkPopover(null);
+        setLinkHoverPopover(null);
+        if (linkHoverHideTimerRef.current) clearTimeout(linkHoverHideTimerRef.current);
+        linkHoverHideTimerRef.current = null;
     }, [resetSignal]);
+
+    useLayoutEffect(
+        () => () => {
+            if (linkHoverHideTimerRef.current) clearTimeout(linkHoverHideTimerRef.current);
+        },
+        [],
+    );
 
     const captureSelection = useCallback(
         (event: MouseEvent | KeyboardEvent) => {
@@ -657,6 +670,9 @@ function BlockEditor({
                 !event.target.closest('.linkFloatingPopover')
             ) {
                 setLinkPopover(null);
+                setLinkHoverPopover(null);
+                if (linkHoverHideTimerRef.current) clearTimeout(linkHoverHideTimerRef.current);
+                linkHoverHideTimerRef.current = null;
             }
             setIsExtendingSelection(
                 event.detail <= 1 && !event.shiftKey && (event.metaKey || event.ctrlKey),
@@ -852,6 +868,7 @@ function BlockEditor({
 
     const openLinkFromRange = useCallback(
         (range: LinkTargetRange & {href: string}, element: HTMLElement) => {
+            setLinkHoverPopover(null);
             setLinkPopover({
                 ranges: [{blockId: range.blockId, startOffset: range.startOffset, endOffset: range.endOffset}],
                 href: range.href,
@@ -859,6 +876,31 @@ function BlockEditor({
             });
         },
         [],
+    );
+
+    const cancelLinkHoverHide = useCallback(() => {
+        if (linkHoverHideTimerRef.current) clearTimeout(linkHoverHideTimerRef.current);
+        linkHoverHideTimerRef.current = null;
+    }, []);
+
+    const scheduleLinkHoverHide = useCallback(() => {
+        if (linkHoverHideTimerRef.current) clearTimeout(linkHoverHideTimerRef.current);
+        linkHoverHideTimerRef.current = setTimeout(() => {
+            setLinkHoverPopover(null);
+            linkHoverHideTimerRef.current = null;
+        }, 100);
+    }, []);
+
+    const showLinkHoverFromRange = useCallback(
+        (range: LinkTargetRange & {href: string}, element: HTMLElement) => {
+            cancelLinkHoverHide();
+            setLinkHoverPopover({
+                ranges: [{blockId: range.blockId, startOffset: range.startOffset, endOffset: range.endOffset}],
+                href: range.href,
+                ...linkPopoverPositionFromElement(element),
+            });
+        },
+        [cancelLinkHoverHide],
     );
 
     const applyLinkPopover = useCallback(
@@ -1208,6 +1250,8 @@ function BlockEditor({
                         onPopoverTriggerLeave: schedulePopoverHideFromPointer,
                         openLinkFromCurrentSelection,
                         openLinkFromRange,
+                        showLinkHoverFromRange,
+                        hideLinkHover: scheduleLinkHoverHide,
                         runEditCommand,
                         runBlockControlCommand,
                         moveCaretHorizontally,
@@ -1252,6 +1296,16 @@ function BlockEditor({
                 onApply={applyLinkPopover}
                 onRemove={removeLinkPopover}
                 onClose={() => setLinkPopover(null)}
+            />
+            <LinkHoverPopover
+                state={linkHoverPopover}
+                onEdit={(state) => {
+                    cancelLinkHoverHide();
+                    setLinkHoverPopover(null);
+                    setLinkPopover(state);
+                }}
+                onMouseEnter={cancelLinkHoverHide}
+                onMouseLeave={scheduleLinkHoverHide}
             />
             <Footnotes
                 annotations={annotations.filter((item) => item.data.presentation === 'footnote')}
@@ -1324,6 +1378,8 @@ type RenderBlockContext = {
     onPopoverTriggerLeave(id?: string, transition?: PopoverPointerTransition): void;
     openLinkFromCurrentSelection(): void;
     openLinkFromRange(range: LinkTargetRange & {href: string}, element: HTMLElement): void;
+    showLinkHoverFromRange(range: LinkTargetRange & {href: string}, element: HTMLElement): void;
+    hideLinkHover(): void;
     onUndo(): void;
     onRedo(): void;
     onKeystroke(blockId: string, event: KeyboardEvent<HTMLElement>): void;
@@ -1479,6 +1535,8 @@ const renderEditableBlock = (block: RichFormattedBlock, context: RenderBlockCont
             }
             onOpenLink={context.openLinkFromCurrentSelection}
             onOpenLinkRange={context.openLinkFromRange}
+            onLinkHoverEnter={context.showLinkHoverFromRange}
+            onLinkHoverLeave={context.hideLinkHover}
             onToggleTodo={() =>
                 context.runEditCommand((current, selection) =>
                     updateBlockMetaEverywhere(
@@ -1832,26 +1890,50 @@ function LinkFloatingPopover({
                 aria-label="Link target"
                 onChange={(event) => setHref(event.currentTarget.value)}
             />
-            <button
-                type="button"
-                className="linkOpenButton"
-                aria-label="Open link in new tab"
-                disabled={!targetHref}
-                onClick={() => {
-                    if (targetHref) window.open(targetHref, '_blank', 'noopener,noreferrer');
-                }}
-            >
-                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                    <path d="M14 5h5v5" />
-                    <path d="M10 14 19 5" />
-                    <path d="M19 14v4a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h4" />
-                </svg>
-            </button>
             <button type="submit">Apply</button>
             <button type="button" onClick={onRemove}>
                 Remove
             </button>
         </form>
+    );
+}
+
+function LinkHoverPopover({
+    state,
+    onEdit,
+    onMouseEnter,
+    onMouseLeave,
+}: {
+    state: LinkHoverPopoverState | null;
+    onEdit(state: LinkPopoverState): void;
+    onMouseEnter(): void;
+    onMouseLeave(): void;
+}) {
+    if (!state) return null;
+    const targetHref = state.href.trim();
+
+    return (
+        <div
+            className="linkHoverPopover"
+            role="dialog"
+            aria-label="Link actions"
+            style={{top: state.top, left: state.left}}
+            onMouseDown={(event) => event.stopPropagation()}
+            onMouseEnter={onMouseEnter}
+            onMouseLeave={onMouseLeave}
+        >
+            <a
+                className="linkHoverUrl"
+                href={targetHref}
+                target="_blank"
+                rel="noreferrer"
+            >
+                {state.href}
+            </a>
+            <button type="button" onClick={() => onEdit(state)}>
+                Edit
+            </button>
+        </div>
     );
 }
 
@@ -1878,8 +1960,10 @@ function AnnotationBodyBlock({
 }) {
     const pendingCaretRestoreBlockIdRef = useRef<string | null>(null);
     const pendingSelectionRestoreRef = useRef<EditorSelection | null>(null);
+    const linkHoverHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [selection, setSelection] = useState<EditorSelection>(() => caret(block.id, block.text.length));
     const [linkPopover, setLinkPopover] = useState<LinkPopoverState | null>(null);
+    const [linkHoverPopover, setLinkHoverPopover] = useState<LinkHoverPopoverState | null>(null);
 
     const restoreAfter = useCallback((selection: EditorSelection) => {
         pendingCaretRestoreBlockIdRef.current =
@@ -1951,6 +2035,38 @@ function AnnotationBodyBlock({
         run(rangeSelection(range), removeAnnotationBodyLink);
     }, [linkPopover?.ranges, rangeSelection, run]);
 
+    const cancelBodyLinkHoverHide = useCallback(() => {
+        if (linkHoverHideTimerRef.current) clearTimeout(linkHoverHideTimerRef.current);
+        linkHoverHideTimerRef.current = null;
+    }, []);
+
+    const scheduleBodyLinkHoverHide = useCallback(() => {
+        if (linkHoverHideTimerRef.current) clearTimeout(linkHoverHideTimerRef.current);
+        linkHoverHideTimerRef.current = setTimeout(() => {
+            setLinkHoverPopover(null);
+            linkHoverHideTimerRef.current = null;
+        }, 100);
+    }, []);
+
+    useLayoutEffect(
+        () => () => {
+            if (linkHoverHideTimerRef.current) clearTimeout(linkHoverHideTimerRef.current);
+        },
+        [],
+    );
+
+    const showBodyLinkHover = useCallback(
+        (range: LinkTargetRange & {href: string}, element: HTMLElement) => {
+            cancelBodyLinkHoverHide();
+            setLinkHoverPopover({
+                ranges: [{blockId: range.blockId, startOffset: range.startOffset, endOffset: range.endOffset}],
+                href: range.href,
+                ...linkPopoverPositionFromElement(element),
+            });
+        },
+        [cancelBodyLinkHoverHide],
+    );
+
     return (
         <>
             <RichTextEditableSurface
@@ -1968,6 +2084,8 @@ function AnnotationBodyBlock({
                 onPopoverTriggerEnter={onPopoverTriggerEnter}
                 onPopoverTriggerLeave={onPopoverTriggerLeave}
                 onLinkClick={(range, element) => openBodyLinkPopover([range], range.href, linkPopoverPositionFromElement(element))}
+                onLinkHoverEnter={showBodyLinkHover}
+                onLinkHoverLeave={scheduleBodyLinkHoverHide}
                 onSelectionChange={updateSelection}
                 onInsertText={(text, activeSelection) =>
                     run(activeSelection ?? selection, (state, selected, context) =>
@@ -2063,6 +2181,16 @@ function AnnotationBodyBlock({
                 onApply={applyBodyLink}
                 onRemove={removeBodyLink}
                 onClose={() => setLinkPopover(null)}
+            />
+            <LinkHoverPopover
+                state={linkHoverPopover}
+                onEdit={(state) => {
+                    cancelBodyLinkHoverHide();
+                    setLinkHoverPopover(null);
+                    setLinkPopover(state);
+                }}
+                onMouseEnter={cancelBodyLinkHoverHide}
+                onMouseLeave={scheduleBodyLinkHoverHide}
             />
         </>
     );
@@ -2216,6 +2344,8 @@ function EditableBlock({
     onToggleStrikethrough,
     onOpenLink,
     onOpenLinkRange,
+    onLinkHoverEnter,
+    onLinkHoverLeave,
     onToggleTodo,
     onSetCodeLanguage,
     onSetCalloutKind,
@@ -2262,6 +2392,8 @@ function EditableBlock({
     onToggleStrikethrough(): void;
     onOpenLink(): void;
     onOpenLinkRange(range: LinkTargetRange & {href: string}, element: HTMLElement): void;
+    onLinkHoverEnter(range: LinkTargetRange & {href: string}, element: HTMLElement): void;
+    onLinkHoverLeave(): void;
     onToggleTodo(): void;
     onSetCodeLanguage(language: string): void;
     onSetCalloutKind(kind: 'info' | 'warning' | 'error'): void;
@@ -2337,6 +2469,8 @@ function EditableBlock({
                 onPopoverTriggerEnter={onPopoverTriggerEnter}
                 onPopoverTriggerLeave={onPopoverTriggerLeave}
                 onLinkClick={onOpenLinkRange}
+                onLinkHoverEnter={onLinkHoverEnter}
+                onLinkHoverLeave={onLinkHoverLeave}
                 onInsertText={onInsertText}
                 onDeleteBackward={onDeleteBackward}
                 onDeleteForward={onDeleteForward}
@@ -2537,6 +2671,8 @@ function RichTextEditableSurface({
     onPopoverTriggerEnter,
     onPopoverTriggerLeave,
     onLinkClick,
+    onLinkHoverEnter,
+    onLinkHoverLeave,
     onKeyDown,
     onPaste,
 }: {
@@ -2559,6 +2695,8 @@ function RichTextEditableSurface({
     onPopoverTriggerEnter?(id: string, element: HTMLElement): void;
     onPopoverTriggerLeave?(id?: string, transition?: PopoverPointerTransition): void;
     onLinkClick?(range: LinkTargetRange & {href: string}, element: HTMLElement): void;
+    onLinkHoverEnter?(range: LinkTargetRange & {href: string}, element: HTMLElement): void;
+    onLinkHoverLeave?(): void;
     onKeyDown?(event: KeyboardEvent<HTMLDivElement>): void;
     onPaste?(event: ClipboardEvent<HTMLDivElement>): void;
 }) {
@@ -2669,6 +2807,17 @@ function RichTextEditableSurface({
             onMouseUp={(event) => onSelectionChange?.(readSelectionFromDom(event.currentTarget))}
             onKeyUp={(event) => onSelectionChange?.(readSelectionFromDom(event.currentTarget))}
             onMouseOver={(event) => {
+                const linkTrigger = linkTriggerFromEvent(event.currentTarget, event.target);
+                if (linkTrigger) {
+                    const relatedLinkTrigger = linkTriggerFromEvent(
+                        event.currentTarget,
+                        event.relatedTarget,
+                    );
+                    if (relatedLinkTrigger !== linkTrigger) {
+                        const range = linkRangeFromTrigger(linkTrigger, blockId, runs);
+                        if (range) onLinkHoverEnter?.(range, linkTrigger);
+                    }
+                }
                 const trigger = popoverTriggerFromEvent(event.currentTarget, event.target);
                 if (!trigger) return;
                 const relatedTrigger = popoverTriggerFromEvent(
@@ -2681,6 +2830,16 @@ function RichTextEditableSurface({
                 }
             }}
             onMouseOut={(event) => {
+                const linkTrigger = linkTriggerFromEvent(event.currentTarget, event.target);
+                if (linkTrigger) {
+                    const relatedLinkTrigger = linkTriggerFromEvent(
+                        event.currentTarget,
+                        event.relatedTarget,
+                    );
+                    if (relatedLinkTrigger !== linkTrigger) {
+                        onLinkHoverLeave?.();
+                    }
+                }
                 const trigger = popoverTriggerFromEvent(event.currentTarget, event.target);
                 if (!trigger) return;
                 const relatedTrigger = popoverTriggerFromEvent(
@@ -2700,10 +2859,7 @@ function RichTextEditableSurface({
             onClick={(event) => {
                 const linkTrigger = linkTriggerFromEvent(event.currentTarget, event.target);
                 if (linkTrigger) {
-                    const point = readPointFromMouseEvent(event.currentTarget, event.nativeEvent);
-                    const range = point
-                        ? linkRangeAroundOffsetInRuns(blockId, runs, point.offset)
-                        : null;
+                    const range = linkRangeFromTrigger(linkTrigger, blockId, runs);
                     if (range) onLinkClick?.(range, linkTrigger);
                 }
                 const trigger = popoverTriggerFromEvent(event.currentTarget, event.target);
@@ -2869,6 +3025,16 @@ const linkTriggerFromEvent = (
     if (!elementConstructor || !(target instanceof elementConstructor)) return null;
     const trigger = target.closest<HTMLElement>('[data-link-href]');
     return trigger && root.contains(trigger) ? trigger : null;
+};
+
+const linkRangeFromTrigger = (
+    trigger: HTMLElement,
+    blockId: string,
+    runs: RichFormattedBlock['runs'],
+): (LinkTargetRange & {href: string}) | null => {
+    const startOffset = Number(trigger.dataset.linkStartOffset);
+    if (!Number.isFinite(startOffset)) return null;
+    return linkRangeAroundOffsetInRuns(blockId, runs, startOffset);
 };
 
 const overlayTransientSelections = (
@@ -3108,7 +3274,7 @@ const renderRunNodes = (
 
             const span = document.createElement('span');
             span.textContent = chunk.text;
-            applyRunClasses(span, chunk.run, options.popoverTextById);
+            applyRunClasses(span, chunk, options.popoverTextById);
             const highlight = decorations.segments.find(
                 (selectionSegment) =>
                     chunkStart >= selectionSegment.startOffset &&
@@ -3124,7 +3290,7 @@ const renderRunNodes = (
         } else {
             const span = document.createElement('span');
             span.textContent = chunk.text;
-            applyRunClasses(span, chunk.run, options.popoverTextById);
+            applyRunClasses(span, chunk, options.popoverTextById);
             nodes.push(span);
         }
         nodes.push(
@@ -3247,15 +3413,18 @@ const renderCaretsAtOffset = (
 
 const applyRunClasses = (
     span: HTMLElement,
-    run: RichFormattedBlock['runs'][number],
+    chunk: RunRenderChunk,
     popoverTextById?: Map<string, string>,
 ) => {
+    const run = chunk.run;
     if (run.marks.bold) span.classList.add('markBold');
     if (run.marks.italic) span.classList.add('markItalic');
     if (run.marks.strikethrough) span.classList.add('markStrikethrough');
     if (typeof run.marks[LINK_MARK] === 'string') {
         span.classList.add('markLink');
         span.dataset.linkHref = run.marks[LINK_MARK];
+        span.dataset.linkStartOffset = String(chunk.blockStartOffset);
+        span.dataset.linkEndOffset = String(chunk.blockEndOffset);
     }
     if (hasAnnotationMark(run)) span.classList.add('markAnnotation');
     const popoverIds = popoverIdsForRun(run, popoverTextById);

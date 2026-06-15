@@ -1375,7 +1375,7 @@ describe('Block rich text example UI', () => {
         });
     });
 
-    it('edits and removes an existing link from the link popover', async () => {
+    it('shows link hover actions and edits/removes an existing link', async () => {
         const view = render(<App />);
         const {left} = panels(view);
 
@@ -1387,15 +1387,28 @@ describe('Block rich text example UI', () => {
         fireEvent.keyDown(blocks(left)[0], {key: 'k', metaKey: true});
         await waitFor(() => expect(blocks(left)[0].querySelector('.markLink')).toBeTruthy());
 
-        selectCaret(blocks(left)[0], 4);
-        fireEvent.keyDown(blocks(left)[0], {key: 'k', metaKey: true});
+        const originalLink = blocks(left)[0].querySelector<HTMLElement>('.markLink')!;
+        fireEvent.mouseOver(originalLink);
+        const actions = await waitFor(() => within(left).getByRole('dialog', {name: 'Link actions'}));
+        const url = within(actions).getByRole('link', {name: 'https://example.test'});
+        expect(url.getAttribute('href')).toBe('https://example.test');
+        expect(url.getAttribute('target')).toBe('_blank');
+        expect(url.getAttribute('rel')).toBe('noreferrer');
+
+        vi.useFakeTimers();
+        fireEvent.mouseOut(originalLink);
+        act(() => vi.advanceTimersByTime(99));
+        expect(within(left).getByRole('dialog', {name: 'Link actions'})).toBeTruthy();
+        act(() => vi.advanceTimersByTime(1));
+        expect(within(left).queryByRole('dialog', {name: 'Link actions'})).toBeNull();
+        vi.useRealTimers();
+
+        fireEvent.mouseOver(originalLink);
+        const editActions = await waitFor(() => within(left).getByRole('dialog', {name: 'Link actions'}));
+        fireEvent.click(within(editActions).getByRole('button', {name: 'Edit'}));
         const dialog = await waitFor(() => within(left).getByRole('dialog', {name: 'Link'}));
         const input = within(dialog).getByRole('textbox', {name: 'Link target'});
         expect((input as HTMLInputElement).value).toBe('https://example.test');
-        const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
-        fireEvent.click(within(dialog).getByRole('button', {name: 'Open link in new tab'}));
-        expect(openSpy).toHaveBeenCalledWith('https://example.test', '_blank', 'noopener,noreferrer');
-        openSpy.mockRestore();
 
         fireEvent.change(input, {target: {value: 'https://updated.test'}});
         fireEvent.click(within(dialog).getByRole('button', {name: 'Apply'}));
@@ -1405,8 +1418,9 @@ describe('Block rich text example UI', () => {
             ),
         );
 
-        selectCaret(blocks(left)[0], 4);
-        fireEvent.keyDown(blocks(left)[0], {key: 'k', metaKey: true});
+        fireEvent.mouseOver(blocks(left)[0].querySelector<HTMLElement>('.markLink')!);
+        const updatedActions = await waitFor(() => within(left).getByRole('dialog', {name: 'Link actions'}));
+        fireEvent.click(within(updatedActions).getByRole('button', {name: 'Edit'}));
         const removeDialog = await waitFor(() => within(left).getByRole('dialog', {name: 'Link'}));
         fireEvent.click(within(removeDialog).getByRole('button', {name: 'Remove'}));
 
