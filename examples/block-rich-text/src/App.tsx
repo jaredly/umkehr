@@ -406,7 +406,7 @@ function BlockEditor({
     const [isExtendingSelection, setIsExtendingSelection] = useState(false);
     const [activeAnnotationBodySelection, setActiveAnnotationBodySelection] =
         useState<EditorSelection | null>(null);
-    const [activePopover, setActivePopover] = useState<ActivePopover | null>(null);
+    const [activePopovers, setActivePopovers] = useState<ActivePopover[]>([]);
     const popoverHideTimerRef = useRef<number | null>(null);
     const popoverHasFocusRef = useRef(false);
     const blocks = materializeFormattedBlocks(replica.state, annotationMarkBehavior);
@@ -495,19 +495,27 @@ function BlockEditor({
         );
     }, []);
 
-    const schedulePopoverHide = useCallback(() => {
+    const schedulePopoverHide = useCallback((id?: string) => {
         if (popoverHasFocusRef.current && popoverContainsFocus()) return;
         cancelPopoverHide();
         popoverHideTimerRef.current = window.setTimeout(() => {
             popoverHideTimerRef.current = null;
             if (popoverHasFocusRef.current && popoverContainsFocus()) return;
-            setActivePopover((current) => (current?.source === 'selection' ? current : null));
+            setActivePopovers((current) => {
+                if (!id) return current.filter((popover) => popover.source === 'selection');
+                const index = current.findIndex((popover) => popover.id === id);
+                if (index < 0) return current;
+                if (index < current.length - 1) return current;
+                return current.filter(
+                    (popover) => popover.id !== id || popover.source === 'selection',
+                );
+            });
         }, 300);
     }, [cancelPopoverHide, popoverContainsFocus]);
 
-    const schedulePopoverHideFromPointer = useCallback(() => {
+    const schedulePopoverHideFromPointer = useCallback((id?: string) => {
         if (popoverHasFocusRef.current && popoverContainsFocus()) return;
-        schedulePopoverHide();
+        schedulePopoverHide(id);
     }, [popoverContainsFocus, schedulePopoverHide]);
 
     const showPopover = useCallback(
@@ -517,11 +525,20 @@ function BlockEditor({
             const width = 320;
             const margin = 12;
             const availableWidth = window.innerWidth || document.documentElement.clientWidth || width;
-            setActivePopover({
+            const nextPopover = {
                 id,
                 top: rect.bottom + 8,
                 left: Math.max(margin, Math.min(rect.left, availableWidth - width - margin)),
                 source,
+            };
+            setActivePopovers((current) => {
+                const existingIndex = current.findIndex((popover) => popover.id === id);
+                if (existingIndex < 0) return [...current, nextPopover];
+                return [
+                    ...current.slice(0, existingIndex),
+                    nextPopover,
+                    ...current.slice(existingIndex + 1),
+                ];
             });
         },
         [cancelPopoverHide],
@@ -567,8 +584,10 @@ function BlockEditor({
 
     useLayoutEffect(() => {
         if (!selectedPopoverId) {
-            setActivePopover((current) =>
-                current?.source === 'selection' && !popoverContainsFocus() ? null : current,
+            setActivePopovers((current) =>
+                popoverContainsFocus()
+                    ? current
+                    : current.filter((popover) => popover.source !== 'selection'),
             );
             return;
         }
@@ -1088,7 +1107,7 @@ function BlockEditor({
                         orderedListNumbers,
                         popoverTextById,
                         onPopoverTriggerEnter: showPopover,
-                        onPopoverTriggerLeave: schedulePopoverHide,
+                        onPopoverTriggerLeave: schedulePopoverHideFromPointer,
                         runEditCommand,
                         runBlockControlCommand,
                         moveCaretHorizontally,
@@ -1104,20 +1123,21 @@ function BlockEditor({
                     }),
                 )}
             </div>
-            <FloatingAnnotationPopover
-                annotation={
-                    activePopover ? popoverAnnotationsById.get(activePopover.id) ?? null : null
-                }
-                position={activePopover}
-                onMouseEnter={cancelPopoverHide}
-                onMouseLeave={schedulePopoverHideFromPointer}
-                onFocusChange={setPopoverFocusPinned}
-                onBodyCommand={runAnnotationBodyCommand}
-                onBodySelectionChange={setActiveAnnotationBodySelection}
-                popoverTextById={popoverTextById}
-                onPopoverTriggerEnter={showPopover}
-                onPopoverTriggerLeave={schedulePopoverHideFromPointer}
-            />
+            {activePopovers.map((popover) => (
+                <FloatingAnnotationPopover
+                    key={popover.id}
+                    annotation={popoverAnnotationsById.get(popover.id) ?? null}
+                    position={popover}
+                    onMouseEnter={cancelPopoverHide}
+                    onMouseLeave={() => schedulePopoverHideFromPointer(popover.id)}
+                    onFocusChange={setPopoverFocusPinned}
+                    onBodyCommand={runAnnotationBodyCommand}
+                    onBodySelectionChange={setActiveAnnotationBodySelection}
+                    popoverTextById={popoverTextById}
+                    onPopoverTriggerEnter={showPopover}
+                    onPopoverTriggerLeave={schedulePopoverHideFromPointer}
+                />
+            ))}
             <Footnotes
                 annotations={annotations.filter((item) => item.data.presentation === 'footnote')}
                 onBodyCommand={runAnnotationBodyCommand}
@@ -1184,7 +1204,7 @@ type RenderBlockContext = {
         sourceBlock: HTMLElement,
     ): void;
     onPopoverTriggerEnter(id: string, element: HTMLElement): void;
-    onPopoverTriggerLeave(): void;
+    onPopoverTriggerLeave(id?: string): void;
     onUndo(): void;
     onRedo(): void;
     onKeystroke(blockId: string, event: KeyboardEvent<HTMLElement>): void;
@@ -1486,7 +1506,7 @@ function AnnotationSidebar({
     onBodySelectionChange(selection: EditorSelection | null): void;
     popoverTextById: Map<string, string>;
     onPopoverTriggerEnter(id: string, element: HTMLElement): void;
-    onPopoverTriggerLeave(): void;
+    onPopoverTriggerLeave(id?: string): void;
 }) {
     if (!annotations.length) return null;
     return (
@@ -1526,7 +1546,7 @@ function Footnotes({
     onBodySelectionChange(selection: EditorSelection | null): void;
     popoverTextById: Map<string, string>;
     onPopoverTriggerEnter(id: string, element: HTMLElement): void;
-    onPopoverTriggerLeave(): void;
+    onPopoverTriggerLeave(id?: string): void;
 }) {
     if (!annotations.length) return null;
     return (
@@ -1576,7 +1596,7 @@ function FloatingAnnotationPopover({
     onBodySelectionChange(selection: EditorSelection | null): void;
     popoverTextById: Map<string, string>;
     onPopoverTriggerEnter(id: string, element: HTMLElement): void;
-    onPopoverTriggerLeave(): void;
+    onPopoverTriggerLeave(id?: string): void;
 }) {
     if (!annotation || !position) return null;
     return (
@@ -1627,7 +1647,7 @@ function AnnotationBodyBlock({
     onBodySelectionChange(selection: EditorSelection | null): void;
     popoverTextById: Map<string, string>;
     onPopoverTriggerEnter(id: string, element: HTMLElement): void;
-    onPopoverTriggerLeave(): void;
+    onPopoverTriggerLeave(id?: string): void;
 }) {
     const pendingCaretRestoreBlockIdRef = useRef<string | null>(null);
     const pendingSelectionRestoreRef = useRef<EditorSelection | null>(null);
@@ -1879,7 +1899,7 @@ function EditableBlock({
     onStartDrag: ReturnType<typeof useBlockReorder>['startDrag'];
     popoverTextById: Map<string, string>;
     onPopoverTriggerEnter(id: string, element: HTMLElement): void;
-    onPopoverTriggerLeave(): void;
+    onPopoverTriggerLeave(id?: string): void;
     onInsertText(text: string, selection?: EditorSelection): void;
     onDeleteBackward(selection?: EditorSelection): void;
     onDeleteForward(selection?: EditorSelection): void;
@@ -2173,7 +2193,7 @@ function RichTextEditableSurface({
     onDeleteForward(selection?: EditorSelection): void;
     onSelectionChange?(selection: EditorSelection | null): void;
     onPopoverTriggerEnter?(id: string, element: HTMLElement): void;
-    onPopoverTriggerLeave?(): void;
+    onPopoverTriggerLeave?(id?: string): void;
     onKeyDown?(event: KeyboardEvent<HTMLDivElement>): void;
     onPaste?(event: ClipboardEvent<HTMLDivElement>): void;
 }) {
@@ -2277,7 +2297,7 @@ function RichTextEditableSurface({
                     event.relatedTarget,
                 );
                 if (relatedTrigger === trigger) return;
-                onPopoverTriggerLeave?.();
+                onPopoverTriggerLeave?.(trigger.dataset.popoverId);
             }}
             onInput={(event) => {
                 const native = event.nativeEvent as InputEvent;

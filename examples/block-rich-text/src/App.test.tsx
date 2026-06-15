@@ -1323,23 +1323,34 @@ describe('Block rich text example UI', () => {
         beforeInputText(popoverBody, 'note');
         await waitFor(() => expect(popoverBody.textContent).toBe('note'));
 
+        selectRange(popoverBody, 1, 3);
+        fireEvent.click(within(left).getByRole('button', {name: 'Popover'}));
+        const popoversWithChild = await waitFor(() => {
+            const dialogs = within(left).getAllByRole('dialog', {name: 'Popover'});
+            if (dialogs.length !== 2) throw new Error(`expected 2 popovers, received ${dialogs.length}`);
+            return dialogs;
+        });
+        expect(popoversWithChild[0]).toBe(popover);
+        const childPopover = popoversWithChild[1];
+        const childPopoverBody = within(childPopover).getByRole('textbox', {name: 'Annotation body'});
+
         vi.useFakeTimers();
         fireEvent.mouseOut(popoverMark, {relatedTarget: document.body});
-        act(() => vi.advanceTimersByTime(200));
-        expect(within(left).getByRole('dialog', {name: 'Popover'})).toBe(popover);
+        act(() => vi.advanceTimersByTime(300));
+        expect(within(left).getAllByRole('dialog', {name: 'Popover'})).toHaveLength(2);
 
         fireEvent.mouseEnter(popover);
         act(() => vi.advanceTimersByTime(300));
-        expect(within(left).getByRole('dialog', {name: 'Popover'})).toBe(popover);
+        expect(within(left).getAllByRole('dialog', {name: 'Popover'})).toHaveLength(2);
 
-        fireEvent.focus(popoverBody);
+        fireEvent.focus(childPopoverBody);
         fireEvent.mouseLeave(popover, {relatedTarget: document.body});
         act(() => vi.advanceTimersByTime(300));
-        expect(within(left).getByRole('dialog', {name: 'Popover'})).toBe(popover);
+        expect(within(left).getAllByRole('dialog', {name: 'Popover'})).toHaveLength(2);
 
-        fireEvent.blur(popoverBody, {relatedTarget: document.body});
+        fireEvent.blur(childPopoverBody, {relatedTarget: document.body});
         act(() => vi.advanceTimersByTime(300));
-        expect(within(left).getByRole('dialog', {name: 'Popover'})).toBe(popover);
+        expect(within(left).getAllByRole('dialog', {name: 'Popover'})).toHaveLength(2);
 
         vi.useRealTimers();
         selectCaret(blocks(left)[0], 0);
