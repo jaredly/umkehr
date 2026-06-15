@@ -1533,6 +1533,14 @@ function TableBlock({
             data-table-id={node.block.id}
         >
             <div className="tableToolbar" aria-label="Table controls">
+                <button
+                    type="button"
+                    className="tableDragHandle"
+                    aria-label="Move table"
+                    onPointerDown={(event) => context.startDrag(node.block.id, event)}
+                >
+                    ⋮⋮
+                </button>
                 <span>Table</span>
                 <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => context.addTableRow(node.block.id)}>
                     Add row
@@ -1558,6 +1566,7 @@ function TableBlock({
                             .join(' ')}
                         role="row"
                         data-row-id={row.block.id}
+                        style={{'--table-columns': columnCount} as CSSProperties}
                     >
                         <div className="tableRowControls" role="cell" aria-label={`Row ${rowIndex + 1} controls`}>
                             <button

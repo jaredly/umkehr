@@ -109,3 +109,4 @@
   - `npm run build`
 - Follow-up polish: removed row up/down arrow controls now that rows can be dragged, added row-level drop indicators, tightened table-cell drop indicators so they do not use the document block offset, and fixed the table-cell grid so hidden markers do not leave a zero-width track over the editable content.
 - Follow-up behavior: Enter at the end of a table cell now moves into an empty cell to the right, or creates the missing cell to the right when the row is sparse. Non-empty right cells still fall through to the normal split behavior.
+- Follow-up issue: row drag used the generic `moveBlock` path, which resolved a row's rendered parent as the table block instead of the table's virtual `rowParent`. That could move rows out of the row grid and break Tab navigation. Fixed row moves to resolve table rows through their materialized virtual parent, reject child-target row moves, and added regression coverage for Tab after generic row drag reorder.

@@ -381,7 +381,7 @@ select {
 
 .tableBlock {
     margin-left: calc(var(--block-depth, 0) * 24px);
-    padding: 8px 0 10px 42px;
+    padding: 8px 0 10px;
 }
 
 .tableToolbar {
@@ -414,6 +414,14 @@ select {
     padding: 0 8px;
 }
 
+.tableToolbar .tableDragHandle {
+    width: 28px;
+    min-width: 28px;
+    padding: 0;
+    color: #7a8793;
+    cursor: grab;
+}
+
 .tableRowControls button {
     width: 26px;
     padding: 0;
@@ -441,8 +449,7 @@ select {
 .tableRow {
     position: relative;
     display: grid;
-    grid-auto-flow: column;
-    grid-auto-columns: minmax(150px, 1fr);
+    grid-template-columns: 42px repeat(var(--table-columns, 1), minmax(150px, 1fr));
     border-top: 1px solid #dce4eb;
 }
 
@@ -482,7 +489,6 @@ select {
     display: flex;
     align-items: start;
     gap: 4px;
-    min-width: 42px;
     padding: 6px;
     border-right: 1px solid #dce4eb;
     background: #f7fafc;

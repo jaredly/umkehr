@@ -200,6 +200,37 @@ describe('block rich text commands', () => {
         expect(tableShape(demo.right.state, tableId).rows).toEqual(tableShape(demo.left.state, tableId).rows);
     });
 
+    it('keeps Tab navigation working after generic row drag reorder', () => {
+        const demo = createDemoState();
+        const context = ctx();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = createTable(demo.left.state, caret(blockId, 0), context, {rows: 2, columns: 2});
+        const tableId = rootBlockIds(result.state)[1];
+        const rows = tableShape(result.state, tableId).rows;
+
+        result = moveBlock(result.state, rows[1], {type: 'before', targetBlockId: rows[0]}, context);
+        const shape = tableShape(result.state, tableId);
+        expect(shape.rows).toEqual([rows[1], rows[0]]);
+
+        result = moveTableCellByTab(result.state, shape.cells[0][1], 'forward', context);
+
+        expect(result.selection).toEqual(caret(shape.cells[1][0], 0));
+    });
+
+    it('refuses to move rows under other rows as children', () => {
+        const demo = createDemoState();
+        const context = ctx();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = createTable(demo.left.state, caret(blockId, 0), context, {rows: 2, columns: 1});
+        const tableId = rootBlockIds(result.state)[1];
+        const rows = tableShape(result.state, tableId).rows;
+
+        result = moveBlock(result.state, rows[1], {type: 'child', parentBlockId: rows[0], at: 'end'}, context);
+
+        expect(result.ops).toEqual([]);
+        expect(tableShape(result.state, tableId).rows).toEqual(rows);
+    });
+
     it('moves across table cells with Tab and creates a row at the final cell', () => {
         const demo = createDemoState();
         const context = ctx();

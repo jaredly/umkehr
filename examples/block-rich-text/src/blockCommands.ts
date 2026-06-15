@@ -650,6 +650,9 @@ export const moveBlock = (
     if (!current || !visibleBlockIds(state).includes(movedBlockId)) {
         return {state, ops: [], selection: caret(movedBlockId, 0)};
     }
+    if (current.meta.type === 'table_row' && !isValidTableRowMoveTarget(state, movedBlockId, target)) {
+        return {state, ops: [], selection: caret(movedBlockId, 0)};
+    }
 
     const resolved = resolveMoveTarget(state, movedBlockId, target);
     if (!resolved) return {state, ops: [], selection: caret(movedBlockId, 0)};
@@ -668,6 +671,17 @@ export const moveBlock = (
     return {state: next, ops, selection: caret(movedBlockId, 0)};
 };
 
+const isValidTableRowMoveTarget = (
+    state: CachedState<RichBlockMeta>,
+    movedBlockId: string,
+    target: MoveTarget,
+): boolean => {
+    if (target.type === 'child') return false;
+    const targetBlock = state.state.blocks[target.targetBlockId];
+    if (!targetBlock || targetBlock.meta.type !== 'table_row') return false;
+    return visibleParentIdForBlock(state, movedBlockId) === visibleParentIdForBlock(state, target.targetBlockId);
+};
+
 const resolveMoveTarget = (
     state: CachedState<RichBlockMeta>,
     movedBlockId: string,
@@ -681,7 +695,11 @@ const resolveMoveTarget = (
     if (target.type === 'child' && target.parentBlockId === movedBlockId) return null;
     if (target.type !== 'child' && target.targetBlockId === movedBlockId) return null;
     if (target.type !== 'child' && isDescendantOf(state, target.targetBlockId, movedBlockId)) return null;
-    if (targetParentId !== ROOT_ID && isDescendantOrSelf(state, targetParentId, movedBlockId)) return null;
+    if (
+        targetParentId !== ROOT_ID &&
+        state.state.blocks[targetParentId] &&
+        isDescendantOrSelf(state, targetParentId, movedBlockId)
+    ) return null;
 
     const siblings = visibleBlockChildren(state, targetParentId, annotationVirtualParents(state)).filter((id) => id !== movedBlockId);
     let insertIndex: number;
@@ -696,7 +714,8 @@ const resolveMoveTarget = (
 
     const beforeId = insertIndex > 0 ? siblings[insertIndex - 1] : null;
     const afterId = siblings[insertIndex] ?? null;
-    const parentPath = targetParentId === ROOT_ID ? [] : materializedBlockPath(state, targetParentId, annotationVirtualParents(state));
+    const parentPath = materializedPathForMoveParent(state, targetParentId);
+    if (!parentPath) return null;
     const currentParent = visibleParentIdForBlock(state, movedBlockId);
     if (currentParent === null) return null;
     const currentSiblings = visibleBlockChildren(state, currentParent, annotationVirtualParents(state));
@@ -715,11 +734,33 @@ const resolveMoveTarget = (
     return {parentPath, beforeId, afterId};
 };
 
+const materializedPathForMoveParent = (
+    state: CachedState<RichBlockMeta>,
+    parentId: string,
+): Lamport[] | null => {
+    if (parentId === ROOT_ID) return [];
+    if (state.state.blocks[parentId]) {
+        return materializedBlockPath(state, parentId, annotationVirtualParents(state));
+    }
+    const owner = Object.values(state.state.blocks).find(
+        (block) => block.meta.type === 'table' && lamportToString(block.meta.rowParent) === parentId,
+    );
+    return owner
+        ? [...materializedBlockPath(state, lamportToString(owner.id), annotationVirtualParents(state)), parseLamportString(parentId)]
+        : null;
+};
+
 const isDescendantOrSelf = (state: CachedState<RichBlockMeta>, blockId: string, ancestorId: string): boolean =>
     blockId === ancestorId || isDescendantOf(state, blockId, ancestorId);
 
-const rawParentIdForVisibleBlock = (state: CachedState<RichBlockMeta>, blockId: string): string | null =>
-    visibleParentIdForBlock(state, blockId);
+const rawParentIdForVisibleBlock = (state: CachedState<RichBlockMeta>, blockId: string): string | null => {
+    const block = state.state.blocks[blockId];
+    if (!block) return null;
+    if (block.meta.type === 'table_row') {
+        return lamportToString(materializedBlockParent(state, blockId, annotationVirtualParents(state)));
+    }
+    return visibleParentIdForBlock(state, blockId);
+};
 
 const visibleParentIdForBlock = (state: CachedState<RichBlockMeta>, blockId: string): string | null =>
     visibleBlockOutline(state, annotationVirtualParents(state)).find((item) => item.id === blockId)?.parentId ?? null;
