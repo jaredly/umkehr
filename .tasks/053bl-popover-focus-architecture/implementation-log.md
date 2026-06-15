@@ -104,3 +104,5 @@
 
 - Raised retained cursor markers above positioned popover mark spans with a local `z-index`.
 - Kept popover mark positioning and pointer behavior unchanged.
+- Follow-up: native contenteditable carets were still covered by positioned popover marks, while comment/footnote marks were fine.
+- Removed `position: relative` from `.markPopover`; the popover controller uses the mark's bounding rect and does not need positioned inline marks.

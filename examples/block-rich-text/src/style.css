@@ -845,7 +845,6 @@ select {
 }
 
 .markPopover {
-    position: relative;
     border-bottom-style: dotted;
 }
 
