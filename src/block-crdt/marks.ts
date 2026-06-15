@@ -7,6 +7,7 @@ import {
     orderedCharIdsForBlock,
     visibleBlockOutline,
 } from './traversal.js';
+import {type VirtualBlockParentConfig} from './blocks.js';
 import {Block, CachedState, JsonValue, Lamport, Mark, Op, SplitRecord, TimestampedBlockMeta} from './types.js';
 
 export const splitRecordsByLeft = <M extends TimestampedBlockMeta>(
@@ -24,9 +25,12 @@ export const splitRecordsByLeft = <M extends TimestampedBlockMeta>(
     return result;
 };
 
+export type FormattedMarkValue = JsonValue | true;
+
 export type FormattedRun = {
     text: string;
-    marks: Record<string, JsonValue | true>;
+    marks: Record<string, FormattedMarkValue>;
+    stackedMarks?: Record<string, FormattedMarkValue[]>;
 };
 
 export type FormattedBlock<M extends TimestampedBlockMeta = TimestampedBlockMeta> = {
@@ -81,27 +85,29 @@ export const markRange = <M extends TimestampedBlockMeta = TimestampedBlockMeta>
 
 export const materializeFormattedBlocks = <M extends TimestampedBlockMeta>(
     state: CachedState<M>,
+    config: VirtualBlockParentConfig<M> = {},
 ): FormattedBlock<M>[] => {
     const coveredByMark: Record<string, Mark[]> = {};
     const marks = Object.values(state.state.marks).sort((a, b) => compareLamports(a.id, b.id));
     for (const mark of marks) {
-        for (const charId of coveredCharIdsForMark(state, mark)) {
+        for (const charId of coveredCharIdsForMark(state, mark, config)) {
             coveredByMark[charId] = coveredByMark[charId] ?? [];
             coveredByMark[charId].push(mark);
         }
     }
 
-    return visibleBlockOutline(state).map(({id, depth, parentId}) => {
+    return visibleBlockOutline(state, config).map(({id, depth, parentId}) => {
         const runs: FormattedRun[] = [];
         for (const charId of orderedCharIdsForBlock(state, id, {visibleOnly: true})) {
             const char = charRecord(state, charId);
             if (!char) continue;
-            const marks = resolveMarks(coveredByMark[charId] ?? []);
+            const {marks, stackedMarks} = resolveMarks(coveredByMark[charId] ?? [], config);
             const last = runs[runs.length - 1];
-            if (last && equal(last.marks, marks)) {
+            const nextStackedMarks = hasEntries(stackedMarks) ? stackedMarks : undefined;
+            if (last && equal(last.marks, marks) && equal(last.stackedMarks, nextStackedMarks)) {
                 last.text += char.text;
             } else {
-                runs.push({text: char.text, marks});
+                runs.push({text: char.text, marks, ...(nextStackedMarks ? {stackedMarks: nextStackedMarks} : {})});
             }
         }
         return {id, block: state.state.blocks[id], runs, depth, parentId};
@@ -137,8 +143,12 @@ const crossedSplitsBetween = <M extends TimestampedBlockMeta>(
     return crossed;
 };
 
-const coveredCharIdsForMark = <M extends TimestampedBlockMeta>(state: CachedState<M>, mark: Mark): string[] => {
-    const sequence = allCharIds(state);
+export const coveredCharIdsForMark = <M extends TimestampedBlockMeta>(
+    state: CachedState<M>,
+    mark: Mark,
+    config: VirtualBlockParentConfig<M>,
+): string[] => {
+    const sequence = allCharIds(state, config);
     const nextById = nextIdMap(sequence);
     const splitRecords = splitRecordsByLeft(state);
     const crossed = new Set(mark.crossedSplits.map(lamportToString));
@@ -181,8 +191,10 @@ const coveredCharIdsForMark = <M extends TimestampedBlockMeta>(state: CachedStat
     return covered;
 };
 
-const allCharIds = <M extends TimestampedBlockMeta>(state: CachedState<M>): string[] =>
-    visibleBlockOutline(state).flatMap(({id}) => orderedCharIdsForBlock(state, id));
+const allCharIds = <M extends TimestampedBlockMeta>(
+    state: CachedState<M>,
+    config: VirtualBlockParentConfig<M> = {},
+): string[] => visibleBlockOutline(state, config).flatMap(({id}) => orderedCharIdsForBlock(state, id));
 
 const nextIdMap = (sequence: string[]): Record<string, string> => {
     const result: Record<string, string> = {};
@@ -232,19 +244,38 @@ const tailAfterSplitLeft = <M extends TimestampedBlockMeta>(state: CachedState<M
     return result;
 };
 
-const resolveMarks = (marks: Mark[]): Record<string, JsonValue | true> => {
+const resolveMarks = <M extends TimestampedBlockMeta>(
+    marks: Mark[],
+    config: VirtualBlockParentConfig<M>,
+): {marks: Record<string, FormattedMarkValue>; stackedMarks: Record<string, FormattedMarkValue[]>} => {
+    const stacking: Record<string, Mark[]> = {};
     const winning: Record<string, Mark> = {};
     for (const mark of marks) {
+        if (config.markBehavior?.[mark.type] === 'stacking') {
+            if (!mark.remove) {
+                stacking[mark.type] = stacking[mark.type] ?? [];
+                stacking[mark.type].push(mark);
+            }
+            continue;
+        }
         const current = winning[mark.type];
         if (!current || compareLamports(current.id, mark.id) < 0) {
             winning[mark.type] = mark;
         }
     }
-    const result: Record<string, JsonValue | true> = {};
+    const stackedMarks: Record<string, FormattedMarkValue[]> = {};
+    for (const [type, typeMarks] of Object.entries(stacking)) {
+        stackedMarks[type] = typeMarks
+            .sort((a, b) => compareLamports(a.id, b.id))
+            .map((mark) => mark.data ?? true);
+    }
+    const result: Record<string, FormattedMarkValue> = {};
     for (const mark of Object.values(winning)) {
         if (!mark.remove) {
             result[mark.type] = mark.data ?? true;
         }
     }
-    return result;
+    return {marks: result, stackedMarks};
 };
+
+const hasEntries = (value: Record<string, unknown>): boolean => Object.keys(value).length > 0;

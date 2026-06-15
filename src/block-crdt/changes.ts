@@ -3,7 +3,7 @@ import {
     ROOT_ID,
     materializedBlockParent,
     materializedBlockPath,
-    virtualParentOwners,
+    virtualParentOwner,
     type VirtualBlockParentConfig,
 } from './blocks.js';
 import {assertActorId, lamportToString, parseLamportString} from './ids.js';
@@ -128,12 +128,14 @@ export const splitBlockOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>
         offset,
         ts,
         options,
+        virtualParents = {},
     }: {
         actor: string;
         block: Lamport;
         offset: number;
         ts: HLC;
         options?: LseqOptions;
+        virtualParents?: VirtualBlockParentConfig<M>;
     },
 ): Op<M>[] => {
     const blockId = lamportToString(block);
@@ -155,7 +157,7 @@ export const splitBlockOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>
             : offset > 0
               ? state.state.chars[chars[offset - 1]].id
               : null;
-    return split(state, {block, char, previous}, ts, actor, options);
+    return split(state, {block, char, previous}, ts, actor, options, virtualParents);
 };
 
 export const insertBlockOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
@@ -407,7 +409,7 @@ const virtualParentExists = <M extends TimestampedBlockMeta>(
     state: CachedState<M>,
     parentId: string,
     config: VirtualBlockParentConfig<M>,
-): boolean => Boolean(virtualParentOwners(state.state.blocks, config)[parentId]);
+): boolean => Boolean(virtualParentOwner(state, parentId, config));
 
 const materializedPathForParent = <M extends TimestampedBlockMeta>(
     state: CachedState<M>,
@@ -417,7 +419,7 @@ const materializedPathForParent = <M extends TimestampedBlockMeta>(
     const block = state.state.blocks[parentId];
     if (block) return materializedBlockPath(state, parentId, config);
 
-    const ownerId = virtualParentOwners(state.state.blocks, config)[parentId];
+    const ownerId = virtualParentOwner(state, parentId, config);
     if (!ownerId) throw new Error(`virtual parent not found`);
     return [...materializedBlockPath(state, ownerId, config), parseLamportString(parentId)];
 };
@@ -446,13 +448,14 @@ export const split = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
     ts: string,
     actor: string,
     options?: LseqOptions,
+    virtualParents: VirtualBlockParentConfig<M> = {},
 ): Op<M>[] => {
     const {chars, blocks, maxSeenCount} = state;
     const bid = lamportToString(at.block);
     const current = blocks[bid];
-    const parent = materializedBlockParent({state, cache}, bid);
-    const parentPath = materializedBlockPath({state, cache}, bid).slice(0, -1);
-    const siblings = cache.blockChildren[lamportToString(parent)] ?? [];
+    const parent = materializedBlockParent({state, cache}, bid, virtualParents);
+    const parentPath = materializedBlockPath({state, cache}, bid, virtualParents).slice(0, -1);
+    const siblings = visibleBlockChildren({state, cache}, lamportToString(parent), virtualParents);
     const index = siblings.indexOf(bid);
     const previousId = siblings[index - 1];
     const nextId = siblings[index + 1];

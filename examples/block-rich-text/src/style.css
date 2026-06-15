@@ -421,6 +421,7 @@ select {
 
 .retainedSelectionCaret {
     position: relative;
+    z-index: 1;
     display: inline;
     font-size: 0;
     line-height: 0;
@@ -836,4 +837,68 @@ select {
     .demoFigureBody {
         padding: 12px;
     }
+}
+
+.markAnnotation {
+    background: #fef3c7;
+    border-bottom: 2px solid #f59e0b;
+}
+
+.markPopover {
+    border-bottom-style: dotted;
+}
+
+.annotationFloatingPopover {
+    position: fixed;
+    z-index: 40;
+    width: min(320px, calc(100vw - 24px));
+    padding: 10px 12px;
+    border: 1px solid #9ca3af;
+    border-radius: 8px;
+    background: #fff;
+    box-shadow: 0 12px 32px rgb(0 0 0 / 20%);
+}
+
+.annotationSidebar {
+    margin: 0 0 12px;
+    padding: 8px 10px;
+    border: 1px solid #fbbf24;
+    border-radius: 8px;
+    background: #fffbeb;
+}
+
+.annotationCard + .annotationCard {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid #fde68a;
+}
+
+.annotationCard p,
+.footnotes li {
+    margin: 4px 0 0;
+}
+
+.annotationBodyEditor {
+    min-height: 1.4em;
+    margin: 4px 0 0;
+    white-space: pre-wrap;
+    outline: none;
+}
+
+.annotationBodyEditor:focus {
+    box-shadow: inset 0 -2px 0 #f59e0b;
+}
+
+.annotationBodyEditor[data-empty='true']::before {
+    content: attr(data-placeholder);
+    color: #9ca3af;
+    pointer-events: none;
+}
+
+.footnotes {
+    margin: 12px 0 0;
+    padding: 8px 8px 8px 28px;
+    border-top: 1px solid #d1d5db;
+    color: #374151;
+    font-size: 0.9rem;
 }

@@ -22,6 +22,7 @@ import {createLseqIdBetween} from 'umkehr/block-crdt/lseq';
 import type {BlockOrderTs, CachedState, Lamport} from 'umkehr/block-crdt/types';
 import {lamportToString, parseLamportString} from 'umkehr/block-crdt/utils';
 import {paragraphMeta, sameTypeWithTs, type RichBlockMeta} from './blockMeta';
+import {annotationVirtualParents} from './annotations';
 import {
     caret,
     clampPoint,
@@ -97,7 +98,7 @@ export const deleteBackward = (
             startOffset: point.offset - 1,
             endOffset: point.offset,
         });
-        const next = applyMany(state, ops);
+        const next = applyMany(state, ops, annotationVirtualParents(state));
         return {state: next, ops, selection: caret(point.blockId, point.offset - 1)};
     }
 
@@ -121,7 +122,7 @@ export const deleteForward = (
             startOffset: point.offset,
             endOffset: point.offset + 1,
         });
-        const next = applyMany(state, ops);
+        const next = applyMany(state, ops, annotationVirtualParents(state));
         return {state: next, ops, selection: caret(point.blockId, point.offset)};
     }
 
@@ -154,7 +155,7 @@ export const splitBlock = (
             block: parseLamportString(point.blockId),
             meta: paragraphMeta(context.nextTs()),
         });
-        const next = applyMany(working, ops);
+        const next = applyMany(working, ops, annotationVirtualParents(working));
         return {state: next, ops, selection: caret(point.blockId, 0)};
     }
 
@@ -172,8 +173,9 @@ export const splitBlock = (
         block: parseLamportString(point.blockId),
         offset: point.offset,
         ts: context.nextTs(),
+        virtualParents: annotationVirtualParents(working),
     });
-    const next = applyMany(working, splitOps);
+    const next = applyMany(working, splitOps, annotationVirtualParents(working));
     ops.push(...splitOps);
     return {state: next, ops, selection: caret(newBlockId, 0)};
 };
@@ -222,7 +224,7 @@ export const toggleMark = (
             remove,
             [working.state.maxSeenCount + 1, context.actor],
         );
-        working = applyMany(working, [op]);
+        working = applyMany(working, [op], annotationVirtualParents(working));
         ops.push(op);
     }
 
@@ -245,7 +247,7 @@ export const setBlockMeta = (
         return {state, ops: [], selection: caret(blockId, 0)};
     }
     const ops = setBlockMetaOps(state, {block: current.id, meta});
-    const next = applyMany(state, ops);
+    const next = applyMany(state, ops, annotationVirtualParents(state));
     return {state: next, ops, selection: caret(blockId, 0)};
 };
 
@@ -289,8 +291,9 @@ export const moveBlock = (
         before: resolved.beforeId ? state.state.blocks[resolved.beforeId].id : null,
         after: resolved.afterId ? state.state.blocks[resolved.afterId].id : null,
         ts: context.nextTs(),
+        virtualParents: annotationVirtualParents(state),
     });
-    const next = applyMany(state, ops);
+    const next = applyMany(state, ops, annotationVirtualParents(state));
     return {state: next, ops, selection: caret(movedBlockId, 0)};
 };
 
@@ -309,7 +312,7 @@ const resolveMoveTarget = (
     if (target.type !== 'child' && isDescendantOf(state, target.targetBlockId, movedBlockId)) return null;
     if (targetParentId !== ROOT_ID && isDescendantOrSelf(state, targetParentId, movedBlockId)) return null;
 
-    const siblings = visibleBlockChildren(state, targetParentId).filter((id) => id !== movedBlockId);
+    const siblings = visibleBlockChildren(state, targetParentId, annotationVirtualParents(state)).filter((id) => id !== movedBlockId);
     let insertIndex: number;
     if (target.type === 'child') {
         if (targetParentId !== ROOT_ID && !state.state.blocks[targetParentId]) return null;
@@ -322,10 +325,10 @@ const resolveMoveTarget = (
 
     const beforeId = insertIndex > 0 ? siblings[insertIndex - 1] : null;
     const afterId = siblings[insertIndex] ?? null;
-    const parentPath = targetParentId === ROOT_ID ? [] : materializedBlockPath(state, targetParentId);
+    const parentPath = targetParentId === ROOT_ID ? [] : materializedBlockPath(state, targetParentId, annotationVirtualParents(state));
     const currentParent = visibleParentIdForBlock(state, movedBlockId);
     if (currentParent === null) return null;
-    const currentSiblings = visibleBlockChildren(state, currentParent);
+    const currentSiblings = visibleBlockChildren(state, currentParent, annotationVirtualParents(state));
     const currentIndex = currentSiblings.indexOf(movedBlockId);
     const nextSibling = currentSiblings[currentIndex + 1] ?? null;
     const previousSibling = currentIndex > 0 ? currentSiblings[currentIndex - 1] : null;
@@ -348,10 +351,10 @@ const rawParentIdForVisibleBlock = (state: CachedState<RichBlockMeta>, blockId: 
     visibleParentIdForBlock(state, blockId);
 
 const visibleParentIdForBlock = (state: CachedState<RichBlockMeta>, blockId: string): string | null =>
-    visibleBlockOutline(state).find((item) => item.id === blockId)?.parentId ?? null;
+    visibleBlockOutline(state, annotationVirtualParents(state)).find((item) => item.id === blockId)?.parentId ?? null;
 
 const isDescendantOf = (state: CachedState<RichBlockMeta>, blockId: string, ancestorId: string): boolean => {
-    const path = materializedBlockPath(state, blockId).map(lamportToString);
+    const path = materializedBlockPath(state, blockId, annotationVirtualParents(state)).map(lamportToString);
     return path.includes(ancestorId) && blockId !== ancestorId;
 };
 
@@ -365,8 +368,8 @@ export const indentBlock = (
         return {state, ops: [], selection: caret(blockId, 0)};
     }
 
-    const parentId = lamportToString(materializedBlockParent(state, blockId));
-    const siblings = visibleBlockChildren(state, parentId);
+    const parentId = lamportToString(materializedBlockParent(state, blockId, annotationVirtualParents(state)));
+    const siblings = visibleBlockChildren(state, parentId, annotationVirtualParents(state));
     const index = siblings.indexOf(blockId);
     const previousBlockId = siblings[index - 1];
     const previous = previousBlockId ? state.state.blocks[previousBlockId] : null;
@@ -374,7 +377,7 @@ export const indentBlock = (
         return {state, ops: [], selection: caret(blockId, 0)};
     }
 
-    const previousChildren = visibleBlockChildren(state, previousBlockId);
+    const previousChildren = visibleBlockChildren(state, previousBlockId, annotationVirtualParents(state));
     const lastChildId = previousChildren[previousChildren.length - 1] ?? null;
     const ops = moveBlockOps(state, {
         actor: context.actor,
@@ -383,8 +386,9 @@ export const indentBlock = (
         before: lastChildId ? state.state.blocks[lastChildId].id : null,
         after: null,
         ts: context.nextTs(),
+        virtualParents: annotationVirtualParents(state),
     });
-    const next = applyMany(state, ops);
+    const next = applyMany(state, ops, annotationVirtualParents(state));
     return {state: next, ops, selection: caret(blockId, 0)};
 };
 
@@ -398,7 +402,7 @@ export const unindentBlock = (
         return {state, ops: [], selection: caret(blockId, 0)};
     }
 
-    const parentId = lamportToString(materializedBlockParent(state, blockId));
+    const parentId = lamportToString(materializedBlockParent(state, blockId, annotationVirtualParents(state)));
     if (parentId === ROOT_ID) {
         return {state, ops: [], selection: caret(blockId, 0)};
     }
@@ -408,16 +412,16 @@ export const unindentBlock = (
         return {state, ops: [], selection: caret(blockId, 0)};
     }
 
-    const parentPath = materializedBlockPath(state, parentId);
+    const parentPath = materializedBlockPath(state, parentId, annotationVirtualParents(state));
     const grandparentPath = parentPath.slice(0, -1);
     const grandparentId =
         grandparentPath.length > 0 ? lamportToString(grandparentPath[grandparentPath.length - 1]) : ROOT_ID;
-    const grandparentChildren = visibleBlockChildren(state, grandparentId).filter(
+    const grandparentChildren = visibleBlockChildren(state, grandparentId, annotationVirtualParents(state)).filter(
         (id) => id !== blockId,
     );
     const parentIndex = grandparentChildren.indexOf(parentId);
     const afterParentId = parentIndex >= 0 ? grandparentChildren[parentIndex + 1] : null;
-    const siblings = visibleBlockChildren(state, parentId);
+    const siblings = visibleBlockChildren(state, parentId, annotationVirtualParents(state));
     const blockIndex = siblings.indexOf(blockId);
     const followingSiblings = blockIndex >= 0 ? siblings.slice(blockIndex + 1) : [];
     const ops: Array<Op<RichBlockMeta>> = moveBlockOps(state, {
@@ -427,6 +431,7 @@ export const unindentBlock = (
         before: parent.id,
         after: afterParentId ? state.state.blocks[afterParentId].id : null,
         ts: context.nextTs(),
+        virtualParents: annotationVirtualParents(state),
     });
 
     for (const siblingId of followingSiblings) {
@@ -444,7 +449,7 @@ export const unindentBlock = (
         });
     }
 
-    const next = applyMany(state, ops);
+    const next = applyMany(state, ops, annotationVirtualParents(state));
     return {state: next, ops, selection: caret(blockId, 0)};
 };
 
@@ -468,7 +473,7 @@ export const joinWithPrevious = (
             ts: context.nextTs(),
         },
     );
-    const next = applyMany(state, ops);
+    const next = applyMany(state, ops, annotationVirtualParents(state));
     return {state: next, ops, selection: caret(previousBlockId, previousLength)};
 };
 
@@ -494,7 +499,7 @@ export const joinWithNext = (
             ts: context.nextTs(),
         },
     );
-    const next = applyMany(state, ops);
+    const next = applyMany(state, ops, annotationVirtualParents(state));
     return {state: next, ops, selection: caret(blockId, currentLength)};
 };
 
@@ -517,14 +522,14 @@ const exitCodeBlock = (
             startOffset: length - 1,
             endOffset: length,
         });
-        working = applyMany(working, deleteOps);
+        working = applyMany(working, deleteOps, annotationVirtualParents(working));
         ops.push(...deleteOps);
     }
 
     const parentId = visibleParentIdForBlock(working, blockId);
     if (parentId === null) return {state: working, ops, selection: caret(blockId, pointTextLength(working, blockId))};
 
-    const siblings = visibleBlockChildren(working, parentId);
+    const siblings = visibleBlockChildren(working, parentId, annotationVirtualParents(working));
     const index = siblings.indexOf(blockId);
     if (index < 0) return {state: working, ops, selection: caret(blockId, pointTextLength(working, blockId))};
 
@@ -538,8 +543,9 @@ const exitCodeBlock = (
         after: afterId ? parseLamportString(afterId) : null,
         meta: paragraphMeta(ts),
         ts,
+        virtualParents: annotationVirtualParents(working),
     });
-    working = applyMany(working, insertOps);
+    working = applyMany(working, insertOps, annotationVirtualParents(working));
     ops.push(...insertOps);
 
     return {state: working, ops, selection: caret(newBlockId, 0)};
@@ -560,7 +566,7 @@ const insertTextAtPoint = (
         text,
         ts: context.nextTs,
     });
-    const next = applyMany(state, ops);
+    const next = applyMany(state, ops, annotationVirtualParents(state));
     return {
         state: next,
         ops,
@@ -583,7 +589,7 @@ const deleteSelection = (
             }),
         );
     }
-    return {state: ops.length ? applyMany(state, ops) : state, ops, point};
+    return {state: ops.length ? applyMany(state, ops, annotationVirtualParents(state)) : state, ops, point};
 };
 
 const deleteSelectionAndJoinBoundaries = (
@@ -615,7 +621,7 @@ const deleteSelectionAndJoinBoundaries = (
                     ts: context.nextTs(),
                 },
             );
-            working = applyMany(working, joinOps);
+            working = applyMany(working, joinOps, annotationVirtualParents(working));
             ops.push(...joinOps);
         }
     }
