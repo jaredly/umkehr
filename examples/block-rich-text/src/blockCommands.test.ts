@@ -26,6 +26,7 @@ import {
     type CommandContext,
 } from './blockCommands';
 import {applyLocalChange, createDemoState, makeCommandContext, toggleOnline} from './blockEditorRuntime';
+import {annotationVirtualParents, createAnnotation} from './annotations';
 import {retainSelection} from './retainedSelection';
 import {caret, type EditorSelection} from './selectionModel';
 
@@ -607,6 +608,34 @@ describe('block rich text commands', () => {
         ]);
         expect(result.selection).toEqual(caret(second, 0));
         expectCache(result.state);
+    });
+
+    it('indents a block when an annotation body exists', () => {
+        const context = ctx();
+        let result = pastePlainText(init(), caret(onlyBlock(init()), 0), 'a\nb', context);
+        const [first, second] = rootBlockIds(result.state);
+        result = createAnnotation(
+            result.state,
+            {type: 'range', anchor: {blockId: first, offset: 0}, focus: {blockId: first, offset: 1}},
+            'sidebar',
+            context,
+        );
+
+        result = indentBlock(result.state, second, context);
+
+        expect(outline(result.state)).toEqual([
+            {text: 'a', depth: 0},
+            {text: 'b', depth: 1},
+        ]);
+        expect(result.state.cache).toEqual(
+            organizeState(
+                result.state.state.blocks,
+                result.state.state.chars,
+                result.state.state.joins,
+                annotationVirtualParents(result.state),
+                result.state.state.marks,
+            ),
+        );
     });
 
     it('does not indent the first sibling', () => {

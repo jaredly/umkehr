@@ -367,7 +367,9 @@ export const moveBlockOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
     }
     if (
         parentId === blockId ||
-        (state.state.blocks[parentId] && parentId !== ROOT_ID && isBlockDescendantOf(state, parentId, blockId))
+        (state.state.blocks[parentId] &&
+            parentId !== ROOT_ID &&
+            isBlockDescendantOf(state, parentId, blockId, virtualParents))
     ) {
         throw new Error(`move block cannot be reparented into itself or a descendant`);
     }
@@ -654,7 +656,8 @@ const isBlockDescendantOf = <M extends TimestampedBlockMeta>(
     state: CachedState<M>,
     blockId: string,
     ancestorId: string,
-): boolean => materializedBlockPath(state, blockId).map(lamportToString).includes(ancestorId);
+    virtualParents: VirtualBlockParentConfig<M> = {},
+): boolean => materializedBlockPath(state, blockId, virtualParents).map(lamportToString).includes(ancestorId);
 
 const visibleDescendantIds = (outline: {id: string; parentId: string}[], blockId: string): string[] => {
     const result: string[] = [];
