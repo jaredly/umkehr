@@ -106,3 +106,9 @@
 - Kept popover mark positioning and pointer behavior unchanged.
 - Follow-up: native contenteditable carets were still covered by positioned popover marks, while comment/footnote marks were fine.
 - Removed `position: relative` from `.markPopover`; the popover controller uses the mark's bounding rect and does not need positioned inline marks.
+
+### Popover Header Removal
+
+- Removed the visible `Popover on "text"` heading from floating popovers.
+- Removed the now-unused floating popover heading CSS.
+- Updated overlapping-popover coverage to assert distinct dialogs instead of the removed heading text.

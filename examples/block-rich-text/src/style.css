@@ -859,13 +859,6 @@ select {
     box-shadow: 0 12px 32px rgb(0 0 0 / 20%);
 }
 
-.annotationFloatingPopover strong {
-    display: block;
-    margin-bottom: 6px;
-    color: #374151;
-    font-size: 13px;
-}
-
 .annotationSidebar {
     margin: 0 0 12px;
     padding: 8px 10px;

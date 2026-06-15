@@ -1554,7 +1554,6 @@ function FloatingAnnotationPopover({
                 onEscape();
             }}
         >
-            <strong>Popover on “{annotation.referenceText}”</strong>
             {annotation.bodyBlocks.map((block) => (
                 <AnnotationBodyBlock
                     key={block.id}
