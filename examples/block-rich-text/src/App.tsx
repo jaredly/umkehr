@@ -489,9 +489,12 @@ function BlockEditor({
 
     const popoverContainsFocus = useCallback(() => {
         const panel = rootRef.current?.closest<HTMLElement>('.editorPanel');
-        const popover = panel?.querySelector<HTMLElement>('.annotationFloatingPopover');
+        const popovers = panel
+            ? Array.from(panel.querySelectorAll<HTMLElement>('.annotationFloatingPopover'))
+            : [];
         return Boolean(
-            popover && document.activeElement instanceof Node && popover.contains(document.activeElement),
+            document.activeElement instanceof Node &&
+                popovers.some((popover) => popover.contains(document.activeElement)),
         );
     }, []);
 
@@ -2298,6 +2301,12 @@ function RichTextEditableSurface({
                 );
                 if (relatedTrigger === trigger) return;
                 onPopoverTriggerLeave?.(trigger.dataset.popoverId);
+            }}
+            onClick={(event) => {
+                const trigger = popoverTriggerFromEvent(event.currentTarget, event.target);
+                const id = trigger?.dataset.popoverId;
+                if (!trigger || !id) return;
+                onPopoverTriggerEnter?.(id, trigger);
             }}
             onInput={(event) => {
                 const native = event.nativeEvent as InputEvent;
