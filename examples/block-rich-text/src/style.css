@@ -421,6 +421,7 @@ select {
 
 .retainedSelectionCaret {
     position: relative;
+    z-index: 1;
     display: inline;
     font-size: 0;
     line-height: 0;

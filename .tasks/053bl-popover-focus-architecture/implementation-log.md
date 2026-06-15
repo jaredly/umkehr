@@ -99,3 +99,8 @@
   - `npm exec tsc -- -p examples/block-rich-text/tsconfig.json --noEmit` passed.
   - `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx` passed with 82 tests.
   - `npm exec vitest -- run examples/block-rich-text/src` passed with 196 tests across 9 files.
+
+### Bug Fix: Popover Marks Painting Over Cursors
+
+- Raised retained cursor markers above positioned popover mark spans with a local `z-index`.
+- Kept popover mark positioning and pointer behavior unchanged.
