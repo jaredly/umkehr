@@ -22,7 +22,7 @@ import {
     compareLamportStrings,
     type Op,
 } from 'umkehr/block-crdt';
-import {createLseqIdBetween} from 'umkehr/block-crdt/lseq';
+import {compareLseqIds, createLseqIdBetween} from 'umkehr/block-crdt/lseq';
 import type {BlockOrderTs, CachedState, Lamport} from 'umkehr/block-crdt/types';
 import {lamportToString, parseLamportString} from 'umkehr/block-crdt/utils';
 import {paragraphMeta, sameTypeWithTs, type RichBlockMeta} from './blockMeta';
@@ -468,6 +468,9 @@ export const pastePlainText = (
     context: CommandContext,
 ): CommandResult => {
     const lines = text.replace(/\r\n?/g, '\n').split('\n');
+    const appended = pastePlainTextAtBlockEnd(state, selection, lines, context);
+    if (appended) return appended;
+
     let result = insertText(state, selection, lines[0] ?? '', context);
     const ops = [...result.ops];
 
@@ -480,6 +483,142 @@ export const pastePlainText = (
     }
 
     return {...result, ops};
+};
+
+const pastePlainTextAtBlockEnd = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    lines: string[],
+    context: CommandContext,
+): CommandResult | null => {
+    if (lines.length <= 1 || !isCollapsed(selection)) return null;
+    const point = firstPointForSelection(state, selection);
+    const block = state.state.blocks[point.blockId];
+    const parentId = visibleParentIdForBlock(state, point.blockId);
+    if (
+        !block ||
+        block.meta.type === 'code' ||
+        parentId !== ROOT_ID ||
+        point.offset !== pointTextLength(state, point.blockId)
+    ) {
+        return null;
+    }
+
+    const chars = {...state.state.chars};
+    const blocks = {...state.state.blocks};
+    const charContents = {...state.cache.charContents};
+    const blockChildren = {...state.cache.blockChildren};
+    const ops: Array<Op<RichBlockMeta>> = [];
+    let maxSeenCount = state.state.maxSeenCount;
+    let previousBlockId = point.blockId;
+    let selectionOffset = 0;
+
+    const appendText = (blockId: string, text: string) => {
+        const currentState = {
+            state: {...state.state, chars, blocks, maxSeenCount},
+            cache: {...state.cache, charContents},
+        };
+        let after = lastVisibleCharId(currentState, blockId) ?? blocks[blockId].id;
+        for (const segment of textSegments(text)) {
+            const id: Lamport = [++maxSeenCount, context.actor];
+            const op: Op<RichBlockMeta> = {
+                type: 'char',
+                char: {text: segment, id, deleted: false, parent: {id: after, ts: ''}},
+            };
+            const charId = lamportToString(id);
+            chars[charId] = op.char;
+            const afterId = lamportToString(after);
+            charContents[afterId] = insertSortedRev(charContents[afterId]?.slice() ?? [], charId);
+            ops.push(op);
+            after = id;
+            selectionOffset++;
+        }
+    };
+
+    appendText(previousBlockId, lines[0] ?? '');
+
+    for (let index = 1; index < lines.length; index++) {
+        const previous = blocks[previousBlockId];
+        if (!previous) return null;
+        const currentState = {
+            state: {...state.state, chars, blocks, maxSeenCount},
+            cache: {...state.cache, blockChildren, charContents},
+        };
+        const blockOp = appendRootBlockAfterOp(
+            currentState,
+            previousBlockId,
+            previous.meta,
+            context,
+        );
+        maxSeenCount = Math.max(maxSeenCount, blockOp.block.id[0]);
+        const blockId = lamportToString(blockOp.block.id);
+        blocks[blockId] = blockOp.block;
+        blockChildren[ROOT_ID] = insertSortedBlockId(blockChildren[ROOT_ID]?.slice() ?? [], blockId, blocks);
+        ops.push(blockOp);
+        previousBlockId = blockId;
+        selectionOffset = 0;
+        appendText(previousBlockId, lines[index]);
+    }
+
+    return {
+        state: {
+            state: {...state.state, chars, blocks, maxSeenCount},
+            cache: {...state.cache, blockChildren, charContents},
+        },
+        ops,
+        selection: caret(previousBlockId, selectionOffset),
+    };
+};
+
+const lastVisibleCharId = (state: CachedState<RichBlockMeta>, blockId: string): Lamport | null => {
+    const chars = orderedCharIdsForBlock(state, blockId, {visibleOnly: true});
+    const charId = chars[chars.length - 1];
+    return charId ? state.state.chars[charId].id : null;
+};
+
+const appendRootBlockAfterOp = (
+    state: CachedState<RichBlockMeta>,
+    previousBlockId: string,
+    meta: RichBlockMeta,
+    context: CommandContext,
+): Op<RichBlockMeta> & {type: 'block'} => {
+    const previous = state.state.blocks[previousBlockId];
+    if (!previous) throw new Error('append previous block not found');
+    const id: Lamport = [state.state.maxSeenCount + 1, context.actor];
+    const ts = context.nextTs();
+    return {
+        type: 'block',
+        block: {
+            id,
+            meta,
+            order: {
+                id,
+                path: [id],
+                index: createLseqIdBetween(previous.order.index, null, {
+                    actorId: context.actor,
+                    counter: id[0],
+                }),
+                ts,
+            },
+            deleted: false,
+        },
+    };
+};
+
+const insertSortedBlockId = (
+    array: string[],
+    item: string,
+    blocks: CachedState<RichBlockMeta>['state']['blocks'],
+): string[] => {
+    const itemBlock = blocks[item];
+    for (let index = 0; index < array.length; index++) {
+        if (compareLseqIds(itemBlock.order.index, blocks[array[index]].order.index) < 0) {
+            array.splice(index, 0, item);
+            return array;
+        }
+    }
+    array.push(item);
+    return array;
 };
 
 export const toggleMark = (
@@ -1542,12 +1681,11 @@ const insertTextAtPoint = (
 ): {state: CachedState<RichBlockMeta>; ops: Array<Op<RichBlockMeta>>; point: BlockPoint} => {
     if (!text) return {state, ops: [], point};
 
-    const ops = insertTextOps(state, {
+    const ops = localInsertTextOps(state, {
         actor: context.actor,
         block: parseLamportString(point.blockId),
         offset: point.offset,
         text,
-        ts: context.nextTs,
     });
     const next = applyLocalTextInsertOps(state, ops);
     return {
@@ -1555,6 +1693,47 @@ const insertTextAtPoint = (
         ops,
         point: {blockId: point.blockId, offset: point.offset + ops.length},
     };
+};
+
+const localInsertTextOps = (
+    state: CachedState<RichBlockMeta>,
+    {
+        actor,
+        block,
+        offset,
+        text,
+    }: {
+        actor: string;
+        block: Lamport;
+        offset: number;
+        text: string;
+    },
+): Array<Op<RichBlockMeta>> => {
+    const blockId = lamportToString(block);
+    const visibleChars = offset === 0 ? [] : orderedCharIdsForBlock(state, blockId, {visibleOnly: true});
+    if (offset < 0 || (offset > 0 && offset > visibleChars.length)) {
+        throw new Error(`insert offset out of bounds`);
+    }
+
+    let after = offset === 0 ? block : state.state.chars[visibleChars[offset - 1]].id;
+    let next = state.state.maxSeenCount + 1;
+    const ops: Array<Op<RichBlockMeta>> = [];
+
+    for (const segment of textSegments(text)) {
+        const id: Lamport = [next++, actor];
+        ops.push({
+            type: 'char',
+            char: {text: segment, id, deleted: false, parent: {id: after, ts: ''}},
+        });
+        after = id;
+    }
+
+    return ops;
+};
+
+const textSegments = (text: string): string[] => {
+    if (/^[\x00-\x7F]*$/.test(text)) return text.split('');
+    return segmentText(text);
 };
 
 const applyLocalTextInsertOps = (

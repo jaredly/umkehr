@@ -111,7 +111,7 @@ describe('block rich text typing performance', () => {
         expect(elapsed).toBeLessThan(5);
     }, 30_000);
 
-    it('pastes 4000 characters as plain text in less than 100ms', () => {
+    it('pastes 4000 characters as plain text in less than 20ms', () => {
         const demo = createDemoState();
         const lines = blockLines(20, 200);
         const blockId = rootBlockIds(demo.left.state)[0];
@@ -127,6 +127,6 @@ describe('block rich text typing performance', () => {
 
         expect(rootBlockIds(result.state)).toHaveLength(20);
         expect(rootBlockIds(result.state).map((id) => blockContents(result.state, id))).toEqual(lines);
-        expect(elapsed).toBeLessThan(100);
+        expect(elapsed).toBeLessThan(20);
     }, 30_000);
 });
