@@ -1,0 +1,1 @@
+examples/block-rich-text: when the cursor is collapsed, cmd+b should make it so the next character you type is bolded. This can be tracked in transient state -- i.e. if you move the cursor elsewhere and then back, the "about to bold" status doesn't need to be retained.

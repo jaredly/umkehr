@@ -1,4 +1,4 @@
-import {applyMany, cachedState, compareLamportStrings, type Op} from 'umkehr/block-crdt';
+import {applyMany, cachedState, type Op} from 'umkehr/block-crdt';
 import {initialStateWithMeta} from 'umkehr/block-crdt/initialState';
 import type {
     BlockOrderTs,
@@ -11,7 +11,7 @@ import * as hlc from '../../../src/crdt/hlc';
 import {paragraphMeta, type RichBlockMeta} from './blockMeta';
 import {annotationVirtualParents} from './annotations';
 import {initialRetainedSelectionSet, type RetainedSelectionSet} from './selectionSet';
-import {lamportToString} from 'umkehr/block-crdt/utils';
+import {applyCharInsertOps} from './localTextOps';
 
 export type EditorId = 'left' | 'right';
 
@@ -112,55 +112,8 @@ const createReplica = (id: EditorId, state: CachedState<RichBlockMeta>): Replica
 });
 
 const applyRemoteOps = (replica: Replica, ops: Array<Op<RichBlockMeta>>): Replica => {
-    const state = applyRemoteCharOps(replica.state, ops) ?? applyMany(replica.state, ops, annotationVirtualParents(replica.state));
+    const state = applyCharInsertOps(replica.state, ops) ?? applyMany(replica.state, ops, annotationVirtualParents(replica.state));
     return {...replica, state};
-};
-
-const applyRemoteCharOps = (
-    state: CachedState<RichBlockMeta>,
-    ops: Array<Op<RichBlockMeta>>,
-): CachedState<RichBlockMeta> | null => {
-    if (!ops.length || !ops.every((op) => op.type === 'char')) return null;
-
-    const chars = {...state.state.chars};
-    const charContents = {...state.cache.charContents};
-    let maxSeenCount = state.state.maxSeenCount;
-
-    for (const op of ops) {
-        if (op.type !== 'char') return null;
-        const charId = lamportToString(op.char.id);
-        const parentId = lamportToString(op.char.parent.id);
-        if (chars[charId]) return null;
-        if (!state.state.blocks[parentId] && !chars[parentId] && !state.cache.joinSentinels[parentId]) {
-            return null;
-        }
-        chars[charId] = op.char;
-        charContents[parentId] = insertSortedRev(charContents[parentId]?.slice() ?? [], charId);
-        maxSeenCount = Math.max(maxSeenCount, op.char.id[0]);
-    }
-
-    return {
-        state: {
-            ...state.state,
-            chars,
-            maxSeenCount,
-        },
-        cache: {
-            ...state.cache,
-            charContents,
-        },
-    };
-};
-
-const insertSortedRev = (array: string[], item: string): string[] => {
-    for (let index = 0; index < array.length; index++) {
-        if (compareLamportStrings(item, array[index]) > 0) {
-            array.splice(index, 0, item);
-            return array;
-        }
-    }
-    array.push(item);
-    return array;
 };
 
 const initialTimestamp = (node: string) => hlc.pack(hlc.init(node, 0));

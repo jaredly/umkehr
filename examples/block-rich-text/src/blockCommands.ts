@@ -42,6 +42,7 @@ import {
     type BlockPoint,
     type EditorSelection,
 } from './selectionModel';
+import {applyCharInsertOpsOrApplyMany, localInsertTextOps} from './localTextOps';
 
 export type CommandContext = {
     actor: string;
@@ -519,7 +520,7 @@ const pastePlainTextAtBlockEnd = (
             cache: {...state.cache, charContents},
         };
         let after = lastVisibleCharId(currentState, blockId) ?? blocks[blockId].id;
-        for (const segment of textSegments(text)) {
+        for (const segment of segmentText(text)) {
             const id: Lamport = [++maxSeenCount, context.actor];
             const op: Op<RichBlockMeta> = {
                 type: 'char',
@@ -1687,94 +1688,11 @@ const insertTextAtPoint = (
         offset: point.offset,
         text,
     });
-    const next = applyLocalTextInsertOps(state, ops);
+    const next = applyCharInsertOpsOrApplyMany(state, ops);
     return {
         state: next,
         ops,
         point: {blockId: point.blockId, offset: point.offset + ops.length},
-    };
-};
-
-const localInsertTextOps = (
-    state: CachedState<RichBlockMeta>,
-    {
-        actor,
-        block,
-        offset,
-        text,
-    }: {
-        actor: string;
-        block: Lamport;
-        offset: number;
-        text: string;
-    },
-): Array<Op<RichBlockMeta>> => {
-    const blockId = lamportToString(block);
-    const visibleChars = offset === 0 ? [] : orderedCharIdsForBlock(state, blockId, {visibleOnly: true});
-    if (offset < 0 || (offset > 0 && offset > visibleChars.length)) {
-        throw new Error(`insert offset out of bounds`);
-    }
-
-    let after = offset === 0 ? block : state.state.chars[visibleChars[offset - 1]].id;
-    let next = state.state.maxSeenCount + 1;
-    const ops: Array<Op<RichBlockMeta>> = [];
-
-    for (const segment of textSegments(text)) {
-        const id: Lamport = [next++, actor];
-        ops.push({
-            type: 'char',
-            char: {text: segment, id, deleted: false, parent: {id: after, ts: ''}},
-        });
-        after = id;
-    }
-
-    return ops;
-};
-
-const textSegments = (text: string): string[] => {
-    if (/^[\x00-\x7F]*$/.test(text)) return text.split('');
-    return segmentText(text);
-};
-
-const applyLocalTextInsertOps = (
-    state: CachedState<RichBlockMeta>,
-    ops: Array<Op<RichBlockMeta>>,
-): CachedState<RichBlockMeta> => {
-    if (!ops.length) return state;
-    if (!ops.every((op) => op.type === 'char')) {
-        return applyMany(state, ops, annotationVirtualParents(state));
-    }
-
-    const chars = {...state.state.chars};
-    const charContents = {...state.cache.charContents};
-    let maxSeenCount = state.state.maxSeenCount;
-
-    for (const op of ops) {
-        if (op.type !== 'char') continue;
-        const charId = lamportToString(op.char.id);
-        const parentId = lamportToString(op.char.parent.id);
-        if (chars[charId]) {
-            return applyMany(state, ops, annotationVirtualParents(state));
-        }
-        if (!state.state.blocks[parentId] && !chars[parentId] && !state.cache.joinSentinels[parentId]) {
-            return applyMany(state, ops, annotationVirtualParents(state));
-        }
-
-        chars[charId] = op.char;
-        charContents[parentId] = insertSortedRev(charContents[parentId]?.slice() ?? [], charId);
-        maxSeenCount = Math.max(maxSeenCount, op.char.id[0]);
-    }
-
-    return {
-        state: {
-            ...state.state,
-            chars,
-            maxSeenCount,
-        },
-        cache: {
-            ...state.cache,
-            charContents,
-        },
     };
 };
 

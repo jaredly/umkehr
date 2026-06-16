@@ -1,11 +1,9 @@
 import {
     applyMany,
     blockContents,
-    compareLamportStrings,
     deleteRangeOps,
     formattedMarkValues,
     insertBlockOpsWithId,
-    insertTextOps,
     orderedCharIdsForBlock,
     visibleBlockChildren,
     coveredCharIdsForMark,
@@ -26,6 +24,7 @@ import {
     type AnnotationMarkData,
     type AnnotationPresentation,
 } from './virtualParents';
+import {applyCharInsertOpsOrApplyMany, localInsertTextOps} from './localTextOps';
 
 export {
     ANNOTATION_MARK,
@@ -129,13 +128,13 @@ export const setAnnotationBodyText = (
         ops.push(...deleteOps);
     }
     if (text.length > 0) {
-        const insertOps = localAnnotationBodyInsertTextOps(working, {
+        const insertOps = localInsertTextOps(working, {
             actor: context.actor,
             block: parseLamportString(bodyBlockId),
             offset: 0,
             text,
         });
-        working = applyAnnotationBodyTextInsertOps(working, insertOps);
+        working = applyCharInsertOpsOrApplyMany(working, insertOps);
         ops.push(...insertOps);
     }
 
@@ -163,101 +162,18 @@ export const replaceAnnotationBodySelection = (
         ops.push(...deleteOps);
     }
     if (text.length > 0) {
-        const insertOps = localAnnotationBodyInsertTextOps(working, {
+        const insertOps = localInsertTextOps(working, {
             actor: context.actor,
             block: parseLamportString(range.blockId),
             offset: range.startOffset,
             text,
         });
-        working = applyAnnotationBodyTextInsertOps(working, insertOps);
+        working = applyCharInsertOpsOrApplyMany(working, insertOps);
         ops.push(...insertOps);
     }
 
     const offset = range.startOffset + segmentText(text).length;
     return {state: working, ops, selection: {type: 'caret', point: {blockId: range.blockId, offset}}};
-};
-
-const localAnnotationBodyInsertTextOps = (
-    state: CachedState<RichBlockMeta>,
-    {
-        actor,
-        block,
-        offset,
-        text,
-    }: {
-        actor: string;
-        block: Lamport;
-        offset: number;
-        text: string;
-    },
-): Array<Op<RichBlockMeta>> => {
-    const blockId = lamportToString(block);
-    const visibleChars = offset === 0 ? [] : orderedCharIdsForBlock(state, blockId, {visibleOnly: true});
-    if (offset < 0 || (offset > 0 && offset > visibleChars.length)) {
-        throw new Error(`insert offset out of bounds`);
-    }
-
-    let after = offset === 0 ? block : state.state.chars[visibleChars[offset - 1]].id;
-    let next = state.state.maxSeenCount + 1;
-    const ops: Array<Op<RichBlockMeta>> = [];
-    for (const segment of segmentText(text)) {
-        const id: Lamport = [next++, actor];
-        ops.push({
-            type: 'char',
-            char: {text: segment, id, deleted: false, parent: {id: after, ts: ''}},
-        });
-        after = id;
-    }
-    return ops;
-};
-
-const applyAnnotationBodyTextInsertOps = (
-    state: CachedState<RichBlockMeta>,
-    ops: Array<Op<RichBlockMeta>>,
-): CachedState<RichBlockMeta> => {
-    if (!ops.length) return state;
-    if (!ops.every((op) => op.type === 'char')) return applyMany(state, ops, annotationVirtualParents(state));
-
-    const chars = {...state.state.chars};
-    const charContents = {...state.cache.charContents};
-    let maxSeenCount = state.state.maxSeenCount;
-
-    for (const op of ops) {
-        if (op.type !== 'char') continue;
-        const charId = lamportToString(op.char.id);
-        const parentId = lamportToString(op.char.parent.id);
-        if (chars[charId]) return applyMany(state, ops, annotationVirtualParents(state));
-        if (!state.state.blocks[parentId] && !chars[parentId] && !state.cache.joinSentinels[parentId]) {
-            return applyMany(state, ops, annotationVirtualParents(state));
-        }
-
-        chars[charId] = op.char;
-        charContents[parentId] = insertSortedRev(charContents[parentId]?.slice() ?? [], charId);
-        maxSeenCount = Math.max(maxSeenCount, op.char.id[0]);
-    }
-
-    return {
-        state: {
-            ...state.state,
-            chars,
-            maxSeenCount,
-        },
-        cache: {
-            ...state.cache,
-            charContents,
-        },
-    };
-};
-
-const insertSortedRev = (array: string[], item: string): string[] => {
-    for (let index = 0; index < array.length; index++) {
-        if (compareLamportStrings(item, array[index]) > 0) {
-            array.splice(index, 0, item);
-            return array;
-        }
-    }
-    array.push(item);
-    return array;
 };
 
 export const deleteAnnotationBodyBackward = (
