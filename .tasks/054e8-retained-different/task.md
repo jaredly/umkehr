@@ -1,0 +1,2 @@
+examples/block-rich-text: Current retained formatting (press cmd-b then type then cmd-b again) is conceptually bad and expensive. I want a single mark op added, not 2 for every char.
+The first op should be "before" the next char, so all children added after the current one are included. When you "stop" the bold, it should remove that bold and make a new one that is bounded to "after" the final char you typed.
