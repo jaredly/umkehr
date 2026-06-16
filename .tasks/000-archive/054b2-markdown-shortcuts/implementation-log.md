@@ -20,3 +20,10 @@
   - `npm --prefix examples/block-rich-text run build` passed, including `tsc --noEmit` and Vite build.
 - Known caveat: active pending inline marks keep the existing retained-mark insertion path. Markdown shortcuts are wired for ordinary typed text and non-caret replacement fallback; shortcut conversion while a pending inline mark is actively being extended was left unchanged to avoid interfering with the newer retained mark session logic.
 - Follow-up change: `[ ] `, `[x] `, and `[X] ` now also convert unordered bullet list items into todos. Paragraph todo shortcuts still work. Ordered list items intentionally remain literal for todo shortcuts.
+
+## 2026-06-16
+
+- Follow-up change: `# `, `## `, and `### ` now convert paragraph blocks into heading levels 1, 2, and 3. `#### ` remains literal.
+- Verification:
+  - `npm exec vitest -- run examples/block-rich-text/src/blockCommands.test.ts` passed: 98 tests.
+  - `npm --prefix examples/block-rich-text run build` passed, including `tsc --noEmit` and Vite build.
