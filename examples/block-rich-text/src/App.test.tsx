@@ -1662,6 +1662,109 @@ describe('Block rich text example UI', () => {
         expect(domSelectionOffsets(blocks(left)[0])).toEqual({anchor: 1, focus: 3});
     });
 
+    it('uses Cmd+B as a pending bold style at a collapsed caret', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'a');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('a'));
+
+        fireEvent.keyDown(blocks(left)[0], {key: 'b', metaKey: true});
+        await waitFor(() =>
+            expect(within(left).getByRole('button', {name: 'B'}).getAttribute('aria-pressed')).toBe('true'),
+        );
+
+        beforeInputText(blocks(left)[0], 'bc');
+
+        await waitFor(() => expect(blocks(left)[0].querySelector('.markBold')?.textContent).toBe('bc'));
+        expect(blockText(blocks(left)[0])).toBe('abc');
+    });
+
+    it('toggles pending bold off before typing', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        fireEvent.keyDown(blocks(left)[0], {key: 'b', metaKey: true});
+        fireEvent.keyDown(blocks(left)[0], {key: 'b', metaKey: true});
+        await waitFor(() =>
+            expect(within(left).getByRole('button', {name: 'B'}).getAttribute('aria-pressed')).toBe('false'),
+        );
+
+        beforeInputText(blocks(left)[0], 'a');
+
+        await waitFor(() => expect(blockText(blocks(left)[0])).toBe('a'));
+        expect(blocks(left)[0].querySelector('.markBold')).toBeNull();
+    });
+
+    it('clears pending bold when the caret moves', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        fireEvent.keyDown(blocks(left)[0], {key: 'b', metaKey: true});
+        await waitFor(() =>
+            expect(within(left).getByRole('button', {name: 'B'}).getAttribute('aria-pressed')).toBe('true'),
+        );
+
+        setDomCaret(blocks(left)[0], 0);
+        fireEvent.mouseUp(blocks(left)[0]);
+        await waitFor(() =>
+            expect(within(left).getByRole('button', {name: 'B'}).getAttribute('aria-pressed')).toBe('false'),
+        );
+
+        beforeInputText(blocks(left)[0], 'a');
+
+        await waitFor(() => expect(blockText(blocks(left)[0])).toBe('a'));
+        expect(blocks(left)[0].querySelector('.markBold')).toBeNull();
+    });
+
+    it('uses Ctrl+B for pending bold at a collapsed caret', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        fireEvent.keyDown(blocks(left)[0], {key: 'b', ctrlKey: true});
+        beforeInputText(blocks(left)[0], 'a');
+
+        await waitFor(() => expect(blocks(left)[0].querySelector('.markBold')?.textContent).toBe('a'));
+    });
+
+    it('uses pending italic and strikethrough at a collapsed caret', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        fireEvent.keyDown(blocks(left)[0], {key: 'i', metaKey: true});
+        fireEvent.click(within(left).getByRole('button', {name: 'Strikethrough'}));
+        beforeInputText(blocks(left)[0], 'a');
+
+        await waitFor(() => {
+            expect(blocks(left)[0].querySelector('.markItalic')?.textContent).toBe('a');
+            expect(blocks(left)[0].querySelector('.markStrikethrough')?.textContent).toBe('a');
+        });
+    });
+
+    it('shows toolbar pressed state from actual marks at the caret', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abcd');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abcd'));
+        selectRange(blocks(left)[0], 1, 3);
+        fireEvent.click(within(left).getByRole('button', {name: 'B'}));
+        await waitFor(() => expect(blocks(left)[0].querySelector('.markBold')?.textContent).toBe('bc'));
+
+        setDomCaret(blocks(left)[0], 2);
+        fireEvent.mouseUp(blocks(left)[0]);
+
+        await waitFor(() =>
+            expect(within(left).getByRole('button', {name: 'B'}).getAttribute('aria-pressed')).toBe('true'),
+        );
+    });
+
     it('bolds the first selected range in a newly-created block with Cmd+B', async () => {
         const view = render(<App />);
         const {left} = panels(view);

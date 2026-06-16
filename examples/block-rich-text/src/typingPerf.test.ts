@@ -1,6 +1,7 @@
 import {describe, expect, it} from 'vitest';
-import {applyMany, blockContents, insertBlockOps, rootBlockIds, type Op} from 'umkehr/block-crdt';
-import {insertText, pastePlainText, splitBlock} from './blockCommands';
+import {applyMany, blockContents, insertBlockOps, materializeFormattedBlocks, rootBlockIds, type Op} from 'umkehr/block-crdt';
+import {insertText, pastePlainText, splitBlock, toggleMark} from './blockCommands';
+import {deriveActiveInlineMarks} from './App';
 import {applyLocalChange, createDemoState, makeCommandContext, type DemoState} from './blockEditorRuntime';
 import {annotationVirtualParents} from './annotations';
 import {paragraphMeta, type RichBlockMeta} from './blockMeta';
@@ -148,6 +149,32 @@ describe('block rich text typing performance', () => {
         expect(rootBlockIds(result.state)).toHaveLength(1);
         expect(blockContents(result.state, blockId)).toBe(text);
         expect(elapsed).toBeLessThan(100);
+    });
+
+    it('calculates toolbar active marks at the end of a 2000 character block with an early bold mark in less than 10ms', () => {
+        const demo = createDemoState();
+        const context = makeCommandContext(demo.left);
+        const text = typedText(2000);
+        const blockId = rootBlockIds(demo.left.state)[0];
+        const pasted = pastePlainText(demo.left.state, caret(blockId, 0), text, context);
+        const marked = toggleMark(
+            pasted.state,
+            {
+                type: 'range',
+                anchor: {blockId, offset: 0},
+                focus: {blockId, offset: 10},
+            },
+            'bold',
+            context,
+        );
+        const blocks = materializeFormattedBlocks(marked.state);
+
+        const started = performance.now();
+        const activeMarks = deriveActiveInlineMarks(marked.state, blocks, caret(blockId, 2000), {});
+        const elapsed = performance.now() - started;
+
+        expect(activeMarks.bold).toBe(false);
+        expect(elapsed).toBeLessThan(10);
     });
 
     it('splits at the end of the second 400 character pasted block in less than 50ms', () => {

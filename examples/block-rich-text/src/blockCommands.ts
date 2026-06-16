@@ -102,6 +102,44 @@ export const insertText = (
     return {state: inserted.state, ops, selection: caret(inserted.point.blockId, inserted.point.offset)};
 };
 
+export const insertTextWithMarks = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    text: string,
+    markTypes: BooleanInlineMark[],
+    context: CommandContext,
+): CommandResult => {
+    const insertionStart = firstPointForSelection(state, selection);
+    const inserted = insertText(state, selection, text, context);
+    const insertedLength = segmentText(text).length;
+    const uniqueMarkTypes = [...new Set(markTypes)];
+    if (!insertedLength || !uniqueMarkTypes.length) return inserted;
+
+    const insertionEnd = firstPointForSelection(inserted.state, inserted.selection);
+    if (insertionStart.blockId !== insertionEnd.blockId || insertionStart.offset >= insertionEnd.offset) {
+        return inserted;
+    }
+
+    let working = inserted.state;
+    const ops = [...inserted.ops];
+    for (const markType of uniqueMarkTypes) {
+        const op = markRangeOp(
+            working,
+            parseLamportString(insertionStart.blockId),
+            insertionStart.offset,
+            insertionStart.offset + insertedLength,
+            markType,
+            undefined,
+            false,
+            [working.state.maxSeenCount + 1, context.actor],
+        );
+        working = applyMany(working, [op], annotationVirtualParents(working));
+        ops.push(op);
+    }
+
+    return {state: working, ops, selection: inserted.selection};
+};
+
 export const deleteBackward = (
     state: CachedState<RichBlockMeta>,
     selection: EditorSelection,

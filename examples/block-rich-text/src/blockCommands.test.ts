@@ -28,6 +28,7 @@ import {
     createTable,
     indentBlock,
     insertText,
+    insertTextWithMarks,
     moveBlock,
     moveTableCell,
     moveTableCellByTab,
@@ -941,6 +942,35 @@ describe('block rich text commands', () => {
         expect(materializeFormattedBlocks(result.state).map((block) => block.runs)).toEqual([
             [{text: 'ab', marks: {}}],
             [{text: 'cd', marks: {}}],
+        ]);
+        expectCache(result.state);
+    });
+
+    it('inserts text with pending boolean marks at a collapsed caret', () => {
+        const context = ctx();
+        let result = insertText(init(), caret(onlyBlock(init()), 0), 'ab', context);
+        const blockId = onlyBlock(result.state);
+
+        result = insertTextWithMarks(result.state, caret(blockId, 1), 'X', ['bold'], context);
+
+        expect(materializeFormattedBlocks(result.state)[0].runs).toEqual([
+            {text: 'a', marks: {}},
+            {text: 'X', marks: {bold: true}},
+            {text: 'b', marks: {}},
+        ]);
+        expect(result.selection).toEqual(caret(blockId, 2));
+        expectCache(result.state);
+    });
+
+    it('can apply multiple pending boolean marks to inserted text', () => {
+        const context = ctx();
+        const state = init();
+        const blockId = onlyBlock(state);
+
+        const result = insertTextWithMarks(state, caret(blockId, 0), 'X', ['bold', 'italic'], context);
+
+        expect(materializeFormattedBlocks(result.state)[0].runs).toEqual([
+            {text: 'X', marks: {bold: true, italic: true}},
         ]);
         expectCache(result.state);
     });

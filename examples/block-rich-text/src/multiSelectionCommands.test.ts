@@ -13,6 +13,7 @@ import {
     extendSelectionsVertically,
     indentSelections,
     insertTextEverywhere,
+    insertTextWithMarksEverywhere,
     moveSelectionsHorizontally,
     moveSelectionsVertically,
     setLinkMarkEverywhere,
@@ -75,6 +76,27 @@ describe('block rich text multi-selection commands', () => {
         const result = insertTextEverywhere(pasted.state, set, 'X', ctx());
 
         expect(lines(result.state)).toEqual(['aXb', 'cXd']);
+    });
+
+    it('inserts marked text at selected carets', () => {
+        const inserted = insertText(init(), caret(onlyBlock(init()), 0), 'abcd', ctx());
+        const blockId = onlyBlock(inserted.state);
+        const set = appendSelection(
+            inserted.state,
+            singleRetainedSelectionSet(inserted.state, caret(blockId, 1), 'first'),
+            caret(blockId, 3),
+            'second',
+        );
+
+        const result = insertTextWithMarksEverywhere(inserted.state, set, 'X', ['bold'], ctx());
+
+        expect(materializeFormattedBlocks(result.state)[0].runs).toEqual([
+            {text: 'a', marks: {}},
+            {text: 'X', marks: {bold: true}},
+            {text: 'bc', marks: {}},
+            {text: 'X', marks: {bold: true}},
+            {text: 'd', marks: {}},
+        ]);
     });
 
     it('moves every selected caret horizontally', () => {

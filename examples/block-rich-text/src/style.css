@@ -230,6 +230,16 @@ select {
     background: #eef3f7;
 }
 
+.toolbar button[aria-pressed="true"] {
+    border-color: #4f7fb3;
+    color: #15395d;
+    background: #dcecff;
+}
+
+.toolbar button[aria-pressed="true"]:hover {
+    background: #cfe4fb;
+}
+
 .toolbar button:disabled:hover {
     background: #f3f6f8;
 }

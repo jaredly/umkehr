@@ -92,6 +92,7 @@ import {
     extendSelectionsVertically,
     indentSelections,
     insertTextEverywhere,
+    insertTextWithMarksEverywhere,
     moveSelectionsHorizontally,
     moveSelectionsVertically,
     pastePlainTextEverywhere,
@@ -147,6 +148,7 @@ import {
     linkRangeAroundOffsetInRuns,
     LINK_MARK,
     textForSelectionSegments,
+    type BooleanInlineMark,
     type LinkTargetRange,
 } from './inlineMarks';
 import {highlightCode, type SyntaxToken} from './syntaxHighlight';
@@ -161,6 +163,15 @@ type LinkPopoverState = {
     left: number;
 };
 type LinkHoverPopoverState = LinkPopoverState;
+type PendingInlineMarks = Partial<Record<BooleanInlineMark, boolean>>;
+
+const BOOLEAN_INLINE_MARKS: BooleanInlineMark[] = ['bold', 'italic', 'strikethrough'];
+
+const activePendingInlineMarks = (marks: PendingInlineMarks): BooleanInlineMark[] =>
+    BOOLEAN_INLINE_MARKS.filter((mark) => marks[mark]);
+
+const hasPendingInlineMarks = (marks: PendingInlineMarks): boolean =>
+    activePendingInlineMarks(marks).length > 0;
 
 export function App() {
     return hasDemoQuery() ? <BlogVisualDemos /> : <EditorApp />;
@@ -538,6 +549,7 @@ function BlockEditor({
         useState<EditorSelection | null>(null);
     const [linkPopover, setLinkPopover] = useState<LinkPopoverState | null>(null);
     const [linkHoverPopover, setLinkHoverPopover] = useState<LinkHoverPopoverState | null>(null);
+    const [pendingInlineMarks, setPendingInlineMarks] = useState<PendingInlineMarks>({});
     const blocksWithAnnotationBodies = materializeFormattedBlocks(
         replica.state,
         annotationVirtualParents(replica.state),
@@ -607,6 +619,10 @@ function BlockEditor({
     const selectedBlockType = blockTypeMenuValue(
         replica.state.state.blocks[focusPoint(primaryResolvedSelection).blockId]?.meta,
     );
+    const activeInlineMarks = useMemo(
+        () => deriveActiveInlineMarks(replica.state, blocks, primaryResolvedSelection, pendingInlineMarks),
+        [blocks, pendingInlineMarks, primaryResolvedSelection, replica.state],
+    );
     const decorationsByBlock = useMemo(
         () =>
             decorationsForSelectionSet(replica.state, resolvedSelectionSet, {
@@ -656,6 +672,10 @@ function BlockEditor({
 
     const resetVerticalCaretIntent = useCallback(() => {
         verticalCaretXRef.current = null;
+    }, []);
+
+    const clearPendingInlineMarks = useCallback(() => {
+        setPendingInlineMarks((current) => (hasPendingInlineMarks(current) ? {} : current));
     }, []);
 
     const nextSelectionId = useCallback(() => `sel-${nextSelectionIdRef.current++}`, []);
@@ -768,6 +788,7 @@ function BlockEditor({
         setIsExtendingSelection(false);
         setLinkPopover(null);
         setLinkHoverPopover(null);
+        setPendingInlineMarks({});
         if (linkHoverHideTimerRef.current) clearTimeout(linkHoverHideTimerRef.current);
         linkHoverHideTimerRef.current = null;
     }, [resetSignal]);
@@ -801,6 +822,7 @@ function BlockEditor({
             }
             const root = rootRef.current;
             if (!root) return;
+            if (event.type === 'mouseup') clearPendingInlineMarks();
             if (event.type === 'mouseup' && pendingMultiselectClickRef.current) {
                 const pendingClick = pendingMultiselectClickRef.current;
                 pendingMultiselectClickRef.current = null;
@@ -875,7 +897,7 @@ function BlockEditor({
                       : replaceSelectionSet(current.state, selection, current.selection.primaryId),
             }));
         },
-        [nextSelectionId, onCommand, resetVerticalCaretIntent, scheduleSelectionRestore],
+        [clearPendingInlineMarks, nextSelectionId, onCommand, resetVerticalCaretIntent, scheduleSelectionRestore],
     );
 
     const captureMouseDown = useCallback(
@@ -991,6 +1013,72 @@ function BlockEditor({
             });
         },
         [liveSelectionSet, onCommand, resetVerticalCaretIntent, scheduleSelectionRestore],
+    );
+
+    const runInlineMarkToggle = useCallback(
+        (markType: BooleanInlineMark) => {
+            onCommand((current) => {
+                resetVerticalCaretIntent();
+                const selection = liveSelectionSet(current);
+                const resolved = resolveSelectionSet(current.state, selection);
+                if (resolved.entries.every((entry) => entry.selection.type === 'caret')) {
+                    setPendingInlineMarks((currentMarks) => ({
+                        ...currentMarks,
+                        [markType]: !currentMarks[markType],
+                    }));
+                    const primary = primarySelection(resolved);
+                    scheduleSelectionRestore(primary);
+                    return {state: current.state, ops: [], selection};
+                }
+
+                clearPendingInlineMarks();
+                const result = toggleMarkEverywhere(
+                    current.state,
+                    selection,
+                    markType,
+                    makeCommandContext(current),
+                );
+                const primaryResultSelection = primarySelection(
+                    resolveSelectionSet(result.state, result.selection),
+                );
+                scheduleSelectionRestore(primaryResultSelection);
+                return result;
+            });
+        },
+        [
+            clearPendingInlineMarks,
+            liveSelectionSet,
+            onCommand,
+            resetVerticalCaretIntent,
+            scheduleSelectionRestore,
+        ],
+    );
+
+    const insertTextWithPendingMarks = useCallback(
+        (
+            current: Replica,
+            selection: RetainedSelectionSet,
+            text: string,
+        ): MultiCommandResult => {
+            const activeMarks = activePendingInlineMarks(pendingInlineMarks);
+            if (!activeMarks.length) {
+                return insertTextEverywhere(current.state, selection, text, makeCommandContext(current));
+            }
+            const resolved = resolveSelectionSet(current.state, selection);
+            const primary = primarySelection(resolved);
+            if (primary.type !== 'caret') {
+                clearPendingInlineMarks();
+                return insertTextEverywhere(current.state, selection, text, makeCommandContext(current));
+            }
+            return insertTextWithMarksEverywhere(
+                current.state,
+                selection,
+                text,
+                activeMarks,
+                makeCommandContext(current),
+            );
+        },
+        [clearPendingInlineMarks, pendingInlineMarks],
     );
 
     const runBlockControlCommand = useCallback(
@@ -1166,46 +1254,51 @@ function BlockEditor({
     const moveSelectionsHorizontallyEverywhere = useCallback(
         (direction: 'left' | 'right', unit: HorizontalMovementUnit = 'character') => {
             handledNavigationKeyRef.current = true;
+            clearPendingInlineMarks();
             runEditCommand((current, selection) =>
                 moveSelectionsHorizontally(current.state, selection, direction, unit),
             );
         },
-        [runEditCommand],
+        [clearPendingInlineMarks, runEditCommand],
     );
 
     const moveSelectionsVerticallyEverywhere = useCallback(
         (direction: 'up' | 'down') => {
             handledNavigationKeyRef.current = true;
+            clearPendingInlineMarks();
             runEditCommand((current, selection) =>
                 moveSelectionsVertically(current.state, selection, direction),
             );
         },
-        [runEditCommand],
+        [clearPendingInlineMarks, runEditCommand],
     );
 
     const extendSelectionsHorizontallyEverywhere = useCallback(
         (direction: 'left' | 'right', unit: HorizontalMovementUnit = 'character') => {
             handledNavigationKeyRef.current = true;
+            clearPendingInlineMarks();
             runEditCommand((current, selection) =>
                 extendSelectionsHorizontally(current.state, selection, direction, unit),
             );
         },
-        [runEditCommand],
+        [clearPendingInlineMarks, runEditCommand],
     );
 
     const extendSelectionsVerticallyEverywhere = useCallback(
         (direction: 'up' | 'down') => {
             handledNavigationKeyRef.current = true;
+            clearPendingInlineMarks();
             runEditCommand((current, selection) =>
                 extendSelectionsVertically(current.state, selection, direction),
             );
         },
-        [runEditCommand],
+        [clearPendingInlineMarks, runEditCommand],
     );
 
     const extendSelectionVerticallyWithVisualIntent = useCallback(
         (direction: 'up' | 'down', sourceBlock: HTMLElement) => {
             handledNavigationKeyRef.current = true;
+            clearPendingInlineMarks();
             onCommand((current) => {
                 const root = rootRef.current;
                 if (!root) return {state: current.state, ops: [], selection: current.selection};
@@ -1283,11 +1376,12 @@ function BlockEditor({
                 };
             });
         },
-        [onCommand, scheduleSelectionRestore],
+        [clearPendingInlineMarks, onCommand, scheduleSelectionRestore],
     );
 
     const moveCaret = useCallback(
         (selection: EditorSelection) => {
+            clearPendingInlineMarks();
             scheduleSelectionRestore(selection);
             onCommand((current) => ({
                 state: current.state,
@@ -1295,7 +1389,7 @@ function BlockEditor({
                 selection: replacePrimarySelection(current.state, current.selection, selection),
             }));
         },
-        [onCommand, scheduleSelectionRestore],
+        [clearPendingInlineMarks, onCommand, scheduleSelectionRestore],
     );
 
     const moveCaretHorizontally = useCallback(
@@ -1356,38 +1450,12 @@ function BlockEditor({
                 canUndo={undoState.canUndo}
                 canRedo={undoState.canRedo}
                 blockType={selectedBlockType}
+                activeMarks={activeInlineMarks}
                 onUndo={onUndo}
                 onRedo={onRedo}
-                onBold={() =>
-                    runEditCommand((current, selection) =>
-                        toggleMarkEverywhere(
-                            current.state,
-                            selection,
-                            'bold',
-                            makeCommandContext(current),
-                        ),
-                    )
-                }
-                onItalic={() =>
-                    runEditCommand((current, selection) =>
-                        toggleMarkEverywhere(
-                            current.state,
-                            selection,
-                            'italic',
-                            makeCommandContext(current),
-                        ),
-                    )
-                }
-                onStrikethrough={() =>
-                    runEditCommand((current, selection) =>
-                        toggleMarkEverywhere(
-                            current.state,
-                            selection,
-                            'strikethrough',
-                            makeCommandContext(current),
-                        ),
-                    )
-                }
+                onBold={() => runInlineMarkToggle('bold')}
+                onItalic={() => runInlineMarkToggle('italic')}
+                onStrikethrough={() => runInlineMarkToggle('strikethrough')}
                 onLink={openLinkFromCurrentSelection}
                 onAnnotation={(presentation) =>
                     activeAnnotationBodySelection
@@ -1459,6 +1527,7 @@ function BlockEditor({
                             if (event.currentTarget.contains(event.relatedTarget)) return;
                             resetVerticalCaretIntent();
                             setIsExtendingSelection(false);
+                            clearPendingInlineMarks();
                             setHasFocus(false);
                         }}
                         onMouseDown={captureMouseDown}
@@ -1492,6 +1561,8 @@ function BlockEditor({
                                 openLinkFromRange,
                                 showLinkHoverFromRange,
                                 hideLinkHover: scheduleLinkHoverHide,
+                                insertText: insertTextWithPendingMarks,
+                                runInlineMarkToggle,
                                 createMissingTableCell: (tableId, rowId, columnIndex) =>
                                     runBlockControlCommand((current) => {
                                         const result = createMissingTableCell(
@@ -1649,6 +1720,8 @@ type RenderBlockContext = {
     runEditCommand(
         command: (current: Replica, selection: RetainedSelectionSet) => MultiCommandResult,
     ): void;
+    insertText(current: Replica, selection: RetainedSelectionSet, text: string): MultiCommandResult;
+    runInlineMarkToggle(markType: BooleanInlineMark): void;
     runBlockControlCommand(command: (current: Replica) => MultiCommandResult): void;
     moveCaretHorizontally(selection: EditorSelection): void;
     moveCaretVertically(sourceBlock: HTMLElement, targetBlockId: string): void;
@@ -1942,13 +2015,12 @@ function TableRowHeader({
                 onLinkHoverLeave={context.hideLinkHover}
                 onInsertText={(text, activeSelection) =>
                     context.runEditCommand((current, selection) =>
-                        insertTextEverywhere(
-                            current.state,
+                        context.insertText(
+                            current,
                             activeSelection
                                 ? replacePrimarySelection(current.state, selection, activeSelection)
                                 : selection,
                             text,
-                            makeCommandContext(current),
                         ),
                     )
                 }
@@ -1989,14 +2061,10 @@ function TableRowHeader({
                         context.onRedo();
                     } else if (modifierPressed && key === 'b') {
                         event.preventDefault();
-                        context.runEditCommand((current, selection) =>
-                            toggleMarkEverywhere(current.state, selection, 'bold', makeCommandContext(current)),
-                        );
+                        context.runInlineMarkToggle('bold');
                     } else if (modifierPressed && key === 'i') {
                         event.preventDefault();
-                        context.runEditCommand((current, selection) =>
-                            toggleMarkEverywhere(current.state, selection, 'italic', makeCommandContext(current)),
-                        );
+                        context.runInlineMarkToggle('italic');
                     } else if (modifierPressed && key === 'k') {
                         event.preventDefault();
                         context.openLinkFromCurrentSelection();
@@ -2117,14 +2185,11 @@ const renderEditableBlock = (block: RichFormattedBlock, context: RenderBlockCont
             footnoteNumberById={context.footnoteNumberById}
             onPopoverTriggerEnter={context.onPopoverTriggerEnter}
             onPopoverTriggerLeave={context.onPopoverTriggerLeave}
-            onInsertText={(text) =>
+            onInsertText={(text, activeSelection) =>
                 context.runEditCommand((current, selection) =>
-                    insertTextEverywhere(
-                        current.state,
-                        selection,
-                        text,
-                        makeCommandContext(current),
-                    ),
+                    context.insertText(current, activeSelection
+                        ? replacePrimarySelection(current.state, selection, activeSelection)
+                        : selection, text),
                 )
             }
             onDeleteBackward={() =>
@@ -2254,36 +2319,9 @@ const renderEditableBlock = (block: RichFormattedBlock, context: RenderBlockCont
                     };
                 })
             }
-            onToggleBold={() =>
-                context.runEditCommand((current, selection) =>
-                    toggleMarkEverywhere(
-                        current.state,
-                        selection,
-                        'bold',
-                        makeCommandContext(current),
-                    ),
-                )
-            }
-            onToggleItalic={() =>
-                context.runEditCommand((current, selection) =>
-                    toggleMarkEverywhere(
-                        current.state,
-                        selection,
-                        'italic',
-                        makeCommandContext(current),
-                    ),
-                )
-            }
-            onToggleStrikethrough={() =>
-                context.runEditCommand((current, selection) =>
-                    toggleMarkEverywhere(
-                        current.state,
-                        selection,
-                        'strikethrough',
-                        makeCommandContext(current),
-                    ),
-                )
-            }
+            onToggleBold={() => context.runInlineMarkToggle('bold')}
+            onToggleItalic={() => context.runInlineMarkToggle('italic')}
+            onToggleStrikethrough={() => context.runInlineMarkToggle('strikethrough')}
             onOpenLink={context.openLinkFromCurrentSelection}
             onOpenLinkRange={context.openLinkFromRange}
             onLinkHoverEnter={context.showLinkHoverFromRange}
@@ -2442,6 +2480,71 @@ const blockTypeMenuValue = (meta: RichBlockMeta | undefined): BlockTypeMenuValue
         case 'table_row':
             return 'paragraph';
     }
+};
+
+export const deriveActiveInlineMarks = (
+    state: Replica['state'],
+    blocks: RichFormattedBlock[],
+    selection: EditorSelection,
+    pendingMarks: PendingInlineMarks,
+): PendingInlineMarks => {
+    const result: PendingInlineMarks = {};
+    for (const mark of BOOLEAN_INLINE_MARKS) {
+        result[mark] = !!pendingMarks[mark] || selectionHasInlineMark(state, blocks, selection, mark);
+    }
+    return result;
+};
+
+const selectionHasInlineMark = (
+    state: Replica['state'],
+    blocks: RichFormattedBlock[],
+    selection: EditorSelection,
+    markType: BooleanInlineMark,
+): boolean => {
+    if (selection.type === 'caret') {
+        const block = blocks.find((candidate) => candidate.id === selection.point.blockId);
+        return block ? caretHasInlineMark(block, selection.point.offset, markType) : false;
+    }
+
+    const segments = normalizeSelectionSegments(state, selection);
+    if (!segments.length) return false;
+    return segments.every((segment) => {
+        const block = blocks.find((candidate) => candidate.id === segment.blockId);
+        if (!block) return false;
+        const marksByOffset = inlineMarksByOffset(block);
+        const selected = marksByOffset.slice(segment.startOffset, segment.endOffset);
+        return selected.length > 0 && selected.every((marks) => marks[markType] === true);
+    });
+};
+
+const caretHasInlineMark = (
+    block: RichFormattedBlock,
+    offset: number,
+    markType: BooleanInlineMark,
+): boolean => {
+    const targetOffset = Math.max(0, offset - 1);
+    let currentOffset = 0;
+    let lastMarks: Record<string, unknown> | null = null;
+    for (const run of block.runs) {
+        const length = segmentText(run.text).length;
+        if (!length) continue;
+        lastMarks = run.marks;
+        if (targetOffset < currentOffset + length) {
+            return run.marks[markType] === true;
+        }
+        currentOffset += length;
+    }
+    return lastMarks?.[markType] === true;
+};
+
+const inlineMarksByOffset = (block: RichFormattedBlock): Record<string, unknown>[] => {
+    const result: Record<string, unknown>[] = [];
+    for (const run of block.runs) {
+        for (const _ of segmentText(run.text)) {
+            result.push(run.marks);
+        }
+    }
+    return result;
 };
 
 
@@ -3049,6 +3152,7 @@ function Toolbar({
     canUndo,
     canRedo,
     blockType,
+    activeMarks,
     onUndo,
     onRedo,
     onBold,
@@ -3061,6 +3165,7 @@ function Toolbar({
     canUndo: boolean;
     canRedo: boolean;
     blockType: BlockTypeMenuValue;
+    activeMarks: PendingInlineMarks;
     onUndo(): void;
     onRedo(): void;
     onBold(): void;
@@ -3091,11 +3196,17 @@ function Toolbar({
                 </button>
             </div>
             <div className="toolbarGroup" aria-label="Inline marks">
-                <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={onBold}>
+                <button
+                    type="button"
+                    aria-pressed={!!activeMarks.bold}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={onBold}
+                >
                     <strong>B</strong>
                 </button>
                 <button
                     type="button"
+                    aria-pressed={!!activeMarks.italic}
                     onMouseDown={(event) => event.preventDefault()}
                     onClick={onItalic}
                 >
@@ -3103,6 +3214,7 @@ function Toolbar({
                 </button>
                 <button
                     type="button"
+                    aria-pressed={!!activeMarks.strikethrough}
                     onMouseDown={(event) => event.preventDefault()}
                     onClick={onStrikethrough}
                     aria-label="Strikethrough"
