@@ -2430,6 +2430,20 @@ describe('Block rich text example UI', () => {
         expect(blocks(right).map((block) => block.textContent)).toEqual(['one', 'two']);
     });
 
+    it('pastes 2000 characters into a single block in less than 100ms', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        const text = repeatedText(2000);
+
+        selectCaret(blocks(left)[0], 0);
+        const started = performance.now();
+        pasteText(blocks(left)[0], text);
+        const elapsed = performance.now() - started;
+
+        await waitForBlockTexts(left, [text]);
+        expect(elapsed).toBeLessThan(100);
+    });
+
     it('handles Enter at the end of the second 400 character pasted block in less than 50ms', async () => {
         const view = render(<App />);
         const {left} = panels(view);

@@ -56,6 +56,7 @@ import {
     type AnnotationPresentation,
 } from './annotations';
 import {
+    applyLocalChange,
     makeCommandContext,
     nextReplicaTs,
     type DemoState,
@@ -261,8 +262,8 @@ function EditorApp() {
                 return;
             }
             const commandId = nextReplicaTs(replica);
-            setHistory((current) =>
-                appendHistoryAction(current, {
+            setHistory((current) => {
+                const action: HistoryAction = {
                     type: 'local-change',
                     editorId,
                     ops: result.ops,
@@ -274,8 +275,22 @@ function EditorApp() {
                         beforeSelection: replica.selection,
                         afterSelection: result.selection,
                     },
-                }),
-            );
+                };
+                const nextHistory = appendHistoryAction(current, action);
+                if (nextHistory.cursor === current.cursor + 1 && nextHistory.actions.length === current.actions.length + 1) {
+                    replayCacheRef.current = {
+                        actions: nextHistory.actions,
+                        cursor: nextHistory.cursor,
+                        demo: applyLocalChange(displayDemo, {
+                            editorId,
+                            state: result.state,
+                            selection: result.selection,
+                            ops: result.ops,
+                        }),
+                    };
+                }
+                return nextHistory;
+            });
             setTransientSelections((current) => {
                 const next = {...current};
                 delete next[editorId];

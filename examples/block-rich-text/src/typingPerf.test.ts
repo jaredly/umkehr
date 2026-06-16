@@ -131,6 +131,25 @@ describe('block rich text typing performance', () => {
         expect(elapsed).toBeLessThan(20);
     }, 30_000);
 
+    it('pastes 2000 characters into a single block in less than 100ms', () => {
+        const demo = createDemoState();
+        const text = typedText(2000);
+        const blockId = rootBlockIds(demo.left.state)[0];
+
+        const started = performance.now();
+        const result = pastePlainText(
+            demo.left.state,
+            caret(blockId, 0),
+            text,
+            makeCommandContext(demo.left),
+        );
+        const elapsed = performance.now() - started;
+
+        expect(rootBlockIds(result.state)).toHaveLength(1);
+        expect(blockContents(result.state, blockId)).toBe(text);
+        expect(elapsed).toBeLessThan(100);
+    });
+
     it('splits at the end of the second 400 character pasted block in less than 50ms', () => {
         const demo = createDemoState();
         const lines = blockLines(2, 400);
