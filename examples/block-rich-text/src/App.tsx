@@ -2507,7 +2507,10 @@ export const deriveActiveInlineMarks = (
 ): PendingInlineMarks => {
     const result: PendingInlineMarks = {};
     for (const mark of BOOLEAN_INLINE_MARKS) {
-        result[mark] = !!pendingMarks[mark] || selectionHasInlineMark(state, blocks, selection, mark);
+        result[mark] =
+            selection.type === 'caret'
+                ? !!pendingMarks[mark] || caretInsertionHasInlineMark(blocks, selection.point, mark)
+                : selectionHasInlineMark(state, blocks, selection, mark);
     }
     return result;
 };
@@ -2518,10 +2521,7 @@ const selectionHasInlineMark = (
     selection: EditorSelection,
     markType: BooleanInlineMark,
 ): boolean => {
-    if (selection.type === 'caret') {
-        const block = blocks.find((candidate) => candidate.id === selection.point.blockId);
-        return block ? caretHasInlineMark(block, selection.point.offset, markType) : false;
-    }
+    if (selection.type === 'caret') return false;
 
     const segments = normalizeSelectionSegments(state, selection);
     if (!segments.length) return false;
@@ -2534,24 +2534,15 @@ const selectionHasInlineMark = (
     });
 };
 
-const caretHasInlineMark = (
-    block: RichFormattedBlock,
-    offset: number,
+const caretInsertionHasInlineMark = (
+    blocks: RichFormattedBlock[],
+    point: ReturnType<typeof focusPoint>,
     markType: BooleanInlineMark,
 ): boolean => {
-    const targetOffset = Math.max(0, offset - 1);
-    let currentOffset = 0;
-    let lastMarks: Record<string, unknown> | null = null;
-    for (const run of block.runs) {
-        const length = segmentText(run.text).length;
-        if (!length) continue;
-        lastMarks = run.marks;
-        if (targetOffset < currentOffset + length) {
-            return run.marks[markType] === true;
-        }
-        currentOffset += length;
-    }
-    return lastMarks?.[markType] === true;
+    const block = blocks.find((candidate) => candidate.id === point.blockId);
+    if (!block) return false;
+    const marksByOffset = inlineMarksByOffset(block);
+    return marksByOffset[point.offset]?.[markType] === true;
 };
 
 const inlineMarksByOffset = (block: RichFormattedBlock): Record<string, unknown>[] => {

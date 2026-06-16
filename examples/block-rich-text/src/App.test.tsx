@@ -1681,6 +1681,9 @@ describe('Block rich text example UI', () => {
         expect(blockText(blocks(left)[0])).toBe('abc');
 
         fireEvent.keyDown(blocks(left)[0], {key: 'b', metaKey: true});
+        await waitFor(() =>
+            expect(within(left).getByRole('button', {name: 'B'}).getAttribute('aria-pressed')).toBe('false'),
+        );
         beforeInputText(blocks(left)[0], 'd');
 
         await waitFor(() => expect(blockText(blocks(left)[0])).toBe('abcd'));
@@ -1752,7 +1755,7 @@ describe('Block rich text example UI', () => {
         });
     });
 
-    it('shows toolbar pressed state from actual marks at the caret', async () => {
+    it('shows toolbar pressed state when the next typed character will inherit a mark', async () => {
         const view = render(<App />);
         const {left} = panels(view);
 
@@ -1769,6 +1772,11 @@ describe('Block rich text example UI', () => {
         await waitFor(() =>
             expect(within(left).getByRole('button', {name: 'B'}).getAttribute('aria-pressed')).toBe('true'),
         );
+
+        beforeInputText(blocks(left)[0], 'X');
+
+        await waitFor(() => expect(blockText(blocks(left)[0])).toBe('abXcd'));
+        expect(blocks(left)[0].querySelector('.markBold')?.textContent).toBe('bXc');
     });
 
     it('bolds the first selected range in a newly-created block with Cmd+B', async () => {

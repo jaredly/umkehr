@@ -24,6 +24,8 @@
 - Issue encountered: after closing bold at the end of a bold run, the toolbar can still report bold because existing caret mark detection looks at the previous character. The close path still works; subsequent typed text is plain because insertion uses pending retained state, not toolbar-derived active state.
 - Fixed optional-end assumptions in remote dependency checks and undo mark remapping after grep found remaining `mark.end.id` uses.
 - Verified: `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx`.
+- Follow-up fix: changed toolbar active-state logic to indicate whether the next typed character will inherit each mark. For collapsed carets, pending retained marks still count as active; otherwise the display checks the next character's marks, not the previous character's marks. This keeps the toolbar active inside an interval where inserted text will be marked, but inactive after a closed mark at block end where inserted text will be plain.
+- Verified toolbar fix with `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx` and `npm exec tsc -- -p examples/block-rich-text/tsconfig.json --noEmit`.
 - Verification:
   - `npm exec vitest -- run src/block-crdt/formatting.test.ts examples/block-rich-text/src/blockCommands.test.ts examples/block-rich-text/src/multiSelectionCommands.test.ts examples/block-rich-text/src/App.test.tsx src/block-crdt/index.test.ts src/block-crdt/adapter-additions.test.ts`
   - `npm run typecheck`
