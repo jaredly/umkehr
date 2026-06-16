@@ -444,7 +444,7 @@ select {
 
 .tableColumnInsertControls {
     display: grid;
-    grid-template-columns: var(--table-row-header-width, minmax(130px, 180px)) repeat(var(--table-columns, 1), minmax(150px, 1fr)) 0;
+    grid-template-columns: var(--table-row-header-width, fit-content(180px)) repeat(var(--table-columns, 1), minmax(150px, 1fr)) 0;
     height: 22px;
     overflow: visible;
     pointer-events: none;
@@ -526,9 +526,22 @@ select {
 }
 
 .tableRowHeader .tableRowDrag {
+    position: absolute;
+    top: 6px;
+    left: calc(-1 * var(--table-row-gutter, 30px) + 4px);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 120ms ease;
     cursor: grab;
     font-variant-numeric: tabular-nums;
     font-weight: 700;
+}
+
+.tableRow:hover .tableRowDrag,
+.tableRow:focus-within .tableRowDrag,
+.tableRowHeader .tableRowDrag:focus-visible {
+    opacity: 1;
+    pointer-events: auto;
 }
 
 .tableRowHeader button:disabled {
@@ -538,23 +551,21 @@ select {
 }
 
 .tableGrid {
+    --table-row-gutter: 30px;
     display: grid;
     width: 100%;
     max-width: 100%;
     overflow-x: auto;
+    padding-left: var(--table-row-gutter);
     border: 1px solid #c9d4de;
     border-radius: 6px;
     background: #fff;
 }
 
-.tableGrid.compactRowHeaders {
-    --table-row-header-width: 58px;
-}
-
 .tableRow {
     position: relative;
     display: grid;
-    grid-template-columns: var(--table-row-header-width, minmax(130px, 180px)) repeat(var(--table-columns, 1), minmax(150px, 1fr));
+    grid-template-columns: var(--table-row-header-width, fit-content(180px)) repeat(var(--table-columns, 1), minmax(150px, 1fr));
     border-top: 1px solid #dce4eb;
 }
 
@@ -591,10 +602,8 @@ select {
 }
 
 .tableRowHeader {
-    display: flex;
-    align-items: flex-start;
-    gap: 4px;
-    padding: 6px;
+    position: relative;
+    padding: 6px 8px;
     border-right: 1px solid #dce4eb;
     background: #f7fafc;
 }
@@ -602,30 +611,18 @@ select {
 .tableRowHeaderText {
     min-width: 0;
     min-height: 32px;
-    flex: 1;
     padding: 5px 6px;
     font-size: 13px;
     font-weight: 650;
     color: #23313d;
 }
 
-.tableRowHeaderText[data-empty="true"]::before {
+.editableBlock.tableRowHeaderText[data-empty="true"]::before {
     content: attr(data-placeholder);
     display: inline;
     width: auto;
     color: #738392;
     font-weight: 700;
-}
-
-.compactRowHeaders .tableRowHeader {
-    gap: 3px;
-    padding: 4px;
-}
-
-.compactRowHeaders .tableRowHeaderText {
-    min-height: 28px;
-    padding: 5px 0;
-    text-align: center;
 }
 
 .tableCell {
@@ -1568,11 +1565,11 @@ select {
     }
 
     .tableRow {
-        grid-template-columns: var(--table-row-header-width, minmax(112px, 150px)) repeat(var(--table-columns, 1), minmax(132px, 1fr));
+        grid-template-columns: var(--table-row-header-width, fit-content(150px)) repeat(var(--table-columns, 1), minmax(132px, 1fr));
     }
 
     .tableColumnInsertControls {
-        grid-template-columns: var(--table-row-header-width, minmax(112px, 150px)) repeat(var(--table-columns, 1), minmax(132px, 1fr)) 0;
+        grid-template-columns: var(--table-row-header-width, fit-content(150px)) repeat(var(--table-columns, 1), minmax(132px, 1fr)) 0;
     }
 
     .tableRowHeader {

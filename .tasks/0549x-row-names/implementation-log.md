@@ -73,12 +73,13 @@ Verification:
 - `npm run build` in `examples/block-rich-text` passed.
 - Confirmed the local dev server no longer responds on port `5174` after stopping it.
 
-## Follow-up: Compact Empty Row Header Column
+## Follow-up: Content-Sized Row Header Column
 
-- Added compact table row-header column mode when every row header in a table is empty.
 - Kept empty row headers rendered as editable surfaces with visible row-index placeholders from `data-placeholder`.
-- The table expands back to the wider row-header column as soon as any row header has content.
-- Updated App coverage for compact mode, row-index placeholders, and expansion after typing a header.
+- Replaced the explicit compact/wide mode with a content-sized row-header grid track using `fit-content(...)`, so empty headers naturally keep the column small and contentful headers can grow up to the track limit.
+- Moved row drag handles into a left table gutter and made them visible on row hover/focus instead of occupying row-header column width.
+- Updated App coverage for row-index placeholders and gutter row drag handles.
+- Fixed a CSS cascade bug where the generic `.editableBlock[data-empty="true"]::before` rule overrode row-header placeholder content; row headers now use the more specific `.editableBlock.tableRowHeaderText[data-empty="true"]::before`.
 
 Verification:
 

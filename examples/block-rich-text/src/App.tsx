@@ -1675,7 +1675,6 @@ function TableBlock({
         1,
         ...rowNodes.map((row) => row.children.filter((child) => child.block.block.meta.type !== 'table_row').length),
     );
-    const allRowHeadersEmpty = rowNodes.every((row) => row.block.runs.length === 0);
     const selectedCellId = tableCellIdForSelection(context.state, context.selection);
 
     useLayoutEffect(() => {
@@ -1722,13 +1721,7 @@ function TableBlock({
             data-table-id={node.block.id}
         >
             <div className="tableTitleRow">{renderEditableBlock(node.block, context)}</div>
-            <div
-                className={['tableGrid', allRowHeadersEmpty ? 'compactRowHeaders' : '']
-                    .filter(Boolean)
-                    .join(' ')}
-                role="table"
-                aria-label="Table block"
-            >
+            <div className="tableGrid" role="table" aria-label="Table block">
                 <div
                     className="tableColumnInsertControls"
                     aria-label="Column insert controls"
