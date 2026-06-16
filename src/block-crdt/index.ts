@@ -26,6 +26,7 @@ export {
     deleteBlockOps,
     insertTextOps,
     insertBlockOps,
+    insertBlockOpsWithId,
     join,
     joinBlocksOps,
     markRangesOps,
@@ -60,6 +61,8 @@ export {
     materializedBlockParent,
     materializedBlockPath,
     materializedBlockPaths,
+    virtualParentOwner,
+    virtualParentOwners,
 } from './blocks.js';
 export type {VirtualBlockParentConfig} from './blocks.js';
 
@@ -87,9 +90,11 @@ export {
     markRange as markRangeOp,
     materializeFormattedBlocks,
     coveredCharIdsForMark,
+    formattedMarkValues,
+    visibleRangesForMark,
     splitRecordsByLeft,
 } from './marks.js';
-export type {FormattedBlock, FormattedRun} from './marks.js';
+export type {FormattedBlock, FormattedMarkValue, FormattedRun, VisibleMarkRange} from './marks.js';
 
 export {
     maxLamportCounterForOp,

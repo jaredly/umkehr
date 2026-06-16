@@ -33,6 +33,12 @@ export type FormattedRun = {
     stackedMarks?: Record<string, FormattedMarkValue[]>;
 };
 
+export type VisibleMarkRange = {
+    blockId: string;
+    startOffset: number;
+    endOffset: number;
+};
+
 export type FormattedBlock<M extends TimestampedBlockMeta = TimestampedBlockMeta> = {
     id: string;
     block: Block<M>;
@@ -112,6 +118,36 @@ export const materializeFormattedBlocks = <M extends TimestampedBlockMeta>(
         }
         return {id, block: state.state.blocks[id], runs, depth, parentId};
     });
+};
+
+export const formattedMarkValues = (run: FormattedRun, type: string): FormattedMarkValue[] => [
+    ...(run.stackedMarks?.[type] ?? []),
+    ...(run.marks[type] === undefined ? [] : [run.marks[type]]),
+];
+
+export const visibleRangesForMark = <M extends TimestampedBlockMeta>(
+    state: CachedState<M>,
+    mark: Mark,
+    config: VirtualBlockParentConfig<M> = {},
+): VisibleMarkRange[] => {
+    const covered = new Set(coveredCharIdsForMark(state, mark, config));
+    const ranges: VisibleMarkRange[] = [];
+    for (const {id: blockId} of visibleBlockOutline(state, config)) {
+        let startOffset: number | null = null;
+        const chars = orderedCharIdsForBlock(state, blockId, {visibleOnly: true});
+        for (let offset = 0; offset <= chars.length; offset++) {
+            const charId = chars[offset];
+            if (charId && covered.has(charId)) {
+                startOffset ??= offset;
+                continue;
+            }
+            if (startOffset !== null) {
+                ranges.push({blockId, startOffset, endOffset: offset});
+                startOffset = null;
+            }
+        }
+    }
+    return ranges;
 };
 
 const crossedSplitsBetween = <M extends TimestampedBlockMeta>(

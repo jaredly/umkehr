@@ -236,6 +236,9 @@ const popoverMarks = (scope: HTMLElement): HTMLElement[] =>
 const footnoteReferences = (scope: HTMLElement): HTMLElement[] =>
     Array.from(scope.querySelectorAll<HTMLElement>('.footnoteReferenceNumber'));
 
+const commentDots = (scope: HTMLElement): HTMLElement[] =>
+    within(scope).queryAllByRole('button', {name: /Open comment on/});
+
 const waitForPopoverDialogs = async (panel: HTMLElement, count: number): Promise<HTMLElement[]> =>
     waitFor(() => {
         const dialogs = popoverDialogs(panel);
@@ -1807,6 +1810,89 @@ describe('Block rich text example UI', () => {
         await waitFor(() => expect(commentBody.querySelector('.markBold')?.textContent).toBe('ot'));
         expect(domSelectionBlock()).toBe(commentBody);
         expect(domSelectionOffsets(commentBody)).toEqual({anchor: 1, focus: 3});
+    });
+
+    it('keeps remotely-created comments collapsed until a gutter dot is clicked', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abcd');
+        await waitFor(() => expect(blocks(right)[0].textContent).toBe('abcd'));
+
+        selectRange(blocks(left)[0], 1, 3);
+        fireEvent.click(within(left).getByRole('button', {name: 'Comment'}));
+
+        const leftBody = await waitFor(() =>
+            within(left).getByRole('textbox', {name: 'Annotation body'}),
+        );
+        expect(domSelectionBlock()).toBe(leftBody);
+
+        await waitFor(() => expect(commentDots(right)).toHaveLength(1));
+        expect(within(right).queryByRole('textbox', {name: 'Annotation body'})).toBeNull();
+
+        fireEvent.click(commentDots(right)[0]);
+        const rightBody = await waitFor(() =>
+            within(right).getByRole('textbox', {name: 'Annotation body'}),
+        );
+        expect(domSelectionBlock()).toBe(rightBody);
+    });
+
+    it('opens the collapsed sidebar and focuses a new local comment body', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abcd');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abcd'));
+
+        selectRange(blocks(left)[0], 1, 3);
+        fireEvent.click(within(left).getByRole('button', {name: 'Comment'}));
+
+        const commentBody = await waitFor(() =>
+            within(left).getByRole('textbox', {name: 'Annotation body'}),
+        );
+        expect(domSelectionBlock()).toBe(commentBody);
+        expect(commentDots(left)).toHaveLength(0);
+    });
+
+    it('shows one gutter dot per annotation and refocuses the most recently edited body', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abcd');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abcd'));
+
+        selectRange(blocks(left)[0], 1, 3);
+        fireEvent.click(within(left).getByRole('button', {name: 'Comment'}));
+        await waitFor(() =>
+            expect(within(left).getAllByRole('textbox', {name: 'Annotation body'})).toHaveLength(1),
+        );
+
+        selectRange(blocks(left)[0], 1, 3);
+        fireEvent.click(within(left).getByRole('button', {name: 'Comment'}));
+        let bodies = await waitFor(() => {
+            const found = within(left).getAllByRole('textbox', {name: 'Annotation body'});
+            expect(found).toHaveLength(2);
+            return found;
+        });
+        expect(domSelectionBlock()).toBe(bodies[1]);
+
+        selectCaret(bodies[0], 0);
+        beforeInputText(bodies[0], 'first');
+        await waitFor(() => expect(bodies[0].textContent).toBe('first'));
+
+        fireEvent.click(within(left).getByRole('button', {name: 'Close comments'}));
+        await waitFor(() => expect(commentDots(left)).toHaveLength(1));
+
+        fireEvent.click(commentDots(left)[0]);
+        bodies = await waitFor(() => {
+            const found = within(left).getAllByRole('textbox', {name: 'Annotation body'});
+            expect(found).toHaveLength(2);
+            return found;
+        });
+        expect(domSelectionBlock()).toBe(bodies[0]);
     });
 
     it('supports strikethrough and links in comment body text', async () => {

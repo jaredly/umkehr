@@ -220,6 +220,18 @@ export const insertBlockOps = <M extends TimestampedBlockMeta = DefaultBlockMeta
     ];
 };
 
+export const insertBlockOpsWithId = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
+    state: CachedState<M>,
+    options: InsertBlockOpsOptions<M>,
+): {ops: Op<M>[]; id: Lamport; blockId: string} => {
+    const ops = insertBlockOps(state, options);
+    const op = ops[0];
+    if (!op || op.type !== 'block') {
+        throw new Error(`insertBlockOps did not create a block op`);
+    }
+    return {ops, id: op.block.id, blockId: lamportToString(op.block.id)};
+};
+
 export const deleteBlockOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
     state: CachedState<M>,
     {block, mode = 'block-only'}: DeleteBlockOpsOptions,

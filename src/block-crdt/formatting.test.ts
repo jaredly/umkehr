@@ -7,6 +7,7 @@ import {
     blockContents,
     cachedState,
     charOp,
+    formattedMarkValues,
     hasJoinStyleParent,
     join,
     markOp,
@@ -14,6 +15,7 @@ import {
     materializeFormattedBlocks,
     orderedCharIdsForBlock,
     split,
+    visibleRangesForMark,
 } from './index';
 import {CachedState, Lamport, Op} from './types';
 import {initialState} from './initialState';
@@ -184,6 +186,28 @@ it('materializes configured stacking marks without same-type LWW collapse', () =
     ]);
 });
 
+it('reads formatted mark values from lww and stacking runs', () => {
+    let state = add(init(), 'abc', [0, 'self']);
+    state = apply(
+        state,
+        markRange(state, [0, 'self'], 0, 3, 'color', 'red', false, [10, 'self']),
+    ) as CachedState;
+    state = apply(
+        state,
+        markRange(state, [0, 'self'], 1, 2, 'annotation', 'first', false, [11, 'self']),
+    ) as CachedState;
+    state = apply(
+        state,
+        markRange(state, [0, 'self'], 1, 2, 'annotation', 'second', false, [12, 'self']),
+    ) as CachedState;
+
+    const runs = materializeFormattedBlocks(state, {markBehavior: {annotation: 'stacking'}})[0].runs;
+
+    expect(formattedMarkValues(runs[0], 'color')).toEqual(['red']);
+    expect(formattedMarkValues(runs[1], 'annotation')).toEqual(['first', 'second']);
+    expect(formattedMarkValues(runs[1], 'missing')).toEqual([]);
+});
+
 it('removes configured stacking marks by matching data', () => {
     let state = add(init(), 'abc', [0, 'self']);
     state = apply(
@@ -205,6 +229,35 @@ it('removes configured stacking marks by matching data', () => {
         {text: 'a', marks: {}},
         {text: 'b', marks: {}, stackedMarks: {annotation: ['second']}},
         {text: 'c', marks: {}},
+    ]);
+});
+
+it('returns visible ranges for a mark inside one block', () => {
+    let state = add(init(), 'abcd', [0, 'self']);
+    const op = markRange(state, [0, 'self'], 1, 3, 'bold', undefined, false, [10, 'self']);
+    state = apply(state, op) as CachedState;
+
+    expect(visibleRangesForMark(state, op.mark)).toEqual([
+        {blockId: '0000-self', startOffset: 1, endOffset: 3},
+    ]);
+});
+
+it('returns visible ranges for a mark split across blocks', () => {
+    const ts = mts();
+    let state = add(init(), 'abcdef', [0, 'self'], ts);
+    const op = markRange(state, [0, 'self'], 1, 5, 'bold', undefined, false, [20, 'self']);
+    state = apply(state, op) as CachedState;
+    state = applyMany(
+        state,
+        split(state, splitLocation(state, [0, 'self'], selPos(state, [0, 'self'], 4)!), ts(), 'self', {
+            random: () => 0,
+        }),
+    );
+
+    const blockIds = state.cache.blockChildren['0000-root'];
+    expect(visibleRangesForMark(state, op.mark)).toEqual([
+        {blockId: blockIds[0], startOffset: 1, endOffset: 3},
+        {blockId: blockIds[1], startOffset: 0, endOffset: 2},
     ]);
 });
 

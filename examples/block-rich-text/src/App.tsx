@@ -13,7 +13,13 @@ import {
     type PointerEvent,
     type ReactElement,
 } from 'react';
-import {materializeFormattedBlocks, materializedBlockPath, visibleBlockChildren} from 'umkehr/block-crdt';
+import {
+    formattedMarkValues,
+    materializeFormattedBlocks,
+    materializedBlockPath,
+    visibleBlockChildren,
+    visibleRangesForMark,
+} from 'umkehr/block-crdt';
 import type {FormattedBlock} from 'umkehr/block-crdt';
 import {lamportToString} from 'umkehr/block-crdt/utils';
 import {
@@ -144,6 +150,7 @@ import {highlightCode, type SyntaxToken} from './syntaxHighlight';
 
 type RichFormattedBlock = FormattedBlock<RichBlockMeta>;
 type RenderedAnnotation = ReturnType<typeof renderedAnnotations>[number];
+type CommentFocusRequest = {blockId: string; token: number};
 type LinkPopoverState = {
     ranges: LinkTargetRange[];
     href: string;
@@ -427,10 +434,12 @@ function BlockEditor({
     onKeystroke(blockId: string, event: KeyboardEvent<HTMLElement>): void;
 }) {
     const rootRef = useRef<HTMLDivElement>(null);
+    const editorContentRef = useRef<HTMLDivElement>(null);
     const pendingCaretRestoreBlockIdRef = useRef<string | null>(null);
     const pendingSelectionRestoreRef = useRef<EditorSelection | null>(null);
     const verticalCaretXRef = useRef<number | null>(null);
     const nextSelectionIdRef = useRef(1);
+    const nextCommentFocusTokenRef = useRef(1);
     const handledTripleClickRef = useRef(false);
     const handledNavigationKeyRef = useRef(false);
     const pendingMultiselectClickRef = useRef<{
@@ -446,6 +455,11 @@ function BlockEditor({
     const linkHoverHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [hasFocus, setHasFocus] = useState(false);
     const [isExtendingSelection, setIsExtendingSelection] = useState(false);
+    const [commentsOpen, setCommentsOpen] = useState(false);
+    const [commentFocusRequest, setCommentFocusRequest] = useState<CommentFocusRequest | null>(null);
+    const [lastEditedCommentBodyByAnnotation, setLastEditedCommentBodyByAnnotation] =
+        useState<Record<string, string>>({});
+    const [commentGutterTops, setCommentGutterTops] = useState<Record<string, number>>({});
     const [activeAnnotationBodySelection, setActiveAnnotationBodySelection] =
         useState<EditorSelection | null>(null);
     const [linkPopover, setLinkPopover] = useState<LinkPopoverState | null>(null);
@@ -469,6 +483,11 @@ function BlockEditor({
         [annotationBodyIds, blocksWithAnnotationBodies],
     );
     const annotations = renderedAnnotations(replica.state, blocks, blocksWithAnnotationBodies);
+    const sidebarAnnotations = useMemo(
+        () => annotations.filter((item) => item.data.presentation === 'sidebar'),
+        [annotations],
+    );
+    const sidebarAnnotationKey = sidebarAnnotations.map((annotation) => annotation.id).join('\0');
     const popoverAnnotationsById = useMemo(() => {
         const result = new Map<string, RenderedAnnotation>();
         for (const annotation of annotations) {
@@ -566,6 +585,103 @@ function BlockEditor({
     }, []);
 
     const nextSelectionId = useCallback(() => `sel-${nextSelectionIdRef.current++}`, []);
+
+    const requestCommentFocus = useCallback((blockId: string | null | undefined) => {
+        if (!blockId) return;
+        setCommentFocusRequest({blockId, token: nextCommentFocusTokenRef.current++});
+    }, []);
+
+    const recordCommentBodyActivity = useCallback((annotationId: string, bodyBlockId: string) => {
+        setLastEditedCommentBodyByAnnotation((current) =>
+            current[annotationId] === bodyBlockId
+                ? current
+                : {...current, [annotationId]: bodyBlockId},
+        );
+    }, []);
+
+    const focusBodyBlockForAnnotation = useCallback(
+        (annotation: RenderedAnnotation): string | null => {
+            const bodyIds = annotation.bodyBlocks.map((block) => block.id);
+            const lastEdited = lastEditedCommentBodyByAnnotation[annotation.id];
+            if (lastEdited && bodyIds.includes(lastEdited)) return lastEdited;
+            return bodyIds.at(-1) ?? bodyIds[0] ?? null;
+        },
+        [lastEditedCommentBodyByAnnotation],
+    );
+
+    const handleSidebarCommentCreated = useCallback(
+        (result: ReturnType<typeof createAnnotation>) => {
+            if (!result.ops.length || !result.annotationId || !result.bodyBlockId) return;
+            const annotationId = lamportToString(result.annotationId);
+            setCommentsOpen(true);
+            recordCommentBodyActivity(annotationId, result.bodyBlockId);
+            requestCommentFocus(result.bodyBlockId);
+        },
+        [recordCommentBodyActivity, requestCommentFocus],
+    );
+
+    useLayoutEffect(() => {
+        const root = rootRef.current;
+        const content = editorContentRef.current;
+        if (!root || !content || !sidebarAnnotations.length) {
+            setCommentGutterTops((current) => (Object.keys(current).length ? {} : current));
+            return;
+        }
+
+        const measure = () => {
+            const contentRect = content.getBoundingClientRect();
+            const rootRect = root.getBoundingClientRect();
+            const minTop = Math.max(12, rootRect.top - contentRect.top + 12);
+            const maxTop = Math.max(minTop, rootRect.bottom - contentRect.top - 12);
+            const desired = sidebarAnnotations.map((annotation, index) => {
+                const selector = `[data-sidebar-annotation-ids~="${CSS.escape(annotation.id)}"]`;
+                const trigger = root.querySelector<HTMLElement>(selector);
+                const triggerRect = trigger?.getBoundingClientRect();
+                if (triggerRect && (triggerRect.height || triggerRect.top)) {
+                    return {
+                        id: annotation.id,
+                        top: triggerRect.top - contentRect.top + triggerRect.height / 2,
+                    };
+                }
+
+                const range = visibleRangesForMark(
+                    replica.state,
+                    annotation.mark,
+                    annotationVirtualParents(replica.state),
+                )[0];
+                if (range) {
+                    const block = root.querySelector<HTMLElement>(
+                        `[data-block-id="${CSS.escape(range.blockId)}"]`,
+                    );
+                    const blockRect = block?.getBoundingClientRect();
+                    if (blockRect && (blockRect.height || blockRect.top)) {
+                        return {
+                            id: annotation.id,
+                            top: blockRect.top - contentRect.top + blockRect.height / 2,
+                        };
+                    }
+                }
+
+                return {id: annotation.id, top: minTop + index * 24};
+            });
+
+            desired.sort((a, b) => a.top - b.top);
+            const next: Record<string, number> = {};
+            let previousTop = minTop - 24;
+            for (const item of desired) {
+                const top = Math.min(maxTop, Math.max(minTop, item.top, previousTop + 24));
+                next[item.id] = top;
+                previousTop = top;
+            }
+            setCommentGutterTops((current) =>
+                numberRecordEquals(current, next) ? current : next,
+            );
+        };
+
+        measure();
+        window.addEventListener('resize', measure);
+        return () => window.removeEventListener('resize', measure);
+    }, [commentsOpen, replica.state, sidebarAnnotationKey]);
 
     useLayoutEffect(() => {
         pendingCaretRestoreBlockIdRef.current = null;
@@ -1208,6 +1324,7 @@ function BlockEditor({
                                   presentation,
                                   makeCommandContext(current),
                               );
+                              if (presentation === 'sidebar') handleSidebarCommentCreated(result);
                               return {state: result.state, ops: result.ops, selection: current.selection};
                           })
                         : runEditCommand((current, selection) => {
@@ -1217,6 +1334,7 @@ function BlockEditor({
                                   presentation,
                                   makeCommandContext(current),
                               );
+                              if (presentation === 'sidebar') handleSidebarCommentCreated(result);
                               return {state: result.state, ops: result.ops, selection};
                           })
                 }
@@ -1251,103 +1369,129 @@ function BlockEditor({
                     {undoStatus || undoState.undoReason || undoState.redoReason}
                 </p>
             ) : null}
-            <AnnotationSidebar
-                annotations={annotations.filter((item) => item.data.presentation === 'sidebar')}
-                onBodyCommand={runAnnotationBodyCommand}
-                onBodySelectionChange={setActiveAnnotationBodySelection}
-                popoverTextById={popoverTextById}
-                footnoteNumberById={footnoteNumberById}
-                onPopoverTriggerEnter={showPopover}
-                onPopoverTriggerLeave={schedulePopoverHideFromPointer}
-            />
             <div
-                ref={rootRef}
-                className="blockList"
-                onFocus={() => {
-                    setActiveAnnotationBodySelection(null);
-                    setHasFocus(true);
-                }}
-                onBlur={(event) => {
-                    if (event.currentTarget.contains(event.relatedTarget)) return;
-                    resetVerticalCaretIntent();
-                    setIsExtendingSelection(false);
-                    setHasFocus(false);
-                }}
-                onMouseDown={captureMouseDown}
-                onMouseUp={captureSelection}
-                onKeyDown={(event) => {
-                    if (event.key !== 'Escape' || !activePopovers.length) return;
-                    event.preventDefault();
-                    closeDeepestPopover();
-                }}
-                onKeyUp={captureSelection}
+                ref={editorContentRef}
+                className={commentsOpen ? 'editorContent commentsOpen' : 'editorContent commentsCollapsed'}
             >
-                {renderTree.map((node) =>
-                    renderBlockNode(node, {
-                        blocks,
-                        state: replica.state,
-                        selection: primaryResolvedSelection,
-                        hasMultipleSelections: resolvedSelectionSet.entries.length > 1,
-                        decorationsByBlock,
-                        pendingCaretRestoreBlockIdRef,
-                        draggingSubtreeIds,
-                        draggingId,
-                        dropTarget,
-                        registerRow,
-                        startDrag,
-                        orderedListNumbers,
-                        popoverTextById,
-                        footnoteNumberById,
-                        onPopoverTriggerEnter: showPopover,
-                        onPopoverTriggerLeave: schedulePopoverHideFromPointer,
-                        openLinkFromCurrentSelection,
-                        openLinkFromRange,
-                        showLinkHoverFromRange,
-                        hideLinkHover: scheduleLinkHoverHide,
-                        createMissingTableCell: (tableId, rowId, columnIndex) =>
-                            runBlockControlCommand((current) => {
-                                const result = createMissingTableCell(
-                                    current.state,
-                                    rowId,
-                                    columnIndex,
-                                    makeCommandContext(current),
-                                );
-                                return {state: result.state, ops: result.ops, selection: current.selection};
+                <div className="documentColumn">
+                    <div
+                        ref={rootRef}
+                        className="blockList"
+                        onFocus={() => {
+                            setActiveAnnotationBodySelection(null);
+                            setHasFocus(true);
+                        }}
+                        onBlur={(event) => {
+                            if (event.currentTarget.contains(event.relatedTarget)) return;
+                            resetVerticalCaretIntent();
+                            setIsExtendingSelection(false);
+                            setHasFocus(false);
+                        }}
+                        onMouseDown={captureMouseDown}
+                        onMouseUp={captureSelection}
+                        onKeyDown={(event) => {
+                            if (event.key !== 'Escape' || !activePopovers.length) return;
+                            event.preventDefault();
+                            closeDeepestPopover();
+                        }}
+                        onKeyUp={captureSelection}
+                    >
+                        {renderTree.map((node) =>
+                            renderBlockNode(node, {
+                                blocks,
+                                state: replica.state,
+                                selection: primaryResolvedSelection,
+                                hasMultipleSelections: resolvedSelectionSet.entries.length > 1,
+                                decorationsByBlock,
+                                pendingCaretRestoreBlockIdRef,
+                                draggingSubtreeIds,
+                                draggingId,
+                                dropTarget,
+                                registerRow,
+                                startDrag,
+                                orderedListNumbers,
+                                popoverTextById,
+                                footnoteNumberById,
+                                onPopoverTriggerEnter: showPopover,
+                                onPopoverTriggerLeave: schedulePopoverHideFromPointer,
+                                openLinkFromCurrentSelection,
+                                openLinkFromRange,
+                                showLinkHoverFromRange,
+                                hideLinkHover: scheduleLinkHoverHide,
+                                createMissingTableCell: (tableId, rowId, columnIndex) =>
+                                    runBlockControlCommand((current) => {
+                                        const result = createMissingTableCell(
+                                            current.state,
+                                            rowId,
+                                            columnIndex,
+                                            makeCommandContext(current),
+                                        );
+                                        return {state: result.state, ops: result.ops, selection: current.selection};
+                                    }),
+                                addTableRow: (tableId, afterRowId) =>
+                                    runBlockControlCommand((current) => {
+                                        const result = addTableRow(
+                                            current.state,
+                                            tableId,
+                                            makeCommandContext(current),
+                                            afterRowId,
+                                        );
+                                        return {state: result.state, ops: result.ops, selection: current.selection};
+                                    }),
+                                addTableColumn: (tableId, columnIndex) =>
+                                    runBlockControlCommand((current) => {
+                                        const result = addTableColumn(
+                                            current.state,
+                                            tableId,
+                                            makeCommandContext(current),
+                                            columnIndex,
+                                        );
+                                        return {state: result.state, ops: result.ops, selection: current.selection};
+                                    }),
+                                runEditCommand,
+                                runBlockControlCommand,
+                                moveCaretHorizontally,
+                                moveCaretVertically,
+                                moveSelectionsHorizontallyEverywhere,
+                                moveSelectionsVerticallyEverywhere,
+                                extendSelectionsHorizontallyEverywhere,
+                                extendSelectionsVerticallyEverywhere,
+                                extendSelectionVerticallyWithVisualIntent,
+                                onUndo,
+                                onRedo,
+                                onKeystroke,
                             }),
-                        addTableRow: (tableId, afterRowId) =>
-                            runBlockControlCommand((current) => {
-                                const result = addTableRow(
-                                    current.state,
-                                    tableId,
-                                    makeCommandContext(current),
-                                    afterRowId,
-                                );
-                                return {state: result.state, ops: result.ops, selection: current.selection};
-                            }),
-                        addTableColumn: (tableId, columnIndex) =>
-                            runBlockControlCommand((current) => {
-                                const result = addTableColumn(
-                                    current.state,
-                                    tableId,
-                                    makeCommandContext(current),
-                                    columnIndex,
-                                );
-                                return {state: result.state, ops: result.ops, selection: current.selection};
-                            }),
-                        runEditCommand,
-                        runBlockControlCommand,
-                        moveCaretHorizontally,
-                        moveCaretVertically,
-                        moveSelectionsHorizontallyEverywhere,
-                        moveSelectionsVerticallyEverywhere,
-                        extendSelectionsHorizontallyEverywhere,
-                        extendSelectionsVerticallyEverywhere,
-                        extendSelectionVerticallyWithVisualIntent,
-                        onUndo,
-                        onRedo,
-                        onKeystroke,
-                    }),
-                )}
+                        )}
+                    </div>
+                    <Footnotes
+                        annotations={annotations.filter((item) => item.data.presentation === 'footnote')}
+                        onBodyCommand={runAnnotationBodyCommand}
+                        onBodySelectionChange={setActiveAnnotationBodySelection}
+                        popoverTextById={popoverTextById}
+                        footnoteNumberById={footnoteNumberById}
+                        onPopoverTriggerEnter={showPopover}
+                        onPopoverTriggerLeave={schedulePopoverHideFromPointer}
+                    />
+                </div>
+                <AnnotationSidebar
+                    annotations={sidebarAnnotations}
+                    open={commentsOpen}
+                    gutterTops={commentGutterTops}
+                    focusRequest={commentFocusRequest}
+                    onToggle={setCommentsOpen}
+                    onFocusRequestHandled={() => setCommentFocusRequest(null)}
+                    onFocusAnnotation={(annotation) => {
+                        setCommentsOpen(true);
+                        requestCommentFocus(focusBodyBlockForAnnotation(annotation));
+                    }}
+                    onBodyActivity={recordCommentBodyActivity}
+                    onBodyCommand={runAnnotationBodyCommand}
+                    onBodySelectionChange={setActiveAnnotationBodySelection}
+                    popoverTextById={popoverTextById}
+                    footnoteNumberById={footnoteNumberById}
+                    onPopoverTriggerEnter={showPopover}
+                    onPopoverTriggerLeave={schedulePopoverHideFromPointer}
+                />
             </div>
             {activePopovers.map((popover) => (
                 <FloatingAnnotationPopover
@@ -1388,15 +1532,6 @@ function BlockEditor({
                 }}
                 onMouseEnter={cancelLinkHoverHide}
                 onMouseLeave={scheduleLinkHoverHide}
-            />
-            <Footnotes
-                annotations={annotations.filter((item) => item.data.presentation === 'footnote')}
-                onBodyCommand={runAnnotationBodyCommand}
-                onBodySelectionChange={setActiveAnnotationBodySelection}
-                popoverTextById={popoverTextById}
-                footnoteNumberById={footnoteNumberById}
-                onPopoverTriggerEnter={showPopover}
-                onPopoverTriggerLeave={schedulePopoverHideFromPointer}
             />
         </article>
     );
@@ -2116,6 +2251,13 @@ const blockTypeMenuValue = (meta: RichBlockMeta | undefined): BlockTypeMenuValue
 
 function AnnotationSidebar({
     annotations,
+    open,
+    gutterTops,
+    focusRequest,
+    onToggle,
+    onFocusAnnotation,
+    onFocusRequestHandled,
+    onBodyActivity,
     onBodyCommand,
     onBodySelectionChange,
     popoverTextById,
@@ -2124,6 +2266,13 @@ function AnnotationSidebar({
     onPopoverTriggerLeave,
 }: {
     annotations: ReturnType<typeof renderedAnnotations>;
+    open: boolean;
+    gutterTops: Record<string, number>;
+    focusRequest: CommentFocusRequest | null;
+    onToggle(open: boolean): void;
+    onFocusAnnotation(annotation: RenderedAnnotation): void;
+    onFocusRequestHandled(): void;
+    onBodyActivity(annotationId: string, bodyBlockId: string): void;
     onBodyCommand(
         command: (current: Replica, context: ReturnType<typeof makeCommandContext>) => CommandResult,
     ): void;
@@ -2133,26 +2282,62 @@ function AnnotationSidebar({
     onPopoverTriggerEnter(id: string, element: HTMLElement): void;
     onPopoverTriggerLeave(id?: string, transition?: PopoverPointerTransition): void;
 }) {
-    if (!annotations.length) return null;
+    if (!annotations.length && !open) return null;
     return (
-        <aside className="annotationSidebar" aria-label="Comments">
-            {annotations.map((annotation) => (
-                <section key={annotation.id} className="annotationCard">
-                    <strong>Comment on “{annotation.referenceText}”</strong>
-                    {annotation.bodyBlocks.map((block) => (
-                        <AnnotationBodyBlock
-                            key={block.id}
-                            block={block}
-                            onBodyCommand={onBodyCommand}
-                            onBodySelectionChange={onBodySelectionChange}
-                            popoverTextById={popoverTextById}
-                            footnoteNumberById={footnoteNumberById}
-                            onPopoverTriggerEnter={onPopoverTriggerEnter}
-                            onPopoverTriggerLeave={onPopoverTriggerLeave}
+        <aside
+            className={open ? 'annotationSidebar commentSidebarOpen' : 'annotationSidebar commentSidebarCollapsed'}
+            aria-label="Comments"
+        >
+            <button
+                type="button"
+                className="commentSidebarToggle"
+                aria-label={open ? 'Close comments' : 'Open comments'}
+                onClick={() => onToggle(!open)}
+            >
+                {open ? 'x' : '...'}
+            </button>
+            {open ? (
+                <div className="commentCards">
+                    {annotations.length ? (
+                        annotations.map((annotation) => (
+                            <section key={annotation.id} className="annotationCard">
+                                <strong>Comment on “{annotation.referenceText}”</strong>
+                                {annotation.bodyBlocks.map((block) => (
+                                    <AnnotationBodyBlock
+                                        key={block.id}
+                                        annotationId={annotation.id}
+                                        block={block}
+                                        focusRequest={focusRequest}
+                                        onFocusRequestHandled={onFocusRequestHandled}
+                                        onBodyActivity={onBodyActivity}
+                                        onBodyCommand={onBodyCommand}
+                                        onBodySelectionChange={onBodySelectionChange}
+                                        popoverTextById={popoverTextById}
+                                        footnoteNumberById={footnoteNumberById}
+                                        onPopoverTriggerEnter={onPopoverTriggerEnter}
+                                        onPopoverTriggerLeave={onPopoverTriggerLeave}
+                                    />
+                                ))}
+                            </section>
+                        ))
+                    ) : (
+                        <p className="commentEmpty">No comments</p>
+                    )}
+                </div>
+            ) : (
+                <div className="commentGutter" aria-label="Comment markers">
+                    {annotations.map((annotation, index) => (
+                        <button
+                            key={annotation.id}
+                            type="button"
+                            className="commentGutterDot"
+                            aria-label={`Open comment on ${annotation.referenceText}`}
+                            style={{top: gutterTops[annotation.id] ?? 18 + index * 24}}
+                            onClick={() => onFocusAnnotation(annotation)}
                         />
                     ))}
-                </section>
-            ))}
+                </div>
+            )}
         </aside>
     );
 }
@@ -2361,8 +2546,12 @@ function LinkHoverPopover({
 }
 
 function AnnotationBodyBlock({
+    annotationId,
     block,
     fallbackText = '',
+    focusRequest,
+    onFocusRequestHandled,
+    onBodyActivity,
     onBodyCommand,
     onBodySelectionChange,
     popoverTextById,
@@ -2370,8 +2559,12 @@ function AnnotationBodyBlock({
     onPopoverTriggerEnter,
     onPopoverTriggerLeave,
 }: {
+    annotationId?: string;
     block: ReturnType<typeof renderedAnnotations>[number]['bodyBlocks'][number];
     fallbackText?: string;
+    focusRequest?: CommentFocusRequest | null;
+    onFocusRequestHandled?(): void;
+    onBodyActivity?(annotationId: string, bodyBlockId: string): void;
     onBodyCommand(
         command: (current: Replica, context: ReturnType<typeof makeCommandContext>) => CommandResult,
     ): void;
@@ -2394,12 +2587,30 @@ function AnnotationBodyBlock({
         pendingSelectionRestoreRef.current = selection.type === 'range' ? selection : null;
         setSelection(selection);
         onBodySelectionChange(selection);
-    }, [block.id, onBodySelectionChange]);
+        if (annotationId) onBodyActivity?.(annotationId, block.id);
+    }, [annotationId, block.id, onBodyActivity, onBodySelectionChange]);
 
     const updateSelection = useCallback((nextSelection: EditorSelection | null) => {
         setSelection(nextSelection ?? caret(block.id, block.text.length));
         onBodySelectionChange(nextSelection);
     }, [block.id, block.text.length, onBodySelectionChange]);
+
+    useLayoutEffect(() => {
+        if (focusRequest?.blockId !== block.id) return;
+        const nextSelection = caret(block.id, block.text.length);
+        pendingCaretRestoreBlockIdRef.current = block.id;
+        pendingSelectionRestoreRef.current = null;
+        setSelection(nextSelection);
+        onBodySelectionChange(nextSelection);
+        onFocusRequestHandled?.();
+    }, [
+        block.id,
+        block.text.length,
+        focusRequest?.blockId,
+        focusRequest?.token,
+        onBodySelectionChange,
+        onFocusRequestHandled,
+    ]);
 
     const run = useCallback(
         (
@@ -3605,6 +3816,13 @@ const sameSelectionRange = (one: EditorSelection, two: EditorSelection) => {
     );
 };
 
+const numberRecordEquals = (one: Record<string, number>, two: Record<string, number>) => {
+    const oneKeys = Object.keys(one);
+    const twoKeys = Object.keys(two);
+    if (oneKeys.length !== twoKeys.length) return false;
+    return oneKeys.every((key) => one[key] === two[key]);
+};
+
 const editorSelectionKey = (selection: EditorSelection): string => {
     if (selection.type === 'caret') {
         return `caret:${selection.point.blockId}:${selection.point.offset}`;
@@ -3995,6 +4213,10 @@ const applyRunClasses = (
         span.dataset.linkEndOffset = String(chunk.blockEndOffset);
     }
     if (hasAnnotationMark(run)) span.classList.add('markAnnotation');
+    const sidebarIds = sidebarIdsForRun(run);
+    if (sidebarIds.length) {
+        span.dataset.sidebarAnnotationIds = sidebarIds.join(' ');
+    }
     const popoverIds = popoverIdsForRun(run, popoverTextById);
     if (popoverIds.length) {
         span.classList.add('markPopover');
@@ -4008,8 +4230,17 @@ const hasAnnotationMark = (run: RichFormattedBlock['runs'][number]) =>
     Boolean(run.marks.annotation || run.stackedMarks?.annotation?.length);
 
 const annotationDataForRun = (run: RichFormattedBlock['runs'][number]): AnnotationMarkData[] => {
-    const values = [...(run.stackedMarks?.annotation ?? []), run.marks.annotation];
-    return values.filter(isAnnotationMarkData);
+    return formattedMarkValues(run, ANNOTATION_MARK).filter(isAnnotationMarkData);
+};
+
+const sidebarIdsForRun = (run: RichFormattedBlock['runs'][number]): string[] => {
+    const result: string[] = [];
+    for (const data of annotationDataForRun(run)) {
+        if (data.presentation !== 'sidebar') continue;
+        const id = lamportToString(data.id);
+        if (!result.includes(id)) result.push(id);
+    }
+    return result;
 };
 
 const popoverIdsForRun = (

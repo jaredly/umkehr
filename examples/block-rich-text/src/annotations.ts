@@ -1,7 +1,8 @@
 import {
     blockContents,
     deleteRangeOps,
-    insertBlockOps,
+    formattedMarkValues,
+    insertBlockOpsWithId,
     insertTextOps,
     orderedCharIdsForBlock,
     visibleBlockChildren,
@@ -33,23 +34,29 @@ export {
 
 export const annotationVirtualParents = richTextVirtualParents;
 
+export type CreateAnnotationResult = CommandResult & {
+    annotationId: Lamport | null;
+    bodyBlockId: string | null;
+};
+
 export const createAnnotation = (
     state: CachedState<RichBlockMeta>,
     selection: EditorSelection,
     presentation: AnnotationPresentation,
     context: CommandContext,
-): CommandResult => {
+): CreateAnnotationResult => {
     const bodyRange = bodySelectionRange(state, selection);
-    const segments = bodyRange
+    const segments = (bodyRange
         ? [{blockId: bodyRange.blockId, startOffset: bodyRange.startOffset, endOffset: bodyRange.endOffset}]
-        : normalizeSelectionSegments(state, selection);
-    if (!segments.length) return {state, ops: [], selection};
+        : normalizeSelectionSegments(state, selection)
+    ).filter((segment) => segment.startOffset < segment.endOffset);
+    if (!segments.length) return {state, ops: [], selection, annotationId: null, bodyBlockId: null};
 
     const exact = exactAnnotationForSegments(state, segments);
     if (exact) {
         const existingBodies = annotationBodyBlockIds(state, exact);
         const before = existingBodies.at(-1);
-        const bodyOps = insertBlockOps(state, {
+        const {ops: bodyOps, blockId: bodyBlockId} = insertBlockOpsWithId(state, {
             actor: context.actor,
             parent: exact,
             before: before ? state.state.blocks[before].id : null,
@@ -61,6 +68,8 @@ export const createAnnotation = (
             state: applyMany(state, bodyOps, annotationVirtualParents(state)),
             ops: bodyOps,
             selection,
+            annotationId: exact,
+            bodyBlockId,
         };
     }
 
@@ -83,7 +92,7 @@ export const createAnnotation = (
         ops.push(op);
     }
 
-    const bodyOps = insertBlockOps(working, {
+    const {ops: bodyOps, blockId: bodyBlockId} = insertBlockOpsWithId(working, {
         actor: context.actor,
         parent: markId,
         meta: paragraphMeta(context.nextTs()),
@@ -93,7 +102,7 @@ export const createAnnotation = (
     working = applyMany(working, bodyOps, annotationVirtualParents(working));
     ops.push(...bodyOps);
 
-    return {state: working, ops, selection};
+    return {state: working, ops, selection, annotationId: markId, bodyBlockId};
 };
 
 export const setAnnotationBodyText = (
@@ -366,10 +375,7 @@ const firstPositionForAnnotation = (
 };
 
 const annotationDatasForRun = (run: FormattedRun): AnnotationMarkData[] => {
-    const stacked = run.stackedMarks?.[ANNOTATION_MARK] ?? [];
-    const scalar = run.marks[ANNOTATION_MARK];
-    const values = scalar === undefined ? stacked : [...stacked, scalar];
-    return values.filter(isAnnotationData);
+    return formattedMarkValues(run, ANNOTATION_MARK).filter(isAnnotationData);
 };
 
 const exactAnnotationForSegments = (

@@ -87,6 +87,8 @@ describe('block rich text annotations', () => {
 
         expect(leftAnnotation.referenceText).toBe('ell');
         expect(rightAnnotation.referenceText).toBe('ell');
+        expect(annotated.annotationId).toEqual(leftAnnotation.data.id);
+        expect(annotated.bodyBlockId).toBe(bodyId);
         expect(materializedBlockParent(synced.left.state, bodyId, annotationVirtualParents(synced.left.state))).toEqual(
             leftAnnotation.data.id,
         );
@@ -292,12 +294,27 @@ describe('block rich text annotations', () => {
         let result = insertText(demo.left.state, caret(blockId, 0), 'abcdef', ctx());
 
         result = createAnnotation(result.state, range(blockId, 1, 4), 'sidebar', ctx());
-        result = createAnnotation(result.state, range(blockId, 1, 4), 'sidebar', ctx());
+        const firstAnnotationId = result.annotationId;
+        const exact = createAnnotation(result.state, range(blockId, 1, 4), 'sidebar', ctx());
+        result = exact;
 
         const annotations = annotationsFor(result.state);
         expect(annotations).toHaveLength(1);
         expect(annotations[0].referenceText).toBe('bcd');
         expect(annotations[0].bodyBlocks).toHaveLength(2);
+        expect(exact.annotationId).toEqual(firstAnnotationId);
+        expect(exact.bodyBlockId).toBe(annotations[0].bodyBlocks[1].id);
         expect(Object.values(result.state.state.marks).filter((mark) => mark.type === ANNOTATION_MARK)).toHaveLength(1);
+    });
+
+    it('returns null annotation ids when a selection cannot create an annotation', () => {
+        const demo = createDemoState();
+        const blockId = rootBlockIds(demo.left.state)[0];
+
+        const result = createAnnotation(demo.left.state, caret(blockId, 0), 'sidebar', ctx());
+
+        expect(result.ops).toEqual([]);
+        expect(result.annotationId).toBeNull();
+        expect(result.bodyBlockId).toBeNull();
     });
 });
