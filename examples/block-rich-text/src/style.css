@@ -444,7 +444,8 @@ select {
 
 .tableColumnInsertControls {
     display: grid;
-    grid-template-columns: var(--table-row-header-width, fit-content(180px)) repeat(var(--table-columns, 1), minmax(150px, 1fr)) 0;
+    grid-column: 1 / -1;
+    grid-template-columns: subgrid;
     height: 22px;
     overflow: visible;
     pointer-events: none;
@@ -486,6 +487,7 @@ select {
 
 .tableRowInsertControl {
     position: relative;
+    grid-column: 1 / -1;
     height: 0;
     z-index: 3;
     pointer-events: none;
@@ -553,6 +555,7 @@ select {
 .tableGrid {
     --table-row-gutter: 30px;
     display: grid;
+    grid-template-columns: fit-content(180px) repeat(calc(var(--table-columns, 1) + 1), minmax(150px, 1fr)) 0;
     width: 100%;
     max-width: 100%;
     overflow-x: auto;
@@ -565,7 +568,8 @@ select {
 .tableRow {
     position: relative;
     display: grid;
-    grid-template-columns: var(--table-row-header-width, fit-content(180px)) repeat(var(--table-columns, 1), minmax(150px, 1fr));
+    grid-column: 1 / -2;
+    grid-template-columns: subgrid;
     border-top: 1px solid #dce4eb;
 }
 
@@ -1564,12 +1568,8 @@ select {
         flex-wrap: wrap;
     }
 
-    .tableRow {
-        grid-template-columns: var(--table-row-header-width, fit-content(150px)) repeat(var(--table-columns, 1), minmax(132px, 1fr));
-    }
-
-    .tableColumnInsertControls {
-        grid-template-columns: var(--table-row-header-width, fit-content(150px)) repeat(var(--table-columns, 1), minmax(132px, 1fr)) 0;
+    .tableGrid {
+        grid-template-columns: fit-content(150px) repeat(var(--table-columns, 1), minmax(132px, 1fr)) 0;
     }
 
     .tableRowHeader {

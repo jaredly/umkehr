@@ -80,6 +80,7 @@ Verification:
 - Moved row drag handles into a left table gutter and made them visible on row hover/focus instead of occupying row-header column width.
 - Updated App coverage for row-index placeholders and gutter row drag handles.
 - Fixed a CSS cascade bug where the generic `.editableBlock[data-empty="true"]::before` rule overrode row-header placeholder content; row headers now use the more specific `.editableBlock.tableRowHeaderText[data-empty="true"]::before`.
+- Changed table layout so `.tableGrid` owns the column tracks and each `.tableRow` uses `subgrid`; the row-header column is now one coherent width based on the widest row header instead of each row sizing independently.
 
 Verification:
 

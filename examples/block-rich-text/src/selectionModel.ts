@@ -1,5 +1,5 @@
 import type {CachedState} from 'umkehr/block-crdt/types';
-import {materializeFormattedBlocks, orderedCharIdsForBlock} from 'umkehr/block-crdt';
+import {orderedCharIdsForBlock, visibleBlockOutline} from 'umkehr/block-crdt';
 import {isEditableBlock} from './blockMeta';
 import type {RichBlockMeta} from './blockMeta';
 import {richTextVirtualParents} from './virtualParents';
@@ -25,14 +25,27 @@ export const pointTextLength = (state: CachedState<RichBlockMeta>, blockId: stri
     orderedCharIdsForBlock(state, blockId, {visibleOnly: true}).length;
 
 export const visibleBlockIds = (state: CachedState<RichBlockMeta>): string[] =>
-    materializeFormattedBlocks(state, richTextVirtualParents(state)).map((block) => block.id);
+    visibleBlockOutline(state, richTextVirtualParents(state)).map((block) => block.id);
 
 export const editableBlockIds = (state: CachedState<RichBlockMeta>): string[] =>
-    materializeFormattedBlocks(state, richTextVirtualParents(state))
-        .filter((block) => isEditableBlock(block.block.meta))
+    visibleBlockOutline(state, richTextVirtualParents(state))
+        .filter((block) => isEditableBlock(state.state.blocks[block.id]?.meta))
         .map((block) => block.id);
 
 export const clampPoint = (state: CachedState<RichBlockMeta>, point: BlockPoint): BlockPoint => {
+    const currentBlock = state.state.blocks[point.blockId];
+    if (
+        currentBlock &&
+        !currentBlock.deleted &&
+        !state.cache.joinedBlocks[point.blockId] &&
+        isEditableBlock(currentBlock.meta)
+    ) {
+        return {
+            blockId: point.blockId,
+            offset: Math.max(0, Math.min(point.offset, pointTextLength(state, point.blockId))),
+        };
+    }
+
     const blocks = editableBlockIds(state);
     const blockId = blocks.includes(point.blockId) ? point.blockId : blocks[0];
     if (!blockId) return point;
