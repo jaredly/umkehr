@@ -29,6 +29,7 @@ import {
     indentBlock,
     insertText,
     insertTextWithMarks,
+    insertTextWithRetainedMarks,
     moveBlock,
     moveTableCell,
     moveTableCellByTab,
@@ -42,6 +43,7 @@ import {
     splitTableTitleToParagraph,
     toggleMark,
     unindentBlock,
+    closeRetainedInlineMarkSessions,
     type CommandContext,
 } from './blockCommands';
 import {applyLocalChange, createDemoState, makeCommandContext, toggleOnline} from './blockEditorRuntime';
@@ -973,6 +975,47 @@ describe('block rich text commands', () => {
             {text: 'X', marks: {bold: true, italic: true}},
         ]);
         expectCache(result.state);
+    });
+
+    it('uses one retained mark while typing at a collapsed caret and closes it with bounded ops', () => {
+        const context = ctx();
+        let result = insertText(init(), caret(onlyBlock(init()), 0), 'ab', context);
+        const blockId = onlyBlock(result.state);
+
+        const first = insertTextWithRetainedMarks(result.state, caret(blockId, 1), 'X', ['bold'], [], context);
+        const second = insertTextWithRetainedMarks(
+            first.state,
+            first.selection,
+            'Y',
+            ['bold'],
+            first.sessions,
+            context,
+        );
+        const closed = closeRetainedInlineMarkSessions(second.state, second.sessions, 'bold', context);
+
+        expect(first.ops.filter((op) => op.type === 'mark')).toHaveLength(1);
+        expect(second.ops.filter((op) => op.type === 'mark')).toHaveLength(0);
+        expect(closed.ops.filter((op) => op.type === 'mark')).toHaveLength(2);
+        expect(materializeFormattedBlocks(closed.state)[0].runs).toEqual([
+            {text: 'a', marks: {}},
+            {text: 'XY', marks: {bold: true}},
+            {text: 'b', marks: {}},
+        ]);
+        expectCache(closed.state);
+    });
+
+    it('supports retained marks at the end of an empty block', () => {
+        const context = ctx();
+        const state = init();
+        const blockId = onlyBlock(state);
+
+        const inserted = insertTextWithRetainedMarks(state, caret(blockId, 0), 'XY', ['bold'], [], context);
+        const closed = closeRetainedInlineMarkSessions(inserted.state, inserted.sessions, 'bold', context);
+
+        expect(materializeFormattedBlocks(closed.state)[0].runs).toEqual([
+            {text: 'XY', marks: {bold: true}},
+        ]);
+        expectCache(closed.state);
     });
 
     it('toggles strikethrough over a range', () => {

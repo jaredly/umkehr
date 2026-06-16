@@ -485,7 +485,7 @@ const missingDependenciesForOp = <M extends TimestampedBlockMeta>(
         case 'mark': {
             const missing: Lamport[] = [];
             if (!state.state.chars[lamportToString(op.mark.start.id)]) missing.push(op.mark.start.id);
-            if (!state.state.chars[lamportToString(op.mark.end.id)]) missing.push(op.mark.end.id);
+            if (op.mark.end && !state.state.chars[lamportToString(op.mark.end.id)]) missing.push(op.mark.end.id);
             for (const split of op.mark.crossedSplits) {
                 if (!state.state.splits[lamportToString(split)]) missing.push(split);
             }

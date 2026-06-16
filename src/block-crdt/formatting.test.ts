@@ -10,6 +10,7 @@ import {
     formattedMarkValues,
     hasJoinStyleParent,
     join,
+    markBoundaryOp,
     markOp,
     markRange,
     materializeFormattedBlocks,
@@ -239,6 +240,79 @@ it('returns visible ranges for a mark inside one block', () => {
 
     expect(visibleRangesForMark(state, op.mark)).toEqual([
         {blockId: '0000-self', startOffset: 1, endOffset: 3},
+    ]);
+});
+
+it('supports explicit before-boundary mark ends', () => {
+    const ts = mts();
+    let state = add(init(), 'abc', [0, 'self'], ts);
+    state = apply(
+        state,
+        markBoundaryOp([10, 'self'], {id: [2, 'self'], at: 'before'}, {id: [3, 'self'], at: 'before'}, 'bold'),
+    ) as CachedState;
+    state = apply(state, charOp('X', [11, 'other'], [2, 'self'], ts())) as CachedState;
+
+    expect(formattedRuns(state)[0]).toEqual([
+        {text: 'a', marks: {}},
+        {text: 'bX', marks: {bold: true}},
+        {text: 'c', marks: {}},
+    ]);
+});
+
+it('supports open-ended marks through the end of the start block', () => {
+    const ts = mts();
+    let state = add(init(), 'abcde', [0, 'self'], ts);
+    state = applyMany(
+        state,
+        split(state, splitLocation(state, [0, 'self'], selPos(state, [0, 'self'], 4)!), ts(), 'self', {
+            random: () => 0,
+        }),
+    );
+    const [firstBlock, secondBlock] = state.cache.blockChildren['0000-root'];
+    state = apply(
+        state,
+        markBoundaryOp([20, 'self'], {id: [2, 'self'], at: 'before'}, undefined, 'bold'),
+    ) as CachedState;
+
+    expect(formattedRuns(state)).toEqual([
+        [
+            {text: 'a', marks: {}},
+            {text: 'bc', marks: {bold: true}},
+        ],
+        [{text: 'de', marks: {}}],
+    ]);
+    expect(firstBlock).not.toBe(secondBlock);
+});
+
+it('closes an open-ended retained mark with a remove and bounded add', () => {
+    const ts = mts();
+    let state = add(init(), 'ab', [0, 'self'], ts);
+    state = apply(state, charOp('X', [10, 'self'], [1, 'self'], ts())) as CachedState;
+    state = apply(state, charOp('Y', [11, 'self'], [10, 'self'], ts())) as CachedState;
+    state = apply(
+        state,
+        markBoundaryOp([20, 'self'], {id: [10, 'self'], at: 'before'}, {id: [2, 'self'], at: 'before'}, 'bold'),
+    ) as CachedState;
+    state = apply(
+        state,
+        markBoundaryOp(
+            [21, 'self'],
+            {id: [10, 'self'], at: 'before'},
+            {id: [2, 'self'], at: 'before'},
+            'bold',
+            undefined,
+            true,
+        ),
+    ) as CachedState;
+    state = apply(
+        state,
+        markBoundaryOp([22, 'self'], {id: [10, 'self'], at: 'before'}, {id: [11, 'self'], at: 'after'}, 'bold'),
+    ) as CachedState;
+
+    expect(formattedRuns(state)[0]).toEqual([
+        {text: 'a', marks: {}},
+        {text: 'XY', marks: {bold: true}},
+        {text: 'b', marks: {}},
     ]);
 });
 

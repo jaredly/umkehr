@@ -18,7 +18,7 @@ export type Boundary = {
 export type Mark = {
     id: Lamport;
     start: Boundary;
-    end: Boundary;
+    end?: Boundary;
     remove: boolean;
     type: string;
     data?: JsonValue;

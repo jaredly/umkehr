@@ -92,7 +92,7 @@ import {
     extendSelectionsVertically,
     indentSelections,
     insertTextEverywhere,
-    insertTextWithMarksEverywhere,
+    insertTextWithRetainedMarksEverywhere,
     moveSelectionsHorizontally,
     moveSelectionsVertically,
     pastePlainTextEverywhere,
@@ -103,8 +103,10 @@ import {
     toggleMarkEverywhere,
     updateBlockMetaEverywhere,
     unindentSelections,
+    closeRetainedInlineMarkSessionsEverywhere,
     type HorizontalMovementUnit,
     type MultiCommandResult,
+    type RetainedInlineMarkSessionMap,
 } from './multiSelectionCommands';
 import {useBlockReorder, type DropTarget} from './useBlockReorder';
 import {
@@ -172,6 +174,9 @@ const activePendingInlineMarks = (marks: PendingInlineMarks): BooleanInlineMark[
 
 const hasPendingInlineMarks = (marks: PendingInlineMarks): boolean =>
     activePendingInlineMarks(marks).length > 0;
+
+const hasRetainedInlineMarkSessions = (marks: RetainedInlineMarkSessionMap): boolean =>
+    Object.values(marks).some((sessions) => sessions.length > 0);
 
 export function App() {
     return hasDemoQuery() ? <BlogVisualDemos /> : <EditorApp />;
@@ -550,6 +555,7 @@ function BlockEditor({
     const [linkPopover, setLinkPopover] = useState<LinkPopoverState | null>(null);
     const [linkHoverPopover, setLinkHoverPopover] = useState<LinkHoverPopoverState | null>(null);
     const [pendingInlineMarks, setPendingInlineMarks] = useState<PendingInlineMarks>({});
+    const [retainedInlineMarks, setRetainedInlineMarks] = useState<RetainedInlineMarkSessionMap>({});
     const blocksWithAnnotationBodies = materializeFormattedBlocks(
         replica.state,
         annotationVirtualParents(replica.state),
@@ -675,8 +681,10 @@ function BlockEditor({
     }, []);
 
     const clearPendingInlineMarks = useCallback(() => {
-        setPendingInlineMarks((current) => (hasPendingInlineMarks(current) ? {} : current));
-    }, []);
+        setPendingInlineMarks((current) =>
+            hasPendingInlineMarks(current) && !hasRetainedInlineMarkSessions(retainedInlineMarks) ? {} : current,
+        );
+    }, [retainedInlineMarks]);
 
     const nextSelectionId = useCallback(() => `sel-${nextSelectionIdRef.current++}`, []);
 
@@ -789,6 +797,7 @@ function BlockEditor({
         setLinkPopover(null);
         setLinkHoverPopover(null);
         setPendingInlineMarks({});
+        setRetainedInlineMarks({});
         if (linkHoverHideTimerRef.current) clearTimeout(linkHoverHideTimerRef.current);
         linkHoverHideTimerRef.current = null;
     }, [resetSignal]);
@@ -822,7 +831,6 @@ function BlockEditor({
             }
             const root = rootRef.current;
             if (!root) return;
-            if (event.type === 'mouseup') clearPendingInlineMarks();
             if (event.type === 'mouseup' && pendingMultiselectClickRef.current) {
                 const pendingClick = pendingMultiselectClickRef.current;
                 pendingMultiselectClickRef.current = null;
@@ -1022,12 +1030,24 @@ function BlockEditor({
                 const selection = liveSelectionSet(current);
                 const resolved = resolveSelectionSet(current.state, selection);
                 if (resolved.entries.every((entry) => entry.selection.type === 'caret')) {
-                    setPendingInlineMarks((currentMarks) => ({
-                        ...currentMarks,
-                        [markType]: !currentMarks[markType],
-                    }));
                     const primary = primarySelection(resolved);
                     scheduleSelectionRestore(primary);
+                    if (pendingInlineMarks[markType]) {
+                        const result = closeRetainedInlineMarkSessionsEverywhere(
+                            current.state,
+                            selection,
+                            retainedInlineMarks,
+                            markType,
+                            makeCommandContext(current),
+                        );
+                        setRetainedInlineMarks(result.retainedMarks);
+                        setPendingInlineMarks((currentMarks) => ({...currentMarks, [markType]: false}));
+                        return result;
+                    }
+                    setPendingInlineMarks((currentMarks) => ({
+                        ...currentMarks,
+                        [markType]: true,
+                    }));
                     return {state: current.state, ops: [], selection};
                 }
 
@@ -1049,6 +1069,8 @@ function BlockEditor({
             clearPendingInlineMarks,
             liveSelectionSet,
             onCommand,
+            pendingInlineMarks,
+            retainedInlineMarks,
             resetVerticalCaretIntent,
             scheduleSelectionRestore,
         ],
@@ -1065,20 +1087,21 @@ function BlockEditor({
                 return insertTextEverywhere(current.state, selection, text, makeCommandContext(current));
             }
             const resolved = resolveSelectionSet(current.state, selection);
-            const primary = primarySelection(resolved);
-            if (primary.type !== 'caret') {
-                clearPendingInlineMarks();
+            if (!resolved.entries.every((entry) => entry.selection.type === 'caret')) {
                 return insertTextEverywhere(current.state, selection, text, makeCommandContext(current));
             }
-            return insertTextWithMarksEverywhere(
+            const result = insertTextWithRetainedMarksEverywhere(
                 current.state,
                 selection,
                 text,
                 activeMarks,
+                retainedInlineMarks,
                 makeCommandContext(current),
             );
+            setRetainedInlineMarks(result.retainedMarks);
+            return result;
         },
-        [clearPendingInlineMarks, pendingInlineMarks],
+        [pendingInlineMarks, retainedInlineMarks],
     );
 
     const runBlockControlCommand = useCallback(
@@ -1254,51 +1277,46 @@ function BlockEditor({
     const moveSelectionsHorizontallyEverywhere = useCallback(
         (direction: 'left' | 'right', unit: HorizontalMovementUnit = 'character') => {
             handledNavigationKeyRef.current = true;
-            clearPendingInlineMarks();
             runEditCommand((current, selection) =>
                 moveSelectionsHorizontally(current.state, selection, direction, unit),
             );
         },
-        [clearPendingInlineMarks, runEditCommand],
+        [runEditCommand],
     );
 
     const moveSelectionsVerticallyEverywhere = useCallback(
         (direction: 'up' | 'down') => {
             handledNavigationKeyRef.current = true;
-            clearPendingInlineMarks();
             runEditCommand((current, selection) =>
                 moveSelectionsVertically(current.state, selection, direction),
             );
         },
-        [clearPendingInlineMarks, runEditCommand],
+        [runEditCommand],
     );
 
     const extendSelectionsHorizontallyEverywhere = useCallback(
         (direction: 'left' | 'right', unit: HorizontalMovementUnit = 'character') => {
             handledNavigationKeyRef.current = true;
-            clearPendingInlineMarks();
             runEditCommand((current, selection) =>
                 extendSelectionsHorizontally(current.state, selection, direction, unit),
             );
         },
-        [clearPendingInlineMarks, runEditCommand],
+        [runEditCommand],
     );
 
     const extendSelectionsVerticallyEverywhere = useCallback(
         (direction: 'up' | 'down') => {
             handledNavigationKeyRef.current = true;
-            clearPendingInlineMarks();
             runEditCommand((current, selection) =>
                 extendSelectionsVertically(current.state, selection, direction),
             );
         },
-        [clearPendingInlineMarks, runEditCommand],
+        [runEditCommand],
     );
 
     const extendSelectionVerticallyWithVisualIntent = useCallback(
         (direction: 'up' | 'down', sourceBlock: HTMLElement) => {
             handledNavigationKeyRef.current = true;
-            clearPendingInlineMarks();
             onCommand((current) => {
                 const root = rootRef.current;
                 if (!root) return {state: current.state, ops: [], selection: current.selection};
@@ -1376,12 +1394,11 @@ function BlockEditor({
                 };
             });
         },
-        [clearPendingInlineMarks, onCommand, scheduleSelectionRestore],
+        [onCommand, scheduleSelectionRestore],
     );
 
     const moveCaret = useCallback(
         (selection: EditorSelection) => {
-            clearPendingInlineMarks();
             scheduleSelectionRestore(selection);
             onCommand((current) => ({
                 state: current.state,
@@ -1389,7 +1406,7 @@ function BlockEditor({
                 selection: replacePrimarySelection(current.state, current.selection, selection),
             }));
         },
-        [clearPendingInlineMarks, onCommand, scheduleSelectionRestore],
+        [onCommand, scheduleSelectionRestore],
     );
 
     const moveCaretHorizontally = useCallback(

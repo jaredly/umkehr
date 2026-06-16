@@ -14,12 +14,14 @@ import {
     indentSelections,
     insertTextEverywhere,
     insertTextWithMarksEverywhere,
+    insertTextWithRetainedMarksEverywhere,
     moveSelectionsHorizontally,
     moveSelectionsVertically,
     setLinkMarkEverywhere,
     splitBlockEverywhere,
     toggleMarkEverywhere,
     unindentSelections,
+    closeRetainedInlineMarkSessionsEverywhere,
 } from './multiSelectionCommands';
 import {appendSelection, resolveSelectionSet, singleRetainedSelectionSet} from './selectionSet';
 
@@ -95,6 +97,46 @@ describe('block rich text multi-selection commands', () => {
             {text: 'X', marks: {bold: true}},
             {text: 'bc', marks: {}},
             {text: 'X', marks: {bold: true}},
+            {text: 'd', marks: {}},
+        ]);
+    });
+
+    it('uses retained marks independently at multiple carets', () => {
+        const context = ctx();
+        const inserted = insertText(init(), caret(onlyBlock(init()), 0), 'abcd', context);
+        const blockId = onlyBlock(inserted.state);
+        const set = appendSelection(
+            inserted.state,
+            singleRetainedSelectionSet(inserted.state, caret(blockId, 1), 'first'),
+            caret(blockId, 3),
+            'second',
+        );
+
+        const first = insertTextWithRetainedMarksEverywhere(inserted.state, set, 'X', ['bold'], {}, context);
+        const second = insertTextWithRetainedMarksEverywhere(
+            first.state,
+            first.selection,
+            'Y',
+            ['bold'],
+            first.retainedMarks,
+            context,
+        );
+        const closed = closeRetainedInlineMarkSessionsEverywhere(
+            second.state,
+            second.selection,
+            second.retainedMarks,
+            'bold',
+            context,
+        );
+
+        expect(first.ops.filter((op) => op.type === 'mark')).toHaveLength(2);
+        expect(second.ops.filter((op) => op.type === 'mark')).toHaveLength(0);
+        expect(closed.ops.filter((op) => op.type === 'mark')).toHaveLength(4);
+        expect(materializeFormattedBlocks(closed.state)[0].runs).toEqual([
+            {text: 'a', marks: {}},
+            {text: 'XY', marks: {bold: true}},
+            {text: 'bc', marks: {}},
+            {text: 'XY', marks: {bold: true}},
             {text: 'd', marks: {}},
         ]);
     });

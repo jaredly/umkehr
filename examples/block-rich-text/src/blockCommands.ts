@@ -7,6 +7,7 @@ import {
     insertBlockOps,
     insertTextOps,
     joinBlocksOps,
+    markBoundaryOp,
     markRangeOp,
     materializeFormattedBlocks,
     materializedBlockParent,
@@ -23,7 +24,7 @@ import {
     type Op,
 } from 'umkehr/block-crdt';
 import {compareLseqIds, createLseqIdBetween} from 'umkehr/block-crdt/lseq';
-import type {BlockOrderTs, CachedState, Lamport} from 'umkehr/block-crdt/types';
+import type {BlockOrderTs, Boundary, CachedState, Lamport} from 'umkehr/block-crdt/types';
 import {lamportToString, parseLamportString} from 'umkehr/block-crdt/utils';
 import {paragraphMeta, sameTypeWithTs, type RichBlockMeta} from './blockMeta';
 import {annotationVirtualParents} from './annotations';
@@ -53,6 +54,17 @@ export type CommandResult = {
     state: CachedState<RichBlockMeta>;
     ops: Array<Op<RichBlockMeta>>;
     selection: EditorSelection;
+};
+
+export type RetainedInlineMarkSession = {
+    markType: BooleanInlineMark;
+    start: Boundary;
+    end?: Boundary;
+    lastTypedCharId: string | null;
+};
+
+export type RetainedInlineMarkInsertResult = CommandResult & {
+    sessions: RetainedInlineMarkSession[];
 };
 
 export type MoveTarget =
@@ -138,6 +150,108 @@ export const insertTextWithMarks = (
     }
 
     return {state: working, ops, selection: inserted.selection};
+};
+
+export const insertTextWithRetainedMarks = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    text: string,
+    markTypes: BooleanInlineMark[],
+    sessions: RetainedInlineMarkSession[],
+    context: CommandContext,
+): RetainedInlineMarkInsertResult => {
+    if (selection.type !== 'caret' || !markTypes.length) {
+        const inserted = insertText(state, selection, text, context);
+        return {state: inserted.state, ops: inserted.ops, selection: inserted.selection, sessions};
+    }
+
+    const point = firstPointForSelection(state, selection);
+    const end = openRetainedMarkEndForPoint(state, point);
+    const inserted = insertText(state, selection, text, context);
+    const insertedCharIds = inserted.ops
+        .filter((op): op is Op<RichBlockMeta> & {type: 'char'} => op.type === 'char')
+        .map((op) => lamportToString(op.char.id));
+    if (!insertedCharIds.length) {
+        return {state: inserted.state, ops: inserted.ops, selection: inserted.selection, sessions};
+    }
+
+    let working = inserted.state;
+    const ops = [...inserted.ops];
+    const nextSessions = sessions.slice();
+    const firstInsertedCharId = insertedCharIds[0];
+    const lastInsertedCharId = insertedCharIds[insertedCharIds.length - 1];
+
+    for (const markType of [...new Set(markTypes)]) {
+        const existingIndex = nextSessions.findIndex((session) => session.markType === markType);
+        if (existingIndex >= 0) {
+            nextSessions[existingIndex] = {
+                ...nextSessions[existingIndex],
+                lastTypedCharId: lastInsertedCharId,
+            };
+            continue;
+        }
+
+        const session: RetainedInlineMarkSession = {
+            markType,
+            start: {id: parseLamportString(firstInsertedCharId), at: 'before'},
+            ...(end ? {end} : {}),
+            lastTypedCharId: lastInsertedCharId,
+        };
+        const op = markBoundaryOp<RichBlockMeta>(
+            [working.state.maxSeenCount + 1, context.actor],
+            session.start,
+            session.end,
+            markType,
+        );
+        working = applyMany(working, [op], annotationVirtualParents(working));
+        ops.push(op);
+        nextSessions.push(session);
+    }
+
+    return {state: working, ops, selection: inserted.selection, sessions: nextSessions};
+};
+
+export const closeRetainedInlineMarkSessions = (
+    state: CachedState<RichBlockMeta>,
+    sessions: RetainedInlineMarkSession[],
+    markType: BooleanInlineMark,
+    context: CommandContext,
+): {state: CachedState<RichBlockMeta>; ops: Array<Op<RichBlockMeta>>; sessions: RetainedInlineMarkSession[]} => {
+    let working = state;
+    const ops: Array<Op<RichBlockMeta>> = [];
+    const remaining: RetainedInlineMarkSession[] = [];
+
+    for (const session of sessions) {
+        if (session.markType !== markType) {
+            remaining.push(session);
+            continue;
+        }
+        if (!session.lastTypedCharId) {
+            continue;
+        }
+
+        const remove = markBoundaryOp<RichBlockMeta>(
+            [working.state.maxSeenCount + 1, context.actor],
+            session.start,
+            session.end,
+            markType,
+            undefined,
+            true,
+        );
+        working = applyMany(working, [remove], annotationVirtualParents(working));
+        ops.push(remove);
+
+        const bounded = markBoundaryOp<RichBlockMeta>(
+            [working.state.maxSeenCount + 1, context.actor],
+            session.start,
+            {id: parseLamportString(session.lastTypedCharId), at: 'after'},
+            markType,
+        );
+        working = applyMany(working, [bounded], annotationVirtualParents(working));
+        ops.push(bounded);
+    }
+
+    return {state: working, ops, sessions: remaining};
 };
 
 export const deleteBackward = (
@@ -613,6 +727,15 @@ const lastVisibleCharId = (state: CachedState<RichBlockMeta>, blockId: string): 
     const chars = orderedCharIdsForBlock(state, blockId, {visibleOnly: true});
     const charId = chars[chars.length - 1];
     return charId ? state.state.chars[charId].id : null;
+};
+
+const openRetainedMarkEndForPoint = (
+    state: CachedState<RichBlockMeta>,
+    point: BlockPoint,
+): Boundary | undefined => {
+    const chars = orderedCharIdsForBlock(state, point.blockId, {visibleOnly: true});
+    const nextCharId = chars[point.offset];
+    return nextCharId ? {id: parseLamportString(nextCharId), at: 'before'} : undefined;
 };
 
 const appendRootBlockAfterOp = (

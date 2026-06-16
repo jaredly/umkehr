@@ -58,7 +58,7 @@ export const maxLamportCounterForOp = <M extends TimestampedBlockMeta>(op: Op<M>
             return Math.max(
                 op.mark.id[0],
                 op.mark.start.id[0],
-                op.mark.end.id[0],
+                op.mark.end?.id[0] ?? 0,
                 ...op.mark.crossedSplits.map((id) => id[0]),
             );
         case 'split-record':
@@ -89,7 +89,7 @@ const lamportsForOp = <M extends TimestampedBlockMeta>(op: Op<M>): Lamport[] => 
             return [
                 op.mark.id,
                 op.mark.start.id,
-                op.mark.end.id,
+                ...(op.mark.end ? [op.mark.end.id] : []),
                 ...op.mark.crossedSplits,
             ];
         case 'split-record':

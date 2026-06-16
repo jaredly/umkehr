@@ -8,7 +8,7 @@ import {
     visibleBlockOutline,
 } from './traversal.js';
 import {type VirtualBlockParentConfig} from './blocks.js';
-import {Block, CachedState, JsonValue, Lamport, Mark, Op, SplitRecord, TimestampedBlockMeta} from './types.js';
+import {Block, Boundary, CachedState, JsonValue, Lamport, Mark, Op, SplitRecord, TimestampedBlockMeta} from './types.js';
 
 export const splitRecordsByLeft = <M extends TimestampedBlockMeta>(
     state: CachedState<M>,
@@ -61,6 +61,27 @@ export const markOp = <M extends TimestampedBlockMeta = TimestampedBlockMeta>(
         id,
         start: {id: start, at: 'before'},
         end: {id: end, at: 'after'},
+        remove,
+        type,
+        data,
+        crossedSplits,
+    },
+});
+
+export const markBoundaryOp = <M extends TimestampedBlockMeta = TimestampedBlockMeta>(
+    id: Lamport,
+    start: Boundary,
+    end: Boundary | undefined,
+    type: string,
+    data?: JsonValue,
+    remove = false,
+    crossedSplits: Lamport[] = [],
+): Op<M> => ({
+    type: 'mark',
+    mark: {
+        id,
+        start,
+        ...(end ? {end} : {}),
         remove,
         type,
         data,
@@ -184,7 +205,7 @@ export const coveredCharIdsForMark = <M extends TimestampedBlockMeta>(
     mark: Mark,
     config: VirtualBlockParentConfig<M>,
 ): string[] => {
-    const sequence = allCharIds(state, config);
+    const sequence = mark.end ? allCharIds(state, config) : charIdsForOpenEndedMark(state, mark, config);
     const nextById = nextIdMap(sequence);
     const splitRecords = splitRecordsByLeft(state);
     const crossed = new Set(mark.crossedSplits.map(lamportToString));
@@ -195,25 +216,27 @@ export const coveredCharIdsForMark = <M extends TimestampedBlockMeta>(
         mark.start.at === 'before'
             ? lamportToString(mark.start.id)
             : nextById[lamportToString(mark.start.id)];
-    const end = lamportToString(mark.end.id);
+    const end = mark.end ? lamportToString(mark.end.id) : null;
 
     while (current) {
         if (seen.has(current)) {
             throw new Error(`mark traversal cycle at ${current}`);
         }
         seen.add(current);
-        if (mark.end.at === 'before' && current === end) {
+        if (mark.end?.at === 'before' && current === end) {
             break;
         }
         covered.push(current);
-        if (mark.end.at === 'after' && current === end) {
+        if (mark.end?.at === 'after' && current === end) {
             break;
         }
         if (forcedNext[current]) {
             current = forcedNext[current];
             continue;
         }
-        const split = splitRecords[current]?.find((split) => !crossed.has(lamportToString(split.id)));
+        const split = mark.end
+            ? splitRecords[current]?.find((split) => !crossed.has(lamportToString(split.id)))
+            : undefined;
         if (split) {
             const path = pathForFollowedSplit(state, split);
             for (let i = 0; i < path.length - 1; i++) {
@@ -231,6 +254,18 @@ const allCharIds = <M extends TimestampedBlockMeta>(
     state: CachedState<M>,
     config: VirtualBlockParentConfig<M> = {},
 ): string[] => visibleBlockOutline(state, config).flatMap(({id}) => orderedCharIdsForBlock(state, id));
+
+const charIdsForOpenEndedMark = <M extends TimestampedBlockMeta>(
+    state: CachedState<M>,
+    mark: Mark,
+    config: VirtualBlockParentConfig<M> = {},
+): string[] => {
+    const startId = lamportToString(mark.start.id);
+    const block = visibleBlockOutline(state, config).find(({id}) =>
+        orderedCharIdsForBlock(state, id).includes(startId),
+    );
+    return block ? orderedCharIdsForBlock(state, block.id) : allCharIds(state, config);
+};
 
 const nextIdMap = (sequence: string[]): Record<string, string> => {
     const result: Record<string, string> = {};

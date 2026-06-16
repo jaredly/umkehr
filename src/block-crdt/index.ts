@@ -87,6 +87,7 @@ export {
 
 export {
     markOp,
+    markBoundaryOp,
     markRange,
     markRange as markRangeOp,
     materializeFormattedBlocks,

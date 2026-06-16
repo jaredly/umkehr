@@ -316,7 +316,7 @@ const remapMarksForRestoredChars = <M extends TimestampedBlockMeta>(
     for (const mark of Object.values(current.state.marks)) {
         if (mark.remove) continue;
         const start = replacements.get(lamportToString(mark.start.id));
-        const end = replacements.get(lamportToString(mark.end.id));
+        const end = mark.end ? replacements.get(lamportToString(mark.end.id)) : undefined;
         if (!start && !end) continue;
         ops.push({
             type: 'mark',
@@ -324,7 +324,7 @@ const remapMarksForRestoredChars = <M extends TimestampedBlockMeta>(
                 ...mark,
                 id: nextId(),
                 start: start ? {...mark.start, id: start} : mark.start,
-                end: end ? {...mark.end, id: end} : mark.end,
+                ...(mark.end ? {end: end ? {...mark.end, id: end} : mark.end} : {}),
             },
         });
     }
@@ -339,7 +339,8 @@ const hasMarksToRemap = <M extends TimestampedBlockMeta>(
     return Object.values(current.state.marks).some(
         (mark) =>
             !mark.remove &&
-            (replacements.has(lamportToString(mark.start.id)) || replacements.has(lamportToString(mark.end.id))),
+            (replacements.has(lamportToString(mark.start.id)) ||
+                (mark.end ? replacements.has(lamportToString(mark.end.id)) : false)),
     );
 };
 
@@ -363,7 +364,9 @@ const reparentRestoredChars = <M extends TimestampedBlockMeta>(
     return ops;
 };
 
-const sameBoundary = (one: Mark['start'], two: Mark['start']) =>
-    one.at === two.at && lamportToString(one.id) === lamportToString(two.id);
+const sameBoundary = (one: Mark['start'] | undefined, two: Mark['start'] | undefined) =>
+    one === undefined || two === undefined
+        ? one === two
+        : one.at === two.at && lamportToString(one.id) === lamportToString(two.id);
 
 const sameLamport = (one: Lamport, two: Lamport) => one[0] === two[0] && one[1] === two[1];

@@ -7,6 +7,7 @@ import {
     deleteForward,
     insertText,
     insertTextWithMarks,
+    insertTextWithRetainedMarks,
     moveBlock,
     pastePlainText,
     removeLinkMark,
@@ -19,8 +20,10 @@ import {
     updateBlockMeta,
     commandApplied,
     noCommand,
+    closeRetainedInlineMarkSessions,
     type CommandResult,
     type CommandContext,
+    type RetainedInlineMarkSession,
 } from './blockCommands';
 import type {BooleanInlineMark} from './inlineMarks';
 import {resolveSelection, retainSelection} from './retainedSelection';
@@ -52,6 +55,12 @@ export type MultiCommandResult = {
     selection: RetainedSelectionSet;
 };
 
+export type RetainedInlineMarkSessionMap = Record<string, RetainedInlineMarkSession[]>;
+
+export type RetainedInlineMarkMultiCommandResult = MultiCommandResult & {
+    retainedMarks: RetainedInlineMarkSessionMap;
+};
+
 export type HorizontalMovementUnit = 'character' | 'word' | 'block';
 
 export const insertTextEverywhere = (
@@ -74,6 +83,81 @@ export const insertTextWithMarksEverywhere = (
     runReplacingCommand(state, selection, (working, entry) =>
         insertTextWithMarks(working, resolveSelection(working, entry.selection), text, markTypes, context),
     );
+
+export const insertTextWithRetainedMarksEverywhere = (
+    state: CachedState<RichBlockMeta>,
+    selection: RetainedSelectionSet,
+    text: string,
+    markTypes: BooleanInlineMark[],
+    retainedMarks: RetainedInlineMarkSessionMap,
+    context: CommandContext,
+): RetainedInlineMarkMultiCommandResult => {
+    const deduped = dedupeSelectionSet(state, selection);
+    const commandEntries = reverseSortedRetainedEntries(state, mergeOverlappingRanges(state, deduped));
+    if (!commandEntries.length) return {state, ops: [], selection: deduped, retainedMarks};
+
+    let working = state;
+    const ops: Array<Op<RichBlockMeta>> = [];
+    const nextEntries: RetainedSelectionEntry[] = [];
+    const nextRetainedMarks: RetainedInlineMarkSessionMap = {...retainedMarks};
+
+    for (const entry of commandEntries) {
+        const result = insertTextWithRetainedMarks(
+            working,
+            resolveSelection(working, entry.selection),
+            text,
+            markTypes,
+            nextRetainedMarks[entry.id] ?? [],
+            context,
+        );
+        working = result.state;
+        ops.push(...result.ops);
+        nextEntries.push({id: entry.id, selection: retainSelection(working, result.selection)});
+        if (result.sessions.length) {
+            nextRetainedMarks[entry.id] = result.sessions;
+        } else {
+            delete nextRetainedMarks[entry.id];
+        }
+    }
+
+    return {
+        state: working,
+        ops,
+        selection: dedupeSelectionSet(working, {
+            primaryId: selection.primaryId,
+            entries: nextEntries,
+        }),
+        retainedMarks: nextRetainedMarks,
+    };
+};
+
+export const closeRetainedInlineMarkSessionsEverywhere = (
+    state: CachedState<RichBlockMeta>,
+    selection: RetainedSelectionSet,
+    retainedMarks: RetainedInlineMarkSessionMap,
+    markType: BooleanInlineMark,
+    context: CommandContext,
+): RetainedInlineMarkMultiCommandResult => {
+    let working = state;
+    const ops: Array<Op<RichBlockMeta>> = [];
+    const nextRetainedMarks: RetainedInlineMarkSessionMap = {};
+
+    for (const [selectionId, sessions] of Object.entries(retainedMarks)) {
+        const result = closeRetainedInlineMarkSessions(working, sessions, markType, context);
+        working = result.state;
+        ops.push(...result.ops);
+        if (result.sessions.length) {
+            nextRetainedMarks[selectionId] = result.sessions;
+        }
+    }
+
+    return {
+        state: working,
+        ops,
+        selection: dedupeSelectionSet(working, selection),
+        retainedMarks: nextRetainedMarks,
+    };
+};
 
 export const pastePlainTextEverywhere = (
     state: CachedState<RichBlockMeta>,

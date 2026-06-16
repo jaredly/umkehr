@@ -1679,6 +1679,12 @@ describe('Block rich text example UI', () => {
 
         await waitFor(() => expect(blocks(left)[0].querySelector('.markBold')?.textContent).toBe('bc'));
         expect(blockText(blocks(left)[0])).toBe('abc');
+
+        fireEvent.keyDown(blocks(left)[0], {key: 'b', metaKey: true});
+        beforeInputText(blocks(left)[0], 'd');
+
+        await waitFor(() => expect(blockText(blocks(left)[0])).toBe('abcd'));
+        expect(blocks(left)[0].querySelector('.markBold')?.textContent).toBe('bc');
     });
 
     it('toggles pending bold off before typing', async () => {
@@ -1698,7 +1704,7 @@ describe('Block rich text example UI', () => {
         expect(blocks(left)[0].querySelector('.markBold')).toBeNull();
     });
 
-    it('clears pending bold when the caret moves', async () => {
+    it('keeps pending bold active when the caret moves', async () => {
         const view = render(<App />);
         const {left} = panels(view);
 
@@ -1711,13 +1717,13 @@ describe('Block rich text example UI', () => {
         setDomCaret(blocks(left)[0], 0);
         fireEvent.mouseUp(blocks(left)[0]);
         await waitFor(() =>
-            expect(within(left).getByRole('button', {name: 'B'}).getAttribute('aria-pressed')).toBe('false'),
+            expect(within(left).getByRole('button', {name: 'B'}).getAttribute('aria-pressed')).toBe('true'),
         );
 
         beforeInputText(blocks(left)[0], 'a');
 
         await waitFor(() => expect(blockText(blocks(left)[0])).toBe('a'));
-        expect(blocks(left)[0].querySelector('.markBold')).toBeNull();
+        await waitFor(() => expect(blocks(left)[0].querySelector('.markBold')?.textContent).toBe('a'));
     });
 
     it('uses Ctrl+B for pending bold at a collapsed caret', async () => {
