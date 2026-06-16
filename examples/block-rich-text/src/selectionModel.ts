@@ -118,4 +118,6 @@ export const firstPointForSelection = (state: CachedState<RichBlockMeta>, select
 };
 
 export const segmentText = (text: string): string[] =>
-    Array.from(new Intl.Segmenter().segment(text), (part) => part.segment);
+    /^[\x00-\x7F]*$/.test(text)
+        ? text.split('')
+        : Array.from(new Intl.Segmenter().segment(text), (part) => part.segment);

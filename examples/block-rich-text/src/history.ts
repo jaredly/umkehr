@@ -137,23 +137,30 @@ export const replayHistory = (
     const limit = clampCursor(cursor, actions.length);
 
     for (const action of actions.slice(0, limit)) {
-        if (action.type === 'toggle-online') {
-            demo = toggleOnline(demo, action.editorId);
-            continue;
-        }
-
-        const current = demo[action.editorId];
-        demo = applyLocalChange(demo, {
-            editorId: action.editorId,
-            state: action.ops.length
-                ? applyMany(current.state, action.ops, annotationVirtualParents(current.state))
-                : current.state,
-            selection: action.selection,
-            ops: action.ops,
-        });
+        demo = applyHistoryActionWithoutClockAdvance(demo, action);
     }
 
     return advanceReplicaCommandClocks(demo, actions.slice(0, limit));
+};
+
+export const applyHistoryAction = (demo: DemoState, action: HistoryAction): DemoState => {
+    return advanceReplicaCommandClocks(applyHistoryActionWithoutClockAdvance(demo, action), [action]);
+};
+
+const applyHistoryActionWithoutClockAdvance = (demo: DemoState, action: HistoryAction): DemoState => {
+    if (action.type === 'toggle-online') {
+        return toggleOnline(demo, action.editorId);
+    }
+
+    const current = demo[action.editorId];
+    return applyLocalChange(demo, {
+        editorId: action.editorId,
+        state: action.ops.length
+            ? applyMany(current.state, action.ops, annotationVirtualParents(current.state))
+            : current.state,
+        selection: action.selection,
+        ops: action.ops,
+    });
 };
 
 export const buildHistorySnapshot = (demo: DemoState): HistorySnapshot => ({

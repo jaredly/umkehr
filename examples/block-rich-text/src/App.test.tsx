@@ -62,6 +62,9 @@ const blockText = (block: HTMLElement): string => {
     return text;
 };
 
+const repeatedText = (length: number): string =>
+    Array.from({length}, (_, index) => String.fromCharCode(97 + (index % 26))).join('');
+
 const blockDepth = (block: HTMLElement): string =>
     block.closest<HTMLElement>('.blockRow')?.style.getPropertyValue('--block-depth') ?? '';
 
@@ -2425,6 +2428,24 @@ describe('Block rich text example UI', () => {
 
         await waitFor(() => expect(blocks(left).map((block) => block.textContent)).toEqual(['one', 'two']));
         expect(blocks(right).map((block) => block.textContent)).toEqual(['one', 'two']);
+    });
+
+    it('handles Enter at the end of the second 400 character pasted block in less than 50ms', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        const lines = [repeatedText(400), repeatedText(400).replace(/^./, '1')];
+
+        selectCaret(blocks(left)[0], 0);
+        pasteText(blocks(left)[0], lines.join('\n'));
+        await waitForBlockTexts(left, lines);
+
+        selectCaret(blocks(left)[1], 400);
+        const started = performance.now();
+        fireEvent.keyDown(blocks(left)[1], {key: 'Enter'});
+        const elapsed = performance.now() - started;
+
+        await waitForBlockTexts(left, [...lines, '']);
+        expect(elapsed).toBeLessThan(50);
     });
 
     it('adds a second cursor with Cmd-click and types at both cursors', async () => {

@@ -1,12 +1,13 @@
 import {describe, expect, it} from 'vitest';
 import {applyMany, blockContents, insertBlockOps, rootBlockIds, type Op} from 'umkehr/block-crdt';
-import {insertText, pastePlainText} from './blockCommands';
+import {insertText, pastePlainText, splitBlock} from './blockCommands';
 import {applyLocalChange, createDemoState, makeCommandContext, type DemoState} from './blockEditorRuntime';
 import {annotationVirtualParents} from './annotations';
 import {paragraphMeta, type RichBlockMeta} from './blockMeta';
 import {lamportToString} from 'umkehr/block-crdt/utils';
 import {replacePrimarySelection} from './selectionSet';
 import {caret, type EditorSelection} from './selectionModel';
+import {splitBlockEverywhere} from './multiSelectionCommands';
 
 const typedText = (length: number): string =>
     Array.from({length}, (_, index) => String.fromCharCode(97 + (index % 26))).join('');
@@ -129,4 +130,54 @@ describe('block rich text typing performance', () => {
         expect(rootBlockIds(result.state).map((id) => blockContents(result.state, id))).toEqual(lines);
         expect(elapsed).toBeLessThan(20);
     }, 30_000);
+
+    it('splits at the end of the second 400 character pasted block in less than 50ms', () => {
+        const demo = createDemoState();
+        const lines = blockLines(2, 400);
+        const blockId = rootBlockIds(demo.left.state)[0];
+        const pasted = pastePlainText(
+            demo.left.state,
+            caret(blockId, 0),
+            lines.join('\n'),
+            makeCommandContext(demo.left),
+        );
+        const secondBlockId = rootBlockIds(pasted.state)[1];
+
+        const started = performance.now();
+        const result = splitBlock(pasted.state, caret(secondBlockId, 400), makeCommandContext(demo.left));
+        const elapsed = performance.now() - started;
+
+        expect(rootBlockIds(result.state)).toHaveLength(3);
+        expect(rootBlockIds(result.state).map((id) => blockContents(result.state, id))).toEqual([
+            lines[0],
+            lines[1],
+            '',
+        ]);
+        expect(elapsed).toBeLessThan(50);
+    });
+
+    it('splits everywhere at the end of the second 400 character pasted block in less than 50ms', () => {
+        const demo = createDemoState();
+        const lines = blockLines(2, 400);
+        const blockId = rootBlockIds(demo.left.state)[0];
+        const pasted = pastePlainText(
+            demo.left.state,
+            caret(blockId, 0),
+            lines.join('\n'),
+            makeCommandContext(demo.left),
+        );
+        const secondBlockId = rootBlockIds(pasted.state)[1];
+        const selection = replacePrimarySelection(
+            pasted.state,
+            demo.left.selection,
+            caret(secondBlockId, 400),
+        );
+
+        const started = performance.now();
+        const result = splitBlockEverywhere(pasted.state, selection, makeCommandContext(demo.left));
+        const elapsed = performance.now() - started;
+
+        expect(rootBlockIds(result.state)).toHaveLength(3);
+        expect(elapsed).toBeLessThan(50);
+    });
 });
