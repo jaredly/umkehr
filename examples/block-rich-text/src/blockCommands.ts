@@ -19,6 +19,7 @@ import {
     visibleSiblingAnchorsForBlock,
     visibleBlockChildren,
     visibleBlockOutline,
+    compareLamportStrings,
     type Op,
 } from 'umkehr/block-crdt';
 import {createLseqIdBetween} from 'umkehr/block-crdt/lseq';
@@ -1548,12 +1549,65 @@ const insertTextAtPoint = (
         text,
         ts: context.nextTs,
     });
-    const next = applyMany(state, ops, annotationVirtualParents(state));
+    const next = applyLocalTextInsertOps(state, ops);
     return {
         state: next,
         ops,
         point: {blockId: point.blockId, offset: point.offset + ops.length},
     };
+};
+
+const applyLocalTextInsertOps = (
+    state: CachedState<RichBlockMeta>,
+    ops: Array<Op<RichBlockMeta>>,
+): CachedState<RichBlockMeta> => {
+    if (!ops.length) return state;
+    if (!ops.every((op) => op.type === 'char')) {
+        return applyMany(state, ops, annotationVirtualParents(state));
+    }
+
+    const chars = {...state.state.chars};
+    const charContents = {...state.cache.charContents};
+    let maxSeenCount = state.state.maxSeenCount;
+
+    for (const op of ops) {
+        if (op.type !== 'char') continue;
+        const charId = lamportToString(op.char.id);
+        const parentId = lamportToString(op.char.parent.id);
+        if (chars[charId]) {
+            return applyMany(state, ops, annotationVirtualParents(state));
+        }
+        if (!state.state.blocks[parentId] && !chars[parentId] && !state.cache.joinSentinels[parentId]) {
+            return applyMany(state, ops, annotationVirtualParents(state));
+        }
+
+        chars[charId] = op.char;
+        charContents[parentId] = insertSortedRev(charContents[parentId]?.slice() ?? [], charId);
+        maxSeenCount = Math.max(maxSeenCount, op.char.id[0]);
+    }
+
+    return {
+        state: {
+            ...state.state,
+            chars,
+            maxSeenCount,
+        },
+        cache: {
+            ...state.cache,
+            charContents,
+        },
+    };
+};
+
+const insertSortedRev = (array: string[], item: string): string[] => {
+    for (let index = 0; index < array.length; index++) {
+        if (compareLamportStrings(item, array[index]) > 0) {
+            array.splice(index, 0, item);
+            return array;
+        }
+    }
+    array.push(item);
+    return array;
 };
 
 const deleteSelection = (

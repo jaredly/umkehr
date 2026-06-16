@@ -1,12 +1,18 @@
 import {describe, expect, it} from 'vitest';
-import {blockContents, rootBlockIds} from 'umkehr/block-crdt';
-import {insertText} from './blockCommands';
+import {applyMany, blockContents, insertBlockOps, rootBlockIds, type Op} from 'umkehr/block-crdt';
+import {insertText, pastePlainText} from './blockCommands';
 import {applyLocalChange, createDemoState, makeCommandContext, type DemoState} from './blockEditorRuntime';
+import {annotationVirtualParents} from './annotations';
+import {paragraphMeta, type RichBlockMeta} from './blockMeta';
+import {lamportToString} from 'umkehr/block-crdt/utils';
 import {replacePrimarySelection} from './selectionSet';
 import {caret, type EditorSelection} from './selectionModel';
 
 const typedText = (length: number): string =>
     Array.from({length}, (_, index) => String.fromCharCode(97 + (index % 26))).join('');
+
+const blockLines = (blocks: number, blockLength: number): string[] =>
+    Array.from({length: blocks}, (_, index) => typedText(blockLength).replace(/^./, String(index % 10)));
 
 const typeCharacters = (demo: DemoState, text: string): DemoState => {
     let next = demo;
@@ -23,6 +29,51 @@ const typeCharacters = (demo: DemoState, text: string): DemoState => {
         selection = result.selection;
     }
     return next;
+};
+
+const createLargeDocument = (
+    demo: DemoState,
+    blockCount: number,
+    blockLength: number,
+): {demo: DemoState; blockIds: string[]} => {
+    const context = makeCommandContext(demo.left);
+    let state = demo.left.state;
+    const ops: Array<Op<RichBlockMeta>> = [];
+
+    const firstBlockId = rootBlockIds(state)[0];
+    let inserted = insertText(state, caret(firstBlockId, 0), typedText(blockLength), context);
+    state = inserted.state;
+    ops.push(...inserted.ops);
+
+    for (let index = 1; index < blockCount; index++) {
+        const previousBlockId = rootBlockIds(state).at(-1);
+        if (!previousBlockId) throw new Error('missing previous block');
+        const blockOps = insertBlockOps(state, {
+            actor: demo.left.actor,
+            parent: [0, 'root'],
+            before: state.state.blocks[previousBlockId].id,
+            meta: paragraphMeta(context.nextTs()),
+            ts: context.nextTs(),
+            virtualParents: annotationVirtualParents(state),
+        });
+        state = applyMany(state, blockOps, annotationVirtualParents(state));
+        ops.push(...blockOps);
+
+        const blockOp = blockOps[0];
+        if (!blockOp || blockOp.type !== 'block') throw new Error('missing inserted block op');
+        const blockId = lamportToString(blockOp.block.id);
+        inserted = insertText(state, caret(blockId, 0), typedText(blockLength), context);
+        state = inserted.state;
+        ops.push(...inserted.ops);
+    }
+
+    const nextDemo = applyLocalChange(demo, {
+        editorId: 'left',
+        state,
+        selection: replacePrimarySelection(state, demo.left.selection, inserted.selection),
+        ops,
+    });
+    return {demo: nextDemo, blockIds: rootBlockIds(nextDemo.left.state)};
 };
 
 describe('block rich text typing performance', () => {
@@ -45,4 +96,37 @@ describe('block rich text typing performance', () => {
         expect(blockContents(demo.right.state, blockId)).toBe(text);
         expect(elapsed).toBeLessThan(120);
     });
+
+    it.skip('inserts one character into a 20 by 200 character document in less than 5ms', () => {
+        const {demo, blockIds} = createLargeDocument(createDemoState(), 20, 200);
+        const targetBlockId = blockIds[10];
+        const selection = caret(targetBlockId, 100);
+
+        const started = performance.now();
+        const result = insertText(demo.left.state, selection, 'Z', makeCommandContext(demo.left));
+        const elapsed = performance.now() - started;
+
+        expect(blockContents(result.state, targetBlockId)).toHaveLength(201);
+        expect(blockContents(result.state, targetBlockId)[100]).toBe('Z');
+        expect(elapsed).toBeLessThan(5);
+    }, 30_000);
+
+    it('pastes 4000 characters as plain text in less than 100ms', () => {
+        const demo = createDemoState();
+        const lines = blockLines(20, 200);
+        const blockId = rootBlockIds(demo.left.state)[0];
+
+        const started = performance.now();
+        const result = pastePlainText(
+            demo.left.state,
+            caret(blockId, 0),
+            lines.join('\n'),
+            makeCommandContext(demo.left),
+        );
+        const elapsed = performance.now() - started;
+
+        expect(rootBlockIds(result.state)).toHaveLength(20);
+        expect(rootBlockIds(result.state).map((id) => blockContents(result.state, id))).toEqual(lines);
+        expect(elapsed).toBeLessThan(100);
+    }, 30_000);
 });
