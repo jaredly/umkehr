@@ -883,6 +883,19 @@ describe('Block rich text example UI', () => {
         expect(blockTexts(left)).toEqual(['c', 'a', 'b']);
     });
 
+    it('converts typed markdown bullet shortcuts through beforeinput', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+        const leftBlock = blocks(left)[0];
+
+        selectCaret(leftBlock, 0);
+        beforeInputText(leftBlock, '- ');
+
+        await waitForBlockTexts(left, ['']);
+        expect(left.querySelector<HTMLElement>('.blockAffordanceMarker')?.textContent).toBe('•');
+        expect(right.querySelector<HTMLElement>('.blockAffordanceMarker')?.textContent).toBe('•');
+    });
+
     it('uses ordered list numbers as block drag handles', async () => {
         const view = render(<App />);
         const {left} = panels(view);

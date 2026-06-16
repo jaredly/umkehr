@@ -114,6 +114,69 @@ export const insertText = (
     return {state: inserted.state, ops, selection: caret(inserted.point.blockId, inserted.point.offset)};
 };
 
+export const insertTextWithMarkdownShortcuts = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    text: string,
+    context: CommandContext,
+): CommandResult => {
+    const inserted = insertText(state, selection, text, context);
+    if (text !== ' ' || !isCollapsed(inserted.selection)) return inserted;
+
+    const point = focusPoint(inserted.selection);
+    const block = inserted.state.state.blocks[point.blockId];
+    if (!block) return inserted;
+
+    const textBeforeCaret = segmentText(blockContents(inserted.state, point.blockId))
+        .slice(0, point.offset)
+        .join('');
+    const meta = markdownShortcutMeta(textBeforeCaret, block.meta, context.nextTs);
+    if (!meta) return inserted;
+
+    let working = inserted.state;
+    const ops: Array<Op<RichBlockMeta>> = [...inserted.ops];
+    const deleteOps = deleteRangeOps(working, {
+        block: parseLamportString(point.blockId),
+        startOffset: 0,
+        endOffset: point.offset,
+    });
+    working = applyMany(working, deleteOps, annotationVirtualParents(working));
+    ops.push(...deleteOps);
+
+    const metaOps = setBlockMetaOps(working, {block: block.id, meta});
+    working = applyMany(working, metaOps, annotationVirtualParents(working));
+    ops.push(...metaOps);
+
+    return {state: working, ops, selection: caret(point.blockId, 0)};
+};
+
+const markdownShortcutMeta = (
+    prefix: string,
+    currentMeta: RichBlockMeta,
+    nextTs: CommandContext['nextTs'],
+): RichBlockMeta | null => {
+    if (currentMeta.type === 'paragraph' && (prefix === '- ' || prefix === '* ')) {
+        return {type: 'list_item', kind: 'unordered', ts: nextTs()};
+    }
+    if (currentMeta.type === 'paragraph' && /^[1-9][0-9]*\. $/.test(prefix)) {
+        return {type: 'list_item', kind: 'ordered', ts: nextTs()};
+    }
+    if (currentMeta.type === 'paragraph' && /^#{1,3} $/.test(prefix)) {
+        return {type: 'heading', level: (prefix.length - 1) as 1 | 2 | 3, ts: nextTs()};
+    }
+    if (!canConvertMarkdownTodoShortcut(currentMeta)) return null;
+    if (prefix === '[ ] ') {
+        return {type: 'todo', checked: false, ts: nextTs()};
+    }
+    if (prefix === '[x] ' || prefix === '[X] ') {
+        return {type: 'todo', checked: true, ts: nextTs()};
+    }
+    return null;
+};
+
+const canConvertMarkdownTodoShortcut = (meta: RichBlockMeta): boolean =>
+    meta.type === 'paragraph' || (meta.type === 'list_item' && meta.kind === 'unordered');
+
 export const insertTextWithMarks = (
     state: CachedState<RichBlockMeta>,
     selection: EditorSelection,

@@ -91,7 +91,7 @@ import {
     extendSelectionsHorizontally,
     extendSelectionsVertically,
     indentSelections,
-    insertTextEverywhere,
+    insertTextWithMarkdownShortcutsEverywhere,
     insertTextWithRetainedMarksEverywhere,
     moveSelectionsHorizontally,
     moveSelectionsVertically,
@@ -1084,11 +1084,21 @@ function BlockEditor({
         ): MultiCommandResult => {
             const activeMarks = activePendingInlineMarks(pendingInlineMarks);
             if (!activeMarks.length) {
-                return insertTextEverywhere(current.state, selection, text, makeCommandContext(current));
+                return insertTextWithMarkdownShortcutsEverywhere(
+                    current.state,
+                    selection,
+                    text,
+                    makeCommandContext(current),
+                );
             }
             const resolved = resolveSelectionSet(current.state, selection);
             if (!resolved.entries.every((entry) => entry.selection.type === 'caret')) {
-                return insertTextEverywhere(current.state, selection, text, makeCommandContext(current));
+                return insertTextWithMarkdownShortcutsEverywhere(
+                    current.state,
+                    selection,
+                    text,
+                    makeCommandContext(current),
+                );
             }
             const result = insertTextWithRetainedMarksEverywhere(
                 current.state,

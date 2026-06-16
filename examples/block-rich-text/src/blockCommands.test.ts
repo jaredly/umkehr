@@ -28,6 +28,7 @@ import {
     createTable,
     indentBlock,
     insertText,
+    insertTextWithMarkdownShortcuts,
     insertTextWithMarks,
     insertTextWithRetainedMarks,
     moveBlock,
@@ -77,6 +78,24 @@ const expectCache = (state: CachedState) => {
     expect(state.cache).toEqual(organizeState(state.state.blocks, state.state.chars, state.state.joins));
 };
 
+const typeWithMarkdownShortcuts = (
+    state: CachedState<RichBlockMeta>,
+    blockId: string,
+    text: string,
+    context: CommandContext = ctx(),
+) => {
+    let working = state;
+    let selection: EditorSelection = caret(blockId, 0);
+    const ops: ReturnType<typeof insertTextWithMarkdownShortcuts>['ops'] = [];
+    for (const character of text) {
+        const result = insertTextWithMarkdownShortcuts(working, selection, character, context);
+        working = result.state;
+        selection = result.selection;
+        ops.push(...result.ops);
+    }
+    return {state: working, selection, ops};
+};
+
 const tableShape = (state: CachedState<RichBlockMeta>, tableId: string) => {
     const table = state.state.blocks[tableId];
     if (!table || table.meta.type !== 'table') throw new Error(`table ${tableId} not found`);
@@ -89,6 +108,115 @@ const tableShape = (state: CachedState<RichBlockMeta>, tableId: string) => {
 };
 
 describe('block rich text commands', () => {
+    it.each([
+        ['- ', {type: 'list_item', kind: 'unordered'}],
+        ['* ', {type: 'list_item', kind: 'unordered'}],
+        ['1. ', {type: 'list_item', kind: 'ordered'}],
+        ['12. ', {type: 'list_item', kind: 'ordered'}],
+        ['# ', {type: 'heading', level: 1}],
+        ['## ', {type: 'heading', level: 2}],
+        ['### ', {type: 'heading', level: 3}],
+        ['[ ] ', {type: 'todo', checked: false}],
+        ['[x] ', {type: 'todo', checked: true}],
+        ['[X] ', {type: 'todo', checked: true}],
+    ] as const)('converts typed markdown shortcut %s at the start of a paragraph', (shortcut, expectedMeta) => {
+        const state = init();
+        const blockId = onlyBlock(state);
+        const result = typeWithMarkdownShortcuts(state, blockId, shortcut);
+
+        expect(blockContents(result.state, blockId)).toBe('');
+        expect(result.state.state.blocks[blockId].meta).toMatchObject(expectedMeta);
+        expect(result.selection).toEqual(caret(blockId, 0));
+    });
+
+    it.each(['0. ', '01. ', '#### ', 'abc- ', ' - '] as const)(
+        'keeps non-matching markdown shortcut text %s literal',
+        (text) => {
+            const state = init();
+            const blockId = onlyBlock(state);
+            const result = typeWithMarkdownShortcuts(state, blockId, text);
+
+            expect(blockContents(result.state, blockId)).toBe(text);
+            expect(result.state.state.blocks[blockId].meta).toMatchObject({type: 'paragraph'});
+            expect(focusPoint(result.selection)).toEqual({blockId, offset: text.length});
+        },
+    );
+
+    it('does not convert markdown shortcuts in non-paragraph blocks', () => {
+        const state = init();
+        const blockId = onlyBlock(state);
+        const heading = setBlockType(state, blockId, {type: 'heading', level: 2, ts: '00001'});
+        const result = typeWithMarkdownShortcuts(heading.state, blockId, '- ');
+
+        expect(blockContents(result.state, blockId)).toBe('- ');
+        expect(result.state.state.blocks[blockId].meta).toMatchObject({type: 'heading', level: 2});
+    });
+
+    it.each([
+        ['[ ] ', {checked: false}],
+        ['[x] ', {checked: true}],
+        ['[X] ', {checked: true}],
+    ] as const)('converts typed todo shortcut %s at the start of an unordered list item', (shortcut, expected) => {
+        const state = init();
+        const blockId = onlyBlock(state);
+        const context = ctx();
+        const list = setBlockType(state, blockId, {
+            type: 'list_item',
+            kind: 'unordered',
+            ts: context.nextTs(),
+        });
+
+        const result = typeWithMarkdownShortcuts(list.state, blockId, shortcut, context);
+
+        expect(blockContents(result.state, blockId)).toBe('');
+        expect(result.state.state.blocks[blockId].meta).toMatchObject({type: 'todo', ...expected});
+        expect(result.selection).toEqual(caret(blockId, 0));
+    });
+
+    it('does not convert typed todo shortcuts at the start of an ordered list item', () => {
+        const state = init();
+        const blockId = onlyBlock(state);
+        const context = ctx();
+        const list = setBlockType(state, blockId, {
+            type: 'list_item',
+            kind: 'ordered',
+            ts: context.nextTs(),
+        });
+
+        const result = typeWithMarkdownShortcuts(list.state, blockId, '[ ] ', context);
+
+        expect(blockContents(result.state, blockId)).toBe('[ ] ');
+        expect(result.state.state.blocks[blockId].meta).toMatchObject({type: 'list_item', kind: 'ordered'});
+    });
+
+    it('converts markdown shortcuts in paragraph table cells', () => {
+        const state = init();
+        const context = ctx();
+        const blockId = onlyBlock(state);
+        const table = createTable(state, caret(blockId, 0), context, {rows: 1, columns: 1});
+        const tableId = rootBlockIds(table.state)[1];
+        const cellId = tableShape(table.state, tableId).cells[0][0];
+
+        const result = typeWithMarkdownShortcuts(table.state, cellId, '[x] ', context);
+
+        expect(blockContents(result.state, cellId)).toBe('');
+        expect(result.state.state.blocks[cellId].meta).toMatchObject({type: 'todo', checked: true});
+        expect(result.selection).toEqual(caret(cellId, 0));
+    });
+
+    it('syncs markdown shortcut text deletion and metadata to a peer replica', () => {
+        const demo = createDemoState();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        const result = typeWithMarkdownShortcuts(demo.left.state, blockId, '3. ', makeCommandContext(demo.left));
+
+        const syncedRight = applyMany(demo.right.state, result.ops, annotationVirtualParents(demo.right.state));
+
+        expect(blockContents(result.state, blockId)).toBe('');
+        expect(result.state.state.blocks[blockId].meta).toMatchObject({type: 'list_item', kind: 'ordered'});
+        expect(blockContents(syncedRight, blockId)).toBe('');
+        expect(syncedRight.state.blocks[blockId].meta).toMatchObject({type: 'list_item', kind: 'ordered'});
+    });
+
     it('syncs metadata command updates to the peer replica', () => {
         const demo = createDemoState();
         const blockId = rootBlockIds(demo.left.state)[0];

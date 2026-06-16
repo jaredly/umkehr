@@ -6,6 +6,7 @@ import {
     deleteTableRowHeaderBackward,
     deleteForward,
     insertText,
+    insertTextWithMarkdownShortcuts,
     insertTextWithMarks,
     insertTextWithRetainedMarks,
     moveBlock,
@@ -71,6 +72,16 @@ export const insertTextEverywhere = (
 ): MultiCommandResult =>
     runReplacingCommand(state, selection, (working, entry) =>
         insertText(working, resolveSelection(working, entry.selection), text, context),
+    );
+
+export const insertTextWithMarkdownShortcutsEverywhere = (
+    state: CachedState<RichBlockMeta>,
+    selection: RetainedSelectionSet,
+    text: string,
+    context: CommandContext,
+): MultiCommandResult =>
+    runReplacingCommand(state, selection, (working, entry) =>
+        insertTextWithMarkdownShortcuts(working, resolveSelection(working, entry.selection), text, context),
     );
 
 export const insertTextWithMarksEverywhere = (
