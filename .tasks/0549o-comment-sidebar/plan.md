@@ -11,8 +11,72 @@ Goal: move sidebar comments in `examples/block-rich-text` into a collapsible rig
 - Dot placement: vertically align with referenced text/block as much as possible, while preventing dot overlap.
 - Multiple body blocks under one annotation: a gutter dot focuses the most recently edited body block.
 - `createAnnotation` should return the annotation id explicitly so UI focus does not need to infer it from operation shapes.
+- Small generic `src/block-crdt` API additions are acceptable if they reduce app-side mark/virtual-parent boilerplate:
+  - export `virtualParentOwner` and `virtualParentOwners`.
+  - add a formatted-run mark value helper.
+  - add a visible mark range helper.
+  - optionally add an insert-block-with-id convenience wrapper if it proves useful.
 
-## Phase 1: Extend Annotation Command Result
+## Phase 1: Add Generic Block CRDT Helpers
+
+Add small, generally useful APIs to `src/block-crdt` that make the sidebar implementation cleaner without introducing comment-specific core concepts.
+
+Tasks:
+
+- Export existing virtual parent ownership helpers from `src/block-crdt/index.ts`:
+  - `virtualParentOwner`
+  - `virtualParentOwners`
+- Add a helper for reading all values for a formatted mark type from a `FormattedRun`, for example:
+
+```ts
+export const formattedMarkValues = (
+    run: FormattedRun,
+    type: string,
+): FormattedMarkValue[] => { ... };
+```
+
+- The helper should return values from both:
+  - `run.stackedMarks?.[type]`
+  - `run.marks[type]`
+- Preserve the current semantics that ordinary boolean marks materialize as `true`.
+- Add a helper that converts a mark's visible coverage into block-local ranges, for example:
+
+```ts
+export type VisibleMarkRange = {
+    blockId: string;
+    startOffset: number;
+    endOffset: number;
+};
+
+export const visibleRangesForMark = <M extends TimestampedBlockMeta>(
+    state: CachedState<M>,
+    mark: Mark,
+    config: VirtualBlockParentConfig<M> = {},
+): VisibleMarkRange[] => { ... };
+```
+
+- Implement `visibleRangesForMark` generically by using `coveredCharIdsForMark`, grouping visible covered chars by block, and converting contiguous visible chars into grapheme offsets.
+- Add tests in `src/block-crdt/formatting.test.ts` or a nearby block-crdt test file for:
+  - `formattedMarkValues` with LWW marks.
+  - `formattedMarkValues` with configured stacking marks.
+  - `visibleRangesForMark` for a single-block mark.
+  - `visibleRangesForMark` for a mark that survives split/join or crosses visible blocks, if existing helpers make that setup straightforward.
+- Optional only if useful during implementation: add `insertBlockOpsWithId` as a non-breaking wrapper around `insertBlockOps`:
+
+```ts
+export const insertBlockOpsWithId = (...) => {
+    const ops = insertBlockOps(...);
+    return {ops, blockId: lamportToString(ops[0].block.id), id: ops[0].block.id};
+};
+```
+
+Notes:
+
+- Do not add comment/sidebar-specific concepts to `src/block-crdt`.
+- Keep the helpers pure read/convenience APIs. They should not change CRDT behavior, op shape, conflict resolution, or cache organization.
+- If `visibleRangesForMark` gets complicated, prefer a conservative first implementation that covers visible chars accurately for current annotations over a large traversal refactor.
+
+## Phase 2: Extend Annotation Command Result
 
 Update annotation creation so callers can reliably know which annotation was created or reused.
 
@@ -32,6 +96,10 @@ type CreateAnnotationResult = CommandResult & {
   - `bodyBlockId`: the newly inserted annotation body block id when one is created.
   - `null` ids when no annotation is created because the selection has no segments.
 - Keep existing `state`, `ops`, and `selection` fields unchanged so current callers continue to work with minimal changes.
+- Use the new block-crdt helpers where they simplify annotation code:
+  - `formattedMarkValues` for collecting annotation values from formatted runs.
+  - `visibleRangesForMark` if useful for exact-overlap or later gutter positioning.
+  - `insertBlockOpsWithId` only if the optional helper was added and it removes meaningful boilerplate.
 - Add or update `annotations.test.ts` coverage for:
   - brand-new annotation returns its annotation id and body block id.
   - exact-overlap annotation returns the existing annotation id and the new body block id.
@@ -42,7 +110,7 @@ Notes:
 - Prefer deriving `bodyBlockId` from the `insertBlockOps` result or resulting virtual children immediately after insertion, not from UI-rendered annotations.
 - Avoid changing the underlying CRDT op model; this is an example-layer command result improvement.
 
-## Phase 2: Sidebar State And Focus Requests
+## Phase 3: Sidebar State And Focus Requests
 
 Add local view state and a reusable way for the parent sidebar to focus a comment body.
 
@@ -77,7 +145,7 @@ Notes:
 - A token-based request avoids ignoring a second click on the same gutter dot after the first request was cleared too early or reissued.
 - If the last-edited body for an annotation no longer exists, fall back to the annotation's last body block, then first body block.
 
-## Phase 3: Restructure Layout
+## Phase 4: Restructure Layout
 
 Move comments from above the blocks into a right-hand sidebar/gutter that shares a content row with the document.
 
@@ -106,7 +174,7 @@ Notes:
 - The sidebar is per editor panel; Editor A and Editor B can be open/collapsed independently.
 - The right rail should not reduce the document column below a usable width in the existing two-column editor grid.
 
-## Phase 4: Collapsed Gutter Dots And Vertical Alignment
+## Phase 5: Collapsed Gutter Dots And Vertical Alignment
 
 Render one collapsed dot per sidebar annotation, aligned as close as practical to the referenced text.
 
@@ -116,6 +184,7 @@ Tasks:
   - Existing annotation spans already get `.markAnnotation`.
   - Popover spans get `data-popover-id`.
   - Add a sidebar annotation data attribute such as `data-sidebar-annotation-ids="id1 id2"` when a run contains sidebar annotations.
+- Use `formattedMarkValues` to collect sidebar annotation data from formatted runs instead of manually merging `marks` and `stackedMarks`.
 - In `BlockEditor`, keep a map of gutter dot vertical positions keyed by annotation id.
 - Measure positions in a layout effect when:
   - sidebar annotations change.
@@ -123,6 +192,7 @@ Tasks:
   - the sidebar opens/collapses.
   - window resizes.
 - Measurement approach:
+  - Use `visibleRangesForMark` to identify each annotation's visible block-local coverage where practical.
   - Find the first visible reference element for each annotation id inside `rootRef`.
   - Compute its vertical center relative to the editor content wrapper or block list.
   - If no reference element is available, fall back to annotation order spacing.
@@ -140,7 +210,7 @@ Notes:
 - This is best-effort alignment. It should not require exact text-range geometry for every overlap case.
 - Overlapping annotations may share the same reference span; the overlap resolver should stack dots cleanly.
 
-## Phase 5: Local Comment Creation Opens And Focuses
+## Phase 6: Local Comment Creation Opens And Focuses
 
 Wire toolbar comment creation into the new sidebar/focus path.
 
@@ -160,7 +230,7 @@ Notes:
 
 - Since `runCommand` callbacks are synchronous, setting React state from inside the command callback is acceptable but should be kept narrowly scoped. If it becomes awkward, return the command result and schedule UI state immediately outside the command wrapper through a small helper.
 
-## Phase 6: Styling And Responsive Behavior
+## Phase 7: Styling And Responsive Behavior
 
 Update CSS so the comment area behaves like a real right-hand sidebar/gutter.
 
@@ -189,11 +259,16 @@ Notes:
 - Avoid making the editor panel a card-within-card layout. The sidebar is part of the editor work surface.
 - The collapsed gutter should be visible enough to signal comments without covering editable text.
 
-## Phase 7: Tests And Verification
+## Phase 8: Tests And Verification
 
 Add focused tests for the new behavior and run the relevant suite.
 
 Tests to add/update:
+
+- `src/block-crdt`
+  - virtual parent owner helpers are exported from the public index.
+  - `formattedMarkValues` handles LWW and stacking marks.
+  - `visibleRangesForMark` returns expected visible block-local ranges.
 
 - `annotations.test.ts`
   - `createAnnotation` returns annotation/body ids for new annotation.
@@ -211,6 +286,7 @@ Tests to add/update:
 Verification commands:
 
 ```sh
+pnpm exec vitest -- run src/block-crdt/formatting.test.ts
 pnpm exec vitest -- run examples/block-rich-text/src/annotations.test.ts examples/block-rich-text/src/App.test.tsx
 ```
 
@@ -227,11 +303,12 @@ Manual/browser verification:
 
 ## Implementation Order
 
-1. Extend `createAnnotation` result and test it.
-2. Add focus request plumbing without changing layout.
-3. Move sidebar into the right-side content layout.
-4. Implement collapsed gutter dots with click-to-open/focus.
-5. Add vertical measurement and overlap avoidance.
-6. Wire local comment creation to open/focus.
-7. Polish CSS and responsive behavior.
-8. Add/update UI tests and run verification.
+1. Add and test the generic block-crdt helper exports.
+2. Extend `createAnnotation` result and test it.
+3. Add focus request plumbing without changing layout.
+4. Move sidebar into the right-side content layout.
+5. Implement collapsed gutter dots with click-to-open/focus.
+6. Add vertical measurement and overlap avoidance.
+7. Wire local comment creation to open/focus.
+8. Polish CSS and responsive behavior.
+9. Add/update UI tests and run verification.

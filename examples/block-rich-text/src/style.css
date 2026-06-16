@@ -194,8 +194,7 @@ select {
 }
 
 .toolbar button,
-.toolbar select,
-.dragHandle {
+.toolbar select {
     display: inline-grid;
     place-items: center;
     min-width: 32px;
@@ -227,8 +226,7 @@ select {
     cursor: not-allowed;
 }
 
-.toolbar button:hover,
-.dragHandle:hover {
+.toolbar button:hover {
     background: #eef3f7;
 }
 
@@ -257,7 +255,7 @@ select {
 .blockRow {
     position: relative;
     display: grid;
-    grid-template-columns: 34px 24px minmax(0, 1fr) minmax(0, auto);
+    grid-template-columns: 34px minmax(0, 1fr) minmax(0, auto);
     gap: 8px;
     align-items: start;
     margin-left: calc(var(--block-depth, 0) * 24px);
@@ -322,31 +320,51 @@ select {
     opacity: 0.46;
 }
 
-.dragHandle {
+.blockAffordance {
+    display: inline-grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
     margin-top: 1px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 6px;
     color: #7a8793;
+    background: transparent;
     cursor: grab;
+    font: inherit;
+    font-variant-numeric: tabular-nums;
     user-select: none;
 }
 
-.blockMarker {
-    min-height: 34px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: flex-end;
-    color: #6a7784;
-    font-variant-numeric: tabular-nums;
-    user-select: none;
+.blockAffordanceButton:hover,
+.blockAffordanceButton:focus-visible,
+.blockAffordanceTodo:hover,
+.blockAffordanceTodo:focus-within {
+    border-color: #cbd5df;
+    color: #23313d;
+    background: #eef3f7;
+}
+
+.blockAffordanceHandle {
+    opacity: 0;
+}
+
+.blockRow:hover .blockAffordanceHandle,
+.blockRow:focus-within .blockAffordanceHandle,
+.blockAffordanceHandle:focus-visible {
+    opacity: 1;
+}
+
+.blockAffordance:active {
+    cursor: grabbing;
 }
 
 .todoToggle {
     width: 18px;
     height: 18px;
-    margin: 8px 3px 0;
-}
-
-.dragHandle:active {
-    cursor: grabbing;
+    margin: 0;
+    cursor: pointer;
 }
 
 .editableBlock {
@@ -427,7 +445,7 @@ select {
 .tableColumnInsertControls {
     display: grid;
     grid-template-columns: 42px repeat(var(--table-columns, 1), minmax(150px, 1fr)) 0;
-    height: 0;
+    height: 22px;
     overflow: visible;
     pointer-events: none;
 }
@@ -447,14 +465,18 @@ select {
 
 .tableColumnInsert {
     justify-self: start;
-    transform: translate(-10px, -10px);
+    transform: translate(-10px, 1px);
 }
 
 .tableColumnInsert:first-child {
     grid-column: 2;
 }
 
-.tableGrid:hover .tableColumnInsert,
+.tableColumnInsertControls:hover .tableColumnInsert {
+    opacity: 0.45;
+}
+
+.tableColumnInsert:hover,
 .tableColumnInsert:focus-visible,
 .tableRowInsertControl:hover button,
 .tableRowInsertControl:focus-within button,
@@ -642,11 +664,7 @@ select {
     bottom: 2px;
 }
 
-.tableCell .blockMarker {
-    display: none;
-}
-
-.tableCell .dragHandlePlaceholder {
+.tableCell .blockAffordance {
     display: none;
 }
 

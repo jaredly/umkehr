@@ -22,6 +22,7 @@ import {
     advanceFromTableCellEnd,
     addTableRow,
     commandApplied,
+    convertBlockToTable,
     createMissingTableCell,
     createTable,
     indentBlock,
@@ -111,6 +112,20 @@ describe('block rich text commands', () => {
         expect(shape.cells.map((row) => row.length)).toEqual([3, 3]);
         expect(shape.rows.every((rowId) => result.state.state.blocks[rowId].meta.type === 'table_row')).toBe(true);
         expect(shape.cells.flat().every((cellId) => result.state.state.blocks[cellId].meta.type === 'paragraph')).toBe(true);
+    });
+
+    it('converts a text block to a table with the text as its title', () => {
+        const demo = createDemoState();
+        const context = ctx();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = insertText(demo.left.state, caret(blockId, 0), 'Table title', context);
+
+        result = convertBlockToTable(result.state, caret(blockId, 5), context, {rows: 2, columns: 2});
+
+        expect(rootBlockIds(result.state)[0]).toBe(blockId);
+        expect(result.state.state.blocks[blockId].meta.type).toBe('table');
+        expect(blockContents(result.state, blockId)).toBe('Table title');
+        expect(tableShape(result.state, blockId).cells.map((row) => row.length)).toEqual([2, 2]);
     });
 
     it('orders table rows by normal block order under the row virtual parent', () => {

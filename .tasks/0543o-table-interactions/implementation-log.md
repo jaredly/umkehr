@@ -81,6 +81,31 @@
   - `pnpm exec vitest -- run examples/block-rich-text/src/blockCommands.test.ts`
   - `pnpm exec vitest -- run examples/block-rich-text/src/App.test.tsx`
 
+## Follow-Up: Row Insert Hover Scope
+
+- Changed row insert button visibility so hovering the table no longer reveals every row insert button at once.
+- Row insert buttons now reveal only when hovering/focusing the individual row divider control.
+- Verification passed:
+  - `pnpm exec vitest -- run examples/block-rich-text/src/App.test.tsx`
+
+## Follow-Up: Column Insert Visibility
+
+- The column insert controls existed in the DOM, but their zero-height overlay plus negative transform made them easy to miss and potentially clipped by the grid.
+- Changed the column insert overlay to a small top divider band and moved the buttons into that band.
+- Column buttons are partially visible when hovering the column-control band and fully visible on the specific button hover/focus.
+- Verification passed:
+  - `pnpm exec vitest -- run examples/block-rich-text/src/App.test.tsx`
+
+## Follow-Up: Table Conversion Flow
+
+- Removed the standalone toolbar table button.
+- Added `Table` to the block type dropdown.
+- Added `convertBlockToTable`, which converts the focused block into a table and preserves the block's existing rich text as the editable table title.
+- Updated UI tests to create tables via the block type menu and assert that converted text becomes the table title.
+- Verification passed:
+  - `pnpm exec vitest -- run examples/block-rich-text/src/blockCommands.test.ts`
+  - `pnpm exec vitest -- run examples/block-rich-text/src/App.test.tsx`
+
 ### Remaining Caveats
 
 - Offset-zero table-title splits can flatten inline marks in the moved title text, as noted above.

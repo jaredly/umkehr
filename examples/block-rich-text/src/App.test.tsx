@@ -390,11 +390,18 @@ const installMockBlockRowGeometry = (panel: HTMLElement) => {
     });
 };
 
-const dragBlockHandle = (panel: HTMLElement, fromIndex: number, clientX: number, clientY: number) => {
-    const handles = within(panel).getAllByRole('button', {name: 'Move block'});
-    const handle = handles[fromIndex] as HTMLElement & {setPointerCapture?: (pointerId: number) => void};
+const dragElementTo = (element: HTMLElement, clientX: number, clientY: number) => {
+    const handle = element as HTMLElement & {setPointerCapture?: (pointerId: number) => void};
     handle.setPointerCapture = () => {};
     fireEvent.pointerDown(handle, {
+        button: 0,
+        buttons: 1,
+        isPrimary: true,
+        pointerId: 1,
+        clientX,
+        clientY: clientY + 8,
+    });
+    fireEvent.pointerMove(window, {
         button: 0,
         buttons: 1,
         isPrimary: true,
@@ -410,6 +417,11 @@ const dragBlockHandle = (panel: HTMLElement, fromIndex: number, clientX: number,
         clientX,
         clientY,
     });
+};
+
+const dragBlockHandle = (panel: HTMLElement, fromIndex: number, clientX: number, clientY: number) => {
+    const handles = within(panel).getAllByRole('button', {name: 'Move block'});
+    dragElementTo(handles[fromIndex], clientX, clientY);
 };
 
 describe('Block rich text example UI', () => {
@@ -450,17 +462,21 @@ describe('Block rich text example UI', () => {
         expect(blocks(right)).toHaveLength(1);
     });
 
-    it('creates and edits table structure from the toolbar', async () => {
+    it('converts a block to a table from the block type menu', async () => {
         const view = render(<App />);
         const {left, right} = panels(view);
         selectCaret(blocks(left)[0], 0);
+        typeText(blocks(left)[0], 'Schedule');
 
-        fireEvent.click(within(left).getByRole('button', {name: 'Table'}));
+        setBlockType(left, 'table');
 
         await waitFor(() => {
             expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy();
             expect(within(right).getByRole('table', {name: 'Table block'})).toBeTruthy();
         });
+        expect(within(left).queryByRole('button', {name: 'Table'})).toBeNull();
+        expect(blockText(tableTitleBlock(left))).toBe('Schedule');
+        expect(blockText(tableTitleBlock(right))).toBe('Schedule');
         expect(tableBlocks(left)).toHaveLength(4);
 
         selectCaret(tableBlocks(left)[3], 0);
@@ -476,7 +492,7 @@ describe('Block rich text example UI', () => {
         const {left, right} = panels(view);
         selectCaret(blocks(left)[0], 0);
 
-        fireEvent.click(within(left).getByRole('button', {name: 'Table'}));
+        setBlockType(left, 'table');
         await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
 
         const title = tableTitleBlock(left);
@@ -500,7 +516,7 @@ describe('Block rich text example UI', () => {
         const {left} = panels(view);
         selectCaret(blocks(left)[0], 0);
 
-        fireEvent.click(within(left).getByRole('button', {name: 'Table'}));
+        setBlockType(left, 'table');
         await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
 
         expect(within(left).getByRole('button', {name: 'Move row 1'}).textContent).toBe('1');
@@ -513,7 +529,7 @@ describe('Block rich text example UI', () => {
         const {left} = panels(view);
         selectCaret(blocks(left)[0], 0);
 
-        fireEvent.click(within(left).getByRole('button', {name: 'Table'}));
+        setBlockType(left, 'table');
         await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
 
         ['A', 'B', 'C', 'D'].forEach((text, index) => {
@@ -732,7 +748,7 @@ describe('Block rich text example UI', () => {
         const {left, right} = panels(view);
 
         selectCaret(blocks(left)[0], 0);
-        fireEvent.click(within(left).getByRole('button', {name: 'Table'}));
+        setBlockType(left, 'table');
         await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
 
         selectCaret(tableBlocks(left)[0], 0);
@@ -832,6 +848,113 @@ describe('Block rich text example UI', () => {
 
         await waitForBlockTexts(right, ['c', 'a', 'b']);
         expect(blockTexts(left)).toEqual(['c', 'a', 'b']);
+    });
+
+    it('uses unordered list bullets as block drag handles', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        pasteText(blocks(left)[0], 'a\nb\nc');
+        await waitForBlockTexts(right, ['a', 'b', 'c']);
+        for (let index = 0; index < 3; index++) {
+            selectCaret(blocks(right)[index], 0);
+            setBlockType(right, 'unordered');
+        }
+        await waitFor(() => {
+            expect([...right.querySelectorAll<HTMLButtonElement>('.blockAffordanceMarker')].map((marker) => marker.textContent)).toEqual([
+                '•',
+                '•',
+                '•',
+            ]);
+        });
+
+        installMockBlockRowGeometry(right);
+        dragElementTo(right.querySelectorAll<HTMLElement>('.blockAffordanceMarker')[2], 20, 5);
+
+        await waitForBlockTexts(right, ['c', 'a', 'b']);
+        expect(blockTexts(left)).toEqual(['c', 'a', 'b']);
+    });
+
+    it('uses ordered list numbers as block drag handles', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        pasteText(blocks(left)[0], 'a\nb\nc');
+        await waitForBlockTexts(left, ['a', 'b', 'c']);
+        for (let index = 0; index < 3; index++) {
+            selectCaret(blocks(left)[index], 0);
+            setBlockType(left, 'ordered');
+        }
+        await waitFor(() => {
+            expect([...left.querySelectorAll<HTMLButtonElement>('.blockAffordanceMarker')].map((marker) => marker.textContent)).toEqual([
+                '1.',
+                '2.',
+                '3.',
+            ]);
+        });
+
+        installMockBlockRowGeometry(left);
+        dragElementTo(left.querySelectorAll<HTMLElement>('.blockAffordanceMarker')[2], 20, 5);
+
+        await waitForBlockTexts(left, ['c', 'a', 'b']);
+    });
+
+    it('uses one leading affordance slot for paragraph rows', () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        const row = blocks(left)[0].closest<HTMLElement>('.blockRow')!;
+
+        expect(row.querySelectorAll('.blockAffordance')).toHaveLength(1);
+        expect(row.querySelector('.blockAffordanceHandle')).toBeTruthy();
+        expect(row.querySelector('.dragHandle')).toBeNull();
+        expect(row.querySelector('.blockMarker')).toBeNull();
+    });
+
+    it('toggles todos on click and drags them from the checkbox slot', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        pasteText(blocks(left)[0], 'a\nb');
+        await waitForBlockTexts(right, ['a', 'b']);
+        selectCaret(blocks(right)[0], 0);
+        setBlockType(right, 'todo');
+
+        const checkbox = within(right).getByRole('checkbox', {name: 'Toggle todo'}) as HTMLInputElement;
+        fireEvent.click(checkbox);
+        await waitFor(() => expect(checkbox.checked).toBe(true));
+
+        installMockBlockRowGeometry(right);
+        const slot = checkbox.closest<HTMLElement>('[data-block-drag-affordance="todo"]')!;
+        (slot as HTMLElement & {setPointerCapture?: (pointerId: number) => void}).setPointerCapture = () => {};
+        fireEvent.pointerDown(checkbox, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 20,
+            clientY: 88,
+        });
+        fireEvent.pointerMove(window, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 20,
+            clientY: 80,
+        });
+        fireEvent.pointerUp(window, {
+            button: 0,
+            buttons: 0,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 20,
+            clientY: 80,
+        });
+        fireEvent.click(checkbox);
+
+        await waitForBlockTexts(right, ['b', 'a']);
+        expect(blockTexts(left)).toEqual(['b', 'a']);
+        expect((within(right).getByRole('checkbox', {name: 'Toggle todo'}) as HTMLInputElement).checked).toBe(true);
     });
 
     it('undoes and redoes text through editor toolbar buttons', async () => {

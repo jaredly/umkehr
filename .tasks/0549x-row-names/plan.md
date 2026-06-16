@@ -1,6 +1,44 @@
 # Plan: Table Row Headers
 
-## Phase 1: Command Model And Selection Semantics
+## Phase 1: Core Block CRDT Helper APIs
+
+Files:
+
+- `src/block-crdt/changes.ts`
+- `src/block-crdt/traversal.ts`
+- `src/block-crdt/index.ts`
+- `src/block-crdt/index.test.ts`
+- `src/block-crdt/adapter-additions.test.ts` if that is the better local home for adapter/helper coverage
+
+Tasks:
+
+1. Make subtree deletion virtual-parent-aware.
+   - Extend `deleteBlockOps` options to accept `virtualParents?: VirtualBlockParentConfig<M>`.
+   - When `mode: 'subtree'`, call `visibleBlockOutline(state, virtualParents)` instead of the unconfigured outline.
+   - Preserve current default behavior when no config is provided.
+   - Add coverage for deleting a block subtree under a configured virtual parent.
+2. Add a block-id sibling anchor helper.
+   - Export a helper such as `visibleSiblingAnchorsForBlock(state, blockId, config)`.
+   - Return the visible insertion slot immediately after or around the block in the same shape used by `insertBlockOps`: `{parent, before, after}`.
+   - Use `materializedBlockParent` plus `visibleBlockChildren`, or derive it from `visiblePathForBlockId` and `visibleSiblingAnchorsForPath`.
+   - Add tests for ordinary parents and virtual parents.
+3. Add a helper for predicting the next local block id.
+   - Export a small helper such as `nextBlockIdForActor(state, actor)` returning `Lamport` or string form.
+   - Use it where the example currently predicts `[state.state.maxSeenCount + 1, actor]`.
+   - Keep the helper intentionally narrow; do not make it table-specific.
+4. Make selection marking helpers virtual-parent-aware where practical.
+   - Extend `markSelectionOps` to accept `virtualParents?: VirtualBlockParentConfig<M>`.
+   - Use `visibleBlockOutline(state, virtualParents)` for block ordering.
+   - Preserve default behavior without a config.
+   - Add coverage for marking a selection that spans blocks exposed through a virtual parent.
+5. Re-export new helpers and updated types from `src/block-crdt/index.ts`.
+
+Notes:
+
+- These API changes should stay generic. The core should not learn table-row semantics like creating empty cells on split.
+- The example can still use existing lower-level primitives where clearer, but these helpers should remove local duplicated traversal/anchor code.
+
+## Phase 2: Command Model And Selection Semantics
 
 Files:
 
@@ -34,8 +72,9 @@ Notes:
 
 - Row headers should support inline marks and links through the same command path as ordinary blocks.
 - Range deletion across row headers and cells needs explicit tests because making rows editable changes normalization and join behavior.
+- Prefer the new core helpers for virtual-parent-aware subtree deletion, sibling anchors, predicted block ids, and selection marking.
 
-## Phase 2: Row Header Commands
+## Phase 3: Row Header Commands
 
 Files:
 
@@ -54,18 +93,21 @@ Tasks:
    - Returns selection at the start of the new row header.
 2. Prefer implementing row-header split with `splitBlockOps` plus cell creation.
    - If `splitBlockOps` does not place the new row under the table row parent correctly, manually insert the row under `table.meta.rowParent`.
+   - Use the new next-block-id helper instead of open-coding `[state.state.maxSeenCount + 1, actor]`.
+   - Use the new sibling anchor helper where it simplifies immediate-after-row placement.
 3. Add `deleteTableRowHeaderBackward`.
    - Applies only for a collapsed caret at offset `0` in an empty row header.
    - If all cells in the row are empty, delete the row.
    - If this deletes the only row, convert the table to a paragraph, matching current first-cell behavior.
    - If any cell in the row has content, keep the row and move selection to the end of the previous row header.
    - If there is no previous row, move selection to the end of the table header/title block.
+   - Use virtual-parent-aware `deleteBlockOps(..., {mode: 'subtree', virtualParents: ...})` rather than maintaining an example-local subtree deletion helper.
 4. Wire row-aware wrappers before generic commands.
    - `splitBlockEverywhere` should try `splitTableRowHeader` before generic `splitBlock`.
    - `deleteBackwardEverywhere` should try `deleteTableRowHeaderBackward` before generic `deleteBackward`.
    - Existing first-cell empty-row Backspace behavior should remain supported and should respect non-empty row headers.
 
-## Phase 3: Rendering And Interaction
+## Phase 4: Rendering And Interaction
 
 Files:
 
@@ -92,13 +134,24 @@ Tasks:
 8. Add row-header-specific placeholder styling using `data-placeholder`.
 9. Use a stable accessible label such as `Row header ${rowIndex + 1}`. Keep the visible placeholder visual-only unless later requirements say otherwise.
 
-## Phase 4: Tests
+## Phase 5: Tests
 
 Files:
 
+- `src/block-crdt/index.test.ts`
+- `src/block-crdt/adapter-additions.test.ts`
 - `examples/block-rich-text/src/blockCommands.test.ts`
 - `examples/block-rich-text/src/multiSelectionCommands.test.ts`
 - `examples/block-rich-text/src/App.test.tsx` if existing render helpers make UI coverage practical
+
+Core API tests:
+
+1. `deleteBlockOps` with `mode: 'subtree'` and `virtualParents` deletes a virtual-parent subtree.
+2. `deleteBlockOps` without `virtualParents` preserves existing behavior.
+3. `visibleSiblingAnchorsForBlock` returns correct anchors for ordinary siblings.
+4. `visibleSiblingAnchorsForBlock` returns correct anchors for siblings under a virtual parent.
+5. The next-block-id helper predicts the id produced by `insertBlockOps` and `splitBlockOps`.
+6. `markSelectionOps` with `virtualParents` marks ranges across virtual-parent-visible blocks.
 
 Command tests:
 
@@ -127,11 +180,12 @@ Render tests:
 3. Typing into a row header updates the row block's content.
 4. Pressing Enter in a row header splits the row rather than advancing through cells.
 
-## Phase 5: Verification
+## Phase 6: Verification
 
 Run focused tests first:
 
 ```sh
+npm exec vitest -- run src/block-crdt/index.test.ts
 npm exec vitest -- run examples/block-rich-text/src/blockCommands.test.ts
 npm exec vitest -- run examples/block-rich-text/src/multiSelectionCommands.test.ts
 ```
@@ -157,9 +211,11 @@ For UI verification:
 
 ## Implementation Order
 
-1. Add failing command tests for row-header split and Backspace decisions.
-2. Implement command helpers and row-aware multi-command wrappers.
-3. Make `table_row` editable and update traversal tests.
-4. Add rendering and CSS for row headers.
-5. Add UI tests or manual verification for placeholders and keyboard routing.
-6. Run focused tests and then broader example tests.
+1. Add core API tests for virtual-parent-aware deletion, sibling anchors, next block id, and virtual-parent-aware marking.
+2. Implement and export the core helper APIs.
+3. Add failing command tests for row-header split and Backspace decisions.
+4. Implement command helpers and row-aware multi-command wrappers using the new core helpers.
+5. Make `table_row` editable and update traversal tests.
+6. Add rendering and CSS for row headers.
+7. Add UI tests or manual verification for placeholders and keyboard routing.
+8. Run focused tests and then broader example tests.

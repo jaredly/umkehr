@@ -1,6 +1,8 @@
 import {useCallback, useEffect, useMemo, useRef, useState, type PointerEvent} from 'react';
 import type {MoveTarget} from './blockCommands';
 
+const DRAG_START_THRESHOLD_PX = 4;
+
 export type BlockOutlineItem = {
     id: string;
     depth: number;
@@ -12,6 +14,14 @@ export type DropTarget = {
     indicatorBlockId: string;
     indicatorPlacement: 'before' | 'after';
     indicatorDepth: number;
+};
+
+type PendingDrag = {
+    id: string;
+    pointerId: number;
+    startX: number;
+    startY: number;
+    source: HTMLElement;
 };
 
 export function useBlockReorder({
@@ -26,6 +36,8 @@ export function useBlockReorder({
     const rowRefs = useRef(new Map<string, HTMLElement>());
     const blocksRef = useRef(blocks);
     const draggingRef = useRef<string | null>(null);
+    const pendingDragRef = useRef<PendingDrag | null>(null);
+    const [hasPointerGesture, setHasPointerGesture] = useState(false);
 
     blocksRef.current = blocks;
 
@@ -81,25 +93,49 @@ export function useBlockReorder({
     }, []);
 
     useEffect(() => {
-        if (!draggingId) return;
+        if (!hasPointerGesture) return;
 
         const onPointerMove = (event: globalThis.PointerEvent) => {
+            const pending = pendingDragRef.current;
+            if (pending) {
+                if (event.pointerId !== pending.pointerId) return;
+                const deltaX = event.clientX - pending.startX;
+                const deltaY = event.clientY - pending.startY;
+                if (Math.hypot(deltaX, deltaY) < DRAG_START_THRESHOLD_PX) return;
+                pendingDragRef.current = null;
+                draggingRef.current = pending.id;
+                pending.source.dataset.blockDragSuppressClick = 'true';
+                window.setTimeout(() => {
+                    if (pending.source.dataset.blockDragSuppressClick === 'true') {
+                        delete pending.source.dataset.blockDragSuppressClick;
+                    }
+                }, 0);
+                setDraggingId(pending.id);
+            }
+            if (!draggingRef.current) return;
             event.preventDefault();
             setDropTarget(findDropTarget(event.clientX, event.clientY));
         };
         const onPointerUp = (event: globalThis.PointerEvent) => {
-            event.preventDefault();
-            const target = findDropTarget(event.clientX, event.clientY) ?? dropTarget;
+            const wasDragging = draggingRef.current !== null;
+            if (wasDragging) event.preventDefault();
+            const target = wasDragging
+                ? findDropTarget(event.clientX, event.clientY) ?? dropTarget
+                : null;
             const dragged = draggingRef.current;
+            pendingDragRef.current = null;
             setDraggingId(null);
             setDropTarget(null);
+            setHasPointerGesture(false);
             draggingRef.current = null;
             if (!dragged || !target) return;
             onMove(dragged, target.command);
         };
         const onPointerCancel = () => {
+            pendingDragRef.current = null;
             setDraggingId(null);
             setDropTarget(null);
+            setHasPointerGesture(false);
             draggingRef.current = null;
         };
         window.addEventListener('pointermove', onPointerMove, {passive: false});
@@ -110,16 +146,23 @@ export function useBlockReorder({
             window.removeEventListener('pointerup', onPointerUp);
             window.removeEventListener('pointercancel', onPointerCancel);
         };
-    }, [draggingId, dropTarget, findDropTarget, onMove]);
+    }, [dropTarget, findDropTarget, hasPointerGesture, onMove]);
 
     const startDrag = useCallback((id: string, event: PointerEvent<HTMLElement>) => {
         if (!event.isPrimary || event.button !== 0) return;
-        event.preventDefault();
         event.stopPropagation();
         event.currentTarget.setPointerCapture(event.pointerId);
-        draggingRef.current = id;
-        setDraggingId(id);
+        pendingDragRef.current = {
+            id,
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            startY: event.clientY,
+            source: event.currentTarget,
+        };
+        draggingRef.current = null;
+        setDraggingId(null);
         setDropTarget(null);
+        setHasPointerGesture(true);
     }, []);
 
     return {draggingId, draggingSubtreeIds, dropTarget, registerRow, startDrag};

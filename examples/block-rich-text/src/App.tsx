@@ -21,8 +21,8 @@ import {
     addTableRow,
     advanceFromTableCellEnd,
     commandApplied,
+    convertBlockToTable,
     createMissingTableCell,
-    createTable,
     deleteEmptyTableRowBackward,
     exitEmptyLastTableRow,
     moveBlock,
@@ -1221,30 +1221,28 @@ function BlockEditor({
                           })
                 }
                 onBlockType={(kind) =>
-                    runEditCommand((current, selection) =>
-                        setBlockTypeEverywhere(current.state, selection, (_blockId, meta) =>
+                    runEditCommand((current, selection) => {
+                        if (kind === 'table') {
+                            const result = convertBlockToTable(
+                                current.state,
+                                primarySelection(resolveSelectionSet(current.state, selection)),
+                                makeCommandContext(current),
+                            );
+                            return {
+                                state: result.state,
+                                ops: result.ops,
+                                selection: replacePrimarySelection(
+                                    result.state,
+                                    current.selection,
+                                    result.selection,
+                                ),
+                            };
+                        }
+                        return setBlockTypeEverywhere(current.state, selection, (_blockId, meta) =>
                             meta.type === 'table'
                                 ? meta
                                 : blockTypeMeta(kind, meta, nextReplicaTs(current)),
-                        ),
-                    )
-                }
-                onCreateTable={() =>
-                    runEditCommand((current, selection) => {
-                        const result = createTable(
-                            current.state,
-                            primarySelection(resolveSelectionSet(current.state, selection)),
-                            makeCommandContext(current),
                         );
-                        return {
-                            state: result.state,
-                            ops: result.ops,
-                            selection: replacePrimarySelection(
-                                result.state,
-                                current.selection,
-                                result.selection,
-                            ),
-                        };
                     })
                 }
             />
@@ -1421,7 +1419,8 @@ type BlockTypeMenuValue =
     | 'code'
     | 'callout-info'
     | 'callout-warning'
-    | 'callout-error';
+    | 'callout-error'
+    | 'table';
 
 type RenderBlockContext = {
     blocks: RichFormattedBlock[];
@@ -2081,6 +2080,8 @@ const blockTypeMeta = (
             return {type: 'callout', kind: 'warning', ts};
         case 'callout-error':
             return {type: 'callout', kind: 'error', ts};
+        case 'table':
+            return current;
     }
 };
 
@@ -2106,6 +2107,7 @@ const blockTypeMenuValue = (meta: RichBlockMeta | undefined): BlockTypeMenuValue
                   ? 'callout-warning'
                   : 'callout-error';
         case 'table':
+            return 'table';
         case 'table_row':
             return 'paragraph';
     }
@@ -2648,7 +2650,6 @@ function Toolbar({
     onLink,
     onBlockType,
     onAnnotation,
-    onCreateTable,
 }: {
     canUndo: boolean;
     canRedo: boolean;
@@ -2661,7 +2662,6 @@ function Toolbar({
     onLink(): void;
     onBlockType(kind: BlockTypeMenuValue): void;
     onAnnotation(presentation: AnnotationPresentation): void;
-    onCreateTable(): void;
 }) {
     return (
         <div className="toolbar" aria-label="Formatting">
@@ -2735,17 +2735,6 @@ function Toolbar({
                     P
                 </button>
             </div>
-            <div className="toolbarGroup" aria-label="Blocks">
-                <button
-                    type="button"
-                    aria-label="Table"
-                    title="Table"
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={onCreateTable}
-                >
-                    Tbl
-                </button>
-            </div>
             <select
                 aria-label="Block type"
                 value={blockType}
@@ -2765,6 +2754,7 @@ function Toolbar({
                 <option value="callout-info">Info callout</option>
                 <option value="callout-warning">Warning callout</option>
                 <option value="callout-error">Error callout</option>
+                <option value="table">Table</option>
             </select>
         </div>
     );
@@ -2911,19 +2901,15 @@ function EditableBlock({
                 } as CSSProperties
             }
         >
-            {isTableCell ? (
-                <span className="dragHandlePlaceholder" aria-hidden="true" />
-            ) : (
-                <button
-                    type="button"
-                    className="dragHandle"
-                    aria-label="Move block"
-                    onPointerDown={(event) => onStartDrag(block.id, event)}
-                >
-                    ⋮⋮
-                </button>
+            {!isTableCell && (
+                <BlockAffordance
+                    blockId={block.id}
+                    meta={meta}
+                    listNumber={listNumber}
+                    onStartDrag={onStartDrag}
+                    onToggleTodo={onToggleTodo}
+                />
             )}
-            <BlockAffordance meta={meta} listNumber={listNumber} onToggleTodo={onToggleTodo} />
             <RichTextEditableSurface
                 blockId={block.id}
                 runs={block.runs}
@@ -3385,34 +3371,63 @@ function RichTextEditableSurface({
 }
 
 function BlockAffordance({
+    blockId,
     meta,
     listNumber,
+    onStartDrag,
     onToggleTodo,
 }: {
+    blockId: string;
     meta: RichBlockMeta;
     listNumber: number | null;
+    onStartDrag: ReturnType<typeof useBlockReorder>['startDrag'];
     onToggleTodo(): void;
 }) {
     if (meta.type === 'list_item') {
         return (
-            <span className="blockMarker">
+            <button
+                type="button"
+                className="blockAffordance blockAffordanceButton blockAffordanceMarker"
+                aria-label="Move block"
+                onPointerDown={(event) => onStartDrag(blockId, event)}
+            >
                 {meta.kind === 'ordered' ? `${listNumber ?? 1}.` : '•'}
-            </span>
+            </button>
         );
     }
     if (meta.type === 'todo') {
         return (
-            <input
-                className="todoToggle"
-                type="checkbox"
-                checked={meta.checked}
-                aria-label="Toggle todo"
-                onMouseDown={(event) => event.preventDefault()}
-                onChange={onToggleTodo}
-            />
+            <span
+                className="blockAffordance blockAffordanceTodo"
+                data-block-drag-affordance="todo"
+                onPointerDown={(event) => onStartDrag(blockId, event)}
+                onClickCapture={(event) => {
+                    if (event.currentTarget.dataset.blockDragSuppressClick !== 'true') return;
+                    delete event.currentTarget.dataset.blockDragSuppressClick;
+                    event.preventDefault();
+                    event.stopPropagation();
+                }}
+            >
+                <input
+                    className="todoToggle"
+                    type="checkbox"
+                    checked={meta.checked}
+                    aria-label="Toggle todo"
+                    onChange={onToggleTodo}
+                />
+            </span>
         );
     }
-    return <span className="blockMarker" aria-hidden="true" />;
+    return (
+        <button
+            type="button"
+            className="blockAffordance blockAffordanceButton blockAffordanceHandle"
+            aria-label="Move block"
+            onPointerDown={(event) => onStartDrag(blockId, event)}
+        >
+            ⋮⋮
+        </button>
+    );
 }
 
 function BlockInlineControls({
