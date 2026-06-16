@@ -14,3 +14,13 @@
 - Verification: `npm --prefix examples/block-rich-text run build` passed.
 - Visual check: the in-app browser connector reported `Browser is not available: iab`, so I fell back to headless Chrome and captured `/tmp/054aj-drag-handle.png` from `http://127.0.0.1:5174/`. Chrome wrote the screenshot but did not exit cleanly, so I terminated the stuck headless process by its unique `/tmp/054aj-drag-handle-chrome` user-data-dir argument.
 - Issue encountered: `pnpm exec playwright screenshot ...` was not usable because `playwright` is not installed in this workspace.
+
+## Todo Checkbox Click Fix
+
+- Bug reported after implementation: clicking the todo checkbox did not check the box in the browser.
+- Cause: the todo wrapper handled `pointerdown` for both the surrounding slot and the checkbox target, so it called `setPointerCapture` on the wrapper. In a real browser this can redirect the eventual click away from the checkbox input.
+- Fix: the wrapper now starts drag only when the wrapper itself is the pointer target. The checkbox has its own `onPointerDown`, so checkbox-originated gestures capture on the input and normal clicks still toggle.
+- Kept drag click suppression on both the wrapper and checkbox so actual checkbox drags do not accidentally toggle afterward.
+- Added a regression path in the todo UI test that performs pointerdown, pointerup, then click on the checkbox before asserting it toggles.
+- Verification: `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx` passed with 101 tests.
+- Verification: `npm --prefix examples/block-rich-text run build` passed.

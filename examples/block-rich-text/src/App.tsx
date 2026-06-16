@@ -3400,7 +3400,10 @@ function BlockAffordance({
             <span
                 className="blockAffordance blockAffordanceTodo"
                 data-block-drag-affordance="todo"
-                onPointerDown={(event) => onStartDrag(blockId, event)}
+                onPointerDown={(event) => {
+                    if (event.target !== event.currentTarget) return;
+                    onStartDrag(blockId, event);
+                }}
                 onClickCapture={(event) => {
                     if (event.currentTarget.dataset.blockDragSuppressClick !== 'true') return;
                     delete event.currentTarget.dataset.blockDragSuppressClick;
@@ -3413,6 +3416,13 @@ function BlockAffordance({
                     type="checkbox"
                     checked={meta.checked}
                     aria-label="Toggle todo"
+                    onPointerDown={(event) => onStartDrag(blockId, event)}
+                    onClickCapture={(event) => {
+                        if (event.currentTarget.dataset.blockDragSuppressClick !== 'true') return;
+                        delete event.currentTarget.dataset.blockDragSuppressClick;
+                        event.preventDefault();
+                        event.stopPropagation();
+                    }}
                     onChange={onToggleTodo}
                 />
             </span>

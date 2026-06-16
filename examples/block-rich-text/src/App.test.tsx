@@ -920,12 +920,28 @@ describe('Block rich text example UI', () => {
         setBlockType(right, 'todo');
 
         const checkbox = within(right).getByRole('checkbox', {name: 'Toggle todo'}) as HTMLInputElement;
+        (checkbox as HTMLInputElement & {setPointerCapture?: (pointerId: number) => void}).setPointerCapture = () => {};
+        fireEvent.pointerDown(checkbox, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 20,
+            clientY: 8,
+        });
+        fireEvent.pointerUp(window, {
+            button: 0,
+            buttons: 0,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 20,
+            clientY: 8,
+        });
         fireEvent.click(checkbox);
         await waitFor(() => expect(checkbox.checked).toBe(true));
 
         installMockBlockRowGeometry(right);
         const slot = checkbox.closest<HTMLElement>('[data-block-drag-affordance="todo"]')!;
-        (slot as HTMLElement & {setPointerCapture?: (pointerId: number) => void}).setPointerCapture = () => {};
         fireEvent.pointerDown(checkbox, {
             button: 0,
             buttons: 1,
