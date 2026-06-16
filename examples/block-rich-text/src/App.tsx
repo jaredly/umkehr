@@ -1,5 +1,6 @@
 import {
     useCallback,
+    Fragment,
     useLayoutEffect,
     useMemo,
     useRef,
@@ -9,20 +10,26 @@ import {
     type KeyboardEvent,
     type MouseEvent,
     type MutableRefObject,
+    type PointerEvent,
     type ReactElement,
 } from 'react';
-import {materializeFormattedBlocks, visibleBlockChildren} from 'umkehr/block-crdt';
+import {materializeFormattedBlocks, materializedBlockPath, visibleBlockChildren} from 'umkehr/block-crdt';
 import type {FormattedBlock} from 'umkehr/block-crdt';
 import {lamportToString} from 'umkehr/block-crdt/utils';
 import {
     addTableColumn,
     addTableRow,
     advanceFromTableCellEnd,
+    commandApplied,
     createMissingTableCell,
     createTable,
+    deleteEmptyTableRowBackward,
+    exitEmptyLastTableRow,
     moveBlock,
+    moveTableCell,
     moveTableCellByTab,
     setBlockMeta,
+    splitTableTitleToParagraph,
     type CommandResult,
 } from './blockCommands';
 import {
@@ -133,6 +140,7 @@ import {
     textForSelectionSegments,
     type LinkTargetRange,
 } from './inlineMarks';
+import {highlightCode, type SyntaxToken} from './syntaxHighlight';
 
 type RichFormattedBlock = FormattedBlock<RichBlockMeta>;
 type RenderedAnnotation = ReturnType<typeof renderedAnnotations>[number];
@@ -1215,7 +1223,9 @@ function BlockEditor({
                 onBlockType={(kind) =>
                     runEditCommand((current, selection) =>
                         setBlockTypeEverywhere(current.state, selection, (_blockId, meta) =>
-                            blockTypeMeta(kind, meta, nextReplicaTs(current)),
+                            meta.type === 'table'
+                                ? meta
+                                : blockTypeMeta(kind, meta, nextReplicaTs(current)),
                         ),
                     )
                 }
@@ -1306,21 +1316,23 @@ function BlockEditor({
                                 );
                                 return {state: result.state, ops: result.ops, selection: current.selection};
                             }),
-                        addTableRow: (tableId) =>
+                        addTableRow: (tableId, afterRowId) =>
                             runBlockControlCommand((current) => {
                                 const result = addTableRow(
                                     current.state,
                                     tableId,
                                     makeCommandContext(current),
+                                    afterRowId,
                                 );
                                 return {state: result.state, ops: result.ops, selection: current.selection};
                             }),
-                        addTableColumn: (tableId) =>
+                        addTableColumn: (tableId, columnIndex) =>
                             runBlockControlCommand((current) => {
                                 const result = addTableColumn(
                                     current.state,
                                     tableId,
                                     makeCommandContext(current),
+                                    columnIndex,
                                 );
                                 return {state: result.state, ops: result.ops, selection: current.selection};
                             }),
@@ -1453,8 +1465,8 @@ type RenderBlockContext = {
     showLinkHoverFromRange(range: LinkTargetRange & {href: string}, element: HTMLElement): void;
     hideLinkHover(): void;
     createMissingTableCell(tableId: string, rowId: string, columnIndex: number): void;
-    addTableRow(tableId: string): void;
-    addTableColumn(tableId: string): void;
+    addTableRow(tableId: string, afterRowId?: string): void;
+    addTableColumn(tableId: string, columnIndex?: number): void;
     onUndo(): void;
     onRedo(): void;
     onKeystroke(blockId: string, event: KeyboardEvent<HTMLElement>): void;
@@ -1519,12 +1531,54 @@ function TableBlock({
     node: RenderTreeNode;
     context: RenderBlockContext;
 }) {
+    const [cellDrag, setCellDrag] = useState<{
+        sourceCellId: string;
+        target: {rowId: string; index: number} | null;
+    } | null>(null);
     const rowNodes = node.children.filter((child) => child.block.block.meta.type === 'table_row');
     const normalChildren = node.children.filter((child) => child.block.block.meta.type !== 'table_row');
     const columnCount = Math.max(
         1,
         ...rowNodes.map((row) => row.children.filter((child) => child.block.block.meta.type !== 'table_row').length),
     );
+    const selectedCellId = tableCellIdForSelection(context.state, context.selection);
+
+    useLayoutEffect(() => {
+        if (!cellDrag) return;
+        const onPointerMove = (event: globalThis.PointerEvent) => {
+            event.preventDefault();
+            setCellDrag((current) =>
+                current
+                    ? {...current, target: tableCellDropTargetFromPoint(event.clientX, event.clientY)}
+                    : current,
+            );
+        };
+        const onPointerUp = (event: globalThis.PointerEvent) => {
+            event.preventDefault();
+            const target = tableCellDropTargetFromPoint(event.clientX, event.clientY) ?? cellDrag.target;
+            const sourceCellId = cellDrag.sourceCellId;
+            setCellDrag(null);
+            if (!target) return;
+            context.runBlockControlCommand((current) => {
+                const result = moveTableCell(
+                    current.state,
+                    sourceCellId,
+                    target,
+                    makeCommandContext(current),
+                );
+                return {state: result.state, ops: result.ops, selection: current.selection};
+            });
+        };
+        const onPointerCancel = () => setCellDrag(null);
+        window.addEventListener('pointermove', onPointerMove, {passive: false});
+        window.addEventListener('pointerup', onPointerUp, {passive: false});
+        window.addEventListener('pointercancel', onPointerCancel);
+        return () => {
+            window.removeEventListener('pointermove', onPointerMove);
+            window.removeEventListener('pointerup', onPointerUp);
+            window.removeEventListener('pointercancel', onPointerCancel);
+        };
+    }, [cellDrag, context]);
 
     return (
         <div
@@ -1532,27 +1586,29 @@ function TableBlock({
             style={{'--block-depth': node.block.depth} as CSSProperties}
             data-table-id={node.block.id}
         >
-            <div className="tableToolbar" aria-label="Table controls">
-                <button
-                    type="button"
-                    className="tableDragHandle"
-                    aria-label="Move table"
-                    onPointerDown={(event) => context.startDrag(node.block.id, event)}
-                >
-                    ⋮⋮
-                </button>
-                <span>Table</span>
-                <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => context.addTableRow(node.block.id)}>
-                    Add row
-                </button>
-                <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => context.addTableColumn(node.block.id)}>
-                    Add column
-                </button>
-            </div>
+            <div className="tableTitleRow">{renderEditableBlock(node.block, context)}</div>
             <div className="tableGrid" role="table" aria-label="Table block">
+                <div
+                    className="tableColumnInsertControls"
+                    aria-label="Column insert controls"
+                    style={{'--table-columns': columnCount} as CSSProperties}
+                >
+                    {Array.from({length: columnCount + 1}, (_, columnIndex) => (
+                        <button
+                            key={columnIndex}
+                            type="button"
+                            className="tableColumnInsert"
+                            aria-label={`Add column ${columnIndex + 1}`}
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => context.addTableColumn(node.block.id, columnIndex)}
+                        >
+                            +
+                        </button>
+                    ))}
+                </div>
                 {rowNodes.map((row, rowIndex) => (
+                    <Fragment key={row.block.id}>
                     <div
-                        key={row.block.id}
                         ref={(element) => context.registerRow(row.block.id, element)}
                         className={[
                             'tableRow',
@@ -1572,31 +1628,70 @@ function TableBlock({
                             <button
                                 type="button"
                                 className="tableRowDrag"
-                                aria-label="Move row"
+                                aria-label={`Move row ${rowIndex + 1}`}
                                 onPointerDown={(event) => context.startDrag(row.block.id, event)}
                             >
-                                ⋮
+                                {rowIndex + 1}
                             </button>
                         </div>
                         {Array.from({length: columnCount}, (_, columnIndex) => {
                             const cell = row.children[columnIndex] ?? null;
                             return (
-                                <div key={`${row.block.id}:${columnIndex}`} className={cell ? 'tableCell' : 'tableCell missingTableCell'} role="cell">
+                                <div
+                                    key={`${row.block.id}:${columnIndex}`}
+                                    className={[
+                                        cell ? 'tableCell' : 'tableCell missingTableCell',
+                                        cell?.block.id === selectedCellId ? 'activeTableCell' : '',
+                                        cellDrag?.sourceCellId === cell?.block.id ? 'draggingCell' : '',
+                                        cellDrag?.target?.rowId === row.block.id && cellDrag.target.index === columnIndex
+                                            ? 'cellDropBefore'
+                                            : '',
+                                        cellDrag?.target?.rowId === row.block.id && cellDrag.target.index === columnIndex + 1
+                                            ? 'cellDropAfter'
+                                            : '',
+                                    ]
+                                        .filter(Boolean)
+                                        .join(' ')}
+                                    role="cell"
+                                    data-cell-id={cell?.block.id}
+                                    onPointerDown={(event) => {
+                                        if (!cell || !isFocusedCellBorderDrag(event, selectedCellId)) return;
+                                        event.preventDefault();
+                                        event.stopPropagation();
+                                        event.currentTarget.setPointerCapture(event.pointerId);
+                                        setCellDrag({
+                                            sourceCellId: cell.block.id,
+                                            target: {rowId: row.block.id, index: columnIndex},
+                                        });
+                                    }}
+                                >
                                     {cell ? (
                                         renderTableCell(cell, context)
                                     ) : (
                                         <button
                                             type="button"
+                                            aria-label="Add cell"
                                             onMouseDown={(event) => event.preventDefault()}
                                             onClick={() => context.createMissingTableCell(node.block.id, row.block.id, columnIndex)}
                                         >
-                                            Add cell
+                                            +
                                         </button>
                                     )}
                                 </div>
                             );
                         })}
                     </div>
+                    <div className="tableRowInsertControl" aria-label={`Row ${rowIndex + 1} insert control`}>
+                        <button
+                            type="button"
+                            aria-label={`Add row after ${rowIndex + 1}`}
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => context.addTableRow(node.block.id, row.block.id)}
+                        >
+                            +
+                        </button>
+                    </div>
+                    </Fragment>
                 ))}
             </div>
             {normalChildren.map((child) => renderBlockNode(child, context))}
@@ -1609,6 +1704,56 @@ const renderTableCell = (node: RenderTreeNode, context: RenderBlockContext): Rea
         return <TableBlock node={node} context={context} />;
     }
     return renderEditableBlock({...node.block, depth: 0}, context);
+};
+
+const tableCellIdForSelection = (
+    state: Replica['state'],
+    selection: EditorSelection,
+): string | null => {
+    const point = focusPoint(selection);
+    const block = state.state.blocks[point.blockId];
+    if (!block || block.meta.type === 'table_row') return null;
+    const path = materializedBlockPath(state, point.blockId, annotationVirtualParents(state)).map(lamportToString);
+    const rowIndex = path.findLastIndex((id) => state.state.blocks[id]?.meta.type === 'table_row');
+    return rowIndex >= 0 ? point.blockId : null;
+};
+
+const isFocusedCellBorderDrag = (
+    event: PointerEvent<HTMLDivElement>,
+    selectedCellId: string | null,
+): boolean => {
+    if (!event.isPrimary || event.button !== 0) return false;
+    const cellId = event.currentTarget.dataset.cellId ?? null;
+    if (!cellId || cellId !== selectedCellId) return false;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const edge = 7;
+    return (
+        event.clientX - rect.left <= edge ||
+        rect.right - event.clientX <= edge ||
+        event.clientY - rect.top <= edge ||
+        rect.bottom - event.clientY <= edge
+    );
+};
+
+const tableCellDropTargetFromPoint = (
+    clientX: number,
+    clientY: number,
+): {rowId: string; index: number} | null => {
+    const row = document
+        .elementsFromPoint(clientX, clientY)
+        .find((element): element is HTMLElement =>
+            element instanceof HTMLElement && element.matches('[data-row-id]'),
+        );
+    if (!row) return null;
+    const rowId = row.dataset.rowId;
+    if (!rowId) return null;
+    const cells = Array.from(row.querySelectorAll<HTMLElement>('.tableCell[data-cell-id]'));
+    if (!cells.length) return {rowId, index: 0};
+    const before = cells.findIndex((cell) => {
+        const rect = cell.getBoundingClientRect();
+        return clientX < rect.left + rect.width / 2;
+    });
+    return {rowId, index: before >= 0 ? before : cells.length};
 };
 
 const renderEditableBlock = (block: RichFormattedBlock, context: RenderBlockContext) => {
@@ -1653,9 +1798,26 @@ const renderEditableBlock = (block: RichFormattedBlock, context: RenderBlockCont
                 )
             }
             onDeleteBackward={() =>
-                context.runEditCommand((current, selection) =>
-                    deleteBackwardEverywhere(current.state, selection, makeCommandContext(current)),
-                )
+                context.runEditCommand((current, selection) => {
+                    const selected = primarySelection(resolveSelectionSet(current.state, selection));
+                    const tableResult = deleteEmptyTableRowBackward(
+                        current.state,
+                        selected,
+                        makeCommandContext(current),
+                    );
+                    if (commandApplied(tableResult)) {
+                        return {
+                            state: tableResult.state,
+                            ops: tableResult.ops,
+                            selection: replacePrimarySelection(
+                                tableResult.state,
+                                current.selection,
+                                tableResult.selection,
+                            ),
+                        };
+                    }
+                    return deleteBackwardEverywhere(current.state, selection, makeCommandContext(current));
+                })
             }
             onDeleteForward={() =>
                 context.runEditCommand((current, selection) =>
@@ -1663,12 +1825,45 @@ const renderEditableBlock = (block: RichFormattedBlock, context: RenderBlockCont
                 )
             }
             onSplit={() =>
-                context.runEditCommand((current, selection) =>
-                    splitBlockEverywhere(current.state, selection, makeCommandContext(current)),
-                )
+                context.runEditCommand((current, selection) => {
+                    const selected = primarySelection(resolveSelectionSet(current.state, selection));
+                    const tableTitleResult = splitTableTitleToParagraph(
+                        current.state,
+                        selected,
+                        makeCommandContext(current),
+                    );
+                    if (commandApplied(tableTitleResult)) {
+                        return {
+                            state: tableTitleResult.state,
+                            ops: tableTitleResult.ops,
+                            selection: replacePrimarySelection(
+                                tableTitleResult.state,
+                                current.selection,
+                                tableTitleResult.selection,
+                            ),
+                        };
+                    }
+                    return splitBlockEverywhere(current.state, selection, makeCommandContext(current));
+                })
             }
             onAdvanceFromTableCellEnd={(selection) =>
                 context.runEditCommand((current) => {
+                    const exitResult = exitEmptyLastTableRow(
+                        current.state,
+                        selection,
+                        makeCommandContext(current),
+                    );
+                    if (commandApplied(exitResult)) {
+                        return {
+                            state: exitResult.state,
+                            ops: exitResult.ops,
+                            selection: replacePrimarySelection(
+                                exitResult.state,
+                                current.selection,
+                                exitResult.selection,
+                            ),
+                        };
+                    }
                     const result = advanceFromTableCellEnd(
                         current.state,
                         selection,
@@ -2470,55 +2665,87 @@ function Toolbar({
 }) {
     return (
         <div className="toolbar" aria-label="Formatting">
-            <button
-                type="button"
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={onUndo}
-                disabled={!canUndo}
-            >
-                Undo
-            </button>
-            <button
-                type="button"
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={onRedo}
-                disabled={!canRedo}
-            >
-                Redo
-            </button>
-            <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={onBold}>
-                <strong>B</strong>
-            </button>
-            <button
-                type="button"
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={onItalic}
-            >
-                <em>I</em>
-            </button>
-            <button
-                type="button"
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={onStrikethrough}
-                aria-label="Strikethrough"
-            >
-                <span className="toolbarStrike">S</span>
-            </button>
-            <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={onLink}>
-                Link
-            </button>
-            <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => onAnnotation('sidebar')}>
-                Comment
-            </button>
-            <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => onAnnotation('footnote')}>
-                Footnote
-            </button>
-            <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => onAnnotation('popover')}>
-                Popover
-            </button>
-            <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={onCreateTable}>
-                Table
-            </button>
+            <div className="toolbarGroup" aria-label="History">
+                <button
+                    type="button"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={onUndo}
+                    disabled={!canUndo}
+                >
+                    Undo
+                </button>
+                <button
+                    type="button"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={onRedo}
+                    disabled={!canRedo}
+                >
+                    Redo
+                </button>
+            </div>
+            <div className="toolbarGroup" aria-label="Inline marks">
+                <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={onBold}>
+                    <strong>B</strong>
+                </button>
+                <button
+                    type="button"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={onItalic}
+                >
+                    <em>I</em>
+                </button>
+                <button
+                    type="button"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={onStrikethrough}
+                    aria-label="Strikethrough"
+                >
+                    <span className="toolbarStrike">S</span>
+                </button>
+                <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={onLink}>
+                    Link
+                </button>
+            </div>
+            <div className="toolbarGroup" aria-label="Annotations">
+                <button
+                    type="button"
+                    aria-label="Comment"
+                    title="Comment"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => onAnnotation('sidebar')}
+                >
+                    C
+                </button>
+                <button
+                    type="button"
+                    aria-label="Footnote"
+                    title="Footnote"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => onAnnotation('footnote')}
+                >
+                    F
+                </button>
+                <button
+                    type="button"
+                    aria-label="Popover"
+                    title="Popover"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => onAnnotation('popover')}
+                >
+                    P
+                </button>
+            </div>
+            <div className="toolbarGroup" aria-label="Blocks">
+                <button
+                    type="button"
+                    aria-label="Table"
+                    title="Table"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={onCreateTable}
+                >
+                    Tbl
+                </button>
+            </div>
             <select
                 aria-label="Block type"
                 value={blockType}
@@ -2655,6 +2882,13 @@ function EditableBlock({
     const meta = block.block.meta;
     const codeHasTrailingNewline =
         meta.type === 'code' && block.runs.map((run) => run.text).join('').endsWith('\n');
+    const isCodeBlock = meta.type === 'code';
+    const codeText = isCodeBlock ? block.runs.map((run) => run.text).join('') : '';
+    const codeLanguage = isCodeBlock ? meta.language : '';
+    const syntaxTokens = useMemo(
+        () => (isCodeBlock ? highlightCode(codeText, codeLanguage) : undefined),
+        [codeLanguage, codeText, isCodeBlock],
+    );
 
     return (
         <div
@@ -2677,14 +2911,18 @@ function EditableBlock({
                 } as CSSProperties
             }
         >
-            <button
-                type="button"
-                className="dragHandle"
-                aria-label="Move block"
-                onPointerDown={(event) => onStartDrag(block.id, event)}
-            >
-                ⋮⋮
-            </button>
+            {isTableCell ? (
+                <span className="dragHandlePlaceholder" aria-hidden="true" />
+            ) : (
+                <button
+                    type="button"
+                    className="dragHandle"
+                    aria-label="Move block"
+                    onPointerDown={(event) => onStartDrag(block.id, event)}
+                >
+                    ⋮⋮
+                </button>
+            )}
             <BlockAffordance meta={meta} listNumber={listNumber} onToggleTodo={onToggleTodo} />
             <RichTextEditableSurface
                 blockId={block.id}
@@ -2701,6 +2939,7 @@ function EditableBlock({
                     .join(' ')}
                 ariaLabel="Block text"
                 trailingCodeNewline={codeHasTrailingNewline}
+                syntaxTokens={syntaxTokens}
                 popoverTextById={popoverTextById}
                 footnoteNumberById={footnoteNumberById}
                 onPopoverTriggerEnter={onPopoverTriggerEnter}
@@ -2740,6 +2979,8 @@ function EditableBlock({
                         event.preventDefault();
                         if (meta.type === 'code' && event.shiftKey) {
                             onForceCodeNewline();
+                        } else if (meta.type === 'code') {
+                            onSplit();
                         } else if (isTableCell && !event.shiftKey) {
                             onAdvanceFromTableCellEnd(
                                 readSelectionFromDom(event.currentTarget) ?? caret(block.id, blockLength),
@@ -2905,6 +3146,7 @@ function RichTextEditableSurface({
     ariaLabel,
     placeholder,
     trailingCodeNewline = false,
+    syntaxTokens,
     popoverTextById = new Map(),
     footnoteNumberById = new Map(),
     onInsertText,
@@ -2929,6 +3171,7 @@ function RichTextEditableSurface({
     ariaLabel: string;
     placeholder?: string;
     trailingCodeNewline?: boolean;
+    syntaxTokens?: SyntaxToken[];
     popoverTextById?: Map<string, string>;
     footnoteNumberById?: Map<string, number>;
     onInsertText(text: string, selection?: EditorSelection): void;
@@ -2981,12 +3224,14 @@ function RichTextEditableSurface({
             decorations,
             trailingCodeNewline,
             footnoteNumberById,
+            syntaxTokens,
         );
         if (renderedRunsRef.current !== renderedRuns) {
             renderedRunsRef.current = renderedRuns;
             element.replaceChildren(
                 ...renderRunNodes(runs, decorations, {
                     trailingCodeNewline,
+                    syntaxTokens,
                     popoverTextById,
                     footnoteNumberById,
                 }),
@@ -3013,6 +3258,7 @@ function RichTextEditableSurface({
         popoverTextById,
         runs,
         selection,
+        syntaxTokens,
         trailingCodeNewline,
     ]);
 
@@ -3036,6 +3282,7 @@ function RichTextEditableSurface({
                 event.currentTarget.replaceChildren(
                     ...renderRunNodes(runs, nextDecorations, {
                         trailingCodeNewline,
+                        syntaxTokens,
                         popoverTextById,
                         footnoteNumberById,
                     }),
@@ -3045,6 +3292,7 @@ function RichTextEditableSurface({
                     nextDecorations,
                     trailingCodeNewline,
                     footnoteNumberById,
+                    syntaxTokens,
                 );
             }}
             onMouseUp={(event) => onSelectionChange?.(readSelectionFromDom(event.currentTarget))}
@@ -3118,6 +3366,7 @@ function RichTextEditableSurface({
                     event.currentTarget.replaceChildren(
                         ...renderRunNodes(runs, decorations, {
                             trailingCodeNewline,
+                            syntaxTokens,
                             popoverTextById,
                             footnoteNumberById,
                         }),
@@ -3481,6 +3730,7 @@ const serializeRuns = (
     decorations: BlockSelectionDecorations | null,
     trailingCodeNewline = false,
     footnoteNumberById: Map<string, number> = new Map(),
+    syntaxTokens?: SyntaxToken[],
 ) =>
     JSON.stringify({
         runs: runs.map((run) => [
@@ -3493,6 +3743,7 @@ const serializeRuns = (
         stackedMarks: runs.map((run) => run.stackedMarks),
         decorations,
         trailingCodeNewline,
+        syntaxTokens,
         footnoteNumbers: [...footnoteNumberById.entries()].sort(([a], [b]) => a.localeCompare(b)),
     });
 
@@ -3501,11 +3752,12 @@ const renderRunNodes = (
     decorations: BlockSelectionDecorations | null,
     options: {
         trailingCodeNewline?: boolean;
+        syntaxTokens?: SyntaxToken[];
         popoverTextById?: Map<string, string>;
         footnoteNumberById?: Map<string, number>;
     } = {},
 ): Node[] => {
-    const chunks = runRenderChunks(runs, decorations);
+    const chunks = runRenderChunks(runs, decorations, options.syntaxTokens);
     const nodes: Node[] = [];
     const renderedCarets = new Set<string>();
     for (let index = 0; index < chunks.length; index++) {
@@ -3556,13 +3808,16 @@ type RunRenderChunk = {
     text: string;
     blockStartOffset: number;
     blockEndOffset: number;
+    syntaxClassName: string | null;
 };
 
 const runRenderChunks = (
     runs: RichFormattedBlock['runs'],
     decorations: BlockSelectionDecorations | null,
+    syntaxTokens?: SyntaxToken[],
 ): RunRenderChunk[] => {
     const chunks: RunRenderChunk[] = [];
+    const syntaxRanges = syntaxTokenRanges(syntaxTokens, formattedRunsTextLength(runs));
     let offset = 0;
     for (const run of runs) {
         const runSegments = segmentText(run.text);
@@ -3587,6 +3842,10 @@ const runRenderChunks = (
                 addBoundaryInRun(boundaries, caret.offset - runStart, runSegments.length);
             }
         }
+        for (const range of syntaxRanges) {
+            addBoundaryInRun(boundaries, range.startOffset - runStart, runSegments.length);
+            addBoundaryInRun(boundaries, range.endOffset - runStart, runSegments.length);
+        }
 
         const sortedBoundaries = [...boundaries].sort((a, b) => a - b);
         for (let index = 0; index < sortedBoundaries.length - 1; index++) {
@@ -3598,6 +3857,11 @@ const runRenderChunks = (
                 text: runSegments.slice(start, end).join(''),
                 blockStartOffset: runStart + start,
                 blockEndOffset: runStart + end,
+                syntaxClassName: syntaxClassNameForRange(
+                    syntaxRanges,
+                    runStart + start,
+                    runStart + end,
+                ),
             });
         }
         offset = runEnd;
@@ -3607,6 +3871,41 @@ const runRenderChunks = (
 
 const formattedRunsTextLength = (runs: RichFormattedBlock['runs']): number =>
     runs.reduce((length, run) => length + segmentText(run.text).length, 0);
+
+type SyntaxTokenRange = {
+    startOffset: number;
+    endOffset: number;
+    className: string | null;
+};
+
+const syntaxTokenRanges = (
+    syntaxTokens: SyntaxToken[] | undefined,
+    expectedLength: number,
+): SyntaxTokenRange[] => {
+    if (!syntaxTokens?.length) return [];
+    const ranges: SyntaxTokenRange[] = [];
+    let offset = 0;
+    for (const token of syntaxTokens) {
+        const length = segmentText(token.text).length;
+        if (length) {
+            ranges.push({
+                startOffset: offset,
+                endOffset: offset + length,
+                className: token.className,
+            });
+        }
+        offset += length;
+    }
+    return offset === expectedLength ? ranges : [];
+};
+
+const syntaxClassNameForRange = (
+    ranges: SyntaxTokenRange[],
+    startOffset: number,
+    endOffset: number,
+): string | null =>
+    ranges.find((range) => startOffset >= range.startOffset && endOffset <= range.endOffset)
+        ?.className ?? null;
 
 const renderEndingFootnoteReferences = (
     chunk: RunRenderChunk,
@@ -3660,6 +3959,7 @@ const applyRunClasses = (
     popoverTextById?: Map<string, string>,
 ) => {
     const run = chunk.run;
+    if (chunk.syntaxClassName) span.classList.add(chunk.syntaxClassName);
     if (run.marks.bold) span.classList.add('markBold');
     if (run.marks.italic) span.classList.add('markItalic');
     if (run.marks.strikethrough) span.classList.add('markStrikethrough');

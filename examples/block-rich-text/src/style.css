@@ -181,6 +181,18 @@ select {
     border-bottom: 1px solid #e6ebf0;
 }
 
+.toolbarGroup {
+    display: inline-flex;
+    flex-wrap: nowrap;
+    gap: 4px;
+}
+
+.toolbarGroup + .toolbarGroup {
+    margin-left: 2px;
+    padding-left: 8px;
+    border-left: 1px solid #e6ebf0;
+}
+
 .toolbar button,
 .toolbar select,
 .dragHandle {
@@ -197,6 +209,10 @@ select {
 
 .toolbar button {
     padding: 0 10px;
+}
+
+.toolbarGroup button {
+    padding: 0 8px;
 }
 
 .toolbar select {
@@ -384,6 +400,21 @@ select {
     padding: 8px 0 10px;
 }
 
+.tableTitleRow .blockRow {
+    margin-left: 0;
+    padding-bottom: 6px;
+}
+
+.tableTitleRow .blockType-table .editableBlock {
+    min-height: 30px;
+    padding-left: 0;
+    font-size: 13px;
+    font-weight: 800;
+    font-variant: small-caps;
+    letter-spacing: 0.04em;
+    color: #33414d;
+}
+
 .tableToolbar {
     display: flex;
     align-items: center;
@@ -393,10 +424,55 @@ select {
     font-size: 12px;
 }
 
-.tableToolbar span {
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+.tableColumnInsertControls {
+    display: grid;
+    grid-template-columns: 42px repeat(var(--table-columns, 1), minmax(150px, 1fr)) 0;
+    height: 0;
+    overflow: visible;
+    pointer-events: none;
+}
+
+.tableColumnInsert,
+.tableRowInsertControl button {
+    width: 20px;
+    height: 20px;
+    border: 1px solid #9db6cc;
+    border-radius: 999px;
+    color: #174b76;
+    background: #fff;
+    opacity: 0;
+    cursor: pointer;
+    pointer-events: auto;
+}
+
+.tableColumnInsert {
+    justify-self: start;
+    transform: translate(-10px, -10px);
+}
+
+.tableColumnInsert:first-child {
+    grid-column: 2;
+}
+
+.tableGrid:hover .tableColumnInsert,
+.tableColumnInsert:focus-visible,
+.tableRowInsertControl:hover button,
+.tableRowInsertControl:focus-within button,
+.tableRowInsertControl button:focus-visible {
+    opacity: 1;
+}
+
+.tableRowInsertControl {
+    position: relative;
+    height: 0;
+    z-index: 3;
+    pointer-events: none;
+}
+
+.tableRowInsertControl button {
+    position: absolute;
+    left: 32px;
+    top: -10px;
 }
 
 .tableToolbar button,
@@ -429,6 +505,8 @@ select {
 
 .tableRowControls .tableRowDrag {
     cursor: grab;
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
 }
 
 .tableRowControls button:disabled {
@@ -440,6 +518,7 @@ select {
 .tableGrid {
     display: grid;
     width: 100%;
+    max-width: 100%;
     overflow-x: auto;
     border: 1px solid #c9d4de;
     border-radius: 6px;
@@ -495,10 +574,45 @@ select {
 }
 
 .tableCell {
+    position: relative;
     min-width: 150px;
     min-height: 46px;
     border-right: 1px solid #dce4eb;
     background: #fff;
+}
+
+.tableCell:focus-within {
+    z-index: 1;
+    box-shadow: inset 0 0 0 2px #1b75bb;
+}
+
+.tableCell.activeTableCell {
+    z-index: 1;
+    box-shadow: inset 0 0 0 2px #1b75bb;
+}
+
+.tableCell.draggingCell {
+    opacity: 0.58;
+}
+
+.tableCell.cellDropBefore::before,
+.tableCell.cellDropAfter::after {
+    content: "";
+    position: absolute;
+    top: 4px;
+    bottom: 4px;
+    z-index: 4;
+    width: 3px;
+    border-radius: 999px;
+    background: #1b75bb;
+}
+
+.tableCell.cellDropBefore::before {
+    left: -2px;
+}
+
+.tableCell.cellDropAfter::after {
+    right: -2px;
 }
 
 .tableCell:last-child {
@@ -506,7 +620,7 @@ select {
 }
 
 .tableCell .blockRow {
-    grid-template-columns: 30px minmax(0, 1fr) minmax(0, auto);
+    grid-template-columns: minmax(0, 1fr) minmax(0, auto);
     gap: 4px;
     margin-left: 0;
     padding: 4px;
@@ -532,11 +646,8 @@ select {
     display: none;
 }
 
-.tableCell .dragHandle {
-    min-width: 26px;
-    width: 26px;
-    height: 28px;
-    margin-top: 4px;
+.tableCell .dragHandlePlaceholder {
+    display: none;
 }
 
 .tableCell .editableBlock {
@@ -607,6 +718,39 @@ select {
 
 .markStrikethrough.markLink {
     text-decoration-line: underline line-through;
+}
+
+.syntax-keyword {
+    color: #8f3daf;
+    font-weight: 650;
+}
+
+.syntax-title,
+.syntax-attr,
+.syntax-attribute,
+.syntax-name {
+    color: #0f6f8f;
+}
+
+.syntax-string,
+.syntax-template-string {
+    color: #1e7f4f;
+}
+
+.syntax-number,
+.syntax-literal {
+    color: #9a5b00;
+}
+
+.syntax-comment {
+    color: #6d7882;
+    font-style: italic;
+}
+
+.syntax-built_in,
+.syntax-selector-tag,
+.syntax-meta {
+    color: #7a4bb0;
 }
 
 .retainedSelectionHighlight {
@@ -1057,6 +1201,8 @@ select {
     position: fixed;
     z-index: 40;
     width: min(320px, calc(100vw - 24px));
+    max-height: min(420px, calc(100vh - 24px));
+    overflow: auto;
     padding: 10px 12px;
     border: 1px solid #9ca3af;
     border-radius: 8px;
@@ -1071,6 +1217,8 @@ select {
     grid-template-columns: minmax(160px, 1fr) auto auto;
     gap: 6px;
     width: min(420px, calc(100vw - 24px));
+    max-height: min(280px, calc(100vh - 24px));
+    overflow: auto;
     padding: 8px;
     border: 1px solid #9ca3af;
     border-radius: 8px;
@@ -1193,4 +1341,123 @@ select {
     border-top: 1px solid #d1d5db;
     color: #374151;
     font-size: 0.9rem;
+}
+
+@media (max-width: 980px) {
+    .editorGrid {
+        grid-template-columns: 1fr;
+        max-width: 760px;
+    }
+
+    .toolbar {
+        gap: 5px;
+    }
+
+    .toolbarGroup + .toolbarGroup {
+        margin-left: 0;
+        padding-left: 6px;
+    }
+}
+
+@media (max-width: 620px) {
+    .appShell {
+        padding: 10px;
+    }
+
+    .historyControls {
+        grid-template-columns: 1fr 1fr;
+        padding: 8px;
+    }
+
+    .historyControls input[type="range"] {
+        grid-column: 1 / -1;
+    }
+
+    .historyCount,
+    .historyStatus {
+        white-space: normal;
+    }
+
+    .editorHeader {
+        align-items: start;
+        gap: 10px;
+        padding: 12px;
+    }
+
+    .toolbar {
+        padding: 8px;
+    }
+
+    .toolbarGroup {
+        flex-wrap: wrap;
+    }
+
+    .toolbarGroup + .toolbarGroup {
+        border-left: 0;
+        padding-left: 0;
+    }
+
+    .toolbar select {
+        flex: 1 1 150px;
+        min-width: 0;
+    }
+
+    .blockList {
+        padding: 10px 8px 14px;
+    }
+
+    .blockRow {
+        grid-template-columns: 28px 20px minmax(0, 1fr);
+        gap: 5px;
+    }
+
+    .blockRow > .codeLanguage,
+    .blockRow > .calloutKind {
+        grid-column: 3;
+        width: min(180px, 100%);
+        margin-top: 0;
+    }
+
+    .tableBlock {
+        margin-left: 0;
+    }
+
+    .tableToolbar {
+        flex-wrap: wrap;
+    }
+
+    .tableRow {
+        grid-template-columns: 34px repeat(var(--table-columns, 1), minmax(132px, 1fr));
+    }
+
+    .tableColumnInsertControls {
+        grid-template-columns: 34px repeat(var(--table-columns, 1), minmax(132px, 1fr)) 0;
+    }
+
+    .tableRowControls {
+        padding: 4px;
+    }
+
+    .tableCell {
+        min-width: 132px;
+    }
+
+    .tableCell .blockRow {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .tableCell .blockRow > .codeLanguage,
+    .tableCell .blockRow > .calloutKind {
+        grid-column: 1;
+    }
+
+    .annotationSidebar,
+    .footnotes {
+        margin-top: 10px;
+        font-size: 0.88rem;
+    }
+
+    .linkFloatingPopover {
+        grid-template-columns: minmax(0, 1fr);
+    }
 }

@@ -1,0 +1,2 @@
+examples/block-rich-text: so far our "table_row" type blocks have had their main text content hidden/inacessible. It actually would make sense for it to be visible as the "row header". Let's do that. If the row header is empty, we fallback to showing the row index as a placeholder.
+"Splitting" in the row block's text content should split at the caret position, with the trailing text moved into a new row immediately after. Backspace in an empty row header should delete the row if all of the cells are empty, otherwise it should move the cursor to the end of the preivous row.

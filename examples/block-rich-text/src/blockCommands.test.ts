@@ -16,14 +16,18 @@ import type {CachedState} from 'umkehr/block-crdt/types';
 import {lamportToString} from 'umkehr/block-crdt/utils';
 import {
     deleteBackward,
+    deleteEmptyTableRowBackward,
     deleteForward,
+    exitEmptyLastTableRow,
     advanceFromTableCellEnd,
     addTableRow,
+    commandApplied,
     createMissingTableCell,
     createTable,
     indentBlock,
     insertText,
     moveBlock,
+    moveTableCell,
     moveTableCellByTab,
     moveTableRow,
     pastePlainText,
@@ -31,6 +35,7 @@ import {
     setBlockType,
     setLinkMark,
     splitBlock,
+    splitTableTitleToParagraph,
     toggleMark,
     unindentBlock,
     type CommandContext,
@@ -40,7 +45,7 @@ import {annotationVirtualParents, createAnnotation} from './annotations';
 import type {RichBlockMeta} from './blockMeta';
 import {toggleMarkEverywhere} from './multiSelectionCommands';
 import {retainSelection} from './retainedSelection';
-import {caret, pointTextLength, type EditorSelection} from './selectionModel';
+import {caret, focusPoint, pointTextLength, type EditorSelection} from './selectionModel';
 
 const ctx = (actor = 'left'): CommandContext => {
     let i = 1;
@@ -270,7 +275,7 @@ describe('block rich text commands', () => {
         expect(advanced).toMatchObject({ops: [], selection: caret(secondCell, 0)});
     });
 
-    it('creates a missing cell to the right on Enter at cell end', () => {
+    it('creates a new row on Enter at the end of a row', () => {
         const demo = createDemoState();
         const context = ctx();
         const blockId = rootBlockIds(demo.left.state)[0];
@@ -291,8 +296,10 @@ describe('block rich text commands', () => {
         expect(advanced).not.toBeNull();
         if (!advanced) return;
         const nextShape = tableShape(advanced.state, tableId);
-        expect(nextShape.cells[0]).toHaveLength(2);
-        expect(advanced.selection).toEqual(caret(nextShape.cells[0][1], 0));
+        expect(nextShape.rows).toHaveLength(3);
+        expect(nextShape.rows[1]).not.toBe(shape.rows[1]);
+        expect(nextShape.cells[1]).toHaveLength(2);
+        expect(advanced.selection).toEqual(caret(nextShape.cells[1][0], 0));
     });
 
     it('joins cells in the same row but blocks accidental joins across rows', () => {
@@ -319,6 +326,140 @@ describe('block rich text commands', () => {
 
         result = deleteForward(result.state, caret(rowOneA, pointTextLength(result.state, rowOneA)), context);
         expect(result.ops).toEqual([]);
+    });
+
+    it('moves Backspace at a non-first empty cell start to the previous cell end', () => {
+        const demo = createDemoState();
+        const context = ctx();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = createTable(demo.left.state, caret(blockId, 0), context, {rows: 1, columns: 2});
+        const tableId = rootBlockIds(result.state)[1];
+        const [firstCell, secondCell] = tableShape(result.state, tableId).cells[0];
+        result = insertText(result.state, caret(firstCell, 0), 'one', context);
+
+        const moved = deleteEmptyTableRowBackward(result.state, caret(secondCell, 0), context);
+
+        expect(moved).toMatchObject({ops: [], selection: caret(firstCell, 3)});
+    });
+
+    it('deletes an all-empty table row on Backspace at the first cell start', () => {
+        const demo = createDemoState();
+        const context = ctx();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = createTable(demo.left.state, caret(blockId, 0), context, {rows: 2, columns: 2});
+        const tableId = rootBlockIds(result.state)[1];
+        const shape = tableShape(result.state, tableId);
+        result = insertText(result.state, caret(shape.cells[0][1], 0), 'prev', context);
+
+        const deleted = deleteEmptyTableRowBackward(result.state, caret(shape.cells[1][0], 0), context);
+        if (!('state' in deleted)) throw new Error('expected delete command');
+
+        expect(tableShape(deleted.state, tableId).rows).toEqual([shape.rows[0]]);
+        expect(deleted.selection).toEqual(caret(shape.cells[0][1], 4));
+    });
+
+    it('does not delete a row on Backspace when any row cell has content', () => {
+        const demo = createDemoState();
+        const context = ctx();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = createTable(demo.left.state, caret(blockId, 0), context, {rows: 2, columns: 2});
+        const tableId = rootBlockIds(result.state)[1];
+        const shape = tableShape(result.state, tableId);
+        result = insertText(result.state, caret(shape.cells[1][1], 0), 'x', context);
+
+        const deleted = deleteEmptyTableRowBackward(result.state, caret(shape.cells[1][0], 0), context);
+
+        expect(commandApplied(deleted)).toBe(false);
+    });
+
+    it('converts a table to a paragraph when Backspace deletes its only empty row', () => {
+        const demo = createDemoState();
+        const context = ctx();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        const result = createTable(demo.left.state, caret(blockId, 0), context, {rows: 1, columns: 2});
+        const tableId = rootBlockIds(result.state)[1];
+        const [row] = tableShape(result.state, tableId).rows;
+
+        const converted = deleteEmptyTableRowBackward(
+            result.state,
+            caret(tableShape(result.state, tableId).cells[0][0], 0),
+            context,
+        );
+        if (!('state' in converted)) throw new Error('expected convert command');
+
+        expect(converted.state.state.blocks[tableId].meta).toMatchObject({type: 'paragraph'});
+        expect(converted.state.state.blocks[row].deleted).toBe(true);
+        expect(converted.selection).toEqual(caret(tableId, 0));
+    });
+
+    it('exits an empty last table row on Enter by creating a paragraph after the table', () => {
+        const demo = createDemoState();
+        const context = ctx();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = createTable(demo.left.state, caret(blockId, 0), context, {rows: 2, columns: 1});
+        const tableId = rootBlockIds(result.state)[1];
+        const shape = tableShape(result.state, tableId);
+        result = insertText(result.state, caret(shape.cells[0][0], 0), 'keep', context);
+
+        const exited = exitEmptyLastTableRow(result.state, caret(shape.cells[1][0], 0), context);
+        if (!('state' in exited)) throw new Error('expected exit command');
+
+        expect(tableShape(exited.state, tableId).rows).toEqual([shape.rows[0]]);
+        const roots = rootBlockIds(exited.state);
+        expect(roots[roots.indexOf(tableId) + 1]).toBe(exited.selection.type === 'caret' ? exited.selection.point.blockId : '');
+        expect(exited.state.state.blocks[focusPoint(exited.selection).blockId].meta).toMatchObject({type: 'paragraph'});
+    });
+
+    it('does not exit the only table row on Enter', () => {
+        const demo = createDemoState();
+        const context = ctx();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        const result = createTable(demo.left.state, caret(blockId, 0), context, {rows: 1, columns: 1});
+        const tableId = rootBlockIds(result.state)[1];
+        const cellId = tableShape(result.state, tableId).cells[0][0];
+
+        const exited = exitEmptyLastTableRow(result.state, caret(cellId, 0), context);
+
+        expect(commandApplied(exited)).toBe(false);
+    });
+
+    it('splits a table title into a following paragraph with trailing text', () => {
+        const demo = createDemoState();
+        const context = ctx();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = createTable(demo.left.state, caret(blockId, 0), context, {rows: 1, columns: 1});
+        const tableId = rootBlockIds(result.state)[1];
+        result = insertText(result.state, caret(tableId, 0), 'AlphaBeta', context);
+
+        const split = splitTableTitleToParagraph(result.state, caret(tableId, 5), context);
+        if (!('state' in split)) throw new Error('expected split command');
+
+        const roots = rootBlockIds(split.state);
+        const paragraphId = roots[roots.indexOf(tableId) + 1];
+        expect(blockContents(split.state, tableId)).toBe('Alpha');
+        expect(blockContents(split.state, paragraphId)).toBe('Beta');
+        expect(split.state.state.blocks[paragraphId].meta).toMatchObject({type: 'paragraph'});
+        expect(split.selection).toEqual(caret(paragraphId, 0));
+    });
+
+    it('moves table cells within and across rows with splice semantics', () => {
+        const demo = createDemoState();
+        const context = ctx();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = createTable(demo.left.state, caret(blockId, 0), context, {rows: 2, columns: 3});
+        const tableId = rootBlockIds(result.state)[1];
+        let shape = tableShape(result.state, tableId);
+        const [a, b, c] = shape.cells[0];
+        const [d, e, f] = shape.cells[1];
+
+        result = moveTableCell(result.state, a, {rowId: shape.rows[0], index: 2}, context);
+        shape = tableShape(result.state, tableId);
+        expect(shape.cells[0]).toEqual([b, c, a]);
+
+        result = moveTableCell(result.state, e, {rowId: shape.rows[0], index: 1}, context);
+        shape = tableShape(result.state, tableId);
+        expect(shape.cells[0]).toEqual([b, e, c, a]);
+        expect(shape.cells[1]).toEqual([d, f]);
     });
 
     it('does not indent table cells out of their structural rows', () => {

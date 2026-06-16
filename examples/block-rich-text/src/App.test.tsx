@@ -37,6 +37,20 @@ const blocks = (panel: HTMLElement) => within(panel).getAllByRole('textbox', {na
 const blockTexts = (panel: HTMLElement): string[] =>
     blocks(panel).map(blockText);
 
+const tableBlocks = (panel: HTMLElement): HTMLElement[] =>
+    within(within(panel).getByRole('table', {name: 'Table block'})).getAllByRole('textbox', {
+        name: 'Block text',
+    });
+
+const tableBlockTexts = (panel: HTMLElement): string[] =>
+    tableBlocks(panel).map(blockText);
+
+const tableTitleBlock = (panel: HTMLElement): HTMLElement => {
+    const title = panel.querySelector<HTMLElement>('.tableTitleRow [role="textbox"]');
+    if (!title) throw new Error('missing table title');
+    return title;
+};
+
 const blockText = (block: HTMLElement): string => {
     let text = '';
     const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
@@ -447,14 +461,134 @@ describe('Block rich text example UI', () => {
             expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy();
             expect(within(right).getByRole('table', {name: 'Table block'})).toBeTruthy();
         });
-        expect(blocks(left)).toHaveLength(5);
+        expect(tableBlocks(left)).toHaveLength(4);
 
-        selectCaret(blocks(left)[4], 0);
-        fireEvent.keyDown(blocks(left)[4], {key: 'Tab'});
-        await waitFor(() => expect(blocks(right)).toHaveLength(7));
+        selectCaret(tableBlocks(left)[3], 0);
+        fireEvent.keyDown(tableBlocks(left)[3], {key: 'Tab'});
+        await waitFor(() => expect(tableBlocks(right)).toHaveLength(6));
 
-        fireEvent.click(within(left).getByRole('button', {name: 'Add column'}));
-        await waitFor(() => expect(blocks(right)).toHaveLength(10));
+        fireEvent.click(within(left).getByRole('button', {name: 'Add column 3'}));
+        await waitFor(() => expect(tableBlocks(right)).toHaveLength(9));
+    });
+
+    it('edits and splits the table title into a following paragraph', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+        selectCaret(blocks(left)[0], 0);
+
+        fireEvent.click(within(left).getByRole('button', {name: 'Table'}));
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+
+        const title = tableTitleBlock(left);
+        selectCaret(title, 0);
+        typeText(title, 'AlphaBeta');
+        await waitFor(() => expect(blockText(tableTitleBlock(right))).toBe('AlphaBeta'));
+
+        selectCaret(tableTitleBlock(left), 5);
+        fireEvent.keyDown(tableTitleBlock(left), {key: 'Enter'});
+
+        await waitFor(() => {
+            expect(blockText(tableTitleBlock(left))).toBe('Alpha');
+            expect(blockTexts(left)).toContain('Beta');
+        });
+        expect(blockText(tableTitleBlock(right))).toBe('Alpha');
+        expect(blockTexts(right)).toContain('Beta');
+    });
+
+    it('uses row numbers for row drag and removes cell drag handles', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        selectCaret(blocks(left)[0], 0);
+
+        fireEvent.click(within(left).getByRole('button', {name: 'Table'}));
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+
+        expect(within(left).getByRole('button', {name: 'Move row 1'}).textContent).toBe('1');
+        expect(within(left).getByRole('button', {name: 'Move row 2'}).textContent).toBe('2');
+        expect(within(within(left).getByRole('table', {name: 'Table block'})).queryAllByRole('button', {name: 'Move block'})).toEqual([]);
+    });
+
+    it('highlights the active cell and drags a focused cell from its border', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        selectCaret(blocks(left)[0], 0);
+
+        fireEvent.click(within(left).getByRole('button', {name: 'Table'}));
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+
+        ['A', 'B', 'C', 'D'].forEach((text, index) => {
+            selectCaret(tableBlocks(left)[index], 0);
+            typeText(tableBlocks(left)[index], text);
+        });
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['A', 'B', 'C', 'D']));
+
+        const firstCellBlock = tableBlocks(left)[0];
+        selectCaret(firstCellBlock, 0);
+        fireEvent.mouseUp(firstCellBlock);
+        const firstCell = firstCellBlock.closest<HTMLElement>('.tableCell')!;
+        expect(firstCell.classList.contains('activeTableCell')).toBe(true);
+
+        const rows = Array.from(left.querySelectorAll<HTMLElement>('[data-row-id]'));
+        rows.forEach((row, rowIndex) => {
+            row.getBoundingClientRect = () =>
+                ({
+                    left: 0,
+                    top: rowIndex * 50,
+                    right: 340,
+                    bottom: rowIndex * 50 + 50,
+                    width: 340,
+                    height: 50,
+                    x: 0,
+                    y: rowIndex * 50,
+                    toJSON: () => ({}),
+                }) as DOMRect;
+            Array.from(row.querySelectorAll<HTMLElement>('.tableCell[data-cell-id]')).forEach((cell, cellIndex) => {
+                cell.getBoundingClientRect = () =>
+                    ({
+                        left: 40 + cellIndex * 100,
+                        top: rowIndex * 50,
+                        right: 140 + cellIndex * 100,
+                        bottom: rowIndex * 50 + 50,
+                        width: 100,
+                        height: 50,
+                        x: 40 + cellIndex * 100,
+                        y: rowIndex * 50,
+                        toJSON: () => ({}),
+                    }) as DOMRect;
+            });
+        });
+        const originalElementsFromPoint = document.elementsFromPoint;
+        document.elementsFromPoint = (_x: number, y: number) => [rows[y >= 50 ? 1 : 0]];
+        (firstCell as HTMLElement & {setPointerCapture?: (pointerId: number) => void}).setPointerCapture = () => {};
+
+        fireEvent.pointerDown(firstCell, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 20,
+        });
+        fireEvent.pointerMove(window, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 170,
+            clientY: 70,
+        });
+        expect(left.querySelector('.cellDropBefore, .cellDropAfter')).toBeTruthy();
+        fireEvent.pointerUp(window, {
+            button: 0,
+            buttons: 0,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 170,
+            clientY: 70,
+        });
+        document.elementsFromPoint = originalElementsFromPoint;
+
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['B', 'C', 'A', 'D']));
     });
 
     it('applies block type metadata from the toolbar to both replicas', async () => {
@@ -593,6 +727,27 @@ describe('Block rich text example UI', () => {
         expect(blockTexts(right)).toEqual(['ab\n\n']);
     });
 
+    it('keeps code Enter and Tab behavior inside table cells', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        fireEvent.click(within(left).getByRole('button', {name: 'Table'}));
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+
+        selectCaret(tableBlocks(left)[0], 0);
+        typeText(tableBlocks(left)[0], 'ab');
+        setBlockType(left, 'code');
+        selectCaret(tableBlocks(left)[0], 1);
+        fireEvent.keyDown(tableBlocks(left)[0], {key: 'Enter'});
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['a\nb', '', '', '']));
+
+        selectCaret(tableBlocks(left)[0], 2);
+        fireEvent.keyDown(tableBlocks(left)[0], {key: 'Tab'});
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['a\n    b', '', '', '']));
+        expect(tableBlockTexts(right)).toEqual(['a\n    b', '', '', '']);
+    });
+
     it('keeps focus in the code language field while typing', async () => {
         const view = render(<App />);
         const {left, right} = panels(view);
@@ -609,6 +764,47 @@ describe('Block rich text example UI', () => {
         await waitFor(() => {
             expect(document.activeElement).toBe(language);
             expect((within(right).getByRole('textbox', {name: 'Code language'}) as HTMLInputElement).value).toBe('ts');
+        });
+    });
+
+    it('renders code syntax highlighting with marks and retained selections', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'const answer = "yes";');
+        setBlockType(left, 'code');
+        const language = within(left).getByRole('textbox', {name: 'Code language'});
+        fireEvent.change(language, {target: {value: 'js'}});
+
+        await waitFor(() => {
+            expect(blocks(left)[0].querySelector('.syntax-keyword')?.textContent).toBe('const');
+            expect(blocks(left)[0].querySelector('.syntax-string')?.textContent).toBe('"yes"');
+            expect(blocks(right)[0].querySelector('.syntax-keyword')?.textContent).toBe('const');
+        });
+
+        selectRange(blocks(left)[0], 0, 5);
+        fireEvent.click(within(left).getByRole('button', {name: 'B'}));
+        await waitFor(() => {
+            const bold = blocks(left)[0].querySelector('.markBold');
+            expect(bold?.textContent).toBe('const');
+            expect(bold?.classList.contains('syntax-keyword')).toBe(true);
+        });
+
+        selectRange(blocks(right)[0], 15, 20);
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'let ');
+
+        await waitFor(() => {
+            expect(retainedHighlightText(blocks(right)[0])).toBe('"yes"');
+            expect(blocks(right)[0].querySelector('.retainedSelectionHighlight')?.classList.contains('syntax-string')).toBe(true);
+        });
+
+        fireEvent.change(language, {target: {value: 'made-up-language'}});
+        await waitFor(() => {
+            expect(blocks(left)[0].querySelector('.syntax-keyword')).toBeNull();
+            expect(blocks(right)[0].querySelector('.syntax-keyword')).toBeNull();
+            expect(blocks(left)[0].querySelector('.markBold')?.textContent).toBe('const');
         });
     });
 

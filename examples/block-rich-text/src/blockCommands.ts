@@ -2,6 +2,7 @@ import equal from 'fast-deep-equal';
 import {
     applyMany,
     blockContents,
+    deleteBlockOps,
     deleteRangeOps,
     insertBlockOps,
     insertTextOps,
@@ -63,6 +64,15 @@ const insertedBlockFromOps = (ops: Array<Op<RichBlockMeta>>) => {
     if (op?.type !== 'block') throw new Error('insertBlockOps did not return a block op');
     return op.block;
 };
+
+const NO_COMMAND = Symbol('no-command');
+
+export type OptionalCommandResult = CommandResult | typeof NO_COMMAND;
+
+export const noCommand = (): OptionalCommandResult => NO_COMMAND;
+
+export const commandApplied = (result: OptionalCommandResult): result is CommandResult =>
+    result !== NO_COMMAND;
 
 export const insertText = (
     state: CachedState<RichBlockMeta>,
@@ -185,6 +195,147 @@ export const splitBlock = (
     const next = applyMany(working, splitOps, annotationVirtualParents(working));
     ops.push(...splitOps);
     return {state: next, ops, selection: caret(newBlockId, 0)};
+};
+
+export const deleteEmptyTableRowBackward = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    context: CommandContext,
+): OptionalCommandResult => {
+    if (!isCollapsed(selection)) return noCommand();
+    const point = focusPoint(selection);
+    if (point.offset !== 0) return noCommand();
+
+    const cell = tableCellContext(state, point.blockId);
+    if (!cell) return noCommand();
+    const rowCells = visibleBlockChildren(state, cell.rowId, annotationVirtualParents(state));
+    if (cell.columnIndex > 0) {
+        const previousCellId = rowCells[cell.columnIndex - 1];
+        return previousCellId
+            ? {state, ops: [], selection: caret(previousCellId, pointTextLength(state, previousCellId))}
+            : noCommand();
+    }
+
+    if (!isEmptyTableRow(state, cell.rowId)) return noCommand();
+
+    const rows = tableRows(state, cell.tableId);
+    if (rows.length <= 1) {
+        const table = state.state.blocks[cell.tableId];
+        if (!table || table.meta.type !== 'table') return noCommand();
+        const rehomed = rehomeVisibleSubtreeToRealParents(state, cell.rowId, table.id, context);
+        let working = rehomed.state;
+        const ops: Array<Op<RichBlockMeta>> = [...rehomed.ops];
+        const deleteOps = deleteVisibleSubtreeOps(working, cell.rowId);
+        working = applyMany(working, deleteOps, annotationVirtualParents(working));
+        ops.push(...deleteOps);
+        const metaOps = setBlockMetaOps(working, {
+            block: table.id,
+            meta: paragraphMeta(context.nextTs()),
+        });
+        const next = applyMany(working, metaOps, annotationVirtualParents(working));
+        ops.push(...metaOps);
+        return {state: next, ops, selection: caret(cell.tableId, pointTextLength(next, cell.tableId))};
+    }
+
+    const previousRowId = rows[cell.rowIndex - 1] ?? null;
+    if (!previousRowId) return noCommand();
+    const previousCells = visibleBlockChildren(state, previousRowId, annotationVirtualParents(state));
+    const previousCellId = previousCells[previousCells.length - 1] ?? null;
+    const ops = deleteVisibleSubtreeOps(state, cell.rowId);
+    const next = applyMany(state, ops, annotationVirtualParents(state));
+    return {
+        state: next,
+        ops,
+        selection: previousCellId
+            ? caret(previousCellId, pointTextLength(next, previousCellId))
+            : caret(cell.tableId, pointTextLength(next, cell.tableId)),
+    };
+};
+
+export const exitEmptyLastTableRow = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    context: CommandContext,
+): OptionalCommandResult => {
+    if (!isCollapsed(selection)) return noCommand();
+    const cell = tableCellContext(state, focusPoint(selection).blockId);
+    if (!cell) return noCommand();
+    const rows = tableRows(state, cell.tableId);
+    if (rows.length <= 1 || rows[rows.length - 1] !== cell.rowId) return noCommand();
+    if (!isEmptyTableRow(state, cell.rowId)) return noCommand();
+
+    let working = state;
+    const ops: Array<Op<RichBlockMeta>> = [];
+    const deleteOps = deleteVisibleSubtreeOps(working, cell.rowId);
+    working = applyMany(working, deleteOps, annotationVirtualParents(working));
+    ops.push(...deleteOps);
+
+    const inserted = insertParagraphAfterBlock(working, cell.tableId, context);
+    ops.push(...inserted.ops);
+    return {state: inserted.state, ops, selection: caret(inserted.blockId, 0)};
+};
+
+export const splitTableTitleToParagraph = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    context: CommandContext,
+): OptionalCommandResult => {
+    let working = state;
+    let point = firstPointForSelection(working, selection);
+    const ops: Array<Op<RichBlockMeta>> = [];
+
+    if (!isCollapsed(selection)) {
+        const deleted = deleteSelectionAndJoinBoundaries(working, selection, context);
+        working = deleted.state;
+        ops.push(...deleted.ops);
+        point = deleted.point;
+    }
+
+    const current = working.state.blocks[point.blockId];
+    if (!current || current.meta.type !== 'table') return noCommand();
+
+    if (point.offset === 0) {
+        const trailing = blockContents(working, point.blockId);
+        const inserted = insertParagraphAfterBlock(working, point.blockId, context);
+        working = inserted.state;
+        ops.push(...inserted.ops);
+        if (trailing) {
+            const deleteOps = deleteRangeOps(working, {
+                block: current.id,
+                startOffset: 0,
+                endOffset: pointTextLength(working, point.blockId),
+            });
+            working = applyMany(working, deleteOps, annotationVirtualParents(working));
+            ops.push(...deleteOps);
+            const insertedText = insertTextAtPoint(working, {blockId: inserted.blockId, offset: 0}, trailing, context);
+            working = insertedText.state;
+            ops.push(...insertedText.ops);
+        }
+        return {state: working, ops, selection: caret(inserted.blockId, 0)};
+    }
+
+    const newBlockId = lamportToString([working.state.maxSeenCount + 1, context.actor]);
+    const splitOps = splitBlockOps<RichBlockMeta>(working, {
+        actor: context.actor,
+        block: current.id,
+        offset: point.offset,
+        ts: context.nextTs(),
+        virtualParents: annotationVirtualParents(working),
+    });
+    working = applyMany(working, splitOps, annotationVirtualParents(working));
+    ops.push(...splitOps);
+
+    const newBlock = working.state.blocks[newBlockId];
+    if (newBlock) {
+        const metaOps = setBlockMetaOps(working, {
+            block: newBlock.id,
+            meta: paragraphMeta(context.nextTs()),
+        });
+        working = applyMany(working, metaOps, annotationVirtualParents(working));
+        ops.push(...metaOps);
+    }
+
+    return {state: working, ops, selection: caret(newBlockId, 0)};
 };
 
 export const pastePlainText = (
@@ -452,20 +603,25 @@ export const addTableColumn = (
     state: CachedState<RichBlockMeta>,
     tableId: string,
     context: CommandContext,
+    columnIndex?: number,
 ): CommandResult => {
     const table = state.state.blocks[tableId];
     if (!table || table.meta.type !== 'table') return {state, ops: [], selection: caret(tableId, 0)};
     const rows = visibleBlockChildren(state, lamportToString(table.meta.rowParent), annotationVirtualParents(state));
+    const appendIndex = Math.max(0, ...rows.map((rowId) => visibleBlockChildren(state, rowId, annotationVirtualParents(state)).length));
+    const targetIndex = columnIndex ?? appendIndex;
     const ops: Array<Op<RichBlockMeta>> = [];
     let working = state;
     let firstCellId: string | null = null;
     for (const rowId of rows) {
         const cells = visibleBlockChildren(working, rowId, annotationVirtualParents(working));
-        const previousCellId = cells[cells.length - 1] ?? null;
+        const previousCellId = targetIndex > 0 ? cells[targetIndex - 1] ?? cells[cells.length - 1] ?? null : null;
+        const nextCellId = cells[targetIndex] ?? null;
         const cellOps = insertBlockOps(working, {
             actor: context.actor,
             parent: state.state.blocks[rowId].id,
             before: previousCellId ? working.state.blocks[previousCellId].id : null,
+            after: nextCellId ? working.state.blocks[nextCellId].id : null,
             meta: paragraphMeta(context.nextTs()),
             ts: context.nextTs(),
             virtualParents: annotationVirtualParents(working),
@@ -544,6 +700,56 @@ export const moveTableCellByTab = (
     return {...added, selection: caret(firstCellId ?? blockId, 0)};
 };
 
+export const moveTableCell = (
+    state: CachedState<RichBlockMeta>,
+    cellId: string,
+    target: {rowId: string; index: number},
+    context: CommandContext,
+): CommandResult => {
+    const cell = tableCellContext(state, cellId);
+    const targetRow = state.state.blocks[target.rowId];
+    if (!cell || !targetRow || targetRow.meta.type !== 'table_row') {
+        return {state, ops: [], selection: caret(cellId, 0)};
+    }
+    const sourceTable = state.state.blocks[cell.tableId];
+    if (!sourceTable || sourceTable.meta.type !== 'table') {
+        return {state, ops: [], selection: caret(cellId, 0)};
+    }
+    const targetPath = materializedBlockPath(state, target.rowId, annotationVirtualParents(state)).map(lamportToString);
+    const targetTableId = targetPath[targetPath.length - 3];
+    if (targetTableId !== cell.tableId) {
+        return {state, ops: [], selection: caret(cellId, 0)};
+    }
+
+    const targetCells = visibleBlockChildren(state, target.rowId, annotationVirtualParents(state)).filter(
+        (id) => id !== cellId,
+    );
+    const insertIndex = Math.max(0, Math.min(target.index, targetCells.length));
+    const beforeId = insertIndex > 0 ? targetCells[insertIndex - 1] : null;
+    const afterId = targetCells[insertIndex] ?? null;
+    if (cell.rowId === target.rowId) {
+        const currentCells = visibleBlockChildren(state, cell.rowId, annotationVirtualParents(state));
+        const reordered = currentCells.filter((id) => id !== cellId);
+        reordered.splice(insertIndex, 0, cellId);
+        if (reordered.join('\0') === currentCells.join('\0')) {
+            return {state, ops: [], selection: caret(cellId, 0)};
+        }
+    }
+
+    const current = state.state.blocks[cellId];
+    const ops = moveBlockOps(state, {
+        actor: context.actor,
+        block: current.id,
+        parent: targetRow.id,
+        before: beforeId ? state.state.blocks[beforeId].id : null,
+        after: afterId ? state.state.blocks[afterId].id : null,
+        ts: context.nextTs(),
+        virtualParents: annotationVirtualParents(state),
+    });
+    const next = applyMany(state, ops, annotationVirtualParents(state));
+    return {state: next, ops, selection: caret(cellId, 0)};
+};
+
 export const advanceFromTableCellEnd = (
     state: CachedState<RichBlockMeta>,
     selection: EditorSelection,
@@ -561,16 +767,25 @@ export const advanceFromTableCellEnd = (
         ...rows.map((rowId) => visibleBlockChildren(state, rowId, annotationVirtualParents(state)).length),
     );
     const nextColumn = cell.columnIndex + 1;
+    const cells = visibleBlockChildren(state, cell.rowId, annotationVirtualParents(state));
+    if (nextColumn >= cells.length) {
+        const added = addTableRow(state, cell.tableId, context, cell.rowId);
+        const updatedRows = tableRows(added.state, cell.tableId);
+        const insertedRowId = updatedRows[cell.rowIndex + 1] ?? updatedRows[updatedRows.length - 1] ?? null;
+        const firstCellId = insertedRowId
+            ? visibleBlockChildren(added.state, insertedRowId, annotationVirtualParents(added.state))[0]
+            : null;
+        return {...added, selection: caret(firstCellId ?? point.blockId, 0)};
+    }
     if (nextColumn >= columnCount) return null;
 
-    const cells = visibleBlockChildren(state, cell.rowId, annotationVirtualParents(state));
     const nextCellId = cells[nextColumn] ?? null;
     if (nextCellId) {
         return pointTextLength(state, nextCellId) === 0
             ? {state, ops: [], selection: caret(nextCellId, 0)}
             : null;
     }
-    return createMissingTableCell(state, cell.rowId, nextColumn, context);
+    return null;
 };
 
 type TableCellContext = {
@@ -606,6 +821,98 @@ const tableRows = (state: CachedState<RichBlockMeta>, tableId: string): string[]
     const table = state.state.blocks[tableId];
     if (!table || table.meta.type !== 'table') return [];
     return visibleBlockChildren(state, lamportToString(table.meta.rowParent), annotationVirtualParents(state));
+};
+
+const isEmptyTableRow = (state: CachedState<RichBlockMeta>, rowId: string): boolean => {
+    const cells = visibleBlockChildren(state, rowId, annotationVirtualParents(state));
+    return cells.length > 0 && cells.every((cellId) => pointTextLength(state, cellId) === 0);
+};
+
+const deleteVisibleSubtreeOps = (
+    state: CachedState<RichBlockMeta>,
+    blockId: string,
+): Array<Op<RichBlockMeta>> => {
+    const outline = visibleBlockOutline(state, annotationVirtualParents(state));
+    const index = outline.findIndex((item) => item.id === blockId);
+    if (index < 0) return [];
+    const rootDepth = outline[index].depth;
+    const ids = [blockId];
+    for (let i = index + 1; i < outline.length && outline[i].depth > rootDepth; i++) {
+        ids.push(outline[i].id);
+    }
+    return ids.flatMap((id) =>
+        deleteBlockOps(state, {block: state.state.blocks[id].id, mode: 'block-only'}),
+    );
+};
+
+const insertParagraphAfterBlock = (
+    state: CachedState<RichBlockMeta>,
+    blockId: string,
+    context: CommandContext,
+): {state: CachedState<RichBlockMeta>; ops: Array<Op<RichBlockMeta>>; blockId: string} => {
+    const block = state.state.blocks[blockId];
+    if (!block) return {state, ops: [], blockId};
+    const parent = materializedBlockParent(state, blockId, annotationVirtualParents(state));
+    const parentId = lamportToString(parent);
+    const siblings = visibleBlockChildren(state, parentId, annotationVirtualParents(state));
+    const index = siblings.indexOf(blockId);
+    const afterId = index >= 0 ? siblings[index + 1] ?? null : null;
+    const ts = context.nextTs();
+    const ops = insertBlockOps(state, {
+        actor: context.actor,
+        parent,
+        before: block.id,
+        after: afterId ? state.state.blocks[afterId].id : null,
+        meta: paragraphMeta(ts),
+        ts,
+        virtualParents: annotationVirtualParents(state),
+    });
+    const next = applyMany(state, ops, annotationVirtualParents(state));
+    return {state: next, ops, blockId: lamportToString(insertedBlockFromOps(ops).id)};
+};
+
+const rehomeVisibleSubtreeToRealParents = (
+    state: CachedState<RichBlockMeta>,
+    rootId: string,
+    rootParent: Lamport,
+    context: CommandContext,
+): {state: CachedState<RichBlockMeta>; ops: Array<Op<RichBlockMeta>>} => {
+    let working = state;
+    const ops: Array<Op<RichBlockMeta>> = [];
+    const outline = visibleBlockOutline(state, annotationVirtualParents(state));
+    const index = outline.findIndex((item) => item.id === rootId);
+    if (index < 0) return {state, ops};
+    const rootDepth = outline[index].depth;
+    const ids = [rootId];
+    for (let i = index + 1; i < outline.length && outline[i].depth > rootDepth; i++) {
+        ids.push(outline[i].id);
+    }
+
+    ids.forEach((id, idIndex) => {
+        const block = working.state.blocks[id];
+        if (!block) return;
+        const parent = idIndex === 0
+            ? rootParent
+            : materializedBlockParent(working, id, annotationVirtualParents(working));
+        const parentId = lamportToString(parent);
+        const siblings = visibleBlockChildren(working, parentId, annotationVirtualParents(working)).filter(
+            (siblingId) => siblingId !== id,
+        );
+        const beforeId = siblings[siblings.length - 1] ?? null;
+        const moveOps = moveBlockOps(working, {
+            actor: context.actor,
+            block: block.id,
+            parent,
+            before: beforeId ? working.state.blocks[beforeId].id : null,
+            after: null,
+            ts: context.nextTs(),
+            virtualParents: annotationVirtualParents(working),
+        });
+        working = applyMany(working, moveOps, annotationVirtualParents(working));
+        ops.push(...moveOps);
+    });
+
+    return {state: working, ops};
 };
 
 const nextTableCellId = (state: CachedState<RichBlockMeta>, cell: TableCellContext): string | null => {
