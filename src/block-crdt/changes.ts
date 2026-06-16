@@ -32,9 +32,10 @@ export type InsertBlockOpsOptions<M extends TimestampedBlockMeta> = {
 
 export type DeleteBlockMode = 'block-only' | 'subtree';
 
-export type DeleteBlockOpsOptions = {
+export type DeleteBlockOpsOptions<M extends TimestampedBlockMeta = TimestampedBlockMeta> = {
     block: Lamport;
     mode?: DeleteBlockMode;
+    virtualParents?: VirtualBlockParentConfig<M>;
 };
 
 export type MarkRangePoint = {
@@ -160,6 +161,11 @@ export const splitBlockOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>
     return split(state, {block, char, previous}, ts, actor, options, virtualParents);
 };
 
+export const nextBlockIdForActor = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
+    state: CachedState<M>,
+    actor: string,
+): Lamport => [state.state.maxSeenCount + 1, actor];
+
 export const insertBlockOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
     state: CachedState<M>,
     {
@@ -201,7 +207,7 @@ export const insertBlockOps = <M extends TimestampedBlockMeta = DefaultBlockMeta
         throw new Error(`insert before/after anchors must be adjacent siblings`);
     }
 
-    const id: Lamport = [state.state.maxSeenCount + 1, actor];
+    const id = nextBlockIdForActor(state, actor);
     const parentPath = parentId === ROOT_ID ? [] : materializedPathForParent(state, parentId, virtualParents);
     return [
         {
@@ -234,7 +240,7 @@ export const insertBlockOpsWithId = <M extends TimestampedBlockMeta = DefaultBlo
 
 export const deleteBlockOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
     state: CachedState<M>,
-    {block, mode = 'block-only'}: DeleteBlockOpsOptions,
+    {block, mode = 'block-only', virtualParents = {}}: DeleteBlockOpsOptions<M>,
 ): Op<M>[] => {
     const blockId = lamportToString(block);
     const current = state.state.blocks[blockId];
@@ -250,7 +256,7 @@ export const deleteBlockOps = <M extends TimestampedBlockMeta = DefaultBlockMeta
     if (mode === 'block-only') {
         return [{type: 'block:delete', id: block}];
     }
-    const visible = visibleBlockOutline(state);
+    const visible = visibleBlockOutline(state, virtualParents);
     const target = visible.find((entry) => entry.id === blockId);
     if (!target) {
         throw new Error(`delete block not found or hidden`);
@@ -311,9 +317,10 @@ export const markSelectionOps = <M extends TimestampedBlockMeta = DefaultBlockMe
         actor: string;
         ts?: HLC;
         nextId?: () => Lamport;
+        virtualParents?: VirtualBlockParentConfig<M>;
     },
 ): Op<M>[] => {
-    const blocks = visibleBlockOutline(state).map((entry) => entry.id);
+    const blocks = visibleBlockOutline(state, options.virtualParents).map((entry) => entry.id);
     const anchorIndex = blocks.indexOf(selection.anchor.blockId);
     const focusIndex = blocks.indexOf(selection.focus.blockId);
     if (anchorIndex < 0 || focusIndex < 0) {

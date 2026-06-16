@@ -1675,6 +1675,7 @@ function TableBlock({
         1,
         ...rowNodes.map((row) => row.children.filter((child) => child.block.block.meta.type !== 'table_row').length),
     );
+    const allRowHeadersEmpty = rowNodes.every((row) => row.block.runs.length === 0);
     const selectedCellId = tableCellIdForSelection(context.state, context.selection);
 
     useLayoutEffect(() => {
@@ -1721,7 +1722,13 @@ function TableBlock({
             data-table-id={node.block.id}
         >
             <div className="tableTitleRow">{renderEditableBlock(node.block, context)}</div>
-            <div className="tableGrid" role="table" aria-label="Table block">
+            <div
+                className={['tableGrid', allRowHeadersEmpty ? 'compactRowHeaders' : '']
+                    .filter(Boolean)
+                    .join(' ')}
+                role="table"
+                aria-label="Table block"
+            >
                 <div
                     className="tableColumnInsertControls"
                     aria-label="Column insert controls"
@@ -1758,16 +1765,7 @@ function TableBlock({
                         data-row-id={row.block.id}
                         style={{'--table-columns': columnCount} as CSSProperties}
                     >
-                        <div className="tableRowControls" role="cell" aria-label={`Row ${rowIndex + 1} controls`}>
-                            <button
-                                type="button"
-                                className="tableRowDrag"
-                                aria-label={`Move row ${rowIndex + 1}`}
-                                onPointerDown={(event) => context.startDrag(row.block.id, event)}
-                            >
-                                {rowIndex + 1}
-                            </button>
-                        </div>
+                        <TableRowHeader row={row.block} rowIndex={rowIndex} context={context} />
                         {Array.from({length: columnCount}, (_, columnIndex) => {
                             const cell = row.children[columnIndex] ?? null;
                             return (
@@ -1839,6 +1837,137 @@ const renderTableCell = (node: RenderTreeNode, context: RenderBlockContext): Rea
     }
     return renderEditableBlock({...node.block, depth: 0}, context);
 };
+
+function TableRowHeader({
+    row,
+    rowIndex,
+    context,
+}: {
+    row: RichFormattedBlock;
+    rowIndex: number;
+    context: RenderBlockContext;
+}) {
+    return (
+        <div className="tableRowHeader" role="rowheader" aria-label={`Row ${rowIndex + 1} header`}>
+            <button
+                type="button"
+                className="tableRowDrag"
+                aria-label={`Move row ${rowIndex + 1}`}
+                onPointerDown={(event) => context.startDrag(row.id, event)}
+            >
+                ⋮
+            </button>
+            <RichTextEditableSurface
+                blockId={row.id}
+                runs={row.runs}
+                decorations={context.decorationsByBlock.get(row.id) ?? null}
+                pendingCaretRestoreBlockIdRef={context.pendingCaretRestoreBlockIdRef}
+                selection={context.selection}
+                className="editableBlock tableRowHeaderText"
+                ariaLabel={`Row header ${rowIndex + 1}`}
+                placeholder={`${rowIndex + 1}`}
+                popoverTextById={context.popoverTextById}
+                footnoteNumberById={context.footnoteNumberById}
+                onPopoverTriggerEnter={context.onPopoverTriggerEnter}
+                onPopoverTriggerLeave={context.onPopoverTriggerLeave}
+                onLinkClick={context.openLinkFromRange}
+                onLinkHoverEnter={context.showLinkHoverFromRange}
+                onLinkHoverLeave={context.hideLinkHover}
+                onInsertText={(text, activeSelection) =>
+                    context.runEditCommand((current, selection) =>
+                        insertTextEverywhere(
+                            current.state,
+                            activeSelection
+                                ? replacePrimarySelection(current.state, selection, activeSelection)
+                                : selection,
+                            text,
+                            makeCommandContext(current),
+                        ),
+                    )
+                }
+                onDeleteBackward={(activeSelection) =>
+                    context.runEditCommand((current, selection) =>
+                        deleteBackwardEverywhere(
+                            current.state,
+                            activeSelection
+                                ? replacePrimarySelection(current.state, selection, activeSelection)
+                                : selection,
+                            makeCommandContext(current),
+                        ),
+                    )
+                }
+                onDeleteForward={(activeSelection) =>
+                    context.runEditCommand((current, selection) =>
+                        deleteForwardEverywhere(
+                            current.state,
+                            activeSelection
+                                ? replacePrimarySelection(current.state, selection, activeSelection)
+                                : selection,
+                            makeCommandContext(current),
+                        ),
+                    )
+                }
+                onKeyDown={(event) => {
+                    context.onKeystroke(row.id, event);
+                    const modifierPressed = event.metaKey || event.ctrlKey;
+                    const key = event.key.toLowerCase();
+                    if (modifierPressed && key === 'z' && event.shiftKey) {
+                        event.preventDefault();
+                        context.onRedo();
+                    } else if (modifierPressed && key === 'z') {
+                        event.preventDefault();
+                        context.onUndo();
+                    } else if (modifierPressed && key === 'y') {
+                        event.preventDefault();
+                        context.onRedo();
+                    } else if (modifierPressed && key === 'b') {
+                        event.preventDefault();
+                        context.runEditCommand((current, selection) =>
+                            toggleMarkEverywhere(current.state, selection, 'bold', makeCommandContext(current)),
+                        );
+                    } else if (modifierPressed && key === 'i') {
+                        event.preventDefault();
+                        context.runEditCommand((current, selection) =>
+                            toggleMarkEverywhere(current.state, selection, 'italic', makeCommandContext(current)),
+                        );
+                    } else if (modifierPressed && key === 'k') {
+                        event.preventDefault();
+                        context.openLinkFromCurrentSelection();
+                    } else if (event.key === 'Enter') {
+                        event.preventDefault();
+                        context.runEditCommand((current, selection) =>
+                            splitBlockEverywhere(current.state, selection, makeCommandContext(current)),
+                        );
+                    } else if (event.key === 'Backspace') {
+                        event.preventDefault();
+                        context.runEditCommand((current, selection) =>
+                            deleteBackwardEverywhere(current.state, selection, makeCommandContext(current)),
+                        );
+                    } else if (event.key === 'Delete') {
+                        event.preventDefault();
+                        context.runEditCommand((current, selection) =>
+                            deleteForwardEverywhere(current.state, selection, makeCommandContext(current)),
+                        );
+                    } else if (event.key === 'Tab' && !event.altKey && !modifierPressed) {
+                        event.preventDefault();
+                        context.moveSelectionsHorizontallyEverywhere(event.shiftKey ? 'left' : 'right', 'block');
+                    }
+                }}
+                onPaste={(event) => {
+                    event.preventDefault();
+                    context.runEditCommand((current, selection) =>
+                        pastePlainTextEverywhere(
+                            current.state,
+                            selection,
+                            event.clipboardData.getData('text/plain'),
+                            makeCommandContext(current),
+                        ),
+                    );
+                }}
+            />
+        </div>
+    );
+}
 
 const tableCellIdForSelection = (
     state: Replica['state'],

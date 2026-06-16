@@ -140,6 +140,12 @@ export type VisibleBlockOutlineEntry = {
     parentId: string;
 };
 
+export type VisibleSiblingAnchors = {
+    parent: Lamport;
+    before: Lamport | null;
+    after: Lamport | null;
+};
+
 export const visibleBlockOutline = <M extends TimestampedBlockMeta>(
     state: CachedState<M>,
     config: VirtualBlockParentConfig<M> = {},
@@ -213,7 +219,7 @@ export const visibleSiblingAnchorsForPath = <M extends TimestampedBlockMeta>(
     state: CachedState<M>,
     path: VisibleBlockPath,
     config: VirtualBlockParentConfig<M> = {},
-): {parent: Lamport; before: Lamport | null; after: Lamport | null} | null => {
+): VisibleSiblingAnchors | null => {
     validateVisiblePath(path);
     if (path.length === 0) return null;
     const parentPath = path.slice(0, -1);
@@ -233,6 +239,20 @@ export const visibleSiblingAnchorsForPath = <M extends TimestampedBlockMeta>(
         before: beforeId ? state.state.blocks[beforeId].id : null,
         after: afterId ? state.state.blocks[afterId].id : null,
     };
+};
+
+export const visibleSiblingAnchorsForBlock = <M extends TimestampedBlockMeta>(
+    state: CachedState<M>,
+    blockId: string,
+    config: VirtualBlockParentConfig<M> = {},
+): VisibleSiblingAnchors | null => {
+    const path = visiblePathForBlockId(state, blockId, config);
+    if (!path) return null;
+    return visibleSiblingAnchorsForPath(
+        state,
+        [...path.slice(0, -1), path[path.length - 1] + 1],
+        config,
+    );
 };
 
 const actualParentForSiblingSlot = <M extends TimestampedBlockMeta>(

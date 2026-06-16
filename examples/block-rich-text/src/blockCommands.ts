@@ -12,9 +12,11 @@ import {
     materializedBlockParent,
     materializedBlockPath,
     moveBlockOps,
+    nextBlockIdForActor,
     orderedCharIdsForBlock,
     setBlockMetaOps,
     splitBlockOps,
+    visibleSiblingAnchorsForBlock,
     visibleBlockChildren,
     visibleBlockOutline,
     type Op,
@@ -195,6 +197,126 @@ export const splitBlock = (
     const next = applyMany(working, splitOps, annotationVirtualParents(working));
     ops.push(...splitOps);
     return {state: next, ops, selection: caret(newBlockId, 0)};
+};
+
+export const splitTableRowHeader = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    context: CommandContext,
+): OptionalCommandResult => {
+    let working = state;
+    let point = firstPointForSelection(working, selection);
+    const ops: Array<Op<RichBlockMeta>> = [];
+
+    if (!isCollapsed(selection)) {
+        const deleted = deleteSelectionAndJoinBoundaries(working, selection, context);
+        working = deleted.state;
+        ops.push(...deleted.ops);
+        point = deleted.point;
+    }
+
+    const current = working.state.blocks[point.blockId];
+    if (!current || current.meta.type !== 'table_row') return noCommand();
+    const row = tableRowContext(working, point.blockId);
+    if (!row) return noCommand();
+
+    const newRowId = lamportToString(nextBlockIdForActor(working, context.actor));
+    if (point.offset === 0) {
+        const anchors = visibleSiblingAnchorsForBlock(working, point.blockId, annotationVirtualParents(working));
+        if (!anchors) return noCommand();
+        const insertOps = insertBlockOps(working, {
+            actor: context.actor,
+            parent: anchors.parent,
+            before: anchors.before,
+            after: anchors.after,
+            meta: {type: 'table_row', ts: context.nextTs()},
+            ts: context.nextTs(),
+            virtualParents: annotationVirtualParents(working),
+        });
+        working = applyMany(working, insertOps, annotationVirtualParents(working));
+        ops.push(...insertOps);
+
+        const firstCharId = orderedCharIdsForBlock(working, point.blockId, {visibleOnly: true})[0];
+        if (firstCharId) {
+            const moveOp: Op<RichBlockMeta> = {
+                type: 'char:move',
+                id: parseLamportString(firstCharId),
+                parent: {id: parseLamportString(newRowId), ts: context.nextTs()},
+            };
+            working = applyMany(working, [moveOp], annotationVirtualParents(working));
+            ops.push(moveOp);
+        }
+    } else {
+        const splitOps = splitBlockOps<RichBlockMeta>(working, {
+            actor: context.actor,
+            block: current.id,
+            offset: point.offset,
+            ts: context.nextTs(),
+            virtualParents: annotationVirtualParents(working),
+        });
+        working = applyMany(working, splitOps, annotationVirtualParents(working));
+        ops.push(...splitOps);
+    }
+
+    const columnCount = tableColumnCount(working, row.tableId);
+    const newRow = working.state.blocks[newRowId];
+    if (!newRow || newRow.meta.type !== 'table_row') return noCommand();
+    const cells = createEmptyCellsForRow(working, newRowId, columnCount, context);
+    working = cells.state;
+    ops.push(...cells.ops);
+
+    return {state: working, ops, selection: caret(newRowId, 0)};
+};
+
+export const deleteTableRowHeaderBackward = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    context: CommandContext,
+): OptionalCommandResult => {
+    if (!isCollapsed(selection)) return noCommand();
+    const point = focusPoint(selection);
+    if (point.offset !== 0 || pointTextLength(state, point.blockId) !== 0) return noCommand();
+
+    const row = tableRowContext(state, point.blockId);
+    if (!row) return noCommand();
+    const previousRowId = row.rows[row.rowIndex - 1] ?? null;
+    const fallbackSelection = previousRowId
+        ? caret(previousRowId, pointTextLength(state, previousRowId))
+        : caret(row.tableId, pointTextLength(state, row.tableId));
+
+    if (!areTableRowCellsEmpty(state, point.blockId)) {
+        return {state, ops: [], selection: fallbackSelection};
+    }
+
+    if (row.rows.length <= 1) {
+        const table = state.state.blocks[row.tableId];
+        if (!table || table.meta.type !== 'table') return noCommand();
+        const rehomed = rehomeVisibleSubtreeToRealParents(state, point.blockId, table.id, context);
+        let working = rehomed.state;
+        const ops: Array<Op<RichBlockMeta>> = [...rehomed.ops];
+        const deleteOps = deleteBlockOps(working, {
+            block: parseLamportString(point.blockId),
+            mode: 'subtree',
+            virtualParents: annotationVirtualParents(working),
+        });
+        working = applyMany(working, deleteOps, annotationVirtualParents(working));
+        ops.push(...deleteOps);
+        const metaOps = setBlockMetaOps(working, {
+            block: table.id,
+            meta: paragraphMeta(context.nextTs()),
+        });
+        const next = applyMany(working, metaOps, annotationVirtualParents(working));
+        ops.push(...metaOps);
+        return {state: next, ops, selection: caret(row.tableId, pointTextLength(next, row.tableId))};
+    }
+
+    const ops = deleteBlockOps(state, {
+        block: parseLamportString(point.blockId),
+        mode: 'subtree',
+        virtualParents: annotationVirtualParents(state),
+    });
+    const next = applyMany(state, ops, annotationVirtualParents(state));
+    return {state: next, ops, selection: fallbackSelection};
 };
 
 export const deleteEmptyTableRowBackward = (
@@ -875,32 +997,91 @@ const tableCellContext = (
     return {tableId, rowParentId, rowId, rowIndex, columnIndex};
 };
 
+type TableRowContext = {
+    tableId: string;
+    rowParentId: string;
+    rowId: string;
+    rowIndex: number;
+    rows: string[];
+};
+
+const tableRowContext = (
+    state: CachedState<RichBlockMeta>,
+    rowId: string,
+): TableRowContext | null => {
+    const block = state.state.blocks[rowId];
+    if (!block || block.meta.type !== 'table_row') return null;
+    const pathIds = materializedBlockPath(state, rowId, annotationVirtualParents(state)).map(lamportToString);
+    const rowIndexInPath = pathIds.findLastIndex((id) => id === rowId);
+    if (rowIndexInPath < 2) return null;
+    const rowParentId = pathIds[rowIndexInPath - 1];
+    const tableId = pathIds[rowIndexInPath - 2];
+    if (state.state.blocks[tableId]?.meta.type !== 'table') return null;
+    const rows = tableRows(state, tableId);
+    const rowIndex = rows.indexOf(rowId);
+    if (rowIndex < 0) return null;
+    return {tableId, rowParentId, rowId, rowIndex, rows};
+};
+
 const tableRows = (state: CachedState<RichBlockMeta>, tableId: string): string[] => {
     const table = state.state.blocks[tableId];
     if (!table || table.meta.type !== 'table') return [];
     return visibleBlockChildren(state, lamportToString(table.meta.rowParent), annotationVirtualParents(state));
 };
 
-const isEmptyTableRow = (state: CachedState<RichBlockMeta>, rowId: string): boolean => {
+const tableColumnCount = (state: CachedState<RichBlockMeta>, tableId: string): number => {
+    const rows = tableRows(state, tableId);
+    return Math.max(
+        1,
+        ...rows.map((rowId) => visibleBlockChildren(state, rowId, annotationVirtualParents(state)).length),
+    );
+};
+
+const areTableRowCellsEmpty = (state: CachedState<RichBlockMeta>, rowId: string): boolean => {
     const cells = visibleBlockChildren(state, rowId, annotationVirtualParents(state));
     return cells.length > 0 && cells.every((cellId) => pointTextLength(state, cellId) === 0);
+};
+
+const isEmptyTableRow = (state: CachedState<RichBlockMeta>, rowId: string): boolean => {
+    return pointTextLength(state, rowId) === 0 && areTableRowCellsEmpty(state, rowId);
+};
+
+const createEmptyCellsForRow = (
+    state: CachedState<RichBlockMeta>,
+    rowId: string,
+    columnCount: number,
+    context: CommandContext,
+): {state: CachedState<RichBlockMeta>; ops: Array<Op<RichBlockMeta>>} => {
+    const row = state.state.blocks[rowId];
+    if (!row || row.meta.type !== 'table_row') return {state, ops: []};
+    let working = state;
+    const ops: Array<Op<RichBlockMeta>> = [];
+    for (let index = 0; index < columnCount; index++) {
+        const existingCells = visibleBlockChildren(working, rowId, annotationVirtualParents(working));
+        const previousCellId = existingCells[existingCells.length - 1] ?? null;
+        const cellOps = insertBlockOps(working, {
+            actor: context.actor,
+            parent: row.id,
+            before: previousCellId ? working.state.blocks[previousCellId].id : null,
+            meta: paragraphMeta(context.nextTs()),
+            ts: context.nextTs(),
+            virtualParents: annotationVirtualParents(working),
+        });
+        working = applyMany(working, cellOps, annotationVirtualParents(working));
+        ops.push(...cellOps);
+    }
+    return {state: working, ops};
 };
 
 const deleteVisibleSubtreeOps = (
     state: CachedState<RichBlockMeta>,
     blockId: string,
 ): Array<Op<RichBlockMeta>> => {
-    const outline = visibleBlockOutline(state, annotationVirtualParents(state));
-    const index = outline.findIndex((item) => item.id === blockId);
-    if (index < 0) return [];
-    const rootDepth = outline[index].depth;
-    const ids = [blockId];
-    for (let i = index + 1; i < outline.length && outline[i].depth > rootDepth; i++) {
-        ids.push(outline[i].id);
-    }
-    return ids.flatMap((id) =>
-        deleteBlockOps(state, {block: state.state.blocks[id].id, mode: 'block-only'}),
-    );
+    return deleteBlockOps(state, {
+        block: parseLamportString(blockId),
+        mode: 'subtree',
+        virtualParents: annotationVirtualParents(state),
+    });
 };
 
 const insertParagraphAfterBlock = (
@@ -1244,8 +1425,14 @@ export const joinWithPrevious = (
     const blocks = editableBlockIds(state);
     const index = blocks.indexOf(blockId);
     if (index <= 0) return {state, ops: [], selection: caret(blockId, 0)};
+    if (state.state.blocks[blockId]?.meta.type === 'table_row') {
+        return {state, ops: [], selection: caret(blockId, 0)};
+    }
 
     const previousBlockId = blocks[index - 1];
+    if (state.state.blocks[previousBlockId]?.meta.type === 'table_row') {
+        return {state, ops: [], selection: caret(blockId, 0)};
+    }
     if (!sameTableRowBoundary(state, previousBlockId, blockId)) {
         return {state, ops: [], selection: caret(blockId, 0)};
     }
@@ -1272,6 +1459,12 @@ export const joinWithNext = (
     const index = blocks.indexOf(blockId);
     const nextBlockId = blocks[index + 1];
     if (index < 0 || !nextBlockId) {
+        return {state, ops: [], selection: caret(blockId, pointTextLength(state, blockId))};
+    }
+    if (
+        state.state.blocks[blockId]?.meta.type === 'table_row' ||
+        state.state.blocks[nextBlockId]?.meta.type === 'table_row'
+    ) {
         return {state, ops: [], selection: caret(blockId, pointTextLength(state, blockId))};
     }
     if (!sameTableRowBoundary(state, blockId, nextBlockId)) {

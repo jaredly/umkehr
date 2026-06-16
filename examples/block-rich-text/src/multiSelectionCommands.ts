@@ -3,6 +3,7 @@ import {blockContents, materializeFormattedBlocks, type Op} from 'umkehr/block-c
 import type {RichBlockMeta} from './blockMeta';
 import {
     deleteBackward,
+    deleteTableRowHeaderBackward,
     deleteForward,
     insertText,
     moveBlock,
@@ -12,8 +13,11 @@ import {
     setLinkMark,
     setBlockType,
     splitBlock,
+    splitTableRowHeader,
     toggleMark,
     updateBlockMeta,
+    commandApplied,
+    noCommand,
     type CommandResult,
     type CommandContext,
 } from './blockCommands';
@@ -74,9 +78,13 @@ export const deleteBackwardEverywhere = (
     selection: RetainedSelectionSet,
     context: CommandContext,
 ): MultiCommandResult =>
-    runReplacingCommand(state, selection, (working, entry) =>
-        deleteBackward(working, resolveSelection(working, entry.selection), context),
-    );
+    runReplacingCommand(state, selection, (working, entry) => {
+        const resolved = resolveSelection(working, entry.selection);
+        const rowHeaderDeleted = deleteTableRowHeaderBackward(working, resolved, context);
+        return commandApplied(rowHeaderDeleted)
+            ? rowHeaderDeleted
+            : deleteBackward(working, resolved, context);
+    });
 
 export const deleteForwardEverywhere = (
     state: CachedState<RichBlockMeta>,
@@ -93,9 +101,15 @@ export const splitBlockEverywhere = (
     context: CommandContext,
     options: {forceCodeNewline?: boolean} = {},
 ): MultiCommandResult =>
-    runReplacingCommand(state, selection, (working, entry) =>
-        splitBlock(working, resolveSelection(working, entry.selection), context, options),
-    );
+    runReplacingCommand(state, selection, (working, entry) => {
+        const resolved = resolveSelection(working, entry.selection);
+        const rowHeaderSplit = options.forceCodeNewline
+            ? noCommand()
+            : splitTableRowHeader(working, resolved, context);
+        return commandApplied(rowHeaderSplit)
+            ? rowHeaderSplit
+            : splitBlock(working, resolved, context, options);
+    });
 
 export const toggleMarkEverywhere = (
     state: CachedState<RichBlockMeta>,

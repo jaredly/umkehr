@@ -46,7 +46,7 @@ export const isTableRow = (meta: RichBlockMeta): boolean => meta.type === 'table
 export const isCellBlock = (meta: RichBlockMeta): boolean =>
     !isTableBlock(meta) && !isTableRow(meta);
 
-export const isEditableBlock = (meta: RichBlockMeta): boolean => !isTableRow(meta);
+export const isEditableBlock = (_meta: RichBlockMeta): boolean => true;
 
 export const isWholeSubtreeStyledBlock = (meta: RichBlockMeta): boolean =>
     meta.type === 'blockquote' || meta.type === 'callout';

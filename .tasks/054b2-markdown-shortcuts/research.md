@@ -137,6 +137,10 @@ npm exec vitest -- run examples/block-rich-text/src/blockCommands.test.ts
 ## Open Questions
 
 - Should shortcut handling apply only to typed spaces, or also to pasted/autocorrected text such as pasting `- ` into an empty paragraph?
+    - only on typed spaces
 - Should ordered-list shortcuts recognize only `1. `, or any positive number followed by `. `?
+    - any positive number followed by `. `
 - Should `[x] ` or `[X] ` create a checked todo, or is unchecked `[ ] ` the only supported todo shortcut for now?
+    - sure
 - Should shortcuts work inside paragraph table cells? The model allows it, but table editing has special behavior elsewhere.
+    - sure

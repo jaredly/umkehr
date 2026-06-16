@@ -30,17 +30,21 @@ import {
     visibleBlockChildren,
     visibleBlockOutline,
     insertBlockOps,
+    deleteBlockOps,
     insertTextOps,
     deleteRangeOps,
     splitBlockOps,
     joinBlocksOps,
     moveBlockOps,
     setBlockMetaOps,
+    markSelectionOps,
     markRangeOp,
     materializeFormattedBlocks,
     planUndoOps,
     validateOp,
     assertCacheConsistent,
+    nextBlockIdForActor,
+    visibleSiblingAnchorsForBlock,
     visibleSiblingAnchorsForPath,
     type VirtualBlockParentConfig,
 } from './index';
@@ -305,6 +309,160 @@ it('moves blocks under a configured virtual parent', () => {
 
     expect(visibleBlockChildren(state, lamportToString(rowParent), tableVirtualConfig)).toEqual([movedId]);
     expect(materializedBlockParent(state, movedId, tableVirtualConfig)).toEqual(rowParent);
+});
+
+it('deletes visible subtrees under a configured virtual parent', () => {
+    let state = initVirtualParentState();
+    const rowParent = [100, 'self'] as Lamport;
+    const rowOps = insertBlockOps(state, {
+        actor: 'alice',
+        parent: rowParent,
+        meta: {type: 'paragraph', ts: '00002'},
+        ts: '00002',
+        virtualParents: tableVirtualConfig,
+    });
+    state = applyMany(state, rowOps, tableVirtualConfig);
+    const rowOp = rowOps[0];
+    if (rowOp.type !== 'block') throw new Error('expected row block op');
+    const rowId = lamportToString(rowOp.block.id);
+    const cellOps = insertBlockOps(state, {
+        actor: 'alice',
+        parent: parseLamportString(rowId),
+        meta: {type: 'paragraph', ts: '00003'},
+        ts: '00003',
+        virtualParents: tableVirtualConfig,
+    });
+    state = applyMany(state, cellOps, tableVirtualConfig);
+    const cellOp = cellOps[0];
+    if (cellOp.type !== 'block') throw new Error('expected cell block op');
+    const cellId = lamportToString(cellOp.block.id);
+
+    expect(() => deleteBlockOps(state, {block: parseLamportString(rowId), mode: 'subtree'})).toThrow('not found');
+
+    const next = applyMany(
+        state,
+        deleteBlockOps(state, {
+            block: parseLamportString(rowId),
+            mode: 'subtree',
+            virtualParents: tableVirtualConfig,
+        }),
+        tableVirtualConfig,
+    );
+
+    expect(next.state.blocks[rowId].deleted).toBe(true);
+    expect(next.state.blocks[cellId].deleted).toBe(true);
+    expect(visibleBlockChildren(next, lamportToString(rowParent), tableVirtualConfig)).toEqual([]);
+});
+
+it('returns sibling anchors after a visible block id', () => {
+    let state = initVirtualParentState();
+    const rowParent = [100, 'self'] as Lamport;
+    const firstRowOps = insertBlockOps(state, {
+        actor: 'alice',
+        parent: rowParent,
+        meta: {type: 'paragraph', ts: '00002'},
+        ts: '00002',
+        virtualParents: tableVirtualConfig,
+    });
+    state = applyMany(state, firstRowOps, tableVirtualConfig);
+    const firstRowOp = firstRowOps[0];
+    if (firstRowOp.type !== 'block') throw new Error('expected row block op');
+    const firstRowId = lamportToString(firstRowOp.block.id);
+    const secondRowOps = insertBlockOps(state, {
+        actor: 'bob',
+        parent: rowParent,
+        before: parseLamportString(firstRowId),
+        meta: {type: 'paragraph', ts: '00003'},
+        ts: '00003',
+        virtualParents: tableVirtualConfig,
+    });
+    state = applyMany(state, secondRowOps, tableVirtualConfig);
+    const secondRowOp = secondRowOps[0];
+    if (secondRowOp.type !== 'block') throw new Error('expected row block op');
+    const secondRowId = lamportToString(secondRowOp.block.id);
+
+    expect(visibleSiblingAnchorsForBlock(state, firstRowId, tableVirtualConfig)).toEqual({
+        parent: rowParent,
+        before: parseLamportString(firstRowId),
+        after: parseLamportString(secondRowId),
+    });
+    expect(visibleSiblingAnchorsForBlock(state, secondRowId, tableVirtualConfig)).toEqual({
+        parent: rowParent,
+        before: parseLamportString(secondRowId),
+        after: null,
+    });
+});
+
+it('predicts the next local block id for inserts and splits', () => {
+    let state = initVirtualParentState();
+    expect(nextBlockIdForActor(state, 'alice')).toEqual([1, 'alice']);
+
+    const insertOps = insertBlockOps(state, {
+        actor: 'alice',
+        parent: [0, 'root'],
+        before: [0, 'self'],
+        meta: {type: 'paragraph', ts: '00002'},
+        ts: '00002',
+    });
+    expect(insertOps[0]).toMatchObject({type: 'block', block: {id: [1, 'alice']}});
+    state = applyMany(state, insertOps);
+    expect(nextBlockIdForActor(state, 'alice')).toEqual([2, 'alice']);
+
+    state = applyMany(state, insertTextOps(state, {actor: 'alice', block: [0, 'self'], offset: 0, text: 'ab', ts: mts()}));
+    const splitOps = splitBlockOps(state, {actor: 'alice', block: [0, 'self'], offset: 1, ts: '00003'});
+    expect(splitOps[0]).toMatchObject({type: 'block', block: {id: nextBlockIdForActor(state, 'alice')}});
+});
+
+it('marks selections across virtual-parent-visible blocks', () => {
+    let state = initVirtualParentState();
+    const rowParent = [100, 'self'] as Lamport;
+    const rowOps = insertBlockOps(state, {
+        actor: 'alice',
+        parent: rowParent,
+        meta: {type: 'paragraph', ts: '00002'},
+        ts: '00002',
+        virtualParents: tableVirtualConfig,
+    });
+    state = applyMany(state, rowOps, tableVirtualConfig);
+    const rowOp = rowOps[0];
+    if (rowOp.type !== 'block') throw new Error('expected row block op');
+    const rowId = lamportToString(rowOp.block.id);
+    const cellOps = insertBlockOps(state, {
+        actor: 'alice',
+        parent: parseLamportString(rowId),
+        meta: {type: 'paragraph', ts: '00003'},
+        ts: '00003',
+        virtualParents: tableVirtualConfig,
+    });
+    state = applyMany(state, cellOps, tableVirtualConfig);
+    const cellOp = cellOps[0];
+    if (cellOp.type !== 'block') throw new Error('expected cell block op');
+    const cellId = lamportToString(cellOp.block.id);
+    state = applyMany(state, insertTextOps(state, {actor: 'alice', block: parseLamportString(rowId), offset: 0, text: 'rh', ts: mts()}), tableVirtualConfig);
+    state = applyMany(state, insertTextOps(state, {actor: 'alice', block: parseLamportString(cellId), offset: 0, text: 'cd', ts: mts()}), tableVirtualConfig);
+
+    state = applyMany(
+        state,
+        markSelectionOps(
+            state,
+            {anchor: {blockId: rowId, offset: 1}, focus: {blockId: cellId, offset: 1}},
+            'bold',
+            undefined,
+            false,
+            {actor: 'alice', virtualParents: tableVirtualConfig},
+        ),
+        tableVirtualConfig,
+    );
+
+    const formatted = materializeFormattedBlocks(state, tableVirtualConfig);
+    expect(formatted.find((block) => block.id === rowId)?.runs).toEqual([
+        {text: 'r', marks: {}},
+        {text: 'h', marks: {bold: true}},
+    ]);
+    expect(formatted.find((block) => block.id === cellId)?.runs).toEqual([
+        {text: 'c', marks: {bold: true}},
+        {text: 'd', marks: {}},
+    ]);
 });
 
 it('applies remote block ops under virtual parents after the declaring block arrives', () => {

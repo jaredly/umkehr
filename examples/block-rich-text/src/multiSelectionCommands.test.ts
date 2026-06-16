@@ -492,7 +492,7 @@ describe('block rich text multi-selection commands', () => {
         ]);
     });
 
-    it('skips structural table rows during horizontal caret movement', () => {
+    it('moves horizontally through editable table row headers', () => {
         const context = ctx();
         const demo = createDemoState();
         let result = pastePlainText(demo.left.state, caret(rootBlockIds(demo.left.state)[0], 0), 'a\nrow\nb', context);
@@ -504,13 +504,13 @@ describe('block rich text multi-selection commands', () => {
             singleRetainedSelectionSet(result.state, caret(first, 1)),
             'right',
         );
-        expect(resolveSelectionSet(moved.state, moved.selection).entries[0].selection).toEqual(caret(third, 0));
+        expect(resolveSelectionSet(moved.state, moved.selection).entries[0].selection).toEqual(caret(row, 0));
 
         moved = moveSelectionsHorizontally(
             result.state,
             singleRetainedSelectionSet(result.state, caret(third, 0)),
             'left',
         );
-        expect(resolveSelectionSet(moved.state, moved.selection).entries[0].selection).toEqual(caret(first, 1));
+        expect(resolveSelectionSet(moved.state, moved.selection).entries[0].selection).toEqual(caret(row, 3));
     });
 });

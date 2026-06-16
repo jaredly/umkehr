@@ -17,6 +17,7 @@ import {lamportToString} from 'umkehr/block-crdt/utils';
 import {
     deleteBackward,
     deleteEmptyTableRowBackward,
+    deleteTableRowHeaderBackward,
     deleteForward,
     exitEmptyLastTableRow,
     advanceFromTableCellEnd,
@@ -36,6 +37,7 @@ import {
     setBlockType,
     setLinkMark,
     splitBlock,
+    splitTableRowHeader,
     splitTableTitleToParagraph,
     toggleMark,
     unindentBlock,
@@ -455,6 +457,126 @@ describe('block rich text commands', () => {
         expect(blockContents(split.state, paragraphId)).toBe('Beta');
         expect(split.state.state.blocks[paragraphId].meta).toMatchObject({type: 'paragraph'});
         expect(split.selection).toEqual(caret(paragraphId, 0));
+    });
+
+    it('splits a row header into a following row with empty cells', () => {
+        const demo = createDemoState();
+        const context = ctx();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = createTable(demo.left.state, caret(blockId, 0), context, {rows: 1, columns: 2});
+        const tableId = rootBlockIds(result.state)[1];
+        const rowId = tableShape(result.state, tableId).rows[0];
+        result = insertText(result.state, caret(rowId, 0), 'AlphaBeta', context);
+
+        const split = splitTableRowHeader(result.state, caret(rowId, 5), context);
+        if (!('state' in split)) throw new Error('expected row split');
+
+        const shape = tableShape(split.state, tableId);
+        const newRowId = shape.rows[1];
+        expect(shape.rows).toHaveLength(2);
+        expect(blockContents(split.state, rowId)).toBe('Alpha');
+        expect(blockContents(split.state, newRowId)).toBe('Beta');
+        expect(shape.cells[1]).toHaveLength(2);
+        expect(shape.cells[1].every((cellId) => blockContents(split.state, cellId) === '')).toBe(true);
+        expect(split.selection).toEqual(caret(newRowId, 0));
+    });
+
+    it('splits a row header at the start by moving all text into the following row', () => {
+        const demo = createDemoState();
+        const context = ctx();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = createTable(demo.left.state, caret(blockId, 0), context, {rows: 1, columns: 1});
+        const tableId = rootBlockIds(result.state)[1];
+        const rowId = tableShape(result.state, tableId).rows[0];
+        result = insertText(result.state, caret(rowId, 0), 'Alpha', context);
+
+        const split = splitTableRowHeader(result.state, caret(rowId, 0), context);
+        if (!('state' in split)) throw new Error('expected row split');
+
+        const shape = tableShape(split.state, tableId);
+        expect(blockContents(split.state, rowId)).toBe('');
+        expect(blockContents(split.state, shape.rows[1])).toBe('Alpha');
+        expect(split.selection).toEqual(caret(shape.rows[1], 0));
+    });
+
+    it('deletes an all-empty row from an empty row header', () => {
+        const demo = createDemoState();
+        const context = ctx();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        const result = createTable(demo.left.state, caret(blockId, 0), context, {rows: 2, columns: 1});
+        const tableId = rootBlockIds(result.state)[1];
+        const shape = tableShape(result.state, tableId);
+
+        const deleted = deleteTableRowHeaderBackward(result.state, caret(shape.rows[1], 0), context);
+        if (!('state' in deleted)) throw new Error('expected row delete');
+
+        expect(tableShape(deleted.state, tableId).rows).toEqual([shape.rows[0]]);
+        expect(deleted.selection).toEqual(caret(shape.rows[0], 0));
+    });
+
+    it('converts a table to a paragraph when Backspace deletes its only empty row header', () => {
+        const demo = createDemoState();
+        const context = ctx();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        const result = createTable(demo.left.state, caret(blockId, 0), context, {rows: 1, columns: 1});
+        const tableId = rootBlockIds(result.state)[1];
+        const rowId = tableShape(result.state, tableId).rows[0];
+
+        const deleted = deleteTableRowHeaderBackward(result.state, caret(rowId, 0), context);
+        if (!('state' in deleted)) throw new Error('expected table convert');
+
+        expect(deleted.state.state.blocks[tableId].meta).toMatchObject({type: 'paragraph'});
+        expect(deleted.state.state.blocks[rowId].deleted).toBe(true);
+        expect(deleted.selection).toEqual(caret(tableId, 0));
+    });
+
+    it('moves from an empty row header to the previous row header when cells contain content', () => {
+        const demo = createDemoState();
+        const context = ctx();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = createTable(demo.left.state, caret(blockId, 0), context, {rows: 2, columns: 1});
+        const tableId = rootBlockIds(result.state)[1];
+        const shape = tableShape(result.state, tableId);
+        result = insertText(result.state, caret(shape.rows[0], 0), 'prev', context);
+        result = insertText(result.state, caret(shape.cells[1][0], 0), 'cell', context);
+
+        const moved = deleteTableRowHeaderBackward(result.state, caret(shape.rows[1], 0), context);
+        if (!('state' in moved)) throw new Error('expected row-header move');
+
+        expect(tableShape(moved.state, tableId).rows).toEqual(shape.rows);
+        expect(moved.ops).toEqual([]);
+        expect(moved.selection).toEqual(caret(shape.rows[0], 4));
+    });
+
+    it('moves from the first empty row header to the table title when cells contain content', () => {
+        const demo = createDemoState();
+        const context = ctx();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = createTable(demo.left.state, caret(blockId, 0), context, {rows: 1, columns: 1});
+        const tableId = rootBlockIds(result.state)[1];
+        const shape = tableShape(result.state, tableId);
+        result = insertText(result.state, caret(tableId, 0), 'T', context);
+        result = insertText(result.state, caret(shape.cells[0][0], 0), 'cell', context);
+
+        const moved = deleteTableRowHeaderBackward(result.state, caret(shape.rows[0], 0), context);
+        if (!('state' in moved)) throw new Error('expected row-header move');
+
+        expect(moved.ops).toEqual([]);
+        expect(moved.selection).toEqual(caret(tableId, 1));
+    });
+
+    it('does not delete a first-cell empty row when the row header has content', () => {
+        const demo = createDemoState();
+        const context = ctx();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = createTable(demo.left.state, caret(blockId, 0), context, {rows: 2, columns: 1});
+        const tableId = rootBlockIds(result.state)[1];
+        const shape = tableShape(result.state, tableId);
+        result = insertText(result.state, caret(shape.rows[1], 0), 'header', context);
+
+        const deleted = deleteEmptyTableRowBackward(result.state, caret(shape.cells[1][0], 0), context);
+
+        expect(typeof deleted).toBe('symbol');
     });
 
     it('moves table cells within and across rows with splice semantics', () => {

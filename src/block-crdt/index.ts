@@ -32,6 +32,7 @@ export {
     markRangesOps,
     markSelectionOps,
     moveBlockOps,
+    nextBlockIdForActor,
     setBlockMetaOps,
     split,
     splitBlockOps,
@@ -130,10 +131,18 @@ export {
     visibleGraphemeIdsForBlock,
     visibleLengthForBlock,
     visiblePathForBlockId,
+    visibleSiblingAnchorsForBlock,
     visibleSiblingAnchorsForPath,
     visibleTextForBlock,
 } from './traversal.js';
-export type {BlockPoint, RetainedPoint, RetainedSelection, VisibleBlockOutlineEntry, VisibleBlockPath} from './traversal.js';
+export type {
+    BlockPoint,
+    RetainedPoint,
+    RetainedSelection,
+    VisibleBlockOutlineEntry,
+    VisibleBlockPath,
+    VisibleSiblingAnchors,
+} from './traversal.js';
 
 export {
     blockOrderVersionWins,

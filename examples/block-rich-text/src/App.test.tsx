@@ -514,7 +514,7 @@ describe('Block rich text example UI', () => {
         expect(blockTexts(right)).toContain('Beta');
     });
 
-    it('uses row numbers for row drag and removes cell drag handles', async () => {
+    it('uses compact row-number placeholders for all-empty row headers', async () => {
         const view = render(<App />);
         const {left} = panels(view);
         selectCaret(blocks(left)[0], 0);
@@ -522,9 +522,17 @@ describe('Block rich text example UI', () => {
         setBlockType(left, 'table');
         await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
 
-        expect(within(left).getByRole('button', {name: 'Move row 1'}).textContent).toBe('1');
-        expect(within(left).getByRole('button', {name: 'Move row 2'}).textContent).toBe('2');
+        const table = within(left).getByRole('table', {name: 'Table block'});
+        expect(table.classList.contains('compactRowHeaders')).toBe(true);
+        expect(within(left).getByRole('textbox', {name: 'Row header 1'}).getAttribute('data-placeholder')).toBe('1');
+        expect(within(left).getByRole('textbox', {name: 'Row header 2'}).getAttribute('data-placeholder')).toBe('2');
+        expect(within(left).getByRole('button', {name: 'Move row 1'}).textContent).toBe('⋮');
+        expect(within(left).getByRole('button', {name: 'Move row 2'}).textContent).toBe('⋮');
         expect(within(within(left).getByRole('table', {name: 'Table block'})).queryAllByRole('button', {name: 'Move block'})).toEqual([]);
+
+        selectCaret(within(left).getByRole('textbox', {name: 'Row header 1'}), 0);
+        typeText(within(left).getByRole('textbox', {name: 'Row header 1'}), 'Header');
+        await waitFor(() => expect(table.classList.contains('compactRowHeaders')).toBe(false));
     });
 
     it('highlights the active cell and drags a focused cell from its border', async () => {
