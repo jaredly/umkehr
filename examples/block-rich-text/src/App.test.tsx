@@ -1861,6 +1861,31 @@ describe('Block rich text example UI', () => {
         expect(commentDots(left)).toHaveLength(0);
     });
 
+    it('pastes 2000 characters into a comment body after commenting large text in less than 50ms', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        const mainText = repeatedText(2000);
+        const commentText = repeatedText(2000).replace(/^./, '1');
+
+        selectCaret(blocks(left)[0], 0);
+        pasteText(blocks(left)[0], mainText);
+        await waitForBlockTexts(left, [mainText]);
+
+        selectRange(blocks(left)[0], 0, 10);
+        fireEvent.click(within(left).getByRole('button', {name: 'Comment'}));
+        const commentBody = await waitFor(() =>
+            within(left).getByRole('textbox', {name: 'Annotation body'}),
+        );
+
+        selectCaret(commentBody, 0);
+        const started = performance.now();
+        pasteText(commentBody, commentText);
+        const elapsed = performance.now() - started;
+
+        await waitFor(() => expect(blockText(commentBody)).toBe(commentText));
+        expect(elapsed).toBeLessThan(50);
+    });
+
     it('shows one gutter dot per annotation and refocuses the most recently edited body', async () => {
         const view = render(<App />);
         const {left} = panels(view);
