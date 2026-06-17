@@ -55,7 +55,7 @@ import {
     createAnnotation,
     pasteAnnotationBodyTextWithMarkdownShortcuts,
 } from './annotations';
-import type {RichBlockMeta} from './blockMeta';
+import {paragraphMeta, type RichBlockMeta} from './blockMeta';
 import {toggleMarkEverywhere} from './multiSelectionCommands';
 import {retainSelection} from './retainedSelection';
 import {caret, focusPoint, pointTextLength, type EditorSelection} from './selectionModel';
@@ -105,12 +105,60 @@ const typeWithMarkdownShortcuts = (
 const tableShape = (state: CachedState<RichBlockMeta>, tableId: string) => {
     const table = state.state.blocks[tableId];
     if (!table || table.meta.type !== 'table') throw new Error(`table ${tableId} not found`);
-    const rows = visibleBlockChildren(state, lamportToString(table.meta.rowParent), annotationVirtualParents(state));
+    const rows = visibleBlockChildren(state, tableId, annotationVirtualParents(state));
     return {
         table,
         rows,
-        cells: rows.map((rowId) => visibleBlockChildren(state, rowId, annotationVirtualParents(state))),
+        cells: rows.map((rowId) =>
+            state.state.blocks[rowId]?.meta.type === 'table'
+                ? []
+                : visibleBlockChildren(state, rowId, annotationVirtualParents(state)),
+        ),
     };
+};
+
+const insertParagraphChild = (
+    state: CachedState<RichBlockMeta>,
+    parentId: string,
+    context: CommandContext = ctx(),
+) => {
+    const children = visibleBlockChildren(state, parentId, annotationVirtualParents(state));
+    const previousChild = children[children.length - 1] ?? null;
+    const ops = insertBlockOps(state, {
+        actor: context.actor,
+        parent: state.state.blocks[parentId].id,
+        before: previousChild ? state.state.blocks[previousChild].id : null,
+        meta: paragraphMeta(context.nextTs()),
+        ts: context.nextTs(),
+        virtualParents: annotationVirtualParents(state),
+    });
+    const next = applyMany(state, ops, annotationVirtualParents(state));
+    const childId = ops[0].type === 'block' ? lamportToString(ops[0].block.id) : '';
+    return {state: next, ops, childId};
+};
+
+const insertParagraphAfterBlockForTest = (
+    state: CachedState<RichBlockMeta>,
+    blockId: string,
+    context: CommandContext = ctx(),
+) => {
+    const parent = materializedBlockParent(state, blockId, annotationVirtualParents(state));
+    const parentId = lamportToString(parent);
+    const siblings = visibleBlockChildren(state, parentId, annotationVirtualParents(state));
+    const index = siblings.indexOf(blockId);
+    const afterId = index >= 0 ? siblings[index + 1] ?? null : null;
+    const ops = insertBlockOps(state, {
+        actor: context.actor,
+        parent,
+        before: state.state.blocks[blockId].id,
+        after: afterId ? state.state.blocks[afterId].id : null,
+        meta: paragraphMeta(context.nextTs()),
+        ts: context.nextTs(),
+        virtualParents: annotationVirtualParents(state),
+    });
+    const next = applyMany(state, ops, annotationVirtualParents(state));
+    const insertedId = ops[0].type === 'block' ? lamportToString(ops[0].block.id) : '';
+    return {state: next, ops, blockId: insertedId};
 };
 
 describe('block rich text commands', () => {
@@ -287,7 +335,7 @@ describe('block rich text commands', () => {
         expectCache(result.state);
     });
 
-    it('strips pasted markdown markers in table row headers without changing row metadata', () => {
+    it('applies pasted markdown shortcuts in table row headers as normal paragraph blocks', () => {
         const state = init();
         const context = ctx();
         const blockId = onlyBlock(state);
@@ -298,7 +346,7 @@ describe('block rich text commands', () => {
         const result = pastePlainTextWithMarkdownShortcuts(table.state, caret(rowId, 0), '# Header', context);
 
         expect(blockContents(result.state, rowId)).toBe('Header');
-        expect(result.state.state.blocks[rowId].meta).toMatchObject({type: 'table_row'});
+        expect(result.state.state.blocks[rowId].meta).toMatchObject({type: 'heading', level: 1});
     });
 
     it('syncs pasted markdown shortcut deletion and metadata to a peer replica', () => {
@@ -385,7 +433,7 @@ describe('block rich text commands', () => {
         expect(synced.right.state.state.blocks[blockId].meta).toEqual({type: 'heading', level: 2, ts: '00001'});
     });
 
-    it('creates a table block with a virtual row parent, rows, and cells', () => {
+    it('creates a table block with normal row children and cells', () => {
         const demo = createDemoState();
         const blockId = rootBlockIds(demo.left.state)[0];
         const result = createTable(demo.left.state, caret(blockId, 0), ctx(), {rows: 2, columns: 3});
@@ -395,7 +443,7 @@ describe('block rich text commands', () => {
         expect(shape.table.meta.type).toBe('table');
         expect(shape.rows).toHaveLength(2);
         expect(shape.cells.map((row) => row.length)).toEqual([3, 3]);
-        expect(shape.rows.every((rowId) => result.state.state.blocks[rowId].meta.type === 'table_row')).toBe(true);
+        expect(shape.rows.every((rowId) => result.state.state.blocks[rowId].meta.type === 'paragraph')).toBe(true);
         expect(shape.cells.flat().every((cellId) => result.state.state.blocks[cellId].meta.type === 'paragraph')).toBe(true);
     });
 
@@ -413,6 +461,20 @@ describe('block rich text commands', () => {
         expect(tableShape(result.state, blockId).cells.map((row) => row.length)).toEqual([2, 2]);
     });
 
+    it('does not add default rows when converting a block that already has children', () => {
+        const context = ctx();
+        let result = pastePlainText(init(), caret(onlyBlock(init()), 0), 'Parent\nChild', context);
+        const [parentId, childId] = rootBlockIds(result.state);
+        result = moveBlock(result.state, childId, {type: 'child', parentBlockId: parentId, at: 'end'}, context);
+
+        result = convertBlockToTable(result.state, caret(parentId, 0), context, {rows: 2, columns: 2});
+
+        expect(result.state.state.blocks[parentId].meta.type).toBe('table');
+        expect(tableShape(result.state, parentId).rows).toEqual([childId]);
+        expect(tableShape(result.state, parentId).cells).toEqual([[]]);
+        expect(result.selection).toEqual(caret(parentId, 0));
+    });
+
     it('orders table rows by normal block order under the row virtual parent', () => {
         const demo = createDemoState();
         const context = ctx();
@@ -426,7 +488,7 @@ describe('block rich text commands', () => {
         expect(tableShape(result.state, tableId).rows).toEqual([before[1], before[0]]);
     });
 
-    it('keeps normal children under a table block outside the row grid', () => {
+    it('treats normal direct children under a table block as rows', () => {
         const demo = createDemoState();
         const blockId = rootBlockIds(demo.left.state)[0];
         let result = createTable(demo.left.state, caret(blockId, 0), ctx(), {rows: 1, columns: 1});
@@ -449,7 +511,7 @@ describe('block rich text commands', () => {
             parentId: tableId,
             depth: 1,
         });
-        expect(tableShape(state, tableId).rows).toHaveLength(1);
+        expect(tableShape(state, tableId).rows).toContain(normalChild);
     });
 
     it('creates sparse missing cells at the clicked column position', () => {
@@ -520,6 +582,36 @@ describe('block rich text commands', () => {
         result = moveTableCellByTab(result.state, shape.cells[0][1], 'forward', context);
 
         expect(result.selection).toEqual(caret(shape.cells[1][0], 0));
+    });
+
+    it('moves table rows out of the table as normal blocks', () => {
+        const demo = createDemoState();
+        const context = ctx();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = createTable(demo.left.state, caret(blockId, 0), context, {rows: 2, columns: 1});
+        const tableId = rootBlockIds(result.state)[1];
+        const rows = tableShape(result.state, tableId).rows;
+
+        result = moveBlock(result.state, rows[1], {type: 'after', targetBlockId: tableId}, context);
+
+        expect(tableShape(result.state, tableId).rows).toEqual([rows[0]]);
+        expect(rootBlockIds(result.state)).toContain(rows[1]);
+    });
+
+    it('moves normal blocks into a table as rows', () => {
+        const demo = createDemoState();
+        const context = ctx();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = createTable(demo.left.state, caret(blockId, 0), context, {rows: 1, columns: 1});
+        const tableId = rootBlockIds(result.state)[1];
+        const inserted = insertParagraphAfterBlockForTest(result.state, tableId, context);
+
+        result = moveBlock(inserted.state, inserted.blockId, {type: 'after', targetBlockId: tableShape(inserted.state, tableId).rows[0]}, context);
+
+        expect(tableShape(result.state, tableId).rows).toEqual([
+            tableShape(inserted.state, tableId).rows[0],
+            inserted.blockId,
+        ]);
     });
 
     it('refuses to move rows under other rows as children', () => {
@@ -862,6 +954,22 @@ describe('block rich text commands', () => {
         expect(typeof deleted).toBe('symbol');
     });
 
+    it('does not delete a row when a cell child subtree has content', () => {
+        const demo = createDemoState();
+        const context = ctx();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = createTable(demo.left.state, caret(blockId, 0), context, {rows: 2, columns: 1});
+        const tableId = rootBlockIds(result.state)[1];
+        const shape = tableShape(result.state, tableId);
+        const cell = shape.cells[1][0];
+        const child = insertParagraphChild(result.state, cell, context);
+        result = insertText(child.state, caret(child.childId, 0), 'nested', context);
+
+        const deleted = deleteEmptyTableRowBackward(result.state, caret(cell, 0), context);
+
+        expect(typeof deleted).toBe('symbol');
+    });
+
     it('moves table cells within and across rows with splice semantics', () => {
         const demo = createDemoState();
         const context = ctx();
@@ -882,6 +990,25 @@ describe('block rich text commands', () => {
         expect(shape.cells[1]).toEqual([d, f]);
     });
 
+    it('moves a table cell with its child subtree', () => {
+        const demo = createDemoState();
+        const context = ctx();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = createTable(demo.left.state, caret(blockId, 0), context, {rows: 1, columns: 2});
+        const tableId = rootBlockIds(result.state)[1];
+        let shape = tableShape(result.state, tableId);
+        const [firstCell, secondCell] = shape.cells[0];
+        const child = insertParagraphChild(result.state, firstCell, context);
+        result = insertText(child.state, caret(child.childId, 0), 'child', context);
+
+        result = moveTableCell(result.state, firstCell, {rowId: shape.rows[0], index: 2}, context);
+        shape = tableShape(result.state, tableId);
+
+        expect(shape.cells[0]).toEqual([secondCell, firstCell]);
+        expect(lamportToString(materializedBlockParent(result.state, child.childId, annotationVirtualParents(result.state)))).toBe(firstCell);
+        expect(blockContents(result.state, child.childId)).toBe('child');
+    });
+
     it('does not indent table cells out of their structural rows', () => {
         const demo = createDemoState();
         const context = ctx();
@@ -894,6 +1021,22 @@ describe('block rich text commands', () => {
 
         expect(result.ops).toEqual([]);
         expect(tableShape(result.state, tableId).cells[0]).toContain(secondCell);
+    });
+
+    it('indents child blocks inside table cells normally', () => {
+        const demo = createDemoState();
+        const context = ctx();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = createTable(demo.left.state, caret(blockId, 0), context, {rows: 1, columns: 1});
+        const tableId = rootBlockIds(result.state)[1];
+        const cell = tableShape(result.state, tableId).cells[0][0];
+        const firstChild = insertParagraphChild(result.state, cell, context);
+        const secondChild = insertParagraphChild(firstChild.state, cell, context);
+
+        result = indentBlock(secondChild.state, secondChild.childId, context);
+
+        expect(result.ops.length).toBeGreaterThan(0);
+        expect(lamportToString(materializedBlockParent(result.state, secondChild.childId, annotationVirtualParents(result.state)))).toBe(firstChild.childId);
     });
 
     it('applies multi-selection marks across table cells', () => {

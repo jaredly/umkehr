@@ -1,9 +1,10 @@
 import {describe, expect, it} from 'vitest';
-import {blockContents, cachedState, materializeFormattedBlocks, rootBlockIds} from 'umkehr/block-crdt';
+import {blockContents, cachedState, materializeFormattedBlocks, rootBlockIds, visibleBlockChildren} from 'umkehr/block-crdt';
 import {initialState} from 'umkehr/block-crdt/initialState';
 import type {CachedState} from 'umkehr/block-crdt/types';
 import {lamportToString} from 'umkehr/block-crdt/utils';
-import {insertText, pastePlainText, setBlockType, type CommandContext} from './blockCommands';
+import {createTable, insertText, pastePlainText, type CommandContext} from './blockCommands';
+import {annotationVirtualParents} from './annotations';
 import {createDemoState} from './blockEditorRuntime';
 import {caret, type EditorSelection} from './selectionModel';
 import {
@@ -582,20 +583,27 @@ describe('block rich text multi-selection commands', () => {
     it('moves horizontally through editable table row headers', () => {
         const context = ctx();
         const demo = createDemoState();
-        let result = pastePlainText(demo.left.state, caret(rootBlockIds(demo.left.state)[0], 0), 'a\nrow\nb', context);
-        const [first, row, third] = rootBlockIds(result.state);
-        result = setBlockType(result.state, row, {type: 'table_row', ts: '0005-left'});
+        let result = pastePlainText(demo.left.state, caret(rootBlockIds(demo.left.state)[0], 0), 'a\nb', context);
+        let roots = rootBlockIds(result.state);
+        const third = roots.find((id) => blockContents(result.state, id) === 'b')!;
+        result = createTable(result.state, caret(third, 0), context, {rows: 1, columns: 1});
+        roots = rootBlockIds(result.state);
+        const tableId = roots.find((id) => result.state.state.blocks[id]?.meta.type === 'table')!;
+        const row = visibleBlockChildren(result.state, tableId, annotationVirtualParents(result.state))[0];
+        result = insertText(result.state, caret(row, 0), 'row', context);
+
+        const cell = visibleBlockChildren(result.state, row, annotationVirtualParents(result.state))[0];
 
         let moved = moveSelectionsHorizontally(
             result.state,
-            singleRetainedSelectionSet(result.state, caret(first, 1)),
+            singleRetainedSelectionSet(result.state, caret(tableId, 0)),
             'right',
         );
         expect(resolveSelectionSet(moved.state, moved.selection).entries[0].selection).toEqual(caret(row, 0));
 
         moved = moveSelectionsHorizontally(
             result.state,
-            singleRetainedSelectionSet(result.state, caret(third, 0)),
+            singleRetainedSelectionSet(result.state, caret(cell, 0)),
             'left',
         );
         expect(resolveSelectionSet(moved.state, moved.selection).entries[0].selection).toEqual(caret(row, 3));

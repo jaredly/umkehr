@@ -9,8 +9,7 @@ export type RichBlockMeta =
     | {type: 'blockquote'; ts: HLC}
     | {type: 'code'; language: string; ts: HLC}
     | {type: 'callout'; kind: 'info' | 'warning' | 'error'; ts: HLC}
-    | {type: 'table'; rowParent: Lamport; ts: HLC}
-    | {type: 'table_row'; ts: HLC};
+    | {type: 'table'; ts: HLC};
 
 export type RichBlockType = RichBlockMeta['type'];
 
@@ -33,23 +32,17 @@ export const sameTypeWithTs = (meta: RichBlockMeta, ts: HLC): RichBlockMeta => {
         case 'callout':
             return {type: 'callout', kind: meta.kind, ts};
         case 'table':
-            return {type: 'table', rowParent: meta.rowParent, ts};
-        case 'table_row':
-            return {type: 'table_row', ts};
+            return {type: 'table', ts};
     }
 };
 
 export const isTableBlock = (meta: RichBlockMeta): boolean => meta.type === 'table';
 
-export const isTableRow = (meta: RichBlockMeta): boolean => meta.type === 'table_row';
-
-export const isCellBlock = (meta: RichBlockMeta): boolean =>
-    !isTableBlock(meta) && !isTableRow(meta);
+export const isCellBlock = (meta: RichBlockMeta): boolean => !isTableBlock(meta);
 
 export const isEditableBlock = (_meta: RichBlockMeta): boolean => true;
 
 export const isWholeSubtreeStyledBlock = (meta: RichBlockMeta): boolean =>
     meta.type === 'blockquote' || meta.type === 'callout';
 
-export const tableVirtualParentsForBlock = (block: Block<RichBlockMeta>): Lamport[] =>
-    block.meta.type === 'table' ? [block.meta.rowParent] : [];
+export const tableVirtualParentsForBlock = (_block: Block<RichBlockMeta>): Lamport[] => [];

@@ -387,7 +387,7 @@ const isRichBlockMeta = (value: unknown): value is RichBlockMeta => {
     switch (value.type) {
         case 'paragraph':
         case 'blockquote':
-        case 'table_row':
+        case 'table':
             return true;
         case 'heading':
             return value.level === 1 || value.level === 2 || value.level === 3;
@@ -399,8 +399,6 @@ const isRichBlockMeta = (value: unknown): value is RichBlockMeta => {
             return typeof value.language === 'string';
         case 'callout':
             return value.kind === 'info' || value.kind === 'warning' || value.kind === 'error';
-        case 'table':
-            return isLamport(value.rowParent);
         default:
             return false;
     }

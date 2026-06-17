@@ -1,5 +1,6 @@
 import type {CachedState} from 'umkehr/block-crdt/types';
-import {blockContents, materializeFormattedBlocks, type Op} from 'umkehr/block-crdt';
+import {blockContents, materializeFormattedBlocks, materializedBlockParent, type Op} from 'umkehr/block-crdt';
+import {lamportToString} from 'umkehr/block-crdt/utils';
 import type {RichBlockMeta} from './blockMeta';
 import {
     deleteBackward,
@@ -494,7 +495,12 @@ const blockMovesForSelection = (
 const isTableCellOutlineItem = (
     state: CachedState<RichBlockMeta>,
     block: {parentId: string},
-): boolean => state.state.blocks[block.parentId]?.meta.type === 'table_row';
+): boolean => {
+    const parent = state.state.blocks[block.parentId];
+    if (!parent || parent.meta.type === 'table') return false;
+    const grandparentId = lamportToString(materializedBlockParent(state, block.parentId));
+    return state.state.blocks[grandparentId]?.meta.type === 'table';
+};
 
 export const moveSelectionsVertically = (
     state: CachedState<RichBlockMeta>,

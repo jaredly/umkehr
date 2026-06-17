@@ -429,14 +429,33 @@ select {
     padding: 8px 0 10px;
 }
 
+.tableGrid {
+    --table-row-gutter: 30px;
+    display: grid;
+    grid-template-columns: fit-content(180px) repeat(calc(var(--table-columns, 1) + 1), minmax(150px, 1fr)) 0;
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    padding-left: var(--table-row-gutter);
+    border: 1px solid #c9d4de;
+    border-radius: 6px;
+    background: #fff;
+}
+
+.tableTitleRow {
+    grid-column: 1 / -1;
+    border-bottom: 1px solid #dce4eb;
+    background: #f7fafc;
+}
+
 .tableTitleRow .blockRow {
     margin-left: 0;
-    padding-bottom: 6px;
+    padding: 6px 8px;
 }
 
 .tableTitleRow .blockType-table .editableBlock {
     min-height: 30px;
-    padding-left: 0;
+    padding-left: 6px;
     font-size: 13px;
     font-weight: 800;
     font-variant: small-caps;
@@ -563,19 +582,6 @@ select {
     cursor: not-allowed;
 }
 
-.tableGrid {
-    --table-row-gutter: 30px;
-    display: grid;
-    grid-template-columns: fit-content(180px) repeat(calc(var(--table-columns, 1) + 1), minmax(150px, 1fr)) 0;
-    width: 100%;
-    max-width: 100%;
-    overflow-x: auto;
-    padding-left: var(--table-row-gutter);
-    border: 1px solid #c9d4de;
-    border-radius: 6px;
-    background: #fff;
-}
-
 .tableRow {
     position: relative;
     display: grid;
@@ -630,6 +636,9 @@ select {
     font-size: 13px;
     font-weight: 650;
     color: #23313d;
+    overflow-x: auto;
+    overflow-wrap: normal;
+    white-space: pre;
 }
 
 .tableCell {
@@ -707,6 +716,25 @@ select {
 
 .tableCell .editableBlock {
     min-height: 36px;
+    overflow-x: auto;
+    overflow-wrap: normal;
+    white-space: pre;
+}
+
+.tableCellChildren {
+    display: grid;
+    gap: 2px;
+    padding: 0 4px 4px;
+}
+
+.tableInterstitialRow {
+    position: relative;
+    border-bottom: 1px solid #dce4eb;
+    background: #fff;
+}
+
+.tableInterstitialRow > .tableBlock {
+    margin: 0;
 }
 
 .missingTableCell {
@@ -747,7 +775,7 @@ select {
 }
 
 .editableBlock[data-empty="true"]::before {
-    content: "...";
+    content: attr(data-placeholder);
     display: inline-block;
     opacity: 0.5;
 }

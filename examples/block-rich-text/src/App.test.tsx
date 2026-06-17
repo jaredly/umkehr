@@ -38,9 +38,11 @@ const blockTexts = (panel: HTMLElement): string[] =>
     blocks(panel).map(blockText);
 
 const tableBlocks = (panel: HTMLElement): HTMLElement[] =>
-    within(within(panel).getByRole('table', {name: 'Table block'})).getAllByRole('textbox', {
-        name: 'Block text',
-    });
+    Array.from(
+        within(panel)
+            .getByRole('table', {name: 'Table block'})
+            .querySelectorAll<HTMLElement>('.tableCell [role="textbox"][aria-label="Block text"]'),
+    );
 
 const tableBlockTexts = (panel: HTMLElement): string[] =>
     tableBlocks(panel).map(blockText);
@@ -527,6 +529,25 @@ describe('Block rich text example UI', () => {
         await waitFor(() => expect(tableBlocks(right)).toHaveLength(9));
     });
 
+    it('converts a selected table header back to a normal block from the block type menu', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+        selectCaret(blocks(left)[0], 0);
+        typeText(blocks(left)[0], 'Schedule');
+        setBlockType(left, 'table');
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+
+        selectCaret(tableTitleBlock(left), 0);
+        setBlockType(left, 'paragraph');
+
+        await waitFor(() => {
+            expect(within(left).queryByRole('table', {name: 'Table block'})).toBeNull();
+            expect(within(right).queryByRole('table', {name: 'Table block'})).toBeNull();
+        });
+        expect(blockTexts(left)).toContain('Schedule');
+        expect(blockTexts(right)).toContain('Schedule');
+    });
+
     it('edits and splits the table title into a following paragraph', async () => {
         const view = render(<App />);
         const {left, right} = panels(view);
@@ -563,7 +584,7 @@ describe('Block rich text example UI', () => {
         expect(within(left).getByRole('textbox', {name: 'Row header 2'}).getAttribute('data-placeholder')).toBe('2');
         expect(within(left).getByRole('button', {name: 'Move row 1'}).textContent).toBe('⋮');
         expect(within(left).getByRole('button', {name: 'Move row 2'}).textContent).toBe('⋮');
-        expect(within(within(left).getByRole('table', {name: 'Table block'})).queryAllByRole('button', {name: 'Move block'})).toEqual([]);
+        expect(within(within(left).getByRole('table', {name: 'Table block'})).queryAllByRole('button', {name: 'Move block'})).toHaveLength(1);
     });
 
     it('highlights the active cell and drags a focused cell from its border', async () => {
