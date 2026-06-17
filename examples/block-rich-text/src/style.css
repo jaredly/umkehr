@@ -631,14 +631,6 @@ select {
     color: #23313d;
 }
 
-.editableBlock.tableRowHeaderText[data-empty="true"]::before {
-    content: attr(data-placeholder);
-    display: inline;
-    width: auto;
-    color: #738392;
-    font-weight: 700;
-}
-
 .tableCell {
     position: relative;
     min-width: 150px;
@@ -754,9 +746,17 @@ select {
 }
 
 .editableBlock[data-empty="true"]::before {
-    content: "";
+    content: "...";
     display: inline-block;
-    width: 1px;
+    opacity: 0.5;
+}
+
+.editableBlock[data-empty="true"]:focus::before {
+    content: "";
+}
+
+.editableBlock[data-empty="true"]:has(.retainedSelectionCaret)::before {
+    content: "";
 }
 
 .markBold {

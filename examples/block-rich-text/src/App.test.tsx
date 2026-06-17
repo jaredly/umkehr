@@ -468,6 +468,40 @@ describe('Block rich text example UI', () => {
         expect(blocks(right)).toHaveLength(1);
     });
 
+    it('tracks empty editable blocks for the empty-block indicator', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        let block = blocks(left)[0];
+
+        expect(block.getAttribute('data-empty')).toBe('true');
+
+        selectCaret(block, 0);
+        typeText(block, 'a');
+        await waitFor(() => expect(block.getAttribute('data-empty')).toBeNull());
+
+        selectCaret(block, 1);
+        beforeInputDeleteBackward(block);
+        await waitFor(() => expect(block.getAttribute('data-empty')).toBe('true'));
+
+        block = blocks(left)[0];
+        selectCaret(block, 0);
+        beforeInputText(block, ' ');
+        await waitFor(() => expect(block.getAttribute('data-empty')).toBeNull());
+    });
+
+    it('marks empty table editables for the empty-block indicator', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        selectCaret(blocks(left)[0], 0);
+
+        setBlockType(left, 'table');
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+
+        expect(tableTitleBlock(left).getAttribute('data-empty')).toBe('true');
+        expect(tableBlocks(left)[0].getAttribute('data-empty')).toBe('true');
+        expect(within(left).getByRole('textbox', {name: 'Row header 1'}).getAttribute('data-empty')).toBe('true');
+    });
+
     it('converts a block to a table from the block type menu', async () => {
         const view = render(<App />);
         const {left, right} = panels(view);
