@@ -1,0 +1,35 @@
+# Implementation Log: Markdown Shortcuts On Paste
+
+- Started with existing working tree changes in `examples/block-rich-text/src/App.tsx`, `App.test.tsx`, and `style.css`; treated them as user-owned and avoided reverting them.
+- Phase 1 started: refactor shortcut detection in the command layer so typed and paste paths can share prefix matching.
+- Phases 1-3 command layer:
+  - Added shared `markdownShortcuts.ts` prefix matching for typed and paste paths.
+  - Added `pastePlainTextWithMarkdownShortcuts`, preserving existing paste behavior first, then converting touched blocks whose pasted line started at offset `0`.
+  - Added indentation handling for list/todo paste; two leading spaces or one tab count as one nesting level.
+  - Kept headings unconverted when indented.
+  - Kept optimized multi-line paste path active by tracking touched lines from both paste branches.
+  - Added command-level coverage for flat paste conversion, nonzero-offset literal paste, code-block literal paste, peer sync, and nested list/todo paste.
+  - Verification: `npm exec vitest -- run examples/block-rich-text/src/blockCommands.test.ts` passed.
+- Phase 4 app/multi-selection wiring:
+  - Added `pastePlainTextWithMarkdownShortcutsEverywhere`.
+  - Wired main editor paste and table row header paste through the shortcut-aware path.
+  - Preserved link-like paste-over-selection behavior by leaving that branch before markdown paste handling.
+  - Added multi-selection coverage for pasting a shortcut at two carets.
+  - Added UI coverage for main editor paste conversion, indented list paste, and table row header paste.
+- Issue/workaround: table row headers use structural `table_row` metadata. Converting that metadata to `heading` or `list_item` would break table structure, so row-header markdown paste strips recognized markers while preserving `table_row` metadata.
+- Issue/workaround: the generic `expectCache` helper cannot recompute caches for table virtual parents without virtual-parent context. The table-row-header command test asserts text/meta directly and skips that helper.
+- Phase 5 annotation body paste:
+  - Added `pasteAnnotationBodyTextWithMarkdownShortcuts`.
+  - Multi-line annotation body paste now splits into body blocks and converts each eligible line.
+  - Annotation body rendering now carries body block metadata and displays lightweight markers for list/todo body blocks.
+  - Preserved link-like paste-over-selection behavior in annotation bodies.
+- Issue/workaround: annotation body rendering currently enumerates direct annotation body children. Nested annotation body lists would require broader rendering/navigation work, so annotation markdown paste is flat per body line for now.
+- Phase 6 history/perf regression:
+  - Added a history test proving paste plus shortcut conversion is one local history action.
+  - Kept the optimized top-level multi-line paste path active; conversion scans only touched pasted-line starts.
+- Final verification:
+  - `npm exec vitest -- run examples/block-rich-text/src/blockCommands.test.ts` passed.
+  - `npm exec vitest -- run examples/block-rich-text/src/multiSelectionCommands.test.ts` passed.
+  - `npm exec vitest -- run examples/block-rich-text/src/history.test.ts` passed.
+  - `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx` passed.
+  - `npm exec tsc -- -p examples/block-rich-text/tsconfig.json --noEmit` passed after fixing a TypeScript narrowing issue in the nesting helper.

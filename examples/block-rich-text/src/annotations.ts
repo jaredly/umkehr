@@ -7,6 +7,7 @@ import {
     insertBlockOpsWithId,
     materializeFormattedBlocks,
     orderedCharIdsForBlock,
+    setBlockMetaOps,
     splitBlockOps,
     visibleBlockChildren,
     coveredCharIdsForMark,
@@ -21,6 +22,7 @@ import {lamportToString, parseLamportString} from 'umkehr/block-crdt/utils';
 import {paragraphMeta, type RichBlockMeta} from './blockMeta';
 import {caret, focusPoint, normalizeSelectionSegments, segmentText, type EditorSelection} from './selectionModel';
 import type {CommandContext, CommandResult} from './blockCommands';
+import {markdownShortcutPrefix} from './markdownShortcuts';
 import {markRangeOp} from 'umkehr/block-crdt';
 import {
     ANNOTATION_MARK,
@@ -248,6 +250,81 @@ export const replaceAnnotationBodySelection = (
     return {state: working, ops, selection: {type: 'caret', point: {blockId: range.blockId, offset}}};
 };
 
+export const pasteAnnotationBodyTextWithMarkdownShortcuts = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    text: string,
+    context: CommandContext,
+): CommandResult => {
+    const lines = text.replace(/\r\n?/g, '\n').split('\n');
+    let result = replaceAnnotationBodySelection(state, selection, lines[0] ?? '', context);
+    const ops = [...result.ops];
+    const firstPoint = focusPoint(result.selection);
+    const touchedLines = [
+        {
+            blockId: firstPoint.blockId,
+            startOffset: firstPoint.offset - segmentText(lines[0] ?? '').length,
+            sourceLine: lines[0] ?? '',
+        },
+    ];
+
+    for (let index = 1; index < lines.length; index++) {
+        const split = splitAnnotationBodyBlock(result.state, result.selection, context);
+        ops.push(...split.ops);
+        const inserted = replaceAnnotationBodySelection(split.state, split.selection, lines[index], context);
+        ops.push(...inserted.ops);
+        result = inserted;
+        touchedLines.push({
+            blockId: focusPoint(result.selection).blockId,
+            startOffset: 0,
+            sourceLine: lines[index],
+        });
+    }
+
+    let working = result.state;
+    const removedPrefixByBlock = new Map<string, number>();
+    for (const touched of touchedLines) {
+        if (touched.startOffset !== 0) continue;
+        const block = working.state.blocks[touched.blockId];
+        if (!block) continue;
+        const shortcut = markdownShortcutPrefix(touched.sourceLine, block.meta, context.nextTs);
+        if (!shortcut) continue;
+        const currentPrefix = segmentText(blockContents(working, touched.blockId))
+            .slice(0, shortcut.length)
+            .join('');
+        if (currentPrefix !== touched.sourceLine.slice(0, shortcut.length)) continue;
+
+        const deleteOps = deleteRangeOps(working, {
+            block: block.id,
+            startOffset: 0,
+            endOffset: shortcut.length,
+        });
+        working = applyMany(working, deleteOps, annotationVirtualParents(working));
+        ops.push(...deleteOps);
+        removedPrefixByBlock.set(
+            touched.blockId,
+            (removedPrefixByBlock.get(touched.blockId) ?? 0) + shortcut.length,
+        );
+
+        const metaOps = setBlockMetaOps(working, {block: block.id, meta: shortcut.meta});
+        working = applyMany(working, metaOps, annotationVirtualParents(working));
+        ops.push(...metaOps);
+    }
+
+    return {state: working, ops, selection: adjustSelectionForRemovedPrefixes(result.selection, removedPrefixByBlock)};
+};
+
+const adjustSelectionForRemovedPrefixes = (
+    selection: EditorSelection,
+    removedPrefixByBlock: Map<string, number>,
+): EditorSelection => {
+    const point = focusPoint(selection);
+    const removed = removedPrefixByBlock.get(point.blockId) ?? 0;
+    return selection.type === 'caret' && removed
+        ? caret(point.blockId, Math.max(0, point.offset - removed))
+        : selection;
+};
+
 export const splitAnnotationBodyBlock = (
     state: CachedState<RichBlockMeta>,
     selection: EditorSelection,
@@ -419,7 +496,7 @@ export type RenderedAnnotation = {
     data: AnnotationMarkData;
     mark: Mark;
     referenceText: string;
-    bodyBlocks: Array<{id: string; text: string; runs: FormattedRun[]}>;
+    bodyBlocks: Array<{id: string; text: string; runs: FormattedRun[]; meta: RichBlockMeta}>;
 };
 
 export const renderedAnnotations = (
@@ -447,7 +524,12 @@ export const renderedAnnotations = (
                     const text = formatted
                         ? formatted.runs.map((run) => run.text).join('')
                         : blockContents(state, bodyId);
-                    return {id: bodyId, text, runs: formatted?.runs ?? [{text, marks: {}}]};
+                    return {
+                        id: bodyId,
+                        text,
+                        runs: formatted?.runs ?? [{text, marks: {}}],
+                        meta: state.state.blocks[bodyId]?.meta ?? paragraphMeta(''),
+                    };
                 }),
             };
         })

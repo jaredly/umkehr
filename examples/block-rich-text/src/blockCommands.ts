@@ -29,6 +29,7 @@ import {lamportToString, parseLamportString} from 'umkehr/block-crdt/utils';
 import {paragraphMeta, sameTypeWithTs, type RichBlockMeta} from './blockMeta';
 import {annotationVirtualParents} from './annotations';
 import type {BooleanInlineMark} from './inlineMarks';
+import {markdownShortcutPrefix, type MarkdownShortcutMatch} from './markdownShortcuts';
 import {
     caret,
     clampPoint,
@@ -130,52 +131,25 @@ export const insertTextWithMarkdownShortcuts = (
     const textBeforeCaret = segmentText(blockContents(inserted.state, point.blockId))
         .slice(0, point.offset)
         .join('');
-    const meta = markdownShortcutMeta(textBeforeCaret, block.meta, context.nextTs);
-    if (!meta) return inserted;
+    const shortcut = markdownShortcutPrefix(textBeforeCaret, block.meta, context.nextTs);
+    if (!shortcut || shortcut.length !== point.offset) return inserted;
 
     let working = inserted.state;
     const ops: Array<Op<RichBlockMeta>> = [...inserted.ops];
     const deleteOps = deleteRangeOps(working, {
         block: parseLamportString(point.blockId),
         startOffset: 0,
-        endOffset: point.offset,
+        endOffset: shortcut.length,
     });
     working = applyMany(working, deleteOps, annotationVirtualParents(working));
     ops.push(...deleteOps);
 
-    const metaOps = setBlockMetaOps(working, {block: block.id, meta});
+    const metaOps = setBlockMetaOps(working, {block: block.id, meta: shortcut.meta});
     working = applyMany(working, metaOps, annotationVirtualParents(working));
     ops.push(...metaOps);
 
     return {state: working, ops, selection: caret(point.blockId, 0)};
 };
-
-const markdownShortcutMeta = (
-    prefix: string,
-    currentMeta: RichBlockMeta,
-    nextTs: CommandContext['nextTs'],
-): RichBlockMeta | null => {
-    if (currentMeta.type === 'paragraph' && (prefix === '- ' || prefix === '* ')) {
-        return {type: 'list_item', kind: 'unordered', ts: nextTs()};
-    }
-    if (currentMeta.type === 'paragraph' && /^[1-9][0-9]*\. $/.test(prefix)) {
-        return {type: 'list_item', kind: 'ordered', ts: nextTs()};
-    }
-    if (currentMeta.type === 'paragraph' && /^#{1,3} $/.test(prefix)) {
-        return {type: 'heading', level: (prefix.length - 1) as 1 | 2 | 3, ts: nextTs()};
-    }
-    if (!canConvertMarkdownTodoShortcut(currentMeta)) return null;
-    if (prefix === '[ ] ') {
-        return {type: 'todo', checked: false, ts: nextTs()};
-    }
-    if (prefix === '[x] ' || prefix === '[X] ') {
-        return {type: 'todo', checked: true, ts: nextTs()};
-    }
-    return null;
-};
-
-const canConvertMarkdownTodoShortcut = (meta: RichBlockMeta): boolean =>
-    meta.type === 'paragraph' || (meta.type === 'list_item' && meta.kind === 'unordered');
 
 export const insertTextWithMarks = (
     state: CachedState<RichBlockMeta>,
@@ -683,12 +657,35 @@ export const pastePlainText = (
     text: string,
     context: CommandContext,
 ): CommandResult => {
+    return pastePlainTextDetailed(state, selection, text, context).result;
+};
+
+type PastedLineTarget = {
+    blockId: string;
+    startOffset: number;
+    sourceLine: string;
+};
+
+const pastePlainTextDetailed = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    text: string,
+    context: CommandContext,
+): {result: CommandResult; touchedLines: PastedLineTarget[]} => {
     const lines = text.replace(/\r\n?/g, '\n').split('\n');
     const appended = pastePlainTextAtBlockEnd(state, selection, lines, context);
     if (appended) return appended;
 
     let result = insertText(state, selection, lines[0] ?? '', context);
     const ops = [...result.ops];
+    const firstPoint = focusPoint(result.selection);
+    const touchedLines: PastedLineTarget[] = [
+        {
+            blockId: firstPoint.blockId,
+            startOffset: firstPoint.offset - segmentText(lines[0] ?? '').length,
+            sourceLine: lines[0] ?? '',
+        },
+    ];
 
     for (let index = 1; index < lines.length; index++) {
         const splitResult = splitBlock(result.state, result.selection, context);
@@ -696,9 +693,30 @@ export const pastePlainText = (
         const inserted = insertText(splitResult.state, splitResult.selection, lines[index], context);
         ops.push(...inserted.ops);
         result = inserted;
+        touchedLines.push({blockId: focusPoint(result.selection).blockId, startOffset: 0, sourceLine: lines[index]});
     }
 
-    return {...result, ops};
+    return {result: {...result, ops}, touchedLines};
+};
+
+export const pastePlainTextWithMarkdownShortcuts = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    text: string,
+    context: CommandContext,
+): CommandResult => {
+    const pasted = pastePlainTextDetailed(state, selection, text, context);
+    const converted = applyMarkdownShortcutsToPastedLines(
+        pasted.result.state,
+        pasted.touchedLines,
+        pasted.result.selection,
+        context,
+    );
+    return {
+        state: converted.state,
+        ops: [...pasted.result.ops, ...converted.ops],
+        selection: converted.selection,
+    };
 };
 
 const pastePlainTextAtBlockEnd = (
@@ -706,7 +724,7 @@ const pastePlainTextAtBlockEnd = (
     selection: EditorSelection,
     lines: string[],
     context: CommandContext,
-): CommandResult | null => {
+): {result: CommandResult; touchedLines: PastedLineTarget[]} | null => {
     if (lines.length <= 1 || !isCollapsed(selection)) return null;
     const point = firstPointForSelection(state, selection);
     const block = state.state.blocks[point.blockId];
@@ -752,6 +770,9 @@ const pastePlainTextAtBlockEnd = (
     };
 
     appendText(previousBlockId, lines[0] ?? '');
+    const touchedLines: PastedLineTarget[] = [
+        {blockId: previousBlockId, startOffset: point.offset, sourceLine: lines[0] ?? ''},
+    ];
 
     for (let index = 1; index < lines.length; index++) {
         const previous = blocks[previousBlockId];
@@ -774,16 +795,204 @@ const pastePlainTextAtBlockEnd = (
         previousBlockId = blockId;
         selectionOffset = 0;
         appendText(previousBlockId, lines[index]);
+        touchedLines.push({blockId: previousBlockId, startOffset: 0, sourceLine: lines[index]});
     }
 
     return {
-        state: {
-            state: {...state.state, chars, blocks, maxSeenCount},
-            cache: {...state.cache, blockChildren, charContents},
+        result: {
+            state: {
+                state: {...state.state, chars, blocks, maxSeenCount},
+                cache: {...state.cache, blockChildren, charContents},
+            },
+            ops,
+            selection: caret(previousBlockId, selectionOffset),
         },
-        ops,
-        selection: caret(previousBlockId, selectionOffset),
+        touchedLines,
     };
+};
+
+type PastedLineShortcut = {
+    deleteLength: number;
+    indentLevel: number;
+    shortcut: MarkdownShortcutMatch;
+};
+
+const applyMarkdownShortcutsToPastedLines = (
+    state: CachedState<RichBlockMeta>,
+    touchedLines: PastedLineTarget[],
+    selection: EditorSelection,
+    context: CommandContext,
+): CommandResult => {
+    let working = state;
+    const ops: Array<Op<RichBlockMeta>> = [];
+    const removedPrefixByBlock = new Map<string, number>();
+    const converted: Array<{blockId: string; indentLevel: number; nestable: boolean}> = [];
+
+    for (const touched of touchedLines) {
+        if (touched.startOffset !== 0) continue;
+        const block = working.state.blocks[touched.blockId];
+        if (!block) continue;
+        const lineShortcut = pastedLineShortcut(touched.sourceLine, block.meta, context.nextTs);
+        if (!lineShortcut) continue;
+
+        const currentPrefix = segmentText(blockContents(working, touched.blockId))
+            .slice(0, lineShortcut.deleteLength)
+            .join('');
+        if (currentPrefix !== touched.sourceLine.slice(0, lineShortcut.deleteLength)) continue;
+
+        const deleteOps = deleteRangeOps(working, {
+            block: block.id,
+            startOffset: 0,
+            endOffset: lineShortcut.deleteLength,
+        });
+        working = applyMany(working, deleteOps, annotationVirtualParents(working));
+        ops.push(...deleteOps);
+        removedPrefixByBlock.set(
+            touched.blockId,
+            (removedPrefixByBlock.get(touched.blockId) ?? 0) + lineShortcut.deleteLength,
+        );
+
+        const metaOps = setBlockMetaOps(working, {
+            block: block.id,
+            meta: lineShortcut.shortcut.meta,
+        });
+        working = applyMany(working, metaOps, annotationVirtualParents(working));
+        ops.push(...metaOps);
+
+        converted.push({
+            blockId: touched.blockId,
+            indentLevel: lineShortcut.indentLevel,
+            nestable: lineShortcut.shortcut.kind === 'list' || lineShortcut.shortcut.kind === 'todo',
+        });
+    }
+
+    const nested = nestConvertedPastedListBlocks(working, converted, context);
+    working = nested.state;
+    ops.push(...nested.ops);
+
+    return {state: working, ops, selection: adjustSelectionForRemovedPrefixes(selection, removedPrefixByBlock)};
+};
+
+const pastedLineShortcut = (
+    sourceLine: string,
+    currentMeta: RichBlockMeta,
+    nextTs: CommandContext['nextTs'],
+): PastedLineShortcut | null => {
+    const indentation = pastedLineIndentation(sourceLine);
+    const text = indentation.indentLevel > 0 ? sourceLine.slice(indentation.length) : sourceLine;
+    if (currentMeta.type === 'table_row') {
+        if (indentation.length > 0) return null;
+        const markerLength = markdownShortcutMarkerLength(text);
+        return markerLength === null
+            ? null
+            : {
+                  deleteLength: markerLength,
+                  indentLevel: 0,
+                  shortcut: {length: markerLength, meta: currentMeta, kind: 'heading'},
+              };
+    }
+    const shortcut = markdownShortcutPrefix(text, currentMeta, nextTs);
+    if (!shortcut) return null;
+    if (indentation.indentLevel > 0 && shortcut.kind === 'heading') return null;
+    if (indentation.length > 0 && indentation.indentLevel === 0) return null;
+    return {
+        deleteLength: indentation.length + shortcut.length,
+        indentLevel: shortcut.kind === 'list' || shortcut.kind === 'todo' ? indentation.indentLevel : 0,
+        shortcut,
+    };
+};
+
+const markdownShortcutMarkerLength = (text: string): number | null => {
+    if (text.startsWith('- ') || text.startsWith('* ')) return 2;
+    const ordered = /^[1-9][0-9]*\. /.exec(text);
+    if (ordered) return ordered[0].length;
+    const heading = /^#{1,3} /.exec(text);
+    if (heading) return heading[0].length;
+    if (text.startsWith('[ ] ') || text.startsWith('[x] ') || text.startsWith('[X] ')) return 4;
+    return null;
+};
+
+const pastedLineIndentation = (sourceLine: string): {length: number; indentLevel: number} => {
+    let length = 0;
+    let spaces = 0;
+    let tabs = 0;
+    for (const char of sourceLine) {
+        if (char === ' ') {
+            spaces++;
+            length++;
+        } else if (char === '\t') {
+            tabs++;
+            length++;
+        } else {
+            break;
+        }
+    }
+    return {length, indentLevel: tabs + Math.floor(spaces / 2)};
+};
+
+const nestConvertedPastedListBlocks = (
+    state: CachedState<RichBlockMeta>,
+    converted: Array<{blockId: string; indentLevel: number; nestable: boolean}>,
+    context: CommandContext,
+): {state: CachedState<RichBlockMeta>; ops: Array<Op<RichBlockMeta>>} => {
+    let working = state;
+    const ops: Array<Op<RichBlockMeta>> = [];
+    const stack = new Map<number, string>();
+
+    for (const item of converted) {
+        if (!item.nestable) {
+            stack.clear();
+            continue;
+        }
+        if (item.indentLevel > 0 && !pastedBlockHasTableRowParent(working, item.blockId)) {
+            let parentLevel = item.indentLevel - 1;
+            while (parentLevel >= 0 && !stack.has(parentLevel)) parentLevel--;
+            const parentId = parentLevel >= 0 ? stack.get(parentLevel) : null;
+            const current = working.state.blocks[item.blockId];
+            const parent = parentId ? working.state.blocks[parentId] : null;
+            if (current && parent && parentId) {
+                const siblings = visibleBlockChildren(working, parentId, annotationVirtualParents(working)).filter(
+                    (id) => id !== item.blockId,
+                );
+                const beforeId = siblings[siblings.length - 1] ?? null;
+                const moveOps = moveBlockOps(working, {
+                    actor: context.actor,
+                    block: current.id,
+                    parent: parent.id,
+                    before: beforeId ? working.state.blocks[beforeId].id : null,
+                    after: null,
+                    ts: context.nextTs(),
+                    virtualParents: annotationVirtualParents(working),
+                });
+                working = applyMany(working, moveOps, annotationVirtualParents(working));
+                ops.push(...moveOps);
+            }
+        }
+        for (const level of [...stack.keys()]) {
+            if (level >= item.indentLevel) stack.delete(level);
+        }
+        stack.set(item.indentLevel, item.blockId);
+    }
+
+    return {state: working, ops};
+};
+
+const pastedBlockHasTableRowParent = (state: CachedState<RichBlockMeta>, blockId: string): boolean => {
+    const parentId = lamportToString(materializedBlockParent(state, blockId, annotationVirtualParents(state)));
+    return state.state.blocks[parentId]?.meta.type === 'table_row';
+};
+
+const adjustSelectionForRemovedPrefixes = (
+    selection: EditorSelection,
+    removedPrefixByBlock: Map<string, number>,
+): EditorSelection => {
+    const adjustPoint = (point: BlockPoint): BlockPoint => {
+        const removed = removedPrefixByBlock.get(point.blockId) ?? 0;
+        return removed ? {...point, offset: Math.max(0, point.offset - removed)} : point;
+    };
+    return selection.type === 'caret'
+        ? caret(selection.point.blockId, adjustPoint(selection.point).offset)
+        : {type: 'range', anchor: adjustPoint(selection.anchor), focus: adjustPoint(selection.focus)};
 };
 
 const lastVisibleCharId = (state: CachedState<RichBlockMeta>, blockId: string): Lamport | null => {

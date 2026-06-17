@@ -17,6 +17,7 @@ import {
     insertTextWithRetainedMarksEverywhere,
     moveSelectionsHorizontally,
     moveSelectionsVertically,
+    pastePlainTextWithMarkdownShortcutsEverywhere,
     setLinkMarkEverywhere,
     splitBlockEverywhere,
     toggleMarkEverywhere,
@@ -78,6 +79,28 @@ describe('block rich text multi-selection commands', () => {
         const result = insertTextEverywhere(pasted.state, set, 'X', ctx());
 
         expect(lines(result.state)).toEqual(['aXb', 'cXd']);
+    });
+
+    it('pastes markdown shortcuts at multiple carets', () => {
+        const pasted = pastePlainText(init(), caret(onlyBlock(init()), 0), '\n', ctx());
+        const [firstBlock, secondBlock] = rootBlockIds(pasted.state);
+        const set = appendSelection(
+            pasted.state,
+            singleRetainedSelectionSet(pasted.state, caret(firstBlock, 0), 'first'),
+            caret(secondBlock, 0),
+            'second',
+        );
+
+        const result = pastePlainTextWithMarkdownShortcutsEverywhere(pasted.state, set, '- item', ctx());
+        const ids = rootBlockIds(result.state);
+
+        expect(lines(result.state)).toEqual(['item', 'item']);
+        expect(result.state.state.blocks[ids[0]].meta).toMatchObject({type: 'list_item', kind: 'unordered'});
+        expect(result.state.state.blocks[ids[1]].meta).toMatchObject({type: 'list_item', kind: 'unordered'});
+        expect(resolveSelectionSet(result.state, result.selection).entries.map((entry) => entry.selection)).toEqual([
+            caret(ids[0], 4),
+            caret(ids[1], 4),
+        ]);
     });
 
     it('inserts marked text at selected carets', () => {

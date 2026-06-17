@@ -18,6 +18,7 @@ import {
     deleteBackwardEverywhere,
     insertTextEverywhere,
     pastePlainTextEverywhere,
+    pastePlainTextWithMarkdownShortcutsEverywhere,
     setBlockTypeEverywhere,
     splitBlockEverywhere,
     updateBlockMetaEverywhere,
@@ -83,6 +84,9 @@ const visibleOutline = (replica: Replica): Array<{text: string; depth: number}> 
 const paste = (text: string) => (replica: Replica) =>
     pastePlainTextEverywhere(replica.state, replica.selection, text, makeCommandContext(replica));
 
+const pasteMarkdown = (text: string) => (replica: Replica) =>
+    pastePlainTextWithMarkdownShortcutsEverywhere(replica.state, replica.selection, text, makeCommandContext(replica));
+
 const insert = (text: string) => (replica: Replica) =>
     insertTextEverywhere(replica.state, replica.selection, text, makeCommandContext(replica));
 
@@ -142,6 +146,19 @@ describe('block rich text history', () => {
         expect(visibleText(replayHistory(history.actions, 0).left)).toEqual(['']);
         expect(visibleText(replayHistory(history.actions, 1).left)).toEqual(['a']);
         expect(visibleText(replayHistory(history.actions, 2).left)).toEqual(['ab']);
+    });
+
+    it('treats pasted markdown shortcut conversion as one history action', () => {
+        let history = initialHistoryState();
+        history = appendLocal(history, 'left', pasteMarkdown('- item'));
+
+        expect(history.actions).toHaveLength(1);
+        expect(visibleText(replayHistory(history.actions, 0).left)).toEqual(['']);
+
+        const replayed = replayHistory(history.actions, 1).left;
+        const block = materializeFormattedBlocks(replayed.state)[0];
+        expect(block.runs.map((run) => run.text).join('')).toBe('item');
+        expect(block.block.meta).toMatchObject({type: 'list_item', kind: 'unordered'});
     });
 
     it('branches by dropping future actions when appending from the past', () => {

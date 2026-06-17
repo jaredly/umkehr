@@ -48,6 +48,7 @@ import {
     deleteAnnotationBodyForward,
     renderedAnnotations,
     isAnnotationData,
+    pasteAnnotationBodyTextWithMarkdownShortcuts,
     replaceAnnotationBodySelection,
     removeAnnotationBodyLink,
     resolveAnnotation,
@@ -97,7 +98,7 @@ import {
     insertTextWithRetainedMarksEverywhere,
     moveSelectionsHorizontally,
     moveSelectionsVertically,
-    pastePlainTextEverywhere,
+    pastePlainTextWithMarkdownShortcutsEverywhere,
     removeLinkMarkEverywhere,
     setLinkMarkEverywhere,
     setBlockTypeEverywhere,
@@ -184,7 +185,11 @@ export function App() {
     return hasDemoQuery() ? <BlogVisualDemos /> : <EditorApp />;
 }
 
-const actionsSharePrefix = (actions: HistoryAction[], prefix: HistoryAction[], length: number): boolean => {
+const actionsSharePrefix = (
+    actions: HistoryAction[],
+    prefix: HistoryAction[],
+    length: number,
+): boolean => {
     if (prefix.length < length || actions.length < length) return false;
     for (let index = 0; index < length; index++) {
         if (actions[index] !== prefix[index]) return false;
@@ -192,7 +197,10 @@ const actionsSharePrefix = (actions: HistoryAction[], prefix: HistoryAction[], l
     return true;
 };
 
-const deriveToolbarUndoState = (history: HistoryState, editorId: EditorId): ReturnType<typeof deriveUndoState> => {
+const deriveToolbarUndoState = (
+    history: HistoryState,
+    editorId: EditorId,
+): ReturnType<typeof deriveUndoState> => {
     const undoStack: string[] = [];
     const redoStack: string[] = [];
     const cursor = Math.max(0, Math.min(history.cursor, history.actions.length));
@@ -246,7 +254,11 @@ function EditorApp() {
             actionsSharePrefix(history.actions, cached.actions, cached.cursor)
         ) {
             const nextDemo = applyHistoryAction(cached.demo, history.actions[history.cursor - 1]);
-            replayCacheRef.current = {actions: history.actions, cursor: history.cursor, demo: nextDemo};
+            replayCacheRef.current = {
+                actions: history.actions,
+                cursor: history.cursor,
+                demo: nextDemo,
+            };
             return nextDemo;
         }
 
@@ -295,7 +307,10 @@ function EditorApp() {
                     },
                 };
                 const nextHistory = appendHistoryAction(current, action);
-                if (nextHistory.cursor === current.cursor + 1 && nextHistory.actions.length === current.actions.length + 1) {
+                if (
+                    nextHistory.cursor === current.cursor + 1 &&
+                    nextHistory.actions.length === current.actions.length + 1
+                ) {
                     replayCacheRef.current = {
                         actions: nextHistory.actions,
                         cursor: nextHistory.cursor,
@@ -548,16 +563,21 @@ function BlockEditor({
     const [hasFocus, setHasFocus] = useState(false);
     const [isExtendingSelection, setIsExtendingSelection] = useState(false);
     const [commentsOpen, setCommentsOpen] = useState(false);
-    const [commentFocusRequest, setCommentFocusRequest] = useState<CommentFocusRequest | null>(null);
-    const [lastEditedCommentBodyByAnnotation, setLastEditedCommentBodyByAnnotation] =
-        useState<Record<string, string>>({});
+    const [commentFocusRequest, setCommentFocusRequest] = useState<CommentFocusRequest | null>(
+        null,
+    );
+    const [lastEditedCommentBodyByAnnotation, setLastEditedCommentBodyByAnnotation] = useState<
+        Record<string, string>
+    >({});
     const [commentGutterTops, setCommentGutterTops] = useState<Record<string, number>>({});
     const [activeAnnotationBodySelection, setActiveAnnotationBodySelection] =
         useState<EditorSelection | null>(null);
     const [linkPopover, setLinkPopover] = useState<LinkPopoverState | null>(null);
     const [linkHoverPopover, setLinkHoverPopover] = useState<LinkHoverPopoverState | null>(null);
     const [pendingInlineMarks, setPendingInlineMarks] = useState<PendingInlineMarks>({});
-    const [retainedInlineMarks, setRetainedInlineMarks] = useState<RetainedInlineMarkSessionMap>({});
+    const [retainedInlineMarks, setRetainedInlineMarks] = useState<RetainedInlineMarkSessionMap>(
+        {},
+    );
     const blocksWithAnnotationBodies = materializeFormattedBlocks(
         replica.state,
         annotationVirtualParents(replica.state),
@@ -565,7 +585,8 @@ function BlockEditor({
     const annotationBodyIds = useMemo(() => {
         const result = new Set<string>();
         for (const mark of Object.values(replica.state.state.marks)) {
-            if (mark.type !== ANNOTATION_MARK || mark.remove || !isAnnotationData(mark.data)) continue;
+            if (mark.type !== ANNOTATION_MARK || mark.remove || !isAnnotationData(mark.data))
+                continue;
             for (const bodyId of annotationBodyBlockIds(replica.state, mark.data.id)) {
                 result.add(bodyId);
             }
@@ -593,7 +614,10 @@ function BlockEditor({
         const result = new Map<string, string>();
         for (const annotation of annotations) {
             if (annotation.data.presentation !== 'popover') continue;
-            const text = annotation.bodyBlocks.map((block) => block.text).filter(Boolean).join('\n');
+            const text = annotation.bodyBlocks
+                .map((block) => block.text)
+                .filter(Boolean)
+                .join('\n');
             result.set(annotation.id, text || 'Empty popover');
         }
         return result;
@@ -628,7 +652,13 @@ function BlockEditor({
         replica.state.state.blocks[focusPoint(primaryResolvedSelection).blockId]?.meta,
     );
     const activeInlineMarks = useMemo(
-        () => deriveActiveInlineMarks(replica.state, blocks, primaryResolvedSelection, pendingInlineMarks),
+        () =>
+            deriveActiveInlineMarks(
+                replica.state,
+                blocks,
+                primaryResolvedSelection,
+                pendingInlineMarks,
+            ),
         [blocks, pendingInlineMarks, primaryResolvedSelection, replica.state],
     );
     const decorationsByBlock = useMemo(
@@ -684,16 +714,21 @@ function BlockEditor({
 
     const clearPendingInlineMarks = useCallback(() => {
         setPendingInlineMarks((current) =>
-            hasPendingInlineMarks(current) && !hasRetainedInlineMarkSessions(retainedInlineMarks) ? {} : current,
+            hasPendingInlineMarks(current) && !hasRetainedInlineMarkSessions(retainedInlineMarks)
+                ? {}
+                : current,
         );
     }, [retainedInlineMarks]);
 
     const nextSelectionId = useCallback(() => `sel-${nextSelectionIdRef.current++}`, []);
 
-    const requestCommentFocus = useCallback((blockId: string | null | undefined, selection?: EditorSelection) => {
-        if (!blockId) return;
-        setCommentFocusRequest({blockId, selection, token: nextCommentFocusTokenRef.current++});
-    }, []);
+    const requestCommentFocus = useCallback(
+        (blockId: string | null | undefined, selection?: EditorSelection) => {
+            if (!blockId) return;
+            setCommentFocusRequest({blockId, selection, token: nextCommentFocusTokenRef.current++});
+        },
+        [],
+    );
 
     const recordCommentBodyActivity = useCallback((annotationId: string, bodyBlockId: string) => {
         setLastEditedCommentBodyByAnnotation((current) =>
@@ -777,9 +812,7 @@ function BlockEditor({
                 next[item.id] = top;
                 previousTop = top;
             }
-            setCommentGutterTops((current) =>
-                numberRecordEquals(current, next) ? current : next,
-            );
+            setCommentGutterTops((current) => (numberRecordEquals(current, next) ? current : next));
         };
 
         measure();
@@ -907,7 +940,13 @@ function BlockEditor({
                       : replaceSelectionSet(current.state, selection, current.selection.primaryId),
             }));
         },
-        [clearPendingInlineMarks, nextSelectionId, onCommand, resetVerticalCaretIntent, scheduleSelectionRestore],
+        [
+            clearPendingInlineMarks,
+            nextSelectionId,
+            onCommand,
+            resetVerticalCaretIntent,
+            scheduleSelectionRestore,
+        ],
     );
 
     const captureMouseDown = useCallback(
@@ -1043,7 +1082,10 @@ function BlockEditor({
                             makeCommandContext(current),
                         );
                         setRetainedInlineMarks(result.retainedMarks);
-                        setPendingInlineMarks((currentMarks) => ({...currentMarks, [markType]: false}));
+                        setPendingInlineMarks((currentMarks) => ({
+                            ...currentMarks,
+                            [markType]: false,
+                        }));
                         return result;
                     }
                     setPendingInlineMarks((currentMarks) => ({
@@ -1079,11 +1121,7 @@ function BlockEditor({
     );
 
     const insertTextWithPendingMarks = useCallback(
-        (
-            current: Replica,
-            selection: RetainedSelectionSet,
-            text: string,
-        ): MultiCommandResult => {
+        (current: Replica, selection: RetainedSelectionSet, text: string): MultiCommandResult => {
             const activeMarks = activePendingInlineMarks(pendingInlineMarks);
             if (!activeMarks.length) {
                 return insertTextWithMarkdownShortcutsEverywhere(
@@ -1199,7 +1237,9 @@ function BlockEditor({
             const primary = primarySelection(resolveSelectionSet(current.state, selection));
             if (primary.type === 'caret') {
                 const block = formatted.find((candidate) => candidate.id === primary.point.blockId);
-                const linkRange = block ? linkRangeAroundOffsetInRuns(block.id, block.runs, primary.point.offset) : null;
+                const linkRange = block
+                    ? linkRangeAroundOffsetInRuns(block.id, block.runs, primary.point.offset)
+                    : null;
                 if (linkRange) {
                     openLinkPopoverForRanges(
                         current.state,
@@ -1217,7 +1257,13 @@ function BlockEditor({
         (range: LinkTargetRange & {href: string}, element: HTMLElement) => {
             setLinkHoverPopover(null);
             setLinkPopover({
-                ranges: [{blockId: range.blockId, startOffset: range.startOffset, endOffset: range.endOffset}],
+                ranges: [
+                    {
+                        blockId: range.blockId,
+                        startOffset: range.startOffset,
+                        endOffset: range.endOffset,
+                    },
+                ],
                 href: range.href,
                 ...linkPopoverPositionFromElement(element),
             });
@@ -1242,7 +1288,13 @@ function BlockEditor({
         (range: LinkTargetRange & {href: string}, element: HTMLElement) => {
             cancelLinkHoverHide();
             setLinkHoverPopover({
-                ranges: [{blockId: range.blockId, startOffset: range.startOffset, endOffset: range.endOffset}],
+                ranges: [
+                    {
+                        blockId: range.blockId,
+                        startOffset: range.startOffset,
+                        endOffset: range.endOffset,
+                    },
+                ],
                 href: range.href,
                 ...linkPopoverPositionFromElement(element),
             });
@@ -1496,7 +1548,11 @@ function BlockEditor({
                                   makeCommandContext(current),
                               );
                               if (presentation === 'sidebar') handleSidebarCommentCreated(result);
-                              return {state: result.state, ops: result.ops, selection: current.selection};
+                              return {
+                                  state: result.state,
+                                  ops: result.ops,
+                                  selection: current.selection,
+                              };
                           })
                         : runEditCommand((current, selection) => {
                               const result = createAnnotation(
@@ -1542,7 +1598,9 @@ function BlockEditor({
             ) : null}
             <div
                 ref={editorContentRef}
-                className={commentsOpen ? 'editorContent commentsOpen' : 'editorContent commentsCollapsed'}
+                className={
+                    commentsOpen ? 'editorContent commentsOpen' : 'editorContent commentsCollapsed'
+                }
             >
                 <div className="documentColumn">
                     <div
@@ -1600,7 +1658,11 @@ function BlockEditor({
                                             columnIndex,
                                             makeCommandContext(current),
                                         );
-                                        return {state: result.state, ops: result.ops, selection: current.selection};
+                                        return {
+                                            state: result.state,
+                                            ops: result.ops,
+                                            selection: current.selection,
+                                        };
                                     }),
                                 addTableRow: (tableId, afterRowId) =>
                                     runBlockControlCommand((current) => {
@@ -1610,7 +1672,11 @@ function BlockEditor({
                                             makeCommandContext(current),
                                             afterRowId,
                                         );
-                                        return {state: result.state, ops: result.ops, selection: current.selection};
+                                        return {
+                                            state: result.state,
+                                            ops: result.ops,
+                                            selection: current.selection,
+                                        };
                                     }),
                                 addTableColumn: (tableId, columnIndex) =>
                                     runBlockControlCommand((current) => {
@@ -1620,7 +1686,11 @@ function BlockEditor({
                                             makeCommandContext(current),
                                             columnIndex,
                                         );
-                                        return {state: result.state, ops: result.ops, selection: current.selection};
+                                        return {
+                                            state: result.state,
+                                            ops: result.ops,
+                                            selection: current.selection,
+                                        };
                                     }),
                                 runEditCommand,
                                 runBlockControlCommand,
@@ -1638,8 +1708,13 @@ function BlockEditor({
                         )}
                     </div>
                     <Footnotes
-                        annotations={annotations.filter((item) => item.data.presentation === 'footnote')}
+                        annotations={annotations.filter(
+                            (item) => item.data.presentation === 'footnote',
+                        )}
+                        focusRequest={commentFocusRequest}
+                        onFocusRequestHandled={() => setCommentFocusRequest(null)}
                         onBodyCommand={runAnnotationBodyCommand}
+                        onBodyFocusRequest={requestCommentFocus}
                         onBodySelectionChange={setActiveAnnotationBodySelection}
                         popoverTextById={popoverTextById}
                         footnoteNumberById={footnoteNumberById}
@@ -1689,7 +1764,10 @@ function BlockEditor({
                     }
                     onFocusChange={setPopoverFocusPinned}
                     onEscape={closeDeepestPopover}
+                    focusRequest={commentFocusRequest}
+                    onFocusRequestHandled={() => setCommentFocusRequest(null)}
                     onBodyCommand={runAnnotationBodyCommand}
+                    onBodyFocusRequest={requestCommentFocus}
                     onBodySelectionChange={setActiveAnnotationBodySelection}
                     popoverTextById={popoverTextById}
                     footnoteNumberById={footnoteNumberById}
@@ -1840,22 +1918,21 @@ const renderBlockNode = (node: RenderTreeNode, context: RenderBlockContext): Rea
     );
 };
 
-function TableBlock({
-    node,
-    context,
-}: {
-    node: RenderTreeNode;
-    context: RenderBlockContext;
-}) {
+function TableBlock({node, context}: {node: RenderTreeNode; context: RenderBlockContext}) {
     const [cellDrag, setCellDrag] = useState<{
         sourceCellId: string;
         target: {rowId: string; index: number} | null;
     } | null>(null);
     const rowNodes = node.children.filter((child) => child.block.block.meta.type === 'table_row');
-    const normalChildren = node.children.filter((child) => child.block.block.meta.type !== 'table_row');
+    const normalChildren = node.children.filter(
+        (child) => child.block.block.meta.type !== 'table_row',
+    );
     const columnCount = Math.max(
         1,
-        ...rowNodes.map((row) => row.children.filter((child) => child.block.block.meta.type !== 'table_row').length),
+        ...rowNodes.map(
+            (row) =>
+                row.children.filter((child) => child.block.block.meta.type !== 'table_row').length,
+        ),
     );
     const selectedCellId = tableCellIdForSelection(context.state, context.selection);
 
@@ -1865,13 +1942,17 @@ function TableBlock({
             event.preventDefault();
             setCellDrag((current) =>
                 current
-                    ? {...current, target: tableCellDropTargetFromPoint(event.clientX, event.clientY)}
+                    ? {
+                          ...current,
+                          target: tableCellDropTargetFromPoint(event.clientX, event.clientY),
+                      }
                     : current,
             );
         };
         const onPointerUp = (event: globalThis.PointerEvent) => {
             event.preventDefault();
-            const target = tableCellDropTargetFromPoint(event.clientX, event.clientY) ?? cellDrag.target;
+            const target =
+                tableCellDropTargetFromPoint(event.clientX, event.clientY) ?? cellDrag.target;
             const sourceCellId = cellDrag.sourceCellId;
             setCellDrag(null);
             if (!target) return;
@@ -1924,80 +2005,99 @@ function TableBlock({
                 </div>
                 {rowNodes.map((row, rowIndex) => (
                     <Fragment key={row.block.id}>
-                    <div
-                        ref={(element) => context.registerRow(row.block.id, element)}
-                        className={[
-                            'tableRow',
-                            context.draggingSubtreeIds.has(row.block.id) ? 'dragging' : '',
-                            context.draggingId === row.block.id ? 'draggingRoot' : '',
-                            context.dropTarget?.indicatorBlockId === row.block.id
-                                ? `drop${capitalize(context.dropTarget.indicatorPlacement)}`
-                                : '',
-                        ]
-                            .filter(Boolean)
-                            .join(' ')}
-                        role="row"
-                        data-row-id={row.block.id}
-                        style={{'--table-columns': columnCount} as CSSProperties}
-                    >
-                        <TableRowHeader row={row.block} rowIndex={rowIndex} context={context} />
-                        {Array.from({length: columnCount}, (_, columnIndex) => {
-                            const cell = row.children[columnIndex] ?? null;
-                            return (
-                                <div
-                                    key={`${row.block.id}:${columnIndex}`}
-                                    className={[
-                                        cell ? 'tableCell' : 'tableCell missingTableCell',
-                                        cell?.block.id === selectedCellId ? 'activeTableCell' : '',
-                                        cellDrag?.sourceCellId === cell?.block.id ? 'draggingCell' : '',
-                                        cellDrag?.target?.rowId === row.block.id && cellDrag.target.index === columnIndex
-                                            ? 'cellDropBefore'
-                                            : '',
-                                        cellDrag?.target?.rowId === row.block.id && cellDrag.target.index === columnIndex + 1
-                                            ? 'cellDropAfter'
-                                            : '',
-                                    ]
-                                        .filter(Boolean)
-                                        .join(' ')}
-                                    role="cell"
-                                    data-cell-id={cell?.block.id}
-                                    onPointerDown={(event) => {
-                                        if (!cell || !isFocusedCellBorderDrag(event, selectedCellId)) return;
-                                        event.preventDefault();
-                                        event.stopPropagation();
-                                        event.currentTarget.setPointerCapture(event.pointerId);
-                                        setCellDrag({
-                                            sourceCellId: cell.block.id,
-                                            target: {rowId: row.block.id, index: columnIndex},
-                                        });
-                                    }}
-                                >
-                                    {cell ? (
-                                        renderTableCell(cell, context)
-                                    ) : (
-                                        <button
-                                            type="button"
-                                            aria-label="Add cell"
-                                            onMouseDown={(event) => event.preventDefault()}
-                                            onClick={() => context.createMissingTableCell(node.block.id, row.block.id, columnIndex)}
-                                        >
-                                            +
-                                        </button>
-                                    )}
-                                </div>
-                            );
-                        })}
-                    </div>
-                    <div className="tableRowInsertControl" aria-label={`Row ${rowIndex + 1} insert control`}>
-                        <button
-                            type="button"
-                            aria-label={`Add row after ${rowIndex + 1}`}
-                            onMouseDown={(event) => event.preventDefault()}
-                            onClick={() => context.addTableRow(node.block.id, row.block.id)}
+                        <div
+                            ref={(element) => context.registerRow(row.block.id, element)}
+                            className={[
+                                'tableRow',
+                                context.draggingSubtreeIds.has(row.block.id) ? 'dragging' : '',
+                                context.draggingId === row.block.id ? 'draggingRoot' : '',
+                                context.dropTarget?.indicatorBlockId === row.block.id
+                                    ? `drop${capitalize(context.dropTarget.indicatorPlacement)}`
+                                    : '',
+                            ]
+                                .filter(Boolean)
+                                .join(' ')}
+                            role="row"
+                            data-row-id={row.block.id}
+                            style={{'--table-columns': columnCount} as CSSProperties}
                         >
-                            +
-                        </button>
-                    </div>
+                            <TableRowHeader row={row.block} rowIndex={rowIndex} context={context} />
+                            {Array.from({length: columnCount}, (_, columnIndex) => {
+                                const cell = row.children[columnIndex] ?? null;
+                                return (
+                                    <div
+                                        key={`${row.block.id}:${columnIndex}`}
+                                        className={[
+                                            cell ? 'tableCell' : 'tableCell missingTableCell',
+                                            cell?.block.id === selectedCellId
+                                                ? 'activeTableCell'
+                                                : '',
+                                            cellDrag?.sourceCellId === cell?.block.id
+                                                ? 'draggingCell'
+                                                : '',
+                                            cellDrag?.target?.rowId === row.block.id &&
+                                            cellDrag.target.index === columnIndex
+                                                ? 'cellDropBefore'
+                                                : '',
+                                            cellDrag?.target?.rowId === row.block.id &&
+                                            cellDrag.target.index === columnIndex + 1
+                                                ? 'cellDropAfter'
+                                                : '',
+                                        ]
+                                            .filter(Boolean)
+                                            .join(' ')}
+                                        role="cell"
+                                        data-cell-id={cell?.block.id}
+                                        onPointerDown={(event) => {
+                                            if (
+                                                !cell ||
+                                                !isFocusedCellBorderDrag(event, selectedCellId)
+                                            )
+                                                return;
+                                            event.preventDefault();
+                                            event.stopPropagation();
+                                            event.currentTarget.setPointerCapture(event.pointerId);
+                                            setCellDrag({
+                                                sourceCellId: cell.block.id,
+                                                target: {rowId: row.block.id, index: columnIndex},
+                                            });
+                                        }}
+                                    >
+                                        {cell ? (
+                                            renderTableCell(cell, context)
+                                        ) : (
+                                            <button
+                                                type="button"
+                                                aria-label="Add cell"
+                                                onMouseDown={(event) => event.preventDefault()}
+                                                onClick={() =>
+                                                    context.createMissingTableCell(
+                                                        node.block.id,
+                                                        row.block.id,
+                                                        columnIndex,
+                                                    )
+                                                }
+                                            >
+                                                +
+                                            </button>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                        <div
+                            className="tableRowInsertControl"
+                            aria-label={`Row ${rowIndex + 1} insert control`}
+                        >
+                            <button
+                                type="button"
+                                aria-label={`Add row after ${rowIndex + 1}`}
+                                onMouseDown={(event) => event.preventDefault()}
+                                onClick={() => context.addTableRow(node.block.id, row.block.id)}
+                            >
+                                +
+                            </button>
+                        </div>
                     </Fragment>
                 ))}
             </div>
@@ -2106,27 +2206,42 @@ function TableRowHeader({
                     } else if (event.key === 'Enter') {
                         event.preventDefault();
                         context.runEditCommand((current, selection) =>
-                            splitBlockEverywhere(current.state, selection, makeCommandContext(current)),
+                            splitBlockEverywhere(
+                                current.state,
+                                selection,
+                                makeCommandContext(current),
+                            ),
                         );
                     } else if (event.key === 'Backspace') {
                         event.preventDefault();
                         context.runEditCommand((current, selection) =>
-                            deleteBackwardEverywhere(current.state, selection, makeCommandContext(current)),
+                            deleteBackwardEverywhere(
+                                current.state,
+                                selection,
+                                makeCommandContext(current),
+                            ),
                         );
                     } else if (event.key === 'Delete') {
                         event.preventDefault();
                         context.runEditCommand((current, selection) =>
-                            deleteForwardEverywhere(current.state, selection, makeCommandContext(current)),
+                            deleteForwardEverywhere(
+                                current.state,
+                                selection,
+                                makeCommandContext(current),
+                            ),
                         );
                     } else if (event.key === 'Tab' && !event.altKey && !modifierPressed) {
                         event.preventDefault();
-                        context.moveSelectionsHorizontallyEverywhere(event.shiftKey ? 'left' : 'right', 'block');
+                        context.moveSelectionsHorizontallyEverywhere(
+                            event.shiftKey ? 'left' : 'right',
+                            'block',
+                        );
                     }
                 }}
                 onPaste={(event) => {
                     event.preventDefault();
                     context.runEditCommand((current, selection) =>
-                        pastePlainTextEverywhere(
+                        pastePlainTextWithMarkdownShortcutsEverywhere(
                             current.state,
                             selection,
                             event.clipboardData.getData('text/plain'),
@@ -2146,7 +2261,9 @@ const tableCellIdForSelection = (
     const point = focusPoint(selection);
     const block = state.state.blocks[point.blockId];
     if (!block || block.meta.type === 'table_row') return null;
-    const path = materializedBlockPath(state, point.blockId, annotationVirtualParents(state)).map(lamportToString);
+    const path = materializedBlockPath(state, point.blockId, annotationVirtualParents(state)).map(
+        lamportToString,
+    );
     const rowIndex = path.findLastIndex((id) => state.state.blocks[id]?.meta.type === 'table_row');
     return rowIndex >= 0 ? point.blockId : null;
 };
@@ -2174,8 +2291,9 @@ const tableCellDropTargetFromPoint = (
 ): {rowId: string; index: number} | null => {
     const row = document
         .elementsFromPoint(clientX, clientY)
-        .find((element): element is HTMLElement =>
-            element instanceof HTMLElement && element.matches('[data-row-id]'),
+        .find(
+            (element): element is HTMLElement =>
+                element instanceof HTMLElement && element.matches('[data-row-id]'),
         );
     if (!row) return null;
     const rowId = row.dataset.rowId;
@@ -2222,14 +2340,20 @@ const renderEditableBlock = (block: RichFormattedBlock, context: RenderBlockCont
             onPopoverTriggerLeave={context.onPopoverTriggerLeave}
             onInsertText={(text, activeSelection) =>
                 context.runEditCommand((current, selection) =>
-                    context.insertText(current, activeSelection
-                        ? replacePrimarySelection(current.state, selection, activeSelection)
-                        : selection, text),
+                    context.insertText(
+                        current,
+                        activeSelection
+                            ? replacePrimarySelection(current.state, selection, activeSelection)
+                            : selection,
+                        text,
+                    ),
                 )
             }
             onDeleteBackward={() =>
                 context.runEditCommand((current, selection) => {
-                    const selected = primarySelection(resolveSelectionSet(current.state, selection));
+                    const selected = primarySelection(
+                        resolveSelectionSet(current.state, selection),
+                    );
                     const tableResult = deleteEmptyTableRowBackward(
                         current.state,
                         selected,
@@ -2246,7 +2370,11 @@ const renderEditableBlock = (block: RichFormattedBlock, context: RenderBlockCont
                             ),
                         };
                     }
-                    return deleteBackwardEverywhere(current.state, selection, makeCommandContext(current));
+                    return deleteBackwardEverywhere(
+                        current.state,
+                        selection,
+                        makeCommandContext(current),
+                    );
                 })
             }
             onDeleteForward={() =>
@@ -2256,7 +2384,9 @@ const renderEditableBlock = (block: RichFormattedBlock, context: RenderBlockCont
             }
             onSplit={() =>
                 context.runEditCommand((current, selection) => {
-                    const selected = primarySelection(resolveSelectionSet(current.state, selection));
+                    const selected = primarySelection(
+                        resolveSelectionSet(current.state, selection),
+                    );
                     const tableTitleResult = splitTableTitleToParagraph(
                         current.state,
                         selected,
@@ -2273,7 +2403,11 @@ const renderEditableBlock = (block: RichFormattedBlock, context: RenderBlockCont
                             ),
                         };
                     }
-                    return splitBlockEverywhere(current.state, selection, makeCommandContext(current));
+                    return splitBlockEverywhere(
+                        current.state,
+                        selection,
+                        makeCommandContext(current),
+                    );
                 })
             }
             onAdvanceFromTableCellEnd={(selection) =>
@@ -2336,7 +2470,9 @@ const renderEditableBlock = (block: RichFormattedBlock, context: RenderBlockCont
             }
             onMoveTableCellByTab={(direction) =>
                 context.runEditCommand((current, selection) => {
-                    const selected = primarySelection(resolveSelectionSet(current.state, selection));
+                    const selected = primarySelection(
+                        resolveSelectionSet(current.state, selection),
+                    );
                     const result = moveTableCellByTab(
                         current.state,
                         focusPoint(selected).blockId,
@@ -2405,7 +2541,9 @@ const renderEditableBlock = (block: RichFormattedBlock, context: RenderBlockCont
             onPasteText={(text) =>
                 context.runEditCommand((current, selection) => {
                     const activeSelection = selection;
-                    const primary = primarySelection(resolveSelectionSet(current.state, activeSelection));
+                    const primary = primarySelection(
+                        resolveSelectionSet(current.state, activeSelection),
+                    );
                     if (isLinkLikeText(text) && primary.type === 'range') {
                         return setLinkMarkEverywhere(
                             current.state,
@@ -2414,7 +2552,7 @@ const renderEditableBlock = (block: RichFormattedBlock, context: RenderBlockCont
                             makeCommandContext(current),
                         );
                     }
-                    return pastePlainTextEverywhere(
+                    return pastePlainTextWithMarkdownShortcutsEverywhere(
                         current.state,
                         activeSelection,
                         text,
@@ -2573,7 +2711,6 @@ const inlineMarksByOffset = (block: RichFormattedBlock): Record<string, unknown>
     return result;
 };
 
-
 function AnnotationSidebar({
     annotations,
     open,
@@ -2601,7 +2738,10 @@ function AnnotationSidebar({
     onFocusRequestHandled(): void;
     onBodyActivity(annotationId: string, bodyBlockId: string): void;
     onBodyCommand(
-        command: (current: Replica, context: ReturnType<typeof makeCommandContext>) => CommandResult,
+        command: (
+            current: Replica,
+            context: ReturnType<typeof makeCommandContext>,
+        ) => CommandResult,
     ): void;
     onBodyFocusRequest(blockId: string, selection: EditorSelection): void;
     onBodySelectionChange(selection: EditorSelection | null): void;
@@ -2611,10 +2751,14 @@ function AnnotationSidebar({
     onPopoverTriggerEnter(id: string, element: HTMLElement): void;
     onPopoverTriggerLeave(id?: string, transition?: PopoverPointerTransition): void;
 }) {
-    if (!annotations.length && !open) return null;
+    // if (!annotations.length && !open) return null;
     return (
         <aside
-            className={open ? 'annotationSidebar commentSidebarOpen' : 'annotationSidebar commentSidebarCollapsed'}
+            className={
+                open
+                    ? 'annotationSidebar commentSidebarOpen'
+                    : 'annotationSidebar commentSidebarCollapsed'
+            }
             aria-label="Comments"
         >
             <button
@@ -2685,7 +2829,10 @@ function AnnotationSidebar({
 
 function Footnotes({
     annotations,
+    focusRequest,
+    onFocusRequestHandled,
     onBodyCommand,
+    onBodyFocusRequest,
     onBodySelectionChange,
     popoverTextById,
     footnoteNumberById,
@@ -2693,9 +2840,15 @@ function Footnotes({
     onPopoverTriggerLeave,
 }: {
     annotations: ReturnType<typeof renderedAnnotations>;
+    focusRequest: CommentFocusRequest | null;
+    onFocusRequestHandled(): void;
     onBodyCommand(
-        command: (current: Replica, context: ReturnType<typeof makeCommandContext>) => CommandResult,
+        command: (
+            current: Replica,
+            context: ReturnType<typeof makeCommandContext>,
+        ) => CommandResult,
     ): void;
+    onBodyFocusRequest(blockId: string, selection: EditorSelection): void;
     onBodySelectionChange(selection: EditorSelection | null): void;
     popoverTextById: Map<string, string>;
     footnoteNumberById: Map<string, number>;
@@ -2713,7 +2866,10 @@ function Footnotes({
                                   key={block.id}
                                   block={block}
                                   fallbackText={annotation.referenceText}
+                                  focusRequest={focusRequest}
+                                  onFocusRequestHandled={onFocusRequestHandled}
                                   onBodyCommand={onBodyCommand}
+                                  onBodyFocusRequest={onBodyFocusRequest}
                                   onBodySelectionChange={onBodySelectionChange}
                                   popoverTextById={popoverTextById}
                                   footnoteNumberById={footnoteNumberById}
@@ -2735,7 +2891,10 @@ function FloatingAnnotationPopover({
     onMouseLeave,
     onFocusChange,
     onEscape,
+    focusRequest,
+    onFocusRequestHandled,
     onBodyCommand,
+    onBodyFocusRequest,
     onBodySelectionChange,
     popoverTextById,
     footnoteNumberById,
@@ -2748,9 +2907,15 @@ function FloatingAnnotationPopover({
     onMouseLeave(event: MouseEvent<HTMLElement>): void;
     onFocusChange(focused: boolean, id?: string, relatedTarget?: EventTarget | null): void;
     onEscape(): void;
+    focusRequest: CommentFocusRequest | null;
+    onFocusRequestHandled(): void;
     onBodyCommand(
-        command: (current: Replica, context: ReturnType<typeof makeCommandContext>) => CommandResult,
+        command: (
+            current: Replica,
+            context: ReturnType<typeof makeCommandContext>,
+        ) => CommandResult,
     ): void;
+    onBodyFocusRequest(blockId: string, selection: EditorSelection): void;
     onBodySelectionChange(selection: EditorSelection | null): void;
     popoverTextById: Map<string, string>;
     footnoteNumberById: Map<string, number>;
@@ -2783,7 +2948,10 @@ function FloatingAnnotationPopover({
                     key={block.id}
                     block={block}
                     fallbackText={annotation.referenceText}
+                    focusRequest={focusRequest}
+                    onFocusRequestHandled={onFocusRequestHandled}
                     onBodyCommand={onBodyCommand}
+                    onBodyFocusRequest={onBodyFocusRequest}
                     onBodySelectionChange={onBodySelectionChange}
                     popoverTextById={popoverTextById}
                     footnoteNumberById={footnoteNumberById}
@@ -2871,12 +3039,7 @@ function LinkHoverPopover({
             onMouseEnter={onMouseEnter}
             onMouseLeave={onMouseLeave}
         >
-            <a
-                className="linkHoverUrl"
-                href={targetHref}
-                target="_blank"
-                rel="noreferrer"
-            >
+            <a className="linkHoverUrl" href={targetHref} target="_blank" rel="noreferrer">
                 {state.href}
             </a>
             <button type="button" onClick={() => onEdit(state)}>
@@ -2908,7 +3071,10 @@ function AnnotationBodyBlock({
     onFocusRequestHandled?(): void;
     onBodyActivity?(annotationId: string, bodyBlockId: string): void;
     onBodyCommand(
-        command: (current: Replica, context: ReturnType<typeof makeCommandContext>) => CommandResult,
+        command: (
+            current: Replica,
+            context: ReturnType<typeof makeCommandContext>,
+        ) => CommandResult,
     ): void;
     onBodyFocusRequest?(blockId: string, selection: EditorSelection): void;
     onBodySelectionChange(selection: EditorSelection | null): void;
@@ -2920,29 +3086,41 @@ function AnnotationBodyBlock({
     const pendingCaretRestoreBlockIdRef = useRef<string | null>(null);
     const pendingSelectionRestoreRef = useRef<EditorSelection | null>(null);
     const linkHoverHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const [selection, setSelection] = useState<EditorSelection>(() => caret(block.id, block.text.length));
+    const [selection, setSelection] = useState<EditorSelection>(() =>
+        caret(block.id, block.text.length),
+    );
     const [linkPopover, setLinkPopover] = useState<LinkPopoverState | null>(null);
     const [linkHoverPopover, setLinkHoverPopover] = useState<LinkHoverPopoverState | null>(null);
 
-    const restoreAfter = useCallback((selection: EditorSelection) => {
-        pendingCaretRestoreBlockIdRef.current =
-            selection.type === 'caret' && selection.point.blockId === block.id ? block.id : null;
-        pendingSelectionRestoreRef.current = selection.type === 'range' ? selection : null;
-        setSelection(selection);
-        onBodySelectionChange(selection);
-        if (annotationId) onBodyActivity?.(annotationId, block.id);
-    }, [annotationId, block.id, onBodyActivity, onBodySelectionChange]);
+    const restoreAfter = useCallback(
+        (selection: EditorSelection) => {
+            pendingCaretRestoreBlockIdRef.current =
+                selection.type === 'caret' && selection.point.blockId === block.id
+                    ? block.id
+                    : null;
+            pendingSelectionRestoreRef.current = selection.type === 'range' ? selection : null;
+            setSelection(selection);
+            onBodySelectionChange(selection);
+            if (annotationId) onBodyActivity?.(annotationId, block.id);
+        },
+        [annotationId, block.id, onBodyActivity, onBodySelectionChange],
+    );
 
-    const updateSelection = useCallback((nextSelection: EditorSelection | null) => {
-        setSelection(nextSelection ?? caret(block.id, block.text.length));
-        onBodySelectionChange(nextSelection);
-    }, [block.id, block.text.length, onBodySelectionChange]);
+    const updateSelection = useCallback(
+        (nextSelection: EditorSelection | null) => {
+            setSelection(nextSelection ?? caret(block.id, block.text.length));
+            onBodySelectionChange(nextSelection);
+        },
+        [block.id, block.text.length, onBodySelectionChange],
+    );
 
     useLayoutEffect(() => {
         if (focusRequest?.blockId !== block.id) return;
         const nextSelection = focusRequest.selection ?? caret(block.id, block.text.length);
         pendingCaretRestoreBlockIdRef.current =
-            nextSelection.type === 'caret' && nextSelection.point.blockId === block.id ? block.id : null;
+            nextSelection.type === 'caret' && nextSelection.point.blockId === block.id
+                ? block.id
+                : null;
         pendingSelectionRestoreRef.current = nextSelection.type === 'range' ? nextSelection : null;
         setSelection(nextSelection);
         onBodySelectionChange(nextSelection);
@@ -3041,7 +3219,13 @@ function AnnotationBodyBlock({
         (range: LinkTargetRange & {href: string}, element: HTMLElement) => {
             cancelBodyLinkHoverHide();
             setLinkHoverPopover({
-                ranges: [{blockId: range.blockId, startOffset: range.startOffset, endOffset: range.endOffset}],
+                ranges: [
+                    {
+                        blockId: range.blockId,
+                        startOffset: range.startOffset,
+                        endOffset: range.endOffset,
+                    },
+                ],
                 href: range.href,
                 ...linkPopoverPositionFromElement(element),
             });
@@ -3051,6 +3235,7 @@ function AnnotationBodyBlock({
 
     return (
         <>
+            {annotationBodyMarker(block.meta)}
             <RichTextEditableSurface
                 blockId={block.id}
                 runs={block.runs}
@@ -3065,7 +3250,13 @@ function AnnotationBodyBlock({
                 footnoteNumberById={footnoteNumberById}
                 onPopoverTriggerEnter={onPopoverTriggerEnter}
                 onPopoverTriggerLeave={onPopoverTriggerLeave}
-                onLinkClick={(range, element) => openBodyLinkPopover([range], range.href, linkPopoverPositionFromElement(element))}
+                onLinkClick={(range, element) =>
+                    openBodyLinkPopover(
+                        [range],
+                        range.href,
+                        linkPopoverPositionFromElement(element),
+                    )
+                }
                 onLinkHoverEnter={showBodyLinkHover}
                 onLinkHoverLeave={scheduleBodyLinkHoverHide}
                 onSelectionChange={updateSelection}
@@ -3076,7 +3267,10 @@ function AnnotationBodyBlock({
                 }
                 onDeleteBackward={(activeSelection) =>
                     run(activeSelection ?? selection, (state, selected, context) =>
-                        deleteAnnotationBodyBackward(state, selected, context, {annotationId, bodyBlockId: block.id}),
+                        deleteAnnotationBodyBackward(state, selected, context, {
+                            annotationId,
+                            bodyBlockId: block.id,
+                        }),
                     )
                 }
                 onDeleteForward={(activeSelection) =>
@@ -3093,7 +3287,7 @@ function AnnotationBodyBlock({
                         return;
                     }
                     run(selected, (state, activeSelection, context) =>
-                        replaceAnnotationBodySelection(state, activeSelection, text, context),
+                        pasteAnnotationBodyTextWithMarkdownShortcuts(state, activeSelection, text, context),
                     );
                 }}
                 onKeyDown={(event) => {
@@ -3112,49 +3306,90 @@ function AnnotationBodyBlock({
                     if (modifierPressed && (key === 'b' || key === 'i')) {
                         event.preventDefault();
                         run(selected, (state, activeSelection, context) =>
-                            toggleAnnotationBodyMark(state, activeSelection, key === 'b' ? 'bold' : 'italic', context),
+                            toggleAnnotationBodyMark(
+                                state,
+                                activeSelection,
+                                key === 'b' ? 'bold' : 'italic',
+                                context,
+                            ),
                         );
                     } else if (modifierPressed && event.shiftKey && key === 'x') {
                         event.preventDefault();
                         run(selected, (state, activeSelection, context) =>
-                            toggleAnnotationBodyMark(state, activeSelection, 'strikethrough', context),
+                            toggleAnnotationBodyMark(
+                                state,
+                                activeSelection,
+                                'strikethrough',
+                                context,
+                            ),
                         );
                     } else if (modifierPressed && key === 'k') {
                         event.preventDefault();
                         if (selected.type === 'range') {
-                            const ranges = [{blockId: block.id, startOffset: Math.min(selected.anchor.offset, selected.focus.offset), endOffset: Math.max(selected.anchor.offset, selected.focus.offset)}];
-                            const selectedText = textForSelectionSegments([
+                            const ranges = [
                                 {
-                                    id: block.id,
-                                    runs: block.runs,
-                                    depth: 0,
-                                    parentId: '',
-                                    block: {} as RichFormattedBlock['block'],
+                                    blockId: block.id,
+                                    startOffset: Math.min(
+                                        selected.anchor.offset,
+                                        selected.focus.offset,
+                                    ),
+                                    endOffset: Math.max(
+                                        selected.anchor.offset,
+                                        selected.focus.offset,
+                                    ),
                                 },
-                            ], ranges).trim();
+                            ];
+                            const selectedText = textForSelectionSegments(
+                                [
+                                    {
+                                        id: block.id,
+                                        runs: block.runs,
+                                        depth: 0,
+                                        parentId: '',
+                                        block: {} as RichFormattedBlock['block'],
+                                    },
+                                ],
+                                ranges,
+                            ).trim();
                             if (isLinkLikeText(selectedText)) {
                                 run(selected, (state, activeSelection, context) =>
-                                    setAnnotationBodyLink(state, activeSelection, selectedText, context),
+                                    setAnnotationBodyLink(
+                                        state,
+                                        activeSelection,
+                                        selectedText,
+                                        context,
+                                    ),
                                 );
                             } else {
                                 openBodyLinkPopover(
                                     ranges,
-                                    linkHrefForSelectionSegments([
-                                        {
-                                            id: block.id,
-                                            runs: block.runs,
-                                            depth: 0,
-                                            parentId: '',
-                                            block: {} as RichFormattedBlock['block'],
-                                        },
-                                    ], ranges) ?? '',
+                                    linkHrefForSelectionSegments(
+                                        [
+                                            {
+                                                id: block.id,
+                                                runs: block.runs,
+                                                depth: 0,
+                                                parentId: '',
+                                                block: {} as RichFormattedBlock['block'],
+                                            },
+                                        ],
+                                        ranges,
+                                    ) ?? '',
                                     linkPopoverPositionFromSelection(event.currentTarget),
                                 );
                             }
                         } else {
-                            const range = linkRangeAroundOffsetInRuns(block.id, block.runs, selected.point.offset);
+                            const range = linkRangeAroundOffsetInRuns(
+                                block.id,
+                                block.runs,
+                                selected.point.offset,
+                            );
                             if (range) {
-                                openBodyLinkPopover([range], range.href, linkPopoverPositionFromSelection(event.currentTarget));
+                                openBodyLinkPopover(
+                                    [range],
+                                    range.href,
+                                    linkPopoverPositionFromSelection(event.currentTarget),
+                                );
                             }
                         }
                     }
@@ -3180,6 +3415,24 @@ function AnnotationBodyBlock({
     );
 }
 
+const annotationBodyMarker = (meta: RichBlockMeta): ReactElement | null => {
+    if (meta.type === 'list_item') {
+        return (
+            <span className="annotationBodyMarker" aria-hidden="true">
+                {meta.kind === 'ordered' ? '1.' : '•'}
+            </span>
+        );
+    }
+    if (meta.type === 'todo') {
+        return (
+            <span className="annotationBodyMarker" aria-hidden="true">
+                {meta.checked ? '☑' : '☐'}
+            </span>
+        );
+    }
+    return null;
+};
+
 const renderStaticRuns = (runs: RichFormattedBlock['runs']): ReactElement[] =>
     runs.map((run, index) => (
         <span
@@ -3193,7 +3446,9 @@ const renderStaticRuns = (runs: RichFormattedBlock['runs']): ReactElement[] =>
             ]
                 .filter(Boolean)
                 .join(' ')}
-            data-link-href={typeof run.marks[LINK_MARK] === 'string' ? run.marks[LINK_MARK] : undefined}
+            data-link-href={
+                typeof run.marks[LINK_MARK] === 'string' ? run.marks[LINK_MARK] : undefined
+            }
         >
             {run.text}
         </span>
@@ -3272,7 +3527,11 @@ function Toolbar({
                 >
                     <span className="toolbarStrike">S</span>
                 </button>
-                <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={onLink}>
+                <button
+                    type="button"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={onLink}
+                >
                     Link
                 </button>
             </div>
@@ -3441,7 +3700,11 @@ function EditableBlock({
 }) {
     const meta = block.block.meta;
     const codeHasTrailingNewline =
-        meta.type === 'code' && block.runs.map((run) => run.text).join('').endsWith('\n');
+        meta.type === 'code' &&
+        block.runs
+            .map((run) => run.text)
+            .join('')
+            .endsWith('\n');
     const isCodeBlock = meta.type === 'code';
     const codeText = isCodeBlock ? block.runs.map((run) => run.text).join('') : '';
     const codeLanguage = isCodeBlock ? meta.language : '';
@@ -3539,7 +3802,8 @@ function EditableBlock({
                             onSplit();
                         } else if (isTableCell && !event.shiftKey) {
                             onAdvanceFromTableCellEnd(
-                                readSelectionFromDom(event.currentTarget) ?? caret(block.id, blockLength),
+                                readSelectionFromDom(event.currentTarget) ??
+                                    caret(block.id, blockLength),
                             );
                         } else {
                             onSplit();
@@ -3931,7 +4195,10 @@ function RichTextEditableSurface({
                 }
                 if (native.isComposing) return;
                 if (isJsdom() && native.inputType === 'insertText' && native.data) {
-                    onInsertText(native.data, readSelectionFromDom(event.currentTarget) ?? undefined);
+                    onInsertText(
+                        native.data,
+                        readSelectionFromDom(event.currentTarget) ?? undefined,
+                    );
                 }
             }}
             onKeyDown={onKeyDown}
@@ -4308,7 +4575,9 @@ const retainedSelectionSetForLinkRanges = (
     return retainSelectionSet(state, {primaryId: entries[0]?.id ?? 'link-0', entries});
 };
 
-const linkPopoverPositionFromSelection = (root: HTMLElement | null): {top: number; left: number} => {
+const linkPopoverPositionFromSelection = (
+    root: HTMLElement | null,
+): {top: number; left: number} => {
     const fallbackRect = root?.getBoundingClientRect();
     const selection = root?.ownerDocument.defaultView?.getSelection();
     const rect =
@@ -4318,7 +4587,7 @@ const linkPopoverPositionFromSelection = (root: HTMLElement | null): {top: numbe
             ? selection.getRangeAt(0).getBoundingClientRect()
             : null;
     const top = rect && rect.height ? rect.bottom + 8 : (fallbackRect?.top ?? 0) + 28;
-    const left = rect && rect.width ? rect.left : fallbackRect?.left ?? 0;
+    const left = rect && rect.width ? rect.left : (fallbackRect?.left ?? 0);
     return {top, left};
 };
 
@@ -4516,7 +4785,9 @@ const renderEndingFootnoteReferences = (
 ): HTMLElement[] => {
     const currentIds = footnoteIdsForRun(chunk.run, footnoteNumberById);
     if (!currentIds.length) return [];
-    const nextIds = nextChunk ? new Set(footnoteIdsForRun(nextChunk.run, footnoteNumberById)) : new Set<string>();
+    const nextIds = nextChunk
+        ? new Set(footnoteIdsForRun(nextChunk.run, footnoteNumberById))
+        : new Set<string>();
     return currentIds
         .filter((id) => !nextIds.has(id))
         .sort((a, b) => (footnoteNumberById.get(a) ?? 0) - (footnoteNumberById.get(b) ?? 0))

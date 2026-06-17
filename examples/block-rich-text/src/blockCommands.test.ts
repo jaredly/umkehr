@@ -36,6 +36,7 @@ import {
     moveTableCellByTab,
     moveTableRow,
     pastePlainText,
+    pastePlainTextWithMarkdownShortcuts,
     removeLinkMark,
     setBlockType,
     setLinkMark,
@@ -48,7 +49,12 @@ import {
     type CommandContext,
 } from './blockCommands';
 import {applyLocalChange, createDemoState, makeCommandContext, toggleOnline} from './blockEditorRuntime';
-import {annotationVirtualParents, createAnnotation} from './annotations';
+import {
+    annotationBodyBlockIds,
+    annotationVirtualParents,
+    createAnnotation,
+    pasteAnnotationBodyTextWithMarkdownShortcuts,
+} from './annotations';
 import type {RichBlockMeta} from './blockMeta';
 import {toggleMarkEverywhere} from './multiSelectionCommands';
 import {retainSelection} from './retainedSelection';
@@ -215,6 +221,152 @@ describe('block rich text commands', () => {
         expect(result.state.state.blocks[blockId].meta).toMatchObject({type: 'list_item', kind: 'ordered'});
         expect(blockContents(syncedRight, blockId)).toBe('');
         expect(syncedRight.state.blocks[blockId].meta).toMatchObject({type: 'list_item', kind: 'ordered'});
+    });
+
+    it.each([
+        ['- item', {type: 'list_item', kind: 'unordered'}, 'item'],
+        ['* item', {type: 'list_item', kind: 'unordered'}, 'item'],
+        ['12. item', {type: 'list_item', kind: 'ordered'}, 'item'],
+        ['# Heading', {type: 'heading', level: 1}, 'Heading'],
+        ['## Heading', {type: 'heading', level: 2}, 'Heading'],
+        ['### Heading', {type: 'heading', level: 3}, 'Heading'],
+        ['[ ] todo', {type: 'todo', checked: false}, 'todo'],
+        ['[x] todo', {type: 'todo', checked: true}, 'todo'],
+        ['[X] todo', {type: 'todo', checked: true}, 'todo'],
+        ['- ', {type: 'list_item', kind: 'unordered'}, ''],
+    ] as const)('converts pasted markdown shortcut %s at block start', (text, expectedMeta, expectedText) => {
+        const state = init();
+        const blockId = onlyBlock(state);
+        const result = pastePlainTextWithMarkdownShortcuts(state, caret(blockId, 0), text, ctx());
+
+        expect(blockContents(result.state, blockId)).toBe(expectedText);
+        expect(result.state.state.blocks[blockId].meta).toMatchObject(expectedMeta);
+        expect(result.selection).toEqual(caret(blockId, expectedText.length));
+        expectCache(result.state);
+    });
+
+    it('converts every eligible pasted markdown line', () => {
+        const state = init();
+        const result = pastePlainTextWithMarkdownShortcuts(
+            state,
+            caret(onlyBlock(state), 0),
+            '- one\nplain\n[x] done',
+            ctx(),
+        );
+        const [first, second, third] = rootBlockIds(result.state);
+
+        expect(lines(result.state)).toEqual(['one', 'plain', 'done']);
+        expect(result.state.state.blocks[first].meta).toMatchObject({type: 'list_item', kind: 'unordered'});
+        expect(result.state.state.blocks[second].meta).toMatchObject({type: 'paragraph'});
+        expect(result.state.state.blocks[third].meta).toMatchObject({type: 'todo', checked: true});
+        expect(result.selection).toEqual(caret(third, 4));
+        expectCache(result.state);
+    });
+
+    it('keeps pasted markdown shortcuts literal away from block start', () => {
+        const context = ctx();
+        const state = init();
+        const blockId = onlyBlock(state);
+        const seeded = insertText(state, caret(blockId, 0), '- ', context);
+        const result = pastePlainTextWithMarkdownShortcuts(seeded.state, caret(blockId, 2), 'item', context);
+
+        expect(blockContents(result.state, blockId)).toBe('- item');
+        expect(result.state.state.blocks[blockId].meta).toMatchObject({type: 'paragraph'});
+        expect(result.selection).toEqual(caret(blockId, 6));
+        expectCache(result.state);
+    });
+
+    it('keeps pasted markdown shortcuts literal in code blocks', () => {
+        const state = init();
+        const blockId = onlyBlock(state);
+        const code = setBlockType(state, blockId, {type: 'code', language: '', ts: '00001'});
+        const result = pastePlainTextWithMarkdownShortcuts(code.state, caret(blockId, 0), '- item', ctx());
+
+        expect(blockContents(result.state, blockId)).toBe('- item');
+        expect(result.state.state.blocks[blockId].meta).toMatchObject({type: 'code'});
+        expectCache(result.state);
+    });
+
+    it('strips pasted markdown markers in table row headers without changing row metadata', () => {
+        const state = init();
+        const context = ctx();
+        const blockId = onlyBlock(state);
+        const table = createTable(state, caret(blockId, 0), context, {rows: 1, columns: 1});
+        const tableId = rootBlockIds(table.state)[1];
+        const rowId = tableShape(table.state, tableId).rows[0];
+
+        const result = pastePlainTextWithMarkdownShortcuts(table.state, caret(rowId, 0), '# Header', context);
+
+        expect(blockContents(result.state, rowId)).toBe('Header');
+        expect(result.state.state.blocks[rowId].meta).toMatchObject({type: 'table_row'});
+    });
+
+    it('syncs pasted markdown shortcut deletion and metadata to a peer replica', () => {
+        const demo = createDemoState();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        const result = pastePlainTextWithMarkdownShortcuts(
+            demo.left.state,
+            caret(blockId, 0),
+            '1. item',
+            makeCommandContext(demo.left),
+        );
+
+        const syncedRight = applyMany(demo.right.state, result.ops, annotationVirtualParents(demo.right.state));
+
+        expect(blockContents(result.state, blockId)).toBe('item');
+        expect(result.state.state.blocks[blockId].meta).toMatchObject({type: 'list_item', kind: 'ordered'});
+        expect(blockContents(syncedRight, blockId)).toBe('item');
+        expect(syncedRight.state.blocks[blockId].meta).toMatchObject({type: 'list_item', kind: 'ordered'});
+    });
+
+    it('nests indented pasted markdown list items under previous list items', () => {
+        const state = init();
+        const result = pastePlainTextWithMarkdownShortcuts(
+            state,
+            caret(onlyBlock(state), 0),
+            '- one\n  - two\n  [x] three\n- four',
+            ctx(),
+        );
+        const [one, four] = rootBlockIds(result.state);
+        const children = visibleBlockChildren(result.state, one, annotationVirtualParents(result.state));
+
+        expect(blockContents(result.state, one)).toBe('one');
+        expect(blockContents(result.state, four)).toBe('four');
+        expect(children.map((id) => blockContents(result.state, id))).toEqual(['two', 'three']);
+        expect(result.state.state.blocks[children[0]].meta).toMatchObject({type: 'list_item', kind: 'unordered'});
+        expect(result.state.state.blocks[children[1]].meta).toMatchObject({type: 'todo', checked: true});
+        expect(outline(result.state)).toEqual([
+            {text: 'one', depth: 0},
+            {text: 'two', depth: 1},
+            {text: 'three', depth: 1},
+            {text: 'four', depth: 0},
+        ]);
+        expectCache(result.state);
+    });
+
+    it('converts pasted markdown shortcuts in annotation bodies', () => {
+        const context = ctx();
+        const inserted = insertText(init(), caret(onlyBlock(init()), 0), 'abcd', context);
+        const annotation = createAnnotation(
+            inserted.state,
+            {type: 'range', anchor: {blockId: onlyBlock(inserted.state), offset: 1}, focus: {blockId: onlyBlock(inserted.state), offset: 3}},
+            'sidebar',
+            context,
+        );
+        const bodyBlockId = annotation.bodyBlockId!;
+
+        const result = pasteAnnotationBodyTextWithMarkdownShortcuts(
+            annotation.state,
+            caret(bodyBlockId, 0),
+            '- note\n[x] done',
+            context,
+        );
+        const bodyIds = annotationBodyBlockIds(result.state, annotation.annotationId!);
+
+        expect(bodyIds.map((id) => blockContents(result.state, id))).toEqual(['note', 'done']);
+        expect(result.state.state.blocks[bodyIds[0]].meta).toMatchObject({type: 'list_item', kind: 'unordered'});
+        expect(result.state.state.blocks[bodyIds[1]].meta).toMatchObject({type: 'todo', checked: true});
+        expect(result.selection).toEqual(caret(bodyIds[1], 4));
     });
 
     it('syncs metadata command updates to the peer replica', () => {

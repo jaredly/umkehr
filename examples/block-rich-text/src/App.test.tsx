@@ -930,6 +930,51 @@ describe('Block rich text example UI', () => {
         expect(right.querySelector<HTMLElement>('.blockAffordanceMarker')?.textContent).toBe('•');
     });
 
+    it('converts pasted markdown bullet shortcuts and syncs them to the peer', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        pasteText(blocks(left)[0], '- item');
+
+        await waitForBlockTexts(left, ['item']);
+        expect(left.querySelector<HTMLElement>('.blockAffordanceMarker')?.textContent).toBe('•');
+        await waitForBlockTexts(right, ['item']);
+        expect(right.querySelector<HTMLElement>('.blockAffordanceMarker')?.textContent).toBe('•');
+    });
+
+    it('nests indented pasted markdown list items', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        pasteText(blocks(left)[0], '- one\n  - two\n- three');
+
+        await waitForBlockTexts(left, ['one', 'two', 'three']);
+        expect(blockDepth(blocks(left)[0])).toBe('0');
+        expect(blockDepth(blocks(left)[1])).toBe('1');
+        expect(blockDepth(blocks(left)[2])).toBe('0');
+        await waitForBlockTexts(right, ['one', 'two', 'three']);
+        expect(blockDepth(blocks(right)[1])).toBe('1');
+    });
+
+    it('strips pasted markdown markers in table row headers', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        setBlockType(left, 'table');
+        const leftRowHeader = await waitFor(() =>
+            within(left).getByRole('textbox', {name: 'Row header 1'}),
+        );
+
+        selectCaret(leftRowHeader, 0);
+        pasteText(leftRowHeader, '# Header');
+
+        await waitFor(() => expect(blockText(leftRowHeader)).toBe('Header'));
+        expect(blockText(within(right).getByRole('textbox', {name: 'Row header 1'}))).toBe('Header');
+        expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy();
+    });
+
     it('uses ordered list numbers as block drag handles', async () => {
         const view = render(<App />);
         const {left} = panels(view);
@@ -2157,6 +2202,56 @@ describe('Block rich text example UI', () => {
         });
     });
 
+    it('converts pasted markdown shortcuts in comment body text', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abcd');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abcd'));
+
+        selectRange(blocks(left)[0], 1, 3);
+        fireEvent.click(within(left).getByRole('button', {name: 'Comment'}));
+
+        const commentBody = await waitFor(() =>
+            within(left).getByRole('textbox', {name: 'Annotation body'}),
+        );
+        selectCaret(commentBody, 0);
+        pasteText(commentBody, '- note');
+
+        await waitFor(() => expect(blockText(commentBody)).toBe('note'));
+        expect(left.querySelector<HTMLElement>('.annotationBodyMarker')?.textContent).toBe('•');
+    });
+
+    it('pastes a link-like target over selected comment body text as a link', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abcd');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abcd'));
+
+        selectRange(blocks(left)[0], 1, 3);
+        fireEvent.click(within(left).getByRole('button', {name: 'Comment'}));
+
+        const commentBody = await waitFor(() =>
+            within(left).getByRole('textbox', {name: 'Annotation body'}),
+        );
+        selectCaret(commentBody, 0);
+        beforeInputText(commentBody, 'note');
+        await waitFor(() => expect(blockText(commentBody)).toBe('note'));
+
+        selectRange(commentBody, 0, 4);
+        pasteText(commentBody, 'https://note.test');
+
+        await waitFor(() => {
+            expect(blockText(commentBody)).toBe('note');
+            const links = [...commentBody.querySelectorAll<HTMLElement>('.markLink')];
+            expect(links.map((link) => link.textContent).join('')).toBe('note');
+            expect(links.every((link) => link.dataset.linkHref === 'https://note.test')).toBe(true);
+        });
+    });
+
     it('creates a comment on selected comment body text', async () => {
         const view = render(<App />);
         const {left} = panels(view);
@@ -2274,6 +2369,39 @@ describe('Block rich text example UI', () => {
         });
     });
 
+    it('splits a footnote body with Enter and focuses the new sibling body', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        const block = blocks(left)[0];
+
+        selectCaret(block, 0);
+        beforeInputText(block, 'abcd');
+        await waitFor(() => expect(blockText(block)).toBe('abcd'));
+
+        selectRange(block, 1, 3);
+        fireEvent.click(within(left).getByRole('button', {name: 'Footnote'}));
+
+        const footnoteBody = await waitFor(() =>
+            within(left).getByRole('textbox', {name: 'Annotation body'}),
+        );
+        selectCaret(footnoteBody, 0);
+        beforeInputText(footnoteBody, 'note');
+        await waitFor(() => expect(blockText(footnoteBody)).toBe('note'));
+
+        selectCaret(footnoteBody, 2);
+        fireEvent.keyDown(footnoteBody, {key: 'Enter'});
+
+        const bodies = await waitFor(() => {
+            const found = within(left).getAllByRole('textbox', {name: 'Annotation body'});
+            expect(found).toHaveLength(2);
+            expect(found.map(blockText)).toEqual(['no', 'te']);
+            return found;
+        });
+        expect(domSelectionBlock()).toBe(bodies[1]);
+        expect(domSelectionOffsets(bodies[1])).toEqual({anchor: 0, focus: 0});
+        expect(document.activeElement).toBe(bodies[1]);
+    });
+
     it('renders popover annotations inline as editable transition-managed popovers', async () => {
         const view = render(<App />);
         const {left} = panels(view);
@@ -2304,6 +2432,26 @@ describe('Block rich text example UI', () => {
         expect(popoverDialogs(left)).toEqual([popover]);
 
         await closePopoversBySelectingMainBlock(left);
+    });
+
+    it('splits a popover body with Enter and focuses the new sibling body', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        const {popover} = await createPopoverOnMainText(left, 'abcd', 1, 3);
+        const popoverBody = await typePopoverBody(popover, 'note');
+
+        selectCaret(popoverBody, 2);
+        fireEvent.keyDown(popoverBody, {key: 'Enter'});
+
+        const bodies = await waitFor(() => {
+            const found = within(popover).getAllByRole('textbox', {name: 'Annotation body'});
+            expect(found).toHaveLength(2);
+            expect(found.map(blockText)).toEqual(['no', 'te']);
+            return found;
+        });
+        expect(domSelectionBlock()).toBe(bodies[1]);
+        expect(domSelectionOffsets(bodies[1])).toEqual({anchor: 0, focus: 0});
+        expect(document.activeElement).toBe(bodies[1]);
     });
 
     it('keeps a hover popover open briefly when the pointer leaves toward it', async () => {

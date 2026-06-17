@@ -11,6 +11,7 @@ import {
     insertTextWithRetainedMarks,
     moveBlock,
     pastePlainText,
+    pastePlainTextWithMarkdownShortcuts,
     removeLinkMark,
     setBlockMeta,
     setLinkMark,
@@ -178,6 +179,16 @@ export const pastePlainTextEverywhere = (
 ): MultiCommandResult =>
     runReplacingCommand(state, selection, (working, entry) =>
         pastePlainText(working, resolveSelection(working, entry.selection), text, context),
+    );
+
+export const pastePlainTextWithMarkdownShortcutsEverywhere = (
+    state: CachedState<RichBlockMeta>,
+    selection: RetainedSelectionSet,
+    text: string,
+    context: CommandContext,
+): MultiCommandResult =>
+    runReplacingCommand(state, selection, (working, entry) =>
+        pastePlainTextWithMarkdownShortcuts(working, resolveSelection(working, entry.selection), text, context),
     );
 
 export const deleteBackwardEverywhere = (
