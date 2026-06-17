@@ -50,7 +50,9 @@ import {
     isAnnotationData,
     replaceAnnotationBodySelection,
     removeAnnotationBodyLink,
+    resolveAnnotation,
     setAnnotationBodyLink,
+    splitAnnotationBodyBlock,
     toggleAnnotationBodyMark,
     type AnnotationMarkData,
     type AnnotationPresentation,
@@ -157,7 +159,7 @@ import {highlightCode, type SyntaxToken} from './syntaxHighlight';
 
 type RichFormattedBlock = FormattedBlock<RichBlockMeta>;
 type RenderedAnnotation = ReturnType<typeof renderedAnnotations>[number];
-type CommentFocusRequest = {blockId: string; token: number};
+type CommentFocusRequest = {blockId: string; token: number; selection?: EditorSelection};
 type LinkPopoverState = {
     ranges: LinkTargetRange[];
     href: string;
@@ -688,9 +690,9 @@ function BlockEditor({
 
     const nextSelectionId = useCallback(() => `sel-${nextSelectionIdRef.current++}`, []);
 
-    const requestCommentFocus = useCallback((blockId: string | null | undefined) => {
+    const requestCommentFocus = useCallback((blockId: string | null | undefined, selection?: EditorSelection) => {
         if (!blockId) return;
-        setCommentFocusRequest({blockId, token: nextCommentFocusTokenRef.current++});
+        setCommentFocusRequest({blockId, selection, token: nextCommentFocusTokenRef.current++});
     }, []);
 
     const recordCommentBodyActivity = useCallback((annotationId: string, bodyBlockId: string) => {
@@ -1658,7 +1660,13 @@ function BlockEditor({
                     }}
                     onBodyActivity={recordCommentBodyActivity}
                     onBodyCommand={runAnnotationBodyCommand}
+                    onBodyFocusRequest={requestCommentFocus}
                     onBodySelectionChange={setActiveAnnotationBodySelection}
+                    onResolveAnnotation={(annotation) => {
+                        runAnnotationBodyCommand((current, context) =>
+                            resolveAnnotation(current.state, annotation.id, context),
+                        );
+                    }}
                     popoverTextById={popoverTextById}
                     footnoteNumberById={footnoteNumberById}
                     onPopoverTriggerEnter={showPopover}
@@ -2576,7 +2584,9 @@ function AnnotationSidebar({
     onFocusRequestHandled,
     onBodyActivity,
     onBodyCommand,
+    onBodyFocusRequest,
     onBodySelectionChange,
+    onResolveAnnotation,
     popoverTextById,
     footnoteNumberById,
     onPopoverTriggerEnter,
@@ -2593,7 +2603,9 @@ function AnnotationSidebar({
     onBodyCommand(
         command: (current: Replica, context: ReturnType<typeof makeCommandContext>) => CommandResult,
     ): void;
+    onBodyFocusRequest(blockId: string, selection: EditorSelection): void;
     onBodySelectionChange(selection: EditorSelection | null): void;
+    onResolveAnnotation(annotation: RenderedAnnotation): void;
     popoverTextById: Map<string, string>;
     footnoteNumberById: Map<string, number>;
     onPopoverTriggerEnter(id: string, element: HTMLElement): void;
@@ -2618,7 +2630,18 @@ function AnnotationSidebar({
                     {annotations.length ? (
                         annotations.map((annotation) => (
                             <section key={annotation.id} className="annotationCard">
-                                <strong>Comment on “{annotation.referenceText}”</strong>
+                                <div className="annotationCardHeader">
+                                    <strong>Comment on “{annotation.referenceText}”</strong>
+                                    <button
+                                        type="button"
+                                        className="annotationResolveButton"
+                                        aria-label="Resolve comment"
+                                        title="Resolve comment"
+                                        onClick={() => onResolveAnnotation(annotation)}
+                                    >
+                                        x
+                                    </button>
+                                </div>
                                 {annotation.bodyBlocks.map((block) => (
                                     <AnnotationBodyBlock
                                         key={block.id}
@@ -2628,6 +2651,7 @@ function AnnotationSidebar({
                                         onFocusRequestHandled={onFocusRequestHandled}
                                         onBodyActivity={onBodyActivity}
                                         onBodyCommand={onBodyCommand}
+                                        onBodyFocusRequest={onBodyFocusRequest}
                                         onBodySelectionChange={onBodySelectionChange}
                                         popoverTextById={popoverTextById}
                                         footnoteNumberById={footnoteNumberById}
@@ -2870,6 +2894,7 @@ function AnnotationBodyBlock({
     onFocusRequestHandled,
     onBodyActivity,
     onBodyCommand,
+    onBodyFocusRequest,
     onBodySelectionChange,
     popoverTextById,
     footnoteNumberById,
@@ -2885,6 +2910,7 @@ function AnnotationBodyBlock({
     onBodyCommand(
         command: (current: Replica, context: ReturnType<typeof makeCommandContext>) => CommandResult,
     ): void;
+    onBodyFocusRequest?(blockId: string, selection: EditorSelection): void;
     onBodySelectionChange(selection: EditorSelection | null): void;
     popoverTextById: Map<string, string>;
     footnoteNumberById: Map<string, number>;
@@ -2914,9 +2940,10 @@ function AnnotationBodyBlock({
 
     useLayoutEffect(() => {
         if (focusRequest?.blockId !== block.id) return;
-        const nextSelection = caret(block.id, block.text.length);
-        pendingCaretRestoreBlockIdRef.current = block.id;
-        pendingSelectionRestoreRef.current = null;
+        const nextSelection = focusRequest.selection ?? caret(block.id, block.text.length);
+        pendingCaretRestoreBlockIdRef.current =
+            nextSelection.type === 'caret' && nextSelection.point.blockId === block.id ? block.id : null;
+        pendingSelectionRestoreRef.current = nextSelection.type === 'range' ? nextSelection : null;
         setSelection(nextSelection);
         onBodySelectionChange(nextSelection);
         onFocusRequestHandled?.();
@@ -2927,6 +2954,7 @@ function AnnotationBodyBlock({
         focusRequest?.token,
         onBodySelectionChange,
         onFocusRequestHandled,
+        focusRequest?.selection,
     ]);
 
     const run = useCallback(
@@ -2940,11 +2968,14 @@ function AnnotationBodyBlock({
         ) => {
             onBodyCommand((current, context) => {
                 const result = apply(current.state, selection, context);
+                if (focusPoint(result.selection).blockId !== block.id) {
+                    onBodyFocusRequest?.(focusPoint(result.selection).blockId, result.selection);
+                }
                 restoreAfter(result.selection);
                 return result;
             });
         },
-        [onBodyCommand, restoreAfter],
+        [block.id, onBodyCommand, onBodyFocusRequest, restoreAfter],
     );
 
     const rangeSelection = useCallback(
@@ -3044,7 +3075,9 @@ function AnnotationBodyBlock({
                     )
                 }
                 onDeleteBackward={(activeSelection) =>
-                    run(activeSelection ?? selection, deleteAnnotationBodyBackward)
+                    run(activeSelection ?? selection, (state, selected, context) =>
+                        deleteAnnotationBodyBackward(state, selected, context, {annotationId, bodyBlockId: block.id}),
+                    )
                 }
                 onDeleteForward={(activeSelection) =>
                     run(activeSelection ?? selection, deleteAnnotationBodyForward)
@@ -3072,7 +3105,7 @@ function AnnotationBodyBlock({
                     if (event.key === 'Enter') {
                         event.preventDefault();
                         run(selected, (state, activeSelection, context) =>
-                            replaceAnnotationBodySelection(state, activeSelection, '\n', context),
+                            splitAnnotationBodyBlock(state, activeSelection, context),
                         );
                         return;
                     }
@@ -4553,10 +4586,10 @@ const applyRunClasses = (
 };
 
 const hasAnnotationMark = (run: RichFormattedBlock['runs'][number]) =>
-    Boolean(run.marks.annotation || run.stackedMarks?.annotation?.length);
+    annotationDataForRun(run).length > 0;
 
 const annotationDataForRun = (run: RichFormattedBlock['runs'][number]): AnnotationMarkData[] => {
-    return formattedMarkValues(run, ANNOTATION_MARK).filter(isAnnotationMarkData);
+    return formattedMarkValues(run, ANNOTATION_MARK).filter(isActiveAnnotationMarkData);
 };
 
 const sidebarIdsForRun = (run: RichFormattedBlock['runs'][number]): string[] => {
@@ -4601,6 +4634,9 @@ const isAnnotationMarkData = (value: unknown): value is AnnotationMarkData =>
     value !== null &&
     Array.isArray((value as AnnotationMarkData).id) &&
     ['sidebar', 'footnote', 'popover'].includes((value as AnnotationMarkData).presentation);
+
+const isActiveAnnotationMarkData = (value: unknown): value is AnnotationMarkData =>
+    isAnnotationMarkData(value) && !value.resolved;
 
 const capitalize = (value: string) => value.slice(0, 1).toUpperCase() + value.slice(1);
 

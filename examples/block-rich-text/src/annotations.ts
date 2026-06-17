@@ -1,20 +1,25 @@
 import {
     applyMany,
     blockContents,
+    deleteBlockOps,
     deleteRangeOps,
     formattedMarkValues,
     insertBlockOpsWithId,
+    materializeFormattedBlocks,
     orderedCharIdsForBlock,
+    splitBlockOps,
     visibleBlockChildren,
     coveredCharIdsForMark,
+    visibleRangesForMark,
     type FormattedBlock,
     type FormattedRun,
     type Op,
+    type VisibleMarkRange,
 } from 'umkehr/block-crdt';
 import type {CachedState, JsonValue, Lamport, Mark} from 'umkehr/block-crdt/types';
 import {lamportToString, parseLamportString} from 'umkehr/block-crdt/utils';
 import {paragraphMeta, type RichBlockMeta} from './blockMeta';
-import {normalizeSelectionSegments, segmentText, type EditorSelection} from './selectionModel';
+import {caret, focusPoint, normalizeSelectionSegments, segmentText, type EditorSelection} from './selectionModel';
 import type {CommandContext, CommandResult} from './blockCommands';
 import {markRangeOp} from 'umkehr/block-crdt';
 import {
@@ -141,6 +146,73 @@ export const setAnnotationBodyText = (
     return {state: working, ops, selection: {type: 'caret', point: {blockId: bodyBlockId, offset: segmentText(text).length}}};
 };
 
+export const resolveAnnotation = (
+    state: CachedState<RichBlockMeta>,
+    annotationId: string,
+    context: CommandContext,
+): CommandResult => {
+    const marks = findAnnotationMarks(state, annotationId);
+    if (!marks.length) return {state, ops: [], selection: fallbackAnnotationSelection(state)};
+
+    const rangesByMark = marks.map((mark) => ({
+        mark,
+        ranges: visibleRangesForMark(state, mark, annotationVirtualParents(state)),
+    })).filter((entry) => entry.ranges.length > 0);
+    const ranges = rangesByMark.flatMap((entry) => entry.ranges);
+    if (!ranges.length) return {state, ops: [], selection: fallbackAnnotationSelection(state)};
+
+    const ops: Array<Op<RichBlockMeta>> = [];
+    let working = state;
+    for (const {mark, ranges: markRanges} of rangesByMark) {
+        const originalData = mark.data as unknown as AnnotationMarkData;
+        const resolvedData: AnnotationMarkData = {...originalData, resolved: true};
+        for (const range of markRanges) {
+            const removeOp = annotationMarkRangeOp(working, range, originalData, true, context);
+            working = applyMany(working, [removeOp], annotationVirtualParents(working));
+            ops.push(removeOp);
+
+            const resolvedOp = annotationMarkRangeOp(working, range, resolvedData, false, context);
+            working = applyMany(working, [resolvedOp], annotationVirtualParents(working));
+            ops.push(resolvedOp);
+        }
+    }
+
+    const first = ranges[0];
+    return {state: working, ops, selection: caret(first.blockId, first.startOffset)};
+};
+
+export const removeAnnotationBodyBlock = (
+    state: CachedState<RichBlockMeta>,
+    annotationId: string,
+    bodyBlockId: string,
+    context: CommandContext,
+): CommandResult => {
+    const mark = findAnnotationMarks(state, annotationId)[0];
+    if (!mark) return {state, ops: [], selection: caret(bodyBlockId, 0)};
+
+    const bodyIds = annotationBodyBlockIds(state, (mark.data as unknown as AnnotationMarkData).id);
+    const bodyIndex = bodyIds.indexOf(bodyBlockId);
+    if (bodyIndex < 0) return {state, ops: [], selection: caret(bodyBlockId, 0)};
+
+    if (bodyIds.length <= 1) {
+        return resolveAnnotation(state, annotationId, context);
+    }
+
+    const fallbackBodyId = bodyIds[bodyIndex - 1] ?? bodyIds[bodyIndex + 1] ?? bodyIds[0];
+    const fallbackTextLength = fallbackBodyId ? segmentText(blockContents(state, fallbackBodyId)).length : 0;
+    const ops = deleteBlockOps(state, {
+        block: parseLamportString(bodyBlockId),
+        mode: 'subtree',
+        virtualParents: annotationVirtualParents(state),
+    });
+    const next = applyMany(state, ops, annotationVirtualParents(state));
+    return {
+        state: next,
+        ops,
+        selection: fallbackBodyId ? caret(fallbackBodyId, fallbackTextLength) : fallbackAnnotationSelection(next),
+    };
+};
+
 export const replaceAnnotationBodySelection = (
     state: CachedState<RichBlockMeta>,
     selection: EditorSelection,
@@ -176,17 +248,59 @@ export const replaceAnnotationBodySelection = (
     return {state: working, ops, selection: {type: 'caret', point: {blockId: range.blockId, offset}}};
 };
 
-export const deleteAnnotationBodyBackward = (
+export const splitAnnotationBodyBlock = (
     state: CachedState<RichBlockMeta>,
     selection: EditorSelection,
     context: CommandContext,
 ): CommandResult => {
     const range = bodySelectionRange(state, selection);
     if (!range) return {state, ops: [], selection};
+
+    let working = state;
+    const ops: Array<Op<RichBlockMeta>> = [];
+    let point = focusPoint(selection);
+
+    if (range.startOffset < range.endOffset) {
+        const deleted = replaceAnnotationBodySelection(working, selection, '', context);
+        working = deleted.state;
+        ops.push(...deleted.ops);
+        point = focusPoint(deleted.selection);
+    } else {
+        point = {blockId: range.blockId, offset: range.startOffset};
+    }
+
+    const newBlockId = lamportToString([working.state.maxSeenCount + 1, context.actor]);
+    const splitOps = splitBlockOps<RichBlockMeta>(working, {
+        actor: context.actor,
+        block: parseLamportString(point.blockId),
+        offset: point.offset,
+        ts: context.nextTs(),
+        virtualParents: annotationVirtualParents(working),
+    });
+    working = applyMany(working, splitOps, annotationVirtualParents(working));
+    ops.push(...splitOps);
+
+    return {state: working, ops, selection: caret(newBlockId, 0)};
+};
+
+export const deleteAnnotationBodyBackward = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    context: CommandContext,
+    options: {annotationId?: string; bodyBlockId?: string} = {},
+): CommandResult => {
+    const range = bodySelectionRange(state, selection);
+    if (!range) return {state, ops: [], selection};
     if (range.startOffset < range.endOffset) {
         return replaceAnnotationBodySelection(state, selection, '', context);
     }
-    if (range.startOffset === 0) return {state, ops: [], selection};
+    if (range.startOffset === 0) {
+        const textLength = segmentText(blockContents(state, range.blockId)).length;
+        if (textLength === 0 && options.annotationId && options.bodyBlockId) {
+            return removeAnnotationBodyBlock(state, options.annotationId, options.bodyBlockId, context);
+        }
+        return {state, ops: [], selection};
+    }
 
     const deleteSelection: EditorSelection = {
         type: 'range',
@@ -315,15 +429,17 @@ export const renderedAnnotations = (
 ): RenderedAnnotation[] => {
     const formattedBodies = new Map(blocksWithAnnotationBodies.map((block) => [block.id, block]));
     const referenceBlocks = blocksWithAnnotationBodies;
+    const activeData = activeAnnotationDatasForBlocks(referenceBlocks);
     const seen = new Set<string>();
-    return Object.values(state.state.marks)
-        .filter((mark) => mark.type === ANNOTATION_MARK && !mark.remove && isAnnotationData(mark.data))
-        .map((mark) => {
-            const id = lamportToString((mark.data as unknown as AnnotationMarkData).id);
-            const bodyIds = annotationBodyBlockIds(state, (mark.data as unknown as AnnotationMarkData).id);
+    return activeData
+        .map((data) => {
+            const id = lamportToString(data.id);
+            const mark = representativeAnnotationMark(state, data);
+            const bodyIds = annotationBodyBlockIds(state, data.id);
+            if (!mark) return null;
             return {
                 id,
-                data: mark.data as unknown as AnnotationMarkData,
+                data,
                 mark,
                 referenceText: annotationReferenceText(referenceBlocks, id),
                 bodyBlocks: bodyIds.map((bodyId) => {
@@ -335,6 +451,7 @@ export const renderedAnnotations = (
                 }),
             };
         })
+        .filter((annotation): annotation is RenderedAnnotation => Boolean(annotation))
         .filter((annotation) => annotation.referenceText.length > 0)
         .filter((annotation) => {
             if (seen.has(annotation.id)) return false;
@@ -351,6 +468,9 @@ export const renderedAnnotations = (
 export const isAnnotationData = (value: unknown): value is AnnotationMarkData =>
     typeof value === 'object' && value !== null && Array.isArray((value as AnnotationMarkData).id) &&
     ['sidebar', 'footnote', 'popover'].includes((value as AnnotationMarkData).presentation);
+
+export const isActiveAnnotationData = (value: unknown): value is AnnotationMarkData =>
+    isAnnotationData(value) && !value.resolved;
 
 const annotationReferenceText = (blocks: Array<FormattedBlock<RichBlockMeta>>, id: string): string =>
     blocks.flatMap((block) => block.runs).filter((run) => annotationDatasForRun(run).some((data) => lamportToString(data.id) === id)).map((run) => run.text).join('');
@@ -373,9 +493,36 @@ const firstPositionForAnnotation = (
     return {blockIndex: Number.MAX_SAFE_INTEGER, offset: Number.MAX_SAFE_INTEGER};
 };
 
-const annotationDatasForRun = (run: FormattedRun): AnnotationMarkData[] => {
-    return formattedMarkValues(run, ANNOTATION_MARK).filter(isAnnotationData);
+const annotationDatasForRun = (run: FormattedRun): AnnotationMarkData[] =>
+    formattedMarkValues(run, ANNOTATION_MARK).filter(isActiveAnnotationData);
+
+const activeAnnotationDatasForBlocks = (blocks: Array<FormattedBlock<RichBlockMeta>>): AnnotationMarkData[] => {
+    const result: AnnotationMarkData[] = [];
+    const seen = new Set<string>();
+    for (const block of blocks) {
+        for (const run of block.runs) {
+            for (const data of annotationDatasForRun(run)) {
+                const id = lamportToString(data.id);
+                if (seen.has(id)) continue;
+                seen.add(id);
+                result.push(data);
+            }
+        }
+    }
+    return result;
 };
+
+const representativeAnnotationMark = (
+    state: CachedState<RichBlockMeta>,
+    data: AnnotationMarkData,
+): Mark | null =>
+    findAnnotationMarks(state, lamportToString(data.id)).find((mark) => annotationDataEquals(mark.data, data)) ?? null;
+
+const annotationDataEquals = (value: unknown, data: AnnotationMarkData): boolean =>
+    isAnnotationData(value) &&
+    lamportToString(value.id) === lamportToString(data.id) &&
+    value.presentation === data.presentation &&
+    Boolean(value.resolved) === Boolean(data.resolved);
 
 const exactAnnotationForSegments = (
     state: CachedState<RichBlockMeta>,
@@ -386,12 +533,14 @@ const exactAnnotationForSegments = (
     const selected = orderedVisibleCharIds(state, segment.blockId).slice(segment.startOffset, segment.endOffset);
     if (!selected.length) return null;
     const selectedKey = selected.join('\0');
-    for (const mark of Object.values(state.state.marks)) {
-        if (mark.type !== ANNOTATION_MARK || mark.remove || !isAnnotationData(mark.data)) continue;
+    const activeData = activeAnnotationDatasForBlocks(materializeFormattedBlocks(state, annotationVirtualParents(state)));
+    for (const data of activeData) {
+        const mark = representativeAnnotationMark(state, data);
+        if (!mark) continue;
         const covered = coveredCharIdsForMark(state, mark, annotationVirtualParents(state))
             .filter((id) => !state.state.chars[id]?.deleted);
         if (covered.join('\0') === selectedKey) {
-            return (mark.data as unknown as AnnotationMarkData).id;
+            return data.id;
         }
     }
     return null;
@@ -399,3 +548,38 @@ const exactAnnotationForSegments = (
 
 const orderedVisibleCharIds = (state: CachedState<RichBlockMeta>, blockId: string): string[] =>
     orderedCharIdsForBlock(state, blockId, {visibleOnly: true});
+
+const findAnnotationMarks = (
+    state: CachedState<RichBlockMeta>,
+    annotationId: string,
+): Mark[] => {
+    const marks: Mark[] = [];
+    for (const mark of Object.values(state.state.marks)) {
+        if (mark.type !== ANNOTATION_MARK || mark.remove || !isActiveAnnotationData(mark.data)) continue;
+        if (lamportToString(mark.data.id) === annotationId) marks.push(mark);
+    }
+    return marks;
+};
+
+const annotationMarkRangeOp = (
+    state: CachedState<RichBlockMeta>,
+    range: VisibleMarkRange,
+    data: AnnotationMarkData,
+    remove: boolean,
+    context: CommandContext,
+): Op<RichBlockMeta> =>
+    markRangeOp(
+        state,
+        parseLamportString(range.blockId),
+        range.startOffset,
+        range.endOffset,
+        ANNOTATION_MARK,
+        data as unknown as JsonValue,
+        remove,
+        [state.state.maxSeenCount + 1, context.actor],
+    );
+
+const fallbackAnnotationSelection = (state: CachedState<RichBlockMeta>): EditorSelection => {
+    const blockId = Object.keys(state.state.blocks).find((id) => !state.state.blocks[id].deleted);
+    return caret(blockId ?? lamportToString([0, 'root']), 0);
+};

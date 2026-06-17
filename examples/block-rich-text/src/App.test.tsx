@@ -2025,6 +2025,38 @@ describe('Block rich text example UI', () => {
         expect(commentDots(left)).toHaveLength(0);
     });
 
+    it('splits a comment body with Enter and focuses the new sibling body', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abcd');
+        await waitFor(() => expect(blockText(blocks(left)[0])).toBe('abcd'));
+
+        selectRange(blocks(left)[0], 1, 3);
+        fireEvent.click(within(left).getByRole('button', {name: 'Comment'}));
+
+        const commentBody = await waitFor(() =>
+            within(left).getByRole('textbox', {name: 'Annotation body'}),
+        );
+        selectCaret(commentBody, 0);
+        beforeInputText(commentBody, 'note');
+        await waitFor(() => expect(blockText(commentBody)).toBe('note'));
+
+        selectCaret(commentBody, 2);
+        fireEvent.keyDown(commentBody, {key: 'Enter'});
+
+        const bodies = await waitFor(() => {
+            const found = within(left).getAllByRole('textbox', {name: 'Annotation body'});
+            expect(found).toHaveLength(2);
+            expect(found.map(blockText)).toEqual(['no', 'te']);
+            return found;
+        });
+        expect(domSelectionBlock()).toBe(bodies[1]);
+        expect(domSelectionOffsets(bodies[1])).toEqual({anchor: 0, focus: 0});
+        expect(document.activeElement).toBe(bodies[1]);
+    });
+
     it('pastes 2000 characters into a comment body after commenting large text in less than 50ms', async () => {
         const view = render(<App />);
         const {left} = panels(view);
