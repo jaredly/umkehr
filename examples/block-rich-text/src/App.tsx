@@ -1973,7 +1973,9 @@ function TableBlock({node, context}: {node: RenderTreeNode; context: RenderBlock
             style={{'--block-depth': node.block.depth} as CSSProperties}
             data-table-id={node.block.id}
         >
-            <div className="tableGrid" role="table" aria-label="Table block">
+            <div className="tableGrid" role="table" aria-label="Table block"
+                style={{'--table-columns': columnCount} as CSSProperties}
+            >
                 <div className="tableTitleRow">{renderEditableBlock(node.block, context)}</div>
                 <div
                     className="tableColumnInsertControls"

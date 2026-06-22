@@ -432,7 +432,7 @@ select {
 .tableGrid {
     --table-row-gutter: 30px;
     display: grid;
-    grid-template-columns: fit-content(180px) repeat(calc(var(--table-columns, 1) + 1), minmax(150px, 1fr)) 0;
+    grid-template-columns: fit-content(180px) repeat(calc(var(--table-columns, 1)), minmax(150px, 1fr)) 0;
     width: 100%;
     max-width: 100%;
     overflow-x: auto;
