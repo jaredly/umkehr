@@ -839,23 +839,8 @@ describe('Block rich text example UI', () => {
         });
         expect(document.activeElement).toBe(targetCell);
 
-        fireEvent.pointerMove(targetCell, {
-            buttons: 0,
-            isPrimary: true,
-            pointerId: 1,
-            clientX: 42,
-            clientY: 20,
-        });
-        await waitFor(() => expect(targetCell.classList.contains('cellDragReady')).toBe(true));
-
-        fireEvent.pointerMove(targetCell, {
-            buttons: 0,
-            isPrimary: true,
-            pointerId: 1,
-            clientX: 90,
-            clientY: 20,
-        });
-        await waitFor(() => expect(targetCell.classList.contains('cellDragReady')).toBe(false));
+        expect(targetCell.classList.contains('cellDragCandidate')).toBe(true);
+        expect(targetCell.querySelectorAll('.tableCellDragEdge')).toHaveLength(2);
     });
 
     it('undoes while a table cell block selection is focused', async () => {

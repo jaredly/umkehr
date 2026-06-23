@@ -3480,7 +3480,6 @@ function TableBlock({node, context}: {node: RenderTreeNode; context: RenderBlock
         anchorCellId: string;
         focusCellId: string;
     } | null>(null);
-    const [cellDragReadyId, setCellDragReadyId] = useState<string | null>(null);
     const rowNodes = node.children;
     const columnCount = Math.max(
         1,
@@ -3716,9 +3715,7 @@ function TableBlock({node, context}: {node: RenderTreeNode; context: RenderBlock
                                                 cellDrag?.sourceCellId === cell?.block.id
                                                     ? 'draggingCell'
                                                     : '',
-                                                canStartCellDrag && cellDragReadyId === cell.block.id
-                                                    ? 'cellDragReady'
-                                                    : '',
+                                                canStartCellDrag ? 'cellDragCandidate' : '',
                                                 cellDrag?.target?.rowId === row.block.id &&
                                                 cellDrag.target.index === columnIndex
                                                     ? 'cellDropBefore'
@@ -3751,25 +3748,9 @@ function TableBlock({node, context}: {node: RenderTreeNode; context: RenderBlock
                                                     context.onRedo();
                                                 }
                                             }}
-                                            onPointerMove={(event) => {
-                                                if (!cell) return;
-                                                const dragReady =
-                                                    canStartCellDrag && isCellBorderPointer(event);
-                                                setCellDragReadyId((current) => {
-                                                    if (dragReady) return cell.block.id;
-                                                    return current === cell.block.id ? null : current;
-                                                });
-                                            }}
-                                            onPointerLeave={() => {
-                                                if (!cell) return;
-                                                setCellDragReadyId((current) =>
-                                                    current === cell.block.id ? null : current,
-                                                );
-                                            }}
                                             onPointerDown={(event) => {
                                                 if (!cell || !isCellBorderPointer(event))
                                                     return;
-                                                setCellDragReadyId(null);
                                                 event.preventDefault();
                                                 event.stopPropagation();
                                                 if (cell.block.id !== selectedCellId) {
@@ -3827,6 +3808,18 @@ function TableBlock({node, context}: {node: RenderTreeNode; context: RenderBlock
                                                 });
                                             }}
                                         >
+                                            {canStartCellDrag ? (
+                                                <>
+                                                    <span
+                                                        className="tableCellDragEdge tableCellDragEdgeLeft"
+                                                        aria-hidden="true"
+                                                    />
+                                                    <span
+                                                        className="tableCellDragEdge tableCellDragEdgeRight"
+                                                        aria-hidden="true"
+                                                    />
+                                                </>
+                                            ) : null}
                                             {cell ? (
                                                 renderTableCell(cell, context)
                                             ) : (
