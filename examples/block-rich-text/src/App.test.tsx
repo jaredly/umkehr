@@ -2391,6 +2391,9 @@ describe('Block rich text example UI', () => {
         });
 
         await waitFor(() => expect(tableBlockTexts(left)).toEqual(['cell', '', 'X', 'Y', '', '']));
+
+        fireEvent.click(within(left).getByText('Undo'));
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['cell', '', '', '']));
     });
 
     it('pastes custom block rich text before falling back to plain text', async () => {

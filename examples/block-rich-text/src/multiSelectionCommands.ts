@@ -1,4 +1,5 @@
 import type {CachedState, JsonValue, Lamport} from 'umkehr/block-crdt/types';
+import * as hlc from '../../../src/crdt/hlc';
 import {
     applyMany,
     blockContents,
@@ -346,6 +347,7 @@ const pasteRichClipboardAsCellChildren = (
         if (!parent) break;
         const inserted = insertBlockOpsWithId(working, {
             actor: context.actor,
+            id: nextCommandLamport(working, context),
             parent: parent.id,
             before: previousBlockId ? working.state.blocks[previousBlockId].id : null,
             meta: fragment.meta,
@@ -378,6 +380,13 @@ const pasteRichClipboardAsCellChildren = (
             entries: [{id: selection.primaryId, selection: retainSelection(working, nextSelection)}],
         },
     };
+};
+
+const nextCommandLamport = (state: CachedState<RichBlockMeta>, context: CommandContext): Lamport => {
+    const timestamp = context.nextTs();
+    const unpacked = hlc.tryUnpack(timestamp);
+    const count = unpacked ? unpacked.count : parseLamportString(timestamp)[0];
+    return [Math.max(state.state.maxSeenCount + 1, count), context.actor];
 };
 
 const pasteRichClipboardAsTableRow = (

@@ -21,6 +21,7 @@ import {Block, CachedState, Char, DefaultBlockMeta, HLC, JsonValue, Lamport, Op,
 
 export type InsertBlockOpsOptions<M extends TimestampedBlockMeta> = {
     actor: string;
+    id?: Lamport;
     parent: Lamport;
     before?: Lamport | null;
     after?: Lamport | null;
@@ -170,6 +171,7 @@ export const insertBlockOps = <M extends TimestampedBlockMeta = DefaultBlockMeta
     state: CachedState<M>,
     {
         actor,
+        id,
         parent,
         before = null,
         after = null,
@@ -207,13 +209,13 @@ export const insertBlockOps = <M extends TimestampedBlockMeta = DefaultBlockMeta
         throw new Error(`insert before/after anchors must be adjacent siblings`);
     }
 
-    const id = nextBlockIdForActor(state, actor);
+    const blockId = id ?? nextBlockIdForActor(state, actor);
     const parentPath = parentId === ROOT_ID ? [] : materializedPathForParent(state, parentId, virtualParents);
     return [
         {
             type: 'block',
             block: blockBetween(
-                id,
+                blockId,
                 meta,
                 parentPath,
                 beforeId ? state.state.blocks[beforeId].order.index : null,

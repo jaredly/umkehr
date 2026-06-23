@@ -1,6 +1,7 @@
 import {describe, expect, it} from 'vitest';
-import {materializeFormattedBlocks} from 'umkehr/block-crdt';
+import {blockContents, materializeFormattedBlocks, rootBlockIds, visibleBlockChildren} from 'umkehr/block-crdt';
 import {makeCommandContext, nextReplicaTs, type EditorId, type Replica} from './blockEditorRuntime';
+import {createTable} from './blockCommands';
 import {
     appendHistoryAction,
     initialHistoryState,
@@ -11,13 +12,16 @@ import {
 import {
     deleteBackwardEverywhere,
     insertTextEverywhere,
+    pasteRichClipboardEverywhere,
     setBlockTypeEverywhere,
     splitBlockEverywhere,
     type MultiCommandResult,
 } from './multiSelectionCommands';
 import {deriveUndoState, createRedoAction, createUndoAction} from './undoHistory';
 import {annotationVirtualParents, createAnnotation, renderedAnnotations} from './annotations';
-import {primarySelection, replacePrimarySelection, resolveSelectionSet} from './selectionSet';
+import {primarySelection, replacePrimarySelection, resolveSelectionSet, singleRetainedSelectionSet} from './selectionSet';
+import {caret} from './selectionModel';
+import type {RichClipboardPayload} from './clipboard';
 
 const appendEdit = (
     history: HistoryState,
@@ -264,6 +268,72 @@ describe('block rich text undo history', () => {
         history = appendActionResult(history, createUndoAction(history, 'left'));
 
         expect(visibleText(history)).toEqual(['ab']);
+    });
+
+    it('undoes rich paste into a single selected table cell', () => {
+        let history = initialHistoryState();
+        history = appendEdit(history, 'left', (replica) =>
+            createTable(
+                replica.state,
+                primarySelection(resolveSelectionSet(replica.state, replica.selection)),
+                makeCommandContext(replica),
+            ),
+        );
+
+        let demo = replayHistory(history.actions, history.cursor);
+        const tableId = rootBlockIds(demo.left.state).find(
+            (id) => demo.left.state.state.blocks[id]?.meta.type === 'table',
+        )!;
+        const rowId = visibleBlockChildren(demo.left.state, tableId, annotationVirtualParents(demo.left.state))[0];
+        const firstCellId = visibleBlockChildren(demo.left.state, rowId, annotationVirtualParents(demo.left.state))[0];
+        const cellId = visibleBlockChildren(demo.left.state, rowId, annotationVirtualParents(demo.left.state))[1];
+        history = appendEdit(history, 'left', (replica) =>
+            insertTextEverywhere(
+                replica.state,
+                singleRetainedSelectionSet(replica.state, caret(firstCellId, 0)),
+                'cell',
+                makeCommandContext(replica),
+            ),
+        );
+
+        const payload: RichClipboardPayload = {
+            version: 1,
+            plainText: 'one\ntwo',
+            html: '<p>one</p><p>two</p>',
+            fragments: [
+                {text: 'one', meta: {type: 'paragraph', ts: 'one-ts'}, marks: []},
+                {text: 'two', meta: {type: 'paragraph', ts: 'two-ts'}, marks: []},
+            ],
+            annotations: [],
+        };
+        history = appendEdit(history, 'left', (replica) =>
+            pasteRichClipboardEverywhere(
+                replica.state,
+                singleRetainedSelectionSet(replica.state, {
+                    type: 'table-cells',
+                    tableId,
+                    anchorCellId: cellId,
+                    focusCellId: cellId,
+                }),
+                payload,
+                makeCommandContext(replica),
+            ),
+        );
+
+        demo = replayHistory(history.actions, history.cursor);
+        expect(blockContents(demo.left.state, firstCellId)).toBe('cell');
+        expect(
+            visibleBlockChildren(demo.left.state, cellId, annotationVirtualParents(demo.left.state)).map((id) =>
+                blockContents(demo.left.state, id),
+            ),
+        ).toEqual(['one', 'two']);
+        expect(deriveUndoState(history, 'left')).toMatchObject({canUndo: true});
+
+        history = appendActionResult(history, createUndoAction(history, 'left'));
+        demo = replayHistory(history.actions, history.cursor);
+
+        expect(blockContents(demo.left.state, firstCellId)).toBe('cell');
+        expect(visibleBlockChildren(demo.left.state, cellId, annotationVirtualParents(demo.left.state))).toEqual([]);
     });
 
     it('keeps annotation marks anchored to the start of a restored deleted word', () => {
