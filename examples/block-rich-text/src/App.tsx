@@ -14,6 +14,9 @@ import {
     type ReactElement,
 } from 'react';
 import {
+    applyMany,
+    blockContents,
+    deleteRangeOps,
     formattedMarkValues,
     materializeFormattedBlocks,
     materializedBlockParent,
@@ -23,7 +26,8 @@ import {
     visibleRangesForMark,
 } from 'umkehr/block-crdt';
 import type {FormattedBlock} from 'umkehr/block-crdt';
-import {lamportToString} from 'umkehr/block-crdt/utils';
+import type {CachedState, Op} from 'umkehr/block-crdt/types';
+import {lamportToString, parseLamportString} from 'umkehr/block-crdt/utils';
 import {
     addTableColumn,
     addTableRow,
@@ -138,17 +142,22 @@ import {
 import {useBlockReorder, type DropTarget} from './useBlockReorder';
 import {
     appendSelection,
+    dedupeSelectionSet,
     decorationsForSelectionSet,
+    mergeOverlappingRanges,
     primarySelection,
     replacePrimarySelection,
     replaceSelectionSet,
     resolveSelectionSet,
+    reverseSortedRetainedEntries,
     retainSelectionSet,
     singleRetainedSelectionSet,
     type BlockSelectionDecorations,
     type EditorSelectionSet,
+    type RetainedSelectionEntry,
     type RetainedSelectionSet,
 } from './selectionSet';
+import {resolveSelection, retainSelection} from './retainedSelection';
 import {findWordOccurrences, wordAtPoint} from './wordOccurrences';
 import {
     applyHistoryAction,
@@ -223,6 +232,23 @@ type EmbedPopoverState = {
     top: number;
     left: number;
 };
+type SlashTrigger = {
+    selectionId: string;
+    charId: string | null;
+    fallbackBlockId: string;
+    fallbackOffset: number;
+};
+type SlashMenuState = {
+    triggers: SlashTrigger[];
+    selection: RetainedSelectionSet;
+    top: number;
+    left: number;
+    query: string;
+    activeIndex: number;
+};
+type SlashCommand =
+    | {type: 'block'; value: BlockTypeMenuValue; label: string; group: string; keywords: string[]}
+    | {type: 'date-embed'; label: string; group: string; keywords: string[]};
 type PendingInlineMarks = Partial<Record<BareInlineMark, boolean>>;
 type KeyPerfSample = {
     id: number;
@@ -234,6 +260,7 @@ type KeyPerfSampleInput = Omit<KeyPerfSample, 'id'>;
 
 const BOOLEAN_INLINE_MARKS: BooleanInlineMark[] = ['bold', 'italic', 'strikethrough'];
 const BARE_INLINE_MARKS: BareInlineMark[] = [...BOOLEAN_INLINE_MARKS, CODE_MARK];
+const DEFAULT_DATE_EMBED_DATA = {type: 'date', value: '2026-06-23'} as const;
 const KEY_PERF_SAMPLE_LIMIT = 60;
 const KEY_PERF_MAX_BAR_MS = 50;
 
@@ -697,6 +724,7 @@ function BlockEditor({
     const [codePopover, setCodePopover] = useState<CodePopoverState | null>(null);
     const [codeHoverPopover, setCodeHoverPopover] = useState<CodeHoverPopoverState | null>(null);
     const [embedPopover, setEmbedPopover] = useState<EmbedPopoverState | null>(null);
+    const [slashMenu, setSlashMenu] = useState<SlashMenuState | null>(null);
     const [pendingInlineMarks, setPendingInlineMarks] = useState<PendingInlineMarks>({});
     const [retainedInlineMarks, setRetainedInlineMarks] = useState<RetainedInlineMarkSessionMap>(
         {},
@@ -1004,6 +1032,8 @@ function BlockEditor({
         setLinkHoverPopover(null);
         setCodePopover(null);
         setCodeHoverPopover(null);
+        setEmbedPopover(null);
+        setSlashMenu(null);
         setPendingInlineMarks({});
         setRetainedInlineMarks({});
         if (linkHoverHideTimerRef.current) clearTimeout(linkHoverHideTimerRef.current);
@@ -1157,6 +1187,13 @@ function BlockEditor({
                 setCodeHoverPopover(null);
                 if (codeHoverHideTimerRef.current) clearTimeout(codeHoverHideTimerRef.current);
                 codeHoverHideTimerRef.current = null;
+            }
+            if (
+                elementConstructor &&
+                event.target instanceof elementConstructor &&
+                !event.target.closest('.slashCommandPopover')
+            ) {
+                setSlashMenu(null);
             }
             setIsExtendingSelection(
                 event.detail <= 1 && !event.shiftKey && (event.metaKey || event.ctrlKey),
@@ -1428,35 +1465,118 @@ function BlockEditor({
     const insertTextWithPendingMarks = useCallback(
         (current: Replica, selection: RetainedSelectionSet, text: string): MultiCommandResult => {
             const activeMarks = activePendingInlineMarks(pendingInlineMarks);
-            if (!activeMarks.length) {
-                return insertTextWithMarkdownShortcutsEverywhere(
+            const result = !activeMarks.length
+                ? insertTextWithMarkdownShortcutsEverywhere(
                     current.state,
                     selection,
                     text,
                     makeCommandContext(current),
-                );
+                )
+                : (() => {
+                      const resolved = resolveSelectionSet(current.state, selection);
+                      if (!resolved.entries.every((entry) => entry.selection.type === 'caret')) {
+                          return insertTextWithMarkdownShortcutsEverywhere(
+                              current.state,
+                              selection,
+                              text,
+                              makeCommandContext(current),
+                          );
+                      }
+                      const marked = insertTextWithRetainedMarksEverywhere(
+                          current.state,
+                          selection,
+                          text,
+                          activeMarks,
+                          retainedInlineMarks,
+                          makeCommandContext(current),
+                      );
+                      setRetainedInlineMarks(marked.retainedMarks);
+                      return marked;
+                  })();
+            if (text === '/' && canOpenSlashMenuForSelection(current.state, selection)) {
+                const triggers = slashTriggersFromInsertResult(result);
+                if (triggers.length) {
+                    setSlashMenu({
+                        triggers,
+                        selection: result.selection,
+                        ...linkPopoverPositionFromSelection(rootRef.current),
+                        query: '',
+                        activeIndex: 0,
+                    });
+                }
+            } else if (text !== '/') {
+                setSlashMenu(null);
             }
-            const resolved = resolveSelectionSet(current.state, selection);
-            if (!resolved.entries.every((entry) => entry.selection.type === 'caret')) {
-                return insertTextWithMarkdownShortcutsEverywhere(
-                    current.state,
-                    selection,
-                    text,
-                    makeCommandContext(current),
-                );
-            }
-            const result = insertTextWithRetainedMarksEverywhere(
-                current.state,
-                selection,
-                text,
-                activeMarks,
-                retainedInlineMarks,
-                makeCommandContext(current),
-            );
-            setRetainedInlineMarks(result.retainedMarks);
             return result;
         },
         [pendingInlineMarks, retainedInlineMarks],
+    );
+
+    const closeSlashMenuAndRestoreSelection = useCallback(() => {
+        const menu = slashMenu;
+        setSlashMenu(null);
+        if (!menu) return;
+        scheduleSelectionRestore(primarySelection(resolveSelectionSet(replica.state, menu.selection)));
+    }, [replica.state, scheduleSelectionRestore, slashMenu]);
+
+    const updateSlashMenuQuery = useCallback((query: string) => {
+        setSlashMenu((current) => (current ? {...current, query, activeIndex: 0} : current));
+    }, []);
+
+    const updateSlashMenuActiveIndex = useCallback((activeIndex: number) => {
+        setSlashMenu((current) => (current ? {...current, activeIndex} : current));
+    }, []);
+
+    const runSlashCommand = useCallback(
+        (command: SlashCommand) => {
+            const menu = slashMenu;
+            if (!menu) return;
+            setSlashMenu(null);
+            onCommand((current) => {
+                resetVerticalCaretIntent();
+                const context = makeCommandContext(current);
+                const deleted = deleteSlashTriggers(current.state, menu, context);
+                let result: MultiCommandResult;
+                if (command.type === 'date-embed') {
+                    result = runSelectionCommandEverywhere(
+                        deleted.state,
+                        deleted.selection,
+                        (working, entry) =>
+                            insertInlineEmbed(
+                                working,
+                                resolveSelection(working, entry.selection),
+                                DEFAULT_DATE_EMBED_DATA,
+                                context,
+                            ),
+                    );
+                } else if (command.value === 'table') {
+                    result = runSelectionCommandEverywhere(
+                        deleted.state,
+                        deleted.selection,
+                        (working, entry) =>
+                            convertBlockToTable(
+                                working,
+                                resolveSelection(working, entry.selection),
+                                context,
+                            ),
+                    );
+                } else {
+                    result = setBlockTypeEverywhere(
+                        deleted.state,
+                        deleted.selection,
+                        (_blockId, meta) => blockTypeMeta(command.value, meta, context.nextTs()),
+                    );
+                }
+                const primary = primarySelection(resolveSelectionSet(result.state, result.selection));
+                scheduleSelectionRestore(primary);
+                return {
+                    state: result.state,
+                    ops: [...deleted.ops, ...result.ops],
+                    selection: result.selection,
+                };
+            });
+        },
+        [onCommand, resetVerticalCaretIntent, scheduleSelectionRestore, slashMenu],
     );
 
     const runBlockControlCommand = useCallback(
@@ -1471,7 +1591,7 @@ function BlockEditor({
             const result = insertInlineEmbed(
                 current.state,
                 primarySelection(resolveSelectionSet(current.state, selection)),
-                {type: 'date', value: '2026-06-23'},
+                DEFAULT_DATE_EMBED_DATA,
                 makeCommandContext(current),
             );
             return {
@@ -2373,6 +2493,13 @@ function BlockEditor({
                     onDisplayInputRenderStarted={onDisplayInputRenderStarted}
                 />
             ))}
+            <SlashCommandPopover
+                state={slashMenu}
+                onQueryChange={updateSlashMenuQuery}
+                onActiveIndexChange={updateSlashMenuActiveIndex}
+                onSelect={runSlashCommand}
+                onClose={closeSlashMenuAndRestoreSelection}
+            />
             <LinkFloatingPopover
                 state={linkPopover}
                 onApply={applyLinkPopover}
@@ -2434,6 +2561,180 @@ type BlockTypeMenuValue =
     | 'callout-warning'
     | 'callout-error'
     | 'table';
+
+const SLASH_COMMANDS: SlashCommand[] = [
+    {type: 'block', value: 'paragraph', label: 'Paragraph', group: 'Block type', keywords: ['text']},
+    {type: 'block', value: 'heading1', label: 'Heading 1', group: 'Block type', keywords: ['h1', 'title']},
+    {type: 'block', value: 'heading2', label: 'Heading 2', group: 'Block type', keywords: ['h2', 'subtitle']},
+    {type: 'block', value: 'heading3', label: 'Heading 3', group: 'Block type', keywords: ['h3']},
+    {type: 'block', value: 'unordered', label: 'Bulleted list', group: 'Block type', keywords: ['bullet', 'unordered']},
+    {type: 'block', value: 'ordered', label: 'Numbered list', group: 'Block type', keywords: ['number', 'ordered']},
+    {type: 'block', value: 'todo', label: 'Todo', group: 'Block type', keywords: ['task', 'checkbox']},
+    {type: 'block', value: 'blockquote', label: 'Blockquote', group: 'Block type', keywords: ['quote']},
+    {type: 'block', value: 'code', label: 'Code', group: 'Block type', keywords: ['pre']},
+    {type: 'block', value: 'callout-info', label: 'Info callout', group: 'Block type', keywords: ['info']},
+    {type: 'block', value: 'callout-warning', label: 'Warning callout', group: 'Block type', keywords: ['warning']},
+    {type: 'block', value: 'callout-error', label: 'Error callout', group: 'Block type', keywords: ['error']},
+    {type: 'block', value: 'table', label: 'Table', group: 'Block type', keywords: ['grid']},
+    {type: 'date-embed', label: 'Date', group: 'Inline embed', keywords: ['embed', 'calendar']},
+];
+
+const slashCommandId = (command: SlashCommand): string =>
+    command.type === 'block' ? `block:${command.value}` : command.type;
+
+const canOpenSlashMenuForSelection = (
+    state: CachedState<RichBlockMeta>,
+    selection: RetainedSelectionSet,
+): boolean => {
+    const resolved = resolveSelectionSet(state, selection);
+    return resolved.entries.every((entry) => {
+        const block = state.state.blocks[focusPoint(entry.selection).blockId];
+        return block?.meta.type !== 'code';
+    });
+};
+
+const slashTriggersFromInsertResult = (result: MultiCommandResult): SlashTrigger[] => {
+    const slashChars = result.ops.filter(
+        (op): op is Op<RichBlockMeta> & {type: 'char'} =>
+            op.type === 'char' && op.char.text === '/',
+    );
+    if (!slashChars.length) return [];
+
+    const resolved = resolveSelectionSet(result.state, result.selection);
+    const unusedEntries = [...resolved.entries];
+    return slashChars.flatMap((op) => {
+        const charId = lamportToString(op.char.id);
+        const location = visibleCharLocation(result.state, charId);
+        if (!location) return [];
+        const entryIndex = unusedEntries.findIndex((entry) => {
+            if (entry.selection.type !== 'caret') return false;
+            return (
+                entry.selection.point.blockId === location.blockId &&
+                entry.selection.point.offset === location.offset + 1
+            );
+        });
+        const entry =
+            entryIndex >= 0
+                ? unusedEntries.splice(entryIndex, 1)[0]
+                : (unusedEntries.shift() ?? resolved.entries[0]);
+        return [
+            {
+                selectionId: entry?.id ?? result.selection.primaryId,
+                charId,
+                fallbackBlockId: location.blockId,
+                fallbackOffset: location.offset,
+            },
+        ];
+    });
+};
+
+const visibleCharLocation = (
+    state: CachedState<RichBlockMeta>,
+    charId: string,
+): {blockId: string; offset: number} | null => {
+    const char = state.state.chars[charId];
+    if (!char || char.deleted) return null;
+    const parentId = lamportToString(char.parent.id);
+    const parentIds = [parentId, ...Object.keys(state.state.blocks).filter((id) => id !== parentId)];
+    for (const blockId of parentIds) {
+        if (!state.state.blocks[blockId]) continue;
+        const index = orderedCharIdsForBlock(state, blockId, {visibleOnly: true}).indexOf(charId);
+        if (index >= 0) return {blockId, offset: index};
+    }
+    return null;
+};
+
+const fallbackSlashLocation = (
+    state: CachedState<RichBlockMeta>,
+    trigger: SlashTrigger,
+): {blockId: string; offset: number} | null => {
+    if (!state.state.blocks[trigger.fallbackBlockId]) return null;
+    const chars = segmentText(blockContents(state, trigger.fallbackBlockId));
+    return chars[trigger.fallbackOffset] === '/'
+        ? {blockId: trigger.fallbackBlockId, offset: trigger.fallbackOffset}
+        : null;
+};
+
+const deleteSlashTriggers = (
+    state: CachedState<RichBlockMeta>,
+    menu: SlashMenuState,
+    _context: ReturnType<typeof makeCommandContext>,
+): {state: CachedState<RichBlockMeta>; ops: Array<Op<RichBlockMeta>>; selection: RetainedSelectionSet} => {
+    let working = state;
+    const ops: Array<Op<RichBlockMeta>> = [];
+    const located = menu.triggers
+        .map((trigger) => ({
+            trigger,
+            location:
+                (trigger.charId ? visibleCharLocation(working, trigger.charId) : null) ??
+                fallbackSlashLocation(working, trigger),
+        }))
+        .filter(
+            (item): item is {trigger: SlashTrigger; location: {blockId: string; offset: number}} =>
+                item.location !== null,
+        )
+        .sort((a, b) =>
+            a.location.blockId === b.location.blockId
+                ? b.location.offset - a.location.offset
+                : a.location.blockId.localeCompare(b.location.blockId),
+        );
+
+    const caretBySelectionId = new Map<string, EditorSelection>();
+    for (const {trigger, location} of located) {
+        const deleteOps = deleteRangeOps(working, {
+            block: parseLamportString(location.blockId),
+            startOffset: location.offset,
+            endOffset: location.offset + 1,
+        });
+        if (!deleteOps.length) continue;
+        working = applyMany(working, deleteOps, annotationVirtualParents(working));
+        ops.push(...deleteOps);
+        caretBySelectionId.set(trigger.selectionId, caret(location.blockId, location.offset));
+    }
+
+    const selection = dedupeSelectionSet(working, {
+        primaryId: menu.selection.primaryId,
+        entries: menu.selection.entries.map((entry) => ({
+            id: entry.id,
+            selection: retainSelection(
+                working,
+                caretBySelectionId.get(entry.id) ?? resolveSelection(working, entry.selection),
+            ),
+        })),
+    });
+    return {state: working, ops, selection};
+};
+
+const runSelectionCommandEverywhere = (
+    state: CachedState<RichBlockMeta>,
+    selection: RetainedSelectionSet,
+    command: (
+        working: CachedState<RichBlockMeta>,
+        entry: RetainedSelectionEntry,
+    ) => CommandResult,
+): MultiCommandResult => {
+    const deduped = dedupeSelectionSet(state, selection);
+    const commandEntries = reverseSortedRetainedEntries(state, mergeOverlappingRanges(state, deduped));
+    if (!commandEntries.length) return {state, ops: [], selection: deduped};
+
+    let working = state;
+    const ops: Array<Op<RichBlockMeta>> = [];
+    const nextEntries: RetainedSelectionEntry[] = [];
+    for (const entry of commandEntries) {
+        const result = command(working, entry);
+        working = result.state;
+        ops.push(...result.ops);
+        nextEntries.push({id: entry.id, selection: retainSelection(working, result.selection)});
+    }
+    return {
+        state: working,
+        ops,
+        selection: dedupeSelectionSet(working, {
+            primaryId: selection.primaryId,
+            entries: nextEntries,
+        }),
+    };
+};
 
 type RenderBlockContext = {
     blocks: RichFormattedBlock[];
@@ -3729,6 +4030,102 @@ function FloatingAnnotationPopover({
                 />
             ))}
         </section>
+    );
+}
+
+function SlashCommandPopover({
+    state,
+    onQueryChange,
+    onActiveIndexChange,
+    onSelect,
+    onClose,
+}: {
+    state: SlashMenuState | null;
+    onQueryChange(query: string): void;
+    onActiveIndexChange(index: number): void;
+    onSelect(command: SlashCommand): void;
+    onClose(): void;
+}) {
+    const inputRef = useRef<HTMLInputElement>(null);
+    const commands = useMemo(() => {
+        const query = state?.query.trim().toLowerCase() ?? '';
+        if (!query) return SLASH_COMMANDS;
+        return SLASH_COMMANDS.filter((command) => {
+            const haystack = [command.label, command.group, ...command.keywords]
+                .join(' ')
+                .toLowerCase();
+            return haystack.includes(query);
+        });
+    }, [state?.query]);
+    const activeIndex = commands.length
+        ? Math.max(0, Math.min(state?.activeIndex ?? 0, commands.length - 1))
+        : -1;
+
+    useLayoutEffect(() => {
+        if (state) inputRef.current?.focus();
+    }, [state]);
+
+    if (!state) return null;
+
+    return (
+        <div
+            className="slashCommandPopover"
+            role="dialog"
+            aria-label="Slash commands"
+            style={{top: state.top, left: state.left}}
+            onMouseDown={(event) => event.stopPropagation()}
+            onKeyDown={(event) => {
+                if (event.key === 'Escape') {
+                    event.preventDefault();
+                    onClose();
+                    return;
+                }
+                if (event.key === 'ArrowDown') {
+                    event.preventDefault();
+                    if (commands.length) onActiveIndexChange((activeIndex + 1) % commands.length);
+                    return;
+                }
+                if (event.key === 'ArrowUp') {
+                    event.preventDefault();
+                    if (commands.length) {
+                        onActiveIndexChange((activeIndex - 1 + commands.length) % commands.length);
+                    }
+                    return;
+                }
+                if (event.key === 'Enter' && activeIndex >= 0) {
+                    event.preventDefault();
+                    onSelect(commands[activeIndex]);
+                }
+            }}
+        >
+            <input
+                ref={inputRef}
+                value={state.query}
+                aria-label="Search slash commands"
+                placeholder="Search"
+                onChange={(event) => onQueryChange(event.currentTarget.value)}
+            />
+            <div className="slashCommandList" role="listbox" aria-label="Slash command results">
+                {commands.length ? (
+                    commands.map((command, index) => (
+                        <button
+                            key={slashCommandId(command)}
+                            type="button"
+                            className={index === activeIndex ? 'active' : ''}
+                            role="option"
+                            aria-selected={index === activeIndex}
+                            onMouseEnter={() => onActiveIndexChange(index)}
+                            onClick={() => onSelect(command)}
+                        >
+                            <span>{command.label}</span>
+                            <small>{command.group}</small>
+                        </button>
+                    ))
+                ) : (
+                    <div className="slashCommandEmpty">No commands</div>
+                )}
+            </div>
+        </div>
     );
 }
 

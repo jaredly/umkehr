@@ -740,6 +740,190 @@ describe('Block rich text example UI', () => {
         expect(blocks(right)[0].classList.contains('headingLevel2')).toBe(true);
     });
 
+    it('opens a slash command menu after inserting a slash and closes it with Escape', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], '/');
+
+        const dialog = await waitFor(() => within(left).getByRole('dialog', {name: 'Slash commands'}));
+        const search = within(dialog).getByRole('textbox', {name: 'Search slash commands'});
+        expect(document.activeElement).toBe(search);
+        await waitForBlockTexts(left, ['/']);
+        await waitForBlockTexts(right, ['/']);
+
+        fireEvent.keyDown(dialog, {key: 'Escape'});
+        await waitFor(() =>
+            expect(within(left).queryByRole('dialog', {name: 'Slash commands'})).toBeNull(),
+        );
+        beforeInputText(blocks(left)[0], 'x');
+        await waitForBlockTexts(left, ['/x']);
+        await waitForBlockTexts(right, ['/x']);
+    });
+
+    it('filters slash commands without changing document text', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], '/');
+
+        const dialog = await waitFor(() => within(left).getByRole('dialog', {name: 'Slash commands'}));
+        fireEvent.change(within(dialog).getByRole('textbox', {name: 'Search slash commands'}), {
+            target: {value: 'date'},
+        });
+
+        expect(within(dialog).getByRole('option', {name: /Date/})).toBeTruthy();
+        expect(within(dialog).queryByRole('option', {name: /Heading 2/})).toBeNull();
+        await waitForBlockTexts(left, ['/']);
+    });
+
+    it('runs a slash block type command as slash deletion plus command', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], '/');
+
+        const dialog = await waitFor(() => within(left).getByRole('dialog', {name: 'Slash commands'}));
+        fireEvent.click(within(dialog).getByRole('option', {name: /Heading 2/}));
+
+        await waitForBlockTexts(left, ['']);
+        await waitFor(() => expect(blocks(left)[0].classList.contains('headingLevel2')).toBe(true));
+        await waitForBlockTexts(right, ['']);
+        expect(blocks(right)[0].classList.contains('headingLevel2')).toBe(true);
+    });
+
+    it('runs a slash date embed command and tombstones the slash', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], '/');
+
+        const dialog = await waitFor(() => within(left).getByRole('dialog', {name: 'Slash commands'}));
+        fireEvent.change(within(dialog).getByRole('textbox', {name: 'Search slash commands'}), {
+            target: {value: 'date'},
+        });
+        fireEvent.click(within(dialog).getByRole('option', {name: /Date/}));
+
+        await waitFor(() => {
+            const embed = blocks(left)[0].querySelector<HTMLElement>('[data-inline-embed="true"]');
+            expect(embed?.dataset.embedType).toBe('date');
+            expect(embed?.querySelector('.inlineEmbedLabel')?.textContent).toBe('06/23/2026');
+            expect(blockText(blocks(left)[0])).not.toContain('/');
+        });
+        await waitFor(() =>
+            expect(
+                blocks(right)[0]
+                    .querySelector<HTMLElement>('[data-inline-embed="true"]')
+                    ?.querySelector('.inlineEmbedLabel')?.textContent,
+            ).toBe('06/23/2026'),
+        );
+    });
+
+    it('runs slash commands across multiple cursors and deletes every inserted slash', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abcd');
+        selectCaret(blocks(left)[0], 1);
+        addCaret(blocks(left)[0], 3);
+
+        beforeInputText(blocks(left)[0], '/');
+        await waitForBlockTexts(left, ['a/bc/d']);
+
+        const dialog = await waitFor(() => within(left).getByRole('dialog', {name: 'Slash commands'}));
+        fireEvent.click(within(dialog).getByRole('option', {name: /Heading 2/}));
+
+        await waitForBlockTexts(left, ['abcd']);
+        await waitFor(() => expect(blocks(left)[0].classList.contains('headingLevel2')).toBe(true));
+        expect(blockTexts(right)).toEqual(['abcd']);
+        expect(blocks(right)[0].classList.contains('headingLevel2')).toBe(true);
+    });
+
+    it('inserts date embeds from slash commands across multiple cursors', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abcd');
+        selectCaret(blocks(left)[0], 1);
+        addCaret(blocks(left)[0], 3);
+
+        beforeInputText(blocks(left)[0], '/');
+        const dialog = await waitFor(() => within(left).getByRole('dialog', {name: 'Slash commands'}));
+        fireEvent.change(within(dialog).getByRole('textbox', {name: 'Search slash commands'}), {
+            target: {value: 'date'},
+        });
+        fireEvent.click(within(dialog).getByRole('option', {name: /Date/}));
+
+        await waitFor(() => {
+            const embeds = blocks(left)[0].querySelectorAll('[data-inline-embed="true"]');
+            expect(embeds).toHaveLength(2);
+            expect(blockText(blocks(left)[0])).not.toContain('/');
+        });
+        await waitFor(() =>
+            expect(blocks(right)[0].querySelectorAll('[data-inline-embed="true"]')).toHaveLength(2),
+        );
+    });
+
+    it('does not open slash commands in code blocks', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'code');
+        beforeInputText(blocks(left)[0], '/');
+
+        await waitForBlockTexts(left, ['/']);
+        await waitForBlockTexts(right, ['/']);
+        expect(within(left).queryByRole('dialog', {name: 'Slash commands'})).toBeNull();
+    });
+
+    it('opens slash commands in table cells and row headers', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'table');
+        await waitFor(() => expect(tableBlocks(left)).toHaveLength(4));
+
+        selectCaret(tableBlocks(left)[0], 0);
+        beforeInputText(tableBlocks(left)[0], '/');
+        let dialog = await waitFor(() => within(left).getByRole('dialog', {name: 'Slash commands'}));
+        expect(dialog).toBeTruthy();
+        fireEvent.keyDown(dialog, {key: 'Escape'});
+        await waitFor(() =>
+            expect(within(left).queryByRole('dialog', {name: 'Slash commands'})).toBeNull(),
+        );
+
+        selectCaret(tableRowHeaders(left)[0], 0);
+        beforeInputText(tableRowHeaders(left)[0], '/');
+        dialog = await waitFor(() => within(left).getByRole('dialog', {name: 'Slash commands'}));
+        expect(dialog).toBeTruthy();
+    });
+
+    it('still runs a slash command if the slash was already deleted', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], '/');
+        const dialog = await waitFor(() => within(left).getByRole('dialog', {name: 'Slash commands'}));
+
+        selectCaret(blocks(left)[0], 1);
+        beforeInputDeleteBackward(blocks(left)[0]);
+        await waitForBlockTexts(left, ['']);
+
+        fireEvent.click(within(dialog).getByRole('option', {name: /Heading 2/}));
+        await waitFor(() => expect(blocks(left)[0].classList.contains('headingLevel2')).toBe(true));
+        expect(blockTexts(right)).toEqual(['']);
+        expect(blocks(right)[0].classList.contains('headingLevel2')).toBe(true);
+    });
+
     it('reflects the selected block type in the toolbar dropdown', async () => {
         const view = render(<App />);
         const {left} = panels(view);
