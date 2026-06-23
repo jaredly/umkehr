@@ -10,10 +10,11 @@ import {
 } from './clipboard';
 import {createDemoState, makeCommandContext} from './blockEditorRuntime';
 import {createAnnotation, setAnnotationBodyText} from './annotations';
-import {insertText, setBlockMeta, setLinkMark, splitBlock, toggleMark, type CommandContext} from './blockCommands';
+import {insertInlineEmbed, insertText, setBlockMeta, setLinkMark, splitBlock, toggleMark, type CommandContext} from './blockCommands';
 import {paragraphMeta} from './blockMeta';
 import {singleRetainedSelectionSet} from './selectionSet';
 import {caret, type EditorSelection} from './selectionModel';
+import {INLINE_EMBED_TEXT} from './inlineEmbeds';
 
 const ctx = (actor = 'left'): CommandContext => {
     let i = 1;
@@ -216,6 +217,65 @@ describe('block rich text clipboard serialization', () => {
                 ],
             },
         ]);
+    });
+
+    it('serializes inline embeds for custom MIME and plain text', () => {
+        const demo = createDemoState();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = insertText(demo.left.state, caret(blockId, 0), 'due ', ctx());
+        result = insertInlineEmbed(result.state, result.selection, {type: 'date', value: '2026-06-23'}, ctx());
+
+        const payload = serializeSelectionToClipboardPayload(
+            result.state,
+            singleRetainedSelectionSet(result.state, range(blockId, 0, 5)),
+        );
+
+        expect(payload?.plainText).toBe('due 06/23/2026');
+        expect(payload?.fragments[0]).toEqual({
+            text: `due ${INLINE_EMBED_TEXT}`,
+            meta: result.state.state.blocks[blockId].meta,
+            marks: [
+                {
+                    type: 'embed',
+                    startOffset: 4,
+                    endOffset: 5,
+                    data: {type: 'date', value: '2026-06-23'},
+                },
+            ],
+        });
+        expect(payload?.html).toContain('data-umkehr-embed-type="date"');
+        expect(payload?.html).toContain('06/23/2026');
+    });
+
+    it('parses inline embed marks from custom MIME', () => {
+        const parsed = parseBlockRichTextClipboardPayload(
+            JSON.stringify(
+                payload({
+                    plainText: '06/23/2026',
+                    fragments: [
+                        {
+                            text: INLINE_EMBED_TEXT,
+                            meta: {type: 'paragraph', ts: '001-test'},
+                            marks: [
+                                {
+                                    type: 'embed',
+                                    startOffset: 0,
+                                    endOffset: 1,
+                                    data: {type: 'date', value: '2026-06-23'},
+                                },
+                            ],
+                        },
+                    ],
+                }),
+            ),
+        );
+
+        expect(parsed?.fragments[0]?.marks[0]).toEqual({
+            type: 'embed',
+            startOffset: 0,
+            endOffset: 1,
+            data: {type: 'date', value: '2026-06-23'},
+        });
     });
 
     it('serializes multiple selections in document order as separate fragments', () => {

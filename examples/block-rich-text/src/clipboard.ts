@@ -8,6 +8,13 @@ import {lamportToString} from 'umkehr/block-crdt/utils';
 import type {Lamport} from 'umkehr/block-crdt/types';
 import {annotationBodyBlockIds} from './annotations';
 import {LINK_MARK} from './inlineMarks';
+import {
+    INLINE_EMBED_MARK,
+    INLINE_EMBED_TEXT,
+    inlineEmbedPlugins,
+    isInlineEmbedData,
+    plainTextForInlineEmbed,
+} from './inlineEmbeds';
 import {normalizeSelectionSegments, segmentText} from './selectionModel';
 import type {RichBlockMeta} from './blockMeta';
 import {
@@ -27,7 +34,7 @@ import type {CachedState} from 'umkehr/block-crdt/types';
 export const BLOCK_RICH_TEXT_MIME = 'application/x-umkehr-block-rich-text+json';
 
 export type ClipboardBooleanMarkType = 'bold' | 'italic' | 'strikethrough';
-export type ClipboardInlineMarkType = ClipboardBooleanMarkType | 'link' | 'annotation';
+export type ClipboardInlineMarkType = ClipboardBooleanMarkType | 'link' | 'annotation' | 'embed';
 
 export type ClipboardMarkRange = {
     type: ClipboardInlineMarkType;
@@ -68,6 +75,7 @@ const INLINE_MARK_TYPES = new Set<ClipboardInlineMarkType>([
     'strikethrough',
     'link',
     'annotation',
+    'embed',
 ]);
 
 const PRESENTATIONS = new Set<AnnotationPresentation>(['sidebar', 'footnote', 'popover']);
@@ -126,7 +134,7 @@ export const serializeSelectionToClipboardPayload = (
     if (!fragments.length) return null;
 
     const annotations = collectAnnotations(state, refs);
-    const plainText = fragments.map((fragment) => fragment.text).join('\n');
+    const plainText = fragments.map(fragmentToPlainText).join('\n');
     const html = fragmentsToHtml(fragments);
     return {version: 1, plainText, html, fragments, annotations};
 };
@@ -265,6 +273,10 @@ const appendRunMarks = (
         marks.push({type: 'annotation', startOffset, endOffset, data: ref});
         annotationRefs.push(ref);
     }
+    const embed = run.marks[INLINE_EMBED_MARK];
+    if (isInlineEmbedData(embed)) {
+        marks.push({type: 'embed', startOffset, endOffset, data: embed});
+    }
 };
 
 const mergeAdjacentMarks = (marks: ClipboardMarkRange[]): ClipboardMarkRange[] => {
@@ -309,7 +321,42 @@ const fragmentToHtml = (fragment: ClipboardFragment): string => {
     return `<${tag}${attrs}>${inner || '<br>'}</${tag}>`;
 };
 
+const fragmentToPlainText = (fragment: ClipboardFragment): string => {
+    const chars = segmentText(fragment.text);
+    let result = '';
+    for (let offset = 0; offset < chars.length; offset++) {
+        if (chars[offset] === INLINE_EMBED_TEXT) {
+            const embed = fragment.marks.find(
+                (mark) =>
+                    mark.type === 'embed' &&
+                    mark.startOffset <= offset &&
+                    mark.endOffset > offset &&
+                    isInlineEmbedData(mark.data),
+            );
+            result += plainTextForInlineEmbed(
+                embed && isInlineEmbedData(embed.data) ? embed.data : null,
+                inlineEmbedPlugins,
+                {ambientMarks: {}},
+            );
+        } else {
+            result += chars[offset];
+        }
+    }
+    return result;
+};
+
 const wrapHtmlText = (text: string, marks: ClipboardMarkRange[]): string => {
+    const embed = marks.find((mark) => mark.type === 'embed' && isInlineEmbedData(mark.data));
+    if (text === INLINE_EMBED_TEXT) {
+        const plainText = plainTextForInlineEmbed(
+            embed && isInlineEmbedData(embed.data) ? embed.data : null,
+            inlineEmbedPlugins,
+            {ambientMarks: {}},
+        );
+        return `<span data-umkehr-embed-type="${escapeAttribute(
+            embed && isInlineEmbedData(embed.data) ? embed.data.type : 'unknown',
+        )}">${escapeHtml(plainText)}</span>`;
+    }
     let result = escapeHtml(text);
     for (const mark of sortedHtmlMarks(marks)) {
         if (mark.type === 'bold') result = `<strong>${result}</strong>`;
@@ -333,14 +380,16 @@ const htmlMarkRank = (type: ClipboardInlineMarkType): number => {
     switch (type) {
         case 'annotation':
             return 0;
-        case 'link':
+        case 'embed':
             return 1;
-        case 'strikethrough':
+        case 'link':
             return 2;
-        case 'italic':
+        case 'strikethrough':
             return 3;
-        case 'bold':
+        case 'italic':
             return 4;
+        case 'bold':
+            return 5;
     }
 };
 
@@ -417,7 +466,14 @@ const parseMarks = (value: unknown[], textLength: number): ClipboardMarkRange[] 
         }
         if (item.type === 'link' && typeof item.data !== 'string') return null;
         if (item.type === 'annotation' && !isClipboardAnnotationRef(item.data)) return null;
-        if (item.type !== 'link' && item.type !== 'annotation' && item.data !== undefined && item.data !== true) {
+        if (item.type === 'embed' && !isInlineEmbedData(item.data)) return null;
+        if (
+            item.type !== 'link' &&
+            item.type !== 'annotation' &&
+            item.type !== 'embed' &&
+            item.data !== undefined &&
+            item.data !== true
+        ) {
             return null;
         }
         result.push({

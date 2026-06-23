@@ -835,6 +835,48 @@ select {
     text-decoration-line: underline line-through;
 }
 
+.inlineEmbed {
+    display: inline-flex;
+    align-items: center;
+    max-width: min(18rem, 100%);
+    min-height: 1.35em;
+    margin: 0 0.08em;
+    padding: 0 0.36em;
+    border: 1px solid #b9c7d3;
+    border-radius: 5px;
+    color: #1f2d38;
+    background: #eef5f8;
+    font: inherit;
+    line-height: 1.25;
+    vertical-align: baseline;
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+}
+
+.inlineEmbed:hover {
+    border-color: #7f95a8;
+    background: #e4eef4;
+}
+
+.inlineEmbedDate {
+    color: #173b4d;
+    background: #eaf4f2;
+}
+
+.inlineEmbedUnknown {
+    color: #5c3c12;
+    background: #fff4da;
+}
+
+.inlineEmbedOffsetText {
+    position: absolute;
+    width: 0;
+    overflow: hidden;
+    opacity: 0;
+    pointer-events: none;
+}
+
 .syntax-keyword {
     color: #8f3daf;
     font-weight: 650;
@@ -1331,7 +1373,8 @@ select {
     box-shadow: 0 12px 32px rgb(0 0 0 / 20%);
 }
 
-.linkFloatingPopover {
+.linkFloatingPopover,
+.embedFloatingPopover {
     position: fixed;
     z-index: 45;
     display: grid;
@@ -1382,7 +1425,8 @@ select {
     white-space: nowrap;
 }
 
-.linkFloatingPopover input {
+.linkFloatingPopover input,
+.embedFloatingPopover input {
     min-width: 0;
     height: 32px;
     padding: 0 8px;
@@ -1391,6 +1435,7 @@ select {
 }
 
 .linkFloatingPopover button,
+.embedFloatingPopover button,
 .linkHoverPopover button {
     height: 32px;
     padding: 0 10px;
@@ -1402,11 +1447,13 @@ select {
 }
 
 .linkFloatingPopover button:hover,
+.embedFloatingPopover button:hover,
 .linkHoverPopover button:hover {
     background: #eef3f7;
 }
 
 .linkFloatingPopover button:disabled,
+.embedFloatingPopover button:disabled,
 .linkHoverPopover button:disabled {
     color: #8a96a3;
     background: #f3f6f8;
@@ -1719,7 +1766,8 @@ select {
         padding-right: 8px;
     }
 
-    .linkFloatingPopover {
+    .linkFloatingPopover,
+    .embedFloatingPopover {
         grid-template-columns: minmax(0, 1fr);
     }
 }

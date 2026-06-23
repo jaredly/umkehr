@@ -166,8 +166,14 @@ Tables are a special block type command and should not be treated like ordinary 
 ## Open Questions
 
 1. What should “insert some inline embed” mean for this demo: a non-editable chip, an annotation-style popover mark, a link preview placeholder, or just a textual placeholder?
+    -> I've added inline embeds (see 05c2h-inline-embeds)
 2. Should slash commands trigger inside code blocks, table cells, row headers, and annotation body blocks, or only normal document blocks?
+    -> hmm not code blocks that are syntax highlighted. otherwise everywhere yes
 3. What exact block type options should the menu include? It can mirror the toolbar, but table conversion has different behavior and may be surprising in a compact command menu.
+    -> mirror the toolbar
 4. Should command selection be recorded as one history action with slash deletion plus command, or two actions? One action seems better for undo, but two actions exposes the typed slash as an independent historical edit.
+    -> one action
 5. For multi-selection, should the menu be disabled, operate only on the primary selection, or delete every inserted slash and apply the command to every selection?
+    -> apply to every selection
 6. If the slash is concurrently deleted before the user chooses a command, should selection still run the chosen command or cancel silently?
+    -> still run

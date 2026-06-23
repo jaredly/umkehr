@@ -1938,6 +1938,50 @@ describe('Block rich text example UI', () => {
         expect(domSelectionOffsets(blocks(left)[0])).toEqual({anchor: 1, focus: 3});
     });
 
+    it('inserts and edits a date inline embed from the toolbar', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        typeText(blocks(left)[0], 'due ');
+        fireEvent.click(within(left).getByRole('button', {name: 'Date'}));
+
+        await waitFor(() => {
+            const embed = blocks(left)[0].querySelector<HTMLElement>('[data-inline-embed="true"]');
+            expect(embed?.dataset.embedType).toBe('date');
+            expect(embed?.dataset.embedCharId).toBeTruthy();
+            expect(embed?.querySelector('.inlineEmbedLabel')?.textContent).toBe('06/23/2026');
+        });
+        await waitFor(() =>
+            expect(
+                blocks(right)[0]
+                    .querySelector<HTMLElement>('[data-inline-embed="true"]')
+                    ?.querySelector('.inlineEmbedLabel')?.textContent,
+            ).toBe('06/23/2026'),
+        );
+
+        fireEvent.click(blocks(left)[0].querySelector<HTMLElement>('[data-inline-embed="true"]')!);
+        const dialog = await waitFor(() => within(left).getByRole('dialog', {name: 'Date embed'}));
+        const input = within(dialog).getByLabelText('Date value') as HTMLInputElement;
+        fireEvent.change(input, {target: {value: '2026-07-04'}});
+        fireEvent.click(within(dialog).getByRole('button', {name: 'Apply'}));
+
+        await waitFor(() =>
+            expect(
+                blocks(left)[0]
+                    .querySelector('[data-inline-embed="true"]')
+                    ?.querySelector('.inlineEmbedLabel')?.textContent,
+            ).toBe('07/04/2026'),
+        );
+        await waitFor(() =>
+            expect(
+                blocks(right)[0]
+                    .querySelector<HTMLElement>('[data-inline-embed="true"]')
+                    ?.querySelector('.inlineEmbedLabel')?.textContent,
+            ).toBe('07/04/2026'),
+        );
+    });
+
     it('uses Cmd+B as a pending bold style at a collapsed caret', async () => {
         const view = render(<App />);
         const {left} = panels(view);

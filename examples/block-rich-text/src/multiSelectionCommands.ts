@@ -44,6 +44,7 @@ import {
     type RetainedInlineMarkSession,
 } from './blockCommands';
 import {LINK_MARK, type BareInlineMark, type BooleanInlineMark} from './inlineMarks';
+import {INLINE_EMBED_MARK, isInlineEmbedData} from './inlineEmbeds';
 import {resolveSelection, retainSelection} from './retainedSelection';
 import {
     dedupeSelectionSet,
@@ -918,6 +919,19 @@ const clipboardMarkOp = (
             endOffset,
             ANNOTATION_MARK,
             data as unknown as JsonValue,
+            false,
+            [state.state.maxSeenCount + 1, context.actor],
+        );
+    }
+    if (mark.type === 'embed') {
+        if (!isInlineEmbedData(mark.data)) return null;
+        return markRangeOp(
+            state,
+            parseLamportString(blockId),
+            startOffset,
+            endOffset,
+            INLINE_EMBED_MARK,
+            mark.data as unknown as JsonValue,
             false,
             [state.state.maxSeenCount + 1, context.actor],
         );

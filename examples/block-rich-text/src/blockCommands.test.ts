@@ -7,6 +7,7 @@ import {
     materializedBlockParent,
     materializeFormattedBlocks,
     organizeState,
+    orderedCharIdsForBlock,
     rootBlockIds,
     visibleBlockChildren,
     visibleBlockOutline,
@@ -28,6 +29,7 @@ import {
     createTable,
     indentBlock,
     insertText,
+    insertInlineEmbed,
     insertTextWithMarkdownShortcuts,
     insertTextWithMarks,
     insertTextWithRetainedMarks,
@@ -40,6 +42,7 @@ import {
     pastePlainTextWithMarkdownShortcuts,
     removeLinkMark,
     setCodeMark,
+    setInlineEmbedDataByCharId,
     setBlockType,
     setLinkMark,
     splitBlock,
@@ -61,6 +64,7 @@ import {paragraphMeta, type RichBlockMeta} from './blockMeta';
 import {toggleMarkEverywhere} from './multiSelectionCommands';
 import {retainSelection} from './retainedSelection';
 import {caret, focusPoint, pointTextLength, type EditorSelection} from './selectionModel';
+import {INLINE_EMBED_MARK, INLINE_EMBED_TEXT} from './inlineEmbeds';
 
 const ctx = (actor = 'left'): CommandContext => {
     let i = 1;
@@ -210,6 +214,80 @@ describe('block rich text commands', () => {
             {text: 'hello', marks: {code: true}},
         ]);
         expect(result.selection).toEqual(caret(blockId, 'say hello'.length));
+    });
+
+    it('inserts an inline embed as one marked character', () => {
+        const state = init();
+        const blockId = onlyBlock(state);
+        const result = insertInlineEmbed(
+            state,
+            caret(blockId, 0),
+            {type: 'date', value: '2026-06-23'},
+            ctx(),
+        );
+        const formatted = materializeFormattedBlocks(result.state);
+
+        expect(blockContents(result.state, blockId)).toBe(INLINE_EMBED_TEXT);
+        expect(formatted[0].runs).toEqual([
+            {text: INLINE_EMBED_TEXT, marks: {[INLINE_EMBED_MARK]: {type: 'date', value: '2026-06-23'}}},
+        ]);
+        expect(result.selection).toEqual(caret(blockId, 1));
+    });
+
+    it('replaces selected text with an inline embed', () => {
+        const state = init();
+        const blockId = onlyBlock(state);
+        const typed = insertText(state, caret(blockId, 0), 'hello', ctx());
+        const result = insertInlineEmbed(
+            typed.state,
+            {type: 'range', anchor: {blockId, offset: 1}, focus: {blockId, offset: 4}},
+            {type: 'date', value: '2026-06-23'},
+            ctx(),
+        );
+
+        expect(blockContents(result.state, blockId)).toBe(`h${INLINE_EMBED_TEXT}o`);
+        expect(result.selection).toEqual(caret(blockId, 2));
+    });
+
+    it('deletes an inline embed as one visible character', () => {
+        const state = init();
+        const blockId = onlyBlock(state);
+        let result = insertText(state, caret(blockId, 0), 'a', ctx());
+        result = insertInlineEmbed(result.state, result.selection, {type: 'date', value: '2026-06-23'}, ctx());
+        result = insertText(result.state, result.selection, 'b', ctx());
+
+        const deletedBackward = deleteBackward(result.state, caret(blockId, 2), ctx());
+        expect(blockContents(deletedBackward.state, blockId)).toBe('ab');
+        expect(deletedBackward.selection).toEqual(caret(blockId, 1));
+
+        const reinserted = insertInlineEmbed(deletedBackward.state, caret(blockId, 1), {type: 'date', value: '2026-06-23'}, ctx());
+        const deletedForward = deleteForward(reinserted.state, caret(blockId, 1), ctx());
+        expect(blockContents(deletedForward.state, blockId)).toBe('ab');
+        expect(deletedForward.selection).toEqual(caret(blockId, 1));
+    });
+
+    it('updates an inline embed by char id after preceding text shifts its offset', () => {
+        const state = init();
+        const blockId = onlyBlock(state);
+        let result = insertText(state, caret(blockId, 0), 'a', ctx());
+        result = insertInlineEmbed(result.state, result.selection, {type: 'date', value: '2026-06-23'}, ctx());
+        const embedCharId = orderedCharIdsForBlock(result.state, blockId, {visibleOnly: true})[1];
+        result = insertText(result.state, caret(blockId, 0), 'zz', ctx());
+
+        const updated = setInlineEmbedDataByCharId(
+            result.state,
+            embedCharId,
+            {type: 'date', value: '2026-07-04'},
+            ctx(),
+        );
+        if (!commandApplied(updated)) throw new Error('expected embed update');
+
+        const formatted = materializeFormattedBlocks(updated.state);
+        expect(blockContents(updated.state, blockId)).toBe(`zza${INLINE_EMBED_TEXT}`);
+        expect(formatted[0].runs.at(-1)).toEqual({
+            text: INLINE_EMBED_TEXT,
+            marks: {[INLINE_EMBED_MARK]: {type: 'date', value: '2026-07-04'}},
+        });
     });
 
     it('sets a language over an existing bare inline code mark', () => {

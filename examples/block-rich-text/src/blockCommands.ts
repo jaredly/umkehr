@@ -24,7 +24,7 @@ import {
     type Op,
 } from 'umkehr/block-crdt';
 import {compareLseqIds, createLseqIdBetween} from 'umkehr/block-crdt/lseq';
-import type {BlockOrderTs, Boundary, CachedState, Lamport} from 'umkehr/block-crdt/types';
+import type {BlockOrderTs, Boundary, CachedState, JsonValue, Lamport} from 'umkehr/block-crdt/types';
 import {lamportToString, parseLamportString} from 'umkehr/block-crdt/utils';
 import {paragraphMeta, sameTypeWithTs, type RichBlockMeta} from './blockMeta';
 import {annotationVirtualParents} from './annotations';
@@ -46,6 +46,7 @@ import {
 } from './selectionModel';
 import {textSegments} from './charUtils';
 import {applyCharInsertOpsOrApplyMany, localInsertTextOps} from './localTextOps';
+import {INLINE_EMBED_MARK, INLINE_EMBED_TEXT, type InlineEmbedData} from './inlineEmbeds';
 
 export type CommandContext = {
     actor: string;
@@ -251,6 +252,69 @@ export const insertTextWithMarks = (
     }
 
     return {state: working, ops, selection: inserted.selection};
+};
+
+export const insertInlineEmbed = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    data: InlineEmbedData,
+    context: CommandContext,
+): CommandResult => {
+    let working = state;
+    let point = firstPointForSelection(working, selection);
+    const ops: Array<Op<RichBlockMeta>> = [];
+
+    if (!isCollapsed(selection)) {
+        const deleted = deleteSelectionAndJoinBoundaries(working, selection, context);
+        if (deleted.ops.length) {
+            working = deleted.state;
+            ops.push(...deleted.ops);
+            point = deleted.point;
+        }
+    }
+
+    const inserted = insertTextAtPoint(working, point, INLINE_EMBED_TEXT, context);
+    working = inserted.state;
+    ops.push(...inserted.ops);
+
+    const mark = markRangeOp(
+        working,
+        parseLamportString(point.blockId),
+        point.offset,
+        point.offset + 1,
+        INLINE_EMBED_MARK,
+        data as unknown as JsonValue,
+        false,
+        [working.state.maxSeenCount + 1, context.actor],
+    );
+    working = applyMany(working, [mark], annotationVirtualParents(working));
+    ops.push(mark);
+
+    return {state: working, ops, selection: caret(point.blockId, point.offset + 1)};
+};
+
+export const setInlineEmbedDataByCharId = (
+    state: CachedState<RichBlockMeta>,
+    charId: string,
+    data: InlineEmbedData,
+    context: CommandContext,
+): OptionalCommandResult => {
+    const target = visibleCharLocation(state, charId);
+    if (!target) return noCommand();
+    if (state.state.chars[charId]?.text !== INLINE_EMBED_TEXT) return noCommand();
+
+    const op = markRangeOp(
+        state,
+        parseLamportString(target.blockId),
+        target.offset,
+        target.offset + 1,
+        INLINE_EMBED_MARK,
+        data as unknown as JsonValue,
+        false,
+        [state.state.maxSeenCount + 1, context.actor],
+    );
+    const next = applyMany(state, [op], annotationVirtualParents(state));
+    return {state: next, ops: [op], selection: caret(target.blockId, target.offset + 1)};
 };
 
 export const insertTextWithRetainedMarks = (
@@ -2515,6 +2579,17 @@ const normalizedSelectionSpan = (
 const parentFromPath = (path: Lamport[]): Lamport => path[path.length - 1] ?? ROOT;
 
 const lastBlockOrderTs = (ts: BlockOrderTs) => (typeof ts === 'string' ? ts : ts[2]);
+
+const visibleCharLocation = (
+    state: CachedState<RichBlockMeta>,
+    charId: string,
+): {blockId: string; offset: number} | null => {
+    for (const blockId of editableBlockIds(state)) {
+        const index = orderedCharIdsForBlock(state, blockId, {visibleOnly: true}).indexOf(charId);
+        if (index >= 0) return {blockId, offset: index};
+    }
+    return null;
+};
 
 const selectionFullyHasMark = (
     state: CachedState<RichBlockMeta>,

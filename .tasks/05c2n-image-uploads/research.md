@@ -223,12 +223,22 @@ No core files under `src/block-crdt` should be necessary unless a hidden assumpt
 ## Open Questions
 
 1. Should image insertion convert an empty current block, insert after the current block, or split the current block at the caret?
+    -> convert empty current, or insert after if not empty
 2. Are image blocks allowed inside tables, annotations, blockquotes, and callouts?
+    -> yes
 3. Should descriptions support inline marks and links, or be plain text only? The easiest path is to support existing rich text.
+    -> rich
 4. What should Enter do inside an image description: create a paragraph after the image, insert a caption newline, or split the caption?
+    -> paragraph after
 5. What is the expected attachment id source: random UUID, content hash, server id, or demo-local id?
+    -> UUID
 6. Should attachment metadata outside CRDT include dimensions, alt text fallback, MIME type, file name, or upload status?
+    -> yeah
 7. Should history export/import include a separate attachment bundle, or is a missing-image placeholder acceptable?
+    -> separate attachment bundle
 8. Should rich clipboard copy preserve image blocks when pasting within the same app session, or should it copy only description text?
+    -> preserve image blocks and the attachments as well
 9. What conflict behavior is desired when two users concurrently change image size? Existing `block:meta` last-writer-wins by timestamp is probably acceptable.
+    -> LWW is fine
 10. What should deletion do with orphaned attachments? Since file management is outside CRDT state, attachment garbage collection should be a separate store concern, not part of document ops.
+    -> yeah let's just leave them for now

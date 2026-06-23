@@ -18,6 +18,7 @@ import {
     materializeFormattedBlocks,
     materializedBlockParent,
     materializedBlockPath,
+    orderedCharIdsForBlock,
     visibleBlockChildren,
     visibleRangesForMark,
 } from 'umkehr/block-crdt';
@@ -34,6 +35,7 @@ import {
     createMissingTableCell,
     deleteEmptyTableRowBackward,
     exitEmptyLastTableRow,
+    insertInlineEmbed,
     insertTextWithMarkdownShortcuts,
     insertTextWithRetainedMarks,
     moveBlock,
@@ -42,6 +44,7 @@ import {
     moveTableCell,
     moveTableCellByTab,
     setCodeMark,
+    setInlineEmbedDataByCharId,
     setBlockMeta,
     splitTableTitleToParagraph,
     type CommandResult,
@@ -185,6 +188,15 @@ import {
     type BooleanInlineMark,
     type LinkTargetRange,
 } from './inlineMarks';
+import {
+    INLINE_EMBED_MARK,
+    INLINE_EMBED_TEXT,
+    inlineEmbedDataForRun,
+    inlineEmbedPlugins,
+    isInlineEmbedData,
+    plainTextForInlineEmbed,
+    renderInlineEmbed,
+} from './inlineEmbeds';
 import {highlightCode, type SyntaxToken} from './syntaxHighlight';
 
 type RichFormattedBlock = FormattedBlock<RichBlockMeta>;
@@ -204,6 +216,13 @@ type CodePopoverState = {
     left: number;
 };
 type CodeHoverPopoverState = CodePopoverState;
+type EmbedPopoverState = {
+    charId: string;
+    type: string;
+    value: string;
+    top: number;
+    left: number;
+};
 type PendingInlineMarks = Partial<Record<BareInlineMark, boolean>>;
 
 const BOOLEAN_INLINE_MARKS: BooleanInlineMark[] = ['bold', 'italic', 'strikethrough'];
@@ -614,6 +633,7 @@ function BlockEditor({
     const [linkHoverPopover, setLinkHoverPopover] = useState<LinkHoverPopoverState | null>(null);
     const [codePopover, setCodePopover] = useState<CodePopoverState | null>(null);
     const [codeHoverPopover, setCodeHoverPopover] = useState<CodeHoverPopoverState | null>(null);
+    const [embedPopover, setEmbedPopover] = useState<EmbedPopoverState | null>(null);
     const [pendingInlineMarks, setPendingInlineMarks] = useState<PendingInlineMarks>({});
     const [retainedInlineMarks, setRetainedInlineMarks] = useState<RetainedInlineMarkSessionMap>(
         {},
@@ -673,6 +693,13 @@ function BlockEditor({
         return result;
     }, [annotations]);
     const renderTree = useMemo(() => buildRenderTree(blocks), [blocks]);
+    const charIdsByBlock = useMemo(() => {
+        const result = new Map<string, string[]>();
+        for (const block of blocksWithAnnotationBodies) {
+            result.set(block.id, orderedCharIdsForBlock(replica.state, block.id, {visibleOnly: true}));
+        }
+        return result;
+    }, [blocksWithAnnotationBodies, replica.state]);
     const orderedListNumbers = useMemo(() => deriveOrderedListNumbers(blocks), [blocks]);
     const resolvedSelectionSet = resolveSelectionSet(replica.state, replica.selection);
     const primaryResolvedSelection = primarySelection(resolvedSelectionSet);
@@ -1324,6 +1351,55 @@ function BlockEditor({
         [onCommand],
     );
 
+    const insertDateEmbedFromCurrentSelection = useCallback(() => {
+        runEditCommand((current, selection) => {
+            const result = insertInlineEmbed(
+                current.state,
+                primarySelection(resolveSelectionSet(current.state, selection)),
+                {type: 'date', value: '2026-06-23'},
+                makeCommandContext(current),
+            );
+            return {
+                state: result.state,
+                ops: result.ops,
+                selection: replacePrimarySelection(result.state, selection, result.selection),
+            };
+        });
+    }, [runEditCommand]);
+
+    const openEmbedPopover = useCallback(
+        (charId: string, element: HTMLElement) => {
+            const data = inlineEmbedDataByCharId(replica.state, charId);
+            if (!data) return;
+            setEmbedPopover({
+                charId,
+                type: data.type,
+                value: data.value,
+                ...linkPopoverPositionFromElement(element),
+            });
+        },
+        [replica.state],
+    );
+
+    const applyEmbedPopover = useCallback(
+        (value: string) => {
+            const target = embedPopover;
+            setEmbedPopover(null);
+            if (!target) return;
+            runBlockControlCommand((current) => {
+                const result = setInlineEmbedDataByCharId(
+                    current.state,
+                    target.charId,
+                    {type: target.type, value},
+                    makeCommandContext(current),
+                );
+                if (!commandApplied(result)) return {state: current.state, ops: [], selection: current.selection};
+                return {state: result.state, ops: result.ops, selection: current.selection};
+            });
+        },
+        [embedPopover, runBlockControlCommand],
+    );
+
     const applyLinkToRanges = useCallback(
         (ranges: LinkTargetRange[], href: string) => {
             runBlockControlCommand((current) => {
@@ -1927,6 +2003,7 @@ function BlockEditor({
                         : runCodeToggle()
                 }
                 onLink={openLinkFromCurrentSelection}
+                onDateEmbed={insertDateEmbedFromCurrentSelection}
                 onAnnotation={(presentation) =>
                     activeAnnotationBodySelection
                         ? runBlockControlCommand((current) => {
@@ -2017,6 +2094,7 @@ function BlockEditor({
                             renderBlockNode(node, {
                                 blocks,
                                 state: replica.state,
+                                charIdsByBlock,
                                 selection: primaryResolvedSelection,
                                 hasMultipleSelections: resolvedSelectionSet.entries.length > 1,
                                 decorationsByBlock,
@@ -2036,6 +2114,7 @@ function BlockEditor({
                                 hideLinkHover: scheduleLinkHoverHide,
                                 showCodeHoverFromRange,
                                 hideCodeHover: scheduleCodeHoverHide,
+                                openInlineEmbed: openEmbedPopover,
                                 insertText: insertTextWithPendingMarks,
                                 runInlineMarkToggle,
                                 runCodeToggle,
@@ -2204,6 +2283,11 @@ function BlockEditor({
                 onMouseEnter={cancelCodeHoverHide}
                 onMouseLeave={scheduleCodeHoverHide}
             />
+            <DateEmbedFloatingPopover
+                state={embedPopover}
+                onApply={applyEmbedPopover}
+                onClose={() => setEmbedPopover(null)}
+            />
         </article>
     );
 }
@@ -2231,6 +2315,7 @@ type BlockTypeMenuValue =
 type RenderBlockContext = {
     blocks: RichFormattedBlock[];
     state: Replica['state'];
+    charIdsByBlock: Map<string, string[]>;
     selection: EditorSelection;
     hasMultipleSelections: boolean;
     decorationsByBlock: Map<string, BlockSelectionDecorations>;
@@ -2285,6 +2370,7 @@ type RenderBlockContext = {
     hideLinkHover(): void;
     showCodeHoverFromRange(range: CodeTargetRange & {language: string}, element: HTMLElement): void;
     hideCodeHover(): void;
+    openInlineEmbed(charId: string, element: HTMLElement): void;
     createMissingTableCell(tableId: string, rowId: string, columnIndex: number): void;
     addTableRow(tableId: string, afterRowId?: string): void;
     addTableColumn(tableId: string, columnIndex?: number): void;
@@ -2597,6 +2683,7 @@ function TableRowHeader({
             <RichTextEditableSurface
                 blockId={row.id}
                 runs={row.runs}
+                charIdsByOffset={context.charIdsByBlock.get(row.id) ?? []}
                 decorations={context.decorationsByBlock.get(row.id) ?? null}
                 pendingCaretRestoreBlockIdRef={context.pendingCaretRestoreBlockIdRef}
                 selection={context.selection}
@@ -2611,6 +2698,7 @@ function TableRowHeader({
                 onLinkHoverLeave={context.hideLinkHover}
                 onCodeHoverEnter={context.showCodeHoverFromRange}
                 onCodeHoverLeave={context.hideCodeHover}
+                onInlineEmbedOpen={context.openInlineEmbed}
                 onInsertText={(text, activeSelection) =>
                     context.runEditCommand((current, selection) =>
                         context.insertText(
@@ -2860,6 +2948,7 @@ const renderEditableBlock = (block: RichFormattedBlock, context: RenderBlockCont
                 previousBlock ? pointTextLength(context.state, previousBlock.id) : 0
             }
             blockLength={pointTextLength(context.state, block.id)}
+            charIdsByOffset={context.charIdsByBlock.get(block.id) ?? []}
             nextBlockId={nextBlock?.id ?? null}
             selection={context.selection}
             hasMultipleSelections={context.hasMultipleSelections}
@@ -3037,6 +3126,7 @@ const renderEditableBlock = (block: RichFormattedBlock, context: RenderBlockCont
             onLinkHoverLeave={context.hideLinkHover}
             onCodeHoverEnter={context.showCodeHoverFromRange}
             onCodeHoverLeave={context.hideCodeHover}
+            onInlineEmbedOpen={context.openInlineEmbed}
             onToggleTodo={() =>
                 context.runEditCommand((current, selection) =>
                     updateBlockMetaEverywhere(
@@ -3547,6 +3637,52 @@ function LinkFloatingPopover({
     );
 }
 
+function DateEmbedFloatingPopover({
+    state,
+    onApply,
+    onClose,
+}: {
+    state: EmbedPopoverState | null;
+    onApply(value: string): void;
+    onClose(): void;
+}) {
+    const [value, setValue] = useState('');
+
+    useLayoutEffect(() => {
+        setValue(state?.value ?? '');
+    }, [state?.value]);
+
+    if (!state) return null;
+
+    return (
+        <form
+            className="embedFloatingPopover"
+            role="dialog"
+            aria-label="Date embed"
+            style={{top: state.top, left: state.left}}
+            onSubmit={(event) => {
+                event.preventDefault();
+                onApply(value);
+            }}
+            onKeyDown={(event) => {
+                if (event.key !== 'Escape') return;
+                event.preventDefault();
+                onClose();
+            }}
+            onMouseDown={(event) => event.stopPropagation()}
+        >
+            <input
+                type="date"
+                value={value}
+                autoFocus
+                aria-label="Date value"
+                onChange={(event) => setValue(event.currentTarget.value)}
+            />
+            <button type="submit">Apply</button>
+        </form>
+    );
+}
+
 function LinkHoverPopover({
     state,
     onEdit,
@@ -3944,6 +4080,7 @@ function AnnotationBodyBlock({
             <RichTextEditableSurface
                 blockId={block.id}
                 runs={block.runs}
+                charIdsByOffset={orderedCharIdsForBlock(state, block.id, {visibleOnly: true})}
                 decorations={null}
                 pendingCaretRestoreBlockIdRef={pendingCaretRestoreBlockIdRef}
                 pendingSelectionRestoreRef={pendingSelectionRestoreRef}
@@ -4247,6 +4384,7 @@ function Toolbar({
     onStrikethrough,
     onCode,
     onLink,
+    onDateEmbed,
     onBlockType,
     onAnnotation,
 }: {
@@ -4261,6 +4399,7 @@ function Toolbar({
     onStrikethrough(): void;
     onCode(): void;
     onLink(): void;
+    onDateEmbed(): void;
     onBlockType(kind: BlockTypeMenuValue): void;
     onAnnotation(presentation: AnnotationPresentation): void;
 }) {
@@ -4325,6 +4464,13 @@ function Toolbar({
                 >
                     Link
                 </button>
+                <button
+                    type="button"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={onDateEmbed}
+                >
+                    Date
+                </button>
             </div>
             <div className="toolbarGroup" aria-label="Annotations">
                 <button
@@ -4387,6 +4533,7 @@ function EditableBlock({
     previousBlockId,
     previousBlockLength,
     blockLength,
+    charIdsByOffset,
     nextBlockId,
     selection,
     hasMultipleSelections,
@@ -4419,6 +4566,7 @@ function EditableBlock({
     onLinkHoverLeave,
     onCodeHoverEnter,
     onCodeHoverLeave,
+    onInlineEmbedOpen,
     onToggleTodo,
     onSetCodeLanguage,
     onSetCalloutKind,
@@ -4443,6 +4591,7 @@ function EditableBlock({
     previousBlockId: string | null;
     previousBlockLength: number;
     blockLength: number;
+    charIdsByOffset: string[];
     nextBlockId: string | null;
     selection: EditorSelection;
     hasMultipleSelections: boolean;
@@ -4475,6 +4624,7 @@ function EditableBlock({
     onLinkHoverLeave(): void;
     onCodeHoverEnter(range: CodeTargetRange & {language: string}, element: HTMLElement): void;
     onCodeHoverLeave(): void;
+    onInlineEmbedOpen(charId: string, element: HTMLElement): void;
     onToggleTodo(): void;
     onSetCodeLanguage(language: string): void;
     onSetCalloutKind(kind: 'info' | 'warning' | 'error'): void;
@@ -4555,6 +4705,7 @@ function EditableBlock({
             <RichTextEditableSurface
                 blockId={block.id}
                 runs={block.runs}
+                charIdsByOffset={charIdsByOffset}
                 decorations={decorations}
                 pendingCaretRestoreBlockIdRef={pendingCaretRestoreBlockIdRef}
                 selection={selection}
@@ -4576,6 +4727,7 @@ function EditableBlock({
                 onLinkHoverLeave={onLinkHoverLeave}
                 onCodeHoverEnter={onCodeHoverEnter}
                 onCodeHoverLeave={onCodeHoverLeave}
+                onInlineEmbedOpen={onInlineEmbedOpen}
                 onInsertText={onInsertText}
                 onDeleteBackward={onDeleteBackward}
                 onDeleteForward={onDeleteForward}
@@ -4837,6 +4989,7 @@ function EditableBlock({
 function RichTextEditableSurface({
     blockId,
     runs,
+    charIdsByOffset,
     decorations,
     pendingCaretRestoreBlockIdRef,
     pendingSelectionRestoreRef,
@@ -4858,12 +5011,14 @@ function RichTextEditableSurface({
     onLinkHoverLeave,
     onCodeHoverEnter,
     onCodeHoverLeave,
+    onInlineEmbedOpen,
     onKeyDown,
     onCopy,
     onPaste,
 }: {
     blockId: string;
     runs: RichFormattedBlock['runs'];
+    charIdsByOffset: string[];
     decorations: BlockSelectionDecorations | null;
     pendingCaretRestoreBlockIdRef: MutableRefObject<string | null>;
     pendingSelectionRestoreRef?: MutableRefObject<EditorSelection | null>;
@@ -4885,6 +5040,7 @@ function RichTextEditableSurface({
     onLinkHoverLeave?(): void;
     onCodeHoverEnter?(range: CodeTargetRange & {language: string}, element: HTMLElement): void;
     onCodeHoverLeave?(): void;
+    onInlineEmbedOpen?(charId: string, element: HTMLElement): void;
     onKeyDown?(event: KeyboardEvent<HTMLDivElement>): void;
     onCopy?(event: ClipboardEvent<HTMLDivElement>): void;
     onPaste?(event: ClipboardEvent<HTMLDivElement>): void;
@@ -4924,6 +5080,7 @@ function RichTextEditableSurface({
         if (!element) return;
         const renderedRuns = serializeRuns(
             runs,
+            charIdsByOffset,
             decorations,
             trailingCodeNewline,
             footnoteNumberById,
@@ -4933,6 +5090,8 @@ function RichTextEditableSurface({
             renderedRunsRef.current = renderedRuns;
             element.replaceChildren(
                 ...renderRunNodes(runs, decorations, {
+                    blockId,
+                    charIdsByOffset,
                     trailingCodeNewline,
                     syntaxTokens,
                     popoverTextById,
@@ -4954,6 +5113,7 @@ function RichTextEditableSurface({
         }
     }, [
         blockId,
+        charIdsByOffset,
         decorations,
         footnoteNumberById,
         pendingCaretRestoreBlockIdRef,
@@ -4984,6 +5144,8 @@ function RichTextEditableSurface({
                 if (nextDecorations === decorations) return;
                 event.currentTarget.replaceChildren(
                     ...renderRunNodes(runs, nextDecorations, {
+                        blockId,
+                        charIdsByOffset,
                         trailingCodeNewline,
                         syntaxTokens,
                         popoverTextById,
@@ -4992,6 +5154,7 @@ function RichTextEditableSurface({
                 );
                 renderedRunsRef.current = serializeRuns(
                     runs,
+                    charIdsByOffset,
                     nextDecorations,
                     trailingCodeNewline,
                     footnoteNumberById,
@@ -5072,6 +5235,12 @@ function RichTextEditableSurface({
                 }
             }}
             onClick={(event) => {
+                const embedTrigger = embedTriggerFromEvent(event.currentTarget, event.target);
+                if (embedTrigger?.dataset.embedCharId) {
+                    event.preventDefault();
+                    onInlineEmbedOpen?.(embedTrigger.dataset.embedCharId, embedTrigger);
+                    return;
+                }
                 const trigger = popoverTriggerFromEvent(event.currentTarget, event.target);
                 if (!trigger) return;
                 for (const id of popoverIdsForTrigger(trigger)) {
@@ -5084,6 +5253,8 @@ function RichTextEditableSurface({
                     handledBeforeInputRef.current = false;
                     event.currentTarget.replaceChildren(
                         ...renderRunNodes(runs, decorations, {
+                            blockId,
+                            charIdsByOffset,
                             trailingCodeNewline,
                             syntaxTokens,
                             popoverTextById,
@@ -5291,6 +5462,16 @@ const codeTriggerFromEvent = (
     return trigger && root.contains(trigger) ? trigger : null;
 };
 
+const embedTriggerFromEvent = (
+    root: HTMLElement,
+    target: EventTarget | null,
+): HTMLElement | null => {
+    const elementConstructor = root.ownerDocument.defaultView?.Element;
+    if (!elementConstructor || !(target instanceof elementConstructor)) return null;
+    const trigger = target.closest<HTMLElement>('[data-inline-embed="true"]');
+    return trigger && root.contains(trigger) ? trigger : null;
+};
+
 const linkRangeFromTrigger = (
     trigger: HTMLElement,
     blockId: string,
@@ -5309,6 +5490,37 @@ const codeRangeFromTrigger = (
     const startOffset = Number(trigger.dataset.codeStartOffset);
     if (!Number.isFinite(startOffset)) return null;
     return codeRangeAroundOffsetInRuns(blockId, runs, startOffset);
+};
+
+const inlineEmbedDataByCharId = (
+    state: Replica['state'],
+    charId: string,
+): {type: string; value: string} | null => {
+    const blocks = materializeFormattedBlocks(state, annotationMarkBehavior);
+    for (const block of blocks) {
+        const charIds = orderedCharIdsForBlock(state, block.id, {visibleOnly: true});
+        const offset = charIds.indexOf(charId);
+        if (offset < 0) continue;
+        let runStart = 0;
+        for (const run of block.runs) {
+            const length = segmentText(run.text).length;
+            if (offset >= runStart && offset < runStart + length) {
+                const data = run.marks[INLINE_EMBED_MARK];
+                if (!isInlineEmbedData(data)) return null;
+                return {type: data.type, value: inlineEmbedInputValue(data.value)};
+            }
+            runStart += length;
+        }
+    }
+    return null;
+};
+
+const inlineEmbedInputValue = (value: unknown): string => {
+    if (typeof value === 'string') return value;
+    if (value && typeof value === 'object' && !Array.isArray(value) && typeof (value as {date?: unknown}).date === 'string') {
+        return (value as {date: string}).date;
+    }
+    return '';
 };
 
 const overlayTransientSelections = (
@@ -5525,6 +5737,7 @@ const linkPopoverPositionFromElement = (element: HTMLElement): {top: number; lef
 
 const serializeRuns = (
     runs: RichFormattedBlock['runs'],
+    charIdsByOffset: string[],
     decorations: BlockSelectionDecorations | null,
     trailingCodeNewline = false,
     footnoteNumberById: Map<string, number> = new Map(),
@@ -5538,8 +5751,10 @@ const serializeRuns = (
             run.marks.strikethrough,
             run.marks[LINK_MARK],
             run.marks[CODE_MARK],
+            run.marks[INLINE_EMBED_MARK],
         ]),
         stackedMarks: runs.map((run) => run.stackedMarks),
+        charIdsByOffset,
         decorations,
         trailingCodeNewline,
         syntaxTokens,
@@ -5550,6 +5765,8 @@ const renderRunNodes = (
     runs: RichFormattedBlock['runs'],
     decorations: BlockSelectionDecorations | null,
     options: {
+        blockId?: string;
+        charIdsByOffset?: string[];
         trailingCodeNewline?: boolean;
         syntaxTokens?: SyntaxToken[];
         popoverTextById?: Map<string, string>;
@@ -5566,26 +5783,21 @@ const renderRunNodes = (
             const chunkEnd = chunk.blockEndOffset;
             renderCaretsAtOffset(nodes, decorations, renderedCarets, chunkStart);
 
-            const span = document.createElement('span');
-            span.textContent = chunk.text;
-            applyRunClasses(span, chunk, options.popoverTextById);
+            const node = renderRunChunkNode(chunk, options);
             const highlight = decorations.segments.find(
                 (selectionSegment) =>
                     chunkStart >= selectionSegment.startOffset &&
                     chunkEnd <= selectionSegment.endOffset,
             );
             if (highlight) {
-                span.classList.add('retainedSelectionHighlight');
-                span.dataset.retainedSelection = 'highlight';
-                span.dataset.selectionEntryId = highlight.id;
-                span.dataset.selectionPrimary = String(highlight.primary);
+                node.classList.add('retainedSelectionHighlight');
+                node.dataset.retainedSelection = 'highlight';
+                node.dataset.selectionEntryId = highlight.id;
+                node.dataset.selectionPrimary = String(highlight.primary);
             }
-            nodes.push(span);
+            nodes.push(node);
         } else {
-            const span = document.createElement('span');
-            span.textContent = chunk.text;
-            applyRunClasses(span, chunk, options.popoverTextById);
-            nodes.push(span);
+            nodes.push(renderRunChunkNode(chunk, options));
         }
         nodes.push(
             ...renderEndingFootnoteReferences(
@@ -5600,6 +5812,33 @@ const renderRunNodes = (
         renderCaretsAtOffset(nodes, decorations, renderedCarets, finalOffset);
     }
     return appendTrailingCodeNewlineSentinel(nodes, options);
+};
+
+const renderRunChunkNode = (
+    chunk: RunRenderChunk,
+    options: {
+        blockId?: string;
+        charIdsByOffset?: string[];
+        popoverTextById?: Map<string, string>;
+    },
+): HTMLElement => {
+    if (chunk.text === INLINE_EMBED_TEXT && segmentText(chunk.text).length === 1) {
+        const data = inlineEmbedDataForRun(chunk.run);
+        const plainText = plainTextForInlineEmbed(data, inlineEmbedPlugins, {
+            ambientMarks: chunk.run.marks,
+        });
+        return renderInlineEmbed(data, inlineEmbedPlugins, {
+            blockId: options.blockId ?? '',
+            charId: options.charIdsByOffset?.[chunk.blockStartOffset] ?? '',
+            startOffset: chunk.blockStartOffset,
+            ambientMarks: chunk.run.marks,
+            plainText,
+        });
+    }
+    const span = document.createElement('span');
+    span.textContent = chunk.text;
+    applyRunClasses(span, chunk, options.popoverTextById);
+    return span;
 };
 
 type RunRenderChunk = {
@@ -5626,6 +5865,11 @@ const runRenderChunks = (
         const runStart = offset;
         const runEnd = runStart + runSegments.length;
         const boundaries = new Set([0, runSegments.length]);
+        for (let index = 0; index < runSegments.length; index++) {
+            if (runSegments[index] !== INLINE_EMBED_TEXT) continue;
+            boundaries.add(index);
+            boundaries.add(index + 1);
+        }
 
         if (decorations) {
             for (const selectionSegment of decorations.segments) {
