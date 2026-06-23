@@ -4,12 +4,19 @@ import {
 } from 'umkehr/block-crdt';
 import type {CachedState} from 'umkehr/block-crdt/types';
 import type {RichBlockMeta} from './blockMeta';
-import {caret, editableBlockIds, type BlockPoint, type EditorSelection} from './selectionModel';
+import {
+    caret,
+    editableBlockIds,
+    type BlockPoint,
+    type DecorationAffinity,
+    type EditorSelection,
+} from './selectionModel';
 
 export type RetainedPoint = {
     blockId: string;
     affinity: 'before' | 'after';
     charId: string | null;
+    visualAffinity?: DecorationAffinity;
 };
 
 export type RetainedSelection =
@@ -59,7 +66,13 @@ export const retainSelection = (
 
 export const retainPoint = (state: CachedState<RichBlockMeta>, point: BlockPoint): RetainedPoint => {
     const retained = retainBlockPoint(state, point);
-    return {blockId: retained.blockId, charId: retained.charId, affinity: retained.affinity};
+    const result: RetainedPoint = {
+        blockId: retained.blockId,
+        charId: retained.charId,
+        affinity: retained.affinity,
+    };
+    if (point.visualAffinity) result.visualAffinity = point.visualAffinity;
+    return result;
 };
 
 export const resolveSelection = (
@@ -97,7 +110,8 @@ export const resolveSelection = (
 };
 
 export const resolvePoint = (state: CachedState<RichBlockMeta>, point: RetainedPoint): BlockPoint => {
-    return resolveBlockPoint(state, point);
+    const resolved = resolveBlockPoint(state, point);
+    return point.visualAffinity ? {...resolved, visualAffinity: point.visualAffinity} : resolved;
 };
 
 const allBlockIds = (state: CachedState<RichBlockMeta>): string[] => Object.keys(state.state.blocks).sort();

@@ -4168,6 +4168,60 @@ describe('Block rich text example UI', () => {
         });
     });
 
+    it('keeps a caret before a footnote number when recording arrow navigation', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        const block = blocks(left)[0];
+
+        selectCaret(block, 0);
+        beforeInputText(block, 'abcd');
+        await waitFor(() => expect(blockText(block)).toBe('abcd'));
+
+        selectRange(block, 1, 3);
+        fireEvent.click(within(left).getByRole('button', {name: 'Footnote'}));
+
+        const reference = await waitFor(() => {
+            const found = footnoteReferences(block)[0];
+            if (!found) throw new Error('missing footnote reference');
+            return found;
+        });
+
+        setDomCaretBeforeNode(reference);
+        expect(isDomCaretBeforeNode(reference)).toBe(true);
+
+        fireEvent.keyUp(block, {key: 'ArrowLeft'});
+
+        await waitFor(() => expect(isDomCaretBeforeNode(reference)).toBe(true));
+        expect(domSelectionOffsets(block)).toEqual({anchor: 3, focus: 3});
+    });
+
+    it('keeps a caret after a footnote number when recording arrow navigation', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        const block = blocks(left)[0];
+
+        selectCaret(block, 0);
+        beforeInputText(block, 'abcd');
+        await waitFor(() => expect(blockText(block)).toBe('abcd'));
+
+        selectRange(block, 1, 3);
+        fireEvent.click(within(left).getByRole('button', {name: 'Footnote'}));
+
+        const reference = await waitFor(() => {
+            const found = footnoteReferences(block)[0];
+            if (!found) throw new Error('missing footnote reference');
+            return found;
+        });
+
+        setDomCaretAfterNode(reference);
+        expect(isDomCaretAfterNode(reference)).toBe(true);
+
+        fireEvent.keyUp(block, {key: 'ArrowRight'});
+
+        await waitFor(() => expect(isDomCaretAfterNode(reference)).toBe(true));
+        expect(domSelectionOffsets(block)).toEqual({anchor: 3, focus: 3});
+    });
+
     it('renders overlapping footnote numbers at their respective boundaries', async () => {
         const view = render(<App />);
         const {left} = panels(view);
@@ -5128,6 +5182,54 @@ const domCaretPosition = (panel: HTMLElement): {blockIndex: number; offset: numb
         blockIndex,
         offset: blockIndex >= 0 ? domCaretOffset(editorBlocks[blockIndex]) : -1,
     };
+};
+
+const isDomCaretBeforeNode = (node: Node): boolean => {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || !selection.isCollapsed) return false;
+    const range = selection.getRangeAt(0);
+    const before = document.createRange();
+    before.setStartBefore(node);
+    before.collapse(true);
+    if (range.compareBoundaryPoints(0, before) === 0) return true;
+    if (range.compareBoundaryPoints(0, before) > 0) return false;
+    const between = document.createRange();
+    between.setStart(range.startContainer, range.startOffset);
+    between.setEnd(before.startContainer, before.startOffset);
+    return between.toString() === '';
+};
+
+const isDomCaretAfterNode = (node: Node): boolean => {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || !selection.isCollapsed) return false;
+    const range = selection.getRangeAt(0);
+    const after = document.createRange();
+    after.setStartAfter(node);
+    after.collapse(true);
+    if (range.compareBoundaryPoints(0, after) === 0) return true;
+    if (range.compareBoundaryPoints(0, after) < 0) return false;
+    const between = document.createRange();
+    between.setStart(after.startContainer, after.startOffset);
+    between.setEnd(range.startContainer, range.startOffset);
+    return between.toString() === '';
+};
+
+const setDomCaretBeforeNode = (node: Node) => {
+    const selection = window.getSelection()!;
+    const range = document.createRange();
+    range.setStartBefore(node);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+};
+
+const setDomCaretAfterNode = (node: Node) => {
+    const selection = window.getSelection()!;
+    const range = document.createRange();
+    range.setStartAfter(node);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
 };
 
 const domPointOffset = (block: HTMLElement, node: Node | null, nodeOffset: number): number => {

@@ -4,7 +4,13 @@ import {isEditableBlock} from './blockMeta';
 import type {RichBlockMeta} from './blockMeta';
 import {richTextVirtualParents} from './virtualParents';
 
-export type BlockPoint = {blockId: string; offset: number};
+export type DecorationAffinity = 'beforeDecorations' | 'afterDecorations';
+
+export type BlockPoint = {
+    blockId: string;
+    offset: number;
+    visualAffinity?: DecorationAffinity;
+};
 
 export type TextSelection =
     | {type: 'caret'; point: BlockPoint}
@@ -84,6 +90,7 @@ export const clampPoint = (state: CachedState<RichBlockMeta>, point: BlockPoint)
         return {
             blockId: point.blockId,
             offset: Math.max(0, Math.min(point.offset, pointTextLength(state, point.blockId))),
+            visualAffinity: point.visualAffinity,
         };
     }
 
@@ -93,6 +100,7 @@ export const clampPoint = (state: CachedState<RichBlockMeta>, point: BlockPoint)
     return {
         blockId,
         offset: Math.max(0, Math.min(point.offset, pointTextLength(state, blockId))),
+        visualAffinity: point.visualAffinity,
     };
 };
 

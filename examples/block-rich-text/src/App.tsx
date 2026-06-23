@@ -6617,7 +6617,7 @@ function RichTextEditableSurface({
         if (point?.blockId === blockId && pendingCaretRestoreBlockIdRef.current === blockId) {
             pendingCaretRestoreBlockIdRef.current = null;
             if (document.activeElement !== element) element.focus();
-            restoreCaretToDom(element, point.offset);
+            restoreCaretToDom(element, point);
         }
         const rangeSelection = pendingSelectionRestoreRef?.current;
         if (pendingSelectionRestoreRef && rangeSelection?.type === 'range') {
