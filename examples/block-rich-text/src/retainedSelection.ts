@@ -2,6 +2,7 @@ import {orderedCharIdsForBlock} from 'umkehr/block-crdt';
 import type {CachedState} from 'umkehr/block-crdt/types';
 import type {RichBlockMeta} from './blockMeta';
 import {caret, clampPoint, editableBlockIds, type BlockPoint, type EditorSelection} from './selectionModel';
+import {visibleCharIdBeforeOffset} from './charUtils';
 
 export type RetainedPoint = {
     blockId: string;
@@ -37,8 +38,7 @@ export const retainPoint = (state: CachedState<RichBlockMeta>, point: BlockPoint
     if (clamped.offset <= 0) {
         return {blockId: clamped.blockId, charId: null, affinity: 'after'};
     }
-    const visibleCharIds = orderedCharIdsForBlock(state, clamped.blockId, {visibleOnly: true});
-    const charId = visibleCharIds[clamped.offset - 1] ?? null;
+    const charId = visibleCharIdBeforeOffset(state, clamped.blockId, clamped.offset);
     return {blockId: clamped.blockId, charId, affinity: 'after'};
 };
 

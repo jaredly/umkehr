@@ -1,9 +1,9 @@
-import {applyMany, compareLamportStrings, orderedCharIdsForBlock, type Op} from 'umkehr/block-crdt';
+import {applyMany, compareLamportStrings, type Op} from 'umkehr/block-crdt';
 import type {CachedState, Lamport} from 'umkehr/block-crdt/types';
 import {lamportToString} from 'umkehr/block-crdt/utils';
 import type {RichBlockMeta} from './blockMeta';
-import {segmentText} from './selectionModel';
 import {richTextVirtualParents} from './virtualParents';
+import {textSegments, visibleCharIdBeforeOffset} from './charUtils';
 
 export const localInsertTextOps = (
     state: CachedState<RichBlockMeta>,
@@ -20,16 +20,20 @@ export const localInsertTextOps = (
     },
 ): Array<Op<RichBlockMeta>> => {
     const blockId = lamportToString(block);
-    const visibleChars = offset === 0 ? [] : orderedCharIdsForBlock(state, blockId, {visibleOnly: true});
-    if (offset < 0 || (offset > 0 && offset > visibleChars.length)) {
+    const previousCharId = visibleCharIdBeforeOffset(state, blockId, offset);
+    if (offset < 0 || (offset > 0 && !previousCharId)) {
         throw new Error(`insert offset out of bounds`);
     }
 
-    let after = offset === 0 ? block : state.state.chars[visibleChars[offset - 1]].id;
+    let after = block;
+    if (offset > 0) {
+        if (!previousCharId) throw new Error(`insert offset out of bounds`);
+        after = state.state.chars[previousCharId].id;
+    }
     let next = state.state.maxSeenCount + 1;
     const ops: Array<Op<RichBlockMeta>> = [];
 
-    for (const segment of segmentText(text)) {
+    for (const segment of textSegments(text)) {
         const id: Lamport = [next++, actor];
         ops.push({
             type: 'char',

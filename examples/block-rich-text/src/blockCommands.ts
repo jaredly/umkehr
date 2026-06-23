@@ -44,6 +44,7 @@ import {
     type BlockPoint,
     type EditorSelection,
 } from './selectionModel';
+import {textSegments} from './charUtils';
 import {applyCharInsertOpsOrApplyMany, localInsertTextOps} from './localTextOps';
 
 export type CommandContext = {
@@ -753,7 +754,7 @@ const pastePlainTextAtBlockEnd = (
             cache: {...state.cache, charContents},
         };
         let after = lastVisibleCharId(currentState, blockId) ?? blocks[blockId].id;
-        for (const segment of segmentText(text)) {
+        for (const segment of textSegments(text)) {
             const id: Lamport = [++maxSeenCount, context.actor];
             const op: Op<RichBlockMeta> = {
                 type: 'char',
