@@ -2121,6 +2121,32 @@ describe('Block rich text example UI', () => {
         expect(within(left).queryByRole('dialog', {name: 'Link'})).toBeNull();
     });
 
+    it('does not open link or code popovers from direct mark clicks', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'https://example.test code');
+        await waitFor(() => expect(blockText(blocks(left)[0])).toBe('https://example.test code'));
+
+        selectRange(blocks(left)[0], 0, 'https://example.test'.length);
+        fireEvent.keyDown(blocks(left)[0], {key: 'k', metaKey: true});
+        await waitFor(() => expect(blocks(left)[0].querySelector('.markLink')).toBeTruthy());
+
+        const codeStart = 'https://example.test '.length;
+        selectRange(blocks(left)[0], codeStart, codeStart + 'code'.length);
+        fireEvent.click(within(left).getByRole('button', {name: 'Code'}));
+        await waitFor(() => expect(blocks(left)[0].querySelector('.markCode')).toBeTruthy());
+
+        fireEvent.click(blocks(left)[0].querySelector<HTMLElement>('.markLink')!);
+        fireEvent.click(blocks(left)[0].querySelector<HTMLElement>('.markCode')!);
+
+        expect(within(left).queryByRole('dialog', {name: 'Link'})).toBeNull();
+        expect(within(left).queryByRole('dialog', {name: 'Link actions'})).toBeNull();
+        expect(within(left).queryByRole('dialog', {name: 'Inline code language'})).toBeNull();
+        expect(within(left).queryByRole('dialog', {name: 'Inline code actions'})).toBeNull();
+    });
+
     it('pastes a link-like target over selected text as a link', async () => {
         const view = render(<App />);
         const {left} = panels(view);

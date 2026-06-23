@@ -1404,24 +1404,6 @@ function BlockEditor({
         });
     }, [liveSelectionSet, onCommand, openLinkPopoverForRanges]);
 
-    const openLinkFromRange = useCallback(
-        (range: LinkTargetRange & {href: string}, element: HTMLElement) => {
-            setLinkHoverPopover(null);
-            setLinkPopover({
-                ranges: [
-                    {
-                        blockId: range.blockId,
-                        startOffset: range.startOffset,
-                        endOffset: range.endOffset,
-                    },
-                ],
-                href: range.href,
-                ...linkPopoverPositionFromElement(element),
-            });
-        },
-        [],
-    );
-
     const cancelLinkHoverHide = useCallback(() => {
         if (linkHoverHideTimerRef.current) clearTimeout(linkHoverHideTimerRef.current);
         linkHoverHideTimerRef.current = null;
@@ -1451,24 +1433,6 @@ function BlockEditor({
             });
         },
         [cancelLinkHoverHide],
-    );
-
-    const openCodeFromRange = useCallback(
-        (range: CodeTargetRange & {language: string}, element: HTMLElement) => {
-            setCodeHoverPopover(null);
-            setCodePopover({
-                ranges: [
-                    {
-                        blockId: range.blockId,
-                        startOffset: range.startOffset,
-                        endOffset: range.endOffset,
-                    },
-                ],
-                language: range.language,
-                ...linkPopoverPositionFromElement(element),
-            });
-        },
-        [],
     );
 
     const cancelCodeHoverHide = useCallback(() => {
@@ -2005,10 +1969,8 @@ function BlockEditor({
                                 onPopoverTriggerEnter: showPopover,
                                 onPopoverTriggerLeave: schedulePopoverHideFromPointer,
                                 openLinkFromCurrentSelection,
-                                openLinkFromRange,
                                 showLinkHoverFromRange,
                                 hideLinkHover: scheduleLinkHoverHide,
-                                openCodeFromRange,
                                 showCodeHoverFromRange,
                                 hideCodeHover: scheduleCodeHoverHide,
                                 insertText: insertTextWithPendingMarks,
@@ -2249,10 +2211,8 @@ type RenderBlockContext = {
     onPopoverTriggerEnter(id: string, element: HTMLElement): void;
     onPopoverTriggerLeave(id?: string, transition?: PopoverPointerTransition): void;
     openLinkFromCurrentSelection(): void;
-    openLinkFromRange(range: LinkTargetRange & {href: string}, element: HTMLElement): void;
     showLinkHoverFromRange(range: LinkTargetRange & {href: string}, element: HTMLElement): void;
     hideLinkHover(): void;
-    openCodeFromRange(range: CodeTargetRange & {language: string}, element: HTMLElement): void;
     showCodeHoverFromRange(range: CodeTargetRange & {language: string}, element: HTMLElement): void;
     hideCodeHover(): void;
     createMissingTableCell(tableId: string, rowId: string, columnIndex: number): void;
@@ -2577,10 +2537,8 @@ function TableRowHeader({
                 footnoteNumberById={context.footnoteNumberById}
                 onPopoverTriggerEnter={context.onPopoverTriggerEnter}
                 onPopoverTriggerLeave={context.onPopoverTriggerLeave}
-                onLinkClick={context.openLinkFromRange}
                 onLinkHoverEnter={context.showLinkHoverFromRange}
                 onLinkHoverLeave={context.hideLinkHover}
-                onCodeClick={context.openCodeFromRange}
                 onCodeHoverEnter={context.showCodeHoverFromRange}
                 onCodeHoverLeave={context.hideCodeHover}
                 onInsertText={(text, activeSelection) =>
@@ -3014,10 +2972,8 @@ const renderEditableBlock = (block: RichFormattedBlock, context: RenderBlockCont
             onToggleStrikethrough={() => context.runInlineMarkToggle('strikethrough')}
             onToggleCode={context.runCodeToggle}
             onOpenLink={context.openLinkFromCurrentSelection}
-            onOpenLinkRange={context.openLinkFromRange}
             onLinkHoverEnter={context.showLinkHoverFromRange}
             onLinkHoverLeave={context.hideLinkHover}
-            onOpenCodeRange={context.openCodeFromRange}
             onCodeHoverEnter={context.showCodeHoverFromRange}
             onCodeHoverLeave={context.hideCodeHover}
             onToggleTodo={() =>
@@ -3814,24 +3770,6 @@ function AnnotationBodyBlock({
         run(rangeSelection(range), removeAnnotationBodyLink);
     }, [linkPopover?.ranges, rangeSelection, run]);
 
-    const openBodyCodePopover = useCallback(
-        (range: CodeTargetRange & {language: string}, element: HTMLElement) => {
-            setCodeHoverPopover(null);
-            setCodePopover({
-                ranges: [
-                    {
-                        blockId: range.blockId,
-                        startOffset: range.startOffset,
-                        endOffset: range.endOffset,
-                    },
-                ],
-                language: range.language,
-                ...linkPopoverPositionFromElement(element),
-            });
-        },
-        [],
-    );
-
     const applyBodyCodeLanguage = useCallback(
         (language: string, ranges: CodeTargetRange[]) => {
             const range = ranges[0];
@@ -3949,16 +3887,8 @@ function AnnotationBodyBlock({
                 footnoteNumberById={footnoteNumberById}
                 onPopoverTriggerEnter={onPopoverTriggerEnter}
                 onPopoverTriggerLeave={onPopoverTriggerLeave}
-                onLinkClick={(range, element) =>
-                    openBodyLinkPopover(
-                        [range],
-                        range.href,
-                        linkPopoverPositionFromElement(element),
-                    )
-                }
                 onLinkHoverEnter={showBodyLinkHover}
                 onLinkHoverLeave={scheduleBodyLinkHoverHide}
-                onCodeClick={openBodyCodePopover}
                 onCodeHoverEnter={showBodyCodeHover}
                 onCodeHoverLeave={scheduleBodyCodeHoverHide}
                 onSelectionChange={updateSelection}
@@ -4395,10 +4325,8 @@ function EditableBlock({
     onToggleStrikethrough,
     onToggleCode,
     onOpenLink,
-    onOpenLinkRange,
     onLinkHoverEnter,
     onLinkHoverLeave,
-    onOpenCodeRange,
     onCodeHoverEnter,
     onCodeHoverLeave,
     onToggleTodo,
@@ -4452,10 +4380,8 @@ function EditableBlock({
     onToggleStrikethrough(): void;
     onToggleCode(): void;
     onOpenLink(): void;
-    onOpenLinkRange(range: LinkTargetRange & {href: string}, element: HTMLElement): void;
     onLinkHoverEnter(range: LinkTargetRange & {href: string}, element: HTMLElement): void;
     onLinkHoverLeave(): void;
-    onOpenCodeRange(range: CodeTargetRange & {language: string}, element: HTMLElement): void;
     onCodeHoverEnter(range: CodeTargetRange & {language: string}, element: HTMLElement): void;
     onCodeHoverLeave(): void;
     onToggleTodo(): void;
@@ -4554,10 +4480,8 @@ function EditableBlock({
                 footnoteNumberById={footnoteNumberById}
                 onPopoverTriggerEnter={onPopoverTriggerEnter}
                 onPopoverTriggerLeave={onPopoverTriggerLeave}
-                onLinkClick={onOpenLinkRange}
                 onLinkHoverEnter={onLinkHoverEnter}
                 onLinkHoverLeave={onLinkHoverLeave}
-                onCodeClick={onOpenCodeRange}
                 onCodeHoverEnter={onCodeHoverEnter}
                 onCodeHoverLeave={onCodeHoverLeave}
                 onInsertText={onInsertText}
@@ -4840,10 +4764,8 @@ function RichTextEditableSurface({
     onSelectionChange,
     onPopoverTriggerEnter,
     onPopoverTriggerLeave,
-    onLinkClick,
     onLinkHoverEnter,
     onLinkHoverLeave,
-    onCodeClick,
     onCodeHoverEnter,
     onCodeHoverLeave,
     onKeyDown,
@@ -4868,10 +4790,8 @@ function RichTextEditableSurface({
     onSelectionChange?(selection: EditorSelection | null): void;
     onPopoverTriggerEnter?(id: string, element: HTMLElement): void;
     onPopoverTriggerLeave?(id?: string, transition?: PopoverPointerTransition): void;
-    onLinkClick?(range: LinkTargetRange & {href: string}, element: HTMLElement): void;
     onLinkHoverEnter?(range: LinkTargetRange & {href: string}, element: HTMLElement): void;
     onLinkHoverLeave?(): void;
-    onCodeClick?(range: CodeTargetRange & {language: string}, element: HTMLElement): void;
     onCodeHoverEnter?(range: CodeTargetRange & {language: string}, element: HTMLElement): void;
     onCodeHoverLeave?(): void;
     onKeyDown?(event: KeyboardEvent<HTMLDivElement>): void;
@@ -5060,16 +4980,6 @@ function RichTextEditableSurface({
                 }
             }}
             onClick={(event) => {
-                const linkTrigger = linkTriggerFromEvent(event.currentTarget, event.target);
-                if (linkTrigger) {
-                    const range = linkRangeFromTrigger(linkTrigger, blockId, runs);
-                    if (range) onLinkClick?.(range, linkTrigger);
-                }
-                const codeTrigger = codeTriggerFromEvent(event.currentTarget, event.target);
-                if (codeTrigger) {
-                    const range = codeRangeFromTrigger(codeTrigger, blockId, runs);
-                    if (range) onCodeClick?.(range, codeTrigger);
-                }
                 const trigger = popoverTriggerFromEvent(event.currentTarget, event.target);
                 if (!trigger) return;
                 for (const id of popoverIdsForTrigger(trigger)) {
