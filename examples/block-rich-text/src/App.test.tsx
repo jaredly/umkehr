@@ -3,7 +3,7 @@ import '../../../src/react/test-dom';
 import {act, cleanup, fireEvent, render, waitFor, within} from '@testing-library/react';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import {App} from './App';
-import {BLOCK_RICH_TEXT_MIME, type RichClipboardPayload} from './clipboard';
+import {BLOCK_RICH_TEXT_MIME, htmlWithClipboardPayload, type RichClipboardPayload} from './clipboard';
 
 Object.defineProperty(globalThis, 'NodeFilter', {
     value: window.NodeFilter,
@@ -162,6 +162,7 @@ const waitForBlockTexts = async (panel: HTMLElement, expected: string[]) => {
 const pasteText = (block: HTMLElement, text: string) => {
     fireEvent.paste(block, {
         clipboardData: {
+            types: ['text/plain'],
             getData: () => text,
         },
     });
@@ -170,6 +171,7 @@ const pasteText = (block: HTMLElement, text: string) => {
 const pasteClipboard = (block: HTMLElement, data: Record<string, string>) => {
     fireEvent.paste(block, {
         clipboardData: {
+            types: Object.keys(data),
             getData: (type: string) => data[type] ?? '',
         },
     });
@@ -2058,6 +2060,10 @@ describe('Block rich text example UI', () => {
         expect(setData).toHaveBeenCalledWith('text/plain', 'hello');
         expect(setData).toHaveBeenCalledWith('text/html', expect.stringContaining('hello'));
         expect(setData).toHaveBeenCalledWith(
+            'text/html',
+            expect.stringContaining('<!--umkehr-block-rich-text:'),
+        );
+        expect(setData).toHaveBeenCalledWith(
             BLOCK_RICH_TEXT_MIME,
             expect.stringContaining('"plainText":"hello"'),
         );
@@ -2124,8 +2130,12 @@ describe('Block rich text example UI', () => {
         expect(setData).toHaveBeenCalledWith('text/plain', 'A\tB\nC\tD');
         expect(setData).toHaveBeenCalledWith('text/tab-separated-values', 'A\tB\nC\tD');
         expect(setData).toHaveBeenCalledWith(
-            BLOCK_RICH_TEXT_MIME,
-            expect.stringContaining('"tsv":"A\\tB\\nC\\tD"'),
+            'text/html',
+            expect.stringContaining('<!--umkehr-block-rich-text:'),
+        );
+        expect(setData).toHaveBeenCalledWith(
+            'text/html',
+            expect.stringContaining('%22tsv%22%3A%22A%5CtB%5CnC%5CtD%22'),
         );
     });
 
@@ -2208,7 +2218,7 @@ describe('Block rich text example UI', () => {
 
         selectCaret(blocks(left)[0], 0);
         pasteClipboard(blocks(left)[0], {
-            [BLOCK_RICH_TEXT_MIME]: JSON.stringify(payload),
+            'text/html': htmlWithClipboardPayload(payload),
             'text/plain': 'plain',
         });
 

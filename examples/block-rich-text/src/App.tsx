@@ -147,6 +147,8 @@ import {
 } from './multiSelectionCommands';
 import {
     BLOCK_RICH_TEXT_MIME,
+    htmlWithClipboardPayload,
+    parseBlockRichTextClipboardHtml,
     parseBlockRichTextClipboardPayload,
     serializeSelectionToClipboardPayload,
     type RichClipboardPayload,
@@ -1615,7 +1617,7 @@ function BlockEditor({
             event.preventDefault();
             event.clipboardData.setData(BLOCK_RICH_TEXT_MIME, JSON.stringify(payload));
             event.clipboardData.setData('text/plain', payload.tsv ?? payload.plainText);
-            event.clipboardData.setData('text/html', payload.html);
+            event.clipboardData.setData('text/html', htmlWithClipboardPayload(payload));
             if (payload.tsv) {
                 event.clipboardData.setData('text/tab-separated-values', payload.tsv);
             }
@@ -1670,9 +1672,7 @@ function BlockEditor({
                 return;
             }
 
-            const rich = parseBlockRichTextClipboardPayload(
-                event.clipboardData.getData(BLOCK_RICH_TEXT_MIME),
-            );
+            const rich = richClipboardPayloadFromDataTransfer(event.clipboardData);
             if (rich) {
                 event.preventDefault();
                 if (rich.attachments?.length) {
@@ -5291,7 +5291,7 @@ function AnnotationBodyBlock({
             event.preventDefault();
             event.clipboardData.setData(BLOCK_RICH_TEXT_MIME, JSON.stringify(payload));
             event.clipboardData.setData('text/plain', payload.plainText);
-            event.clipboardData.setData('text/html', payload.html);
+            event.clipboardData.setData('text/html', htmlWithClipboardPayload(payload));
         },
         [selection, state],
     );
@@ -5535,9 +5535,7 @@ function AnnotationBodyBlock({
                 onCopy={copyBodySelection}
                 onPaste={(event) => {
                     const selected = readSelectionFromDom(event.currentTarget) ?? selection;
-                    const rich = parseBlockRichTextClipboardPayload(
-                        event.clipboardData.getData(BLOCK_RICH_TEXT_MIME),
-                    );
+                    const rich = richClipboardPayloadFromDataTransfer(event.clipboardData);
                     if (rich) {
                         event.preventDefault();
                         run(selected, (state, activeSelection, context) => {
@@ -7200,25 +7198,33 @@ const writeClipboardPayload = async (payload: RichClipboardPayload): Promise<voi
     const plainText = payload.tsv ?? payload.plainText;
     if (typeof clipboard.write === 'function' && typeof ClipboardItem !== 'undefined') {
         const items: Record<string, Blob> = {
-            [BLOCK_RICH_TEXT_MIME]: new Blob([JSON.stringify(payload)], {
-                type: BLOCK_RICH_TEXT_MIME,
-            }),
             'text/plain': new Blob([plainText], {type: 'text/plain'}),
-            'text/html': new Blob([payload.html], {type: 'text/html'}),
+            'text/html': new Blob([htmlWithClipboardPayload(payload)], {type: 'text/html'}),
         };
-        if (payload.tsv) {
-            items['text/tab-separated-values'] = new Blob([payload.tsv], {
-                type: 'text/tab-separated-values',
-            });
-        }
         try {
             await clipboard.write([new ClipboardItem(items)]);
             return;
-        } catch (err) {
-            // Some browsers reject custom MIME types through ClipboardItem.
+        } catch {
+            // Some browsers reject rich async clipboard writes outside direct user gestures.
         }
     }
     await clipboard.writeText?.(plainText);
+};
+
+const richClipboardPayloadFromDataTransfer = (
+    data: DataTransfer,
+): RichClipboardPayload | null => {
+    const types = data.types;
+    const hasTypedClipboard = Boolean(types?.length);
+    const canReadType = (type: string) => !hasTypedClipboard || Array.prototype.includes.call(types, type);
+    return (
+        (canReadType(BLOCK_RICH_TEXT_MIME)
+            ? parseBlockRichTextClipboardPayload(data.getData(BLOCK_RICH_TEXT_MIME))
+            : null) ??
+        (canReadType('text/html')
+            ? parseBlockRichTextClipboardHtml(data.getData('text/html'))
+            : null)
+    );
 };
 
 const occurrenceSelectionSet = (

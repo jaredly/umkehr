@@ -44,6 +44,7 @@ import {
 import type {CachedState} from 'umkehr/block-crdt/types';
 
 export const BLOCK_RICH_TEXT_MIME = 'application/x-umkehr-block-rich-text+json';
+const HTML_PAYLOAD_PREFIX = 'umkehr-block-rich-text:';
 
 export type ClipboardBooleanMarkType = 'bold' | 'italic' | 'strikethrough';
 export type ClipboardInlineMarkType = ClipboardBooleanMarkType | 'link' | 'annotation' | 'embed';
@@ -95,6 +96,7 @@ const INLINE_MARK_TYPES = new Set<ClipboardInlineMarkType>([
 const PRESENTATIONS = new Set<AnnotationPresentation>(['sidebar', 'footnote', 'popover']);
 
 export const parseBlockRichTextClipboardPayload = (value: string): RichClipboardPayload | null => {
+    if (!value || value.trimStart()[0] !== '{') return null;
     let parsed: unknown;
     try {
         parsed = JSON.parse(value);
@@ -127,6 +129,23 @@ export const parseBlockRichTextClipboardPayload = (value: string): RichClipboard
         ...(attachments.length ? {attachments} : {}),
         ...(parsed.tsv ? {tsv: parsed.tsv} : {}),
     };
+};
+
+export const htmlWithClipboardPayload = (payload: RichClipboardPayload): string =>
+    `${payload.html}<!--${HTML_PAYLOAD_PREFIX}${encodeURIComponent(JSON.stringify(payload))}-->`;
+
+export const parseBlockRichTextClipboardHtml = (value: string): RichClipboardPayload | null => {
+    const commentStart = `<!--${HTML_PAYLOAD_PREFIX}`;
+    const start = value.lastIndexOf(commentStart);
+    if (start < 0) return null;
+    const encodedStart = start + commentStart.length;
+    const end = value.indexOf('-->', encodedStart);
+    if (end < 0) return null;
+    try {
+        return parseBlockRichTextClipboardPayload(decodeURIComponent(value.slice(encodedStart, end)));
+    } catch {
+        return null;
+    }
 };
 
 export const serializeSelectionToClipboardPayload = (

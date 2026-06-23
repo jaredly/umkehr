@@ -4,6 +4,8 @@ import {lamportToString} from 'umkehr/block-crdt/utils';
 import {
     BLOCK_RICH_TEXT_MIME,
     fragmentsToHtml,
+    htmlWithClipboardPayload,
+    parseBlockRichTextClipboardHtml,
     parseBlockRichTextClipboardPayload,
     serializeSelectionToClipboardPayload,
     type RichClipboardPayload,
@@ -61,6 +63,19 @@ describe('block rich text clipboard payload parser', () => {
 
     it('parses a valid payload', () => {
         expect(parseBlockRichTextClipboardPayload(JSON.stringify(payload()))).toEqual(payload());
+    });
+
+    it('parses a payload embedded in an HTML comment', () => {
+        const html = htmlWithClipboardPayload(payload());
+
+        expect(html).toContain('<p>hello</p>');
+        expect(html).toContain('<!--umkehr-block-rich-text:');
+        expect(parseBlockRichTextClipboardHtml(html)).toEqual(payload());
+    });
+
+    it('returns null for missing or malformed HTML payload comments', () => {
+        expect(parseBlockRichTextClipboardHtml('<p>hello</p>')).toBeNull();
+        expect(parseBlockRichTextClipboardHtml('<!--umkehr-block-rich-text:%E0%A4%A-->')).toBeNull();
     });
 
     it('returns null for malformed JSON and unknown versions', () => {
