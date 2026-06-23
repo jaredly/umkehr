@@ -22,3 +22,7 @@
 - Workaround: jsdom does not provide the full range geometry API used by the real browser caret measurement path, so the remeasure helper catches missing-geometry failures and keeps the existing fallback position in tests.
 - Verification: `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx` passes after the trigger-offset positioning change.
 - Verification: `npm --prefix examples/block-rich-text run build` passes after the trigger-offset positioning change.
+- Follow-up: active slash command options now call `scrollIntoView({block: 'nearest'})` so ArrowUp/ArrowDown keeps the highlighted option visible.
+- Workaround: jsdom does not implement `scrollIntoView`, so the call is guarded in tests.
+- Verification: `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx` passes after the active-option scroll fix.
+- Verification: `npm --prefix examples/block-rich-text run build` passes after the active-option scroll fix.

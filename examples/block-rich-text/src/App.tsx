@@ -4061,6 +4061,7 @@ function SlashCommandPopover({
     onClose(): void;
 }) {
     const inputRef = useRef<HTMLInputElement>(null);
+    const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
     const commands = useMemo(() => {
         const query = state?.query.trim().toLowerCase() ?? '';
         if (!query) return SLASH_COMMANDS;
@@ -4078,6 +4079,11 @@ function SlashCommandPopover({
     useLayoutEffect(() => {
         if (state) inputRef.current?.focus();
     }, [state]);
+
+    useLayoutEffect(() => {
+        if (!state || activeIndex < 0) return;
+        optionRefs.current[activeIndex]?.scrollIntoView?.({block: 'nearest'});
+    }, [activeIndex, state, commands.length]);
 
     if (!state) return null;
 
@@ -4124,6 +4130,9 @@ function SlashCommandPopover({
                     commands.map((command, index) => (
                         <button
                             key={slashCommandId(command)}
+                            ref={(element) => {
+                                optionRefs.current[index] = element;
+                            }}
                             type="button"
                             className={index === activeIndex ? 'active' : ''}
                             role="option"
