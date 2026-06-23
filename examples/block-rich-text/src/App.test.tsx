@@ -1982,6 +1982,38 @@ describe('Block rich text example UI', () => {
         );
     });
 
+    it('keeps a caret before an inline embed visible and editable', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        typeText(blocks(left)[0], 'due ');
+        fireEvent.click(within(left).getByRole('button', {name: 'Date'}));
+
+        const block = blocks(left)[0];
+        const embed = await waitFor(() => {
+            const element = block.querySelector<HTMLElement>('[data-inline-embed="true"]');
+            expect(element).toBeTruthy();
+            return element!;
+        });
+
+        const selection = window.getSelection()!;
+        const range = document.createRange();
+        const embedIndex = Array.prototype.indexOf.call(block.childNodes, embed);
+        range.setStart(block, embedIndex);
+        range.collapse(true);
+        selection.removeAllRanges();
+        selection.addRange(range);
+        fireEvent.select(block);
+
+        beforeInputText(block, 'now ');
+
+        await waitFor(() => expect(blockText(block)).toBe(`due now \uFFFC`));
+        expect(block.querySelector<HTMLElement>('[data-inline-embed="true"]')).toBeTruthy();
+        expect(domSelectionBlock()).toBe(block);
+        expect(domCaretOffset(block)).toBe(8);
+    });
+
     it('uses Cmd+B as a pending bold style at a collapsed caret', async () => {
         const view = render(<App />);
         const {left} = panels(view);

@@ -189,8 +189,13 @@ const pointFromDom = (
 const textLengthBeforeChild = (block: HTMLElement, childOffset: number): number => {
     let offset = 0;
     for (let index = 0; index < childOffset && index < block.childNodes.length; index++) {
-        if (isOffsetSentinel(block.childNodes[index])) continue;
-        offset += segmentText(block.childNodes[index].textContent ?? '').length;
+        const child = block.childNodes[index];
+        if (isInlineEmbedElement(child)) {
+            offset += 1;
+            continue;
+        }
+        if (isOffsetSentinel(child)) continue;
+        offset += segmentText(child.textContent ?? '').length;
     }
     return offset;
 };
@@ -225,6 +230,13 @@ const domPointInBlockForOffset = (
     let current: Node | null;
     while ((current = walker.nextNode())) {
         if (isOffsetSentinel(current)) continue;
+        const inlineEmbed = closestInlineEmbed(block, current);
+        if (inlineEmbed) {
+            const boundary = childBoundaryAroundInlineEmbed(inlineEmbed, offset <= 0 ? 'before' : 'after');
+            if (offset <= 1 && boundary) return boundary;
+            offset -= 1;
+            continue;
+        }
         const text = current.textContent ?? '';
         const segments = segmentText(text);
         if (offset < segments.length) {
@@ -329,4 +341,24 @@ const closestBlock = (root: HTMLElement, node: Node): HTMLElement | null => {
 const isOffsetSentinel = (node: Node): boolean => {
     const element = node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement;
     return Boolean(element?.closest('[data-offset-sentinel="true"]'));
+};
+
+const isInlineEmbedElement = (node: Node): node is HTMLElement =>
+    node.nodeType === Node.ELEMENT_NODE && (node as HTMLElement).dataset.inlineEmbed === 'true';
+
+const closestInlineEmbed = (block: HTMLElement, node: Node): HTMLElement | null => {
+    const element = node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement;
+    const inlineEmbed = element?.closest<HTMLElement>('[data-inline-embed="true"]') ?? null;
+    return inlineEmbed && block.contains(inlineEmbed) ? inlineEmbed : null;
+};
+
+const childBoundaryAroundInlineEmbed = (
+    inlineEmbed: HTMLElement,
+    side: 'before' | 'after',
+): {node: Node; offset: number} | null => {
+    const parent = inlineEmbed.parentNode;
+    if (!parent) return null;
+    const index = Array.prototype.indexOf.call(parent.childNodes, inlineEmbed);
+    if (index < 0) return null;
+    return {node: parent, offset: side === 'before' ? index : index + 1};
 };

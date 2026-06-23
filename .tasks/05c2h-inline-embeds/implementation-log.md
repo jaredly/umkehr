@@ -22,3 +22,6 @@
 - Verification: `npm exec vitest -- run examples/block-rich-text/src/inlineEmbeds.test.ts examples/block-rich-text/src/blockCommands.test.ts examples/block-rich-text/src/clipboard.test.ts examples/block-rich-text/src/App.test.tsx` passes.
 - Verification: `npm exec vitest -- run examples/block-rich-text/src` passes.
 - Manual smoke testing skipped at user request after automated checks passed.
+- Bug report: placing the caret immediately before an inline embed could make the selection disappear.
+- Fix: updated DOM selection restoration/accounting so inline embed elements are treated as atomic width-one nodes whose caret positions resolve to parent boundaries before/after the non-editable embed, rather than hidden text inside it.
+- Added regression coverage for typing at a caret placed immediately before a date embed.

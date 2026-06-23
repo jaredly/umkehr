@@ -166,7 +166,7 @@ Tables are a special block type command and should not be treated like ordinary 
 ## Open Questions
 
 1. What should “insert some inline embed” mean for this demo: a non-editable chip, an annotation-style popover mark, a link preview placeholder, or just a textual placeholder?
-    -> I've added inline embeds (see 05c2h-inline-embeds)
+    -> I've added inline embeds (see 05c2h-inline-embeds) so you can put the 'date' embed into the list
 2. Should slash commands trigger inside code blocks, table cells, row headers, and annotation body blocks, or only normal document blocks?
     -> hmm not code blocks that are syntax highlighted. otherwise everywhere yes
 3. What exact block type options should the menu include? It can mirror the toolbar, but table conversion has different behavior and may be surprising in a compact command menu.
