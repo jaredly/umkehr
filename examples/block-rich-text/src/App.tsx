@@ -610,7 +610,7 @@ function KeyPerfMonitor({samples}: {samples: KeyPerfSample[]}) {
     return (
         <aside className="keyPerfMonitor" aria-label="Keypress performance monitor">
             <div className="keyPerfHeader">
-                <span>Input ms</span>
+                <span>Event ms</span>
                 <strong>{latest ? `${formatDuration(latest.ms)} ms` : '-- ms'}</strong>
             </div>
             <div className="keyPerfLatest">{latest ? latest.label : 'No samples'}</div>
@@ -675,6 +675,9 @@ function BlockEditor({
         x: number;
         y: number;
     } | null>(null);
+    const pendingDisplayInputRenderRef = useRef<{label: string; started: number} | null>(null);
+    const pendingDomSelectionRef = useRef<{started: number} | null>(null);
+    const pendingDomSelectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const linkHoverHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const codeHoverHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [hasFocus, setHasFocus] = useState(false);
@@ -852,6 +855,39 @@ function BlockEditor({
         [onKeyPerfSample],
     );
 
+    const onDisplayInputRenderStarted = useCallback((label: string, started: number) => {
+        pendingDisplayInputRenderRef.current = {label, started};
+    }, []);
+
+    useLayoutEffect(() => {
+        const pending = pendingDisplayInputRenderRef.current;
+        if (!pending) return;
+        pendingDisplayInputRenderRef.current = null;
+        onKeyPerfSample({
+            label: `Render ${pending.label}`,
+            ms: performance.now() - pending.started,
+        });
+    });
+
+    useLayoutEffect(() => {
+        const onSelectionChange = () => {
+            const pending = pendingDomSelectionRef.current;
+            const root = rootRef.current;
+            if (!pending || !root || !readSelectionFromDom(root)) return;
+            pendingDomSelectionRef.current = null;
+            if (pendingDomSelectionTimerRef.current) {
+                clearTimeout(pendingDomSelectionTimerRef.current);
+                pendingDomSelectionTimerRef.current = null;
+            }
+            onKeyPerfSample({
+                label: 'DOM selection',
+                ms: performance.now() - pending.started,
+            });
+        };
+        document.addEventListener('selectionchange', onSelectionChange);
+        return () => document.removeEventListener('selectionchange', onSelectionChange);
+    }, [onKeyPerfSample]);
+
     const nextSelectionId = useCallback(() => `sel-${nextSelectionIdRef.current++}`, []);
 
     const requestCommentFocus = useCallback(
@@ -958,6 +994,9 @@ function BlockEditor({
         verticalCaretXRef.current = null;
         pendingMultiselectClickRef.current = null;
         pendingAddSelectionClickRef.current = null;
+        pendingDomSelectionRef.current = null;
+        if (pendingDomSelectionTimerRef.current) clearTimeout(pendingDomSelectionTimerRef.current);
+        pendingDomSelectionTimerRef.current = null;
         handledTripleClickRef.current = false;
         handledNavigationKeyRef.current = false;
         setIsExtendingSelection(false);
@@ -977,6 +1016,9 @@ function BlockEditor({
         () => () => {
             if (linkHoverHideTimerRef.current) clearTimeout(linkHoverHideTimerRef.current);
             if (codeHoverHideTimerRef.current) clearTimeout(codeHoverHideTimerRef.current);
+            if (pendingDomSelectionTimerRef.current) {
+                clearTimeout(pendingDomSelectionTimerRef.current);
+            }
         },
         [],
     );
@@ -1123,6 +1165,14 @@ function BlockEditor({
             if (!root) return;
             const point = readPointFromMouseEvent(root, event.nativeEvent);
             if (!point) return;
+            if (pendingDomSelectionTimerRef.current) {
+                clearTimeout(pendingDomSelectionTimerRef.current);
+            }
+            pendingDomSelectionRef.current = {started: performance.now()};
+            pendingDomSelectionTimerRef.current = setTimeout(() => {
+                pendingDomSelectionRef.current = null;
+                pendingDomSelectionTimerRef.current = null;
+            }, 1000);
 
             if (
                 event.detail <= 1 &&
@@ -2242,6 +2292,7 @@ function BlockEditor({
                                 onRedo,
                                 onKeystroke,
                                 onInputMeasured,
+                                onDisplayInputRenderStarted,
                             }),
                         )}
                     </div>
@@ -2260,6 +2311,7 @@ function BlockEditor({
                         onPopoverTriggerEnter={showPopover}
                         onPopoverTriggerLeave={schedulePopoverHideFromPointer}
                         onInputMeasured={onInputMeasured}
+                        onDisplayInputRenderStarted={onDisplayInputRenderStarted}
                     />
                 </div>
                 <AnnotationSidebar
@@ -2288,6 +2340,7 @@ function BlockEditor({
                     onPopoverTriggerEnter={showPopover}
                     onPopoverTriggerLeave={schedulePopoverHideFromPointer}
                     onInputMeasured={onInputMeasured}
+                    onDisplayInputRenderStarted={onDisplayInputRenderStarted}
                 />
             </div>
             {activePopovers.map((popover) => (
@@ -2317,6 +2370,7 @@ function BlockEditor({
                     onPopoverTriggerEnter={showPopover}
                     onPopoverTriggerLeave={schedulePopoverHideFromPointer}
                     onInputMeasured={onInputMeasured}
+                    onDisplayInputRenderStarted={onDisplayInputRenderStarted}
                 />
             ))}
             <LinkFloatingPopover
@@ -2447,6 +2501,7 @@ type RenderBlockContext = {
     onRedo(): void;
     onKeystroke(blockId: string, event: KeyboardEvent<HTMLElement>): void;
     onInputMeasured(label: string, ms: number): void;
+    onDisplayInputRenderStarted(label: string, started: number): void;
 };
 
 const buildRenderTree = (blocks: RichFormattedBlock[]): RenderTreeNode[] => {
@@ -2770,6 +2825,7 @@ function TableRowHeader({
                 onCodeHoverLeave={context.hideCodeHover}
                 onInlineEmbedOpen={context.openInlineEmbed}
                 onInputMeasured={context.onInputMeasured}
+                onDisplayInputRenderStarted={context.onDisplayInputRenderStarted}
                 onInsertText={(text, activeSelection) =>
                     context.runEditCommand((current, selection) =>
                         context.insertText(
@@ -3256,6 +3312,7 @@ const renderEditableBlock = (block: RichFormattedBlock, context: RenderBlockCont
             onRedo={context.onRedo}
             onKeystroke={context.onKeystroke}
             onInputMeasured={context.onInputMeasured}
+            onDisplayInputRenderStarted={context.onDisplayInputRenderStarted}
         />
     );
 };
@@ -3415,6 +3472,7 @@ function AnnotationSidebar({
     onPopoverTriggerEnter,
     onPopoverTriggerLeave,
     onInputMeasured,
+    onDisplayInputRenderStarted,
 }: {
     state: Replica['state'];
     annotations: ReturnType<typeof renderedAnnotations>;
@@ -3439,6 +3497,7 @@ function AnnotationSidebar({
     onPopoverTriggerEnter(id: string, element: HTMLElement): void;
     onPopoverTriggerLeave(id?: string, transition?: PopoverPointerTransition): void;
     onInputMeasured(label: string, ms: number): void;
+    onDisplayInputRenderStarted(label: string, started: number): void;
 }) {
     // if (!annotations.length && !open) return null;
     return (
@@ -3492,6 +3551,7 @@ function AnnotationSidebar({
                                         onPopoverTriggerEnter={onPopoverTriggerEnter}
                                         onPopoverTriggerLeave={onPopoverTriggerLeave}
                                         onInputMeasured={onInputMeasured}
+                                        onDisplayInputRenderStarted={onDisplayInputRenderStarted}
                                     />
                                 ))}
                             </section>
@@ -3531,6 +3591,7 @@ function Footnotes({
     onPopoverTriggerEnter,
     onPopoverTriggerLeave,
     onInputMeasured,
+    onDisplayInputRenderStarted,
 }: {
     state: Replica['state'];
     annotations: ReturnType<typeof renderedAnnotations>;
@@ -3549,6 +3610,7 @@ function Footnotes({
     onPopoverTriggerEnter(id: string, element: HTMLElement): void;
     onPopoverTriggerLeave(id?: string, transition?: PopoverPointerTransition): void;
     onInputMeasured(label: string, ms: number): void;
+    onDisplayInputRenderStarted(label: string, started: number): void;
 }) {
     if (!annotations.length) return null;
     return (
@@ -3572,6 +3634,7 @@ function Footnotes({
                                   onPopoverTriggerEnter={onPopoverTriggerEnter}
                                   onPopoverTriggerLeave={onPopoverTriggerLeave}
                                   onInputMeasured={onInputMeasured}
+                                  onDisplayInputRenderStarted={onDisplayInputRenderStarted}
                               />
                           ))
                         : annotation.referenceText}
@@ -3599,6 +3662,7 @@ function FloatingAnnotationPopover({
     onPopoverTriggerEnter,
     onPopoverTriggerLeave,
     onInputMeasured,
+    onDisplayInputRenderStarted,
 }: {
     state: Replica['state'];
     annotation: RenderedAnnotation | null;
@@ -3622,6 +3686,7 @@ function FloatingAnnotationPopover({
     onPopoverTriggerEnter(id: string, element: HTMLElement): void;
     onPopoverTriggerLeave(id?: string, transition?: PopoverPointerTransition): void;
     onInputMeasured(label: string, ms: number): void;
+    onDisplayInputRenderStarted(label: string, started: number): void;
 }) {
     if (!annotation || !position) return null;
     return (
@@ -3660,6 +3725,7 @@ function FloatingAnnotationPopover({
                     onPopoverTriggerEnter={onPopoverTriggerEnter}
                     onPopoverTriggerLeave={onPopoverTriggerLeave}
                     onInputMeasured={onInputMeasured}
+                    onDisplayInputRenderStarted={onDisplayInputRenderStarted}
                 />
             ))}
         </section>
@@ -3902,6 +3968,7 @@ function AnnotationBodyBlock({
     onPopoverTriggerEnter,
     onPopoverTriggerLeave,
     onInputMeasured,
+    onDisplayInputRenderStarted,
 }: {
     state: Replica['state'];
     annotationId?: string;
@@ -3923,6 +3990,7 @@ function AnnotationBodyBlock({
     onPopoverTriggerEnter(id: string, element: HTMLElement): void;
     onPopoverTriggerLeave(id?: string, transition?: PopoverPointerTransition): void;
     onInputMeasured(label: string, ms: number): void;
+    onDisplayInputRenderStarted(label: string, started: number): void;
 }) {
     const pendingCaretRestoreBlockIdRef = useRef<string | null>(null);
     const pendingSelectionRestoreRef = useRef<EditorSelection | null>(null);
@@ -4181,6 +4249,7 @@ function AnnotationBodyBlock({
                 onCodeHoverLeave={scheduleBodyCodeHoverHide}
                 onSelectionChange={updateSelection}
                 onInputMeasured={onInputMeasured}
+                onDisplayInputRenderStarted={onDisplayInputRenderStarted}
                 onInsertText={(text, activeSelection) =>
                     run(activeSelection ?? selection, (state, selected, context) => {
                         if (pendingCodeMark && selected.type === 'caret') {
@@ -4669,6 +4738,7 @@ function EditableBlock({
     onRedo,
     onKeystroke,
     onInputMeasured,
+    onDisplayInputRenderStarted,
 }: {
     block: RichFormattedBlock;
     isTableCell: boolean;
@@ -4742,6 +4812,7 @@ function EditableBlock({
     onRedo(): void;
     onKeystroke(blockId: string, event: KeyboardEvent<HTMLElement>): void;
     onInputMeasured(label: string, ms: number): void;
+    onDisplayInputRenderStarted(label: string, started: number): void;
 }) {
     const meta = block.block.meta;
     const codeHasTrailingNewline =
@@ -4815,6 +4886,7 @@ function EditableBlock({
                 onCodeHoverLeave={onCodeHoverLeave}
                 onInlineEmbedOpen={onInlineEmbedOpen}
                 onInputMeasured={onInputMeasured}
+                onDisplayInputRenderStarted={onDisplayInputRenderStarted}
                 onInsertText={onInsertText}
                 onDeleteBackward={onDeleteBackward}
                 onDeleteForward={onDeleteForward}
@@ -5100,6 +5172,7 @@ function RichTextEditableSurface({
     onCodeHoverLeave,
     onInlineEmbedOpen,
     onInputMeasured,
+    onDisplayInputRenderStarted,
     onKeyDown,
     onCopy,
     onPaste,
@@ -5130,6 +5203,7 @@ function RichTextEditableSurface({
     onCodeHoverLeave?(): void;
     onInlineEmbedOpen?(charId: string, element: HTMLElement): void;
     onInputMeasured?(label: string, ms: number): void;
+    onDisplayInputRenderStarted?(label: string, started: number): void;
     onKeyDown?(event: KeyboardEvent<HTMLDivElement>): void;
     onCopy?(event: ClipboardEvent<HTMLDivElement>): void;
     onPaste?(event: ClipboardEvent<HTMLDivElement>): void;
@@ -5148,8 +5222,11 @@ function RichTextEditableSurface({
             if (event.inputType === 'insertText' && event.data) {
                 event.preventDefault();
                 handledBeforeInputRef.current = true;
-                measureInput(onInputMeasured, beforeInputLabel(event), () =>
-                    onInsertText(event.data ?? '', selection),
+                measureTextInput(
+                    onInputMeasured,
+                    onDisplayInputRenderStarted,
+                    event.data,
+                    () => onInsertText(event.data ?? '', selection),
                 );
             } else if (event.inputType === 'deleteContentBackward') {
                 event.preventDefault();
@@ -5164,7 +5241,13 @@ function RichTextEditableSurface({
 
         element.addEventListener('beforeinput', onBeforeInput);
         return () => element.removeEventListener('beforeinput', onBeforeInput);
-    }, [onDeleteBackward, onDeleteForward, onInputMeasured, onInsertText]);
+    }, [
+        onDeleteBackward,
+        onDeleteForward,
+        onDisplayInputRenderStarted,
+        onInputMeasured,
+        onInsertText,
+    ]);
 
     useLayoutEffect(() => {
         const element = editableRef.current;
@@ -5356,8 +5439,11 @@ function RichTextEditableSurface({
                 }
                 if (native.isComposing) return;
                 if (isJsdom() && native.inputType === 'insertText' && native.data) {
-                    measureInput(onInputMeasured, beforeInputLabel(native), () =>
-                        onInsertText(
+                    measureTextInput(
+                        onInputMeasured,
+                        onDisplayInputRenderStarted,
+                        native.data,
+                        () => onInsertText(
                             native.data ?? '',
                             readSelectionFromDom(event.currentTarget) ?? undefined,
                         ),
@@ -5656,9 +5742,33 @@ const measureInput = (
     }
 };
 
+const measureTextInput = (
+    onInputMeasured: ((label: string, ms: number) => void) | undefined,
+    onDisplayInputRenderStarted: ((label: string, started: number) => void) | undefined,
+    text: string,
+    action: () => void,
+) => {
+    const started = performance.now();
+    const label = textInputLabel(text);
+    if (isDisplayableKeyText(text)) {
+        onDisplayInputRenderStarted?.(label, started);
+    }
+    try {
+        action();
+    } finally {
+        onInputMeasured?.(label, performance.now() - started);
+    }
+};
+
+const textInputLabel = (text: string): string =>
+    text.length <= 2 && !/\s/.test(text) ? text : 'text';
+
+const isDisplayableKeyText = (text: string): boolean =>
+    text.length > 0 && !/[\u0000-\u001f\u007f]/.test(text);
+
 const beforeInputLabel = (event: InputEvent): string => {
     if (event.inputType === 'insertText' && event.data) {
-        return event.data.length <= 2 && !/\s/.test(event.data) ? event.data : 'text';
+        return textInputLabel(event.data);
     }
     if (event.inputType === 'deleteContentBackward') return 'Backspace';
     if (event.inputType === 'deleteContentForward') return 'Delete';

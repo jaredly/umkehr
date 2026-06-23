@@ -1353,6 +1353,36 @@ describe('Block rich text example UI', () => {
         expect(view.getByText('0 / 0')).toBeTruthy();
     });
 
+    it('records DOM selection updates after a click starts in the performance monitor', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        const documentWithCaretRange = document as Document & {
+            caretRangeFromPoint?: (x: number, y: number) => Range | null;
+        };
+        const previousCaretRangeFromPoint = documentWithCaretRange.caretRangeFromPoint;
+
+        Object.defineProperty(document, 'caretRangeFromPoint', {
+            value: () => rangeAtBlockOffset(blocks(left)[0], 0),
+            configurable: true,
+        });
+
+        try {
+            selectCaret(blocks(left)[0], 0);
+            fireEvent.mouseDown(blocks(left)[0], {clientX: 10, clientY: 10});
+            fireEvent(document, new window.Event('selectionchange'));
+
+            await waitFor(() =>
+                expect(within(keyPerfMonitor(view)).getByText('DOM selection')).toBeTruthy(),
+            );
+            expect(keyPerfBars(view)).toHaveLength(1);
+        } finally {
+            Object.defineProperty(document, 'caretRangeFromPoint', {
+                value: previousCaretRangeFromPoint,
+                configurable: true,
+            });
+        }
+    });
+
     it('records keydown events in a collapsed keystroke log', async () => {
         const view = render(<App />);
         const {left} = panels(view);
@@ -1377,7 +1407,7 @@ describe('Block rich text example UI', () => {
         const view = render(<App />);
         const monitor = keyPerfMonitor(view);
 
-        expect(within(monitor).getByText('Input ms')).toBeTruthy();
+        expect(within(monitor).getByText('Event ms')).toBeTruthy();
         expect(within(monitor).getByText('-- ms')).toBeTruthy();
         expect(within(monitor).getByText('No samples')).toBeTruthy();
         expect(keyPerfBars(view)).toHaveLength(0);
@@ -1390,9 +1420,9 @@ describe('Block rich text example UI', () => {
         selectCaret(blocks(left)[0], 0);
         typeText(blocks(left)[0], 'ab');
 
-        await waitFor(() => expect(keyPerfBars(view).length).toBe(2));
+        await waitFor(() => expect(keyPerfBars(view).length).toBeGreaterThanOrEqual(4));
         expect(within(keyPerfMonitor(view)).getByText(/\d(?:\.\d+)? ms$/)).toBeTruthy();
-        expect(within(keyPerfMonitor(view)).getByText('b')).toBeTruthy();
+        expect(within(keyPerfMonitor(view)).getByText('Render b')).toBeTruthy();
     });
 
     it('records handled keydown input in the keypress performance monitor', async () => {
@@ -1445,7 +1475,7 @@ describe('Block rich text example UI', () => {
 
         selectCaret(blocks(left)[0], 0);
         typeText(blocks(left)[0], 'a');
-        await waitFor(() => expect(keyPerfBars(view)).toHaveLength(1));
+        await waitFor(() => expect(keyPerfBars(view).length).toBeGreaterThanOrEqual(2));
         expect(view.getByText('1 / 1')).toBeTruthy();
 
         fireEvent.click(view.getByText('Export'));
