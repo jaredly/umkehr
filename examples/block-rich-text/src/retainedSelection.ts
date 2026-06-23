@@ -1,8 +1,10 @@
-import {orderedCharIdsForBlock} from 'umkehr/block-crdt';
+import {
+    resolvePoint as resolveBlockPoint,
+    retainPoint as retainBlockPoint,
+} from 'umkehr/block-crdt';
 import type {CachedState} from 'umkehr/block-crdt/types';
 import type {RichBlockMeta} from './blockMeta';
-import {caret, clampPoint, editableBlockIds, type BlockPoint, type EditorSelection} from './selectionModel';
-import {visibleCharIdBeforeOffset} from './charUtils';
+import {caret, editableBlockIds, type BlockPoint, type EditorSelection} from './selectionModel';
 
 export type RetainedPoint = {
     blockId: string;
@@ -34,12 +36,8 @@ export const retainSelection = (
 };
 
 export const retainPoint = (state: CachedState<RichBlockMeta>, point: BlockPoint): RetainedPoint => {
-    const clamped = clampPoint(state, point);
-    if (clamped.offset <= 0) {
-        return {blockId: clamped.blockId, charId: null, affinity: 'after'};
-    }
-    const charId = visibleCharIdBeforeOffset(state, clamped.blockId, clamped.offset);
-    return {blockId: clamped.blockId, charId, affinity: 'after'};
+    const retained = retainBlockPoint(state, point);
+    return {blockId: retained.blockId, charId: retained.charId, affinity: retained.affinity};
 };
 
 export const resolveSelection = (
@@ -62,48 +60,7 @@ export const resolveSelection = (
 };
 
 export const resolvePoint = (state: CachedState<RichBlockMeta>, point: RetainedPoint): BlockPoint => {
-    if (point.charId) {
-        const resolved = resolveCharPoint(state, point);
-        if (resolved) return resolved;
-    }
-
-    const visibleBlocks = editableBlockIds(state);
-    if (point.blockId && visibleBlocks.includes(point.blockId)) {
-        return clampPoint(state, {blockId: point.blockId, offset: 0});
-    }
-
-    const firstVisibleBlock = visibleBlocks[0];
-    if (firstVisibleBlock) return {blockId: firstVisibleBlock, offset: 0};
-
-    return {blockId: point.blockId, offset: 0};
-};
-
-const resolveCharPoint = (state: CachedState<RichBlockMeta>, point: RetainedPoint): BlockPoint | null => {
-    for (const blockId of allBlockIds(state)) {
-        const logicalCharIds = orderedCharIdsForBlock(state, blockId);
-        let visibleOffset = 0;
-
-        for (const charId of logicalCharIds) {
-            if (charId === point.charId) {
-                return {
-                    blockId: visibleBlockOrFallback(state, blockId),
-                    offset: point.affinity === 'before' ? visibleOffset : visibleOffset + visibleCount(state, charId),
-                };
-            }
-            const char = state.state.chars[charId];
-            if (char && !char.deleted) visibleOffset++;
-        }
-    }
-    return null;
-};
-
-const visibleCount = (state: CachedState<RichBlockMeta>, charId: string) =>
-    state.state.chars[charId] && !state.state.chars[charId].deleted ? 1 : 0;
-
-const visibleBlockOrFallback = (state: CachedState<RichBlockMeta>, blockId: string) => {
-    const visibleBlocks = editableBlockIds(state);
-    if (visibleBlocks.includes(blockId)) return blockId;
-    return visibleBlocks[0] ?? blockId;
+    return resolveBlockPoint(state, point);
 };
 
 const allBlockIds = (state: CachedState<RichBlockMeta>): string[] => Object.keys(state.state.blocks).sort();

@@ -20,6 +20,7 @@ let restoreCaretGeometry: (() => void) | null = null;
 afterEach(() => {
     restoreCaretGeometry?.();
     restoreCaretGeometry = null;
+    vi.restoreAllMocks();
     vi.useRealTimers();
     cleanup();
     window.history.pushState({}, '', '/');
@@ -56,6 +57,12 @@ const tableTitleBlock = (panel: HTMLElement): HTMLElement => {
 
 const tableRowHeaders = (panel: HTMLElement): HTMLElement[] =>
     Array.from(panel.querySelectorAll<HTMLElement>('.tableRowHeaderText[role="textbox"]'));
+
+const keyPerfMonitor = (view: ReturnType<typeof render>): HTMLElement =>
+    view.getByLabelText('Keypress performance monitor');
+
+const keyPerfBars = (view: ReturnType<typeof render>): HTMLElement[] =>
+    Array.from(view.container.querySelectorAll<HTMLElement>('[data-testid="key-perf-bar"]'));
 
 const blockText = (block: HTMLElement): string => {
     let text = '';
@@ -1364,6 +1371,93 @@ describe('Block rich text example UI', () => {
         fireEvent.click(details.querySelector('summary')!);
         expect(within(details).getByText('Backspace')).toBeTruthy();
         expect(within(details).getByText('Editor A')).toBeTruthy();
+    });
+
+    it('shows an empty keypress performance monitor on initial render', () => {
+        const view = render(<App />);
+        const monitor = keyPerfMonitor(view);
+
+        expect(within(monitor).getByText('Input ms')).toBeTruthy();
+        expect(within(monitor).getByText('-- ms')).toBeTruthy();
+        expect(within(monitor).getByText('No samples')).toBeTruthy();
+        expect(keyPerfBars(view)).toHaveLength(0);
+    });
+
+    it('records printable text input in the keypress performance monitor', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        typeText(blocks(left)[0], 'ab');
+
+        await waitFor(() => expect(keyPerfBars(view).length).toBe(2));
+        expect(within(keyPerfMonitor(view)).getByText(/\d(?:\.\d+)? ms$/)).toBeTruthy();
+        expect(within(keyPerfMonitor(view)).getByText('b')).toBeTruthy();
+    });
+
+    it('records handled keydown input in the keypress performance monitor', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        typeText(blocks(left)[0], 'ab');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('ab'));
+
+        selectCaret(blocks(left)[0], 2);
+        fireEvent.keyDown(blocks(left)[0], {key: 'Backspace', code: 'Backspace'});
+
+        await waitFor(() => expect(within(keyPerfMonitor(view)).getByText('Backspace')).toBeTruthy());
+    });
+
+    it('records paste input in the keypress performance monitor', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        pasteText(blocks(left)[0], 'hello');
+
+        await waitFor(() => expect(within(keyPerfMonitor(view)).getByText('Paste')).toBeTruthy());
+        expect(keyPerfBars(view).length).toBeGreaterThan(0);
+    });
+
+    it('caps keypress performance bars to the latest samples', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        typeText(blocks(left)[0], repeatedText(65));
+
+        await waitFor(() => expect(keyPerfBars(view)).toHaveLength(60));
+    });
+
+    it('keeps keypress performance samples out of history export', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        let exportedBlob: Blob | null = null;
+        const createUrlSpy = vi.spyOn(URL, 'createObjectURL').mockImplementation((blob) => {
+            exportedBlob = blob as Blob;
+            return 'blob:history';
+        });
+        const revokeUrlSpy = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+        const clickSpy = vi
+            .spyOn(window.HTMLAnchorElement.prototype, 'click')
+            .mockImplementation(() => {});
+
+        selectCaret(blocks(left)[0], 0);
+        typeText(blocks(left)[0], 'a');
+        await waitFor(() => expect(keyPerfBars(view)).toHaveLength(1));
+        expect(view.getByText('1 / 1')).toBeTruthy();
+
+        fireEvent.click(view.getByText('Export'));
+
+        expect(exportedBlob).toBeTruthy();
+        const exported = JSON.parse(await exportedBlob!.text());
+        expect(exported.keystrokes).toEqual([]);
+        expect(exported.keyPerfSamples).toBeUndefined();
+
+        createUrlSpy.mockRestore();
+        revokeUrlSpy.mockRestore();
+        clickSpy.mockRestore();
     });
 
     it('reports invalid history imports without replacing current history', async () => {

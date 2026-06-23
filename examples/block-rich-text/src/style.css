@@ -131,6 +131,79 @@ select {
     color: #657380;
 }
 
+.keyPerfMonitor {
+    position: fixed;
+    top: 12px;
+    right: 12px;
+    z-index: 100;
+    display: grid;
+    grid-template-rows: auto auto 34px;
+    gap: 4px;
+    width: 166px;
+    min-height: 72px;
+    padding: 8px;
+    border: 1px solid rgb(35 49 61 / 18%);
+    border-radius: 8px;
+    color: #edf4f8;
+    background: rgb(24 32 38 / 88%);
+    box-shadow: 0 8px 24px rgb(16 24 31 / 18%);
+    pointer-events: none;
+}
+
+.keyPerfHeader {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 11px;
+    line-height: 1;
+}
+
+.keyPerfHeader span {
+    color: #aebbc5;
+    text-transform: uppercase;
+}
+
+.keyPerfHeader strong {
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+}
+
+.keyPerfLatest {
+    min-width: 0;
+    overflow: hidden;
+    color: #cdd8df;
+    font-size: 11px;
+    line-height: 1.1;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.keyPerfBars {
+    display: flex;
+    align-items: end;
+    gap: 2px;
+    height: 34px;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.keyPerfBar {
+    flex: 1 1 0;
+    min-width: 1px;
+    height: var(--key-perf-height, 4%);
+    border-radius: 2px 2px 0 0;
+    background: #5dc06b;
+}
+
+.keyPerfBar.medium {
+    background: #d9a43b;
+}
+
+.keyPerfBar.slow {
+    background: #e05c51;
+}
+
 .editorGrid {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);

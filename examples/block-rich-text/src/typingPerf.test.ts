@@ -8,13 +8,31 @@ import {paragraphMeta, type RichBlockMeta} from './blockMeta';
 import {lamportToString} from 'umkehr/block-crdt/utils';
 import {replacePrimarySelection} from './selectionSet';
 import {caret, type EditorSelection} from './selectionModel';
-import {splitBlockEverywhere} from './multiSelectionCommands';
+import {insertTextWithMarkdownShortcutsEverywhere, splitBlockEverywhere} from './multiSelectionCommands';
 
 const typedText = (length: number): string =>
     Array.from({length}, (_, index) => String.fromCharCode(97 + (index % 26))).join('');
 
 const blockLines = (blocks: number, blockLength: number): string[] =>
     Array.from({length: blocks}, (_, index) => typedText(blockLength).replace(/^./, String(index % 10)));
+
+const seventyWordsWithEveryFifthBold = (): {
+    text: string;
+    boldRanges: Array<{startOffset: number; endOffset: number}>;
+} => {
+    let offset = 0;
+    const words: string[] = [];
+    const boldRanges: Array<{startOffset: number; endOffset: number}> = [];
+    for (let index = 0; index < 70; index++) {
+        const word = `word${String(index).padStart(2, '0')}`;
+        if (index % 5 === 0) {
+            boldRanges.push({startOffset: offset, endOffset: offset + word.length});
+        }
+        words.push(word);
+        offset += word.length + 1;
+    }
+    return {text: words.join(' '), boldRanges};
+};
 
 const typeCharacters = (demo: DemoState, text: string): DemoState => {
     let next = demo;
@@ -176,6 +194,60 @@ describe('block rich text typing performance', () => {
         expect(activeMarks.bold).toBe(false);
         expect(elapsed).toBeLessThan(10);
     });
+
+    it('keeps command latency for a 70 word block with every fifth word bolded close to plain text', () => {
+        const createCase = (withMarks: boolean) => {
+            const demo = createDemoState();
+            const context = makeCommandContext(demo.left);
+            const blockId = rootBlockIds(demo.left.state)[0];
+            const {text, boldRanges} = seventyWordsWithEveryFifthBold();
+            let result = pastePlainText(demo.left.state, caret(blockId, 0), text, context);
+
+            if (withMarks) {
+                for (const range of boldRanges) {
+                    result = toggleMark(
+                        result.state,
+                        {
+                            type: 'range',
+                            anchor: {blockId, offset: range.startOffset},
+                            focus: {blockId, offset: range.endOffset},
+                        },
+                        'bold',
+                        context,
+                    );
+                }
+            }
+
+            return {
+                replica: {
+                    ...demo.left,
+                    state: result.state,
+                    selection: replacePrimarySelection(result.state, demo.left.selection, caret(blockId, text.length)),
+                },
+                blockId,
+            };
+        };
+        const timeInsert = (withMarks: boolean) => {
+            const {replica, blockId} = createCase(withMarks);
+            const started = performance.now();
+            const result = insertTextWithMarkdownShortcutsEverywhere(
+                replica.state,
+                replica.selection,
+                'Z',
+                makeCommandContext(replica),
+            );
+            const elapsed = performance.now() - started;
+            expect(blockContents(result.state, blockId).endsWith('Z')).toBe(true);
+            return elapsed;
+        };
+
+        timeInsert(false);
+        timeInsert(true);
+        const plainElapsed = timeInsert(false);
+        const markedElapsed = timeInsert(true);
+
+        expect(markedElapsed).toBeLessThan(Math.max(1, plainElapsed * 4));
+    }, 30_000);
 
     it('splits at the end of the second 400 character pasted block in less than 50ms', () => {
         const demo = createDemoState();

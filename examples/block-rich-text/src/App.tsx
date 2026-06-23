@@ -224,9 +224,18 @@ type EmbedPopoverState = {
     left: number;
 };
 type PendingInlineMarks = Partial<Record<BareInlineMark, boolean>>;
+type KeyPerfSample = {
+    id: number;
+    editorId: EditorId;
+    label: string;
+    ms: number;
+};
+type KeyPerfSampleInput = Omit<KeyPerfSample, 'id'>;
 
 const BOOLEAN_INLINE_MARKS: BooleanInlineMark[] = ['bold', 'italic', 'strikethrough'];
 const BARE_INLINE_MARKS: BareInlineMark[] = [...BOOLEAN_INLINE_MARKS, CODE_MARK];
+const KEY_PERF_SAMPLE_LIMIT = 60;
+const KEY_PERF_MAX_BAR_MS = 50;
 
 const activePendingInlineMarks = (marks: PendingInlineMarks): BareInlineMark[] =>
     BARE_INLINE_MARKS.filter((mark) => marks[mark]);
@@ -286,6 +295,7 @@ const removeLast = (items: string[], value: string) => {
 
 function EditorApp() {
     const [history, setHistory] = useState<HistoryState>(() => initialHistoryState());
+    const [keyPerfSamples, setKeyPerfSamples] = useState<KeyPerfSample[]>([]);
     const [transientSelections, setTransientSelections] = useState<
         Partial<Record<EditorId, RetainedSelectionSet>>
     >({});
@@ -293,6 +303,7 @@ function EditorApp() {
     const [undoStatus, setUndoStatus] = useState<Partial<Record<EditorId, string>>>({});
     const [historyResetSignal, setHistoryResetSignal] = useState(0);
     const importInputRef = useRef<HTMLInputElement>(null);
+    const nextKeyPerfSampleIdRef = useRef(1);
     const replayCacheRef = useRef<{
         actions: HistoryAction[];
         cursor: number;
@@ -426,6 +437,18 @@ function EditorApp() {
         [],
     );
 
+    const recordKeyPerfSample = useCallback((sample: KeyPerfSampleInput) => {
+        const ms = Number.isFinite(sample.ms) ? Math.max(0, sample.ms) : 0;
+        const nextSample: KeyPerfSample = {
+            ...sample,
+            ms,
+            id: nextKeyPerfSampleIdRef.current++,
+        };
+        setKeyPerfSamples((current) =>
+            [...current, nextSample].slice(-KEY_PERF_SAMPLE_LIMIT),
+        );
+    }, []);
+
     const exportHistory = useCallback(() => {
         const blob = new Blob([serializeHistory(history)], {type: 'application/json'});
         const url = URL.createObjectURL(blob);
@@ -486,6 +509,7 @@ function EditorApp() {
 
     return (
         <main className="appShell">
+            <KeyPerfMonitor samples={keyPerfSamples} />
             <header className="topBar">
                 <h1>Block Rich Text CRDT</h1>
                 <p>Two local replicas exchange block rich-text operations.</p>
@@ -555,6 +579,9 @@ function EditorApp() {
                     onRedo={() => runUndoCommand('left', 'redo')}
                     onToggleOnline={() => toggleEditorOnline('left')}
                     onKeystroke={(blockId, event) => recordKeystroke('left', blockId, event)}
+                    onKeyPerfSample={(sample) =>
+                        recordKeyPerfSample({...sample, editorId: 'left'})
+                    }
                 />
                 <BlockEditor
                     replica={displayDemo.right}
@@ -566,6 +593,9 @@ function EditorApp() {
                     onRedo={() => runUndoCommand('right', 'redo')}
                     onToggleOnline={() => toggleEditorOnline('right')}
                     onKeystroke={(blockId, event) => recordKeystroke('right', blockId, event)}
+                    onKeyPerfSample={(sample) =>
+                        recordKeyPerfSample({...sample, editorId: 'right'})
+                    }
                 />
             </section>
         </main>
@@ -574,6 +604,34 @@ function EditorApp() {
 
 const hasDemoQuery = () =>
     typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('demos');
+
+function KeyPerfMonitor({samples}: {samples: KeyPerfSample[]}) {
+    const latest = samples.at(-1);
+    return (
+        <aside className="keyPerfMonitor" aria-label="Keypress performance monitor">
+            <div className="keyPerfHeader">
+                <span>Input ms</span>
+                <strong>{latest ? `${formatDuration(latest.ms)} ms` : '-- ms'}</strong>
+            </div>
+            <div className="keyPerfLatest">{latest ? latest.label : 'No samples'}</div>
+            <div className="keyPerfBars" aria-label="Recent keypress durations">
+                {samples.map((sample) => {
+                    const capped = Math.min(sample.ms, KEY_PERF_MAX_BAR_MS);
+                    const height = Math.max(4, (capped / KEY_PERF_MAX_BAR_MS) * 100);
+                    return (
+                        <span
+                            key={sample.id}
+                            className={`keyPerfBar ${keyPerfClass(sample.ms)}`}
+                            style={{'--key-perf-height': `${height}%`} as CSSProperties}
+                            title={`${sample.label}: ${formatDuration(sample.ms)} ms`}
+                            data-testid="key-perf-bar"
+                        />
+                    );
+                })}
+            </div>
+        </aside>
+    );
+}
 
 function BlockEditor({
     replica,
@@ -585,6 +643,7 @@ function BlockEditor({
     onRedo,
     onToggleOnline,
     onKeystroke,
+    onKeyPerfSample,
 }: {
     replica: Replica;
     resetSignal: number;
@@ -595,6 +654,7 @@ function BlockEditor({
     onRedo(): void;
     onToggleOnline(): void;
     onKeystroke(blockId: string, event: KeyboardEvent<HTMLElement>): void;
+    onKeyPerfSample(sample: Omit<KeyPerfSampleInput, 'editorId'>): void;
 }) {
     const rootRef = useRef<HTMLDivElement>(null);
     const editorContentRef = useRef<HTMLDivElement>(null);
@@ -786,6 +846,11 @@ function BlockEditor({
                 : current,
         );
     }, [retainedInlineMarks]);
+
+    const onInputMeasured = useCallback(
+        (label: string, ms: number) => onKeyPerfSample({label, ms}),
+        [onKeyPerfSample],
+    );
 
     const nextSelectionId = useCallback(() => `sel-${nextSelectionIdRef.current++}`, []);
 
@@ -2176,6 +2241,7 @@ function BlockEditor({
                                 onUndo,
                                 onRedo,
                                 onKeystroke,
+                                onInputMeasured,
                             }),
                         )}
                     </div>
@@ -2193,6 +2259,7 @@ function BlockEditor({
                         footnoteNumberById={footnoteNumberById}
                         onPopoverTriggerEnter={showPopover}
                         onPopoverTriggerLeave={schedulePopoverHideFromPointer}
+                        onInputMeasured={onInputMeasured}
                     />
                 </div>
                 <AnnotationSidebar
@@ -2220,6 +2287,7 @@ function BlockEditor({
                     footnoteNumberById={footnoteNumberById}
                     onPopoverTriggerEnter={showPopover}
                     onPopoverTriggerLeave={schedulePopoverHideFromPointer}
+                    onInputMeasured={onInputMeasured}
                 />
             </div>
             {activePopovers.map((popover) => (
@@ -2248,6 +2316,7 @@ function BlockEditor({
                     footnoteNumberById={footnoteNumberById}
                     onPopoverTriggerEnter={showPopover}
                     onPopoverTriggerLeave={schedulePopoverHideFromPointer}
+                    onInputMeasured={onInputMeasured}
                 />
             ))}
             <LinkFloatingPopover
@@ -2377,6 +2446,7 @@ type RenderBlockContext = {
     onUndo(): void;
     onRedo(): void;
     onKeystroke(blockId: string, event: KeyboardEvent<HTMLElement>): void;
+    onInputMeasured(label: string, ms: number): void;
 };
 
 const buildRenderTree = (blocks: RichFormattedBlock[]): RenderTreeNode[] => {
@@ -2699,6 +2769,7 @@ function TableRowHeader({
                 onCodeHoverEnter={context.showCodeHoverFromRange}
                 onCodeHoverLeave={context.hideCodeHover}
                 onInlineEmbedOpen={context.openInlineEmbed}
+                onInputMeasured={context.onInputMeasured}
                 onInsertText={(text, activeSelection) =>
                     context.runEditCommand((current, selection) =>
                         context.insertText(
@@ -3184,6 +3255,7 @@ const renderEditableBlock = (block: RichFormattedBlock, context: RenderBlockCont
             onUndo={context.onUndo}
             onRedo={context.onRedo}
             onKeystroke={context.onKeystroke}
+            onInputMeasured={context.onInputMeasured}
         />
     );
 };
@@ -3342,6 +3414,7 @@ function AnnotationSidebar({
     footnoteNumberById,
     onPopoverTriggerEnter,
     onPopoverTriggerLeave,
+    onInputMeasured,
 }: {
     state: Replica['state'];
     annotations: ReturnType<typeof renderedAnnotations>;
@@ -3365,6 +3438,7 @@ function AnnotationSidebar({
     footnoteNumberById: Map<string, number>;
     onPopoverTriggerEnter(id: string, element: HTMLElement): void;
     onPopoverTriggerLeave(id?: string, transition?: PopoverPointerTransition): void;
+    onInputMeasured(label: string, ms: number): void;
 }) {
     // if (!annotations.length && !open) return null;
     return (
@@ -3417,6 +3491,7 @@ function AnnotationSidebar({
                                         footnoteNumberById={footnoteNumberById}
                                         onPopoverTriggerEnter={onPopoverTriggerEnter}
                                         onPopoverTriggerLeave={onPopoverTriggerLeave}
+                                        onInputMeasured={onInputMeasured}
                                     />
                                 ))}
                             </section>
@@ -3455,6 +3530,7 @@ function Footnotes({
     footnoteNumberById,
     onPopoverTriggerEnter,
     onPopoverTriggerLeave,
+    onInputMeasured,
 }: {
     state: Replica['state'];
     annotations: ReturnType<typeof renderedAnnotations>;
@@ -3472,6 +3548,7 @@ function Footnotes({
     footnoteNumberById: Map<string, number>;
     onPopoverTriggerEnter(id: string, element: HTMLElement): void;
     onPopoverTriggerLeave(id?: string, transition?: PopoverPointerTransition): void;
+    onInputMeasured(label: string, ms: number): void;
 }) {
     if (!annotations.length) return null;
     return (
@@ -3494,6 +3571,7 @@ function Footnotes({
                                   footnoteNumberById={footnoteNumberById}
                                   onPopoverTriggerEnter={onPopoverTriggerEnter}
                                   onPopoverTriggerLeave={onPopoverTriggerLeave}
+                                  onInputMeasured={onInputMeasured}
                               />
                           ))
                         : annotation.referenceText}
@@ -3520,6 +3598,7 @@ function FloatingAnnotationPopover({
     footnoteNumberById,
     onPopoverTriggerEnter,
     onPopoverTriggerLeave,
+    onInputMeasured,
 }: {
     state: Replica['state'];
     annotation: RenderedAnnotation | null;
@@ -3542,6 +3621,7 @@ function FloatingAnnotationPopover({
     footnoteNumberById: Map<string, number>;
     onPopoverTriggerEnter(id: string, element: HTMLElement): void;
     onPopoverTriggerLeave(id?: string, transition?: PopoverPointerTransition): void;
+    onInputMeasured(label: string, ms: number): void;
 }) {
     if (!annotation || !position) return null;
     return (
@@ -3579,6 +3659,7 @@ function FloatingAnnotationPopover({
                     footnoteNumberById={footnoteNumberById}
                     onPopoverTriggerEnter={onPopoverTriggerEnter}
                     onPopoverTriggerLeave={onPopoverTriggerLeave}
+                    onInputMeasured={onInputMeasured}
                 />
             ))}
         </section>
@@ -3820,6 +3901,7 @@ function AnnotationBodyBlock({
     footnoteNumberById,
     onPopoverTriggerEnter,
     onPopoverTriggerLeave,
+    onInputMeasured,
 }: {
     state: Replica['state'];
     annotationId?: string;
@@ -3840,6 +3922,7 @@ function AnnotationBodyBlock({
     footnoteNumberById: Map<string, number>;
     onPopoverTriggerEnter(id: string, element: HTMLElement): void;
     onPopoverTriggerLeave(id?: string, transition?: PopoverPointerTransition): void;
+    onInputMeasured(label: string, ms: number): void;
 }) {
     const pendingCaretRestoreBlockIdRef = useRef<string | null>(null);
     const pendingSelectionRestoreRef = useRef<EditorSelection | null>(null);
@@ -4097,6 +4180,7 @@ function AnnotationBodyBlock({
                 onCodeHoverEnter={showBodyCodeHover}
                 onCodeHoverLeave={scheduleBodyCodeHoverHide}
                 onSelectionChange={updateSelection}
+                onInputMeasured={onInputMeasured}
                 onInsertText={(text, activeSelection) =>
                     run(activeSelection ?? selection, (state, selected, context) => {
                         if (pendingCodeMark && selected.type === 'caret') {
@@ -4584,6 +4668,7 @@ function EditableBlock({
     onUndo,
     onRedo,
     onKeystroke,
+    onInputMeasured,
 }: {
     block: RichFormattedBlock;
     isTableCell: boolean;
@@ -4656,6 +4741,7 @@ function EditableBlock({
     onUndo(): void;
     onRedo(): void;
     onKeystroke(blockId: string, event: KeyboardEvent<HTMLElement>): void;
+    onInputMeasured(label: string, ms: number): void;
 }) {
     const meta = block.block.meta;
     const codeHasTrailingNewline =
@@ -4728,6 +4814,7 @@ function EditableBlock({
                 onCodeHoverEnter={onCodeHoverEnter}
                 onCodeHoverLeave={onCodeHoverLeave}
                 onInlineEmbedOpen={onInlineEmbedOpen}
+                onInputMeasured={onInputMeasured}
                 onInsertText={onInsertText}
                 onDeleteBackward={onDeleteBackward}
                 onDeleteForward={onDeleteForward}
@@ -5012,6 +5099,7 @@ function RichTextEditableSurface({
     onCodeHoverEnter,
     onCodeHoverLeave,
     onInlineEmbedOpen,
+    onInputMeasured,
     onKeyDown,
     onCopy,
     onPaste,
@@ -5041,6 +5129,7 @@ function RichTextEditableSurface({
     onCodeHoverEnter?(range: CodeTargetRange & {language: string}, element: HTMLElement): void;
     onCodeHoverLeave?(): void;
     onInlineEmbedOpen?(charId: string, element: HTMLElement): void;
+    onInputMeasured?(label: string, ms: number): void;
     onKeyDown?(event: KeyboardEvent<HTMLDivElement>): void;
     onCopy?(event: ClipboardEvent<HTMLDivElement>): void;
     onPaste?(event: ClipboardEvent<HTMLDivElement>): void;
@@ -5059,21 +5148,23 @@ function RichTextEditableSurface({
             if (event.inputType === 'insertText' && event.data) {
                 event.preventDefault();
                 handledBeforeInputRef.current = true;
-                onInsertText(event.data, selection);
+                measureInput(onInputMeasured, beforeInputLabel(event), () =>
+                    onInsertText(event.data ?? '', selection),
+                );
             } else if (event.inputType === 'deleteContentBackward') {
                 event.preventDefault();
                 handledBeforeInputRef.current = true;
-                onDeleteBackward(selection);
+                measureInput(onInputMeasured, 'Backspace', () => onDeleteBackward(selection));
             } else if (event.inputType === 'deleteContentForward') {
                 event.preventDefault();
                 handledBeforeInputRef.current = true;
-                onDeleteForward(selection);
+                measureInput(onInputMeasured, 'Delete', () => onDeleteForward(selection));
             }
         };
 
         element.addEventListener('beforeinput', onBeforeInput);
         return () => element.removeEventListener('beforeinput', onBeforeInput);
-    }, [onDeleteBackward, onDeleteForward, onInsertText]);
+    }, [onDeleteBackward, onDeleteForward, onInputMeasured, onInsertText]);
 
     useLayoutEffect(() => {
         const element = editableRef.current;
@@ -5265,15 +5356,26 @@ function RichTextEditableSurface({
                 }
                 if (native.isComposing) return;
                 if (isJsdom() && native.inputType === 'insertText' && native.data) {
-                    onInsertText(
-                        native.data,
-                        readSelectionFromDom(event.currentTarget) ?? undefined,
+                    measureInput(onInputMeasured, beforeInputLabel(native), () =>
+                        onInsertText(
+                            native.data ?? '',
+                            readSelectionFromDom(event.currentTarget) ?? undefined,
+                        ),
                     );
                 }
             }}
-            onKeyDown={onKeyDown}
+            onKeyDown={(event) => {
+                if (!onKeyDown) return;
+                const started = performance.now();
+                onKeyDown(event);
+                if (!event.defaultPrevented) return;
+                onInputMeasured?.(keyboardEventLabel(event), performance.now() - started);
+            }}
             onCopy={onCopy}
-            onPaste={onPaste}
+            onPaste={(event) => {
+                if (!onPaste) return;
+                measureInput(onInputMeasured, 'Paste', () => onPaste(event));
+            }}
         />
     );
 }
@@ -5539,6 +5641,50 @@ const formatKeystroke = (keystroke: HistoryKeystroke) => {
         keystroke.shiftKey ? 'Shift' : '',
     ].filter(Boolean);
     return [...modifiers, keystroke.key].join('+') + (keystroke.repeat ? ' repeat' : '');
+};
+
+const measureInput = (
+    onInputMeasured: ((label: string, ms: number) => void) | undefined,
+    label: string,
+    action: () => void,
+) => {
+    const started = performance.now();
+    try {
+        action();
+    } finally {
+        onInputMeasured?.(label, performance.now() - started);
+    }
+};
+
+const beforeInputLabel = (event: InputEvent): string => {
+    if (event.inputType === 'insertText' && event.data) {
+        return event.data.length <= 2 && !/\s/.test(event.data) ? event.data : 'text';
+    }
+    if (event.inputType === 'deleteContentBackward') return 'Backspace';
+    if (event.inputType === 'deleteContentForward') return 'Delete';
+    return event.inputType || 'input';
+};
+
+const keyboardEventLabel = (event: KeyboardEvent): string => {
+    const modifiers = [
+        event.metaKey ? 'Meta' : '',
+        event.ctrlKey ? 'Ctrl' : '',
+        event.altKey ? 'Alt' : '',
+        event.shiftKey ? 'Shift' : '',
+    ].filter(Boolean);
+    return [...modifiers, event.key].join('+') + (event.repeat ? ' repeat' : '');
+};
+
+const formatDuration = (ms: number): string => {
+    if (ms >= 100) return String(Math.round(ms));
+    if (ms >= 10) return ms.toFixed(1);
+    return ms.toFixed(2);
+};
+
+const keyPerfClass = (ms: number): string => {
+    if (ms > 16) return 'slow';
+    if (ms >= 8) return 'medium';
+    return 'fast';
 };
 
 const occurrenceSelectionSet = (
