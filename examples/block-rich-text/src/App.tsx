@@ -16,6 +16,7 @@ import {
 import {
     applyMany,
     blockContents,
+    deleteBlockOps,
     deleteRangeOps,
     formattedMarkValues,
     materializeFormattedBlocks,
@@ -38,6 +39,7 @@ import {
     convertBlockToTable,
     createMissingTableCell,
     deleteEmptyTableRowBackward,
+    deleteTableCellSelection,
     exitEmptyLastTableRow,
     insertInlineEmbed,
     insertTextWithMarkdownShortcuts,
@@ -46,6 +48,7 @@ import {
     moveTableSelectionByArrow,
     removeCodeMark,
     moveTableCell,
+    moveTableCellRectangleContents,
     moveTableCellByTab,
     setCodeMark,
     setInlineEmbedDataByCharId,
@@ -105,9 +108,15 @@ import {
     editableBlockIds,
     firstPointForSelection,
     focusPoint,
+    isBlockLevelSelection,
     normalizeSelectionSegments,
     pointTextLength,
+    selectedBlockIdsForSelection,
     segmentText,
+    tableCellRectangleForSelection,
+    tableCellsForSelection,
+    tableRowsForSelection,
+    visibleSubtreeBlockIds,
     type EditorSelection,
 } from './selectionModel';
 import {
@@ -144,6 +153,7 @@ import {
 import {useBlockReorder, type DropTarget} from './useBlockReorder';
 import {
     appendSelection,
+    blockLevelDecorationsForSelectionSet,
     dedupeSelectionSet,
     decorationsForSelectionSet,
     mergeOverlappingRanges,
@@ -153,7 +163,9 @@ import {
     resolveSelectionSet,
     reverseSortedRetainedEntries,
     retainSelectionSet,
+    selectedTopLevelBlockIdsForSelectionSet,
     singleRetainedSelectionSet,
+    type BlockLevelSelectionDecorations,
     type BlockSelectionDecorations,
     type EditorSelectionSet,
     type RetainedSelectionEntry,
@@ -690,6 +702,19 @@ function EditorApp() {
 const hasDemoQuery = () =>
     typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('demos');
 
+const orderDraggedBlockIds = (
+    state: Replica['state'],
+    blockIds: string[],
+    target: Parameters<typeof moveBlock>[2],
+): string[] => {
+    const order = editableBlockIds(state);
+    const sorted = [...new Set(blockIds)].sort((a, b) => order.indexOf(a) - order.indexOf(b));
+    if (target.type === 'after' || (target.type === 'child' && target.at === 'start')) {
+        return sorted.reverse();
+    }
+    return sorted;
+};
+
 function KeyPerfMonitor({samples}: {samples: KeyPerfSample[]}) {
     const latest = samples.at(-1);
     return (
@@ -751,16 +776,27 @@ function BlockEditor({
     const editorContentRef = useRef<HTMLDivElement>(null);
     const pendingCaretRestoreBlockIdRef = useRef<string | null>(null);
     const pendingSelectionRestoreRef = useRef<EditorSelection | null>(null);
+    const pendingBlockSelectionFocusRef = useRef<EditorSelection | null>(null);
     const verticalCaretXRef = useRef<number | null>(null);
     const nextSelectionIdRef = useRef(1);
     const nextCommentFocusTokenRef = useRef(1);
     const handledTripleClickRef = useRef(false);
     const handledNavigationKeyRef = useRef(false);
+    const suppressNextBlockFocusSelectionRef = useRef(false);
+    const suppressNextBlockKeySelectionRef = useRef(false);
     const pendingMultiselectClickRef = useRef<{
         point: {blockId: string; offset: number};
         x: number;
         y: number;
     } | null>(null);
+    const pendingTextDragRef = useRef<{
+        pointerId: number;
+        anchor: {blockId: string; offset: number};
+        startX: number;
+        startY: number;
+        dragging: boolean;
+    } | null>(null);
+    const suppressNextMouseSelectionRef = useRef(false);
     const pendingAddSelectionClickRef = useRef<{
         point: {blockId: string; offset: number};
         x: number;
@@ -774,6 +810,8 @@ function BlockEditor({
     const codeHoverHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [hasFocus, setHasFocus] = useState(false);
     const [isExtendingSelection, setIsExtendingSelection] = useState(false);
+    const [dragSelection, setDragSelection] = useState<EditorSelection | null>(null);
+    const [hasTextDragGesture, setHasTextDragGesture] = useState(false);
     const [commentsOpen, setCommentsOpen] = useState(false);
     const [commentFocusRequest, setCommentFocusRequest] = useState<CommentFocusRequest | null>(
         null,
@@ -857,7 +895,19 @@ function BlockEditor({
         return result;
     }, [blocksWithAnnotationBodies, replica.state]);
     const orderedListNumbers = useMemo(() => deriveOrderedListNumbers(blocks), [blocks]);
-    const resolvedSelectionSet = resolveSelectionSet(replica.state, replica.selection);
+    const retainedResolvedSelectionSet = resolveSelectionSet(replica.state, replica.selection);
+    const resolvedSelectionSet: EditorSelectionSet = dragSelection
+        ? {
+              primaryId: retainedResolvedSelectionSet.primaryId,
+              entries: retainedResolvedSelectionSet.entries.length
+                  ? retainedResolvedSelectionSet.entries.map((entry) =>
+                        entry.id === retainedResolvedSelectionSet.primaryId
+                            ? {...entry, selection: dragSelection}
+                            : entry,
+                    )
+                  : [{id: retainedResolvedSelectionSet.primaryId, selection: dragSelection}],
+          }
+        : retainedResolvedSelectionSet;
     const primaryResolvedSelection = primarySelection(resolvedSelectionSet);
     const selectedPopoverSelection = activeAnnotationBodySelection ?? primaryResolvedSelection;
     const selectedPopoverSelectionKey = editorSelectionKey(selectedPopoverSelection);
@@ -892,17 +942,28 @@ function BlockEditor({
             }),
         [hasFocus, isExtendingSelection, replica.state, resolvedSelectionSet],
     );
+    const blockLevelDecorationsByBlock = useMemo(
+        () => blockLevelDecorationsForSelectionSet(replica.state, resolvedSelectionSet),
+        [replica.state, resolvedSelectionSet],
+    );
     const {draggingId, draggingSubtreeIds, dropTarget, registerRow, startDrag} = useBlockReorder({
         blocks: blocks.map(({id, depth, parentId}) => ({id, depth, parentId})),
-        onMove: (blockId, target) =>
+        onMove: (blockIds, target) =>
             onCommand((current) => {
-                const result = moveBlock(
-                    current.state,
-                    blockId,
-                    target,
-                    makeCommandContext(current),
-                );
-                return {state: result.state, ops: result.ops, selection: current.selection};
+                let working = current.state;
+                const ops: Array<Op<RichBlockMeta>> = [];
+                const orderedBlockIds = orderDraggedBlockIds(current.state, blockIds, target);
+                for (const blockId of orderedBlockIds) {
+                    const result = moveBlock(
+                        working,
+                        blockId,
+                        target,
+                        makeCommandContext(current),
+                    );
+                    working = result.state;
+                    ops.push(...result.ops);
+                }
+                return {state: working, ops, selection: current.selection};
             }),
     });
 
@@ -912,8 +973,31 @@ function BlockEditor({
             pendingSelectionRestoreRef.current = null;
             return;
         }
+        if (selection.type !== 'range') {
+            pendingCaretRestoreBlockIdRef.current = null;
+            pendingSelectionRestoreRef.current = null;
+            return;
+        }
         pendingCaretRestoreBlockIdRef.current = null;
         pendingSelectionRestoreRef.current = selection;
+    }, []);
+
+    const focusBlockSelectionTarget = useCallback((editorSelection?: EditorSelection | null) => {
+        const domSelection = window.getSelection();
+        if (domSelection) domSelection.removeAllRanges();
+        pendingBlockSelectionFocusRef.current = editorSelection ?? null;
+        const focusBlockId = editorSelection ? focusPoint(editorSelection).blockId : null;
+        const target = focusBlockId
+            ? rootRef.current?.querySelector<HTMLElement>(
+                  `[data-block-id="${CSS.escape(focusBlockId)}"]`,
+              )
+            : null;
+        suppressNextBlockFocusSelectionRef.current = true;
+        suppressNextBlockKeySelectionRef.current = true;
+        const focusTarget = target ?? rootRef.current;
+        focusTarget?.focus({preventScroll: true});
+        window.getSelection()?.removeAllRanges();
+        if (target) pendingBlockSelectionFocusRef.current = null;
     }, []);
 
     const {
@@ -1087,12 +1171,16 @@ function BlockEditor({
         verticalCaretXRef.current = null;
         pendingMultiselectClickRef.current = null;
         pendingAddSelectionClickRef.current = null;
+        pendingTextDragRef.current = null;
+        suppressNextMouseSelectionRef.current = false;
         pendingDomSelectionRef.current = null;
         if (pendingDomSelectionTimerRef.current) clearTimeout(pendingDomSelectionTimerRef.current);
         pendingDomSelectionTimerRef.current = null;
         handledTripleClickRef.current = false;
         handledNavigationKeyRef.current = false;
         setIsExtendingSelection(false);
+        setDragSelection(null);
+        setHasTextDragGesture(false);
         setLinkPopover(null);
         setLinkHoverPopover(null);
         setCodePopover(null);
@@ -1153,6 +1241,10 @@ function BlockEditor({
             }
             const root = rootRef.current;
             if (!root) return;
+            if (event.type === 'mouseup' && suppressNextMouseSelectionRef.current) {
+                suppressNextMouseSelectionRef.current = false;
+                return;
+            }
             if (event.type === 'mouseup' && pendingMultiselectClickRef.current) {
                 const pendingClick = pendingMultiselectClickRef.current;
                 pendingMultiselectClickRef.current = null;
@@ -1211,6 +1303,14 @@ function BlockEditor({
                 return;
             }
             const addSelection = 'metaKey' in event && (event.metaKey || event.ctrlKey);
+            if (
+                event.type === 'mouseup' &&
+                !addSelection &&
+                resolvedSelectionSet.entries.length === 1 &&
+                editorSelectionKey(selection) === editorSelectionKey(primaryResolvedSelection)
+            ) {
+                return;
+            }
             scheduleSelectionRestore(selection);
             onCommand((current) => ({
                 state: current.state,
@@ -1231,7 +1331,9 @@ function BlockEditor({
             clearPendingInlineMarks,
             nextSelectionId,
             onCommand,
+            primaryResolvedSelection,
             resetVerticalCaretIntent,
+            resolvedSelectionSet.entries.length,
             scheduleSelectionRestore,
         ],
     );
@@ -1352,6 +1454,109 @@ function BlockEditor({
         ],
     );
 
+    const startTextDragSelection = useCallback((event: PointerEvent<HTMLElement>) => {
+        if (!event.isPrimary || event.button !== 0 || event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) {
+            return;
+        }
+        const root = rootRef.current;
+        if (!root) return;
+        const elementConstructor = event.currentTarget.ownerDocument.defaultView?.Element;
+        if (!elementConstructor || !(event.target instanceof elementConstructor)) return;
+        if (
+            event.target.closest(
+                'button,input,select,textarea,[data-popover-id],[contenteditable="false"],.blockAffordance,.tableRowDrag,.tableColumnInsert,.tableRowInsertControl',
+            )
+        ) {
+            return;
+        }
+        const editable = event.target.closest('[data-block-id]');
+        if (!editable || !root.contains(editable)) return;
+        const point = readPointFromMouseEvent(root, event.nativeEvent);
+        if (!point) return;
+        pendingTextDragRef.current = {
+            pointerId: event.pointerId,
+            anchor: point,
+            startX: event.clientX,
+            startY: event.clientY,
+            dragging: false,
+        };
+        setHasTextDragGesture(true);
+    }, []);
+
+    useLayoutEffect(() => {
+        if (!hasTextDragGesture) return;
+        const pending = pendingTextDragRef.current;
+        if (!pending) {
+            setHasTextDragGesture(false);
+            return;
+        }
+
+        const onPointerMove = (event: globalThis.PointerEvent) => {
+            const current = pendingTextDragRef.current;
+            const root = rootRef.current;
+            if (!current || !root || event.pointerId !== current.pointerId) return;
+            const deltaX = event.clientX - current.startX;
+            const deltaY = event.clientY - current.startY;
+            if (!current.dragging && Math.hypot(deltaX, deltaY) < 4) return;
+            const focus = readPointFromMouseEvent(root, event);
+            if (!focus) return;
+            event.preventDefault();
+            window.getSelection()?.removeAllRanges();
+            current.dragging = true;
+            const selection: EditorSelection =
+                current.anchor.blockId === focus.blockId && current.anchor.offset === focus.offset
+                    ? caret(focus.blockId, focus.offset)
+                    : {type: 'range', anchor: current.anchor, focus};
+            setDragSelection(selection);
+        };
+
+        const onPointerUp = (event: globalThis.PointerEvent) => {
+            const current = pendingTextDragRef.current;
+            const root = rootRef.current;
+            if (!current || !root || event.pointerId !== current.pointerId) return;
+            pendingTextDragRef.current = null;
+            setHasTextDragGesture(false);
+            const focus = readPointFromMouseEvent(root, event);
+            const committed =
+                current.dragging && focus
+                    ? current.anchor.blockId === focus.blockId && current.anchor.offset === focus.offset
+                        ? caret(focus.blockId, focus.offset)
+                        : ({type: 'range', anchor: current.anchor, focus} satisfies EditorSelection)
+                    : null;
+            setDragSelection(null);
+            if (!committed) return;
+            event.preventDefault();
+            suppressNextMouseSelectionRef.current = true;
+            scheduleSelectionRestore(committed);
+            onCommand((currentReplica) => ({
+                state: currentReplica.state,
+                ops: [],
+                selection: replaceSelectionSet(
+                    currentReplica.state,
+                    committed,
+                    currentReplica.selection.primaryId,
+                ),
+            }));
+        };
+
+        const onPointerCancel = (event: globalThis.PointerEvent) => {
+            const current = pendingTextDragRef.current;
+            if (!current || event.pointerId !== current.pointerId) return;
+            pendingTextDragRef.current = null;
+            setHasTextDragGesture(false);
+            setDragSelection(null);
+        };
+
+        window.addEventListener('pointermove', onPointerMove, {passive: false});
+        window.addEventListener('pointerup', onPointerUp, {passive: false});
+        window.addEventListener('pointercancel', onPointerCancel);
+        return () => {
+            window.removeEventListener('pointermove', onPointerMove);
+            window.removeEventListener('pointerup', onPointerUp);
+            window.removeEventListener('pointercancel', onPointerCancel);
+        };
+    }, [hasTextDragGesture, onCommand, scheduleSelectionRestore]);
+
     const liveSelectionSet = useCallback((current: Replica): RetainedSelectionSet => {
         const root = rootRef.current;
         const selection = root ? readSelectionFromDom(root) : null;
@@ -1364,7 +1569,13 @@ function BlockEditor({
         (command: (current: Replica, selection: RetainedSelectionSet) => MultiCommandResult) => {
             onCommand((current) => {
                 resetVerticalCaretIntent();
-                const selection = liveSelectionSet(current);
+                const retainedSelection = current.selection;
+                const currentPrimary = primarySelection(
+                    resolveSelectionSet(current.state, retainedSelection),
+                );
+                const selection = isBlockLevelSelection(currentPrimary)
+                    ? retainedSelection
+                    : liveSelectionSet(current);
                 const result = command(current, selection);
                 const primaryResultSelection = primarySelection(
                     resolveSelectionSet(result.state, result.selection),
@@ -1378,18 +1589,25 @@ function BlockEditor({
 
     const copyRichSelection = useCallback(
         (event: ClipboardEvent<HTMLElement>) => {
+            const currentPrimary = primarySelection(resolvedSelectionSet);
+            const selection = isBlockLevelSelection(currentPrimary)
+                ? retainSelectionSet(replica.state, resolvedSelectionSet)
+                : liveSelectionSet(replica);
             const payload = serializeSelectionToClipboardPayload(
                 replica.state,
-                liveSelectionSet(replica),
+                selection,
                 serializeAttachments(attachments),
             );
             if (!payload) return;
             event.preventDefault();
             event.clipboardData.setData(BLOCK_RICH_TEXT_MIME, JSON.stringify(payload));
-            event.clipboardData.setData('text/plain', payload.plainText);
+            event.clipboardData.setData('text/plain', payload.tsv ?? payload.plainText);
             event.clipboardData.setData('text/html', payload.html);
+            if (payload.tsv) {
+                event.clipboardData.setData('text/tab-separated-values', payload.tsv);
+            }
         },
-        [attachments, liveSelectionSet, replica],
+        [attachments, liveSelectionSet, replica, resolvedSelectionSet],
     );
 
     const captureImageUploadSelection = useCallback(() => {
@@ -1447,14 +1665,27 @@ function BlockEditor({
                 if (rich.attachments?.length) {
                     onMergeSerializedAttachments(rich.attachments);
                 }
-                runEditCommand((current, selection) =>
-                    pasteRichClipboardEverywhere(
+                onCommand((current) => {
+                    resetVerticalCaretIntent();
+                    const retainedSelection = current.selection;
+                    const currentPrimary = primarySelection(
+                        resolveSelectionSet(current.state, retainedSelection),
+                    );
+                    const selection = isBlockLevelSelection(currentPrimary)
+                        ? retainedSelection
+                        : liveSelectionSet(current);
+                    const result = pasteRichClipboardEverywhere(
                         current.state,
                         selection,
                         rich,
                         makeCommandContext(current),
-                    ),
-                );
+                    );
+                    const primaryResultSelection = primarySelection(
+                        resolveSelectionSet(result.state, result.selection),
+                    );
+                    scheduleSelectionRestore(primaryResultSelection);
+                    return result;
+                });
                 return;
             }
 
@@ -1462,23 +1693,44 @@ function BlockEditor({
             const text = event.clipboardData.getData('text/plain');
             runEditCommand((current, selection) => {
                 const primary = primarySelection(resolveSelectionSet(current.state, selection));
-                if (isLinkLikeText(text) && primary.type === 'range') {
+                const primaryFocus = focusPoint(primary);
+                const pasteSelection = isBlockLevelSelection(primary)
+                    ? replacePrimarySelection(
+                          current.state,
+                          selection,
+                          caret(
+                              primaryFocus.blockId,
+                              pointTextLength(current.state, primaryFocus.blockId),
+                          ),
+                      )
+                    : selection;
+                const pastePrimary = primarySelection(resolveSelectionSet(current.state, pasteSelection));
+                if (isLinkLikeText(text) && pastePrimary.type === 'range') {
                     return setLinkMarkEverywhere(
                         current.state,
-                        selection,
+                        pasteSelection,
                         text.trim(),
                         makeCommandContext(current),
                     );
                 }
                 return pastePlainTextWithMarkdownShortcutsEverywhere(
                     current.state,
-                    selection,
+                    pasteSelection,
                     text,
                     makeCommandContext(current),
                 );
             });
         },
-        [insertImageFiles, liveSelectionSet, onMergeSerializedAttachments, replica, runEditCommand],
+        [
+            insertImageFiles,
+            liveSelectionSet,
+            onCommand,
+            onMergeSerializedAttachments,
+            replica,
+            resetVerticalCaretIntent,
+            runEditCommand,
+            scheduleSelectionRestore,
+        ],
     );
 
     const runInlineMarkToggle = useCallback(
@@ -1711,6 +1963,152 @@ function BlockEditor({
             onCommand((current) => command(current));
         },
         [onCommand],
+    );
+
+    const selectBlockSubtreeFromHandle = useCallback(
+        (blockId: string) => {
+            onCommand((current) => {
+                const subtree = visibleSubtreeBlockIds(current.state, blockId);
+                const focusBlockId = subtree[subtree.length - 1] ?? blockId;
+                return {
+                    state: current.state,
+                    ops: [],
+                    selection: replaceSelectionSet(current.state, {
+                        type: 'block',
+                        anchorBlockId: blockId,
+                        focusBlockId,
+                    }),
+                };
+            });
+            focusBlockSelectionTarget({
+                type: 'block',
+                anchorBlockId: blockId,
+                focusBlockId: visibleSubtreeBlockIds(replica.state, blockId).at(-1) ?? blockId,
+            });
+        },
+        [focusBlockSelectionTarget, onCommand, replica.state],
+    );
+
+    const startBlockDragFromHandle = useCallback(
+        (blockId: string, event: PointerEvent<HTMLElement>) => {
+            const primary = primarySelection(resolvedSelectionSet);
+            const selectedTopLevelBlockIds =
+                primary.type === 'caret'
+                    ? []
+                    : selectedTopLevelBlockIdsForSelectionSet(replica.state, resolvedSelectionSet);
+            const selectedGroup = selectedTopLevelBlockIds.filter((selectedBlockId) =>
+                visibleSubtreeBlockIds(replica.state, selectedBlockId).includes(blockId),
+            );
+            if (selectedGroup.length) {
+                startDrag(blockId, event, selectedTopLevelBlockIds);
+                return;
+            }
+            selectBlockSubtreeFromHandle(blockId);
+            startDrag(blockId, event, [blockId]);
+        },
+        [replica.state, resolvedSelectionSet, selectBlockSubtreeFromHandle, startDrag],
+    );
+
+    const textCaretForBlockSelection = useCallback(
+        (state: Replica['state'], selection: EditorSelection, placement: 'focus' | 'document-end') => {
+            const selectedBlockIds = selectedBlockIdsForSelection(state, selection);
+            const blockId =
+                placement === 'focus'
+                    ? focusPoint(selection).blockId
+                    : selectedBlockIds[selectedBlockIds.length - 1] ?? focusPoint(selection).blockId;
+            return caret(blockId, pointTextLength(state, blockId));
+        },
+        [],
+    );
+
+    const handleBlockSelectionKeyDown = useCallback(
+        (event: KeyboardEvent<HTMLElement>): boolean => {
+            const selection = primarySelection(resolvedSelectionSet);
+            if (selection.type !== 'block' && selection.type !== 'table-cells') return false;
+            const modifierPressed = event.metaKey || event.ctrlKey || event.altKey;
+
+            if (event.key.length === 1 && !modifierPressed) {
+                event.preventDefault();
+                onCommand((current) => {
+                    const textSelection = textCaretForBlockSelection(current.state, selection, 'focus');
+                    const selectionSet = replacePrimarySelection(current.state, current.selection, textSelection);
+                    const result = insertTextWithPendingMarks(current, selectionSet, event.key);
+                    scheduleSelectionRestore(primarySelection(resolveSelectionSet(result.state, result.selection)));
+                    return result;
+                });
+                return true;
+            }
+
+            if (event.key === 'Enter' && !modifierPressed) {
+                event.preventDefault();
+                onCommand((current) => {
+                    const textSelection = textCaretForBlockSelection(current.state, selection, 'document-end');
+                    const selectionSet = replacePrimarySelection(current.state, current.selection, textSelection);
+                    const result = splitBlockEverywhere(current.state, selectionSet, makeCommandContext(current));
+                    scheduleSelectionRestore(primarySelection(resolveSelectionSet(result.state, result.selection)));
+                    return result;
+                });
+                return true;
+            }
+
+            if ((event.key === 'Backspace' || event.key === 'Delete') && !modifierPressed) {
+                event.preventDefault();
+                onCommand((current) => {
+                    const activeSelection = primarySelection(
+                        resolveSelectionSet(current.state, current.selection),
+                    );
+                    if (activeSelection.type === 'table-cells') {
+                        const result = deleteTableCellSelection(current.state, activeSelection);
+                        if (!result) return {state: current.state, ops: [], selection: current.selection};
+                        scheduleSelectionRestore(result.selection);
+                        return {
+                            state: result.state,
+                            ops: result.ops,
+                            selection: replaceSelectionSet(
+                                result.state,
+                                result.selection,
+                                current.selection.primaryId,
+                            ),
+                        };
+                    }
+                    const resolved = resolveSelectionSet(current.state, current.selection);
+                    const blockIds = selectedTopLevelBlockIdsForSelectionSet(current.state, resolved);
+                    if (!blockIds.length) {
+                        return {state: current.state, ops: [], selection: current.selection};
+                    }
+                    let working = current.state;
+                    const ops: Array<Op<RichBlockMeta>> = [];
+                    for (const blockId of blockIds) {
+                        if (!working.state.blocks[blockId] || working.state.blocks[blockId].deleted) continue;
+                        const deleted = deleteBlockOps(working, {
+                            block: parseLamportString(blockId),
+                            mode: 'subtree',
+                            virtualParents: annotationVirtualParents(working),
+                        });
+                        working = applyMany(working, deleted, annotationVirtualParents(working));
+                        ops.push(...deleted);
+                    }
+                    const fallbackBlockId = editableBlockIds(working)[0] ?? blockIds[0];
+                    const fallback = caret(fallbackBlockId, pointTextLength(working, fallbackBlockId));
+                    scheduleSelectionRestore(fallback);
+                    return {
+                        state: working,
+                        ops,
+                        selection: replaceSelectionSet(working, fallback, current.selection.primaryId),
+                    };
+                });
+                return true;
+            }
+
+            return false;
+        },
+        [
+            insertTextWithPendingMarks,
+            onCommand,
+            resolvedSelectionSet,
+            scheduleSelectionRestore,
+            textCaretForBlockSelection,
+        ],
     );
 
     const insertDateEmbedFromCurrentSelection = useCallback(() => {
@@ -2132,7 +2530,9 @@ function BlockEditor({
                 const nextSelection: EditorSelection = {
                     type: 'range',
                     anchor:
-                        liveSelection.type === 'caret' ? liveSelection.point : liveSelection.anchor,
+                        liveSelection.type === 'range'
+                            ? liveSelection.anchor
+                            : firstPointForSelection(current.state, liveSelection),
                     focus: {blockId: targetBlockId, offset},
                 };
                 scheduleSelectionRestore(nextSelection);
@@ -2269,11 +2669,14 @@ function BlockEditor({
                     direction,
                     sourceBlock,
                 );
-                const nextSelection: EditorSelection = {
-                    type: 'range',
-                    anchor: selection.type === 'caret' ? selection.point : selection.anchor,
-                    focus: focusPoint(adjusted),
-                };
+            const nextSelection: EditorSelection = {
+                type: 'range',
+                anchor:
+                    selection.type === 'range'
+                        ? selection.anchor
+                        : firstPointForSelection(result.state, selection),
+                focus: focusPoint(adjusted),
+            };
                 scheduleSelectionRestore(nextSelection);
                 return {
                     state: result.state,
@@ -2315,6 +2718,7 @@ function BlockEditor({
                 x: verticalCaretXRef.current,
             });
             if (selection.type === 'caret') return caret(point.blockId, offset);
+            if (selection.type !== 'range') return selection;
             return {...selection, focus: {...selection.focus, offset}};
         },
         [],
@@ -2323,10 +2727,28 @@ function BlockEditor({
     useLayoutEffect(() => {
         const root = rootRef.current;
         const selection = pendingSelectionRestoreRef.current;
-        if (!root || !selection) return;
+        if (!root || !selection || selection.type !== 'range') return;
         if (document.activeElement === null || !root.contains(document.activeElement)) return;
         pendingSelectionRestoreRef.current = null;
         restoreSelectionToDom(root, selection);
+    }, [replica.state, replica.selection]);
+
+    useLayoutEffect(() => {
+        const selection = pendingBlockSelectionFocusRef.current;
+        const root = rootRef.current;
+        if (!selection || !root) return;
+        const focusBlockId = focusPoint(selection).blockId;
+        const target = root.querySelector<HTMLElement>(
+            `[data-block-id="${CSS.escape(focusBlockId)}"]`,
+        );
+        if (!target) return;
+        const domSelection = window.getSelection();
+        if (domSelection) domSelection.removeAllRanges();
+        suppressNextBlockFocusSelectionRef.current = true;
+        suppressNextBlockKeySelectionRef.current = true;
+        target.focus({preventScroll: true});
+        window.getSelection()?.removeAllRanges();
+        pendingBlockSelectionFocusRef.current = null;
     }, [replica.state, replica.selection]);
 
     return (
@@ -2434,6 +2856,7 @@ function BlockEditor({
                     <div
                         ref={rootRef}
                         className="blockList"
+                        tabIndex={-1}
                         onFocus={() => {
                             setActiveAnnotationBodySelection(null);
                             setHasFocus(true);
@@ -2445,9 +2868,12 @@ function BlockEditor({
                             clearPendingInlineMarks();
                             setHasFocus(false);
                         }}
+                        onPointerDown={startTextDragSelection}
                         onMouseDown={captureMouseDown}
                         onMouseUp={captureSelection}
+                        onCopy={copyRichSelection}
                         onKeyDown={(event) => {
+                            if (handleBlockSelectionKeyDown(event)) return;
                             if (event.key !== 'Escape' || !activePopovers.length) return;
                             event.preventDefault();
                             closeDeepestPopover();
@@ -2463,7 +2889,10 @@ function BlockEditor({
                                 selection: primaryResolvedSelection,
                                 hasMultipleSelections: resolvedSelectionSet.entries.length > 1,
                                 decorationsByBlock,
+                                blockLevelDecorationsByBlock,
                                 pendingCaretRestoreBlockIdRef,
+                                suppressNextBlockFocusSelectionRef,
+                                suppressNextBlockKeySelectionRef,
                                 draggingSubtreeIds,
                                 draggingId,
                                 dropTarget,
@@ -2527,6 +2956,8 @@ function BlockEditor({
                                 }),
                                 runEditCommand,
                                 runBlockControlCommand,
+                                focusBlockSelectionTarget,
+                                startBlockDragFromHandle,
                                 onCopy: copyRichSelection,
                                 onPaste: pasteFromClipboard,
                                 moveCaretHorizontally,
@@ -2874,7 +3305,10 @@ type RenderBlockContext = {
     selection: EditorSelection;
     hasMultipleSelections: boolean;
     decorationsByBlock: Map<string, BlockSelectionDecorations>;
+    blockLevelDecorationsByBlock: Map<string, BlockLevelSelectionDecorations>;
     pendingCaretRestoreBlockIdRef: MutableRefObject<string | null>;
+    suppressNextBlockFocusSelectionRef: MutableRefObject<boolean>;
+    suppressNextBlockKeySelectionRef: MutableRefObject<boolean>;
     draggingSubtreeIds: Set<string>;
     draggingId: string | null;
     dropTarget: DropTarget | null;
@@ -2890,6 +3324,8 @@ type RenderBlockContext = {
     runInlineMarkToggle(markType: BooleanInlineMark): void;
     runCodeToggle(): void;
     runBlockControlCommand(command: (current: Replica) => MultiCommandResult): void;
+    focusBlockSelectionTarget(selection?: EditorSelection | null): void;
+    startBlockDragFromHandle(blockId: string, event: PointerEvent<HTMLElement>): void;
     onCopy(event: ClipboardEvent<HTMLElement>): void;
     onPaste(event: ClipboardEvent<HTMLElement>): void;
     moveCaretHorizontally(selection: EditorSelection): void;
@@ -2988,7 +3424,14 @@ const renderBlockNode = (node: RenderTreeNode, context: RenderBlockContext): Rea
 function TableBlock({node, context}: {node: RenderTreeNode; context: RenderBlockContext}) {
     const [cellDrag, setCellDrag] = useState<{
         sourceCellId: string;
+        columnCellIds?: string[];
+        rectangleSelection?: EditorSelection;
         target: {rowId: string; index: number} | null;
+    } | null>(null);
+    const [cellSelectionDrag, setCellSelectionDrag] = useState<{
+        tableId: string;
+        anchorCellId: string;
+        focusCellId: string;
     } | null>(null);
     const rowNodes = node.children;
     const columnCount = Math.max(
@@ -3018,13 +3461,50 @@ function TableBlock({node, context}: {node: RenderTreeNode; context: RenderBlock
             setCellDrag(null);
             if (!target) return;
             context.runBlockControlCommand((current) => {
-                const result = moveTableCell(
-                    current.state,
-                    sourceCellId,
-                    target,
-                    makeCommandContext(current),
-                );
-                return {state: result.state, ops: result.ops, selection: current.selection};
+                if (cellDrag.rectangleSelection) {
+                    const result = moveTableCellRectangleContents(
+                        current.state,
+                        cellDrag.rectangleSelection,
+                        target,
+                        makeCommandContext(current),
+                    );
+                    return result
+                        ? {
+                              state: result.state,
+                              ops: result.ops,
+                              selection: replaceSelectionSet(
+                                  result.state,
+                                  result.selection,
+                                  current.selection.primaryId,
+                              ),
+                          }
+                        : {state: current.state, ops: [], selection: current.selection};
+                }
+                if (!cellDrag.columnCellIds?.length) {
+                    const result = moveTableCell(
+                        current.state,
+                        sourceCellId,
+                        target,
+                        makeCommandContext(current),
+                    );
+                    return {state: result.state, ops: result.ops, selection: current.selection};
+                }
+                let working = current.state;
+                const ops: Array<Op<RichBlockMeta>> = [];
+                for (const cellId of cellDrag.columnCellIds) {
+                    const rowId = lamportToString(
+                        materializedBlockParent(working, cellId, annotationVirtualParents(working)),
+                    );
+                    const result = moveTableCell(
+                        working,
+                        cellId,
+                        {rowId, index: target.index},
+                        makeCommandContext(current),
+                    );
+                    working = result.state;
+                    ops.push(...result.ops);
+                }
+                return {state: working, ops, selection: current.selection};
             });
         };
         const onPointerCancel = () => setCellDrag(null);
@@ -3037,6 +3517,51 @@ function TableBlock({node, context}: {node: RenderTreeNode; context: RenderBlock
             window.removeEventListener('pointercancel', onPointerCancel);
         };
     }, [cellDrag, context]);
+
+    useLayoutEffect(() => {
+        if (!cellSelectionDrag) return;
+        const selectCells = (focusCellId: string) => {
+            const selection: EditorSelection = {
+                type: 'table-cells',
+                tableId: cellSelectionDrag.tableId,
+                anchorCellId: cellSelectionDrag.anchorCellId,
+                focusCellId,
+            };
+            context.runBlockControlCommand((current) => ({
+                state: current.state,
+                ops: [],
+                selection: replaceSelectionSet(current.state, selection, current.selection.primaryId),
+            }));
+        };
+        const onPointerMove = (event: globalThis.PointerEvent) => {
+            event.preventDefault();
+            const target = tableCellElementFromPoint(event.clientX, event.clientY);
+            const focusCellId = target?.dataset.cellId ?? null;
+            if (!focusCellId || target?.closest<HTMLElement>('[data-table-id]')?.dataset.tableId !== cellSelectionDrag.tableId) {
+                return;
+            }
+            setCellSelectionDrag((current) =>
+                current ? {...current, focusCellId} : current,
+            );
+            selectCells(focusCellId);
+        };
+        const onPointerUp = (event: globalThis.PointerEvent) => {
+            event.preventDefault();
+            setCellSelectionDrag((current) => {
+                if (current) selectCells(current.focusCellId);
+                return null;
+            });
+        };
+        const onPointerCancel = () => setCellSelectionDrag(null);
+        window.addEventListener('pointermove', onPointerMove, {passive: false});
+        window.addEventListener('pointerup', onPointerUp, {passive: false});
+        window.addEventListener('pointercancel', onPointerCancel);
+        return () => {
+            window.removeEventListener('pointermove', onPointerMove);
+            window.removeEventListener('pointerup', onPointerUp);
+            window.removeEventListener('pointercancel', onPointerCancel);
+        };
+    }, [cellSelectionDrag, context]);
 
     return (
         <div
@@ -3073,6 +3598,12 @@ function TableBlock({node, context}: {node: RenderTreeNode; context: RenderBlock
                                 ref={(element) => context.registerRow(row.block.id, element)}
                                 className={[
                                     'tableInterstitialRow',
+                                    context.blockLevelDecorationsByBlock.get(row.block.id)?.selected
+                                        ? 'blockSelected'
+                                        : '',
+                                    context.blockLevelDecorationsByBlock.get(row.block.id)?.focus
+                                        ? 'blockSelectionFocus'
+                                        : '',
                                     context.draggingSubtreeIds.has(row.block.id) ? 'dragging' : '',
                                     context.draggingId === row.block.id ? 'draggingRoot' : '',
                                     context.dropTarget?.indicatorBlockId === row.block.id
@@ -3091,6 +3622,12 @@ function TableBlock({node, context}: {node: RenderTreeNode; context: RenderBlock
                                 ref={(element) => context.registerRow(row.block.id, element)}
                                 className={[
                                     'tableRow',
+                                    context.blockLevelDecorationsByBlock.get(row.block.id)?.selected
+                                        ? 'blockSelected'
+                                        : '',
+                                    context.blockLevelDecorationsByBlock.get(row.block.id)?.focus
+                                        ? 'blockSelectionFocus'
+                                        : '',
                                     context.draggingSubtreeIds.has(row.block.id) ? 'dragging' : '',
                                     context.draggingId === row.block.id ? 'draggingRoot' : '',
                                     context.dropTarget?.indicatorBlockId === row.block.id
@@ -3111,6 +3648,16 @@ function TableBlock({node, context}: {node: RenderTreeNode; context: RenderBlock
                                             key={`${row.block.id}:${columnIndex}`}
                                             className={[
                                                 cell ? 'tableCell' : 'tableCell missingTableCell',
+                                                cell &&
+                                                context.blockLevelDecorationsByBlock.get(cell.block.id)
+                                                    ?.selected
+                                                    ? 'cellSelected'
+                                                    : '',
+                                                cell &&
+                                                context.blockLevelDecorationsByBlock.get(cell.block.id)
+                                                    ?.focus
+                                                    ? 'cellSelectionFocus'
+                                                    : '',
                                                 cell?.block.id === selectedCellId
                                                     ? 'activeTableCell'
                                                     : '',
@@ -3131,16 +3678,61 @@ function TableBlock({node, context}: {node: RenderTreeNode; context: RenderBlock
                                             role="cell"
                                             data-cell-id={cell?.block.id}
                                             onPointerDown={(event) => {
-                                                if (
-                                                    !cell ||
-                                                    !isFocusedCellBorderDrag(event, selectedCellId)
-                                                )
+                                                if (!cell || !isCellBorderPointer(event))
                                                     return;
                                                 event.preventDefault();
                                                 event.stopPropagation();
-                                                event.currentTarget.setPointerCapture(event.pointerId);
+                                                if (cell.block.id !== selectedCellId) {
+                                                    event.currentTarget.setPointerCapture?.(event.pointerId);
+                                                    setCellSelectionDrag({
+                                                        tableId: node.block.id,
+                                                        anchorCellId: cell.block.id,
+                                                        focusCellId: cell.block.id,
+                                                    });
+                                                    context.focusBlockSelectionTarget({
+                                                        type: 'table-cells',
+                                                        tableId: node.block.id,
+                                                        anchorCellId: cell.block.id,
+                                                        focusCellId: cell.block.id,
+                                                    });
+                                                    context.runBlockControlCommand((current) => {
+                                                        const selection = tableCellSelectionForCell(
+                                                            current.state,
+                                                            cell.block.id,
+                                                        );
+                                                        return {
+                                                            state: current.state,
+                                                            ops: [],
+                                                            selection: selection
+                                                                ? replaceSelectionSet(
+                                                                      current.state,
+                                                                      selection,
+                                                                      current.selection.primaryId,
+                                                                  )
+                                                                : current.selection,
+                                                        };
+                                                    });
+                                                    return;
+                                                }
+                                                event.currentTarget.setPointerCapture?.(event.pointerId);
+                                                context.focusBlockSelectionTarget(context.selection);
+                                                const selectedColumnCellIds = fullColumnSelectionCellIds(
+                                                    context.state,
+                                                    context.selection,
+                                                    node.block.id,
+                                                );
+                                                const selectedRectangle = selectedTableRectangleSelection(
+                                                    context.state,
+                                                    context.selection,
+                                                    node.block.id,
+                                                );
                                                 setCellDrag({
                                                     sourceCellId: cell.block.id,
+                                                    ...(selectedColumnCellIds
+                                                        ? {columnCellIds: selectedColumnCellIds}
+                                                        : selectedRectangle
+                                                          ? {rectangleSelection: selectedRectangle}
+                                                        : {}),
                                                     target: {rowId: row.block.id, index: columnIndex},
                                                 });
                                             }}
@@ -3233,7 +3825,9 @@ function TableRowHeader({
                 type="button"
                 className="tableRowDrag"
                 aria-label={`Move row ${rowIndex + 1}`}
-                onPointerDown={(event) => context.startDrag(row.id, event)}
+                onPointerDown={(event) => {
+                    context.startBlockDragFromHandle(row.id, event);
+                }}
             >
                 ⋮
             </button>
@@ -3440,6 +4034,22 @@ const tableCellIdForSelection = (
     return null;
 };
 
+const tableCellSelectionForCell = (
+    state: Replica['state'],
+    cellId: string,
+): EditorSelection | null => {
+    if (!isTableCellBlock(state, cellId)) return null;
+    const rowId = lamportToString(materializedBlockParent(state, cellId, annotationVirtualParents(state)));
+    const tableId = lamportToString(materializedBlockParent(state, rowId, annotationVirtualParents(state)));
+    if (state.state.blocks[tableId]?.meta.type !== 'table') return null;
+    return {
+        type: 'table-cells',
+        tableId,
+        anchorCellId: cellId,
+        focusCellId: cellId,
+    };
+};
+
 const isTableCellBlock = (state: Replica['state'], blockId: string): boolean => {
     const block = state.state.blocks[blockId];
     if (!block) return false;
@@ -3450,6 +4060,40 @@ const isTableCellBlock = (state: Replica['state'], blockId: string): boolean => 
     return state.state.blocks[tableId]?.meta.type === 'table';
 };
 
+const fullColumnSelectionCellIds = (
+    state: Replica['state'],
+    selection: EditorSelection,
+    tableId: string,
+): string[] | null => {
+    if (selection.type !== 'table-cells' || selection.tableId !== tableId) return null;
+    const rectangle = tableCellRectangleForSelection(state, selection);
+    if (!rectangle || rectangle.startColumnIndex !== rectangle.endColumnIndex) return null;
+    const rows = tableRowsForSelection(state, tableId);
+    if (
+        rectangle.startRowIndex !== 0 ||
+        rectangle.endRowIndex < rows.length - 1 ||
+        rows.length === 0
+    ) {
+        return null;
+    }
+    const cellIds = rows
+        .map((rowId) => tableCellsForSelection(state, rowId)[rectangle.startColumnIndex])
+        .filter((cellId): cellId is string => Boolean(cellId));
+    return cellIds.length === rows.length ? cellIds : null;
+};
+
+const selectedTableRectangleSelection = (
+    state: Replica['state'],
+    selection: EditorSelection,
+    tableId: string,
+): EditorSelection | null => {
+    if (selection.type !== 'table-cells' || selection.tableId !== tableId) return null;
+    const rectangle = tableCellRectangleForSelection(state, selection);
+    if (!rectangle || rectangle.cellIds.length <= 1) return null;
+    if (fullColumnSelectionCellIds(state, selection, tableId)) return null;
+    return selection;
+};
+
 const isFocusedCellBorderDrag = (
     event: PointerEvent<HTMLDivElement>,
     selectedCellId: string | null,
@@ -3457,6 +4101,15 @@ const isFocusedCellBorderDrag = (
     if (!event.isPrimary || event.button !== 0) return false;
     const cellId = event.currentTarget.dataset.cellId ?? null;
     if (!cellId || cellId !== selectedCellId) return false;
+    return isCellBorderPointer(event);
+};
+
+const isCellBorderPointer = (
+    event: PointerEvent<HTMLDivElement>,
+): boolean => {
+    if (!event.isPrimary || event.button !== 0) return false;
+    const cellId = event.currentTarget.dataset.cellId ?? null;
+    if (!cellId) return false;
     const rect = event.currentTarget.getBoundingClientRect();
     const edge = 7;
     return (
@@ -3492,6 +4145,15 @@ const tableCellDropTargetFromPoint = (
     return {rowId, index: before >= 0 ? before : cells.length};
 };
 
+const tableCellElementFromPoint = (
+    clientX: number,
+    clientY: number,
+): HTMLElement | null =>
+    document
+        .elementsFromPoint(clientX, clientY)
+        .map((element) => element.closest<HTMLElement>('.tableCell[data-cell-id]'))
+        .find((element): element is HTMLElement => !!element?.dataset.cellId) ?? null;
+
 const renderEditableBlock = (block: RichFormattedBlock, context: RenderBlockContext) => {
     const index = context.blocks.findIndex((candidate) => candidate.id === block.id);
     const previousBlock = context.blocks[index - 1] ?? null;
@@ -3518,13 +4180,17 @@ const renderEditableBlock = (block: RichFormattedBlock, context: RenderBlockCont
             hasMultipleSelections={context.hasMultipleSelections}
             decorations={context.decorationsByBlock.get(block.id) ?? null}
             pendingCaretRestoreBlockIdRef={context.pendingCaretRestoreBlockIdRef}
+            suppressNextFocusSelectionRef={context.suppressNextBlockFocusSelectionRef}
+            suppressNextKeySelectionRef={context.suppressNextBlockKeySelectionRef}
             isDragging={context.draggingSubtreeIds.has(block.id)}
             isDraggingRoot={context.draggingId === block.id}
+            blockLevelDecoration={context.blockLevelDecorationsByBlock.get(block.id) ?? null}
             dropTarget={
                 context.dropTarget?.indicatorBlockId === block.id ? context.dropTarget : null
             }
             registerRow={context.registerRow}
             onStartDrag={context.startDrag}
+            onStartBlockDragFromHandle={context.startBlockDragFromHandle}
             popoverTextById={context.popoverTextById}
             footnoteNumberById={context.footnoteNumberById}
             onPopoverTriggerEnter={context.onPopoverTriggerEnter}
@@ -3660,26 +4326,31 @@ const renderEditableBlock = (block: RichFormattedBlock, context: RenderBlockCont
                 )
             }
             onMoveTableCellByTab={(direction) =>
-                context.runEditCommand((current, selection) => {
-                    const selected = primarySelection(
-                        resolveSelectionSet(current.state, selection),
-                    );
-                    const result = moveTableCellByTab(
-                        current.state,
-                        focusPoint(selected).blockId,
-                        direction,
-                        makeCommandContext(current),
-                    );
-                    return {
-                        state: result.state,
-                        ops: result.ops,
-                        selection: replacePrimarySelection(
-                            result.state,
-                            current.selection,
-                            result.selection,
-                        ),
-                    };
-                })
+                {
+                    context.runEditCommand((current, selection) => {
+                        const selected = primarySelection(
+                            resolveSelectionSet(current.state, selection),
+                        );
+                        const result = moveTableCellByTab(
+                            current.state,
+                            focusPoint(selected).blockId,
+                            direction,
+                            makeCommandContext(current),
+                        );
+                        const targetCellId = focusPoint(result.selection).blockId;
+                        const targetCellSelection = tableCellSelectionForCell(result.state, targetCellId);
+                        context.focusBlockSelectionTarget(targetCellSelection ?? result.selection);
+                        return {
+                            state: result.state,
+                            ops: result.ops,
+                            selection: replacePrimarySelection(
+                                result.state,
+                                current.selection,
+                                targetCellSelection ?? result.selection,
+                            ),
+                        };
+                    });
+                }
             }
             onToggleBold={() => context.runInlineMarkToggle('bold')}
             onToggleItalic={() => context.runInlineMarkToggle('italic')}
@@ -4989,7 +5660,7 @@ function AnnotationBodyBlock({
                                     linkPopoverPositionFromSelection(event.currentTarget),
                                 );
                             }
-                        } else {
+                        } else if (selected.type === 'caret') {
                             const range = linkRangeAroundOffsetInRuns(
                                 block.id,
                                 block.runs,
@@ -5281,11 +5952,15 @@ function EditableBlock({
     hasMultipleSelections,
     decorations,
     pendingCaretRestoreBlockIdRef,
+    suppressNextFocusSelectionRef,
+    suppressNextKeySelectionRef,
     isDragging,
     isDraggingRoot,
+    blockLevelDecoration,
     dropTarget,
     registerRow,
     onStartDrag,
+    onStartBlockDragFromHandle,
     popoverTextById,
     footnoteNumberById,
     onPopoverTriggerEnter,
@@ -5343,11 +6018,15 @@ function EditableBlock({
     hasMultipleSelections: boolean;
     decorations: BlockSelectionDecorations | null;
     pendingCaretRestoreBlockIdRef: MutableRefObject<string | null>;
+    suppressNextFocusSelectionRef: MutableRefObject<boolean>;
+    suppressNextKeySelectionRef: MutableRefObject<boolean>;
     isDragging: boolean;
     isDraggingRoot: boolean;
+    blockLevelDecoration: BlockLevelSelectionDecorations | null;
     dropTarget: DropTarget | null;
     registerRow(id: string, element: HTMLElement | null): void;
     onStartDrag: ReturnType<typeof useBlockReorder>['startDrag'];
+    onStartBlockDragFromHandle(blockId: string, event: PointerEvent<HTMLElement>): void;
     popoverTextById: Map<string, string>;
     footnoteNumberById: Map<string, number>;
     onPopoverTriggerEnter(id: string, element: HTMLElement): void;
@@ -5427,6 +6106,8 @@ function EditableBlock({
             charIdsByOffset={charIdsByOffset}
             decorations={decorations}
             pendingCaretRestoreBlockIdRef={pendingCaretRestoreBlockIdRef}
+            suppressNextFocusSelectionRef={suppressNextFocusSelectionRef}
+            suppressNextKeySelectionRef={suppressNextKeySelectionRef}
             selection={selection}
             className={[
                 'editableBlock',
@@ -5708,6 +6389,8 @@ function EditableBlock({
                 'blockRow',
                 `blockType-${meta.type}`,
                 meta.type === 'callout' ? `callout${capitalize(meta.kind)}` : '',
+                blockLevelDecoration?.selected ? 'blockSelected' : '',
+                blockLevelDecoration?.focus ? 'blockSelectionFocus' : '',
                 isDragging ? 'dragging' : '',
                 isDraggingRoot ? 'draggingRoot' : '',
                 dropTarget ? `drop${capitalize(dropTarget.indicatorPlacement)}` : '',
@@ -5728,6 +6411,7 @@ function EditableBlock({
                     meta={meta}
                     listNumber={listNumber}
                     onStartDrag={onStartDrag}
+                    onStartBlockDragFromHandle={onStartBlockDragFromHandle}
                     onToggleTodo={onToggleTodo}
                 />
             )}
@@ -5756,6 +6440,8 @@ function RichTextEditableSurface({
     decorations,
     pendingCaretRestoreBlockIdRef,
     pendingSelectionRestoreRef,
+    suppressNextFocusSelectionRef,
+    suppressNextKeySelectionRef,
     selection,
     className,
     ariaLabel,
@@ -5787,6 +6473,8 @@ function RichTextEditableSurface({
     decorations: BlockSelectionDecorations | null;
     pendingCaretRestoreBlockIdRef: MutableRefObject<string | null>;
     pendingSelectionRestoreRef?: MutableRefObject<EditorSelection | null>;
+    suppressNextFocusSelectionRef?: MutableRefObject<boolean>;
+    suppressNextKeySelectionRef?: MutableRefObject<boolean>;
     selection: EditorSelection;
     className: string;
     ariaLabel: string;
@@ -5884,7 +6572,7 @@ function RichTextEditableSurface({
             restoreCaretToDom(element, point.offset);
         }
         const rangeSelection = pendingSelectionRestoreRef?.current;
-        if (rangeSelection) {
+        if (pendingSelectionRestoreRef && rangeSelection?.type === 'range') {
             pendingSelectionRestoreRef.current = null;
             if (document.activeElement !== element) element.focus();
             restoreSelectionToDom(element, rangeSelection);
@@ -5917,7 +6605,11 @@ function RichTextEditableSurface({
             data-placeholder={placeholder ?? '...'}
             data-trailing-newline={trailingCodeNewline ? 'true' : undefined}
             onFocus={(event) => {
-                onSelectionChange?.(readSelectionFromDom(event.currentTarget));
+                if (suppressNextFocusSelectionRef?.current) {
+                    suppressNextFocusSelectionRef.current = false;
+                } else {
+                    onSelectionChange?.(readSelectionFromDom(event.currentTarget));
+                }
                 const nextDecorations = removePrimaryDecorations(decorations);
                 if (nextDecorations === decorations) return;
                 event.currentTarget.replaceChildren(
@@ -5940,7 +6632,14 @@ function RichTextEditableSurface({
                 );
             }}
             onMouseUp={(event) => onSelectionChange?.(readSelectionFromDom(event.currentTarget))}
-            onKeyUp={(event) => onSelectionChange?.(readSelectionFromDom(event.currentTarget))}
+            onKeyUp={(event) => {
+                if (suppressNextKeySelectionRef?.current) {
+                    suppressNextKeySelectionRef.current = false;
+                    event.stopPropagation();
+                    return;
+                }
+                onSelectionChange?.(readSelectionFromDom(event.currentTarget));
+            }}
             onMouseOver={(event) => {
                 const linkTrigger = linkTriggerFromEvent(event.currentTarget, event.target);
                 if (linkTrigger) {
@@ -6075,21 +6774,27 @@ function BlockAffordance({
     meta,
     listNumber,
     onStartDrag,
+    onStartBlockDragFromHandle,
     onToggleTodo,
 }: {
     blockId: string;
     meta: RichBlockMeta;
     listNumber: number | null;
     onStartDrag: ReturnType<typeof useBlockReorder>['startDrag'];
+    onStartBlockDragFromHandle(blockId: string, event: PointerEvent<HTMLElement>): void;
     onToggleTodo(): void;
 }) {
+    const selectAndStartDrag = (event: PointerEvent<HTMLElement>) => {
+        onStartBlockDragFromHandle(blockId, event);
+    };
+
     if (meta.type === 'list_item') {
         return (
             <button
                 type="button"
                 className="blockAffordance blockAffordanceButton blockAffordanceMarker"
                 aria-label="Move block"
-                onPointerDown={(event) => onStartDrag(blockId, event)}
+                onPointerDown={selectAndStartDrag}
             >
                 {meta.kind === 'ordered' ? `${listNumber ?? 1}.` : '•'}
             </button>
@@ -6102,7 +6807,7 @@ function BlockAffordance({
                 data-block-drag-affordance="todo"
                 onPointerDown={(event) => {
                     if (event.target !== event.currentTarget) return;
-                    onStartDrag(blockId, event);
+                    selectAndStartDrag(event);
                 }}
                 onClickCapture={(event) => {
                     if (event.currentTarget.dataset.blockDragSuppressClick !== 'true') return;
@@ -6116,7 +6821,7 @@ function BlockAffordance({
                     type="checkbox"
                     checked={meta.checked}
                     aria-label="Toggle todo"
-                    onPointerDown={(event) => onStartDrag(blockId, event)}
+                    onPointerDown={selectAndStartDrag}
                     onClickCapture={(event) => {
                         if (event.currentTarget.dataset.blockDragSuppressClick !== 'true') return;
                         delete event.currentTarget.dataset.blockDragSuppressClick;
@@ -6133,7 +6838,7 @@ function BlockAffordance({
             type="button"
             className="blockAffordance blockAffordanceButton blockAffordanceHandle"
             aria-label="Move block"
-            onPointerDown={(event) => onStartDrag(blockId, event)}
+            onPointerDown={selectAndStartDrag}
         >
             ⋮⋮
         </button>
@@ -6510,6 +7215,12 @@ const editorSelectionKey = (selection: EditorSelection): string => {
     if (selection.type === 'caret') {
         return `caret:${selection.point.blockId}:${selection.point.offset}`;
     }
+    if (selection.type === 'block') {
+        return `block:${selection.anchorBlockId}:${selection.focusBlockId}`;
+    }
+    if (selection.type === 'table-cells') {
+        return `table-cells:${selection.tableId}:${selection.anchorCellId}:${selection.focusCellId}`;
+    }
     return [
         'range',
         selection.anchor.blockId,
@@ -6575,7 +7286,7 @@ const selectionSegmentsForBlocks = (
     blocks: RichFormattedBlock[],
     selection: EditorSelection,
 ): Array<{blockId: string; startOffset: number; endOffset: number}> => {
-    if (selection.type === 'caret') return [];
+    if (selection.type !== 'range') return [];
     const blockIds = blocks.map((block) => block.id);
     const anchorIndex = blockIds.indexOf(selection.anchor.blockId);
     const focusIndex = blockIds.indexOf(selection.focus.blockId);

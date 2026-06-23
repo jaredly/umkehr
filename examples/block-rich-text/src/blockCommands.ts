@@ -40,6 +40,7 @@ import {
     normalizeSelectionSegments,
     pointTextLength,
     segmentText,
+    tableCellRectangleForSelection,
     visibleBlockIds,
     type BlockPoint,
     type EditorSelection,
@@ -1102,9 +1103,9 @@ const adjustSelectionForRemovedPrefixes = (
         const removed = removedPrefixByBlock.get(point.blockId) ?? 0;
         return removed ? {...point, offset: Math.max(0, point.offset - removed)} : point;
     };
-    return selection.type === 'caret'
-        ? caret(selection.point.blockId, adjustPoint(selection.point).offset)
-        : {type: 'range', anchor: adjustPoint(selection.anchor), focus: adjustPoint(selection.focus)};
+    if (selection.type === 'caret') return caret(selection.point.blockId, adjustPoint(selection.point).offset);
+    if (selection.type !== 'range') return selection;
+    return {type: 'range', anchor: adjustPoint(selection.anchor), focus: adjustPoint(selection.focus)};
 };
 
 const lastVisibleCharId = (state: CachedState<RichBlockMeta>, blockId: string): Lamport | null => {
@@ -1724,6 +1725,129 @@ export const moveTableCell = (
     return {state: next, ops, selection: caret(cellId, 0)};
 };
 
+export const moveTableCellRectangleContents = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    target: {rowId: string; index: number},
+    context: CommandContext,
+): CommandResult | null => {
+    if (selection.type !== 'table-cells') return null;
+    const rectangle = tableCellRectangleForSelection(state, selection);
+    if (!rectangle) return null;
+    const rows = tableRows(state, rectangle.tableId);
+    const targetRowIndex = rows.indexOf(target.rowId);
+    if (targetRowIndex < 0) return null;
+
+    const height = rectangle.endRowIndex - rectangle.startRowIndex + 1;
+    const width = rectangle.endColumnIndex - rectangle.startColumnIndex + 1;
+    if (targetRowIndex + height > rows.length) {
+        return {state, ops: [], selection};
+    }
+
+    const sourceRows = rows.slice(rectangle.startRowIndex, rectangle.endRowIndex + 1);
+    const sourceTexts = sourceRows.map((rowId) => {
+        const cells = tableCells(state, rowId);
+        return Array.from({length: width}, (_, columnOffset) => {
+            const cellId = cells[rectangle.startColumnIndex + columnOffset];
+            return cellId ? blockContents(state, cellId) : '';
+        });
+    });
+
+    let working = state;
+    const ops: Array<Op<RichBlockMeta>> = [];
+    const targetCellRows: string[][] = [];
+    for (let rowOffset = 0; rowOffset < height; rowOffset++) {
+        const rowId = rows[targetRowIndex + rowOffset];
+        const cells: string[] = [];
+        for (let columnOffset = 0; columnOffset < width; columnOffset++) {
+            const targetIndex = target.index + columnOffset;
+            while (tableCells(working, rowId).length <= targetIndex) {
+                const inserted = createMissingTableCell(
+                    working,
+                    rowId,
+                    tableCells(working, rowId).length,
+                    context,
+                );
+                working = inserted.state;
+                ops.push(...inserted.ops);
+            }
+            cells.push(tableCells(working, rowId)[targetIndex]);
+        }
+        targetCellRows.push(cells);
+    }
+
+    const cellsToClear = new Set<string>();
+    for (let rowOffset = 0; rowOffset < height; rowOffset++) {
+        const sourceCells = tableCells(working, rows[rectangle.startRowIndex + rowOffset]);
+        for (let columnOffset = 0; columnOffset < width; columnOffset++) {
+            const sourceCellId = sourceCells[rectangle.startColumnIndex + columnOffset];
+            if (sourceCellId) cellsToClear.add(sourceCellId);
+            const targetCellId = targetCellRows[rowOffset]?.[columnOffset];
+            if (targetCellId) cellsToClear.add(targetCellId);
+        }
+    }
+
+    for (const cellId of cellsToClear) {
+        const cleared = clearCellContents(working, cellId);
+        working = cleared.state;
+        ops.push(...cleared.ops);
+    }
+
+    let focusCellId: string | null = null;
+    for (let rowOffset = 0; rowOffset < height; rowOffset++) {
+        for (let columnOffset = 0; columnOffset < width; columnOffset++) {
+            const targetCellId = targetCellRows[rowOffset]?.[columnOffset];
+            if (!targetCellId) continue;
+            const text = sourceTexts[rowOffset]?.[columnOffset] ?? '';
+            if (text) {
+                const inserted = insertTextAtPoint(working, {blockId: targetCellId, offset: 0}, text, context);
+                working = inserted.state;
+                ops.push(...inserted.ops);
+            }
+            focusCellId = targetCellId;
+        }
+    }
+
+    const anchorCellId = targetCellRows[0]?.[0] ?? focusCellId ?? selection.anchorCellId;
+    return {
+        state: working,
+        ops,
+        selection: {
+            type: 'table-cells',
+            tableId: rectangle.tableId,
+            anchorCellId,
+            focusCellId: focusCellId ?? anchorCellId,
+        },
+    };
+};
+
+export const deleteTableCellSelection = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+): CommandResult | null => {
+    if (selection.type !== 'table-cells') return null;
+    const rectangle = tableCellRectangleForSelection(state, selection);
+    if (!rectangle) return null;
+    const rows = tableRows(state, selection.tableId);
+    const columnCount = tableColumnCount(state, selection.tableId);
+    const isFullRows =
+        rectangle.startColumnIndex === 0 &&
+        rectangle.endColumnIndex >= columnCount - 1 &&
+        rectangle.startRowIndex <= rectangle.endRowIndex;
+    const isFullColumn =
+        rectangle.startRowIndex === 0 &&
+        rectangle.endRowIndex >= rows.length - 1 &&
+        rectangle.startColumnIndex === rectangle.endColumnIndex;
+
+    if (isFullRows) {
+        return deleteTableRows(state, selection.tableId, rows.slice(rectangle.startRowIndex, rectangle.endRowIndex + 1));
+    }
+    if (isFullColumn) {
+        return deleteTableColumn(state, selection.tableId, rectangle.startColumnIndex);
+    }
+    return clearTableCells(state, rectangle.cellIds, selection.focusCellId);
+};
+
 export const advanceFromTableCellEnd = (
     state: CachedState<RichBlockMeta>,
     selection: EditorSelection,
@@ -1826,6 +1950,116 @@ const tableColumnCount = (state: CachedState<RichBlockMeta>, tableId: string): n
         1,
         ...rows.map((rowId) => tableCells(state, rowId).length),
     );
+};
+
+const deleteTableRows = (
+    state: CachedState<RichBlockMeta>,
+    tableId: string,
+    rowIds: string[],
+): CommandResult => {
+    let working = state;
+    const ops: Array<Op<RichBlockMeta>> = [];
+    for (const rowId of rowIds) {
+        if (!working.state.blocks[rowId] || working.state.blocks[rowId].deleted) continue;
+        const deleted = deleteVisibleSubtreeOps(working, rowId);
+        working = applyMany(working, deleted, annotationVirtualParents(working));
+        ops.push(...deleted);
+    }
+    return {state: working, ops, selection: fallbackTableSelection(working, tableId)};
+};
+
+const deleteTableColumn = (
+    state: CachedState<RichBlockMeta>,
+    tableId: string,
+    columnIndex: number,
+): CommandResult => {
+    let working = state;
+    const ops: Array<Op<RichBlockMeta>> = [];
+    for (const rowId of tableRows(state, tableId)) {
+        const cellId = tableCells(working, rowId)[columnIndex];
+        if (!cellId || !working.state.blocks[cellId] || working.state.blocks[cellId].deleted) continue;
+        const deleted = deleteVisibleSubtreeOps(working, cellId);
+        working = applyMany(working, deleted, annotationVirtualParents(working));
+        ops.push(...deleted);
+    }
+    return {state: working, ops, selection: fallbackTableSelection(working, tableId)};
+};
+
+const clearTableCells = (
+    state: CachedState<RichBlockMeta>,
+    cellIds: string[],
+    focusCellId: string,
+): CommandResult => {
+    let working = state;
+    const ops: Array<Op<RichBlockMeta>> = [];
+    for (const cellId of cellIds) {
+        if (!working.state.blocks[cellId] || working.state.blocks[cellId].deleted) continue;
+        const childIds = visibleBlockChildren(working, cellId, annotationVirtualParents(working));
+        for (const childId of childIds) {
+            if (!working.state.blocks[childId] || working.state.blocks[childId].deleted) continue;
+            const deleted = deleteVisibleSubtreeOps(working, childId);
+            working = applyMany(working, deleted, annotationVirtualParents(working));
+            ops.push(...deleted);
+        }
+        const length = pointTextLength(working, cellId);
+        if (length > 0) {
+            const deletedText = deleteRangeOps(working, {
+                block: parseLamportString(cellId),
+                startOffset: 0,
+                endOffset: length,
+            });
+            working = applyMany(working, deletedText, annotationVirtualParents(working));
+            ops.push(...deletedText);
+        }
+    }
+    const fallbackCellId =
+        working.state.blocks[focusCellId] && !working.state.blocks[focusCellId].deleted
+            ? focusCellId
+            : cellIds.find((cellId) => working.state.blocks[cellId] && !working.state.blocks[cellId].deleted);
+    const fallbackBlockId = fallbackCellId ?? editableBlockIds(working)[0] ?? focusCellId;
+    const fallback = caret(fallbackBlockId, fallbackCellId ? 0 : pointTextLength(working, fallbackBlockId));
+    return {state: working, ops, selection: fallback};
+};
+
+const clearCellContents = (
+    state: CachedState<RichBlockMeta>,
+    cellId: string,
+): {state: CachedState<RichBlockMeta>; ops: Array<Op<RichBlockMeta>>} => {
+    let working = state;
+    const ops: Array<Op<RichBlockMeta>> = [];
+    if (!working.state.blocks[cellId] || working.state.blocks[cellId].deleted) return {state: working, ops};
+    const childIds = visibleBlockChildren(working, cellId, annotationVirtualParents(working));
+    for (const childId of childIds) {
+        if (!working.state.blocks[childId] || working.state.blocks[childId].deleted) continue;
+        const deleted = deleteVisibleSubtreeOps(working, childId);
+        working = applyMany(working, deleted, annotationVirtualParents(working));
+        ops.push(...deleted);
+    }
+    const length = pointTextLength(working, cellId);
+    if (length > 0) {
+        const deletedText = deleteRangeOps(working, {
+            block: parseLamportString(cellId),
+            startOffset: 0,
+            endOffset: length,
+        });
+        working = applyMany(working, deletedText, annotationVirtualParents(working));
+        ops.push(...deletedText);
+    }
+    return {state: working, ops};
+};
+
+const fallbackTableSelection = (
+    state: CachedState<RichBlockMeta>,
+    tableId: string,
+): EditorSelection => {
+    const firstRowId = tableRows(state, tableId)[0];
+    const firstCellId = firstRowId ? tableCells(state, firstRowId)[0] : null;
+    if (firstCellId) return caret(firstCellId, 0);
+    if (state.state.blocks[tableId] && !state.state.blocks[tableId].deleted) {
+        return caret(tableId, pointTextLength(state, tableId));
+    }
+    const fallbackBlockId = editableBlockIds(state)[0] ?? tableId;
+    return caret(fallbackBlockId, pointTextLength(state, fallbackBlockId));
 };
 
 type TableNavigationLocation =
@@ -2025,7 +2259,7 @@ const lastPointForSelection = (
 ): BlockPoint => {
     if (selection.type === 'caret') return clampPoint(state, selection.point);
     const segments = normalizeSelectionSegments(state, selection);
-    if (!segments.length) return clampPoint(state, selection.focus);
+    if (!segments.length) return firstPointForSelection(state, selection);
     const segment = segments[segments.length - 1];
     return {blockId: segment.blockId, offset: segment.endOffset};
 };
@@ -2612,7 +2846,7 @@ const normalizedSelectionSpan = (
     state: CachedState<RichBlockMeta>,
     selection: EditorSelection,
 ): {start: BlockPoint; end: BlockPoint} | null => {
-    if (selection.type === 'caret') return null;
+    if (selection.type !== 'range') return null;
 
     const anchor = clampPoint(state, selection.anchor);
     const focus = clampPoint(state, selection.focus);

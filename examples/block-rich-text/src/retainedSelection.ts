@@ -14,7 +14,14 @@ export type RetainedPoint = {
 
 export type RetainedSelection =
     | {type: 'caret'; point: RetainedPoint}
-    | {type: 'range'; anchor: RetainedPoint; focus: RetainedPoint};
+    | {type: 'range'; anchor: RetainedPoint; focus: RetainedPoint}
+    | {type: 'block'; anchorBlockId: string; focusBlockId: string}
+    | {
+          type: 'table-cells';
+          tableId: string;
+          anchorCellId: string;
+          focusCellId: string;
+      };
 
 export const initialRetainedSelection = (state: CachedState<RichBlockMeta>): RetainedSelection => {
     const blockId = editableBlockIds(state)[0] ?? allBlockIds(state)[0] ?? '';
@@ -27,6 +34,21 @@ export const retainSelection = (
 ): RetainedSelection => {
     if (selection.type === 'caret') {
         return {type: 'caret', point: retainPoint(state, selection.point)};
+    }
+    if (selection.type === 'block') {
+        return {
+            type: 'block',
+            anchorBlockId: selection.anchorBlockId,
+            focusBlockId: selection.focusBlockId,
+        };
+    }
+    if (selection.type === 'table-cells') {
+        return {
+            type: 'table-cells',
+            tableId: selection.tableId,
+            anchorCellId: selection.anchorCellId,
+            focusCellId: selection.focusCellId,
+        };
     }
     return {
         type: 'range',
@@ -47,6 +69,21 @@ export const resolveSelection = (
     if (selection.type === 'caret') {
         return {type: 'caret', point: resolvePoint(state, selection.point)};
     }
+    if (selection.type === 'block') {
+        return {
+            type: 'block',
+            anchorBlockId: resolveBlockId(state, selection.anchorBlockId),
+            focusBlockId: resolveBlockId(state, selection.focusBlockId),
+        };
+    }
+    if (selection.type === 'table-cells') {
+        return {
+            type: 'table-cells',
+            tableId: resolveBlockId(state, selection.tableId),
+            anchorCellId: resolveBlockId(state, selection.anchorCellId),
+            focusCellId: resolveBlockId(state, selection.focusCellId),
+        };
+    }
     const anchor = resolvePoint(state, selection.anchor);
     const focus = resolvePoint(state, selection.focus);
     if (anchor.blockId === focus.blockId && anchor.offset === focus.offset) {
@@ -64,6 +101,12 @@ export const resolvePoint = (state: CachedState<RichBlockMeta>, point: RetainedP
 };
 
 const allBlockIds = (state: CachedState<RichBlockMeta>): string[] => Object.keys(state.state.blocks).sort();
+
+const resolveBlockId = (state: CachedState<RichBlockMeta>, blockId: string): string => {
+    const block = state.state.blocks[blockId];
+    if (block && !block.deleted && !state.cache.joinedBlocks[blockId]) return blockId;
+    return editableBlockIds(state)[0] ?? allBlockIds(state)[0] ?? blockId;
+};
 
 export const retainedCaret = (state: CachedState<RichBlockMeta>, blockId: string, offset: number): RetainedSelection =>
     retainSelection(state, caret(blockId, offset));

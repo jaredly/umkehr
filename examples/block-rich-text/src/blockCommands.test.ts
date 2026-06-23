@@ -36,6 +36,7 @@ import {
     insertTextWithRetainedMarks,
     moveBlock,
     moveTableCell,
+    moveTableCellRectangleContents,
     moveTableCellByTab,
     moveTableRow,
     moveTableSelectionByArrow,
@@ -873,6 +874,47 @@ describe('block rich text commands', () => {
         expect(nextShape.cells.map((row) => row.length)).toEqual([2, 2]);
         expect(moved.selection).toEqual(caret(nextShape.cells[1][1], 0));
         expect(moved.ops.length).toBeGreaterThan(0);
+    });
+
+    it('creates missing target cells when moving a table rectangle into a sparse row', () => {
+        const demo = createDemoState();
+        const context = ctx();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = createTable(demo.left.state, caret(blockId, 0), context, {rows: 2, columns: 1});
+        const tableId = rootBlockIds(result.state)[1];
+        let shape = tableShape(result.state, tableId);
+        result = createMissingTableCell(result.state, shape.rows[0], 1, context);
+        shape = tableShape(result.state, tableId);
+        result = insertText(result.state, caret(shape.cells[0][0], 0), 'A', context);
+        result = insertText(result.state, caret(shape.cells[0][1], 0), 'B', context);
+
+        const moved = moveTableCellRectangleContents(
+            result.state,
+            {
+                type: 'table-cells',
+                tableId,
+                anchorCellId: shape.cells[0][0],
+                focusCellId: shape.cells[0][1],
+            },
+            {rowId: shape.rows[1], index: 0},
+            context,
+        );
+        if (!moved) throw new Error('expected rectangle move');
+
+        const nextShape = tableShape(moved.state, tableId);
+        expect(nextShape.cells.map((row) => row.length)).toEqual([2, 2]);
+        expect(nextShape.cells.flat().map((cellId) => blockContents(moved.state, cellId))).toEqual([
+            '',
+            '',
+            'A',
+            'B',
+        ]);
+        expect(moved.selection).toEqual({
+            type: 'table-cells',
+            tableId,
+            anchorCellId: nextShape.cells[1][0],
+            focusCellId: nextShape.cells[1][1],
+        });
     });
 
     it('treats row headers as table navigation targets', () => {

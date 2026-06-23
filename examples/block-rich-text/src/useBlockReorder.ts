@@ -18,6 +18,7 @@ export type DropTarget = {
 
 type PendingDrag = {
     id: string;
+    ids: string[];
     pointerId: number;
     startX: number;
     startY: number;
@@ -29,20 +30,21 @@ export function useBlockReorder({
     onMove,
 }: {
     blocks: BlockOutlineItem[];
-    onMove(blockId: string, target: MoveTarget): void;
+    onMove(blockIds: string[], target: MoveTarget): void;
 }) {
     const [draggingId, setDraggingId] = useState<string | null>(null);
     const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
     const rowRefs = useRef(new Map<string, HTMLElement>());
     const blocksRef = useRef(blocks);
     const draggingRef = useRef<string | null>(null);
+    const draggingIdsRef = useRef<string[]>([]);
     const pendingDragRef = useRef<PendingDrag | null>(null);
     const [hasPointerGesture, setHasPointerGesture] = useState(false);
 
     blocksRef.current = blocks;
 
     const draggingSubtreeIds = useMemo(
-        () => (draggingId ? subtreeIds(blocks, draggingId) : new Set<string>()),
+        () => (draggingId ? subtreeIdsForRoots(blocks, draggingIdsRef.current) : new Set<string>()),
         [blocks, draggingId],
     );
 
@@ -53,6 +55,7 @@ export function useBlockReorder({
 
     const findDropTarget = useCallback((clientX: number, clientY: number): DropTarget | null => {
         const dragged = draggingRef.current;
+        const draggedIds = draggingIdsRef.current;
         const currentBlocks = blocksRef.current;
         const rows = currentBlocks
             .map((block) => {
@@ -69,6 +72,7 @@ export function useBlockReorder({
                 clientY,
                 rect: containing.rect,
                 dragged,
+                draggedIds,
             });
         }
 
@@ -80,6 +84,7 @@ export function useBlockReorder({
                 indicatorPlacement: 'before',
                 indicatorDepth: before.block.depth,
                 dragged,
+                draggedIds,
             });
         }
         const last = rows[rows.length - 1].block;
@@ -89,6 +94,7 @@ export function useBlockReorder({
             indicatorPlacement: 'after',
             indicatorDepth: last.depth,
             dragged,
+            draggedIds,
         });
     }, []);
 
@@ -104,6 +110,7 @@ export function useBlockReorder({
                 if (Math.hypot(deltaX, deltaY) < DRAG_START_THRESHOLD_PX) return;
                 pendingDragRef.current = null;
                 draggingRef.current = pending.id;
+                draggingIdsRef.current = pending.ids;
                 pending.source.dataset.blockDragSuppressClick = 'true';
                 window.setTimeout(() => {
                     if (pending.source.dataset.blockDragSuppressClick === 'true') {
@@ -123,13 +130,15 @@ export function useBlockReorder({
                 ? findDropTarget(event.clientX, event.clientY) ?? dropTarget
                 : null;
             const dragged = draggingRef.current;
+            const draggedIds = draggingIdsRef.current;
             pendingDragRef.current = null;
             setDraggingId(null);
             setDropTarget(null);
             setHasPointerGesture(false);
             draggingRef.current = null;
+            draggingIdsRef.current = [];
             if (!dragged || !target) return;
-            onMove(dragged, target.command);
+            onMove(draggedIds.length ? draggedIds : [dragged], target.command);
         };
         const onPointerCancel = () => {
             pendingDragRef.current = null;
@@ -137,6 +146,7 @@ export function useBlockReorder({
             setDropTarget(null);
             setHasPointerGesture(false);
             draggingRef.current = null;
+            draggingIdsRef.current = [];
         };
         window.addEventListener('pointermove', onPointerMove, {passive: false});
         window.addEventListener('pointerup', onPointerUp, {passive: false});
@@ -148,18 +158,20 @@ export function useBlockReorder({
         };
     }, [dropTarget, findDropTarget, hasPointerGesture, onMove]);
 
-    const startDrag = useCallback((id: string, event: PointerEvent<HTMLElement>) => {
+    const startDrag = useCallback((id: string, event: PointerEvent<HTMLElement>, ids: string[] = [id]) => {
         if (!event.isPrimary || event.button !== 0) return;
         event.stopPropagation();
-        event.currentTarget.setPointerCapture(event.pointerId);
+        event.currentTarget.setPointerCapture?.(event.pointerId);
         pendingDragRef.current = {
             id,
+            ids: ids.length ? ids : [id],
             pointerId: event.pointerId,
             startX: event.clientX,
             startY: event.clientY,
             source: event.currentTarget,
         };
         draggingRef.current = null;
+        draggingIdsRef.current = [];
         setDraggingId(null);
         setDropTarget(null);
         setHasPointerGesture(true);
@@ -176,11 +188,13 @@ const resolveDropTarget = (
         clientY,
         rect,
         dragged,
+        draggedIds,
     }: {
         clientX: number;
         clientY: number;
         rect: DOMRect;
         dragged: string | null;
+        draggedIds: string[];
     },
 ): DropTarget | null => {
     const ratio = rect.height > 0 ? (clientY - rect.top) / rect.height : 0.5;
@@ -192,6 +206,7 @@ const resolveDropTarget = (
             command: {type: 'child', parentBlockId: hovered.id, at},
             ...targetChildIndicator(blocks, hovered, at),
             dragged,
+            draggedIds,
         });
     }
 
@@ -202,11 +217,12 @@ const resolveDropTarget = (
             indicatorPlacement: 'before',
             indicatorDepth: hovered.depth,
             dragged,
+            draggedIds,
         });
     }
 
     const afterSubtree = targetAfterSubtree(blocks, hovered);
-    return normalizeDropTarget(blocks, hovered, {...afterSubtree, dragged});
+    return normalizeDropTarget(blocks, hovered, {...afterSubtree, dragged, draggedIds});
 };
 
 const targetAfterSubtree = (
@@ -283,14 +299,14 @@ const lastSubtreeItem = (blocks: BlockOutlineItem[], root: BlockOutlineItem): Bl
 const normalizeDropTarget = (
     blocks: BlockOutlineItem[],
     hovered: BlockOutlineItem,
-    target: DropTarget & {dragged: string | null},
+    target: DropTarget & {dragged: string | null; draggedIds: string[]},
 ): DropTarget | null => {
-    const {dragged, ...dropTarget} = target;
+    const {dragged, draggedIds, ...dropTarget} = target;
     if (!dragged) return dropTarget;
-    const draggedSubtree = subtreeIds(blocks, dragged);
+    const draggedSubtree = subtreeIdsForRoots(blocks, draggedIds.length ? draggedIds : [dragged]);
     if (draggedSubtree.has(hovered.id)) return null;
     if (moveTargetTouchesSubtree(dropTarget.command, draggedSubtree)) return null;
-    if (isNoop(blocks, dragged, dropTarget.command)) return null;
+    if ((draggedIds.length <= 1) && isNoop(blocks, dragged, dropTarget.command)) return null;
     return dropTarget;
 };
 
@@ -327,6 +343,14 @@ const subtreeIds = (blocks: BlockOutlineItem[], rootId: string): Set<string> => 
     const ids = new Set<string>([rootId]);
     for (let i = rootIndex + 1; i < blocks.length && blocks[i].depth > rootDepth; i++) {
         ids.add(blocks[i].id);
+    }
+    return ids;
+};
+
+const subtreeIdsForRoots = (blocks: BlockOutlineItem[], rootIds: string[]): Set<string> => {
+    const ids = new Set<string>();
+    for (const rootId of rootIds) {
+        for (const id of subtreeIds(blocks, rootId)) ids.add(id);
     }
     return ids;
 };

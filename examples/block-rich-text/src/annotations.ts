@@ -551,6 +551,7 @@ const bodySelectionRange = (
     state: CachedState<RichBlockMeta>,
     selection: EditorSelection,
 ): {blockId: string; startOffset: number; endOffset: number} | null => {
+    if (selection.type !== 'caret' && selection.type !== 'range') return null;
     const anchor = selection.type === 'caret' ? selection.point : selection.anchor;
     const focus = selection.type === 'caret' ? selection.point : selection.focus;
     if (anchor.blockId !== focus.blockId) return null;

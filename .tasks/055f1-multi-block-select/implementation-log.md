@@ -1,0 +1,56 @@
+# Implementation Log: Multi-Block And Block-Level Selection
+
+## 2026-06-23
+
+- Started Phase 1 by widening the editor selection model with `block` and `table-cells` variants.
+- Added retained selection variants for block-level selections. These retain stable block ids directly rather than character anchors.
+- Added initial selection helpers for text-vs-block checks, focus block ids, selected block ids, and selected top-level block ids.
+- Added block-level decoration scaffolding in `selectionSet.ts` so later UI work can style selected block rows and table cells outside inline text spans.
+- Fixed text-only call sites to ignore block-level selections or explicitly convert them through selection helpers instead of assuming every non-caret is an inline range.
+- Added selection-set tests for retaining/resolving block selections and rendering block-level decorations separately from inline text decorations.
+- Wired block-level decorations through `App.tsx` and added wrapper-level CSS classes for selected block rows, table rows, and table cells.
+- Verification: `npm run typecheck`, `npm exec tsc -- -p examples/block-rich-text/tsconfig.json --noEmit --pretty false`, and `npm exec vitest -- run examples/block-rich-text/src/selectionSet.test.ts examples/block-rich-text/src/retainedSelection.test.ts` all pass.
+- Implemented root-level plain pointer drag selection across separate contenteditable block surfaces. The gesture uses a local transient selection overlay during pointer movement and commits to the retained selection set on pointer up.
+- Added a jsdom caret-position shim and app test covering plain drag from one block into another.
+- Verification: block-rich-text typecheck plus focused App selection/drag tests pass.
+- Implemented an initial linear block-selection interaction path: pointer-down on block/row handles selects the whole visible subtree, wrapper-level block selection styles show the selected/focus block, printable typing enters text mode at the focus block end, Enter creates a block after the selected block run, and Delete/Backspace delete selected top-level blocks with descendants.
+- Added focused App tests for handle selection, typing into block selection, Enter after block selection, and Delete for block selection.
+- Issue/workaround: block selection keyboard handling is currently rooted at `BlockEditor` and uses keydown bubbling from handle buttons. This is sufficient for the current handle-driven selection path, but later focus management should make block selection independently focusable.
+- Extended `useBlockReorder` to carry a dragged block group while retaining a source block id for drag-root styling. Drop target validation now rejects targets inside any selected subtree.
+- Drag handles now preserve an existing non-caret selection when the handle is inside the selected group; otherwise they switch to a subtree block selection for the clicked handle.
+- Added group move ordering so selected blocks preserve visible order when dropped before, after, or as children.
+- Added a test proving blocks touched by a text selection drag together and that the original retained text selection is still displayed after the drop.
+- Issue fixed: caret selections were initially treated as selected block groups, so clicking a handle on the caret block did not switch to block selection. Group derivation now ignores plain caret selections.
+- Workaround: `useBlockReorder` now tolerates missing `setPointerCapture` for jsdom tests.
+- Implemented the first table-cell block-selection path: Tab from a table cell now stores a single-cell `table-cells` selection, and cell border clicks create visible cell block selections.
+- Added table rectangle selection helpers that resolve anchor/focus cells to row and column coordinates and return only existing cells inside the rectangle, so sparse missing cells are ignored by selection decoration.
+- Added border-drag selection across table cells. This is separate from the existing focused-cell border reorder path: dragging from an unselected cell border creates/extends a rectangular selection, while dragging the already focused cell border still reorders the cell.
+- Added focused App tests for Tab-to-cell-selection, border-click cell selection, and diagonal rectangle selection.
+- Verification: block-rich-text typecheck plus focused table/cell App tests and selection retention tests pass.
+- Issue/workaround: the jsdom rectangle-drag test waits for the initial pointerdown selection render before firing pointermove because the window-level drag listeners are installed by a layout effect after the first render.
+- Implemented table-aware Delete/Backspace routing for `table-cells` selections. Single/partial cell rectangles clear cell contents, full-row selections delete rows, and full-column selections delete cells from that column.
+- Added focused App tests for partial cell clear, full-row delete, and full-column delete.
+- Verification: block-rich-text typecheck and focused table/cell App tests pass.
+- Started Phase 8 clipboard support by extending copy serialization to include block-level selections and table-cell rectangles. Table-cell rectangles now carry an optional TSV representation, and the main copy handler writes TSV to both `text/plain` and `text/tab-separated-values`.
+- Added root-level copy handling for block-level selections and changed copy serialization to retain the rendered block-level selection set instead of asking the DOM for a live text selection.
+- Issue: App-level jsdom tests for Cmd-C-style block/cell copy were unstable because synthetic copy events on the block-selection target did not reliably invoke the React clipboard path. The implementation compiles, but clipboard copy needs browser/manual verification or a lower-level serializer test harness. Paste behavior for block/cell structured payloads has not been implemented yet.
+- Implemented the supported structured paste cases for table-cell selections: pasting onto a full-row selection inserts a new row below, and pasting onto a full-column selection inserts an adjacent column to the right. Unsupported block-level structured paste currently no-ops instead of falling back to destructive text insertion.
+- Changed rich paste routing so block/cell selections use the retained app selection instead of replacing it with a live DOM text selection.
+- Added focused App tests for structured row paste and structured column paste.
+- Added lower-level clipboard serialization tests for whole-block copy and table-cell rectangle TSV copy.
+- Issue fixed: block-level selections were being passed through `mergeOverlappingRanges`, which is text-selection-only and dropped block/cell selections before serialization. The clipboard serializer now preserves mixed block-level selections and only merges text ranges when appropriate.
+- Fixed toolbar/edit command routing so retained block-level selections are preserved instead of being replaced by a live DOM text selection. This lets block type commands apply to selected blocks.
+- Added an App test for applying a block type change to a block selection.
+- Fixed plain-text paste while in block/cell selection mode so it converts to a caret at the focus block/cell end before pasting, matching printable typing behavior.
+- Added an App test for plain text paste into a block selection.
+- Started Phase 9 with full-column table drag reorder. Dragging the focused cell border while a clean full-column cell selection is active now moves every selected column cell row-by-row to the drop index and preserves the existing table-cell selection.
+- Added an App test for dragging a selected full table column after the adjacent column.
+- Added arbitrary table rectangle content dragging for non-column multi-cell selections. The move snapshots selected cell text, clears source and target cells, creates missing target cells within existing rows as needed, inserts the moved text, and preserves a table-cell selection over the destination rectangle.
+- Added an App test for dragging a selected two-cell row rectangle onto another row.
+- Limitation: rectangle content dragging currently preserves top-level cell text only. Nested child blocks inside moved cells are cleared rather than moved as structured subtrees.
+- Added a command-level test proving rectangle content moves create missing target cells when dropped into a sparse row.
+- Tightened the block/cell selection focus model. The editor root `.blockList` is now programmatically focusable and becomes the active element when selecting blocks from handles, selecting cells from borders, dragging selected cells/columns, or tabbing into cell selection mode.
+- Updated block/cell selection keyboard tests to dispatch typing, Enter, and Delete from the focused editor root instead of relying on keydown bubbling from handle buttons.
+- Fixed a Tab focus regression where table-cell Tab briefly created a cell block selection but then the native DOM selection could remain in the previous contenteditable. Block-level selections no longer schedule text-range restoration, editable restore effects ignore non-text selections, and entering block/cell selection clears native DOM selection while focusing `.blockList`.
+- Refined the block/cell selection focus model so the selected block's own contenteditable becomes `document.activeElement` instead of the `.blockList` root. Programmatic block focus clears native DOM ranges while preserving the retained block/cell selection.
+- Fixed the follow-up Tab regression where the focused editable's synthetic keyup could bubble back to `.blockList` and overwrite the new cell block selection from the DOM. Suppressed block-selection keyups now stop propagation.

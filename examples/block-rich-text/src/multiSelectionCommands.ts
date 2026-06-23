@@ -39,6 +39,8 @@ import {
     updateBlockMeta,
     commandApplied,
     noCommand,
+    addTableColumn,
+    addTableRow,
     closeRetainedInlineMarkSessions,
     type CommandResult,
     type CommandContext,
@@ -50,6 +52,7 @@ import {resolveSelection, retainSelection} from './retainedSelection';
 import {
     dedupeSelectionSet,
     mergeOverlappingRanges,
+    primarySelection,
     reverseSortedRetainedEntries,
     resolveSelectionSet,
     type RetainedSelectionEntry,
@@ -63,7 +66,11 @@ import {
     isCollapsed,
     normalizeSelectionSegments,
     pointTextLength,
+    selectedBlockIdsForSelection,
     segmentText,
+    tableCellRectangleForSelection,
+    tableCellsForSelection,
+    tableRowsForSelection,
     type BlockPoint,
     type EditorSelection,
 } from './selectionModel';
@@ -228,6 +235,9 @@ export const pasteRichClipboardEverywhere = (
     payload: RichClipboardPayload,
     context: CommandContext,
 ): MultiCommandResult => {
+    const blockLevelPaste = pasteRichClipboardIntoBlockSelection(state, selection, payload, context);
+    if (blockLevelPaste) return blockLevelPaste;
+
     const deduped = dedupeSelectionSet(state, selection);
     const commandEntries = reverseSortedRetainedEntries(state, mergeOverlappingRanges(state, deduped));
     if (!commandEntries.length || !payload.fragments.length) return {state, ops: [], selection: deduped};
@@ -256,6 +266,135 @@ export const pasteRichClipboardEverywhere = (
             entries: nextEntries,
         }),
     };
+};
+
+const pasteRichClipboardIntoBlockSelection = (
+    state: CachedState<RichBlockMeta>,
+    selection: RetainedSelectionSet,
+    payload: RichClipboardPayload,
+    context: CommandContext,
+): MultiCommandResult | null => {
+    const resolved = resolveSelectionSet(state, selection);
+    const primary = primarySelection(resolved);
+    if (primary.type !== 'block' && primary.type !== 'table-cells') return null;
+    const noOp = {state, ops: [], selection: dedupeSelectionSet(state, selection)};
+    if (primary.type !== 'table-cells' || !payload.fragments.length) return noOp;
+
+    const rectangle = tableCellRectangleForSelection(state, primary);
+    if (!rectangle) return noOp;
+    const rows = tableRowsForSelection(state, rectangle.tableId);
+    const columnCount = Math.max(
+        1,
+        ...rows.map((rowId) => tableCellsForSelection(state, rowId).length),
+    );
+    const isFullRow =
+        rectangle.startColumnIndex === 0 &&
+        rectangle.endColumnIndex >= columnCount - 1 &&
+        rectangle.startRowIndex === rectangle.endRowIndex;
+    const isFullColumn =
+        rectangle.startRowIndex === 0 &&
+        rectangle.endRowIndex >= rows.length - 1 &&
+        rectangle.startColumnIndex === rectangle.endColumnIndex;
+
+    if (isFullRow) {
+        return pasteRichClipboardAsTableRow(state, selection, payload, primary.tableId, rows[rectangle.endRowIndex], context);
+    }
+    if (isFullColumn) {
+        return pasteRichClipboardAsTableColumn(
+            state,
+            selection,
+            payload,
+            primary.tableId,
+            rectangle.endColumnIndex + 1,
+            context,
+        );
+    }
+    return noOp;
+};
+
+const pasteRichClipboardAsTableRow = (
+    state: CachedState<RichBlockMeta>,
+    selection: RetainedSelectionSet,
+    payload: RichClipboardPayload,
+    tableId: string,
+    afterRowId: string | undefined,
+    context: CommandContext,
+): MultiCommandResult => {
+    const added = addTableRow(state, tableId, context, afterRowId);
+    let working = added.state;
+    const ops = [...added.ops];
+    const firstCellId = focusPoint(added.selection).blockId;
+    const rowId = working.state.blocks[firstCellId]
+        ? lamportToString(materializedBlockParent(working, firstCellId, annotationVirtualParents(working)))
+        : null;
+    const cells = rowId ? tableCellsForSelection(working, rowId) : [];
+    const pasted = pasteFragmentsIntoCells(working, cells, payload, context);
+    working = pasted.state;
+    ops.push(...pasted.ops);
+    const nextSelection = pasted.selection ?? added.selection;
+    return {
+        state: working,
+        ops,
+        selection: {
+            primaryId: selection.primaryId,
+            entries: [{id: selection.primaryId, selection: retainSelection(working, nextSelection)}],
+        },
+    };
+};
+
+const pasteRichClipboardAsTableColumn = (
+    state: CachedState<RichBlockMeta>,
+    selection: RetainedSelectionSet,
+    payload: RichClipboardPayload,
+    tableId: string,
+    columnIndex: number,
+    context: CommandContext,
+): MultiCommandResult => {
+    const added = addTableColumn(state, tableId, context, columnIndex);
+    let working = added.state;
+    const ops = [...added.ops];
+    const rows = tableRowsForSelection(working, tableId);
+    const cells = rows
+        .map((rowId) => tableCellsForSelection(working, rowId)[columnIndex])
+        .filter((cellId): cellId is string => Boolean(cellId));
+    const pasted = pasteFragmentsIntoCells(working, cells, payload, context);
+    working = pasted.state;
+    ops.push(...pasted.ops);
+    const nextSelection = pasted.selection ?? added.selection;
+    return {
+        state: working,
+        ops,
+        selection: {
+            primaryId: selection.primaryId,
+            entries: [{id: selection.primaryId, selection: retainSelection(working, nextSelection)}],
+        },
+    };
+};
+
+const pasteFragmentsIntoCells = (
+    state: CachedState<RichBlockMeta>,
+    cellIds: string[],
+    payload: RichClipboardPayload,
+    context: CommandContext,
+): {state: CachedState<RichBlockMeta>; ops: Array<Op<RichBlockMeta>>; selection: EditorSelection | null} => {
+    let working = state;
+    const ops: Array<Op<RichBlockMeta>> = [];
+    let selection: EditorSelection | null = null;
+    const fragments = payload.fragments.slice(0, cellIds.length);
+    fragments.forEach((fragment, index) => {
+        const cellId = cellIds[index];
+        if (!cellId) return;
+        const pasted = pasteRichClipboardAtSelection(
+            working,
+            caret(cellId, 0),
+            {...payload, fragments: [fragment]},
+            context,
+        );
+        working = pasted.state;
+        ops.push(...pasted.ops);
+        selection = pasted.selection;
+    });
+    return {state: working, ops, selection};
 };
 
 export const insertImageBlockEverywhere = (
@@ -538,7 +677,7 @@ const topLevelSelectedBlockIds = (
 };
 
 const blockIdsForSelection = (state: CachedState<RichBlockMeta>, selection: EditorSelection): string[] => {
-    if (selection.type === 'caret') return [selection.point.blockId];
+    if (selection.type !== 'range') return selectedBlockIdsForSelection(state, selection);
 
     const blocks = editableBlockIds(state);
     const anchorIndex = blocks.indexOf(selection.anchor.blockId);
@@ -689,7 +828,7 @@ const extendSelectionHorizontally = (
     direction: 'left' | 'right',
     unit: HorizontalMovementUnit,
 ): EditorSelection => {
-    const anchor = selection.type === 'caret' ? selection.point : selection.anchor;
+    const anchor = selection.type === 'range' ? selection.anchor : firstPointForSelection(state, selection);
     const focus = movePointHorizontally(state, focusPoint(selection), direction, unit);
     return {type: 'range', anchor, focus};
 };
@@ -699,7 +838,7 @@ const extendSelectionVertically = (
     selection: EditorSelection,
     direction: 'up' | 'down',
 ): EditorSelection => {
-    const anchor = selection.type === 'caret' ? selection.point : selection.anchor;
+    const anchor = selection.type === 'range' ? selection.anchor : firstPointForSelection(state, selection);
     const focus = movePointVertically(state, focusPoint(selection), direction);
     return {type: 'range', anchor, focus};
 };

@@ -55,6 +55,7 @@ export const readPointFromMouseEvent = (
 export const restoreSelectionToDom = (root: HTMLElement, selection: EditorSelection) => {
     const domSelection = window.getSelection();
     if (!domSelection) return;
+    if (selection.type !== 'caret' && selection.type !== 'range') return;
 
     const anchor = selection.type === 'caret' ? selection.point : selection.anchor;
     const focus = selection.type === 'caret' ? selection.point : selection.focus;

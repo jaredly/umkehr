@@ -49,6 +49,9 @@ const tableBlocks = (panel: HTMLElement): HTMLElement[] =>
 const tableBlockTexts = (panel: HTMLElement): string[] =>
     tableBlocks(panel).map(blockText);
 
+const tableCells = (panel: HTMLElement): HTMLElement[] =>
+    tableBlocks(panel).map((block) => block.closest<HTMLElement>('.tableCell')!);
+
 const tableTitleBlock = (panel: HTMLElement): HTMLElement => {
     const title = panel.querySelector<HTMLElement>('.tableTitleRow [role="textbox"]');
     if (!title) throw new Error('missing table title');
@@ -57,6 +60,25 @@ const tableTitleBlock = (panel: HTMLElement): HTMLElement => {
 
 const tableRowHeaders = (panel: HTMLElement): HTMLElement[] =>
     Array.from(panel.querySelectorAll<HTMLElement>('.tableRowHeaderText[role="textbox"]'));
+
+const stubTableCellRects = (panel: HTMLElement, columnCount = 2) => {
+    tableCells(panel).forEach((cell, index) => {
+        const rowIndex = Math.floor(index / columnCount);
+        const columnIndex = index % columnCount;
+        cell.getBoundingClientRect = () =>
+            ({
+                left: 40 + columnIndex * 100,
+                top: rowIndex * 50,
+                right: 140 + columnIndex * 100,
+                bottom: rowIndex * 50 + 50,
+                width: 100,
+                height: 50,
+                x: 40 + columnIndex * 100,
+                y: rowIndex * 50,
+                toJSON: () => ({}),
+            }) as DOMRect;
+    });
+};
 
 const keyPerfMonitor = (view: ReturnType<typeof render>): HTMLElement =>
     view.getByLabelText('Keypress performance monitor');
@@ -483,6 +505,34 @@ const dragElementTo = (element: HTMLElement, clientX: number, clientY: number) =
     });
 };
 
+const withCaretRangeFromPoints = (
+    points: Array<{maxY: number; block: HTMLElement; offset: number}>,
+    run: () => void,
+) => {
+    const documentWithCaretRange = document as Document & {
+        caretRangeFromPoint?: (x: number, y: number) => Range | null;
+    };
+    const previousCaretRangeFromPoint = documentWithCaretRange.caretRangeFromPoint;
+    Object.defineProperty(document, 'caretRangeFromPoint', {
+        value: (_x: number, y: number) => {
+            const point = points.find((candidate) => y <= candidate.maxY) ?? points[points.length - 1];
+            if (!point) return null;
+            const range = rangeAtBlockOffset(point.block, point.offset);
+            range.collapse(true);
+            return range;
+        },
+        configurable: true,
+    });
+    try {
+        run();
+    } finally {
+        Object.defineProperty(document, 'caretRangeFromPoint', {
+            value: previousCaretRangeFromPoint,
+            configurable: true,
+        });
+    }
+};
+
 const dragBlockHandle = (panel: HTMLElement, fromIndex: number, clientX: number, clientY: number) => {
     const handles = within(panel).getAllByRole('button', {name: 'Move block'});
     dragElementTo(handles[fromIndex], clientX, clientY);
@@ -724,6 +774,551 @@ describe('Block rich text example UI', () => {
         document.elementsFromPoint = originalElementsFromPoint;
 
         await waitFor(() => expect(tableBlockTexts(left)).toEqual(['B', 'C', 'A', 'D']));
+    });
+
+    it('tabs from a table cell into a single-cell block selection', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        selectCaret(blocks(left)[0], 0);
+
+        setBlockType(left, 'table');
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+
+        selectCaret(tableBlocks(left)[0], 0);
+        fireEvent.keyDown(tableBlocks(left)[0], {key: 'Tab'});
+        fireEvent.keyUp(tableBlocks(left)[1], {key: 'Tab'});
+
+        const secondCell = tableBlocks(left)[1].closest<HTMLElement>('.tableCell')!;
+        await waitFor(() => {
+            expect(secondCell.classList.contains('cellSelected')).toBe(true);
+            expect(secondCell.classList.contains('cellSelectionFocus')).toBe(true);
+        });
+        expect(document.activeElement).toBe(tableBlocks(left)[1]);
+        expect(window.getSelection()?.rangeCount).toBe(0);
+
+        fireEvent.keyDown(tableBlocks(left)[1], {key: 'X'});
+        await waitFor(() => expect(tableBlockTexts(left)[1]).toBe('X'));
+    });
+
+    it('selects a table cell from its border', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        selectCaret(blocks(left)[0], 0);
+
+        setBlockType(left, 'table');
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+
+        const targetCell = tableBlocks(left)[1].closest<HTMLElement>('.tableCell')!;
+        targetCell.getBoundingClientRect = () =>
+            ({
+                left: 40,
+                top: 0,
+                right: 140,
+                bottom: 50,
+                width: 100,
+                height: 50,
+                x: 40,
+                y: 0,
+                toJSON: () => ({}),
+            }) as DOMRect;
+
+        fireEvent.pointerDown(targetCell, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 20,
+        });
+
+        await waitFor(() => {
+            expect(targetCell.classList.contains('cellSelected')).toBe(true);
+            expect(targetCell.classList.contains('cellSelectionFocus')).toBe(true);
+        });
+        expect(document.activeElement).toBe(tableBlocks(left)[1]);
+    });
+
+    it('drags across table cell borders to create a rectangular cell selection', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        selectCaret(blocks(left)[0], 0);
+
+        setBlockType(left, 'table');
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+
+        const cells = tableBlocks(left).map((block) => block.closest<HTMLElement>('.tableCell')!);
+        cells.forEach((cell, index) => {
+            const rowIndex = Math.floor(index / 2);
+            const columnIndex = index % 2;
+            cell.getBoundingClientRect = () =>
+                ({
+                    left: 40 + columnIndex * 100,
+                    top: rowIndex * 50,
+                    right: 140 + columnIndex * 100,
+                    bottom: rowIndex * 50 + 50,
+                    width: 100,
+                    height: 50,
+                    x: 40 + columnIndex * 100,
+                    y: rowIndex * 50,
+                    toJSON: () => ({}),
+                }) as DOMRect;
+        });
+
+        fireEvent.pointerDown(cells[1], {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 142,
+            clientY: 20,
+        });
+        await waitFor(() => expect(cells[1].classList.contains('cellSelected')).toBe(true));
+
+        const originalElementsFromPoint = document.elementsFromPoint;
+        document.elementsFromPoint = (_x: number, y: number) => [cells[y >= 50 ? 2 : 1]];
+        fireEvent.pointerMove(window, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 70,
+        });
+        fireEvent.pointerUp(window, {
+            button: 0,
+            buttons: 0,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 70,
+        });
+        document.elementsFromPoint = originalElementsFromPoint;
+
+        await waitFor(() => {
+            const selectedCells = tableBlocks(left).map((block) => block.closest<HTMLElement>('.tableCell')!);
+            expect(selectedCells.map((cell) => cell.classList.contains('cellSelected'))).toEqual([
+                true,
+                true,
+                true,
+                true,
+            ]);
+            expect(selectedCells[2].classList.contains('cellSelectionFocus')).toBe(true);
+        });
+    });
+
+    it('clears a partial table cell selection with Delete', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        selectCaret(blocks(left)[0], 0);
+
+        setBlockType(left, 'table');
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+        ['A', 'B', 'C', 'D'].forEach((text, index) => {
+            selectCaret(tableBlocks(left)[index], 0);
+            typeText(tableBlocks(left)[index], text);
+        });
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['A', 'B', 'C', 'D']));
+
+        stubTableCellRects(left);
+        const cells = tableCells(left);
+        fireEvent.pointerDown(cells[1], {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 142,
+            clientY: 20,
+        });
+        await waitFor(() => expect(tableCells(left)[1].classList.contains('cellSelected')).toBe(true));
+        fireEvent.keyDown(tableBlocks(left)[1], {key: 'Delete'});
+
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['A', '', 'C', 'D']));
+    });
+
+    it('deletes a full selected table row with Delete', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        selectCaret(blocks(left)[0], 0);
+
+        setBlockType(left, 'table');
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+        ['A', 'B', 'C', 'D'].forEach((text, index) => {
+            selectCaret(tableBlocks(left)[index], 0);
+            typeText(tableBlocks(left)[index], text);
+        });
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['A', 'B', 'C', 'D']));
+
+        stubTableCellRects(left);
+        let cells = tableCells(left);
+        fireEvent.pointerDown(cells[1], {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 142,
+            clientY: 20,
+        });
+        await waitFor(() => expect(tableCells(left)[1].classList.contains('cellSelected')).toBe(true));
+        const originalElementsFromPoint = document.elementsFromPoint;
+        document.elementsFromPoint = () => [tableCells(left)[0]];
+        fireEvent.pointerMove(window, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 20,
+        });
+        fireEvent.pointerUp(window, {
+            button: 0,
+            buttons: 0,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 20,
+        });
+        document.elementsFromPoint = originalElementsFromPoint;
+        await waitFor(() => {
+            cells = tableCells(left);
+            expect(cells[0].classList.contains('cellSelected')).toBe(true);
+            expect(cells[1].classList.contains('cellSelected')).toBe(true);
+        });
+
+        fireEvent.keyDown(tableBlocks(left)[0], {key: 'Delete'});
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['C', 'D']));
+    });
+
+    it('deletes a full selected table column with Delete', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        selectCaret(blocks(left)[0], 0);
+
+        setBlockType(left, 'table');
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+        ['A', 'B', 'C', 'D'].forEach((text, index) => {
+            selectCaret(tableBlocks(left)[index], 0);
+            typeText(tableBlocks(left)[index], text);
+        });
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['A', 'B', 'C', 'D']));
+
+        stubTableCellRects(left);
+        fireEvent.pointerDown(tableCells(left)[2], {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 70,
+        });
+        await waitFor(() => expect(tableCells(left)[2].classList.contains('cellSelected')).toBe(true));
+        const originalElementsFromPoint = document.elementsFromPoint;
+        document.elementsFromPoint = () => [tableCells(left)[0]];
+        fireEvent.pointerMove(window, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 20,
+        });
+        fireEvent.pointerUp(window, {
+            button: 0,
+            buttons: 0,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 20,
+        });
+        document.elementsFromPoint = originalElementsFromPoint;
+        await waitFor(() => {
+            const selectedCells = tableCells(left);
+            expect(selectedCells[0].classList.contains('cellSelected')).toBe(true);
+            expect(selectedCells[2].classList.contains('cellSelected')).toBe(true);
+        });
+
+        fireEvent.keyDown(tableBlocks(left)[0], {key: 'Delete'});
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['B', 'D']));
+    });
+
+    it('pastes a structured row below a full selected table row', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        const payload: RichClipboardPayload = {
+            version: 1,
+            plainText: 'X\tY',
+            html: '<p>X</p><p>Y</p>',
+            fragments: [
+                {text: 'X', meta: {type: 'paragraph', ts: 'copy-ts'}, marks: []},
+                {text: 'Y', meta: {type: 'paragraph', ts: 'copy-ts'}, marks: []},
+            ],
+            annotations: [],
+            tsv: 'X\tY',
+        };
+        selectCaret(blocks(left)[0], 0);
+
+        setBlockType(left, 'table');
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+        ['A', 'B', 'C', 'D'].forEach((text, index) => {
+            selectCaret(tableBlocks(left)[index], 0);
+            typeText(tableBlocks(left)[index], text);
+        });
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['A', 'B', 'C', 'D']));
+
+        stubTableCellRects(left);
+        fireEvent.pointerDown(tableCells(left)[1], {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 142,
+            clientY: 20,
+        });
+        await waitFor(() => expect(tableCells(left)[1].classList.contains('cellSelected')).toBe(true));
+        const originalElementsFromPoint = document.elementsFromPoint;
+        document.elementsFromPoint = () => [tableCells(left)[0]];
+        fireEvent.pointerMove(window, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 20,
+        });
+        fireEvent.pointerUp(window, {
+            button: 0,
+            buttons: 0,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 20,
+        });
+        document.elementsFromPoint = originalElementsFromPoint;
+        await waitFor(() => expect(tableCells(left)[0].classList.contains('cellSelected')).toBe(true));
+
+        pasteClipboard(tableBlocks(left)[0], {
+            [BLOCK_RICH_TEXT_MIME]: JSON.stringify(payload),
+            'text/plain': payload.plainText,
+        });
+
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['A', 'B', 'X', 'Y', 'C', 'D']));
+    });
+
+    it('pastes a structured column beside a full selected table column', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        const payload: RichClipboardPayload = {
+            version: 1,
+            plainText: 'X\nY',
+            html: '<p>X</p><p>Y</p>',
+            fragments: [
+                {text: 'X', meta: {type: 'paragraph', ts: 'copy-ts'}, marks: []},
+                {text: 'Y', meta: {type: 'paragraph', ts: 'copy-ts'}, marks: []},
+            ],
+            annotations: [],
+            tsv: 'X\nY',
+        };
+        selectCaret(blocks(left)[0], 0);
+
+        setBlockType(left, 'table');
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+        ['A', 'B', 'C', 'D'].forEach((text, index) => {
+            selectCaret(tableBlocks(left)[index], 0);
+            typeText(tableBlocks(left)[index], text);
+        });
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['A', 'B', 'C', 'D']));
+
+        stubTableCellRects(left);
+        fireEvent.pointerDown(tableCells(left)[2], {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 70,
+        });
+        await waitFor(() => expect(tableCells(left)[2].classList.contains('cellSelected')).toBe(true));
+        const originalElementsFromPoint = document.elementsFromPoint;
+        document.elementsFromPoint = () => [tableCells(left)[0]];
+        fireEvent.pointerMove(window, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 20,
+        });
+        fireEvent.pointerUp(window, {
+            button: 0,
+            buttons: 0,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 20,
+        });
+        document.elementsFromPoint = originalElementsFromPoint;
+        await waitFor(() => expect(tableCells(left)[0].classList.contains('cellSelected')).toBe(true));
+
+        pasteClipboard(tableBlocks(left)[0], {
+            [BLOCK_RICH_TEXT_MIME]: JSON.stringify(payload),
+            'text/plain': payload.plainText,
+        });
+
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['A', 'X', 'B', 'C', 'Y', 'D']));
+    });
+
+    it('drags a full selected table column as a column', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        selectCaret(blocks(left)[0], 0);
+
+        setBlockType(left, 'table');
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+        ['A', 'B', 'C', 'D'].forEach((text, index) => {
+            selectCaret(tableBlocks(left)[index], 0);
+            typeText(tableBlocks(left)[index], text);
+        });
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['A', 'B', 'C', 'D']));
+
+        stubTableCellRects(left);
+        fireEvent.pointerDown(tableCells(left)[2], {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 70,
+        });
+        await waitFor(() => expect(tableCells(left)[2].classList.contains('cellSelected')).toBe(true));
+        const originalElementsFromPoint = document.elementsFromPoint;
+        document.elementsFromPoint = () => [tableCells(left)[0]];
+        fireEvent.pointerMove(window, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 20,
+        });
+        fireEvent.pointerUp(window, {
+            button: 0,
+            buttons: 0,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 20,
+        });
+        document.elementsFromPoint = originalElementsFromPoint;
+        await waitFor(() => expect(tableCells(left)[0].classList.contains('cellSelected')).toBe(true));
+
+        const rows = Array.from(left.querySelectorAll<HTMLElement>('[data-row-id]'));
+        document.elementsFromPoint = () => [rows[0]];
+        fireEvent.pointerDown(tableCells(left)[0], {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 2,
+            clientX: 42,
+            clientY: 20,
+        });
+        fireEvent.pointerMove(window, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 2,
+            clientX: 230,
+            clientY: 20,
+        });
+        fireEvent.pointerUp(window, {
+            button: 0,
+            buttons: 0,
+            isPrimary: true,
+            pointerId: 2,
+            clientX: 230,
+            clientY: 20,
+        });
+        document.elementsFromPoint = originalElementsFromPoint;
+
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['B', 'A', 'D', 'C']));
+    });
+
+    it('drags a selected table rectangle as cell contents', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        selectCaret(blocks(left)[0], 0);
+
+        setBlockType(left, 'table');
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+        ['A', 'B', 'C', 'D'].forEach((text, index) => {
+            selectCaret(tableBlocks(left)[index], 0);
+            typeText(tableBlocks(left)[index], text);
+        });
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['A', 'B', 'C', 'D']));
+
+        stubTableCellRects(left);
+        fireEvent.pointerDown(tableCells(left)[1], {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 142,
+            clientY: 20,
+        });
+        await waitFor(() => expect(tableCells(left)[1].classList.contains('cellSelected')).toBe(true));
+        const originalElementsFromPoint = document.elementsFromPoint;
+        document.elementsFromPoint = () => [tableCells(left)[0]];
+        fireEvent.pointerMove(window, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 20,
+        });
+        fireEvent.pointerUp(window, {
+            button: 0,
+            buttons: 0,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 20,
+        });
+        document.elementsFromPoint = originalElementsFromPoint;
+        await waitFor(() => {
+            expect(tableCells(left)[0].classList.contains('cellSelected')).toBe(true);
+            expect(tableCells(left)[1].classList.contains('cellSelected')).toBe(true);
+        });
+
+        const rows = Array.from(left.querySelectorAll<HTMLElement>('[data-row-id]'));
+        document.elementsFromPoint = () => [rows[1]];
+        fireEvent.pointerDown(tableCells(left)[0], {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 2,
+            clientX: 42,
+            clientY: 20,
+        });
+        fireEvent.pointerMove(window, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 2,
+            clientX: 42,
+            clientY: 70,
+        });
+        fireEvent.pointerUp(window, {
+            button: 0,
+            buttons: 0,
+            isPrimary: true,
+            pointerId: 2,
+            clientX: 42,
+            clientY: 70,
+        });
+        document.elementsFromPoint = originalElementsFromPoint;
+
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['', '', 'A', 'B']));
+        expect(tableCells(left)[2].classList.contains('cellSelected')).toBe(true);
+        expect(tableCells(left)[3].classList.contains('cellSelectionFocus')).toBe(true);
     });
 
     it('applies block type metadata from the toolbar to both replicas', async () => {
@@ -1258,6 +1853,146 @@ describe('Block rich text example UI', () => {
         expect(blockTexts(left)).toEqual(['c', 'a', 'b']);
     });
 
+    it('selects a block from its drag handle', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        pasteText(blocks(left)[0], 'a\nb');
+        await waitForBlockTexts(left, ['a', 'b']);
+
+        const handle = within(left).getAllByRole('button', {name: 'Move block'})[1];
+        fireEvent.pointerDown(handle, {button: 0, buttons: 1, isPrimary: true, pointerId: 1});
+        fireEvent.pointerUp(window, {button: 0, buttons: 0, isPrimary: true, pointerId: 1});
+
+        await waitFor(() =>
+            expect(blocks(left)[1].closest('.blockRow')?.classList.contains('blockSelected')).toBe(true),
+        );
+        expect(blocks(left)[1].closest('.blockRow')?.classList.contains('blockSelectionFocus')).toBe(true);
+        expect(document.activeElement).toBe(blocks(left)[1]);
+    });
+
+    it('types into a block selection at the end of the selected block', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abc');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abc'));
+
+        const handle = within(left).getByRole('button', {name: 'Move block'});
+        fireEvent.pointerDown(handle, {button: 0, buttons: 1, isPrimary: true, pointerId: 1});
+        fireEvent.pointerUp(window, {button: 0, buttons: 0, isPrimary: true, pointerId: 1});
+        await waitFor(() =>
+            expect(blocks(left)[0].closest('.blockRow')?.classList.contains('blockSelected')).toBe(true),
+        );
+        expect(document.activeElement).toBe(blocks(left)[0]);
+
+        fireEvent.keyDown(blocks(left)[0], {key: 'X'});
+
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abcX'));
+        expect(blocks(right)[0].textContent).toBe('abcX');
+    });
+
+    it('pastes plain text into a block selection at the end of the selected block', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abc');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abc'));
+
+        const handle = within(left).getByRole('button', {name: 'Move block'});
+        fireEvent.pointerDown(handle, {button: 0, buttons: 1, isPrimary: true, pointerId: 1});
+        fireEvent.pointerUp(window, {button: 0, buttons: 0, isPrimary: true, pointerId: 1});
+        await waitFor(() =>
+            expect(blocks(left)[0].closest('.blockRow')?.classList.contains('blockSelected')).toBe(true),
+        );
+        expect(document.activeElement).toBe(blocks(left)[0]);
+
+        pasteText(blocks(left)[0], 'X');
+
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abcX'));
+        expect(blocks(right)[0].textContent).toBe('abcX');
+    });
+
+    it('creates a block after a block selection with Enter', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abc');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abc'));
+
+        const handle = within(left).getByRole('button', {name: 'Move block'});
+        fireEvent.pointerDown(handle, {button: 0, buttons: 1, isPrimary: true, pointerId: 1});
+        fireEvent.pointerUp(window, {button: 0, buttons: 0, isPrimary: true, pointerId: 1});
+        expect(document.activeElement).toBe(blocks(left)[0]);
+        fireEvent.keyDown(blocks(left)[0], {key: 'Enter'});
+
+        await waitForBlockTexts(left, ['abc', '']);
+    });
+
+    it('deletes a block selection with Delete', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        pasteText(blocks(left)[0], 'a\nb');
+        await waitForBlockTexts(left, ['a', 'b']);
+
+        const handle = within(left).getAllByRole('button', {name: 'Move block'})[0];
+        fireEvent.pointerDown(handle, {button: 0, buttons: 1, isPrimary: true, pointerId: 1});
+        fireEvent.pointerUp(window, {button: 0, buttons: 0, isPrimary: true, pointerId: 1});
+        expect(document.activeElement).toBe(blocks(left)[0]);
+        fireEvent.keyDown(blocks(left)[0], {key: 'Delete'});
+
+        await waitForBlockTexts(left, ['b']);
+        expect(blockTexts(right)).toEqual(['b']);
+    });
+
+    it('applies block type changes to a block selection', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        pasteText(blocks(left)[0], 'a\nb');
+        await waitForBlockTexts(left, ['a', 'b']);
+
+        const handle = within(left).getAllByRole('button', {name: 'Move block'})[1];
+        fireEvent.pointerDown(handle, {button: 0, buttons: 1, isPrimary: true, pointerId: 1});
+        fireEvent.pointerUp(window, {button: 0, buttons: 0, isPrimary: true, pointerId: 1});
+        await waitFor(() =>
+            expect(blocks(left)[1].closest('.blockRow')?.classList.contains('blockSelected')).toBe(true),
+        );
+
+        setBlockType(left, 'heading2');
+
+        await waitFor(() => {
+            expect(blocks(left)[0].classList.contains('headingLevel2')).toBe(false);
+            expect(blocks(left)[1].classList.contains('headingLevel2')).toBe(true);
+        });
+    });
+
+    it('drags every block touched by a text selection as a group', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        pasteText(blocks(left)[0], 'a\nb\nc\nd');
+        await waitForBlockTexts(left, ['a', 'b', 'c', 'd']);
+        installMockBlockRowGeometry(left);
+
+        selectCrossBlockRange(blocks(left)[1], 0, blocks(left)[2], 1);
+        dragBlockHandle(left, 1, 20, 200);
+
+        await waitForBlockTexts(left, ['a', 'd', 'b', 'c']);
+        expect(blockTexts(right)).toEqual(['a', 'd', 'b', 'c']);
+        selectCaret(blocks(right)[0], 0);
+        await waitFor(() => expect(retainedHighlightText(blocks(left)[2])).toBe('b'));
+        expect(retainedHighlightText(blocks(left)[3])).toBe('c');
+    });
+
     it('uses unordered list bullets as block drag handles', async () => {
         const view = render(<App />);
         const {left, right} = panels(view);
@@ -1596,6 +2331,48 @@ describe('Block rich text example UI', () => {
                 expect(within(keyPerfMonitor(view)).getByText('DOM selection')).toBeTruthy(),
             );
             expect(keyPerfBars(view)).toHaveLength(1);
+        } finally {
+            Object.defineProperty(document, 'caretRangeFromPoint', {
+                value: previousCaretRangeFromPoint,
+                configurable: true,
+            });
+        }
+    });
+
+    it('does not rewrite an already selected empty block when it is clicked again', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+        const leftBlock = blocks(left)[0];
+        const rightBlock = blocks(right)[0];
+        const documentWithCaretRange = document as Document & {
+            caretRangeFromPoint?: (x: number, y: number) => Range | null;
+        };
+        const previousCaretRangeFromPoint = documentWithCaretRange.caretRangeFromPoint;
+
+        Object.defineProperty(document, 'caretRangeFromPoint', {
+            value: () => rangeAtBlockOffset(leftBlock, 0),
+            configurable: true,
+        });
+
+        try {
+            selectCaret(leftBlock, 0);
+            fireEvent.mouseUp(leftBlock);
+            selectCaret(rightBlock, 0);
+            fireEvent.mouseUp(rightBlock);
+
+            await waitFor(() =>
+                expect(leftBlock.querySelector('[data-retained-selection="caret"]')).toBeTruthy(),
+            );
+
+            const replaceChildren = vi.spyOn(HTMLElement.prototype, 'replaceChildren');
+            const started = performance.now();
+            fireEvent.mouseDown(leftBlock, {clientX: 10, clientY: 10});
+            setDomCaret(leftBlock, 0);
+            fireEvent.mouseUp(leftBlock, {clientX: 10, clientY: 10});
+            const elapsed = performance.now() - started;
+
+            expect(replaceChildren).not.toHaveBeenCalled();
+            expect(elapsed).toBeLessThan(20);
         } finally {
             Object.defineProperty(document, 'caretRangeFromPoint', {
                 value: previousCaretRangeFromPoint,
@@ -3817,6 +4594,52 @@ describe('Block rich text example UI', () => {
 
         await waitFor(() => expect(retainedHighlightText(blocks(left)[0])).toBe('bc'));
         expect(retainedCaretOffsets(blocks(left)[0])).toEqual([0]);
+    });
+
+    it('plain-drags across blocks to create a text selection', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        pasteText(blocks(left)[0], 'abcd\nwxyz');
+        await waitForBlockTexts(left, ['abcd', 'wxyz']);
+
+        withCaretRangeFromPoints(
+            [
+                {maxY: 20, block: blocks(left)[0], offset: 1},
+                {maxY: 80, block: blocks(left)[1], offset: 2},
+            ],
+            () => {
+                fireEvent.pointerDown(blocks(left)[0], {
+                    button: 0,
+                    buttons: 1,
+                    isPrimary: true,
+                    pointerId: 1,
+                    clientX: 10,
+                    clientY: 10,
+                });
+                fireEvent.pointerMove(window, {
+                    button: 0,
+                    buttons: 1,
+                    isPrimary: true,
+                    pointerId: 1,
+                    clientX: 12,
+                    clientY: 60,
+                });
+                fireEvent.pointerUp(window, {
+                    button: 0,
+                    buttons: 0,
+                    isPrimary: true,
+                    pointerId: 1,
+                    clientX: 12,
+                    clientY: 60,
+                });
+            },
+        );
+        selectCaret(blocks(right)[0], 0);
+
+        await waitFor(() => expect(retainedHighlightText(blocks(left)[0])).toBe('bcd'));
+        expect(retainedHighlightText(blocks(left)[1])).toBe('wx');
     });
 
     it('keeps the existing selection visible while Cmd-dragging another selection', async () => {

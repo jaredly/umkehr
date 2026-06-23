@@ -1,4 +1,5 @@
 import {
+    blockContents,
     formattedMarkValues,
     materializeFormattedBlocks,
     orderedCharIdsForBlock,
@@ -20,6 +21,10 @@ import {
     editableBlockIds,
     normalizeSelectionSegments,
     segmentText,
+    selectedBlockIdsForSelection,
+    tableCellRectangleForSelection,
+    tableCellsForSelection,
+    tableRowsForSelection,
     type EditorSelection,
 } from './selectionModel';
 import type {RichBlockMeta} from './blockMeta';
@@ -70,6 +75,7 @@ export type RichClipboardPayload = {
     fragments: ClipboardFragment[];
     annotations: ClipboardAnnotation[];
     attachments?: SerializedImageAttachment[];
+    tsv?: string;
 };
 
 type FragmentBuildResult = {
@@ -103,6 +109,7 @@ export const parseBlockRichTextClipboardPayload = (value: string): RichClipboard
     if (!Array.isArray(parsed.fragments)) return null;
     if (!Array.isArray(parsed.annotations)) return null;
     if (parsed.attachments !== undefined && !Array.isArray(parsed.attachments)) return null;
+    if (parsed.tsv !== undefined && typeof parsed.tsv !== 'string') return null;
 
     const fragments = parseFragments(parsed.fragments);
     if (!fragments) return null;
@@ -118,6 +125,7 @@ export const parseBlockRichTextClipboardPayload = (value: string): RichClipboard
         fragments,
         annotations,
         ...(attachments.length ? {attachments} : {}),
+        ...(parsed.tsv ? {tsv: parsed.tsv} : {}),
     };
 };
 
@@ -128,13 +136,33 @@ export const serializeSelectionToClipboardPayload = (
 ): RichClipboardPayload | null => {
     const formatted = materializeFormattedBlocks(state, annotationMarkBehavior);
     const formattedById = new Map(formatted.map((block) => [block.id, block]));
-    const merged = mergeOverlappingRanges(state, selection);
+    const initialResolved = resolveSelectionSet(state, selection);
+    const hasBlockLevelSelection = initialResolved.entries.some(
+        (entry) => entry.selection.type === 'block' || entry.selection.type === 'table-cells',
+    );
+    const merged = hasBlockLevelSelection ? selection.entries : mergeOverlappingRanges(state, selection);
     const resolved = resolveSelectionSet(state, {primaryId: selection.primaryId, entries: merged});
     const fragments: ClipboardFragment[] = [];
     const refs: ClipboardAnnotationRef[] = [];
     const includedBlockIds = new Set<string>();
+    let tsv: string | null = null;
 
     for (const entry of resolved.entries) {
+        if (entry.selection.type === 'block' || entry.selection.type === 'table-cells') {
+            for (const blockId of selectedBlockIdsForSelection(state, entry.selection)) {
+                if (includedBlockIds.has(blockId)) continue;
+                const block = formattedById.get(blockId);
+                if (!block) continue;
+                const built = fragmentForRange(block, 0, formattedRunsTextLength(block.runs));
+                fragments.push(built.fragment);
+                refs.push(...built.annotationRefs);
+                includedBlockIds.add(block.id);
+            }
+            if (entry.selection.type === 'table-cells' && entry.id === resolved.primaryId) {
+                tsv = tableSelectionToTsv(state, entry.selection);
+            }
+            continue;
+        }
         for (const segment of normalizeSelectionSegments(state, entry.selection)) {
             const block = formattedById.get(segment.blockId);
             if (!block) continue;
@@ -175,14 +203,46 @@ export const serializeSelectionToClipboardPayload = (
         fragments,
         annotations,
         ...(copiedAttachments.length ? {attachments: copiedAttachments} : {}),
+        ...(tsv ? {tsv} : {}),
     };
+};
+
+const tableSelectionToTsv = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+): string | null => {
+    const rectangle = tableCellRectangleForSelection(state, selection);
+    if (!rectangle) return null;
+    const rows = tableRowsForSelection(state, rectangle.tableId);
+    const lines: string[] = [];
+    for (let rowIndex = rectangle.startRowIndex; rowIndex <= rectangle.endRowIndex; rowIndex++) {
+        const rowId = rows[rowIndex];
+        if (!rowId) continue;
+        const cells = tableCellsForSelection(state, rowId);
+        const values: string[] = [];
+        for (
+            let columnIndex = rectangle.startColumnIndex;
+            columnIndex <= rectangle.endColumnIndex;
+            columnIndex++
+        ) {
+            const cellId = cells[columnIndex];
+            values.push(tsvCell(cellId ? blockContents(state, cellId) : ''));
+        }
+        lines.push(values.join('\t'));
+    }
+    return lines.length ? lines.join('\n') : null;
+};
+
+const tsvCell = (value: string): string => {
+    if (!/[\t\n"]/.test(value)) return value;
+    return `"${value.replace(/"/g, '""')}"`;
 };
 
 const emptyImageBlockIdsForSelection = (
     state: CachedState<RichBlockMeta>,
     selection: EditorSelection,
 ): string[] => {
-    if (selection.type === 'caret') return [];
+    if (selection.type !== 'range') return [];
     const blocks = editableBlockIds(state);
     const anchorIndex = blocks.indexOf(selection.anchor.blockId);
     const focusIndex = blocks.indexOf(selection.focus.blockId);

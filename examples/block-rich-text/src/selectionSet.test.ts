@@ -6,6 +6,7 @@ import {deleteBackward, insertText, pastePlainText, type CommandContext} from '.
 import {caret, type EditorSelection} from './selectionModel';
 import {
     appendSelection,
+    blockLevelDecorationsForSelectionSet,
     decorationsForSelectionSet,
     dedupeSelectionSet,
     mergeOverlappingRanges,
@@ -47,6 +48,48 @@ describe('block rich text selection sets', () => {
             {id: 'second', selection: caret(blockId, 3)},
         ]);
         expect(primarySelection(resolved)).toEqual(caret(blockId, 3));
+    });
+
+    it('retains and resolves a linear block selection', () => {
+        const pasted = pastePlainText(init(), caret(onlyBlock(init()), 0), 'one\ntwo\nthree', ctx());
+        const [firstBlock, secondBlock] = rootBlockIds(pasted.state);
+        const set = singleRetainedSelectionSet(
+            pasted.state,
+            {type: 'block', anchorBlockId: firstBlock, focusBlockId: secondBlock},
+            'blocks',
+        );
+
+        expect(resolveSelectionSet(pasted.state, set)).toEqual({
+            primaryId: 'blocks',
+            entries: [
+                {
+                    id: 'blocks',
+                    selection: {type: 'block', anchorBlockId: firstBlock, focusBlockId: secondBlock},
+                },
+            ],
+        });
+    });
+
+    it('decorates block-level selections separately from text ranges', () => {
+        const pasted = pastePlainText(init(), caret(onlyBlock(init()), 0), 'one\ntwo\nthree', ctx());
+        const [firstBlock, secondBlock, thirdBlock] = rootBlockIds(pasted.state);
+        const set = resolveSelectionSet(
+            pasted.state,
+            singleRetainedSelectionSet(
+                pasted.state,
+                {type: 'block', anchorBlockId: firstBlock, focusBlockId: secondBlock},
+                'blocks',
+            ),
+        );
+
+        expect(decorationsForSelectionSet(pasted.state, set, {includePrimary: true})).toEqual(new Map());
+        expect(blockLevelDecorationsForSelectionSet(pasted.state, set)).toEqual(
+            new Map([
+                [firstBlock, {selected: true, primary: true, focus: false}],
+                [secondBlock, {selected: true, primary: true, focus: true}],
+            ]),
+        );
+        expect(blockLevelDecorationsForSelectionSet(pasted.state, set).has(thirdBlock)).toBe(false);
     });
 
     it('deduplicates visible-coincident carets and keeps the logical first retained cursor', () => {

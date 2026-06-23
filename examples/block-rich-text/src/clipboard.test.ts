@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {materializeFormattedBlocks, rootBlockIds} from 'umkehr/block-crdt';
+import {blockContents, materializeFormattedBlocks, rootBlockIds} from 'umkehr/block-crdt';
 import {lamportToString} from 'umkehr/block-crdt/utils';
 import {
     BLOCK_RICH_TEXT_MIME,
@@ -10,10 +10,25 @@ import {
 } from './clipboard';
 import {createDemoState, makeCommandContext} from './blockEditorRuntime';
 import {createAnnotation, setAnnotationBodyText} from './annotations';
-import {insertInlineEmbed, insertText, setBlockMeta, setLinkMark, splitBlock, toggleMark, type CommandContext} from './blockCommands';
+import {
+    convertBlockToTable,
+    insertInlineEmbed,
+    insertText,
+    pastePlainText,
+    setBlockMeta,
+    setLinkMark,
+    splitBlock,
+    toggleMark,
+    type CommandContext,
+} from './blockCommands';
 import {paragraphMeta} from './blockMeta';
 import {singleRetainedSelectionSet} from './selectionSet';
-import {caret, type EditorSelection} from './selectionModel';
+import {
+    caret,
+    tableCellsForSelection,
+    tableRowsForSelection,
+    type EditorSelection,
+} from './selectionModel';
 import {INLINE_EMBED_TEXT} from './inlineEmbeds';
 
 const ctx = (actor = 'left'): CommandContext => {
@@ -298,6 +313,59 @@ describe('block rich text clipboard serialization', () => {
 
         expect(payload?.fragments.map((fragment) => fragment.text)).toEqual(['first', 'second']);
         expect(payload?.plainText).toBe('first\nsecond');
+    });
+
+    it('serializes a whole-block selection', () => {
+        const demo = createDemoState();
+        const first = rootBlockIds(demo.left.state)[0];
+        const pasted = pastePlainText(demo.left.state, caret(first, 0), 'one\ntwo', ctx());
+        const [, secondBlock] = rootBlockIds(pasted.state);
+
+        const payload = serializeSelectionToClipboardPayload(
+            pasted.state,
+            singleRetainedSelectionSet(pasted.state, {
+                type: 'block',
+                anchorBlockId: secondBlock,
+                focusBlockId: secondBlock,
+            }),
+        );
+
+        expect(payload?.plainText).toBe('two');
+        expect(payload?.fragments).toHaveLength(1);
+        expect(payload?.fragments[0]?.text).toBe('two');
+    });
+
+    it('serializes a table-cell rectangle with TSV fallback', () => {
+        const context = ctx();
+        const demo = createDemoState();
+        const tableBlock = rootBlockIds(demo.left.state)[0];
+        let result = convertBlockToTable(
+            demo.left.state,
+            caret(tableBlock, 0),
+            context,
+            {rows: 2, columns: 2},
+        );
+        const rows = tableRowsForSelection(result.state, tableBlock);
+        const cells = rows.flatMap((rowId) => tableCellsForSelection(result.state, rowId));
+
+        ['A', 'B', 'C', 'D'].forEach((text, index) => {
+            result = insertText(result.state, caret(cells[index], 0), text, context);
+        });
+
+        const payload = serializeSelectionToClipboardPayload(
+            result.state,
+            singleRetainedSelectionSet(result.state, {
+                type: 'table-cells',
+                tableId: tableBlock,
+                anchorCellId: cells[1],
+                focusCellId: cells[2],
+            }),
+        );
+
+        expect(cells.map((cellId) => blockContents(result.state, cellId))).toEqual(['A', 'B', 'C', 'D']);
+        expect(payload?.plainText).toBe('A\nB\nC\nD');
+        expect(payload?.tsv).toBe('A\tB\nC\tD');
+        expect(payload?.fragments.map((fragment) => fragment.text)).toEqual(['A', 'B', 'C', 'D']);
     });
 
     it('escapes generated HTML', () => {
