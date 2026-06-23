@@ -10,6 +10,7 @@ import {
 } from './blockEditorRuntime';
 import type {RichBlockMeta} from './blockMeta';
 import type {RetainedSelectionSet} from './selectionSet';
+import {isSerializedImageAttachment, type SerializedImageAttachment} from './attachments';
 
 export type HistoryAction =
     | {
@@ -74,6 +75,7 @@ export type ExportedHistory = {
     app: 'examples/block-rich-text';
     actions: HistoryAction[];
     keystrokes: HistoryKeystroke[];
+    attachments?: SerializedImageAttachment[];
     finalSnapshot: HistorySnapshot;
 };
 
@@ -168,13 +170,17 @@ export const buildHistorySnapshot = (demo: DemoState): HistorySnapshot => ({
     right: snapshotReplica(demo.right),
 });
 
-export const serializeHistory = (history: HistoryState): string => {
+export const serializeHistory = (
+    history: HistoryState,
+    attachments: SerializedImageAttachment[] = [],
+): string => {
     const actions = history.actions;
     const exported: ExportedHistory = {
         version: EXPORT_VERSION,
         app: EXPORT_APP,
         actions,
         keystrokes: history.keystrokes,
+        ...(attachments.length ? {attachments} : {}),
         finalSnapshot: buildHistorySnapshot(replayHistory(actions, actions.length)),
     };
     return `${JSON.stringify(exported, null, 2)}\n`;
@@ -182,7 +188,7 @@ export const serializeHistory = (history: HistoryState): string => {
 
 export const parseHistoryExport = (
     text: string,
-): {history: HistoryState} | {error: string} => {
+): {history: HistoryState; attachments: SerializedImageAttachment[]} | {error: string} => {
     let parsed: unknown;
     try {
         parsed = JSON.parse(text);
@@ -203,6 +209,8 @@ export const parseHistoryExport = (
     }
     const keystrokes = parseKeystrokes(parsed.keystrokes);
     if ('error' in keystrokes) return {error: keystrokes.error};
+    const attachments = parseAttachments(parsed.attachments);
+    if ('error' in attachments) return {error: attachments.error};
 
     if (!isSnapshot(parsed.finalSnapshot)) {
         return {error: 'Import file has an invalid final snapshot.'};
@@ -216,7 +224,10 @@ export const parseHistoryExport = (
         };
     }
 
-    return {history: {actions, cursor: actions.length, keystrokes: keystrokes.keystrokes}};
+    return {
+        history: {actions, cursor: actions.length, keystrokes: keystrokes.keystrokes},
+        attachments: attachments.attachments,
+    };
 };
 
 const clampCursor = (cursor: number, max: number) => {
@@ -320,6 +331,24 @@ const parseKeystrokes = (
     return {keystrokes};
 };
 
+const parseAttachments = (
+    value: unknown,
+): {attachments: SerializedImageAttachment[]} | {error: string} => {
+    if (value === undefined) return {attachments: []};
+    if (!Array.isArray(value)) return {error: 'Import file attachments must be an array.'};
+    const attachments: SerializedImageAttachment[] = [];
+    const seen = new Set<string>();
+    for (const [index, attachment] of value.entries()) {
+        if (!isSerializedImageAttachment(attachment)) {
+            return {error: `Attachment ${index} has an invalid shape.`};
+        }
+        if (seen.has(attachment.id)) return {error: `Attachment ${index} duplicates an id.`};
+        seen.add(attachment.id);
+        attachments.push(attachment);
+    }
+    return {attachments};
+};
+
 const isKeystroke = (value: unknown): value is HistoryKeystroke =>
     isRecord(value) &&
     Number.isInteger(value.sequence) &&
@@ -399,10 +428,19 @@ const isRichBlockMeta = (value: unknown): value is RichBlockMeta => {
             return typeof value.language === 'string';
         case 'callout':
             return value.kind === 'info' || value.kind === 'warning' || value.kind === 'error';
+        case 'image':
+            return (
+                typeof value.attachmentId === 'string' &&
+                value.attachmentId.length > 0 &&
+                isImagePresentationSize(value.size)
+            );
         default:
             return false;
     }
 };
+
+const isImagePresentationSize = (value: unknown): boolean =>
+    value === 'small' || value === 'medium' || value === 'large' || value === 'original';
 
 const isRetainedSelectionSet = (value: unknown): value is RetainedSelectionSet => {
     if (!isRecord(value) || typeof value.primaryId !== 'string' || !Array.isArray(value.entries)) {

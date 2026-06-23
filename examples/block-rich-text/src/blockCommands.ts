@@ -26,7 +26,7 @@ import {
 import {compareLseqIds, createLseqIdBetween} from 'umkehr/block-crdt/lseq';
 import type {BlockOrderTs, Boundary, CachedState, JsonValue, Lamport} from 'umkehr/block-crdt/types';
 import {lamportToString, parseLamportString} from 'umkehr/block-crdt/utils';
-import {paragraphMeta, sameTypeWithTs, type RichBlockMeta} from './blockMeta';
+import {paragraphMeta, sameTypeWithTs, type ImagePresentationSize, type RichBlockMeta} from './blockMeta';
 import {annotationVirtualParents} from './annotations';
 import {CODE_MARK, isCodeMarkValue, normalizeStoredCodeLanguage, type BareInlineMark, type BooleanInlineMark} from './inlineMarks';
 import {markdownShortcutPrefix, type MarkdownShortcutMatch} from './markdownShortcuts';
@@ -488,6 +488,11 @@ export const splitBlock = (
 
     const newBlockId = lamportToString([working.state.maxSeenCount + 1, context.actor]);
     const currentMeta = working.state.blocks[point.blockId]?.meta;
+    if (currentMeta?.type === 'image') {
+        const inserted = insertParagraphAfterBlock(working, point.blockId, context);
+        return {state: inserted.state, ops: [...ops, ...inserted.ops], selection: caret(inserted.blockId, 0)};
+    }
+
     if (currentMeta && currentMeta.type !== 'paragraph' && pointTextLength(working, point.blockId) === 0) {
         const ops = setBlockMetaOps(working, {
             block: parseLamportString(point.blockId),
@@ -1296,6 +1301,43 @@ export const refreshBlockMetaTimestamp = (
 ): CommandResult =>
     updateBlockMeta(state, blockId, (meta, ts) => sameTypeWithTs(meta, ts), context);
 
+export const insertImageBlock = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    attachmentId: string,
+    size: ImagePresentationSize,
+    context: CommandContext,
+): CommandResult => {
+    let working = state;
+    let point = firstPointForSelection(working, selection);
+    const ops: Array<Op<RichBlockMeta>> = [];
+
+    if (!isCollapsed(selection)) {
+        const deleted = deleteSelectionAndJoinBoundaries(working, selection, context);
+        working = deleted.state;
+        ops.push(...deleted.ops);
+        point = deleted.point;
+    }
+
+    const block = working.state.blocks[point.blockId];
+    if (!block) return {state: working, ops, selection: caret(point.blockId, point.offset)};
+
+    const meta: RichBlockMeta = {type: 'image', attachmentId, size, ts: context.nextTs()};
+    if (pointTextLength(working, point.blockId) === 0) {
+        const metaOps = setBlockMetaOps(working, {block: block.id, meta});
+        working = applyMany(working, metaOps, annotationVirtualParents(working));
+        ops.push(...metaOps);
+        return {state: working, ops, selection: caret(point.blockId, 0)};
+    }
+
+    const inserted = insertBlockAfterBlock(working, point.blockId, meta, context);
+    return {
+        state: inserted.state,
+        ops: [...ops, ...inserted.ops],
+        selection: caret(inserted.blockId, 0),
+    };
+};
+
 export const createTable = (
     state: CachedState<RichBlockMeta>,
     selection: EditorSelection,
@@ -2047,6 +2089,15 @@ const insertParagraphAfterBlock = (
     blockId: string,
     context: CommandContext,
 ): {state: CachedState<RichBlockMeta>; ops: Array<Op<RichBlockMeta>>; blockId: string} => {
+    return insertBlockAfterBlock(state, blockId, paragraphMeta(context.nextTs()), context);
+};
+
+const insertBlockAfterBlock = (
+    state: CachedState<RichBlockMeta>,
+    blockId: string,
+    meta: RichBlockMeta,
+    context: CommandContext,
+): {state: CachedState<RichBlockMeta>; ops: Array<Op<RichBlockMeta>>; blockId: string} => {
     const block = state.state.blocks[blockId];
     if (!block) return {state, ops: [], blockId};
     const parent = materializedBlockParent(state, blockId, annotationVirtualParents(state));
@@ -2060,7 +2111,7 @@ const insertParagraphAfterBlock = (
         parent,
         before: block.id,
         after: afterId ? state.state.blocks[afterId].id : null,
-        meta: paragraphMeta(ts),
+        meta,
         ts,
         virtualParents: annotationVirtualParents(state),
     });

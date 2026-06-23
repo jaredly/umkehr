@@ -87,7 +87,7 @@ import {
     type EditorId,
     type Replica,
 } from './blockEditorRuntime';
-import {paragraphMeta, type RichBlockMeta} from './blockMeta';
+import {paragraphMeta, type ImagePresentationSize, type RichBlockMeta} from './blockMeta';
 import {
     closestCaretOffsetForHorizontalIntent,
     caretRectForBlockOffset,
@@ -122,6 +122,7 @@ import {
     moveSelectionsVertically,
     pastePlainTextWithMarkdownShortcutsEverywhere,
     pasteRichClipboardEverywhere,
+    insertImageBlockEverywhere,
     removeLinkMarkEverywhere,
     setLinkMarkEverywhere,
     setBlockTypeEverywhere,
@@ -208,6 +209,15 @@ import {
     renderInlineEmbed,
 } from './inlineEmbeds';
 import {highlightCode, type SyntaxToken} from './syntaxHighlight';
+import {
+    createAttachmentFromFile,
+    deserializeAttachments,
+    revokeAttachments,
+    serializeAttachments,
+    type AttachmentStore,
+    type ImageAttachment,
+    type SerializedImageAttachment,
+} from './attachments';
 
 type RichFormattedBlock = FormattedBlock<RichBlockMeta>;
 type RenderedAnnotation = ReturnType<typeof renderedAnnotations>[number];
@@ -323,6 +333,7 @@ const removeLast = (items: string[], value: string) => {
 
 function EditorApp() {
     const [history, setHistory] = useState<HistoryState>(() => initialHistoryState());
+    const [attachments, setAttachments] = useState<AttachmentStore>(() => new Map());
     const [keyPerfSamples, setKeyPerfSamples] = useState<KeyPerfSample[]>([]);
     const [transientSelections, setTransientSelections] = useState<
         Partial<Record<EditorId, RetainedSelectionSet>>
@@ -331,12 +342,24 @@ function EditorApp() {
     const [undoStatus, setUndoStatus] = useState<Partial<Record<EditorId, string>>>({});
     const [historyResetSignal, setHistoryResetSignal] = useState(0);
     const importInputRef = useRef<HTMLInputElement>(null);
+    const attachmentsRef = useRef(attachments);
     const nextKeyPerfSampleIdRef = useRef(1);
     const replayCacheRef = useRef<{
         actions: HistoryAction[];
         cursor: number;
         demo: DemoState;
     } | null>(null);
+
+    useLayoutEffect(() => {
+        attachmentsRef.current = attachments;
+    }, [attachments]);
+
+    useLayoutEffect(
+        () => () => {
+            revokeAttachments(attachmentsRef.current);
+        },
+        [],
+    );
     const demo = useMemo(() => {
         const cached = replayCacheRef.current;
         if (cached && cached.actions === history.actions && cached.cursor === history.cursor) {
@@ -376,6 +399,25 @@ function EditorApp() {
     const clearReplayUiState = useCallback(() => {
         setTransientSelections({});
         setHistoryResetSignal((current) => current + 1);
+    }, []);
+
+    const createImageAttachment = useCallback(async (file: File): Promise<ImageAttachment> => {
+        const attachment = await createAttachmentFromFile(file);
+        setAttachments((current) => {
+            const next = new Map(current);
+            next.set(attachment.id, attachment);
+            return next;
+        });
+        return attachment;
+    }, []);
+
+    const mergeSerializedAttachments = useCallback((serialized: SerializedImageAttachment[]) => {
+        const pastedAttachments = deserializeAttachments(serialized);
+        setAttachments((current) => {
+            const next = new Map(current);
+            for (const [id, attachment] of pastedAttachments) next.set(id, attachment);
+            return next;
+        });
     }, []);
 
     const runCommand = useCallback(
@@ -478,7 +520,9 @@ function EditorApp() {
     }, []);
 
     const exportHistory = useCallback(() => {
-        const blob = new Blob([serializeHistory(history)], {type: 'application/json'});
+        const blob = new Blob([serializeHistory(history, serializeAttachments(attachments))], {
+            type: 'application/json',
+        });
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
@@ -486,7 +530,7 @@ function EditorApp() {
         link.click();
         URL.revokeObjectURL(url);
         setHistoryStatus(`Exported ${history.actions.length} actions.`);
-    }, [history]);
+    }, [attachments, history]);
 
     const importHistoryFile = useCallback(
         async (file: File) => {
@@ -497,9 +541,14 @@ function EditorApp() {
                 setHistoryStatus(parsed.error);
                 return;
             }
+            const nextAttachments = deserializeAttachments(parsed.attachments);
+            revokeAttachments(attachmentsRef.current);
+            setAttachments(nextAttachments);
             setHistory(parsed.history);
             clearReplayUiState();
-            setHistoryStatus(`Imported ${parsed.history.actions.length} actions.`);
+            setHistoryStatus(
+                `Imported ${parsed.history.actions.length} actions and ${parsed.attachments.length} attachments.`,
+            );
             setUndoStatus({});
         },
         [clearReplayUiState, history.actions.length],
@@ -507,6 +556,8 @@ function EditorApp() {
 
     const resetHistory = useCallback(() => {
         if (history.actions.length && !window.confirm('Reset the current history?')) return;
+        revokeAttachments(attachmentsRef.current);
+        setAttachments(new Map());
         setHistory(resetHistoryState());
         clearReplayUiState();
         setHistoryStatus('');
@@ -599,6 +650,7 @@ function EditorApp() {
             <section className="editorGrid" aria-label="Synced block editors">
                 <BlockEditor
                     replica={displayDemo.left}
+                    attachments={attachments}
                     resetSignal={historyResetSignal}
                     undoState={undoStates.left}
                     undoStatus={undoStatus.left ?? ''}
@@ -606,6 +658,8 @@ function EditorApp() {
                     onUndo={() => runUndoCommand('left', 'undo')}
                     onRedo={() => runUndoCommand('left', 'redo')}
                     onToggleOnline={() => toggleEditorOnline('left')}
+                    onCreateImageAttachment={createImageAttachment}
+                    onMergeSerializedAttachments={mergeSerializedAttachments}
                     onKeystroke={(blockId, event) => recordKeystroke('left', blockId, event)}
                     onKeyPerfSample={(sample) =>
                         recordKeyPerfSample({...sample, editorId: 'left'})
@@ -613,6 +667,7 @@ function EditorApp() {
                 />
                 <BlockEditor
                     replica={displayDemo.right}
+                    attachments={attachments}
                     resetSignal={historyResetSignal}
                     undoState={undoStates.right}
                     undoStatus={undoStatus.right ?? ''}
@@ -620,6 +675,8 @@ function EditorApp() {
                     onUndo={() => runUndoCommand('right', 'undo')}
                     onRedo={() => runUndoCommand('right', 'redo')}
                     onToggleOnline={() => toggleEditorOnline('right')}
+                    onCreateImageAttachment={createImageAttachment}
+                    onMergeSerializedAttachments={mergeSerializedAttachments}
                     onKeystroke={(blockId, event) => recordKeystroke('right', blockId, event)}
                     onKeyPerfSample={(sample) =>
                         recordKeyPerfSample({...sample, editorId: 'right'})
@@ -663,6 +720,7 @@ function KeyPerfMonitor({samples}: {samples: KeyPerfSample[]}) {
 
 function BlockEditor({
     replica,
+    attachments,
     resetSignal,
     undoState,
     undoStatus,
@@ -670,10 +728,13 @@ function BlockEditor({
     onUndo,
     onRedo,
     onToggleOnline,
+    onCreateImageAttachment,
+    onMergeSerializedAttachments,
     onKeystroke,
     onKeyPerfSample,
 }: {
     replica: Replica;
+    attachments: AttachmentStore;
     resetSignal: number;
     undoState: ReturnType<typeof deriveUndoState>;
     undoStatus: string;
@@ -681,6 +742,8 @@ function BlockEditor({
     onUndo(): void;
     onRedo(): void;
     onToggleOnline(): void;
+    onCreateImageAttachment(file: File): Promise<ImageAttachment>;
+    onMergeSerializedAttachments(attachments: SerializedImageAttachment[]): void;
     onKeystroke(blockId: string, event: KeyboardEvent<HTMLElement>): void;
     onKeyPerfSample(sample: Omit<KeyPerfSampleInput, 'editorId'>): void;
 }) {
@@ -706,6 +769,7 @@ function BlockEditor({
     const pendingDisplayInputRenderRef = useRef<{label: string; started: number} | null>(null);
     const pendingDomSelectionRef = useRef<{started: number} | null>(null);
     const pendingDomSelectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const pendingImageUploadSelectionRef = useRef<RetainedSelectionSet | null>(null);
     const linkHoverHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const codeHoverHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [hasFocus, setHasFocus] = useState(false);
@@ -1317,6 +1381,7 @@ function BlockEditor({
             const payload = serializeSelectionToClipboardPayload(
                 replica.state,
                 liveSelectionSet(replica),
+                serializeAttachments(attachments),
             );
             if (!payload) return;
             event.preventDefault();
@@ -1324,16 +1389,64 @@ function BlockEditor({
             event.clipboardData.setData('text/plain', payload.plainText);
             event.clipboardData.setData('text/html', payload.html);
         },
-        [liveSelectionSet, replica],
+        [attachments, liveSelectionSet, replica],
+    );
+
+    const captureImageUploadSelection = useCallback(() => {
+        pendingImageUploadSelectionRef.current = liveSelectionSet(replica);
+    }, [liveSelectionSet, replica]);
+
+    const insertImageFiles = useCallback(
+        async (files: File[], selectionSnapshot?: RetainedSelectionSet | null) => {
+            const file = files.find(isImageFile);
+            if (!file) return;
+            const retainedSelection =
+                selectionSnapshot ?? pendingImageUploadSelectionRef.current ?? liveSelectionSet(replica);
+            pendingImageUploadSelectionRef.current = null;
+            const attachment = await onCreateImageAttachment(file);
+            onCommand((current) => {
+                resetVerticalCaretIntent();
+                const result = insertImageBlockEverywhere(
+                    current.state,
+                    retainedSelection,
+                    attachment.id,
+                    'medium',
+                    makeCommandContext(current),
+                );
+                const primaryResultSelection = primarySelection(
+                    resolveSelectionSet(result.state, result.selection),
+                );
+                scheduleSelectionRestore(primaryResultSelection);
+                return result;
+            });
+        },
+        [
+            liveSelectionSet,
+            onCommand,
+            onCreateImageAttachment,
+            replica,
+            resetVerticalCaretIntent,
+            scheduleSelectionRestore,
+        ],
     );
 
     const pasteFromClipboard = useCallback(
         (event: ClipboardEvent<HTMLElement>) => {
+            const imageFiles = imageFilesFromDataTransfer(event.clipboardData);
+            if (imageFiles.length) {
+                event.preventDefault();
+                void insertImageFiles(imageFiles, liveSelectionSet(replica));
+                return;
+            }
+
             const rich = parseBlockRichTextClipboardPayload(
                 event.clipboardData.getData(BLOCK_RICH_TEXT_MIME),
             );
             if (rich) {
                 event.preventDefault();
+                if (rich.attachments?.length) {
+                    onMergeSerializedAttachments(rich.attachments);
+                }
                 runEditCommand((current, selection) =>
                     pasteRichClipboardEverywhere(
                         current.state,
@@ -1365,7 +1478,7 @@ function BlockEditor({
                 );
             });
         },
-        [runEditCommand],
+        [insertImageFiles, liveSelectionSet, onMergeSerializedAttachments, replica, runEditCommand],
     );
 
     const runInlineMarkToggle = useCallback(
@@ -2253,6 +2366,8 @@ function BlockEditor({
                 }
                 onLink={openLinkFromCurrentSelection}
                 onDateEmbed={insertDateEmbedFromCurrentSelection}
+                onImageUploadStart={captureImageUploadSelection}
+                onImageUpload={(files) => void insertImageFiles(files)}
                 onAnnotation={(presentation) =>
                     activeAnnotationBodySelection
                         ? runBlockControlCommand((current) => {
@@ -2343,6 +2458,7 @@ function BlockEditor({
                             renderBlockNode(node, {
                                 blocks,
                                 state: replica.state,
+                                attachments,
                                 charIdsByBlock,
                                 selection: primaryResolvedSelection,
                                 hasMultipleSelections: resolvedSelectionSet.entries.length > 1,
@@ -2753,6 +2869,7 @@ const runSelectionCommandEverywhere = (
 type RenderBlockContext = {
     blocks: RichFormattedBlock[];
     state: Replica['state'];
+    attachments: AttachmentStore;
     charIdsByBlock: Map<string, string[]>;
     selection: EditorSelection;
     hasMultipleSelections: boolean;
@@ -3383,6 +3500,11 @@ const renderEditableBlock = (block: RichFormattedBlock, context: RenderBlockCont
         <EditableBlock
             key={block.id}
             block={block}
+            attachment={
+                block.block.meta.type === 'image'
+                    ? context.attachments.get(block.block.meta.attachmentId) ?? null
+                    : null
+            }
             isTableCell={isTableCellBlock(context.state, block.id)}
             listNumber={context.orderedListNumbers.get(block.id) ?? null}
             previousBlockId={previousBlock?.id ?? null}
@@ -3610,6 +3732,20 @@ const renderEditableBlock = (block: RichFormattedBlock, context: RenderBlockCont
                     return {state: result.state, ops: result.ops, selection: current.selection};
                 })
             }
+            onSetImageSize={(size) =>
+                context.runBlockControlCommand((current) => {
+                    const currentBlock = current.state.state.blocks[block.id];
+                    if (!currentBlock || currentBlock.meta.type !== 'image') {
+                        return {state: current.state, ops: [], selection: current.selection};
+                    }
+                    const result = setBlockMeta(current.state, block.id, {
+                        ...currentBlock.meta,
+                        size,
+                        ts: nextReplicaTs(current),
+                    });
+                    return {state: result.state, ops: result.ops, selection: current.selection};
+                })
+            }
             onCopy={context.onCopy}
             onPaste={context.onPaste}
             onMoveCaret={context.moveCaretHorizontally}
@@ -3706,6 +3842,8 @@ const blockTypeMenuValue = (meta: RichBlockMeta | undefined): BlockTypeMenuValue
                   : 'callout-error';
         case 'table':
             return 'table';
+        case 'image':
+            return 'paragraph';
     }
 };
 
@@ -4958,6 +5096,8 @@ function Toolbar({
     onCode,
     onLink,
     onDateEmbed,
+    onImageUploadStart,
+    onImageUpload,
     onBlockType,
     onAnnotation,
 }: {
@@ -4973,9 +5113,12 @@ function Toolbar({
     onCode(): void;
     onLink(): void;
     onDateEmbed(): void;
+    onImageUploadStart(): void;
+    onImageUpload(files: File[]): void;
     onBlockType(kind: BlockTypeMenuValue): void;
     onAnnotation(presentation: AnnotationPresentation): void;
 }) {
+    const imageInputRef = useRef<HTMLInputElement>(null);
     return (
         <div className="toolbar" aria-label="Formatting">
             <div className="toolbarGroup" aria-label="History">
@@ -5044,6 +5187,31 @@ function Toolbar({
                 >
                     Date
                 </button>
+                <button
+                    type="button"
+                    onMouseDown={(event) => {
+                        event.preventDefault();
+                        onImageUploadStart();
+                    }}
+                    onClick={() => {
+                        onImageUploadStart();
+                        imageInputRef.current?.click();
+                    }}
+                >
+                    Image
+                </button>
+                <input
+                    ref={imageInputRef}
+                    className="imageUploadInput"
+                    type="file"
+                    accept="image/*"
+                    aria-label="Upload image"
+                    onChange={(event) => {
+                        const files = Array.from(event.currentTarget.files ?? []);
+                        event.currentTarget.value = '';
+                        if (files.length) onImageUpload(files);
+                    }}
+                />
             </div>
             <div className="toolbarGroup" aria-label="Annotations">
                 <button
@@ -5101,6 +5269,7 @@ function Toolbar({
 
 function EditableBlock({
     block,
+    attachment,
     isTableCell,
     listNumber,
     previousBlockId,
@@ -5143,6 +5312,7 @@ function EditableBlock({
     onToggleTodo,
     onSetCodeLanguage,
     onSetCalloutKind,
+    onSetImageSize,
     onCopy,
     onPaste,
     onMoveCaret,
@@ -5161,6 +5331,7 @@ function EditableBlock({
     onDisplayInputRenderStarted,
 }: {
     block: RichFormattedBlock;
+    attachment: ImageAttachment | null;
     isTableCell: boolean;
     listNumber: number | null;
     previousBlockId: string | null;
@@ -5203,6 +5374,7 @@ function EditableBlock({
     onToggleTodo(): void;
     onSetCodeLanguage(language: string): void;
     onSetCalloutKind(kind: 'info' | 'warning' | 'error'): void;
+    onSetImageSize(size: ImagePresentationSize): void;
     onCopy(event: ClipboardEvent<HTMLElement>): void;
     onPaste(event: ClipboardEvent<HTMLElement>): void;
     onMoveCaret(selection: EditorSelection): void;
@@ -5248,6 +5420,286 @@ function EditableBlock({
         () => (isCodeBlock ? highlightCode(codeText, codeLanguage) : undefined),
         [codeLanguage, codeText, isCodeBlock],
     );
+    const editableSurface = (
+        <RichTextEditableSurface
+            blockId={block.id}
+            runs={block.runs}
+            charIdsByOffset={charIdsByOffset}
+            decorations={decorations}
+            pendingCaretRestoreBlockIdRef={pendingCaretRestoreBlockIdRef}
+            selection={selection}
+            className={[
+                'editableBlock',
+                meta.type === 'code' ? 'codeBlock' : '',
+                meta.type === 'heading' ? `headingLevel${meta.level}` : '',
+                meta.type === 'image' ? 'imageCaption' : '',
+            ]
+                .filter(Boolean)
+                .join(' ')}
+            ariaLabel="Block text"
+            trailingCodeNewline={codeHasTrailingNewline}
+            syntaxTokens={syntaxTokens}
+            popoverTextById={popoverTextById}
+            footnoteNumberById={footnoteNumberById}
+            onPopoverTriggerEnter={onPopoverTriggerEnter}
+            onPopoverTriggerLeave={onPopoverTriggerLeave}
+            onLinkHoverEnter={onLinkHoverEnter}
+            onLinkHoverLeave={onLinkHoverLeave}
+            onCodeHoverEnter={onCodeHoverEnter}
+            onCodeHoverLeave={onCodeHoverLeave}
+            onInlineEmbedOpen={onInlineEmbedOpen}
+            onInputMeasured={onInputMeasured}
+            onDisplayInputRenderStarted={onDisplayInputRenderStarted}
+            onInsertText={onInsertText}
+            onDeleteBackward={onDeleteBackward}
+            onDeleteForward={onDeleteForward}
+            onCopy={onCopy}
+            onKeyDown={(event) => {
+                onKeystroke(block.id, event);
+                const modifierPressed = event.metaKey || event.ctrlKey;
+                const key = event.key.toLowerCase();
+                if (modifierPressed && key === 'z' && event.shiftKey) {
+                    event.preventDefault();
+                    onRedo();
+                } else if (modifierPressed && key === 'z') {
+                    event.preventDefault();
+                    onUndo();
+                } else if (modifierPressed && key === 'y') {
+                    event.preventDefault();
+                    onRedo();
+                } else if (modifierPressed && key === 'b') {
+                    event.preventDefault();
+                    onToggleBold();
+                } else if (modifierPressed && key === 'i') {
+                    event.preventDefault();
+                    onToggleItalic();
+                } else if (modifierPressed && event.shiftKey && key === 'x') {
+                    event.preventDefault();
+                    onToggleStrikethrough();
+                } else if (modifierPressed && key === 'e') {
+                    event.preventDefault();
+                    onToggleCode();
+                } else if (modifierPressed && key === 'k') {
+                    event.preventDefault();
+                    onOpenLink();
+                } else if (event.key === 'Enter') {
+                    event.preventDefault();
+                    if (meta.type === 'code' && event.shiftKey) {
+                        onForceCodeNewline();
+                    } else if (meta.type === 'code') {
+                        onSplit();
+                    } else if (isTableCell && !event.shiftKey && meta.type !== 'image') {
+                        onAdvanceFromTableCellEnd(
+                            readSelectionFromDom(event.currentTarget) ??
+                                caret(block.id, blockLength),
+                        );
+                    } else {
+                        onSplit();
+                    }
+                } else if (event.key === 'Tab' && !event.altKey && !modifierPressed) {
+                    event.preventDefault();
+                    if (meta.type === 'code') {
+                        onInsertText('    ');
+                    } else if (isTableCell) {
+                        onMoveTableCellByTab(event.shiftKey ? 'backward' : 'forward');
+                    } else if (event.shiftKey) {
+                        onUnindent();
+                    } else {
+                        onIndent();
+                    }
+                } else if (event.key === 'Backspace') {
+                    event.preventDefault();
+                    onDeleteBackward();
+                } else if (event.key === 'Delete') {
+                    event.preventDefault();
+                    onDeleteForward();
+                } else if (event.key === 'Home' || event.key === 'End') {
+                    event.preventDefault();
+                    const direction = event.key === 'Home' ? 'left' : 'right';
+                    if (event.shiftKey) {
+                        onExtendSelectionsHorizontally(direction, 'block');
+                    } else {
+                        onMoveSelectionsHorizontally(direction, 'block');
+                    }
+                } else if (
+                    (event.key === 'ArrowLeft' || event.key === 'ArrowRight') &&
+                    (event.altKey || modifierPressed)
+                ) {
+                    event.preventDefault();
+                    const direction = event.key === 'ArrowLeft' ? 'left' : 'right';
+                    const unit = event.altKey ? 'word' : 'block';
+                    if (event.shiftKey) {
+                        onExtendSelectionsHorizontally(direction, unit);
+                    } else {
+                        onMoveSelectionsHorizontally(direction, unit);
+                    }
+                } else if (
+                    isPlainArrowKey(event.key) &&
+                    event.shiftKey &&
+                    !event.altKey &&
+                    !modifierPressed
+                ) {
+                    event.preventDefault();
+                    const currentSelection = readSelectionFromDom(event.currentTarget);
+                    if (currentSelection && !hasMultipleSelections) {
+                        const focus = focusPoint(currentSelection);
+                        if (
+                            event.key === 'ArrowLeft' &&
+                            focus.offset === 0 &&
+                            onExtendTableSelectionByArrowKey(currentSelection, 'left')
+                        ) {
+                            return;
+                        }
+                        if (
+                            event.key === 'ArrowRight' &&
+                            focus.offset === blockLength &&
+                            onExtendTableSelectionByArrowKey(currentSelection, 'right')
+                        ) {
+                            return;
+                        }
+                        if (
+                            event.key === 'ArrowUp' &&
+                            isCaretOnFirstVisualLine(event.currentTarget) &&
+                            onExtendTableSelectionByArrowKey(
+                                currentSelection,
+                                'up',
+                                event.currentTarget,
+                            )
+                        ) {
+                            return;
+                        }
+                        if (
+                            event.key === 'ArrowDown' &&
+                            isCaretOnLastVisualLine(event.currentTarget) &&
+                            onExtendTableSelectionByArrowKey(
+                                currentSelection,
+                                'down',
+                                event.currentTarget,
+                            )
+                        ) {
+                            return;
+                        }
+                    }
+                    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+                        onExtendSelectionsHorizontally(
+                            event.key === 'ArrowLeft' ? 'left' : 'right',
+                        );
+                    } else if (hasMultipleSelections) {
+                        onExtendSelectionsVertically(event.key === 'ArrowUp' ? 'up' : 'down');
+                    } else {
+                        onExtendSelectionVerticallyWithVisualIntent(
+                            event.key === 'ArrowUp' ? 'up' : 'down',
+                            event.currentTarget,
+                        );
+                    }
+                } else if (
+                    hasMultipleSelections &&
+                    isPlainArrowKey(event.key) &&
+                    !event.shiftKey &&
+                    !event.altKey &&
+                    !modifierPressed
+                ) {
+                    event.preventDefault();
+                    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+                        onMoveSelectionsHorizontally(
+                            event.key === 'ArrowLeft' ? 'left' : 'right',
+                        );
+                    } else {
+                        onMoveSelectionsVertically(event.key === 'ArrowUp' ? 'up' : 'down');
+                    }
+                } else if (
+                    event.key === 'ArrowLeft' &&
+                    !event.shiftKey &&
+                    !event.altKey &&
+                    !modifierPressed &&
+                    previousBlockId
+                ) {
+                    const currentSelection = readSelectionFromDom(event.currentTarget);
+                    if (
+                        currentSelection?.type === 'caret' &&
+                        currentSelection.point.offset === 0
+                    ) {
+                        if (onMoveTableSelectionByArrowKey(currentSelection, 'left')) {
+                            event.preventDefault();
+                            return;
+                        }
+                        event.preventDefault();
+                        onMoveCaret(caret(previousBlockId, previousBlockLength));
+                    }
+                } else if (
+                    event.key === 'ArrowRight' &&
+                    !event.shiftKey &&
+                    !event.altKey &&
+                    !modifierPressed &&
+                    nextBlockId
+                ) {
+                    const currentSelection = readSelectionFromDom(event.currentTarget);
+                    if (
+                        currentSelection?.type === 'caret' &&
+                        currentSelection.point.offset === blockLength
+                    ) {
+                        if (onMoveTableSelectionByArrowKey(currentSelection, 'right')) {
+                            event.preventDefault();
+                            return;
+                        }
+                        event.preventDefault();
+                        onMoveCaret(caret(nextBlockId, 0));
+                    }
+                } else if (
+                    event.key === 'ArrowUp' &&
+                    !event.shiftKey &&
+                    !event.altKey &&
+                    !modifierPressed &&
+                    previousBlockId
+                ) {
+                    const currentSelection = readSelectionFromDom(event.currentTarget);
+                    if (
+                        currentSelection?.type === 'caret' &&
+                        isCaretOnFirstVisualLine(event.currentTarget)
+                    ) {
+                        if (
+                            onMoveTableSelectionByArrowKey(
+                                currentSelection,
+                                'up',
+                                event.currentTarget,
+                            )
+                        ) {
+                            event.preventDefault();
+                            return;
+                        }
+                        event.preventDefault();
+                        onMoveCaretVertically(event.currentTarget, previousBlockId);
+                    }
+                } else if (
+                    event.key === 'ArrowDown' &&
+                    !event.shiftKey &&
+                    !event.altKey &&
+                    !modifierPressed &&
+                    nextBlockId
+                ) {
+                    const currentSelection = readSelectionFromDom(event.currentTarget);
+                    if (
+                        currentSelection?.type === 'caret' &&
+                        isCaretOnLastVisualLine(event.currentTarget)
+                    ) {
+                        if (
+                            onMoveTableSelectionByArrowKey(
+                                currentSelection,
+                                'down',
+                                event.currentTarget,
+                            )
+                        ) {
+                            event.preventDefault();
+                            return;
+                        }
+                        event.preventDefault();
+                        onMoveCaretVertically(event.currentTarget, nextBlockId);
+                    }
+                }
+            }}
+            onPaste={onPaste}
+        />
+    );
 
     return (
         <div
@@ -5279,287 +5731,19 @@ function EditableBlock({
                     onToggleTodo={onToggleTodo}
                 />
             )}
-            <RichTextEditableSurface
-                blockId={block.id}
-                runs={block.runs}
-                charIdsByOffset={charIdsByOffset}
-                decorations={decorations}
-                pendingCaretRestoreBlockIdRef={pendingCaretRestoreBlockIdRef}
-                selection={selection}
-                className={[
-                    'editableBlock',
-                    meta.type === 'code' ? 'codeBlock' : '',
-                    meta.type === 'heading' ? `headingLevel${meta.level}` : '',
-                ]
-                    .filter(Boolean)
-                    .join(' ')}
-                ariaLabel="Block text"
-                trailingCodeNewline={codeHasTrailingNewline}
-                syntaxTokens={syntaxTokens}
-                popoverTextById={popoverTextById}
-                footnoteNumberById={footnoteNumberById}
-                onPopoverTriggerEnter={onPopoverTriggerEnter}
-                onPopoverTriggerLeave={onPopoverTriggerLeave}
-                onLinkHoverEnter={onLinkHoverEnter}
-                onLinkHoverLeave={onLinkHoverLeave}
-                onCodeHoverEnter={onCodeHoverEnter}
-                onCodeHoverLeave={onCodeHoverLeave}
-                onInlineEmbedOpen={onInlineEmbedOpen}
-                onInputMeasured={onInputMeasured}
-                onDisplayInputRenderStarted={onDisplayInputRenderStarted}
-                onInsertText={onInsertText}
-                onDeleteBackward={onDeleteBackward}
-                onDeleteForward={onDeleteForward}
-                onCopy={onCopy}
-                onKeyDown={(event) => {
-                    onKeystroke(block.id, event);
-                    const modifierPressed = event.metaKey || event.ctrlKey;
-                    const key = event.key.toLowerCase();
-                    if (modifierPressed && key === 'z' && event.shiftKey) {
-                        event.preventDefault();
-                        onRedo();
-                    } else if (modifierPressed && key === 'z') {
-                        event.preventDefault();
-                        onUndo();
-                    } else if (modifierPressed && key === 'y') {
-                        event.preventDefault();
-                        onRedo();
-                    } else if (modifierPressed && key === 'b') {
-                        event.preventDefault();
-                        onToggleBold();
-                    } else if (modifierPressed && key === 'i') {
-                        event.preventDefault();
-                        onToggleItalic();
-                    } else if (modifierPressed && event.shiftKey && key === 'x') {
-                        event.preventDefault();
-                        onToggleStrikethrough();
-                    } else if (modifierPressed && key === 'e') {
-                        event.preventDefault();
-                        onToggleCode();
-                    } else if (modifierPressed && key === 'k') {
-                        event.preventDefault();
-                        onOpenLink();
-                    } else if (event.key === 'Enter') {
-                        event.preventDefault();
-                        if (meta.type === 'code' && event.shiftKey) {
-                            onForceCodeNewline();
-                        } else if (meta.type === 'code') {
-                            onSplit();
-                        } else if (isTableCell && !event.shiftKey) {
-                            onAdvanceFromTableCellEnd(
-                                readSelectionFromDom(event.currentTarget) ??
-                                    caret(block.id, blockLength),
-                            );
-                        } else {
-                            onSplit();
-                        }
-                    } else if (event.key === 'Tab' && !event.altKey && !modifierPressed) {
-                        event.preventDefault();
-                        if (meta.type === 'code') {
-                            onInsertText('    ');
-                        } else if (isTableCell) {
-                            onMoveTableCellByTab(event.shiftKey ? 'backward' : 'forward');
-                        } else if (event.shiftKey) {
-                            onUnindent();
-                        } else {
-                            onIndent();
-                        }
-                    } else if (event.key === 'Backspace') {
-                        event.preventDefault();
-                        onDeleteBackward();
-                    } else if (event.key === 'Delete') {
-                        event.preventDefault();
-                        onDeleteForward();
-                    } else if (event.key === 'Home' || event.key === 'End') {
-                        event.preventDefault();
-                        const direction = event.key === 'Home' ? 'left' : 'right';
-                        if (event.shiftKey) {
-                            onExtendSelectionsHorizontally(direction, 'block');
-                        } else {
-                            onMoveSelectionsHorizontally(direction, 'block');
-                        }
-                    } else if (
-                        (event.key === 'ArrowLeft' || event.key === 'ArrowRight') &&
-                        (event.altKey || modifierPressed)
-                    ) {
-                        event.preventDefault();
-                        const direction = event.key === 'ArrowLeft' ? 'left' : 'right';
-                        const unit = event.altKey ? 'word' : 'block';
-                        if (event.shiftKey) {
-                            onExtendSelectionsHorizontally(direction, unit);
-                        } else {
-                            onMoveSelectionsHorizontally(direction, unit);
-                        }
-                    } else if (
-                        isPlainArrowKey(event.key) &&
-                        event.shiftKey &&
-                        !event.altKey &&
-                        !modifierPressed
-                    ) {
-                        event.preventDefault();
-                        const currentSelection = readSelectionFromDom(event.currentTarget);
-                        if (currentSelection && !hasMultipleSelections) {
-                            const focus = focusPoint(currentSelection);
-                            if (
-                                event.key === 'ArrowLeft' &&
-                                focus.offset === 0 &&
-                                onExtendTableSelectionByArrowKey(currentSelection, 'left')
-                            ) {
-                                return;
-                            }
-                            if (
-                                event.key === 'ArrowRight' &&
-                                focus.offset === blockLength &&
-                                onExtendTableSelectionByArrowKey(currentSelection, 'right')
-                            ) {
-                                return;
-                            }
-                            if (
-                                event.key === 'ArrowUp' &&
-                                isCaretOnFirstVisualLine(event.currentTarget) &&
-                                onExtendTableSelectionByArrowKey(
-                                    currentSelection,
-                                    'up',
-                                    event.currentTarget,
-                                )
-                            ) {
-                                return;
-                            }
-                            if (
-                                event.key === 'ArrowDown' &&
-                                isCaretOnLastVisualLine(event.currentTarget) &&
-                                onExtendTableSelectionByArrowKey(
-                                    currentSelection,
-                                    'down',
-                                    event.currentTarget,
-                                )
-                            ) {
-                                return;
-                            }
-                        }
-                        if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
-                            onExtendSelectionsHorizontally(
-                                event.key === 'ArrowLeft' ? 'left' : 'right',
-                            );
-                        } else if (hasMultipleSelections) {
-                            onExtendSelectionsVertically(event.key === 'ArrowUp' ? 'up' : 'down');
-                        } else {
-                            onExtendSelectionVerticallyWithVisualIntent(
-                                event.key === 'ArrowUp' ? 'up' : 'down',
-                                event.currentTarget,
-                            );
-                        }
-                    } else if (
-                        hasMultipleSelections &&
-                        isPlainArrowKey(event.key) &&
-                        !event.shiftKey &&
-                        !event.altKey &&
-                        !modifierPressed
-                    ) {
-                        event.preventDefault();
-                        if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
-                            onMoveSelectionsHorizontally(
-                                event.key === 'ArrowLeft' ? 'left' : 'right',
-                            );
-                        } else {
-                            onMoveSelectionsVertically(event.key === 'ArrowUp' ? 'up' : 'down');
-                        }
-                    } else if (
-                        event.key === 'ArrowLeft' &&
-                        !event.shiftKey &&
-                        !event.altKey &&
-                        !modifierPressed &&
-                        previousBlockId
-                    ) {
-                        const currentSelection = readSelectionFromDom(event.currentTarget);
-                        if (
-                            currentSelection?.type === 'caret' &&
-                            currentSelection.point.offset === 0
-                        ) {
-                            if (onMoveTableSelectionByArrowKey(currentSelection, 'left')) {
-                                event.preventDefault();
-                                return;
-                            }
-                            event.preventDefault();
-                            onMoveCaret(caret(previousBlockId, previousBlockLength));
-                        }
-                    } else if (
-                        event.key === 'ArrowRight' &&
-                        !event.shiftKey &&
-                        !event.altKey &&
-                        !modifierPressed &&
-                        nextBlockId
-                    ) {
-                        const currentSelection = readSelectionFromDom(event.currentTarget);
-                        if (
-                            currentSelection?.type === 'caret' &&
-                            currentSelection.point.offset === blockLength
-                        ) {
-                            if (onMoveTableSelectionByArrowKey(currentSelection, 'right')) {
-                                event.preventDefault();
-                                return;
-                            }
-                            event.preventDefault();
-                            onMoveCaret(caret(nextBlockId, 0));
-                        }
-                    } else if (
-                        event.key === 'ArrowUp' &&
-                        !event.shiftKey &&
-                        !event.altKey &&
-                        !modifierPressed &&
-                        previousBlockId
-                    ) {
-                        const currentSelection = readSelectionFromDom(event.currentTarget);
-                        if (
-                            currentSelection?.type === 'caret' &&
-                            isCaretOnFirstVisualLine(event.currentTarget)
-                        ) {
-                            if (
-                                onMoveTableSelectionByArrowKey(
-                                    currentSelection,
-                                    'up',
-                                    event.currentTarget,
-                                )
-                            ) {
-                                event.preventDefault();
-                                return;
-                            }
-                            event.preventDefault();
-                            onMoveCaretVertically(event.currentTarget, previousBlockId);
-                        }
-                    } else if (
-                        event.key === 'ArrowDown' &&
-                        !event.shiftKey &&
-                        !event.altKey &&
-                        !modifierPressed &&
-                        nextBlockId
-                    ) {
-                        const currentSelection = readSelectionFromDom(event.currentTarget);
-                        if (
-                            currentSelection?.type === 'caret' &&
-                            isCaretOnLastVisualLine(event.currentTarget)
-                        ) {
-                            if (
-                                onMoveTableSelectionByArrowKey(
-                                    currentSelection,
-                                    'down',
-                                    event.currentTarget,
-                                )
-                            ) {
-                                event.preventDefault();
-                                return;
-                            }
-                            event.preventDefault();
-                            onMoveCaretVertically(event.currentTarget, nextBlockId);
-                        }
-                    }
-                }}
-                onPaste={onPaste}
-            />
+            {meta.type === 'image' ? (
+                <figure className={`imageBlock imageSize-${meta.size}`}>
+                    <ImagePreview attachment={attachment} attachmentId={meta.attachmentId} />
+                    <figcaption>{editableSurface}</figcaption>
+                </figure>
+            ) : (
+                editableSurface
+            )}
             <BlockInlineControls
                 meta={meta}
                 onSetCodeLanguage={onSetCodeLanguage}
                 onSetCalloutKind={onSetCalloutKind}
+                onSetImageSize={onSetImageSize}
             />
         </div>
     );
@@ -5960,10 +6144,12 @@ function BlockInlineControls({
     meta,
     onSetCodeLanguage,
     onSetCalloutKind,
+    onSetImageSize,
 }: {
     meta: RichBlockMeta;
     onSetCodeLanguage(language: string): void;
     onSetCalloutKind(kind: 'info' | 'warning' | 'error'): void;
+    onSetImageSize(size: ImagePresentationSize): void;
 }) {
     if (meta.type === 'code') {
         return (
@@ -6000,7 +6186,55 @@ function BlockInlineControls({
             </select>
         );
     }
+    if (meta.type === 'image') {
+        return (
+            <select
+                className="imageSizeControl"
+                value={meta.size}
+                aria-label="Image size"
+                onPointerDown={stopEditorControlEvent}
+                onMouseDown={stopEditorControlEvent}
+                onMouseUp={stopEditorControlEvent}
+                onClick={stopEditorControlEvent}
+                onChange={(event) =>
+                    onSetImageSize(event.currentTarget.value as ImagePresentationSize)
+                }
+            >
+                <option value="small">Small</option>
+                <option value="medium">Medium</option>
+                <option value="large">Large</option>
+                <option value="original">Original</option>
+            </select>
+        );
+    }
     return null;
+}
+
+function ImagePreview({
+    attachment,
+    attachmentId,
+}: {
+    attachment: ImageAttachment | null;
+    attachmentId: string;
+}) {
+    if (attachment?.objectUrl) {
+        return (
+            <img
+                className="imagePreview"
+                src={attachment.objectUrl}
+                alt={attachment.name || 'Uploaded image'}
+                width={attachment.width}
+                height={attachment.height}
+                contentEditable={false}
+            />
+        );
+    }
+    return (
+        <div className="imageMissing" contentEditable={false}>
+            <span>Missing image</span>
+            <code>{attachmentId}</code>
+        </div>
+    );
 }
 
 const stopEditorControlEvent = (event: {stopPropagation(): void}) => {
@@ -6008,6 +6242,21 @@ const stopEditorControlEvent = (event: {stopPropagation(): void}) => {
 };
 
 const isJsdom = () => navigator.userAgent.includes('jsdom');
+
+const imageFilesFromDataTransfer = (dataTransfer: DataTransfer): File[] => {
+    const files = Array.from(dataTransfer.files ?? []).filter(isImageFile);
+    if (files.length) return files;
+    return Array.from(dataTransfer.items ?? [])
+        .filter((item) => item.kind === 'file' && (!item.type || item.type.startsWith('image/')))
+        .map((item) => item.getAsFile())
+        .filter((file): file is File => {
+            if (!file) return false;
+            return isImageFile(file);
+        });
+};
+
+const isImageFile = (file: File): boolean =>
+    file.type.startsWith('image/') || /\.(avif|gif|jpe?g|png|svg|webp)$/i.test(file.name);
 
 const isPlainArrowKey = (key: string) =>
     key === 'ArrowLeft' || key === 'ArrowRight' || key === 'ArrowUp' || key === 'ArrowDown';

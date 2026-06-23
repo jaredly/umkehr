@@ -30,6 +30,7 @@ import {
     indentBlock,
     insertText,
     insertInlineEmbed,
+    insertImageBlock,
     insertTextWithMarkdownShortcuts,
     insertTextWithMarks,
     insertTextWithRetainedMarks,
@@ -542,6 +543,84 @@ describe('block rich text commands', () => {
 
         expect(synced.left.state.state.blocks[blockId].meta).toEqual({type: 'heading', level: 2, ts: '00001'});
         expect(synced.right.state.state.blocks[blockId].meta).toEqual({type: 'heading', level: 2, ts: '00001'});
+    });
+
+    it('converts an empty block to an image block', () => {
+        const state = init();
+        const blockId = onlyBlock(state);
+        const result = insertImageBlock(state, caret(blockId, 0), 'attachment-1', 'medium', ctx());
+
+        expect(rootBlockIds(result.state)).toEqual([blockId]);
+        expect(result.state.state.blocks[blockId].meta).toMatchObject({
+            type: 'image',
+            attachmentId: 'attachment-1',
+            size: 'medium',
+        });
+        expect(result.selection).toEqual(caret(blockId, 0));
+    });
+
+    it('inserts an image block after a non-empty block', () => {
+        const context = ctx();
+        const typed = insertText(init(), caret(onlyBlock(init()), 0), 'hello', context);
+        const textBlockId = onlyBlock(typed.state);
+        const result = insertImageBlock(
+            typed.state,
+            caret(textBlockId, 2),
+            'attachment-2',
+            'large',
+            context,
+        );
+        const ids = rootBlockIds(result.state);
+        const imageBlockId = ids[1];
+
+        expect(ids).toHaveLength(2);
+        expect(blockContents(result.state, textBlockId)).toBe('hello');
+        expect(result.state.state.blocks[imageBlockId].meta).toMatchObject({
+            type: 'image',
+            attachmentId: 'attachment-2',
+            size: 'large',
+        });
+        expect(result.selection).toEqual(caret(imageBlockId, 0));
+    });
+
+    it('syncs image block metadata to the peer replica', () => {
+        const demo = createDemoState();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        const result = insertImageBlock(
+            demo.left.state,
+            caret(blockId, 0),
+            'attachment-3',
+            'small',
+            makeCommandContext(demo.left),
+        );
+
+        const synced = applyLocalChange(demo, {
+            editorId: 'left',
+            state: result.state,
+            selection: demo.left.selection,
+            ops: result.ops,
+        });
+
+        expect(synced.right.state.state.blocks[blockId].meta).toMatchObject({
+            type: 'image',
+            attachmentId: 'attachment-3',
+            size: 'small',
+        });
+    });
+
+    it('creates a paragraph after an image block on split', () => {
+        const context = ctx();
+        const state = init();
+        const blockId = onlyBlock(state);
+        const image = insertImageBlock(state, caret(blockId, 0), 'attachment-4', 'medium', context);
+        const result = splitBlock(image.state, caret(blockId, 0), context);
+        const ids = rootBlockIds(result.state);
+        const paragraphId = ids[1];
+
+        expect(ids).toHaveLength(2);
+        expect(result.state.state.blocks[blockId].meta).toMatchObject({type: 'image'});
+        expect(result.state.state.blocks[paragraphId].meta).toMatchObject({type: 'paragraph'});
+        expect(result.selection).toEqual(caret(paragraphId, 0));
     });
 
     it('creates a table block with normal row children and cells', () => {

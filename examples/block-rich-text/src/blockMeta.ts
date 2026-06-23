@@ -1,6 +1,8 @@
 import type {HLC, Lamport} from 'umkehr/block-crdt/types';
 import type {Block} from 'umkehr/block-crdt/types';
 
+export type ImagePresentationSize = 'small' | 'medium' | 'large' | 'original';
+
 export type RichBlockMeta =
     | {type: 'paragraph'; ts: HLC}
     | {type: 'heading'; level: 1 | 2 | 3; ts: HLC}
@@ -9,7 +11,8 @@ export type RichBlockMeta =
     | {type: 'blockquote'; ts: HLC}
     | {type: 'code'; language: string; ts: HLC}
     | {type: 'callout'; kind: 'info' | 'warning' | 'error'; ts: HLC}
-    | {type: 'table'; ts: HLC};
+    | {type: 'table'; ts: HLC}
+    | {type: 'image'; attachmentId: string; size: ImagePresentationSize; ts: HLC};
 
 export type RichBlockType = RichBlockMeta['type'];
 
@@ -33,6 +36,8 @@ export const sameTypeWithTs = (meta: RichBlockMeta, ts: HLC): RichBlockMeta => {
             return {type: 'callout', kind: meta.kind, ts};
         case 'table':
             return {type: 'table', ts};
+        case 'image':
+            return {type: 'image', attachmentId: meta.attachmentId, size: meta.size, ts};
     }
 };
 

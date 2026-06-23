@@ -11,7 +11,7 @@ import {
     type Op,
 } from 'umkehr/block-crdt';
 import {lamportToString, parseLamportString} from 'umkehr/block-crdt/utils';
-import type {RichBlockMeta} from './blockMeta';
+import type {ImagePresentationSize, RichBlockMeta} from './blockMeta';
 import {
     deleteBackward,
     deleteTableRowHeaderBackward,
@@ -20,6 +20,7 @@ import {
     insertTextWithMarkdownShortcuts,
     insertTextWithMarks,
     insertTextWithRetainedMarks,
+    insertImageBlock,
     moveBlock,
     pastePlainText,
     pastePlainTextDetailed,
@@ -256,6 +257,23 @@ export const pasteRichClipboardEverywhere = (
         }),
     };
 };
+
+export const insertImageBlockEverywhere = (
+    state: CachedState<RichBlockMeta>,
+    selection: RetainedSelectionSet,
+    attachmentId: string,
+    size: ImagePresentationSize,
+    context: CommandContext,
+): MultiCommandResult =>
+    runReplacingCommand(state, selection, (working, entry) =>
+        insertImageBlock(
+            working,
+            resolveSelection(working, entry.selection),
+            attachmentId,
+            size,
+            context,
+        ),
+    );
 
 export const deleteBackwardEverywhere = (
     state: CachedState<RichBlockMeta>,

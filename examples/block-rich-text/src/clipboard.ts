@@ -1,6 +1,7 @@
 import {
     formattedMarkValues,
     materializeFormattedBlocks,
+    orderedCharIdsForBlock,
     type FormattedBlock,
     type FormattedRun,
 } from 'umkehr/block-crdt';
@@ -15,8 +16,14 @@ import {
     isInlineEmbedData,
     plainTextForInlineEmbed,
 } from './inlineEmbeds';
-import {normalizeSelectionSegments, segmentText} from './selectionModel';
+import {
+    editableBlockIds,
+    normalizeSelectionSegments,
+    segmentText,
+    type EditorSelection,
+} from './selectionModel';
 import type {RichBlockMeta} from './blockMeta';
+import {isSerializedImageAttachment, type SerializedImageAttachment} from './attachments';
 import {
     ANNOTATION_MARK,
     annotationMarkBehavior,
@@ -62,6 +69,7 @@ export type RichClipboardPayload = {
     html: string;
     fragments: ClipboardFragment[];
     annotations: ClipboardAnnotation[];
+    attachments?: SerializedImageAttachment[];
 };
 
 type FragmentBuildResult = {
@@ -94,11 +102,14 @@ export const parseBlockRichTextClipboardPayload = (value: string): RichClipboard
     if (typeof parsed.html !== 'string') return null;
     if (!Array.isArray(parsed.fragments)) return null;
     if (!Array.isArray(parsed.annotations)) return null;
+    if (parsed.attachments !== undefined && !Array.isArray(parsed.attachments)) return null;
 
     const fragments = parseFragments(parsed.fragments);
     if (!fragments) return null;
     const annotations = parseAnnotations(parsed.annotations);
     if (!annotations) return null;
+    const attachments = parseAttachments(parsed.attachments);
+    if (!attachments) return null;
 
     return {
         version: 1,
@@ -106,12 +117,14 @@ export const parseBlockRichTextClipboardPayload = (value: string): RichClipboard
         html: parsed.html,
         fragments,
         annotations,
+        ...(attachments.length ? {attachments} : {}),
     };
 };
 
 export const serializeSelectionToClipboardPayload = (
     state: CachedState<RichBlockMeta>,
     selection: RetainedSelectionSet,
+    attachments: SerializedImageAttachment[] = [],
 ): RichClipboardPayload | null => {
     const formatted = materializeFormattedBlocks(state, annotationMarkBehavior);
     const formattedById = new Map(formatted.map((block) => [block.id, block]));
@@ -119,15 +132,26 @@ export const serializeSelectionToClipboardPayload = (
     const resolved = resolveSelectionSet(state, {primaryId: selection.primaryId, entries: merged});
     const fragments: ClipboardFragment[] = [];
     const refs: ClipboardAnnotationRef[] = [];
+    const includedBlockIds = new Set<string>();
 
     for (const entry of resolved.entries) {
         for (const segment of normalizeSelectionSegments(state, entry.selection)) {
             const block = formattedById.get(segment.blockId);
             if (!block) continue;
             const built = fragmentForRange(block, segment.startOffset, segment.endOffset);
-            if (!built.fragment.text) continue;
+            if (!built.fragment.text && built.fragment.meta.type !== 'image') continue;
             fragments.push(built.fragment);
             refs.push(...built.annotationRefs);
+            includedBlockIds.add(block.id);
+        }
+        for (const blockId of emptyImageBlockIdsForSelection(state, entry.selection)) {
+            if (includedBlockIds.has(blockId)) continue;
+            const block = formattedById.get(blockId);
+            if (!block) continue;
+            const built = fragmentForRange(block, 0, 0);
+            fragments.push(built.fragment);
+            refs.push(...built.annotationRefs);
+            includedBlockIds.add(block.id);
         }
     }
 
@@ -136,7 +160,42 @@ export const serializeSelectionToClipboardPayload = (
     const annotations = collectAnnotations(state, refs);
     const plainText = fragments.map(fragmentToPlainText).join('\n');
     const html = fragmentsToHtml(fragments);
-    return {version: 1, plainText, html, fragments, annotations};
+    const attachmentIds = new Set(
+        fragments
+            .map((fragment) =>
+                fragment.meta.type === 'image' ? fragment.meta.attachmentId : null,
+            )
+            .filter((id): id is string => Boolean(id)),
+    );
+    const copiedAttachments = attachments.filter((attachment) => attachmentIds.has(attachment.id));
+    return {
+        version: 1,
+        plainText,
+        html,
+        fragments,
+        annotations,
+        ...(copiedAttachments.length ? {attachments: copiedAttachments} : {}),
+    };
+};
+
+const emptyImageBlockIdsForSelection = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+): string[] => {
+    if (selection.type === 'caret') return [];
+    const blocks = editableBlockIds(state);
+    const anchorIndex = blocks.indexOf(selection.anchor.blockId);
+    const focusIndex = blocks.indexOf(selection.focus.blockId);
+    if (anchorIndex < 0 || focusIndex < 0) return [];
+    const start = Math.min(anchorIndex, focusIndex);
+    const end = Math.max(anchorIndex, focusIndex);
+    return blocks.slice(start, end + 1).filter((blockId) => {
+        const block = state.state.blocks[blockId];
+        return (
+            block?.meta.type === 'image' &&
+            orderedCharIdsForBlock(state, blockId, {visibleOnly: true}).length === 0
+        );
+    });
 };
 
 const parseAnnotations = (value: unknown[]): ClipboardAnnotation[] | null => {
@@ -158,6 +217,19 @@ const parseAnnotations = (value: unknown[]): ClipboardAnnotation[] | null => {
             ...(item.resolved === undefined ? {} : {resolved: item.resolved}),
             bodyBlocks,
         });
+    }
+    return result;
+};
+
+const parseAttachments = (value: unknown): SerializedImageAttachment[] | null => {
+    if (value === undefined) return [];
+    if (!Array.isArray(value)) return null;
+    const result: SerializedImageAttachment[] = [];
+    const seen = new Set<string>();
+    for (const item of value) {
+        if (!isSerializedImageAttachment(item) || seen.has(item.id)) return null;
+        seen.add(item.id);
+        result.push(item);
     }
     return result;
 };
@@ -519,7 +591,16 @@ const isRichBlockMeta = (value: unknown): value is RichBlockMeta => {
             return typeof value.language === 'string';
         case 'callout':
             return value.kind === 'info' || value.kind === 'warning' || value.kind === 'error';
+        case 'image':
+            return (
+                typeof value.attachmentId === 'string' &&
+                value.attachmentId.length > 0 &&
+                isImagePresentationSize(value.size)
+            );
         default:
             return false;
     }
 };
+
+const isImagePresentationSize = (value: unknown): boolean =>
+    value === 'small' || value === 'medium' || value === 'large' || value === 'original';
