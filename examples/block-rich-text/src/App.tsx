@@ -1663,47 +1663,44 @@ function BlockEditor({
         ],
     );
 
-    const pasteFromClipboard = useCallback(
-        (event: ClipboardEvent<HTMLElement>) => {
-            const imageFiles = imageFilesFromDataTransfer(event.clipboardData);
-            if (imageFiles.length) {
-                event.preventDefault();
-                void insertImageFiles(imageFiles, liveSelectionSet(replica));
-                return;
+    const pasteRichPayload = useCallback(
+        (rich: RichClipboardPayload) => {
+            if (rich.attachments?.length) {
+                onMergeSerializedAttachments(rich.attachments);
             }
+            onCommand((current) => {
+                resetVerticalCaretIntent();
+                const retainedSelection = current.selection;
+                const currentPrimary = primarySelection(
+                    resolveSelectionSet(current.state, retainedSelection),
+                );
+                const selection = isBlockLevelSelection(currentPrimary)
+                    ? retainedSelection
+                    : liveSelectionSet(current);
+                const result = pasteRichClipboardEverywhere(
+                    current.state,
+                    selection,
+                    rich,
+                    makeCommandContext(current),
+                );
+                const primaryResultSelection = primarySelection(
+                    resolveSelectionSet(result.state, result.selection),
+                );
+                scheduleSelectionRestore(primaryResultSelection);
+                return result;
+            });
+        },
+        [
+            liveSelectionSet,
+            onCommand,
+            onMergeSerializedAttachments,
+            resetVerticalCaretIntent,
+            scheduleSelectionRestore,
+        ],
+    );
 
-            const rich = richClipboardPayloadFromDataTransfer(event.clipboardData);
-            if (rich) {
-                event.preventDefault();
-                if (rich.attachments?.length) {
-                    onMergeSerializedAttachments(rich.attachments);
-                }
-                onCommand((current) => {
-                    resetVerticalCaretIntent();
-                    const retainedSelection = current.selection;
-                    const currentPrimary = primarySelection(
-                        resolveSelectionSet(current.state, retainedSelection),
-                    );
-                    const selection = isBlockLevelSelection(currentPrimary)
-                        ? retainedSelection
-                        : liveSelectionSet(current);
-                    const result = pasteRichClipboardEverywhere(
-                        current.state,
-                        selection,
-                        rich,
-                        makeCommandContext(current),
-                    );
-                    const primaryResultSelection = primarySelection(
-                        resolveSelectionSet(result.state, result.selection),
-                    );
-                    scheduleSelectionRestore(primaryResultSelection);
-                    return result;
-                });
-                return;
-            }
-
-            event.preventDefault();
-            const text = event.clipboardData.getData('text/plain');
+    const pastePlainClipboardText = useCallback(
+        (text: string) => {
             runEditCommand((current, selection) => {
                 const primary = primarySelection(resolveSelectionSet(current.state, selection));
                 const primaryFocus = focusPoint(primary);
@@ -1735,16 +1732,47 @@ function BlockEditor({
             });
         },
         [
-            insertImageFiles,
-            liveSelectionSet,
-            onCommand,
-            onMergeSerializedAttachments,
-            replica,
-            resetVerticalCaretIntent,
             runEditCommand,
-            scheduleSelectionRestore,
         ],
     );
+
+    const pasteFromClipboard = useCallback(
+        (event: ClipboardEvent<HTMLElement>) => {
+            const imageFiles = imageFilesFromDataTransfer(event.clipboardData);
+            if (imageFiles.length) {
+                event.preventDefault();
+                void insertImageFiles(imageFiles, liveSelectionSet(replica));
+                return;
+            }
+
+            const rich = richClipboardPayloadFromDataTransfer(event.clipboardData);
+            if (rich) {
+                event.preventDefault();
+                pasteRichPayload(rich);
+                return;
+            }
+
+            event.preventDefault();
+            pastePlainClipboardText(event.clipboardData.getData('text/plain'));
+        },
+        [
+            insertImageFiles,
+            liveSelectionSet,
+            pastePlainClipboardText,
+            pasteRichPayload,
+            replica,
+        ],
+    );
+
+    const pasteCurrentClipboard = useCallback(async () => {
+        const data = await readClipboardPayload();
+        if (!data) return;
+        if (data.rich) {
+            pasteRichPayload(data.rich);
+            return;
+        }
+        pastePlainClipboardText(data.text);
+    }, [pastePlainClipboardText, pasteRichPayload]);
 
     const runInlineMarkToggle = useCallback(
         (markType: BooleanInlineMark) => {
@@ -2047,6 +2075,15 @@ function BlockEditor({
                 void writeCurrentSelectionToClipboard();
                 return true;
             }
+            if (
+                (event.metaKey || event.ctrlKey) &&
+                !event.altKey &&
+                event.key.toLowerCase() === 'v'
+            ) {
+                event.preventDefault();
+                void pasteCurrentClipboard();
+                return true;
+            }
             const modifierPressed = event.metaKey || event.ctrlKey || event.altKey;
 
             if (event.key.length === 1 && !modifierPressed) {
@@ -2127,6 +2164,7 @@ function BlockEditor({
         [
             insertTextWithPendingMarks,
             onCommand,
+            pasteCurrentClipboard,
             resolvedSelectionSet,
             scheduleSelectionRestore,
             textCaretForBlockSelection,
@@ -7209,6 +7247,32 @@ const writeClipboardPayload = async (payload: RichClipboardPayload): Promise<voi
         }
     }
     await clipboard.writeText?.(plainText);
+};
+
+const readClipboardPayload = async (): Promise<
+    {rich: RichClipboardPayload; text: string} | {rich: null; text: string} | null
+> => {
+    const clipboard = navigator.clipboard;
+    if (!clipboard) return null;
+    if (typeof clipboard.read === 'function') {
+        try {
+            const items = await clipboard.read();
+            for (const item of items) {
+                if (!item.types.includes('text/html')) continue;
+                const html = await (await item.getType('text/html')).text();
+                const rich = parseBlockRichTextClipboardHtml(html);
+                if (rich) return {rich, text: rich.tsv ?? rich.plainText};
+            }
+            for (const item of items) {
+                if (!item.types.includes('text/plain')) continue;
+                return {rich: null, text: await (await item.getType('text/plain')).text()};
+            }
+        } catch {
+            // Fall back to readText below when rich async clipboard reads are unavailable.
+        }
+    }
+    const text = await clipboard.readText?.();
+    return typeof text === 'string' ? {rich: null, text} : null;
 };
 
 const richClipboardPayloadFromDataTransfer = (
