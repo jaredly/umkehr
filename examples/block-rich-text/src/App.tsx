@@ -33,6 +33,7 @@ import {
     deleteEmptyTableRowBackward,
     exitEmptyLastTableRow,
     moveBlock,
+    moveTableSelectionByArrow,
     moveTableCell,
     moveTableCellByTab,
     setBlockMeta,
@@ -63,6 +64,7 @@ import {
     applyLocalChange,
     makeCommandContext,
     nextReplicaTs,
+    previewReplicaTs,
     type DemoState,
     type EditorId,
     type Replica,
@@ -1505,6 +1507,133 @@ function BlockEditor({
         [moveCaret],
     );
 
+    const moveTableSelectionByArrowKey = useCallback(
+        (
+            selection: EditorSelection,
+            direction: 'left' | 'right' | 'up' | 'down',
+            sourceBlock?: HTMLElement,
+        ): boolean => {
+            const preview = moveTableSelectionByArrow(replica.state, selection, direction, {
+                actor: replica.actor,
+                nextTs: previewReplicaTs(replica),
+            });
+            if (!preview) return false;
+            if (direction === 'left' || direction === 'right') resetVerticalCaretIntent();
+
+            let applied = false;
+            onCommand((current) => {
+                const result = moveTableSelectionByArrow(
+                    current.state,
+                    selection,
+                    direction,
+                    makeCommandContext(current),
+                );
+                if (!result) {
+                    return {state: current.state, ops: [], selection: current.selection};
+                }
+                applied = true;
+                const nextSelection = adjustTableVerticalSelectionForIntent(
+                    result.selection,
+                    direction,
+                    sourceBlock,
+                );
+                scheduleSelectionRestore(nextSelection);
+                return {
+                    state: result.state,
+                    ops: result.ops,
+                    selection: replacePrimarySelection(
+                        result.state,
+                        current.selection,
+                        nextSelection,
+                    ),
+                };
+            });
+            return applied;
+        },
+        [onCommand, replica, resetVerticalCaretIntent, scheduleSelectionRestore],
+    );
+
+    const extendTableSelectionByArrowKey = useCallback(
+        (
+            selection: EditorSelection,
+            direction: 'left' | 'right' | 'up' | 'down',
+            sourceBlock?: HTMLElement,
+        ): boolean => {
+            const preview = moveTableSelectionByArrow(replica.state, selection, direction, {
+                actor: replica.actor,
+                nextTs: previewReplicaTs(replica),
+            });
+            if (!preview) return false;
+            if (direction === 'left' || direction === 'right') resetVerticalCaretIntent();
+
+            let applied = false;
+            onCommand((current) => {
+                const result = moveTableSelectionByArrow(
+                    current.state,
+                    selection,
+                    direction,
+                    makeCommandContext(current),
+                );
+                if (!result) {
+                    return {state: current.state, ops: [], selection: current.selection};
+                }
+                applied = true;
+                const adjusted = adjustTableVerticalSelectionForIntent(
+                    result.selection,
+                    direction,
+                    sourceBlock,
+                );
+                const nextSelection: EditorSelection = {
+                    type: 'range',
+                    anchor: selection.type === 'caret' ? selection.point : selection.anchor,
+                    focus: focusPoint(adjusted),
+                };
+                scheduleSelectionRestore(nextSelection);
+                return {
+                    state: result.state,
+                    ops: result.ops,
+                    selection: replacePrimarySelection(
+                        result.state,
+                        current.selection,
+                        nextSelection,
+                    ),
+                };
+            });
+            return applied;
+        },
+        [onCommand, replica, resetVerticalCaretIntent, scheduleSelectionRestore],
+    );
+
+    const adjustTableVerticalSelectionForIntent = useCallback(
+        (
+            selection: EditorSelection,
+            direction: 'left' | 'right' | 'up' | 'down',
+            sourceBlock?: HTMLElement,
+        ): EditorSelection => {
+            if ((direction !== 'up' && direction !== 'down') || !sourceBlock) return selection;
+            const root = rootRef.current;
+            if (!root) return selection;
+            const point = focusPoint(selection);
+            const targetBlock = root.querySelector<HTMLElement>(
+                `[data-block-id="${CSS.escape(point.blockId)}"]`,
+            );
+            if (!targetBlock) return selection;
+
+            if (verticalCaretXRef.current === null) {
+                const intent = readCaretHorizontalIntent(sourceBlock);
+                if (!intent) return selection;
+                verticalCaretXRef.current = intent.x;
+            }
+
+            const offset = closestCaretOffsetForHorizontalIntent(targetBlock, {
+                x: verticalCaretXRef.current,
+            });
+            if (selection.type === 'caret') return caret(point.blockId, offset);
+            return {...selection, focus: {...selection.focus, offset}};
+        },
+        [],
+    );
+
     useLayoutEffect(() => {
         const root = rootRef.current;
         const selection = pendingSelectionRestoreRef.current;
@@ -1695,6 +1824,8 @@ function BlockEditor({
                                 runBlockControlCommand,
                                 moveCaretHorizontally,
                                 moveCaretVertically,
+                                moveTableSelectionByArrowKey,
+                                extendTableSelectionByArrowKey,
                                 moveSelectionsHorizontallyEverywhere,
                                 moveSelectionsVerticallyEverywhere,
                                 extendSelectionsHorizontallyEverywhere,
@@ -1837,6 +1968,16 @@ type RenderBlockContext = {
     runBlockControlCommand(command: (current: Replica) => MultiCommandResult): void;
     moveCaretHorizontally(selection: EditorSelection): void;
     moveCaretVertically(sourceBlock: HTMLElement, targetBlockId: string): void;
+    moveTableSelectionByArrowKey(
+        selection: EditorSelection,
+        direction: 'left' | 'right' | 'up' | 'down',
+        sourceBlock?: HTMLElement,
+    ): boolean;
+    extendTableSelectionByArrowKey(
+        selection: EditorSelection,
+        direction: 'left' | 'right' | 'up' | 'down',
+        sourceBlock?: HTMLElement,
+    ): boolean;
     moveSelectionsHorizontallyEverywhere(
         direction: 'left' | 'right',
         unit?: HorizontalMovementUnit,
@@ -2264,6 +2405,76 @@ function TableRowHeader({
                                 makeCommandContext(current),
                             ),
                         );
+                    } else if (
+                        isPlainArrowKey(event.key) &&
+                        event.shiftKey &&
+                        !event.altKey &&
+                        !modifierPressed
+                    ) {
+                        const currentSelection = readSelectionFromDom(event.currentTarget);
+                        const focus = currentSelection ? focusPoint(currentSelection) : null;
+                        const direction =
+                            event.key === 'ArrowLeft'
+                                ? 'left'
+                                : event.key === 'ArrowRight'
+                                  ? 'right'
+                                  : event.key === 'ArrowUp'
+                                    ? 'up'
+                                    : 'down';
+                        const shouldHandle =
+                            !!currentSelection &&
+                            ((event.key === 'ArrowLeft' && focus?.offset === 0) ||
+                                (event.key === 'ArrowRight' &&
+                                    focus?.offset === pointTextLength(context.state, row.id)) ||
+                                (event.key === 'ArrowUp' &&
+                                    isCaretOnFirstVisualLine(event.currentTarget)) ||
+                                (event.key === 'ArrowDown' &&
+                                    isCaretOnLastVisualLine(event.currentTarget)));
+                        if (
+                            shouldHandle &&
+                            context.extendTableSelectionByArrowKey(
+                                currentSelection,
+                                direction,
+                                event.currentTarget,
+                            )
+                        ) {
+                            event.preventDefault();
+                        }
+                    } else if (
+                        isPlainArrowKey(event.key) &&
+                        !event.shiftKey &&
+                        !event.altKey &&
+                        !modifierPressed
+                    ) {
+                        const currentSelection = readSelectionFromDom(event.currentTarget);
+                        const focus = currentSelection ? focusPoint(currentSelection) : null;
+                        const direction =
+                            event.key === 'ArrowLeft'
+                                ? 'left'
+                                : event.key === 'ArrowRight'
+                                  ? 'right'
+                                  : event.key === 'ArrowUp'
+                                    ? 'up'
+                                    : 'down';
+                        const shouldHandle =
+                            currentSelection?.type === 'caret' &&
+                            ((event.key === 'ArrowLeft' && focus?.offset === 0) ||
+                                (event.key === 'ArrowRight' &&
+                                    focus?.offset === pointTextLength(context.state, row.id)) ||
+                                (event.key === 'ArrowUp' &&
+                                    isCaretOnFirstVisualLine(event.currentTarget)) ||
+                                (event.key === 'ArrowDown' &&
+                                    isCaretOnLastVisualLine(event.currentTarget)));
+                        if (
+                            shouldHandle &&
+                            context.moveTableSelectionByArrowKey(
+                                currentSelection,
+                                direction,
+                                event.currentTarget,
+                            )
+                        ) {
+                            event.preventDefault();
+                        }
                     } else if (event.key === 'Tab' && !event.altKey && !modifierPressed) {
                         event.preventDefault();
                         context.moveSelectionsHorizontallyEverywhere(
@@ -2610,6 +2821,8 @@ const renderEditableBlock = (block: RichFormattedBlock, context: RenderBlockCont
             }
             onMoveCaret={context.moveCaretHorizontally}
             onMoveCaretVertically={context.moveCaretVertically}
+            onMoveTableSelectionByArrowKey={context.moveTableSelectionByArrowKey}
+            onExtendTableSelectionByArrowKey={context.extendTableSelectionByArrowKey}
             onMoveSelectionsHorizontally={context.moveSelectionsHorizontallyEverywhere}
             onMoveSelectionsVertically={context.moveSelectionsVerticallyEverywhere}
             onExtendSelectionsHorizontally={context.extendSelectionsHorizontallyEverywhere}
@@ -3678,6 +3891,8 @@ function EditableBlock({
     onPasteText,
     onMoveCaret,
     onMoveCaretVertically,
+    onMoveTableSelectionByArrowKey,
+    onExtendTableSelectionByArrowKey,
     onMoveSelectionsHorizontally,
     onMoveSelectionsVertically,
     onExtendSelectionsHorizontally,
@@ -3729,6 +3944,16 @@ function EditableBlock({
     onPasteText(text: string): void;
     onMoveCaret(selection: EditorSelection): void;
     onMoveCaretVertically(sourceBlock: HTMLElement, targetBlockId: string): void;
+    onMoveTableSelectionByArrowKey(
+        selection: EditorSelection,
+        direction: 'left' | 'right' | 'up' | 'down',
+        sourceBlock?: HTMLElement,
+    ): boolean;
+    onExtendTableSelectionByArrowKey(
+        selection: EditorSelection,
+        direction: 'left' | 'right' | 'up' | 'down',
+        sourceBlock?: HTMLElement,
+    ): boolean;
     onMoveSelectionsHorizontally(direction: 'left' | 'right', unit?: HorizontalMovementUnit): void;
     onMoveSelectionsVertically(direction: 'up' | 'down'): void;
     onExtendSelectionsHorizontally(
@@ -3898,6 +4123,46 @@ function EditableBlock({
                         !modifierPressed
                     ) {
                         event.preventDefault();
+                        const currentSelection = readSelectionFromDom(event.currentTarget);
+                        if (currentSelection && !hasMultipleSelections) {
+                            const focus = focusPoint(currentSelection);
+                            if (
+                                event.key === 'ArrowLeft' &&
+                                focus.offset === 0 &&
+                                onExtendTableSelectionByArrowKey(currentSelection, 'left')
+                            ) {
+                                return;
+                            }
+                            if (
+                                event.key === 'ArrowRight' &&
+                                focus.offset === blockLength &&
+                                onExtendTableSelectionByArrowKey(currentSelection, 'right')
+                            ) {
+                                return;
+                            }
+                            if (
+                                event.key === 'ArrowUp' &&
+                                isCaretOnFirstVisualLine(event.currentTarget) &&
+                                onExtendTableSelectionByArrowKey(
+                                    currentSelection,
+                                    'up',
+                                    event.currentTarget,
+                                )
+                            ) {
+                                return;
+                            }
+                            if (
+                                event.key === 'ArrowDown' &&
+                                isCaretOnLastVisualLine(event.currentTarget) &&
+                                onExtendTableSelectionByArrowKey(
+                                    currentSelection,
+                                    'down',
+                                    event.currentTarget,
+                                )
+                            ) {
+                                return;
+                            }
+                        }
                         if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
                             onExtendSelectionsHorizontally(
                                 event.key === 'ArrowLeft' ? 'left' : 'right',
@@ -3937,6 +4202,10 @@ function EditableBlock({
                             currentSelection?.type === 'caret' &&
                             currentSelection.point.offset === 0
                         ) {
+                            if (onMoveTableSelectionByArrowKey(currentSelection, 'left')) {
+                                event.preventDefault();
+                                return;
+                            }
                             event.preventDefault();
                             onMoveCaret(caret(previousBlockId, previousBlockLength));
                         }
@@ -3952,6 +4221,10 @@ function EditableBlock({
                             currentSelection?.type === 'caret' &&
                             currentSelection.point.offset === blockLength
                         ) {
+                            if (onMoveTableSelectionByArrowKey(currentSelection, 'right')) {
+                                event.preventDefault();
+                                return;
+                            }
                             event.preventDefault();
                             onMoveCaret(caret(nextBlockId, 0));
                         }
@@ -3967,6 +4240,16 @@ function EditableBlock({
                             currentSelection?.type === 'caret' &&
                             isCaretOnFirstVisualLine(event.currentTarget)
                         ) {
+                            if (
+                                onMoveTableSelectionByArrowKey(
+                                    currentSelection,
+                                    'up',
+                                    event.currentTarget,
+                                )
+                            ) {
+                                event.preventDefault();
+                                return;
+                            }
                             event.preventDefault();
                             onMoveCaretVertically(event.currentTarget, previousBlockId);
                         }
@@ -3982,6 +4265,16 @@ function EditableBlock({
                             currentSelection?.type === 'caret' &&
                             isCaretOnLastVisualLine(event.currentTarget)
                         ) {
+                            if (
+                                onMoveTableSelectionByArrowKey(
+                                    currentSelection,
+                                    'down',
+                                    event.currentTarget,
+                                )
+                            ) {
+                                event.preventDefault();
+                                return;
+                            }
                             event.preventDefault();
                             onMoveCaretVertically(event.currentTarget, nextBlockId);
                         }

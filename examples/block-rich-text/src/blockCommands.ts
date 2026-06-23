@@ -1285,6 +1285,27 @@ export const createMissingTableCell = (
     return {state: next, ops, selection: caret(cellId, 0)};
 };
 
+export const moveTableSelectionByArrow = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    direction: 'left' | 'right' | 'up' | 'down',
+    context: CommandContext,
+): CommandResult | null => {
+    const point =
+        selection.type === 'caret'
+            ? selection.point
+            : direction === 'left' || direction === 'up'
+              ? firstPointForSelection(state, selection)
+              : lastPointForSelection(state, selection);
+    const location = tableNavigationLocation(state, point.blockId);
+    if (!location) return null;
+
+    if (location.kind === 'row-header') {
+        return moveFromTableRowHeader(state, location, point, direction, context);
+    }
+    return moveFromTableCellBlock(state, location, point, direction, context);
+};
+
 export const addTableRow = (
     state: CachedState<RichBlockMeta>,
     tableId: string,
@@ -1582,6 +1603,208 @@ const tableColumnCount = (state: CachedState<RichBlockMeta>, tableId: string): n
         1,
         ...rows.map((rowId) => tableCells(state, rowId).length),
     );
+};
+
+type TableNavigationLocation =
+    | {
+          kind: 'row-header';
+          tableId: string;
+          rowId: string;
+          rowIndex: number;
+          rows: string[];
+      }
+    | {
+          kind: 'cell';
+          tableId: string;
+          rowId: string;
+          rowIndex: number;
+          columnIndex: number;
+          cellId: string;
+          blockIndex: number;
+          cellBlocks: string[];
+      };
+
+const tableNavigationLocation = (
+    state: CachedState<RichBlockMeta>,
+    blockId: string,
+): TableNavigationLocation | null => {
+    const row = tableRowContext(state, blockId);
+    if (row && state.state.blocks[blockId]?.meta.type !== 'table') {
+        return {kind: 'row-header', ...row};
+    }
+
+    const cell = tableCellContextForBlockOrAncestor(state, blockId);
+    if (!cell) return null;
+    const cellBlocks = cellSubtreeBlockIds(state, cell.cellId);
+    const blockIndex = cellBlocks.indexOf(blockId);
+    if (blockIndex < 0) return null;
+    return {kind: 'cell', ...cell, blockIndex, cellBlocks};
+};
+
+const tableCellContextForBlockOrAncestor = (
+    state: CachedState<RichBlockMeta>,
+    blockId: string,
+): (TableCellContext & {cellId: string}) | null => {
+    const direct = tableCellContext(state, blockId);
+    if (direct) return {...direct, cellId: blockId};
+
+    const path = materializedBlockPath(state, blockId, annotationVirtualParents(state)).map(lamportToString);
+    for (let index = path.length - 1; index >= 0; index--) {
+        const cellId = path[index];
+        const cell = tableCellContext(state, cellId);
+        if (cell) return {...cell, cellId};
+    }
+    return null;
+};
+
+const cellSubtreeBlockIds = (state: CachedState<RichBlockMeta>, cellId: string): string[] => {
+    const outline = visibleBlockOutline(state, annotationVirtualParents(state));
+    const index = outline.findIndex((block) => block.id === cellId);
+    if (index < 0) return [cellId];
+    const depth = outline[index].depth;
+    const ids = [cellId];
+    for (let cursor = index + 1; cursor < outline.length && outline[cursor].depth > depth; cursor++) {
+        ids.push(outline[cursor].id);
+    }
+    return ids;
+};
+
+const moveFromTableRowHeader = (
+    state: CachedState<RichBlockMeta>,
+    row: Extract<TableNavigationLocation, {kind: 'row-header'}>,
+    point: BlockPoint,
+    direction: 'left' | 'right' | 'up' | 'down',
+    context: CommandContext,
+): CommandResult | null => {
+    if (direction === 'up' || direction === 'down') {
+        const targetRowId = row.rows[direction === 'up' ? row.rowIndex - 1 : row.rowIndex + 1];
+        if (!targetRowId) return null;
+        return {
+            state,
+            ops: [],
+            selection: caret(targetRowId, Math.min(point.offset, pointTextLength(state, targetRowId))),
+        };
+    }
+
+    if (direction === 'left') {
+        const previousRowId = row.rows[row.rowIndex - 1];
+        if (!previousRowId) return null;
+        const previousCells = tableCells(state, previousRowId);
+        const previousCellId = previousCells[previousCells.length - 1];
+        if (!previousCellId) return null;
+        const targetBlockId = lastBlockInCellSubtree(state, previousCellId);
+        return {
+            state,
+            ops: [],
+            selection: caret(targetBlockId, pointTextLength(state, targetBlockId)),
+        };
+    }
+
+    if (direction === 'right') {
+        const target = ensureTableCellAtColumn(state, row.rowId, 0, context);
+        return {
+            state: target.state,
+            ops: target.ops,
+            selection: caret(target.cellId, 0),
+        };
+    }
+
+    return null;
+};
+
+const moveFromTableCellBlock = (
+    state: CachedState<RichBlockMeta>,
+    cell: Extract<TableNavigationLocation, {kind: 'cell'}>,
+    point: BlockPoint,
+    direction: 'left' | 'right' | 'up' | 'down',
+    context: CommandContext,
+): CommandResult | null => {
+    if (direction === 'left' || direction === 'up') {
+        const previousBlockId = cell.cellBlocks[cell.blockIndex - 1];
+        if (previousBlockId) {
+            return {
+                state,
+                ops: [],
+                selection: caret(previousBlockId, pointTextLength(state, previousBlockId)),
+            };
+        }
+    } else {
+        const nextBlockId = cell.cellBlocks[cell.blockIndex + 1];
+        if (nextBlockId) {
+            return {state, ops: [], selection: caret(nextBlockId, 0)};
+        }
+    }
+
+    if (direction === 'up' || direction === 'down') {
+        const rows = tableRows(state, cell.tableId);
+        const targetRowId = rows[direction === 'up' ? cell.rowIndex - 1 : cell.rowIndex + 1];
+        if (!targetRowId) return null;
+        const target = ensureTableCellAtColumn(state, targetRowId, cell.columnIndex, context);
+        return {
+            state: target.state,
+            ops: target.ops,
+            selection: caret(
+                target.cellId,
+                Math.min(point.offset, pointTextLength(target.state, target.cellId)),
+            ),
+        };
+    }
+
+    if (direction === 'left') {
+        if (cell.columnIndex === 0) {
+            return {
+                state,
+                ops: [],
+                selection: caret(cell.rowId, pointTextLength(state, cell.rowId)),
+            };
+        }
+        const previousCellId = tableCells(state, cell.rowId)[cell.columnIndex - 1];
+        if (!previousCellId) return null;
+        const targetBlockId = lastBlockInCellSubtree(state, previousCellId);
+        return {
+            state,
+            ops: [],
+            selection: caret(targetBlockId, pointTextLength(state, targetBlockId)),
+        };
+    }
+
+    const cells = tableCells(state, cell.rowId);
+    const nextCellId = cells[cell.columnIndex + 1];
+    if (nextCellId) return {state, ops: [], selection: caret(nextCellId, 0)};
+    const nextRowId = tableRows(state, cell.tableId)[cell.rowIndex + 1];
+    return nextRowId ? {state, ops: [], selection: caret(nextRowId, 0)} : null;
+};
+
+const ensureTableCellAtColumn = (
+    state: CachedState<RichBlockMeta>,
+    rowId: string,
+    columnIndex: number,
+    context: CommandContext,
+): {state: CachedState<RichBlockMeta>; ops: Array<Op<RichBlockMeta>>; cellId: string} => {
+    let working = state;
+    const ops: Array<Op<RichBlockMeta>> = [];
+    while (tableCells(working, rowId).length <= columnIndex) {
+        const inserted = createMissingTableCell(working, rowId, tableCells(working, rowId).length, context);
+        working = inserted.state;
+        ops.push(...inserted.ops);
+    }
+    return {state: working, ops, cellId: tableCells(working, rowId)[columnIndex]};
+};
+
+const lastBlockInCellSubtree = (state: CachedState<RichBlockMeta>, cellId: string): string => {
+    const ids = cellSubtreeBlockIds(state, cellId);
+    return ids[ids.length - 1] ?? cellId;
+};
+
+const lastPointForSelection = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+): BlockPoint => {
+    if (selection.type === 'caret') return clampPoint(state, selection.point);
+    const segments = normalizeSelectionSegments(state, selection);
+    if (!segments.length) return clampPoint(state, selection.focus);
+    const segment = segments[segments.length - 1];
+    return {blockId: segment.blockId, offset: segment.endOffset};
 };
 
 const areTableRowCellsEmpty = (state: CachedState<RichBlockMeta>, rowId: string): boolean => {

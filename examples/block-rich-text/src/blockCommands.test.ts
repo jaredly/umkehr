@@ -35,6 +35,7 @@ import {
     moveTableCell,
     moveTableCellByTab,
     moveTableRow,
+    moveTableSelectionByArrow,
     pastePlainText,
     pastePlainTextWithMarkdownShortcuts,
     removeLinkMark,
@@ -647,6 +648,101 @@ describe('block rich text commands', () => {
         expect(shape.rows).toHaveLength(2);
         expect(shape.cells[1]).toHaveLength(2);
         expect(result.selection).toEqual(caret(shape.cells[1][0], 0));
+    });
+
+    it('moves table cell carets vertically by row and column', () => {
+        const demo = createDemoState();
+        const context = ctx();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = createTable(demo.left.state, caret(blockId, 0), context, {rows: 2, columns: 2});
+        const tableId = rootBlockIds(result.state)[1];
+        const shape = tableShape(result.state, tableId);
+        result = insertText(result.state, caret(shape.cells[0][1], 0), 'abcd', context);
+        result = insertText(result.state, caret(shape.cells[1][1], 0), 'xy', context);
+
+        const down = moveTableSelectionByArrow(result.state, caret(shape.cells[0][1], 3), 'down', context);
+        expect(down).toMatchObject({ops: [], selection: caret(shape.cells[1][1], 2)});
+
+        const up = moveTableSelectionByArrow(result.state, caret(shape.cells[1][1], 1), 'up', context);
+        expect(up).toMatchObject({ops: [], selection: caret(shape.cells[0][1], 1)});
+    });
+
+    it('creates missing cells when vertical table navigation targets a sparse row', () => {
+        const demo = createDemoState();
+        const context = ctx();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = createTable(demo.left.state, caret(blockId, 0), context, {rows: 2, columns: 1});
+        const tableId = rootBlockIds(result.state)[1];
+        let shape = tableShape(result.state, tableId);
+        result = createMissingTableCell(result.state, shape.rows[0], 1, context);
+        shape = tableShape(result.state, tableId);
+
+        const moved = moveTableSelectionByArrow(result.state, caret(shape.cells[0][1], 0), 'down', context);
+        if (!moved) throw new Error('expected table move');
+
+        const nextShape = tableShape(moved.state, tableId);
+        expect(nextShape.cells.map((row) => row.length)).toEqual([2, 2]);
+        expect(moved.selection).toEqual(caret(nextShape.cells[1][1], 0));
+        expect(moved.ops.length).toBeGreaterThan(0);
+    });
+
+    it('treats row headers as table navigation targets', () => {
+        const demo = createDemoState();
+        const context = ctx();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = createTable(demo.left.state, caret(blockId, 0), context, {rows: 2, columns: 1});
+        const tableId = rootBlockIds(result.state)[1];
+        const shape = tableShape(result.state, tableId);
+        result = insertText(result.state, caret(shape.rows[0], 0), 'one', context);
+        result = insertText(result.state, caret(shape.rows[1], 0), 'two', context);
+
+        const down = moveTableSelectionByArrow(result.state, caret(shape.rows[0], 2), 'down', context);
+        expect(down).toMatchObject({ops: [], selection: caret(shape.rows[1], 2)});
+
+        const right = moveTableSelectionByArrow(result.state, caret(shape.rows[0], 3), 'right', context);
+        expect(right).toMatchObject({ops: [], selection: caret(shape.cells[0][0], 0)});
+
+        const left = moveTableSelectionByArrow(result.state, caret(shape.cells[0][0], 0), 'left', context);
+        expect(left).toMatchObject({ops: [], selection: caret(shape.rows[0], 3)});
+
+        const headerLeft = moveTableSelectionByArrow(result.state, caret(shape.rows[1], 0), 'left', context);
+        expect(headerLeft).toMatchObject({ops: [], selection: caret(shape.cells[0][0], 0)});
+    });
+
+    it('wraps right from a final row cell to the next row header', () => {
+        const demo = createDemoState();
+        const context = ctx();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = createTable(demo.left.state, caret(blockId, 0), context, {rows: 2, columns: 1});
+        const tableId = rootBlockIds(result.state)[1];
+        const shape = tableShape(result.state, tableId);
+        result = insertText(result.state, caret(shape.cells[0][0], 0), 'cell', context);
+
+        const moved = moveTableSelectionByArrow(result.state, caret(shape.cells[0][0], 4), 'right', context);
+
+        expect(moved).toMatchObject({ops: [], selection: caret(shape.rows[1], 0)});
+    });
+
+    it('navigates through nested blocks inside a cell before leaving the cell', () => {
+        const demo = createDemoState();
+        const context = ctx();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = createTable(demo.left.state, caret(blockId, 0), context, {rows: 1, columns: 2});
+        const tableId = rootBlockIds(result.state)[1];
+        const shape = tableShape(result.state, tableId);
+        const [firstCell, secondCell] = shape.cells[0];
+        result = insertText(result.state, caret(firstCell, 0), 'parent', context);
+        const child = insertParagraphChild(result.state, firstCell, context);
+        result = insertText(child.state, caret(child.childId, 0), 'child', context);
+
+        const intoChild = moveTableSelectionByArrow(result.state, caret(firstCell, 6), 'right', context);
+        expect(intoChild).toMatchObject({ops: [], selection: caret(child.childId, 0)});
+
+        const outOfChild = moveTableSelectionByArrow(result.state, caret(child.childId, 5), 'right', context);
+        expect(outOfChild).toMatchObject({ops: [], selection: caret(secondCell, 0)});
+
+        const backToParent = moveTableSelectionByArrow(result.state, caret(child.childId, 0), 'left', context);
+        expect(backToParent).toMatchObject({ops: [], selection: caret(firstCell, 6)});
     });
 
     it('advances from a cell end into an empty cell to the right on Enter', () => {

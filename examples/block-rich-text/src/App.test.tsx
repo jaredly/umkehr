@@ -53,6 +53,9 @@ const tableTitleBlock = (panel: HTMLElement): HTMLElement => {
     return title;
 };
 
+const tableRowHeaders = (panel: HTMLElement): HTMLElement[] =>
+    Array.from(panel.querySelectorAll<HTMLElement>('.tableRowHeaderText[role="textbox"]'));
+
 const blockText = (block: HTMLElement): string => {
     let text = '';
     const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
@@ -825,6 +828,111 @@ describe('Block rich text example UI', () => {
         fireEvent.keyDown(tableBlocks(left)[0], {key: 'Tab'});
         await waitFor(() => expect(tableBlockTexts(left)).toEqual(['a\n    b', '', '', '']));
         expect(tableBlockTexts(right)).toEqual(['a\n    b', '', '', '']);
+    });
+
+    it('moves ArrowDown between table rows in the same column', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'table');
+        await waitFor(() => expect(tableBlocks(left)).toHaveLength(4));
+        installMockCaretGeometry(left);
+        selectCaret(tableBlocks(left)[1], 0);
+        typeText(tableBlocks(left)[1], 'abcd');
+        selectCaret(tableBlocks(left)[3], 0);
+        typeText(tableBlocks(left)[3], 'xy');
+
+        selectCaret(tableBlocks(left)[1], 3);
+        fireEvent.keyDown(tableBlocks(left)[1], {key: 'ArrowDown'});
+
+        await waitFor(() => expect(domSelectionBlock()).toBe(tableBlocks(left)[3]));
+        expect(domCaretOffset(tableBlocks(left)[3])).toBe(2);
+
+        beforeInputText(tableBlocks(left)[3], 'X');
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['', 'abcd', '', 'xyX']));
+        expect(tableBlockTexts(right)).toEqual(['', 'abcd', '', 'xyX']);
+    });
+
+    it('extends Shift+ArrowDown between table rows in the same column', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'table');
+        await waitFor(() => expect(tableBlocks(left)).toHaveLength(4));
+        installMockCaretGeometry(left);
+        selectCaret(tableBlocks(left)[1], 0);
+        typeText(tableBlocks(left)[1], 'abcd');
+        selectCaret(tableBlocks(left)[3], 0);
+        typeText(tableBlocks(left)[3], 'xy');
+
+        selectCaret(tableBlocks(left)[1], 3);
+        fireEvent.keyDown(tableBlocks(left)[1], {key: 'ArrowDown', shiftKey: true});
+        fireEvent.keyUp(tableBlocks(left)[1], {key: 'ArrowDown', shiftKey: true});
+
+        await waitFor(() => expect(domSelectionBlock()).toBe(tableBlocks(left)[3]));
+        expect(domSelectionOffsets(tableBlocks(left)[3]).focus).toBe(2);
+    });
+
+    it('moves ArrowLeft from the first table cell to the row header', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'table');
+        await waitFor(() => expect(tableBlocks(left)).toHaveLength(4));
+        selectCaret(tableRowHeaders(left)[0], 0);
+        typeText(tableRowHeaders(left)[0], 'Row');
+
+        selectCaret(tableBlocks(left)[0], 0);
+        fireEvent.keyDown(tableBlocks(left)[0], {key: 'ArrowLeft'});
+
+        await waitFor(() => expect(domSelectionBlock()).toBe(tableRowHeaders(left)[0]));
+        expect(domCaretOffset(tableRowHeaders(left)[0])).toBe(3);
+
+        beforeInputText(tableRowHeaders(left)[0], '!');
+        await waitFor(() => expect(blockText(tableRowHeaders(left)[0])).toBe('Row!'));
+        expect(blockText(tableRowHeaders(right)[0])).toBe('Row!');
+    });
+
+    it('navigates with arrow keys from table row headers', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'table');
+        await waitFor(() => expect(tableBlocks(left)).toHaveLength(4));
+        installMockCaretGeometry(left);
+        selectCaret(tableRowHeaders(left)[0], 0);
+        typeText(tableRowHeaders(left)[0], 'abcd');
+        selectCaret(tableRowHeaders(left)[1], 0);
+        typeText(tableRowHeaders(left)[1], 'xy');
+        selectCaret(tableBlocks(left)[1], 0);
+        typeText(tableBlocks(left)[1], 'cell');
+
+        selectCaret(tableRowHeaders(left)[0], 4);
+        fireEvent.keyDown(tableRowHeaders(left)[0], {key: 'ArrowRight'});
+        await waitFor(() => expect(domSelectionBlock()).toBe(tableBlocks(left)[0]));
+        expect(domCaretOffset(tableBlocks(left)[0])).toBe(0);
+
+        selectCaret(tableRowHeaders(left)[0], 3);
+        fireEvent.keyDown(tableRowHeaders(left)[0], {key: 'ArrowDown'});
+        await waitFor(() => expect(domSelectionBlock()).toBe(tableRowHeaders(left)[1]));
+        expect(domCaretOffset(tableRowHeaders(left)[1])).toBe(2);
+
+        fireEvent.keyDown(tableRowHeaders(left)[1], {key: 'ArrowUp'});
+        await waitFor(() => expect(domSelectionBlock()).toBe(tableRowHeaders(left)[0]));
+        expect(domCaretOffset(tableRowHeaders(left)[0])).toBe(3);
+
+        selectCaret(tableRowHeaders(left)[1], 0);
+        fireEvent.keyDown(tableRowHeaders(left)[1], {key: 'ArrowLeft'});
+        await waitFor(() => expect(domSelectionBlock()).toBe(tableBlocks(left)[1]));
+        expect(domCaretOffset(tableBlocks(left)[1])).toBe(4);
+
+        beforeInputText(tableBlocks(left)[1], '!');
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['', 'cell!', '', '']));
+        expect(tableBlockTexts(right)).toEqual(['', 'cell!', '', '']);
     });
 
     it('keeps focus in the code language field while typing', async () => {

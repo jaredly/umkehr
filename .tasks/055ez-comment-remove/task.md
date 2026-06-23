@@ -1,1 +1,0 @@
-examples/block-rich-text: there's not currently a way to "close" or "delete" a comment in the UI, without deleting the text the mark is attached to. At the very least, removing the whole text of the comment and then typing "backspace" again should do it.
