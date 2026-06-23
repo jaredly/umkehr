@@ -1,6 +1,16 @@
-import type {CachedState} from 'umkehr/block-crdt/types';
-import {blockContents, materializeFormattedBlocks, materializedBlockParent, type Op} from 'umkehr/block-crdt';
-import {lamportToString} from 'umkehr/block-crdt/utils';
+import type {CachedState, JsonValue, Lamport} from 'umkehr/block-crdt/types';
+import {
+    applyMany,
+    blockContents,
+    insertBlockOpsWithId,
+    markRangeOp,
+    materializeFormattedBlocks,
+    materializedBlockParent,
+    setBlockMetaOps,
+    visibleBlockChildren,
+    type Op,
+} from 'umkehr/block-crdt';
+import {lamportToString, parseLamportString} from 'umkehr/block-crdt/utils';
 import type {RichBlockMeta} from './blockMeta';
 import {
     deleteBackward,
@@ -12,6 +22,7 @@ import {
     insertTextWithRetainedMarks,
     moveBlock,
     pastePlainText,
+    pastePlainTextDetailed,
     pastePlainTextWithMarkdownShortcuts,
     removeLinkMark,
     removeCodeMark,
@@ -32,7 +43,7 @@ import {
     type CommandContext,
     type RetainedInlineMarkSession,
 } from './blockCommands';
-import type {BareInlineMark, BooleanInlineMark} from './inlineMarks';
+import {LINK_MARK, type BareInlineMark, type BooleanInlineMark} from './inlineMarks';
 import {resolveSelection, retainSelection} from './retainedSelection';
 import {
     dedupeSelectionSet,
@@ -54,7 +65,20 @@ import {
     type BlockPoint,
     type EditorSelection,
 } from './selectionModel';
-import {richTextVirtualParents} from './virtualParents';
+import {
+    ANNOTATION_MARK,
+    richTextVirtualParents,
+    type AnnotationMarkData,
+} from './virtualParents';
+import {annotationVirtualParents} from './annotations';
+import {
+    isClipboardAnnotationRef,
+    type ClipboardAnnotation,
+    type ClipboardAnnotationRef,
+    type ClipboardFragment,
+    type ClipboardMarkRange,
+    type RichClipboardPayload,
+} from './clipboard';
 
 export type MultiCommandResult = {
     state: CachedState<RichBlockMeta>;
@@ -195,6 +219,42 @@ export const pastePlainTextWithMarkdownShortcutsEverywhere = (
     runReplacingCommand(state, selection, (working, entry) =>
         pastePlainTextWithMarkdownShortcuts(working, resolveSelection(working, entry.selection), text, context),
     );
+
+export const pasteRichClipboardEverywhere = (
+    state: CachedState<RichBlockMeta>,
+    selection: RetainedSelectionSet,
+    payload: RichClipboardPayload,
+    context: CommandContext,
+): MultiCommandResult => {
+    const deduped = dedupeSelectionSet(state, selection);
+    const commandEntries = reverseSortedRetainedEntries(state, mergeOverlappingRanges(state, deduped));
+    if (!commandEntries.length || !payload.fragments.length) return {state, ops: [], selection: deduped};
+
+    let working = state;
+    const ops: Array<Op<RichBlockMeta>> = [];
+    const nextEntries: RetainedSelectionEntry[] = [];
+
+    for (const entry of commandEntries) {
+        const pasted = pasteRichClipboardAtSelection(
+            working,
+            resolveSelection(working, entry.selection),
+            payload,
+            context,
+        );
+        working = pasted.state;
+        ops.push(...pasted.ops);
+        nextEntries.push({id: entry.id, selection: retainSelection(working, pasted.selection)});
+    }
+
+    return {
+        state: working,
+        ops,
+        selection: dedupeSelectionSet(working, {
+            primaryId: selection.primaryId,
+            entries: nextEntries,
+        }),
+    };
+};
 
 export const deleteBackwardEverywhere = (
     state: CachedState<RichBlockMeta>,
@@ -721,6 +781,244 @@ const lastPointForSelection = (state: CachedState<RichBlockMeta>, selection: Edi
     const last = segments[segments.length - 1];
     if (!last) return focusPoint(selection);
     return {blockId: last.blockId, offset: last.endOffset};
+};
+
+type RichPasteContext = {
+    actor: string;
+    nextTs(): string;
+    payloadAnnotations: Map<string, ClipboardAnnotation>;
+    annotationIds: Map<string, Lamport>;
+    freshAnnotationIds: Set<string>;
+    importedAnnotationBodies: Set<string>;
+};
+
+type InsertedFragmentTarget = {
+    fragment: ClipboardFragment;
+    blockId: string;
+    startOffset: number;
+};
+
+const pasteRichClipboardAtSelection = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    payload: RichClipboardPayload,
+    context: CommandContext,
+): CommandResult => {
+    const text = payload.fragments.map((fragment) => fragment.text).join('\n');
+    const pasted = pastePlainTextDetailed(state, selection, text, context);
+    let working = pasted.result.state;
+    const ops = [...pasted.result.ops];
+    const richContext: RichPasteContext = {
+        actor: context.actor,
+        nextTs: context.nextTs,
+        payloadAnnotations: new Map(payload.annotations.map((annotation) => [annotation.originalId, annotation])),
+        annotationIds: new Map(),
+        freshAnnotationIds: new Set(),
+        importedAnnotationBodies: new Set(),
+    };
+    const targets = payload.fragments
+        .map((fragment, index): InsertedFragmentTarget | null => {
+            const line = pasted.touchedLines[index];
+            return line ? {fragment, blockId: line.blockId, startOffset: line.startOffset} : null;
+        })
+        .filter((target): target is InsertedFragmentTarget => Boolean(target));
+
+    for (const target of targets) {
+        const block = working.state.blocks[target.blockId];
+        if (!block) continue;
+        const metaOps = setBlockMetaOps(working, {block: block.id, meta: target.fragment.meta});
+        working = applyMany(working, metaOps, annotationVirtualParents(working));
+        ops.push(...metaOps);
+    }
+
+    const marked = applyClipboardMarksToTargets(working, targets, richContext);
+    working = marked.state;
+    ops.push(...marked.ops);
+
+    const imported = importFreshAnnotationBodies(working, richContext);
+    working = imported.state;
+    ops.push(...imported.ops);
+
+    return {state: working, ops, selection: pasted.result.selection};
+};
+
+const applyClipboardMarksToTargets = (
+    state: CachedState<RichBlockMeta>,
+    targets: InsertedFragmentTarget[],
+    context: RichPasteContext,
+): {state: CachedState<RichBlockMeta>; ops: Array<Op<RichBlockMeta>>} => {
+    let working = state;
+    const ops: Array<Op<RichBlockMeta>> = [];
+    for (const target of targets) {
+        const result = applyClipboardMarksToBlock(
+            working,
+            target.blockId,
+            target.startOffset,
+            target.fragment.marks,
+            context,
+        );
+        working = result.state;
+        ops.push(...result.ops);
+    }
+    return {state: working, ops};
+};
+
+const applyClipboardMarksToBlock = (
+    state: CachedState<RichBlockMeta>,
+    blockId: string,
+    baseOffset: number,
+    marks: ClipboardMarkRange[],
+    context: RichPasteContext,
+): {state: CachedState<RichBlockMeta>; ops: Array<Op<RichBlockMeta>>} => {
+    let working = state;
+    const ops: Array<Op<RichBlockMeta>> = [];
+    for (const mark of marks) {
+        const op = clipboardMarkOp(working, blockId, baseOffset, mark, context);
+        if (!op) continue;
+        working = applyMany(working, [op], annotationVirtualParents(working));
+        ops.push(op);
+    }
+    return {state: working, ops};
+};
+
+const clipboardMarkOp = (
+    state: CachedState<RichBlockMeta>,
+    blockId: string,
+    baseOffset: number,
+    mark: ClipboardMarkRange,
+    context: RichPasteContext,
+): Op<RichBlockMeta> | null => {
+    const startOffset = baseOffset + mark.startOffset;
+    const endOffset = baseOffset + mark.endOffset;
+    if (mark.type === 'link') {
+        if (typeof mark.data !== 'string') return null;
+        return markRangeOp(
+            state,
+            parseLamportString(blockId),
+            startOffset,
+            endOffset,
+            LINK_MARK,
+            mark.data,
+            false,
+            [state.state.maxSeenCount + 1, context.actor],
+        );
+    }
+    if (mark.type === 'annotation') {
+        if (!isClipboardAnnotationRef(mark.data)) return null;
+        const annotationId = destinationAnnotationId(state, mark.data, context);
+        const data: AnnotationMarkData = {
+            id: annotationId,
+            presentation: mark.data.presentation,
+            ...(mark.data.resolved ? {resolved: true} : {}),
+        };
+        return markRangeOp(
+            state,
+            parseLamportString(blockId),
+            startOffset,
+            endOffset,
+            ANNOTATION_MARK,
+            data as unknown as JsonValue,
+            false,
+            [state.state.maxSeenCount + 1, context.actor],
+        );
+    }
+    return markRangeOp(
+        state,
+        parseLamportString(blockId),
+        startOffset,
+        endOffset,
+        mark.type,
+        undefined,
+        false,
+        [state.state.maxSeenCount + 1, context.actor],
+    );
+};
+
+const destinationAnnotationId = (
+    state: CachedState<RichBlockMeta>,
+    ref: ClipboardAnnotationRef,
+    context: RichPasteContext,
+): Lamport => {
+    const existing = context.annotationIds.get(ref.originalId);
+    if (existing) return existing;
+
+    const parsed = parseLamportStringOrNull(ref.originalId);
+    if (parsed && annotationExists(state, parsed)) {
+        context.annotationIds.set(ref.originalId, parsed);
+        return parsed;
+    }
+
+    const fresh: Lamport = [state.state.maxSeenCount + 1, context.actor];
+    context.annotationIds.set(ref.originalId, fresh);
+    context.freshAnnotationIds.add(ref.originalId);
+    return fresh;
+};
+
+const importFreshAnnotationBodies = (
+    state: CachedState<RichBlockMeta>,
+    context: RichPasteContext,
+): {state: CachedState<RichBlockMeta>; ops: Array<Op<RichBlockMeta>>} => {
+    let working = state;
+    const ops: Array<Op<RichBlockMeta>> = [];
+
+    while (true) {
+        const nextOriginalId = [...context.freshAnnotationIds].find(
+            (originalId) => !context.importedAnnotationBodies.has(originalId),
+        );
+        if (!nextOriginalId) break;
+        context.importedAnnotationBodies.add(nextOriginalId);
+        const annotation = context.payloadAnnotations.get(nextOriginalId);
+        const parent = context.annotationIds.get(nextOriginalId);
+        if (!annotation || !parent) continue;
+
+        let previousBodyId: string | null = null;
+        for (const fragment of annotation.bodyBlocks) {
+            const inserted: {ops: Array<Op<RichBlockMeta>>; id: Lamport; blockId: string} = insertBlockOpsWithId(working, {
+                actor: context.actor,
+                parent,
+                before: previousBodyId ? working.state.blocks[previousBodyId].id : null,
+                meta: fragment.meta,
+                ts: context.nextTs(),
+                virtualParents: annotationVirtualParents(working),
+            });
+            working = applyMany(working, inserted.ops, annotationVirtualParents(working));
+            ops.push(...inserted.ops);
+            previousBodyId = inserted.blockId;
+
+            const textInserted = insertText(working, caret(inserted.blockId, 0), fragment.text, context);
+            working = textInserted.state;
+            ops.push(...textInserted.ops);
+
+            const marked = applyClipboardMarksToBlock(working, inserted.blockId, 0, fragment.marks, context);
+            working = marked.state;
+            ops.push(...marked.ops);
+        }
+    }
+
+    return {state: working, ops};
+};
+
+const annotationExists = (state: CachedState<RichBlockMeta>, annotationId: Lamport): boolean => {
+    const id = lamportToString(annotationId);
+    for (const mark of Object.values(state.state.marks)) {
+        if (mark.type !== ANNOTATION_MARK || mark.remove || !isAnnotationMarkData(mark.data)) continue;
+        if (lamportToString(mark.data.id) === id) return true;
+    }
+    return visibleBlockChildren(state, id, annotationVirtualParents(state)).length > 0;
+};
+
+const isAnnotationMarkData = (value: unknown): value is AnnotationMarkData =>
+    typeof value === 'object' &&
+    value !== null &&
+    Array.isArray((value as AnnotationMarkData).id) &&
+    ['sidebar', 'footnote', 'popover'].includes((value as AnnotationMarkData).presentation);
+
+const parseLamportStringOrNull = (value: string): Lamport | null => {
+    try {
+        return parseLamportString(value);
+    } catch {
+        return null;
+    }
 };
 
 const runReplacingCommand = (

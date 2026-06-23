@@ -1,0 +1,1 @@
+examples/block-rich-text: footnote superscript behavior is a little buggy. You click before the superscript and the cursor jumps to after it. You arrow left and the cursor jumps forward again. Arrow left should probably jump you two places in that case?

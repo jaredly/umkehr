@@ -1,0 +1,1 @@
+examples/block-rich-text: Can we have a perf monitor? Like one of those fps things in the top right corner, except it would measure each key press, showing by the height of the bar how many ms it took.

@@ -724,13 +724,13 @@ export const pastePlainText = (
     return pastePlainTextDetailed(state, selection, text, context).result;
 };
 
-type PastedLineTarget = {
+export type PastedLineTarget = {
     blockId: string;
     startOffset: number;
     sourceLine: string;
 };
 
-const pastePlainTextDetailed = (
+export const pastePlainTextDetailed = (
     state: CachedState<RichBlockMeta>,
     selection: EditorSelection,
     text: string,

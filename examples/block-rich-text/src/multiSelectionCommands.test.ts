@@ -1,11 +1,18 @@
 import {describe, expect, it} from 'vitest';
-import {blockContents, cachedState, materializeFormattedBlocks, rootBlockIds, visibleBlockChildren} from 'umkehr/block-crdt';
+import {
+    blockContents,
+    cachedState,
+    formattedMarkValues,
+    materializeFormattedBlocks,
+    rootBlockIds,
+    visibleBlockChildren,
+} from 'umkehr/block-crdt';
 import {initialState} from 'umkehr/block-crdt/initialState';
 import type {CachedState} from 'umkehr/block-crdt/types';
 import {lamportToString} from 'umkehr/block-crdt/utils';
 import {createTable, insertText, pastePlainText, type CommandContext} from './blockCommands';
-import {annotationVirtualParents} from './annotations';
-import {createDemoState} from './blockEditorRuntime';
+import {ANNOTATION_MARK, annotationVirtualParents, createAnnotation, renderedAnnotations, setAnnotationBodyText} from './annotations';
+import {createDemoState, makeCommandContext} from './blockEditorRuntime';
 import {caret, type EditorSelection} from './selectionModel';
 import {
     deleteBackwardEverywhere,
@@ -19,6 +26,7 @@ import {
     moveSelectionsHorizontally,
     moveSelectionsVertically,
     pastePlainTextWithMarkdownShortcutsEverywhere,
+    pasteRichClipboardEverywhere,
     setLinkMarkEverywhere,
     splitBlockEverywhere,
     toggleMarkEverywhere,
@@ -26,6 +34,8 @@ import {
     closeRetainedInlineMarkSessionsEverywhere,
 } from './multiSelectionCommands';
 import {appendSelection, resolveSelectionSet, singleRetainedSelectionSet} from './selectionSet';
+import {serializeSelectionToClipboardPayload, type RichClipboardPayload} from './clipboard';
+import type {RichBlockMeta} from './blockMeta';
 
 const ctx = (actor = 'left'): CommandContext => {
     let i = 1;
@@ -39,6 +49,12 @@ const init = () => cachedState(initialState('doc', '00000'));
 
 const onlyBlock = (state: CachedState) => rootBlockIds(state)[0];
 
+const range = (blockId: string, startOffset: number, endOffset: number): EditorSelection => ({
+    type: 'range',
+    anchor: {blockId, offset: startOffset},
+    focus: {blockId, offset: endOffset},
+});
+
 const lines = (state: CachedState) => rootBlockIds(state).map((id) => blockContents(state, id));
 
 const outline = (state: CachedState) =>
@@ -46,6 +62,13 @@ const outline = (state: CachedState) =>
         text: blockContents(state, block.id),
         depth: block.depth,
     }));
+
+const annotationsFor = (state: CachedState<RichBlockMeta>) =>
+    renderedAnnotations(
+        state,
+        materializeFormattedBlocks(state),
+        materializeFormattedBlocks(state, annotationVirtualParents(state)),
+    );
 
 describe('block rich text multi-selection commands', () => {
     it('inserts text at two carets in one block', () => {
@@ -102,6 +125,127 @@ describe('block rich text multi-selection commands', () => {
             caret(ids[0], 4),
             caret(ids[1], 4),
         ]);
+    });
+
+    it('pastes rich clipboard marks and block metadata without markdown shortcuts', () => {
+        const state = init();
+        const blockId = onlyBlock(state);
+        const payload: RichClipboardPayload = {
+            version: 1,
+            plainText: '- item',
+            html: '<h2><strong>- item</strong></h2>',
+            fragments: [
+                {
+                    text: '- item',
+                    meta: {type: 'heading', level: 2, ts: 'heading-ts'},
+                    marks: [{type: 'bold', startOffset: 0, endOffset: 6}],
+                },
+            ],
+            annotations: [],
+        };
+
+        const result = pasteRichClipboardEverywhere(
+            state,
+            singleRetainedSelectionSet(state, caret(blockId, 0)),
+            payload,
+            ctx(),
+        );
+
+        const formatted = materializeFormattedBlocks(result.state)[0];
+        expect(blockContents(result.state, formatted.id)).toBe('- item');
+        expect(formatted.block.meta).toEqual({type: 'heading', level: 2, ts: 'heading-ts'});
+        expect(formatted.runs).toEqual([{text: '- item', marks: {bold: true}}]);
+    });
+
+    it('pastes rich clipboard links and multiple fragments as adjacent blocks', () => {
+        const state = init();
+        const blockId = onlyBlock(state);
+        const payload: RichClipboardPayload = {
+            version: 1,
+            plainText: 'one\ntwo',
+            html: '<p>one</p><p><a href="https://example.test">two</a></p>',
+            fragments: [
+                {text: 'one', meta: {type: 'paragraph', ts: 'one-ts'}, marks: []},
+                {
+                    text: 'two',
+                    meta: {type: 'paragraph', ts: 'two-ts'},
+                    marks: [{type: 'link', startOffset: 0, endOffset: 3, data: 'https://example.test'}],
+                },
+            ],
+            annotations: [],
+        };
+
+        const result = pasteRichClipboardEverywhere(
+            state,
+            singleRetainedSelectionSet(state, caret(blockId, 0)),
+            payload,
+            ctx(),
+        );
+
+        expect(lines(result.state)).toEqual(['one', 'two']);
+        expect(materializeFormattedBlocks(result.state)[1].runs).toEqual([
+            {text: 'two', marks: {link: 'https://example.test'}},
+        ]);
+    });
+
+    it('reuses an existing annotation when rich pasting inside the same document', () => {
+        const demo = createDemoState();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = insertText(demo.left.state, caret(blockId, 0), 'hello', ctx());
+        const annotated = createAnnotation(result.state, range(blockId, 1, 4), 'sidebar', makeCommandContext(demo.left));
+        if (!annotated.annotationId || !annotated.bodyBlockId) throw new Error('missing annotation');
+        result = setAnnotationBodyText(annotated.state, annotated.bodyBlockId, 'note', ctx());
+        const payload = serializeSelectionToClipboardPayload(
+            result.state,
+            singleRetainedSelectionSet(result.state, range(blockId, 1, 4)),
+        );
+        if (!payload) throw new Error('missing payload');
+
+        const pasted = pasteRichClipboardEverywhere(
+            result.state,
+            singleRetainedSelectionSet(result.state, caret(blockId, 5)),
+            payload,
+            ctx(),
+        );
+
+        const annotationId = lamportToString(annotated.annotationId);
+        const annotationRuns = materializeFormattedBlocks(pasted.state, annotationVirtualParents(pasted.state))[0].runs;
+        const pastedAnnotationIds = annotationRuns.flatMap((run) =>
+            formattedMarkValues(run, ANNOTATION_MARK).map((value) =>
+                typeof value === 'object' && value && 'id' in value
+                    ? lamportToString((value as {id: [number, string]}).id)
+                    : '',
+            ),
+        );
+        expect(pastedAnnotationIds.every((id) => id === annotationId)).toBe(true);
+        expect(annotationsFor(pasted.state)[0].bodyBlocks.map((body) => body.text)).toEqual(['note']);
+    });
+
+    it('imports annotations with fresh ids when rich pasting into another document', () => {
+        const source = createDemoState();
+        const sourceBlock = rootBlockIds(source.left.state)[0];
+        let sourceResult = insertText(source.left.state, caret(sourceBlock, 0), 'hello', ctx());
+        const annotated = createAnnotation(sourceResult.state, range(sourceBlock, 1, 4), 'sidebar', makeCommandContext(source.left));
+        if (!annotated.annotationId || !annotated.bodyBlockId) throw new Error('missing annotation');
+        sourceResult = setAnnotationBodyText(annotated.state, annotated.bodyBlockId, 'note', ctx());
+        const payload = serializeSelectionToClipboardPayload(
+            sourceResult.state,
+            singleRetainedSelectionSet(sourceResult.state, range(sourceBlock, 1, 4)),
+        );
+        if (!payload) throw new Error('missing payload');
+
+        const destination = init();
+        const pasted = pasteRichClipboardEverywhere(
+            destination,
+            singleRetainedSelectionSet(destination, caret(onlyBlock(destination), 0)),
+            payload,
+            ctx('right'),
+        );
+
+        const annotation = annotationsFor(pasted.state)[0];
+        expect(annotation.id).not.toBe(lamportToString(annotated.annotationId));
+        expect(annotation.referenceText).toBe('ell');
+        expect(annotation.bodyBlocks.map((body) => body.text)).toEqual(['note']);
     });
 
     it('inserts marked text at selected carets', () => {

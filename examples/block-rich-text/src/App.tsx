@@ -113,6 +113,7 @@ import {
     moveSelectionsHorizontally,
     moveSelectionsVertically,
     pastePlainTextWithMarkdownShortcutsEverywhere,
+    pasteRichClipboardEverywhere,
     removeLinkMarkEverywhere,
     setLinkMarkEverywhere,
     setBlockTypeEverywhere,
@@ -126,6 +127,11 @@ import {
     type MultiCommandResult,
     type RetainedInlineMarkSessionMap,
 } from './multiSelectionCommands';
+import {
+    BLOCK_RICH_TEXT_MIME,
+    parseBlockRichTextClipboardPayload,
+    serializeSelectionToClipboardPayload,
+} from './clipboard';
 import {useBlockReorder, type DropTarget} from './useBlockReorder';
 import {
     appendSelection,
@@ -135,6 +141,7 @@ import {
     replaceSelectionSet,
     resolveSelectionSet,
     retainSelectionSet,
+    singleRetainedSelectionSet,
     type BlockSelectionDecorations,
     type EditorSelectionSet,
     type RetainedSelectionSet,
@@ -1112,6 +1119,62 @@ function BlockEditor({
         [liveSelectionSet, onCommand, resetVerticalCaretIntent, scheduleSelectionRestore],
     );
 
+    const copyRichSelection = useCallback(
+        (event: ClipboardEvent<HTMLElement>) => {
+            const payload = serializeSelectionToClipboardPayload(
+                replica.state,
+                liveSelectionSet(replica),
+            );
+            if (!payload) return;
+            event.preventDefault();
+            event.clipboardData.setData(BLOCK_RICH_TEXT_MIME, JSON.stringify(payload));
+            event.clipboardData.setData('text/plain', payload.plainText);
+            event.clipboardData.setData('text/html', payload.html);
+        },
+        [liveSelectionSet, replica],
+    );
+
+    const pasteFromClipboard = useCallback(
+        (event: ClipboardEvent<HTMLElement>) => {
+            const rich = parseBlockRichTextClipboardPayload(
+                event.clipboardData.getData(BLOCK_RICH_TEXT_MIME),
+            );
+            if (rich) {
+                event.preventDefault();
+                runEditCommand((current, selection) =>
+                    pasteRichClipboardEverywhere(
+                        current.state,
+                        selection,
+                        rich,
+                        makeCommandContext(current),
+                    ),
+                );
+                return;
+            }
+
+            event.preventDefault();
+            const text = event.clipboardData.getData('text/plain');
+            runEditCommand((current, selection) => {
+                const primary = primarySelection(resolveSelectionSet(current.state, selection));
+                if (isLinkLikeText(text) && primary.type === 'range') {
+                    return setLinkMarkEverywhere(
+                        current.state,
+                        selection,
+                        text.trim(),
+                        makeCommandContext(current),
+                    );
+                }
+                return pastePlainTextWithMarkdownShortcutsEverywhere(
+                    current.state,
+                    selection,
+                    text,
+                    makeCommandContext(current),
+                );
+            });
+        },
+        [runEditCommand],
+    );
+
     const runInlineMarkToggle = useCallback(
         (markType: BooleanInlineMark) => {
             onCommand((current) => {
@@ -2017,9 +2080,11 @@ function BlockEditor({
                                             ops: result.ops,
                                             selection: current.selection,
                                         };
-                                    }),
+                                }),
                                 runEditCommand,
                                 runBlockControlCommand,
+                                onCopy: copyRichSelection,
+                                onPaste: pasteFromClipboard,
                                 moveCaretHorizontally,
                                 moveCaretVertically,
                                 moveTableSelectionByArrowKey,
@@ -2036,6 +2101,7 @@ function BlockEditor({
                         )}
                     </div>
                     <Footnotes
+                        state={replica.state}
                         annotations={annotations.filter(
                             (item) => item.data.presentation === 'footnote',
                         )}
@@ -2051,6 +2117,7 @@ function BlockEditor({
                     />
                 </div>
                 <AnnotationSidebar
+                    state={replica.state}
                     annotations={sidebarAnnotations}
                     open={commentsOpen}
                     gutterTops={commentGutterTops}
@@ -2078,6 +2145,7 @@ function BlockEditor({
             </div>
             {activePopovers.map((popover) => (
                 <FloatingAnnotationPopover
+                    state={replica.state}
                     key={popover.id}
                     annotation={popoverAnnotationsById.get(popover.id) ?? null}
                     position={popover}
@@ -2182,6 +2250,8 @@ type RenderBlockContext = {
     runInlineMarkToggle(markType: BooleanInlineMark): void;
     runCodeToggle(): void;
     runBlockControlCommand(command: (current: Replica) => MultiCommandResult): void;
+    onCopy(event: ClipboardEvent<HTMLElement>): void;
+    onPaste(event: ClipboardEvent<HTMLElement>): void;
     moveCaretHorizontally(selection: EditorSelection): void;
     moveCaretVertically(sourceBlock: HTMLElement, targetBlockId: string): void;
     moveTableSelectionByArrowKey(
@@ -2701,17 +2771,8 @@ function TableRowHeader({
                         );
                     }
                 }}
-                onPaste={(event) => {
-                    event.preventDefault();
-                    context.runEditCommand((current, selection) =>
-                        pastePlainTextWithMarkdownShortcutsEverywhere(
-                            current.state,
-                            selection,
-                            event.clipboardData.getData('text/plain'),
-                            makeCommandContext(current),
-                        ),
-                    );
-                }}
+                onCopy={context.onCopy}
+                onPaste={context.onPaste}
             />
         </div>
     );
@@ -3017,28 +3078,8 @@ const renderEditableBlock = (block: RichFormattedBlock, context: RenderBlockCont
                     return {state: result.state, ops: result.ops, selection: current.selection};
                 })
             }
-            onPasteText={(text) =>
-                context.runEditCommand((current, selection) => {
-                    const activeSelection = selection;
-                    const primary = primarySelection(
-                        resolveSelectionSet(current.state, activeSelection),
-                    );
-                    if (isLinkLikeText(text) && primary.type === 'range') {
-                        return setLinkMarkEverywhere(
-                            current.state,
-                            activeSelection,
-                            text.trim(),
-                            makeCommandContext(current),
-                        );
-                    }
-                    return pastePlainTextWithMarkdownShortcutsEverywhere(
-                        current.state,
-                        activeSelection,
-                        text,
-                        makeCommandContext(current),
-                    );
-                })
-            }
+            onCopy={context.onCopy}
+            onPaste={context.onPaste}
             onMoveCaret={context.moveCaretHorizontally}
             onMoveCaretVertically={context.moveCaretVertically}
             onMoveTableSelectionByArrowKey={context.moveTableSelectionByArrowKey}
@@ -3194,6 +3235,7 @@ const inlineMarksByOffset = (block: RichFormattedBlock): Record<string, unknown>
 };
 
 function AnnotationSidebar({
+    state,
     annotations,
     open,
     gutterTops,
@@ -3211,6 +3253,7 @@ function AnnotationSidebar({
     onPopoverTriggerEnter,
     onPopoverTriggerLeave,
 }: {
+    state: Replica['state'];
     annotations: ReturnType<typeof renderedAnnotations>;
     open: boolean;
     gutterTops: Record<string, number>;
@@ -3271,6 +3314,7 @@ function AnnotationSidebar({
                                 {annotation.bodyBlocks.map((block) => (
                                     <AnnotationBodyBlock
                                         key={block.id}
+                                        state={state}
                                         annotationId={annotation.id}
                                         block={block}
                                         focusRequest={focusRequest}
@@ -3310,6 +3354,7 @@ function AnnotationSidebar({
 }
 
 function Footnotes({
+    state,
     annotations,
     focusRequest,
     onFocusRequestHandled,
@@ -3321,6 +3366,7 @@ function Footnotes({
     onPopoverTriggerEnter,
     onPopoverTriggerLeave,
 }: {
+    state: Replica['state'];
     annotations: ReturnType<typeof renderedAnnotations>;
     focusRequest: CommentFocusRequest | null;
     onFocusRequestHandled(): void;
@@ -3346,6 +3392,7 @@ function Footnotes({
                         ? annotation.bodyBlocks.map((block) => (
                               <AnnotationBodyBlock
                                   key={block.id}
+                                  state={state}
                                   block={block}
                                   fallbackText={annotation.referenceText}
                                   focusRequest={focusRequest}
@@ -3367,6 +3414,7 @@ function Footnotes({
 }
 
 function FloatingAnnotationPopover({
+    state,
     annotation,
     position,
     onMouseEnter,
@@ -3383,6 +3431,7 @@ function FloatingAnnotationPopover({
     onPopoverTriggerEnter,
     onPopoverTriggerLeave,
 }: {
+    state: Replica['state'];
     annotation: RenderedAnnotation | null;
     position: ActivePopover | null;
     onMouseEnter(): void;
@@ -3428,6 +3477,7 @@ function FloatingAnnotationPopover({
             {annotation.bodyBlocks.map((block) => (
                 <AnnotationBodyBlock
                     key={block.id}
+                    state={state}
                     block={block}
                     fallbackText={annotation.referenceText}
                     focusRequest={focusRequest}
@@ -3620,6 +3670,7 @@ function CodeHoverPopover({
 }
 
 function AnnotationBodyBlock({
+    state,
     annotationId,
     block,
     fallbackText = '',
@@ -3634,6 +3685,7 @@ function AnnotationBodyBlock({
     onPopoverTriggerEnter,
     onPopoverTriggerLeave,
 }: {
+    state: Replica['state'];
     annotationId?: string;
     block: ReturnType<typeof renderedAnnotations>[number]['bodyBlocks'][number];
     fallbackText?: string;
@@ -3687,6 +3739,22 @@ function AnnotationBodyBlock({
             onBodySelectionChange(nextSelection);
         },
         [block.id, block.text.length, onBodySelectionChange],
+    );
+
+    const copyBodySelection = useCallback(
+        (event: ClipboardEvent<HTMLDivElement>) => {
+            const selected = readSelectionFromDom(event.currentTarget) ?? selection;
+            const payload = serializeSelectionToClipboardPayload(
+                state,
+                singleRetainedSelectionSet(state, selected),
+            );
+            if (!payload) return;
+            event.preventDefault();
+            event.clipboardData.setData(BLOCK_RICH_TEXT_MIME, JSON.stringify(payload));
+            event.clipboardData.setData('text/plain', payload.plainText);
+            event.clipboardData.setData('text/html', payload.html);
+        },
+        [selection, state],
     );
 
     useLayoutEffect(() => {
@@ -3922,10 +3990,32 @@ function AnnotationBodyBlock({
                 onDeleteForward={(activeSelection) =>
                     run(activeSelection ?? selection, deleteAnnotationBodyForward)
                 }
+                onCopy={copyBodySelection}
                 onPaste={(event) => {
+                    const selected = readSelectionFromDom(event.currentTarget) ?? selection;
+                    const rich = parseBlockRichTextClipboardPayload(
+                        event.clipboardData.getData(BLOCK_RICH_TEXT_MIME),
+                    );
+                    if (rich) {
+                        event.preventDefault();
+                        run(selected, (state, activeSelection, context) => {
+                            const result = pasteRichClipboardEverywhere(
+                                state,
+                                singleRetainedSelectionSet(state, activeSelection),
+                                rich,
+                                context,
+                            );
+                            return {
+                                state: result.state,
+                                ops: result.ops,
+                                selection: primarySelection(resolveSelectionSet(result.state, result.selection)),
+                            };
+                        });
+                        return;
+                    }
+
                     event.preventDefault();
                     const text = event.clipboardData.getData('text/plain');
-                    const selected = readSelectionFromDom(event.currentTarget) ?? selection;
                     if (isLinkLikeText(text) && selected.type === 'range') {
                         run(selected, (state, activeSelection, context) =>
                             setAnnotationBodyLink(state, activeSelection, text.trim(), context),
@@ -4332,7 +4422,8 @@ function EditableBlock({
     onToggleTodo,
     onSetCodeLanguage,
     onSetCalloutKind,
-    onPasteText,
+    onCopy,
+    onPaste,
     onMoveCaret,
     onMoveCaretVertically,
     onMoveTableSelectionByArrowKey,
@@ -4387,7 +4478,8 @@ function EditableBlock({
     onToggleTodo(): void;
     onSetCodeLanguage(language: string): void;
     onSetCalloutKind(kind: 'info' | 'warning' | 'error'): void;
-    onPasteText(text: string): void;
+    onCopy(event: ClipboardEvent<HTMLElement>): void;
+    onPaste(event: ClipboardEvent<HTMLElement>): void;
     onMoveCaret(selection: EditorSelection): void;
     onMoveCaretVertically(sourceBlock: HTMLElement, targetBlockId: string): void;
     onMoveTableSelectionByArrowKey(
@@ -4487,6 +4579,7 @@ function EditableBlock({
                 onInsertText={onInsertText}
                 onDeleteBackward={onDeleteBackward}
                 onDeleteForward={onDeleteForward}
+                onCopy={onCopy}
                 onKeyDown={(event) => {
                     onKeystroke(block.id, event);
                     const modifierPressed = event.metaKey || event.ctrlKey;
@@ -4730,10 +4823,7 @@ function EditableBlock({
                         }
                     }
                 }}
-                onPaste={(event) => {
-                    event.preventDefault();
-                    onPasteText(event.clipboardData.getData('text/plain'));
-                }}
+                onPaste={onPaste}
             />
             <BlockInlineControls
                 meta={meta}
@@ -4769,6 +4859,7 @@ function RichTextEditableSurface({
     onCodeHoverEnter,
     onCodeHoverLeave,
     onKeyDown,
+    onCopy,
     onPaste,
 }: {
     blockId: string;
@@ -4795,6 +4886,7 @@ function RichTextEditableSurface({
     onCodeHoverEnter?(range: CodeTargetRange & {language: string}, element: HTMLElement): void;
     onCodeHoverLeave?(): void;
     onKeyDown?(event: KeyboardEvent<HTMLDivElement>): void;
+    onCopy?(event: ClipboardEvent<HTMLDivElement>): void;
     onPaste?(event: ClipboardEvent<HTMLDivElement>): void;
 }) {
     const handledBeforeInputRef = useRef(false);
@@ -5009,6 +5101,7 @@ function RichTextEditableSurface({
                 }
             }}
             onKeyDown={onKeyDown}
+            onCopy={onCopy}
             onPaste={onPaste}
         />
     );
