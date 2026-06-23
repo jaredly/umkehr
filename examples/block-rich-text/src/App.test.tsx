@@ -838,6 +838,57 @@ describe('Block rich text example UI', () => {
             expect(targetCell.classList.contains('cellSelectionFocus')).toBe(true);
         });
         expect(document.activeElement).toBe(targetCell);
+
+        fireEvent.pointerMove(targetCell, {
+            buttons: 0,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 20,
+        });
+        await waitFor(() => expect(targetCell.classList.contains('cellDragReady')).toBe(true));
+
+        fireEvent.pointerMove(targetCell, {
+            buttons: 0,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 90,
+            clientY: 20,
+        });
+        await waitFor(() => expect(targetCell.classList.contains('cellDragReady')).toBe(false));
+    });
+
+    it('undoes while a table cell block selection is focused', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        selectCaret(blocks(left)[0], 0);
+
+        setBlockType(left, 'table');
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+
+        selectCaret(tableBlocks(left)[0], 0);
+        typeText(tableBlocks(left)[0], 'A');
+        await waitFor(() => expect(tableBlockTexts(left)[0]).toBe('A'));
+
+        stubTableCellRects(left);
+        const targetCell = tableCells(left)[1];
+        fireEvent.pointerDown(targetCell, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 142,
+            clientY: 20,
+        });
+
+        await waitFor(() => {
+            expect(targetCell.classList.contains('cellSelected')).toBe(true);
+            expect(document.activeElement).toBe(targetCell);
+        });
+
+        fireEvent.keyDown(document.activeElement ?? targetCell, {key: 'z', metaKey: true});
+
+        await waitFor(() => expect(tableBlockTexts(left)[0]).toBe(''));
     });
 
     it('drags across table cell borders to create a rectangular cell selection', async () => {

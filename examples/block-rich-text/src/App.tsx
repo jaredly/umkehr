@@ -3480,6 +3480,7 @@ function TableBlock({node, context}: {node: RenderTreeNode; context: RenderBlock
         anchorCellId: string;
         focusCellId: string;
     } | null>(null);
+    const [cellDragReadyId, setCellDragReadyId] = useState<string | null>(null);
     const rowNodes = node.children;
     const columnCount = Math.max(
         1,
@@ -3690,6 +3691,10 @@ function TableBlock({node, context}: {node: RenderTreeNode; context: RenderBlock
                                 <TableRowHeader row={row.block} rowIndex={rowIndex} context={context} />
                                 {Array.from({length: columnCount}, (_, columnIndex) => {
                                     const cell = row.children[columnIndex] ?? null;
+                                    const canStartCellDrag =
+                                        !!cell &&
+                                        context.selection.type === 'table-cells' &&
+                                        cell.block.id === selectedCellId;
                                     return (
                                         <div
                                             key={`${row.block.id}:${columnIndex}`}
@@ -3711,6 +3716,9 @@ function TableBlock({node, context}: {node: RenderTreeNode; context: RenderBlock
                                                 cellDrag?.sourceCellId === cell?.block.id
                                                     ? 'draggingCell'
                                                     : '',
+                                                canStartCellDrag && cellDragReadyId === cell.block.id
+                                                    ? 'cellDragReady'
+                                                    : '',
                                                 cellDrag?.target?.rowId === row.block.id &&
                                                 cellDrag.target.index === columnIndex
                                                     ? 'cellDropBefore'
@@ -3727,9 +3735,41 @@ function TableBlock({node, context}: {node: RenderTreeNode; context: RenderBlock
                                             tabIndex={cell ? -1 : undefined}
                                             onCopy={context.onCopy}
                                             onPaste={context.onPaste}
+                                            onKeyDown={(event) => {
+                                                if (!cell || event.target !== event.currentTarget) return;
+                                                context.onKeystroke(cell.block.id, event);
+                                                const modifierPressed = event.metaKey || event.ctrlKey;
+                                                const key = event.key.toLowerCase();
+                                                if (modifierPressed && key === 'z' && event.shiftKey) {
+                                                    event.preventDefault();
+                                                    context.onRedo();
+                                                } else if (modifierPressed && key === 'z') {
+                                                    event.preventDefault();
+                                                    context.onUndo();
+                                                } else if (modifierPressed && key === 'y') {
+                                                    event.preventDefault();
+                                                    context.onRedo();
+                                                }
+                                            }}
+                                            onPointerMove={(event) => {
+                                                if (!cell) return;
+                                                const dragReady =
+                                                    canStartCellDrag && isCellBorderPointer(event);
+                                                setCellDragReadyId((current) => {
+                                                    if (dragReady) return cell.block.id;
+                                                    return current === cell.block.id ? null : current;
+                                                });
+                                            }}
+                                            onPointerLeave={() => {
+                                                if (!cell) return;
+                                                setCellDragReadyId((current) =>
+                                                    current === cell.block.id ? null : current,
+                                                );
+                                            }}
                                             onPointerDown={(event) => {
                                                 if (!cell || !isCellBorderPointer(event))
                                                     return;
+                                                setCellDragReadyId(null);
                                                 event.preventDefault();
                                                 event.stopPropagation();
                                                 if (cell.block.id !== selectedCellId) {

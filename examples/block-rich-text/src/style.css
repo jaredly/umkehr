@@ -843,6 +843,18 @@ select {
     opacity: 0.58;
 }
 
+.tableCell.cellDragReady,
+.tableCell.cellDragReady .blockRow,
+.tableCell.cellDragReady .editableBlock {
+    cursor: grab;
+}
+
+.tableCell.draggingCell,
+.tableCell.draggingCell .blockRow,
+.tableCell.draggingCell .editableBlock {
+    cursor: grabbing;
+}
+
 .tableCell.cellDropBefore::before,
 .tableCell.cellDropAfter::after {
     content: '';
