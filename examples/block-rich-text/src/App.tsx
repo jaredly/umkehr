@@ -149,6 +149,7 @@ import {
     BLOCK_RICH_TEXT_MIME,
     parseBlockRichTextClipboardPayload,
     serializeSelectionToClipboardPayload,
+    type RichClipboardPayload,
 } from './clipboard';
 import {useBlockReorder, type DropTarget} from './useBlockReorder';
 import {
@@ -1587,17 +1588,29 @@ function BlockEditor({
         [liveSelectionSet, onCommand, resetVerticalCaretIntent, scheduleSelectionRestore],
     );
 
-    const copyRichSelection = useCallback(
-        (event: ClipboardEvent<HTMLElement>) => {
+    const currentClipboardPayload = useCallback((): RichClipboardPayload | null => {
             const currentPrimary = primarySelection(resolvedSelectionSet);
             const selection = isBlockLevelSelection(currentPrimary)
                 ? retainSelectionSet(replica.state, resolvedSelectionSet)
                 : liveSelectionSet(replica);
-            const payload = serializeSelectionToClipboardPayload(
+            return serializeSelectionToClipboardPayload(
                 replica.state,
                 selection,
                 serializeAttachments(attachments),
             );
+        },
+        [attachments, liveSelectionSet, replica, resolvedSelectionSet],
+    );
+
+    const writeCurrentSelectionToClipboard = useCallback(async () => {
+        const payload = currentClipboardPayload();
+        if (!payload) return;
+        await writeClipboardPayload(payload);
+    }, [currentClipboardPayload]);
+
+    const copyRichSelection = useCallback(
+        (event: ClipboardEvent<HTMLElement>) => {
+            const payload = currentClipboardPayload();
             if (!payload) return;
             event.preventDefault();
             event.clipboardData.setData(BLOCK_RICH_TEXT_MIME, JSON.stringify(payload));
@@ -1607,7 +1620,7 @@ function BlockEditor({
                 event.clipboardData.setData('text/tab-separated-values', payload.tsv);
             }
         },
-        [attachments, liveSelectionSet, replica, resolvedSelectionSet],
+        [currentClipboardPayload],
     );
 
     const captureImageUploadSelection = useCallback(() => {
@@ -2025,6 +2038,15 @@ function BlockEditor({
         (event: KeyboardEvent<HTMLElement>): boolean => {
             const selection = primarySelection(resolvedSelectionSet);
             if (selection.type !== 'block' && selection.type !== 'table-cells') return false;
+            if (
+                (event.metaKey || event.ctrlKey) &&
+                !event.altKey &&
+                event.key.toLowerCase() === 'c'
+            ) {
+                event.preventDefault();
+                void writeCurrentSelectionToClipboard();
+                return true;
+            }
             const modifierPressed = event.metaKey || event.ctrlKey || event.altKey;
 
             if (event.key.length === 1 && !modifierPressed) {
@@ -2108,6 +2130,7 @@ function BlockEditor({
             resolvedSelectionSet,
             scheduleSelectionRestore,
             textCaretForBlockSelection,
+            writeCurrentSelectionToClipboard,
         ],
     );
 
@@ -7169,6 +7192,33 @@ const keyPerfClass = (ms: number): string => {
     if (ms > 16) return 'slow';
     if (ms >= 8) return 'medium';
     return 'fast';
+};
+
+const writeClipboardPayload = async (payload: RichClipboardPayload): Promise<void> => {
+    const clipboard = navigator.clipboard;
+    if (!clipboard) return;
+    const plainText = payload.tsv ?? payload.plainText;
+    if (typeof clipboard.write === 'function' && typeof ClipboardItem !== 'undefined') {
+        const items: Record<string, Blob> = {
+            [BLOCK_RICH_TEXT_MIME]: new Blob([JSON.stringify(payload)], {
+                type: BLOCK_RICH_TEXT_MIME,
+            }),
+            'text/plain': new Blob([plainText], {type: 'text/plain'}),
+            'text/html': new Blob([payload.html], {type: 'text/html'}),
+        };
+        if (payload.tsv) {
+            items['text/tab-separated-values'] = new Blob([payload.tsv], {
+                type: 'text/tab-separated-values',
+            });
+        }
+        try {
+            await clipboard.write([new ClipboardItem(items)]);
+            return;
+        } catch (err) {
+            // Some browsers reject custom MIME types through ClipboardItem.
+        }
+    }
+    await clipboard.writeText?.(plainText);
 };
 
 const occurrenceSelectionSet = (
