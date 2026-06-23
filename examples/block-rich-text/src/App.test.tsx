@@ -64,6 +64,25 @@ const keyPerfMonitor = (view: ReturnType<typeof render>): HTMLElement =>
 const keyPerfBars = (view: ReturnType<typeof render>): HTMLElement[] =>
     Array.from(view.container.querySelectorAll<HTMLElement>('[data-testid="key-perf-bar"]'));
 
+const keyPerfBarMs = (bar: HTMLElement): number => {
+    const title = bar.getAttribute('title') ?? '';
+    const match = title.match(/: ([\d.]+) ms$/);
+    if (!match) throw new Error(`missing duration in key perf bar title: ${title}`);
+    return Number(match[1]);
+};
+
+const latestKeyPerfBarMs = async (view: ReturnType<typeof render>, label: string): Promise<number> => {
+    const prefix = `${label}: `;
+    const bar = await waitFor(() => {
+        const found = keyPerfBars(view).findLast((candidate) =>
+            (candidate.getAttribute('title') ?? '').startsWith(prefix),
+        );
+        if (!found) throw new Error(`missing key perf sample ${label}`);
+        return found;
+    });
+    return keyPerfBarMs(bar);
+};
+
 const blockText = (block: HTMLElement): string => {
     let text = '';
     const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
@@ -77,6 +96,24 @@ const blockText = (block: HTMLElement): string => {
 
 const repeatedText = (length: number): string =>
     Array.from({length}, (_, index) => String.fromCharCode(97 + (index % 26))).join('');
+
+const seventyWordsWithEveryFifthBold = (): {
+    text: string;
+    boldRanges: Array<{type: 'bold'; startOffset: number; endOffset: number}>;
+} => {
+    let offset = 0;
+    const words: string[] = [];
+    const boldRanges: Array<{type: 'bold'; startOffset: number; endOffset: number}> = [];
+    for (let index = 0; index < 70; index++) {
+        const word = `word${String(index).padStart(2, '0')}`;
+        if (index % 5 === 0) {
+            boldRanges.push({type: 'bold', startOffset: offset, endOffset: offset + word.length});
+        }
+        words.push(word);
+        offset += word.length + 1;
+    }
+    return {text: words.join(' '), boldRanges};
+};
 
 const blockDepth = (block: HTMLElement): string =>
     block.closest<HTMLElement>('.blockRow')?.style.getPropertyValue('--block-depth') ?? '';
@@ -1449,6 +1486,52 @@ describe('Block rich text example UI', () => {
         await waitFor(() => expect(within(keyPerfMonitor(view)).getByText('Paste')).toBeTruthy());
         expect(keyPerfBars(view).length).toBeGreaterThan(0);
     });
+
+    it('keeps React render after typing in a 70 word block with every fifth word bolded close to plain text', async () => {
+        const measureRenderAfterTyping = async (withMarks: boolean): Promise<number> => {
+            const view = render(<App />);
+            const {left} = panels(view);
+            const {text, boldRanges} = seventyWordsWithEveryFifthBold();
+            const payload: RichClipboardPayload = {
+                version: 1,
+                plainText: text,
+                html: `<p>${text}</p>`,
+                fragments: [
+                    {
+                        text,
+                        meta: {type: 'paragraph', ts: 'copy-ts'},
+                        marks: withMarks ? boldRanges : [],
+                    },
+                ],
+                annotations: [],
+            };
+
+            selectCaret(blocks(left)[0], 0);
+            pasteClipboard(blocks(left)[0], {
+                [BLOCK_RICH_TEXT_MIME]: JSON.stringify(payload),
+                'text/plain': text,
+            });
+
+            await waitForBlockTexts(left, [text]);
+            if (withMarks) {
+                expect(blocks(left)[0].querySelectorAll('.markBold')).toHaveLength(14);
+            }
+            selectCaret(blocks(left)[0], text.length);
+            typeText(blocks(left)[0], 'Z');
+
+            await waitForBlockTexts(left, [`${text}Z`]);
+            const ms = await latestKeyPerfBarMs(view, 'Render Z');
+            view.unmount();
+            return ms;
+        };
+
+        await measureRenderAfterTyping(false);
+        await measureRenderAfterTyping(true);
+        const plainRenderMs = await measureRenderAfterTyping(false);
+        const markedRenderMs = await measureRenderAfterTyping(true);
+
+        expect(markedRenderMs).toBeLessThan(Math.max(1, plainRenderMs * 4));
+    }, 30_000);
 
     it('caps keypress performance bars to the latest samples', async () => {
         const view = render(<App />);

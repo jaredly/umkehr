@@ -47,6 +47,21 @@ export type FormattedBlock<M extends TimestampedBlockMeta = TimestampedBlockMeta
     parentId: string;
 };
 
+type VisibleOutlineEntry = {
+    id: string;
+    depth: number;
+    parentId: string;
+};
+
+type MarkTraversalContext = {
+    outline: VisibleOutlineEntry[];
+    blockCharIds: Map<string, string[]>;
+    blockVisibleCharIds: Map<string, string[]>;
+    allCharIds: string[];
+    nextById: Record<string, string>;
+    splitRecords: Record<string, SplitRecord[]>;
+};
+
 export const markOp = <M extends TimestampedBlockMeta = TimestampedBlockMeta>(
     id: Lamport,
     start: Lamport,
@@ -114,18 +129,19 @@ export const materializeFormattedBlocks = <M extends TimestampedBlockMeta>(
     state: CachedState<M>,
     config: VirtualBlockParentConfig<M> = {},
 ): FormattedBlock<M>[] => {
+    const context = createMarkTraversalContext(state, config);
     const coveredByMark: Record<string, Mark[]> = {};
     const marks = Object.values(state.state.marks).sort((a, b) => compareLamports(a.id, b.id));
     for (const mark of marks) {
-        for (const charId of coveredCharIdsForMark(state, mark, config)) {
+        for (const charId of coveredCharIdsForMarkWithContext(state, mark, context)) {
             coveredByMark[charId] = coveredByMark[charId] ?? [];
             coveredByMark[charId].push(mark);
         }
     }
 
-    return visibleBlockOutline(state, config).map(({id, depth, parentId}) => {
+    return context.outline.map(({id, depth, parentId}) => {
         const runs: FormattedRun[] = [];
-        for (const charId of orderedCharIdsForBlock(state, id, {visibleOnly: true})) {
+        for (const charId of context.blockVisibleCharIds.get(id) ?? []) {
             const char = charRecord(state, charId);
             if (!char) continue;
             const {marks, stackedMarks} = resolveMarks(coveredByMark[charId] ?? [], config);
@@ -205,9 +221,17 @@ export const coveredCharIdsForMark = <M extends TimestampedBlockMeta>(
     mark: Mark,
     config: VirtualBlockParentConfig<M>,
 ): string[] => {
-    const sequence = mark.end ? allCharIds(state, config) : charIdsForOpenEndedMark(state, mark, config);
-    const nextById = nextIdMap(sequence);
-    const splitRecords = splitRecordsByLeft(state);
+    const context = createMarkTraversalContext(state, config);
+    return coveredCharIdsForMarkWithContext(state, mark, context);
+};
+
+const coveredCharIdsForMarkWithContext = <M extends TimestampedBlockMeta>(
+    state: CachedState<M>,
+    mark: Mark,
+    context: MarkTraversalContext,
+): string[] => {
+    const sequence = mark.end ? context.allCharIds : charIdsForOpenEndedMarkWithContext(mark, context);
+    const nextById = mark.end ? context.nextById : nextIdMap(sequence);
     const crossed = new Set(mark.crossedSplits.map(lamportToString));
     const covered: string[] = [];
     const forcedNext: Record<string, string> = {};
@@ -235,7 +259,7 @@ export const coveredCharIdsForMark = <M extends TimestampedBlockMeta>(
             continue;
         }
         const split = mark.end
-            ? splitRecords[current]?.find((split) => !crossed.has(lamportToString(split.id)))
+            ? context.splitRecords[current]?.find((split) => !crossed.has(lamportToString(split.id)))
             : undefined;
         if (split) {
             const path = pathForFollowedSplit(state, split);
@@ -248,6 +272,38 @@ export const coveredCharIdsForMark = <M extends TimestampedBlockMeta>(
         current = nextById[current];
     }
     return covered;
+};
+
+const createMarkTraversalContext = <M extends TimestampedBlockMeta>(
+    state: CachedState<M>,
+    config: VirtualBlockParentConfig<M> = {},
+): MarkTraversalContext => {
+    const outline = visibleBlockOutline(state, config);
+    const blockCharIds = new Map<string, string[]>();
+    const blockVisibleCharIds = new Map<string, string[]>();
+    const allIds: string[] = [];
+
+    for (const {id} of outline) {
+        const ids = orderedCharIdsForBlock(state, id);
+        blockCharIds.set(id, ids);
+        blockVisibleCharIds.set(
+            id,
+            ids.filter((charId) => {
+                const char = charRecord(state, charId);
+                return Boolean(char && !char.deleted);
+            }),
+        );
+        allIds.push(...ids);
+    }
+
+    return {
+        outline,
+        blockCharIds,
+        blockVisibleCharIds,
+        allCharIds: allIds,
+        nextById: nextIdMap(allIds),
+        splitRecords: splitRecordsByLeft(state),
+    };
 };
 
 const allCharIds = <M extends TimestampedBlockMeta>(
@@ -265,6 +321,18 @@ const charIdsForOpenEndedMark = <M extends TimestampedBlockMeta>(
         orderedCharIdsForBlock(state, id).includes(startId),
     );
     return block ? orderedCharIdsForBlock(state, block.id) : allCharIds(state, config);
+};
+
+const charIdsForOpenEndedMarkWithContext = (
+    mark: Mark,
+    context: MarkTraversalContext,
+): string[] => {
+    const startId = lamportToString(mark.start.id);
+    for (const {id} of context.outline) {
+        const ids = context.blockCharIds.get(id) ?? [];
+        if (ids.includes(startId)) return ids;
+    }
+    return context.allCharIds;
 };
 
 const nextIdMap = (sequence: string[]): Record<string, string> => {
