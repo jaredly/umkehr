@@ -272,7 +272,7 @@ const blockTextLength = (block: HTMLElement): number => {
     return length;
 };
 
-const caretRectForBlockOffset = (block: HTMLElement, offset: number): CaretRect => {
+export const caretRectForBlockOffset = (block: HTMLElement, offset: number): CaretRect => {
     const point = domPointInBlockForOffset(block, offset);
     const range = document.createRange();
     range.setStart(point.node, point.offset);

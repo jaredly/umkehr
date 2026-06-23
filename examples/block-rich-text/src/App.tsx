@@ -90,6 +90,7 @@ import {
 import {paragraphMeta, type RichBlockMeta} from './blockMeta';
 import {
     closestCaretOffsetForHorizontalIntent,
+    caretRectForBlockOffset,
     isCaretOnFirstVisualLine,
     isCaretOnLastVisualLine,
     readCaretHorizontalIntent,
@@ -1053,6 +1054,19 @@ function BlockEditor({
         [],
     );
 
+    useLayoutEffect(() => {
+        if (!slashMenu) return;
+        const nextPosition = slashPopoverPositionFromTrigger(rootRef.current, slashMenu);
+        if (!nextPosition) return;
+        if (
+            Math.abs(nextPosition.top - slashMenu.top) < 0.5 &&
+            Math.abs(nextPosition.left - slashMenu.left) < 0.5
+        ) {
+            return;
+        }
+        setSlashMenu((current) => (current ? {...current, ...nextPosition} : current));
+    }, [replica.state, slashMenu]);
+
     const captureSelection = useCallback(
         (event: MouseEvent | KeyboardEvent) => {
             if (event.type === 'mouseup') {
@@ -1499,7 +1513,7 @@ function BlockEditor({
                     setSlashMenu({
                         triggers,
                         selection: result.selection,
-                        ...linkPopoverPositionFromSelection(rootRef.current),
+                        ...slashPopoverPositionFromSelection(rootRef.current),
                         query: '',
                         activeIndex: 0,
                     });
@@ -6381,6 +6395,52 @@ const linkPopoverPositionFromSelection = (
     const top = rect && rect.height ? rect.bottom + 8 : (fallbackRect?.top ?? 0) + 28;
     const left = rect && rect.width ? rect.left : (fallbackRect?.left ?? 0);
     return {top, left};
+};
+
+const slashPopoverPositionFromSelection = (
+    root: HTMLElement | null,
+): {top: number; left: number} => {
+    const fallbackRect = root?.getBoundingClientRect();
+    const selection = root?.ownerDocument.defaultView?.getSelection();
+    const range =
+        root &&
+        selection &&
+        selection.rangeCount > 0 &&
+        root.contains(selection.getRangeAt(0).startContainer)
+            ? selection.getRangeAt(0)
+            : null;
+    const rect =
+        range && typeof range.getBoundingClientRect === 'function'
+            ? range.getBoundingClientRect()
+            : null;
+    const clientRect =
+        rect && (rect.top || rect.bottom || rect.left || rect.right)
+            ? rect
+            : (range?.getClientRects?.()[0] ?? null);
+    return {
+        top: clientRect ? clientRect.bottom + 8 : (fallbackRect?.top ?? 0) + 28,
+        left: clientRect ? clientRect.left : (fallbackRect?.left ?? 0),
+    };
+};
+
+const slashPopoverPositionFromTrigger = (
+    root: HTMLElement | null,
+    menu: SlashMenuState,
+): {top: number; left: number} | null => {
+    const trigger =
+        menu.triggers.find((item) => item.selectionId === menu.selection.primaryId) ??
+        menu.triggers[0];
+    if (!root || !trigger) return null;
+    const block = root.querySelector<HTMLElement>(
+        `[data-block-id="${CSS.escape(trigger.fallbackBlockId)}"]`,
+    );
+    if (!block) return null;
+    try {
+        const rect = caretRectForBlockOffset(block, trigger.fallbackOffset + 1);
+        return {top: rect.bottom + 8, left: rect.left};
+    } catch {
+        return null;
+    }
 };
 
 const linkPopoverPositionFromElement = (element: HTMLElement): {top: number; left: number} => {
