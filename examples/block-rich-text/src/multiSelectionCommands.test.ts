@@ -188,6 +188,51 @@ describe('block rich text multi-selection commands', () => {
         ]);
     });
 
+    it('pastes rich clipboard fragments as children of a single selected table cell', () => {
+        const context = ctx();
+        const state = init();
+        const blockId = onlyBlock(state);
+        let table = createTable(state, caret(blockId, 0), context, {rows: 1, columns: 1});
+        const tableId = rootBlockIds(table.state).find((id) => table.state.state.blocks[id]?.meta.type === 'table')!;
+        const rowId = visibleBlockChildren(table.state, tableId, annotationVirtualParents(table.state))[0];
+        const cellId = visibleBlockChildren(table.state, rowId, annotationVirtualParents(table.state))[0];
+        table = insertText(table.state, caret(cellId, 0), 'cell', context);
+        const payload: RichClipboardPayload = {
+            version: 1,
+            plainText: 'one\ntwo',
+            html: '<p>one</p><p><strong>two</strong></p>',
+            fragments: [
+                {text: 'one', meta: {type: 'paragraph', ts: 'one-ts'}, marks: []},
+                {
+                    text: 'two',
+                    meta: {type: 'paragraph', ts: 'two-ts'},
+                    marks: [{type: 'bold', startOffset: 0, endOffset: 3}],
+                },
+            ],
+            annotations: [],
+        };
+
+        const result = pasteRichClipboardEverywhere(
+            table.state,
+            singleRetainedSelectionSet(table.state, {
+                type: 'table-cells',
+                tableId,
+                anchorCellId: cellId,
+                focusCellId: cellId,
+            }),
+            payload,
+            context,
+        );
+
+        const childIds = visibleBlockChildren(result.state, cellId, annotationVirtualParents(result.state));
+        expect(blockContents(result.state, cellId)).toBe('cell');
+        expect(childIds.map((id) => blockContents(result.state, id))).toEqual(['one', 'two']);
+        expect(materializeFormattedBlocks(result.state).find((block) => block.id === childIds[1])?.runs).toEqual([
+            {text: 'two', marks: {bold: true}},
+        ]);
+        expect(resolveSelectionSet(result.state, result.selection).entries[0].selection).toEqual(caret(childIds[1], 3));
+    });
+
     it('reuses an existing annotation when rich pasting inside the same document', () => {
         const demo = createDemoState();
         const blockId = rootBlockIds(demo.left.state)[0];

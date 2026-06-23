@@ -795,10 +795,10 @@ describe('Block rich text example UI', () => {
             expect(secondCell.classList.contains('cellSelected')).toBe(true);
             expect(secondCell.classList.contains('cellSelectionFocus')).toBe(true);
         });
-        expect(document.activeElement).toBe(tableBlocks(left)[1]);
+        expect(document.activeElement).toBe(secondCell);
         expect(window.getSelection()?.rangeCount).toBe(0);
 
-        fireEvent.keyDown(tableBlocks(left)[1], {key: 'X'});
+        fireEvent.keyDown(secondCell, {key: 'X'});
         await waitFor(() => expect(tableBlockTexts(left)[1]).toBe('X'));
     });
 
@@ -837,7 +837,7 @@ describe('Block rich text example UI', () => {
             expect(targetCell.classList.contains('cellSelected')).toBe(true);
             expect(targetCell.classList.contains('cellSelectionFocus')).toBe(true);
         });
-        expect(document.activeElement).toBe(tableBlocks(left)[1]);
+        expect(document.activeElement).toBe(targetCell);
     });
 
     it('drags across table cell borders to create a rectangular cell selection', async () => {
@@ -2124,7 +2124,7 @@ describe('Block rich text example UI', () => {
         });
 
         const activeElement = document.activeElement;
-        expect(activeElement).toBeInstanceOf(HTMLElement);
+        expect(activeElement).toBe(tableCells(left)[1]);
         fireEvent.copy(activeElement as HTMLElement, {clipboardData: {setData}});
 
         expect(setData).toHaveBeenCalledWith('text/plain', 'A\tB\nC\tD');
@@ -2190,7 +2190,8 @@ describe('Block rich text example UI', () => {
         document.elementsFromPoint = originalElementsFromPoint;
 
         await waitFor(() => expect(tableCells(left)[3].classList.contains('cellSelected')).toBe(true));
-        fireEvent.keyDown(document.activeElement ?? tableBlocks(left)[2], {
+        expect(document.activeElement).toBe(tableCells(left)[1]);
+        fireEvent.keyDown(document.activeElement ?? tableCells(left)[1], {
             key: 'c',
             code: 'KeyC',
             metaKey: true,
@@ -2199,10 +2200,11 @@ describe('Block rich text example UI', () => {
         await waitFor(() => expect(writeText).toHaveBeenCalledWith('A\tB\nC\tD'));
     });
 
-    it('pastes plain clipboard text on Cmd-V with selected table cells', async () => {
+    it('pastes plain clipboard text from a native paste event with selected table cells', async () => {
+        const readText = vi.fn();
         Object.defineProperty(navigator, 'clipboard', {
             configurable: true,
-            value: {readText: vi.fn().mockResolvedValue('X')},
+            value: {readText},
         });
         const view = render(<App />);
         const {left} = panels(view);
@@ -2249,16 +2251,20 @@ describe('Block rich text example UI', () => {
         document.elementsFromPoint = originalElementsFromPoint;
 
         await waitFor(() => expect(tableCells(left)[3].classList.contains('cellSelected')).toBe(true));
-        fireEvent.keyDown(document.activeElement ?? tableBlocks(left)[2], {
-            key: 'v',
-            code: 'KeyV',
-            metaKey: true,
+        expect(document.activeElement).toBe(tableCells(left)[1]);
+        fireEvent.paste(document.activeElement ?? tableCells(left)[1], {
+            clipboardData: {
+                types: ['text/plain'],
+                getData: (type: string) => (type === 'text/plain' ? 'X' : ''),
+            },
         });
 
         await waitFor(() => expect(tableBlockTexts(left)).toEqual(['A', 'B', 'CX', 'D']));
+        expect(readText).not.toHaveBeenCalled();
     });
 
-    it('pastes rich HTML clipboard data on Cmd-V with a selected table row', async () => {
+    it('pastes rich HTML clipboard data from a native paste event with a selected table row', async () => {
+        const read = vi.fn();
         const payload: RichClipboardPayload = {
             version: 1,
             plainText: 'X\nY',
@@ -2272,20 +2278,7 @@ describe('Block rich text example UI', () => {
         };
         Object.defineProperty(navigator, 'clipboard', {
             configurable: true,
-            value: {
-                read: vi.fn().mockResolvedValue([
-                    {
-                        types: ['text/html', 'text/plain'],
-                        getType: (type: string) =>
-                            Promise.resolve(
-                                new Blob(
-                                    [type === 'text/html' ? htmlWithClipboardPayload(payload) : payload.plainText],
-                                    {type},
-                                ),
-                            ),
-                    },
-                ]),
-            },
+            value: {read},
         });
         const view = render(<App />);
         const {left} = panels(view);
@@ -2332,13 +2325,72 @@ describe('Block rich text example UI', () => {
         document.elementsFromPoint = originalElementsFromPoint;
 
         await waitFor(() => expect(tableCells(left)[0].classList.contains('cellSelected')).toBe(true));
-        fireEvent.keyDown(document.activeElement ?? tableBlocks(left)[0], {
-            key: 'v',
-            code: 'KeyV',
-            metaKey: true,
+        expect(document.activeElement).toBe(tableCells(left)[1]);
+        fireEvent.paste(document.activeElement ?? tableCells(left)[1], {
+            clipboardData: {
+                types: ['text/html', 'text/plain'],
+                getData: (type: string) =>
+                    type === 'text/html'
+                        ? htmlWithClipboardPayload(payload)
+                        : type === 'text/plain'
+                          ? payload.plainText
+                          : '',
+            },
         });
 
         await waitFor(() => expect(tableBlockTexts(left)).toEqual(['A', 'B', 'X', 'Y', 'C', 'D']));
+        expect(read).not.toHaveBeenCalled();
+    });
+
+    it('pastes rich HTML clipboard data as children of a single selected table cell', async () => {
+        const payload: RichClipboardPayload = {
+            version: 1,
+            plainText: 'X\nY',
+            html: '<p>X</p><p>Y</p>',
+            fragments: [
+                {text: 'X', meta: {type: 'paragraph', ts: 'copy-ts'}, marks: []},
+                {text: 'Y', meta: {type: 'paragraph', ts: 'copy-ts'}, marks: []},
+            ],
+            annotations: [],
+        };
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'table');
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+
+        selectCaret(tableBlocks(left)[0], 0);
+        typeText(tableBlocks(left)[0], 'cell');
+        await waitFor(() => expect(tableBlockTexts(left)[0]).toBe('cell'));
+
+        stubTableCellRects(left);
+        fireEvent.pointerDown(tableCells(left)[1], {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 142,
+            clientY: 20,
+        });
+        await waitFor(() => {
+            expect(tableCells(left)[1].classList.contains('cellSelected')).toBe(true);
+            expect(document.activeElement).toBe(tableCells(left)[1]);
+        });
+
+        fireEvent.paste(tableCells(left)[1], {
+            clipboardData: {
+                types: ['text/html', 'text/plain'],
+                getData: (type: string) =>
+                    type === 'text/html'
+                        ? htmlWithClipboardPayload(payload)
+                        : type === 'text/plain'
+                          ? payload.plainText
+                          : '',
+            },
+        });
+
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['cell', '', 'X', 'Y', '', '']));
     });
 
     it('pastes custom block rich text before falling back to plain text', async () => {

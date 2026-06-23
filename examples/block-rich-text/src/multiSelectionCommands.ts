@@ -282,6 +282,15 @@ const pasteRichClipboardIntoBlockSelection = (
 
     const rectangle = tableCellRectangleForSelection(state, primary);
     if (!rectangle) return noOp;
+    if (rectangle.cellIds.length === 1) {
+        return pasteRichClipboardAsCellChildren(
+            state,
+            selection,
+            payload,
+            rectangle.cellIds[0],
+            context,
+        );
+    }
     const rows = tableRowsForSelection(state, rectangle.tableId);
     const columnCount = Math.max(
         1,
@@ -310,6 +319,65 @@ const pasteRichClipboardIntoBlockSelection = (
         );
     }
     return noOp;
+};
+
+const pasteRichClipboardAsCellChildren = (
+    state: CachedState<RichBlockMeta>,
+    selection: RetainedSelectionSet,
+    payload: RichClipboardPayload,
+    cellId: string,
+    context: CommandContext,
+): MultiCommandResult => {
+    let working = state;
+    const ops: Array<Op<RichBlockMeta>> = [];
+    const richContext: RichPasteContext = {
+        actor: context.actor,
+        nextTs: context.nextTs,
+        payloadAnnotations: new Map(payload.annotations.map((annotation) => [annotation.originalId, annotation])),
+        annotationIds: new Map(),
+        freshAnnotationIds: new Set(),
+        importedAnnotationBodies: new Set(),
+    };
+    let previousBlockId = visibleBlockChildren(working, cellId, annotationVirtualParents(working)).at(-1) ?? null;
+    let nextSelection: EditorSelection = caret(cellId, pointTextLength(working, cellId));
+
+    for (const fragment of payload.fragments) {
+        const parent = working.state.blocks[cellId];
+        if (!parent) break;
+        const inserted = insertBlockOpsWithId(working, {
+            actor: context.actor,
+            parent: parent.id,
+            before: previousBlockId ? working.state.blocks[previousBlockId].id : null,
+            meta: fragment.meta,
+            ts: context.nextTs(),
+            virtualParents: annotationVirtualParents(working),
+        });
+        working = applyMany(working, inserted.ops, annotationVirtualParents(working));
+        ops.push(...inserted.ops);
+        previousBlockId = inserted.blockId;
+
+        const textInserted = insertText(working, caret(inserted.blockId, 0), fragment.text, context);
+        working = textInserted.state;
+        ops.push(...textInserted.ops);
+
+        const marked = applyClipboardMarksToBlock(working, inserted.blockId, 0, fragment.marks, richContext);
+        working = marked.state;
+        ops.push(...marked.ops);
+        nextSelection = caret(inserted.blockId, pointTextLength(working, inserted.blockId));
+    }
+
+    const imported = importFreshAnnotationBodies(working, richContext);
+    working = imported.state;
+    ops.push(...imported.ops);
+
+    return {
+        state: working,
+        ops,
+        selection: {
+            primaryId: selection.primaryId,
+            entries: [{id: selection.primaryId, selection: retainSelection(working, nextSelection)}],
+        },
+    };
 };
 
 const pasteRichClipboardAsTableRow = (

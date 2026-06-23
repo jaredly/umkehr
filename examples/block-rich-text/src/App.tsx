@@ -990,11 +990,16 @@ function BlockEditor({
         if (domSelection) domSelection.removeAllRanges();
         pendingBlockSelectionFocusRef.current = editorSelection ?? null;
         const focusBlockId = editorSelection ? focusPoint(editorSelection).blockId : null;
-        const target = focusBlockId
-            ? rootRef.current?.querySelector<HTMLElement>(
-                  `[data-block-id="${CSS.escape(focusBlockId)}"]`,
-              )
-            : null;
+        const target =
+            editorSelection?.type === 'table-cells'
+                ? rootRef.current?.querySelector<HTMLElement>(
+                      `.tableCell[data-cell-id="${CSS.escape(focusBlockId ?? '')}"]`,
+                  )
+                : focusBlockId
+                  ? rootRef.current?.querySelector<HTMLElement>(
+                        `[data-block-id="${CSS.escape(focusBlockId)}"]`,
+                    )
+                  : null;
         suppressNextBlockFocusSelectionRef.current = true;
         suppressNextBlockKeySelectionRef.current = true;
         const focusTarget = target ?? rootRef.current;
@@ -1764,16 +1769,6 @@ function BlockEditor({
         ],
     );
 
-    const pasteCurrentClipboard = useCallback(async () => {
-        const data = await readClipboardPayload();
-        if (!data) return;
-        if (data.rich) {
-            pasteRichPayload(data.rich);
-            return;
-        }
-        pastePlainClipboardText(data.text);
-    }, [pastePlainClipboardText, pasteRichPayload]);
-
     const runInlineMarkToggle = useCallback(
         (markType: BooleanInlineMark) => {
             onCommand((current) => {
@@ -2075,15 +2070,6 @@ function BlockEditor({
                 void writeCurrentSelectionToClipboard();
                 return true;
             }
-            if (
-                (event.metaKey || event.ctrlKey) &&
-                !event.altKey &&
-                event.key.toLowerCase() === 'v'
-            ) {
-                event.preventDefault();
-                void pasteCurrentClipboard();
-                return true;
-            }
             const modifierPressed = event.metaKey || event.ctrlKey || event.altKey;
 
             if (event.key.length === 1 && !modifierPressed) {
@@ -2164,7 +2150,6 @@ function BlockEditor({
         [
             insertTextWithPendingMarks,
             onCommand,
-            pasteCurrentClipboard,
             resolvedSelectionSet,
             scheduleSelectionRestore,
             textCaretForBlockSelection,
@@ -2933,6 +2918,7 @@ function BlockEditor({
                         onMouseDown={captureMouseDown}
                         onMouseUp={captureSelection}
                         onCopy={copyRichSelection}
+                        onPaste={pasteFromClipboard}
                         onKeyDown={(event) => {
                             if (handleBlockSelectionKeyDown(event)) return;
                             if (event.key !== 'Escape' || !activePopovers.length) return;
@@ -3738,6 +3724,9 @@ function TableBlock({node, context}: {node: RenderTreeNode; context: RenderBlock
                                                 .join(' ')}
                                             role="cell"
                                             data-cell-id={cell?.block.id}
+                                            tabIndex={cell ? -1 : undefined}
+                                            onCopy={context.onCopy}
+                                            onPaste={context.onPaste}
                                             onPointerDown={(event) => {
                                                 if (!cell || !isCellBorderPointer(event))
                                                     return;
@@ -7247,32 +7236,6 @@ const writeClipboardPayload = async (payload: RichClipboardPayload): Promise<voi
         }
     }
     await clipboard.writeText?.(plainText);
-};
-
-const readClipboardPayload = async (): Promise<
-    {rich: RichClipboardPayload; text: string} | {rich: null; text: string} | null
-> => {
-    const clipboard = navigator.clipboard;
-    if (!clipboard) return null;
-    if (typeof clipboard.read === 'function') {
-        try {
-            const items = await clipboard.read();
-            for (const item of items) {
-                if (!item.types.includes('text/html')) continue;
-                const html = await (await item.getType('text/html')).text();
-                const rich = parseBlockRichTextClipboardHtml(html);
-                if (rich) return {rich, text: rich.tsv ?? rich.plainText};
-            }
-            for (const item of items) {
-                if (!item.types.includes('text/plain')) continue;
-                return {rich: null, text: await (await item.getType('text/plain')).text()};
-            }
-        } catch {
-            // Fall back to readText below when rich async clipboard reads are unavailable.
-        }
-    }
-    const text = await clipboard.readText?.();
-    return typeof text === 'string' ? {rich: null, text} : null;
 };
 
 const richClipboardPayloadFromDataTransfer = (
