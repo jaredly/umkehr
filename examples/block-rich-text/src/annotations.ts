@@ -32,6 +32,7 @@ import {
     type AnnotationPresentation,
 } from './virtualParents';
 import {applyCharInsertOpsOrApplyMany, localInsertTextOps} from './localTextOps';
+import {CODE_MARK, normalizeStoredCodeLanguage} from './inlineMarks';
 
 export {
     ANNOTATION_MARK,
@@ -445,6 +446,45 @@ export const removeAnnotationBodyLink = (
     context: CommandContext,
 ): CommandResult => setAnnotationBodyLinkMark(state, selection, undefined, true, context);
 
+export const toggleAnnotationBodyCodeMark = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    context: CommandContext,
+): CommandResult => {
+    const range = bodySelectionRange(state, selection);
+    if (!range || range.startOffset === range.endOffset) return {state, ops: [], selection};
+
+    const formatted = materializeFormattedBlocks(state, annotationVirtualParents(state));
+    const block = formatted.find((candidate) => candidate.id === range.blockId);
+    const selectedMarks = block ? marksForBodyRange(block, range.startOffset, range.endOffset) : [];
+    const remove = selectedMarks.length > 0 && selectedMarks.every((marks) => marks[CODE_MARK] === true || typeof marks[CODE_MARK] === 'string');
+    return setAnnotationBodyCodeMarkValue(state, selection, undefined, remove, context);
+};
+
+export const setAnnotationBodyCodeMark = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    language: string,
+    context: CommandContext,
+): CommandResult => {
+    const normalized = normalizeStoredCodeLanguage(language);
+    return normalized
+        ? setAnnotationBodyCodeMarkValue(state, selection, normalized, false, context)
+        : clearAnnotationBodyCodeLanguage(state, selection, context);
+};
+
+export const clearAnnotationBodyCodeLanguage = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    context: CommandContext,
+): CommandResult => setAnnotationBodyCodeMarkValue(state, selection, undefined, false, context);
+
+export const removeAnnotationBodyCodeMark = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    context: CommandContext,
+): CommandResult => setAnnotationBodyCodeMarkValue(state, selection, undefined, true, context);
+
 const setAnnotationBodyLinkMark = (
     state: CachedState<RichBlockMeta>,
     selection: EditorSelection,
@@ -467,6 +507,44 @@ const setAnnotationBodyLinkMark = (
     );
     const next = applyMany(state, [op], annotationVirtualParents(state));
     return {state: next, ops: [op], selection};
+};
+
+const setAnnotationBodyCodeMarkValue = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    language: string | undefined,
+    remove: boolean,
+    context: CommandContext,
+): CommandResult => {
+    const range = bodySelectionRange(state, selection);
+    if (!range || range.startOffset === range.endOffset) return {state, ops: [], selection};
+
+    const op = markRangeOp(
+        state,
+        parseLamportString(range.blockId),
+        range.startOffset,
+        range.endOffset,
+        CODE_MARK,
+        language,
+        remove,
+        [state.state.maxSeenCount + 1, context.actor],
+    );
+    const next = applyMany(state, [op], annotationVirtualParents(state));
+    return {state: next, ops: [op], selection};
+};
+
+const marksForBodyRange = (
+    block: FormattedBlock<RichBlockMeta>,
+    startOffset: number,
+    endOffset: number,
+): Array<Record<string, unknown>> => {
+    const marksByOffset: Array<Record<string, unknown>> = [];
+    for (const run of block.runs) {
+        for (const _ of segmentText(run.text)) {
+            marksByOffset.push(run.marks);
+        }
+    }
+    return marksByOffset.slice(startOffset, endOffset);
 };
 
 const bodySelectionRange = (

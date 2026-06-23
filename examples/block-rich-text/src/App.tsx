@@ -27,24 +27,32 @@ import {
     addTableColumn,
     addTableRow,
     advanceFromTableCellEnd,
+    clearCodeLanguage,
+    closeRetainedInlineMarkSessions,
     commandApplied,
     convertBlockToTable,
     createMissingTableCell,
     deleteEmptyTableRowBackward,
     exitEmptyLastTableRow,
+    insertTextWithMarkdownShortcuts,
+    insertTextWithRetainedMarks,
     moveBlock,
     moveTableSelectionByArrow,
+    removeCodeMark,
     moveTableCell,
     moveTableCellByTab,
+    setCodeMark,
     setBlockMeta,
     splitTableTitleToParagraph,
     type CommandResult,
+    type RetainedInlineMarkSession,
 } from './blockCommands';
 import {
     annotationVirtualParents,
     ANNOTATION_MARK,
     annotationMarkBehavior,
     annotationBodyBlockIds,
+    clearAnnotationBodyCodeLanguage,
     createAnnotation,
     deleteAnnotationBodyBackward,
     deleteAnnotationBodyForward,
@@ -52,10 +60,13 @@ import {
     isAnnotationData,
     pasteAnnotationBodyTextWithMarkdownShortcuts,
     replaceAnnotationBodySelection,
+    removeAnnotationBodyCodeMark,
     removeAnnotationBodyLink,
     resolveAnnotation,
+    setAnnotationBodyCodeMark,
     setAnnotationBodyLink,
     splitAnnotationBodyBlock,
+    toggleAnnotationBodyCodeMark,
     toggleAnnotationBodyMark,
     type AnnotationMarkData,
     type AnnotationPresentation,
@@ -110,6 +121,7 @@ import {
     updateBlockMetaEverywhere,
     unindentSelections,
     closeRetainedInlineMarkSessionsEverywhere,
+    toggleCodeMarkEverywhere,
     type HorizontalMovementUnit,
     type MultiCommandResult,
     type RetainedInlineMarkSessionMap,
@@ -155,6 +167,13 @@ import {
     linkHrefForSelectionSegments,
     linkRangeAroundOffsetInRuns,
     LINK_MARK,
+    CODE_MARK,
+    codeLanguageFromMarkValue,
+    codeLanguageForSelectionSegments,
+    codeRangeAroundOffsetInRuns,
+    isCodeMarkValue,
+    type BareInlineMark,
+    type CodeTargetRange,
     textForSelectionSegments,
     type BooleanInlineMark,
     type LinkTargetRange,
@@ -171,12 +190,20 @@ type LinkPopoverState = {
     left: number;
 };
 type LinkHoverPopoverState = LinkPopoverState;
-type PendingInlineMarks = Partial<Record<BooleanInlineMark, boolean>>;
+type CodePopoverState = {
+    ranges: CodeTargetRange[];
+    language: string;
+    top: number;
+    left: number;
+};
+type CodeHoverPopoverState = CodePopoverState;
+type PendingInlineMarks = Partial<Record<BareInlineMark, boolean>>;
 
 const BOOLEAN_INLINE_MARKS: BooleanInlineMark[] = ['bold', 'italic', 'strikethrough'];
+const BARE_INLINE_MARKS: BareInlineMark[] = [...BOOLEAN_INLINE_MARKS, CODE_MARK];
 
-const activePendingInlineMarks = (marks: PendingInlineMarks): BooleanInlineMark[] =>
-    BOOLEAN_INLINE_MARKS.filter((mark) => marks[mark]);
+const activePendingInlineMarks = (marks: PendingInlineMarks): BareInlineMark[] =>
+    BARE_INLINE_MARKS.filter((mark) => marks[mark]);
 
 const hasPendingInlineMarks = (marks: PendingInlineMarks): boolean =>
     activePendingInlineMarks(marks).length > 0;
@@ -563,6 +590,7 @@ function BlockEditor({
         y: number;
     } | null>(null);
     const linkHoverHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const codeHoverHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [hasFocus, setHasFocus] = useState(false);
     const [isExtendingSelection, setIsExtendingSelection] = useState(false);
     const [commentsOpen, setCommentsOpen] = useState(false);
@@ -577,6 +605,8 @@ function BlockEditor({
         useState<EditorSelection | null>(null);
     const [linkPopover, setLinkPopover] = useState<LinkPopoverState | null>(null);
     const [linkHoverPopover, setLinkHoverPopover] = useState<LinkHoverPopoverState | null>(null);
+    const [codePopover, setCodePopover] = useState<CodePopoverState | null>(null);
+    const [codeHoverPopover, setCodeHoverPopover] = useState<CodeHoverPopoverState | null>(null);
     const [pendingInlineMarks, setPendingInlineMarks] = useState<PendingInlineMarks>({});
     const [retainedInlineMarks, setRetainedInlineMarks] = useState<RetainedInlineMarkSessionMap>(
         {},
@@ -834,15 +864,20 @@ function BlockEditor({
         setIsExtendingSelection(false);
         setLinkPopover(null);
         setLinkHoverPopover(null);
+        setCodePopover(null);
+        setCodeHoverPopover(null);
         setPendingInlineMarks({});
         setRetainedInlineMarks({});
         if (linkHoverHideTimerRef.current) clearTimeout(linkHoverHideTimerRef.current);
         linkHoverHideTimerRef.current = null;
+        if (codeHoverHideTimerRef.current) clearTimeout(codeHoverHideTimerRef.current);
+        codeHoverHideTimerRef.current = null;
     }, [resetSignal]);
 
     useLayoutEffect(
         () => () => {
             if (linkHoverHideTimerRef.current) clearTimeout(linkHoverHideTimerRef.current);
+            if (codeHoverHideTimerRef.current) clearTimeout(codeHoverHideTimerRef.current);
         },
         [],
     );
@@ -971,6 +1006,16 @@ function BlockEditor({
                 setLinkHoverPopover(null);
                 if (linkHoverHideTimerRef.current) clearTimeout(linkHoverHideTimerRef.current);
                 linkHoverHideTimerRef.current = null;
+            }
+            if (
+                elementConstructor &&
+                event.target instanceof elementConstructor &&
+                !event.target.closest('.codeFloatingPopover')
+            ) {
+                setCodePopover(null);
+                setCodeHoverPopover(null);
+                if (codeHoverHideTimerRef.current) clearTimeout(codeHoverHideTimerRef.current);
+                codeHoverHideTimerRef.current = null;
             }
             setIsExtendingSelection(
                 event.detail <= 1 && !event.shiftKey && (event.metaKey || event.ctrlKey),
@@ -1123,6 +1168,58 @@ function BlockEditor({
         ],
     );
 
+    const runCodeToggle = useCallback(() => {
+        onCommand((current) => {
+            resetVerticalCaretIntent();
+            const selection = liveSelectionSet(current);
+            const resolved = resolveSelectionSet(current.state, selection);
+            if (resolved.entries.every((entry) => entry.selection.type === 'caret')) {
+                const primary = primarySelection(resolved);
+                scheduleSelectionRestore(primary);
+                if (pendingInlineMarks[CODE_MARK]) {
+                    const result = closeRetainedInlineMarkSessionsEverywhere(
+                        current.state,
+                        selection,
+                        retainedInlineMarks,
+                        CODE_MARK,
+                        makeCommandContext(current),
+                    );
+                    setRetainedInlineMarks(result.retainedMarks);
+                    setPendingInlineMarks((currentMarks) => ({
+                        ...currentMarks,
+                        [CODE_MARK]: false,
+                    }));
+                    return result;
+                }
+                setPendingInlineMarks((currentMarks) => ({
+                    ...currentMarks,
+                    [CODE_MARK]: true,
+                }));
+                return {state: current.state, ops: [], selection};
+            }
+
+            clearPendingInlineMarks();
+            const result = toggleCodeMarkEverywhere(
+                current.state,
+                selection,
+                makeCommandContext(current),
+            );
+            const primaryResultSelection = primarySelection(
+                resolveSelectionSet(result.state, result.selection),
+            );
+            scheduleSelectionRestore(primaryResultSelection);
+            return result;
+        });
+    }, [
+        clearPendingInlineMarks,
+        liveSelectionSet,
+        onCommand,
+        pendingInlineMarks,
+        retainedInlineMarks,
+        resetVerticalCaretIntent,
+        scheduleSelectionRestore,
+    ]);
+
     const insertTextWithPendingMarks = useCallback(
         (current: Replica, selection: RetainedSelectionSet, text: string): MultiCommandResult => {
             const activeMarks = activePendingInlineMarks(pendingInlineMarks);
@@ -1167,7 +1264,7 @@ function BlockEditor({
     const applyLinkToRanges = useCallback(
         (ranges: LinkTargetRange[], href: string) => {
             runBlockControlCommand((current) => {
-                const rangeSelection = retainedSelectionSetForLinkRanges(current.state, ranges);
+                const rangeSelection = retainedSelectionSetForRanges(current.state, ranges, 'link');
                 const result = setLinkMarkEverywhere(
                     current.state,
                     rangeSelection,
@@ -1183,13 +1280,64 @@ function BlockEditor({
     const removeLinkFromRanges = useCallback(
         (ranges: LinkTargetRange[]) => {
             runBlockControlCommand((current) => {
-                const rangeSelection = retainedSelectionSetForLinkRanges(current.state, ranges);
+                const rangeSelection = retainedSelectionSetForRanges(current.state, ranges, 'link');
                 const result = removeLinkMarkEverywhere(
                     current.state,
                     rangeSelection,
                     makeCommandContext(current),
                 );
                 return {state: result.state, ops: result.ops, selection: current.selection};
+            });
+        },
+        [runBlockControlCommand],
+    );
+
+    const applyCodeLanguageToRanges = useCallback(
+        (ranges: CodeTargetRange[], language: string) => {
+            runBlockControlCommand((current) => {
+                const context = makeCommandContext(current);
+                let working = current.state;
+                const ops: CommandResult['ops'] = [];
+                for (const range of ranges) {
+                    const result = setCodeMark(working, rangeSelectionFromRange(range), language, context);
+                    working = result.state;
+                    ops.push(...result.ops);
+                }
+                return {state: working, ops, selection: current.selection};
+            });
+        },
+        [runBlockControlCommand],
+    );
+
+    const clearCodeLanguageFromRanges = useCallback(
+        (ranges: CodeTargetRange[]) => {
+            runBlockControlCommand((current) => {
+                const context = makeCommandContext(current);
+                let working = current.state;
+                const ops: CommandResult['ops'] = [];
+                for (const range of ranges) {
+                    const result = clearCodeLanguage(working, rangeSelectionFromRange(range), context);
+                    working = result.state;
+                    ops.push(...result.ops);
+                }
+                return {state: working, ops, selection: current.selection};
+            });
+        },
+        [runBlockControlCommand],
+    );
+
+    const removeCodeFromRanges = useCallback(
+        (ranges: CodeTargetRange[]) => {
+            runBlockControlCommand((current) => {
+                const context = makeCommandContext(current);
+                let working = current.state;
+                const ops: CommandResult['ops'] = [];
+                for (const range of ranges) {
+                    const result = removeCodeMark(working, rangeSelectionFromRange(range), context);
+                    working = result.state;
+                    ops.push(...result.ops);
+                }
+                return {state: working, ops, selection: current.selection};
             });
         },
         [runBlockControlCommand],
@@ -1305,6 +1453,55 @@ function BlockEditor({
         [cancelLinkHoverHide],
     );
 
+    const openCodeFromRange = useCallback(
+        (range: CodeTargetRange & {language: string}, element: HTMLElement) => {
+            setCodeHoverPopover(null);
+            setCodePopover({
+                ranges: [
+                    {
+                        blockId: range.blockId,
+                        startOffset: range.startOffset,
+                        endOffset: range.endOffset,
+                    },
+                ],
+                language: range.language,
+                ...linkPopoverPositionFromElement(element),
+            });
+        },
+        [],
+    );
+
+    const cancelCodeHoverHide = useCallback(() => {
+        if (codeHoverHideTimerRef.current) clearTimeout(codeHoverHideTimerRef.current);
+        codeHoverHideTimerRef.current = null;
+    }, []);
+
+    const scheduleCodeHoverHide = useCallback(() => {
+        if (codeHoverHideTimerRef.current) clearTimeout(codeHoverHideTimerRef.current);
+        codeHoverHideTimerRef.current = setTimeout(() => {
+            setCodeHoverPopover(null);
+            codeHoverHideTimerRef.current = null;
+        }, 100);
+    }, []);
+
+    const showCodeHoverFromRange = useCallback(
+        (range: CodeTargetRange & {language: string}, element: HTMLElement) => {
+            cancelCodeHoverHide();
+            setCodeHoverPopover({
+                ranges: [
+                    {
+                        blockId: range.blockId,
+                        startOffset: range.startOffset,
+                        endOffset: range.endOffset,
+                    },
+                ],
+                language: range.language,
+                ...linkPopoverPositionFromElement(element),
+            });
+        },
+        [cancelCodeHoverHide],
+    );
+
     const applyLinkPopover = useCallback(
         (href: string) => {
             const ranges = linkPopover?.ranges ?? [];
@@ -1325,6 +1522,30 @@ function BlockEditor({
         setLinkPopover(null);
         if (ranges.length) removeLinkFromRanges(ranges);
     }, [linkPopover?.ranges, removeLinkFromRanges]);
+
+    const applyCodePopover = useCallback(
+        (language: string, ranges: CodeTargetRange[]) => {
+            setCodePopover(null);
+            if (!ranges.length) return;
+            const value = language.trim();
+            if (value) {
+                applyCodeLanguageToRanges(ranges, value);
+            } else {
+                clearCodeLanguageFromRanges(ranges);
+            }
+        },
+        [applyCodeLanguageToRanges, clearCodeLanguageFromRanges],
+    );
+
+    const clearCodePopoverLanguage = useCallback((ranges: CodeTargetRange[]) => {
+        setCodePopover(null);
+        if (ranges.length) clearCodeLanguageFromRanges(ranges);
+    }, [clearCodeLanguageFromRanges]);
+
+    const removeCodePopover = useCallback((ranges: CodeTargetRange[]) => {
+        setCodePopover(null);
+        if (ranges.length) removeCodeFromRanges(ranges);
+    }, [removeCodeFromRanges]);
 
     const runAnnotationBodyCommand = useCallback(
         (
@@ -1667,6 +1888,17 @@ function BlockEditor({
                 onBold={() => runInlineMarkToggle('bold')}
                 onItalic={() => runInlineMarkToggle('italic')}
                 onStrikethrough={() => runInlineMarkToggle('strikethrough')}
+                onCode={() =>
+                    activeAnnotationBodySelection
+                        ? runAnnotationBodyCommand((current, context) =>
+                              toggleAnnotationBodyCodeMark(
+                                  current.state,
+                                  activeAnnotationBodySelection,
+                                  context,
+                              ),
+                          )
+                        : runCodeToggle()
+                }
                 onLink={openLinkFromCurrentSelection}
                 onAnnotation={(presentation) =>
                     activeAnnotationBodySelection
@@ -1776,8 +2008,12 @@ function BlockEditor({
                                 openLinkFromRange,
                                 showLinkHoverFromRange,
                                 hideLinkHover: scheduleLinkHoverHide,
+                                openCodeFromRange,
+                                showCodeHoverFromRange,
+                                hideCodeHover: scheduleCodeHoverHide,
                                 insertText: insertTextWithPendingMarks,
                                 runInlineMarkToggle,
+                                runCodeToggle,
                                 createMissingTableCell: (tableId, rowId, columnIndex) =>
                                     runBlockControlCommand((current) => {
                                         const result = createMissingTableCell(
@@ -1921,6 +2157,23 @@ function BlockEditor({
                 onMouseEnter={cancelLinkHoverHide}
                 onMouseLeave={scheduleLinkHoverHide}
             />
+            <CodeFloatingPopover
+                state={codePopover}
+                onApply={applyCodePopover}
+                onClearLanguage={clearCodePopoverLanguage}
+                onRemove={removeCodePopover}
+                onClose={() => setCodePopover(null)}
+            />
+            <CodeHoverPopover
+                state={codeHoverPopover}
+                onEdit={(state) => {
+                    cancelCodeHoverHide();
+                    setCodeHoverPopover(null);
+                    setCodePopover(state);
+                }}
+                onMouseEnter={cancelCodeHoverHide}
+                onMouseLeave={scheduleCodeHoverHide}
+            />
         </article>
     );
 }
@@ -1965,6 +2218,7 @@ type RenderBlockContext = {
     ): void;
     insertText(current: Replica, selection: RetainedSelectionSet, text: string): MultiCommandResult;
     runInlineMarkToggle(markType: BooleanInlineMark): void;
+    runCodeToggle(): void;
     runBlockControlCommand(command: (current: Replica) => MultiCommandResult): void;
     moveCaretHorizontally(selection: EditorSelection): void;
     moveCaretVertically(sourceBlock: HTMLElement, targetBlockId: string): void;
@@ -1998,6 +2252,9 @@ type RenderBlockContext = {
     openLinkFromRange(range: LinkTargetRange & {href: string}, element: HTMLElement): void;
     showLinkHoverFromRange(range: LinkTargetRange & {href: string}, element: HTMLElement): void;
     hideLinkHover(): void;
+    openCodeFromRange(range: CodeTargetRange & {language: string}, element: HTMLElement): void;
+    showCodeHoverFromRange(range: CodeTargetRange & {language: string}, element: HTMLElement): void;
+    hideCodeHover(): void;
     createMissingTableCell(tableId: string, rowId: string, columnIndex: number): void;
     addTableRow(tableId: string, afterRowId?: string): void;
     addTableColumn(tableId: string, columnIndex?: number): void;
@@ -2323,6 +2580,9 @@ function TableRowHeader({
                 onLinkClick={context.openLinkFromRange}
                 onLinkHoverEnter={context.showLinkHoverFromRange}
                 onLinkHoverLeave={context.hideLinkHover}
+                onCodeClick={context.openCodeFromRange}
+                onCodeHoverEnter={context.showCodeHoverFromRange}
+                onCodeHoverLeave={context.hideCodeHover}
                 onInsertText={(text, activeSelection) =>
                     context.runEditCommand((current, selection) =>
                         context.insertText(
@@ -2752,10 +3012,14 @@ const renderEditableBlock = (block: RichFormattedBlock, context: RenderBlockCont
             onToggleBold={() => context.runInlineMarkToggle('bold')}
             onToggleItalic={() => context.runInlineMarkToggle('italic')}
             onToggleStrikethrough={() => context.runInlineMarkToggle('strikethrough')}
+            onToggleCode={context.runCodeToggle}
             onOpenLink={context.openLinkFromCurrentSelection}
             onOpenLinkRange={context.openLinkFromRange}
             onLinkHoverEnter={context.showLinkHoverFromRange}
             onLinkHoverLeave={context.hideLinkHover}
+            onOpenCodeRange={context.openCodeFromRange}
+            onCodeHoverEnter={context.showCodeHoverFromRange}
+            onCodeHoverLeave={context.hideCodeHover}
             onToggleTodo={() =>
                 context.runEditCommand((current, selection) =>
                     updateBlockMetaEverywhere(
@@ -2921,7 +3185,7 @@ export const deriveActiveInlineMarks = (
     pendingMarks: PendingInlineMarks,
 ): PendingInlineMarks => {
     const result: PendingInlineMarks = {};
-    for (const mark of BOOLEAN_INLINE_MARKS) {
+    for (const mark of BARE_INLINE_MARKS) {
         result[mark] =
             selection.type === 'caret'
                 ? !!pendingMarks[mark] || caretInsertionHasInlineMark(blocks, selection.point, mark)
@@ -2934,7 +3198,7 @@ const selectionHasInlineMark = (
     state: Replica['state'],
     blocks: RichFormattedBlock[],
     selection: EditorSelection,
-    markType: BooleanInlineMark,
+    markType: BareInlineMark,
 ): boolean => {
     if (selection.type === 'caret') return false;
 
@@ -2945,19 +3209,22 @@ const selectionHasInlineMark = (
         if (!block) return false;
         const marksByOffset = inlineMarksByOffset(block);
         const selected = marksByOffset.slice(segment.startOffset, segment.endOffset);
-        return selected.length > 0 && selected.every((marks) => marks[markType] === true);
+        return selected.length > 0 && selected.every((marks) =>
+            markType === CODE_MARK ? isCodeMarkValue(marks[markType]) : marks[markType] === true,
+        );
     });
 };
 
 const caretInsertionHasInlineMark = (
     blocks: RichFormattedBlock[],
     point: ReturnType<typeof focusPoint>,
-    markType: BooleanInlineMark,
+    markType: BareInlineMark,
 ): boolean => {
     const block = blocks.find((candidate) => candidate.id === point.blockId);
     if (!block) return false;
     const marksByOffset = inlineMarksByOffset(block);
-    return marksByOffset[point.offset]?.[markType] === true;
+    const value = marksByOffset[point.offset]?.[markType];
+    return markType === CODE_MARK ? isCodeMarkValue(value) : value === true;
 };
 
 const inlineMarksByOffset = (block: RichFormattedBlock): Record<string, unknown>[] => {
@@ -3308,6 +3575,94 @@ function LinkHoverPopover({
     );
 }
 
+function CodeFloatingPopover({
+    state,
+    onApply,
+    onClearLanguage,
+    onRemove,
+    onClose,
+}: {
+    state: CodePopoverState | null;
+    onApply(language: string, ranges: CodeTargetRange[]): void;
+    onClearLanguage(ranges: CodeTargetRange[]): void;
+    onRemove(ranges: CodeTargetRange[]): void;
+    onClose(): void;
+}) {
+    const [language, setLanguage] = useState('');
+
+    useLayoutEffect(() => {
+        if (state) setLanguage(state.language);
+    }, [state?.language]);
+
+    if (!state) return null;
+
+    return (
+        <form
+            className="linkFloatingPopover codeFloatingPopover"
+            role="dialog"
+            aria-label="Inline code language"
+            style={{top: state.top, left: state.left}}
+            onSubmit={(event) => {
+                event.preventDefault();
+                onApply(language, state.ranges);
+            }}
+            onKeyDown={(event) => {
+                if (event.key !== 'Escape') return;
+                event.preventDefault();
+                onClose();
+            }}
+            onMouseDown={(event) => event.stopPropagation()}
+        >
+            <input
+                value={language}
+                name="language"
+                autoFocus
+                aria-label="Code language"
+                placeholder="language"
+                onChange={(event) => setLanguage(event.currentTarget.value)}
+            />
+            <button type="submit">Apply</button>
+            <button type="button" onClick={() => onClearLanguage(state.ranges)}>
+                Clear language
+            </button>
+            <button type="button" onClick={() => onRemove(state.ranges)}>
+                Remove code
+            </button>
+        </form>
+    );
+}
+
+function CodeHoverPopover({
+    state,
+    onEdit,
+    onMouseEnter,
+    onMouseLeave,
+}: {
+    state: CodeHoverPopoverState | null;
+    onEdit(state: CodePopoverState): void;
+    onMouseEnter(): void;
+    onMouseLeave(): void;
+}) {
+    if (!state) return null;
+
+    return (
+        <div
+            className="linkHoverPopover codeHoverPopover"
+            role="dialog"
+            aria-label="Inline code actions"
+            style={{top: state.top, left: state.left}}
+            onMouseDown={(event) => event.stopPropagation()}
+            onMouseEnter={onMouseEnter}
+            onMouseLeave={onMouseLeave}
+        >
+            <span className="codeHoverLanguage">{state.language || 'No language'}</span>
+            <button type="button" onClick={() => onEdit(state)}>
+                Edit
+            </button>
+        </div>
+    );
+}
+
 function AnnotationBodyBlock({
     annotationId,
     block,
@@ -3345,11 +3700,16 @@ function AnnotationBodyBlock({
     const pendingCaretRestoreBlockIdRef = useRef<string | null>(null);
     const pendingSelectionRestoreRef = useRef<EditorSelection | null>(null);
     const linkHoverHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const codeHoverHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [selection, setSelection] = useState<EditorSelection>(() =>
         caret(block.id, block.text.length),
     );
     const [linkPopover, setLinkPopover] = useState<LinkPopoverState | null>(null);
     const [linkHoverPopover, setLinkHoverPopover] = useState<LinkHoverPopoverState | null>(null);
+    const [codePopover, setCodePopover] = useState<CodePopoverState | null>(null);
+    const [codeHoverPopover, setCodeHoverPopover] = useState<CodeHoverPopoverState | null>(null);
+    const [pendingCodeMark, setPendingCodeMark] = useState(false);
+    const [retainedCodeMarks, setRetainedCodeMarks] = useState<RetainedInlineMarkSession[]>([]);
 
     const restoreAfter = useCallback(
         (selection: EditorSelection) => {
@@ -3454,6 +3814,54 @@ function AnnotationBodyBlock({
         run(rangeSelection(range), removeAnnotationBodyLink);
     }, [linkPopover?.ranges, rangeSelection, run]);
 
+    const openBodyCodePopover = useCallback(
+        (range: CodeTargetRange & {language: string}, element: HTMLElement) => {
+            setCodeHoverPopover(null);
+            setCodePopover({
+                ranges: [
+                    {
+                        blockId: range.blockId,
+                        startOffset: range.startOffset,
+                        endOffset: range.endOffset,
+                    },
+                ],
+                language: range.language,
+                ...linkPopoverPositionFromElement(element),
+            });
+        },
+        [],
+    );
+
+    const applyBodyCodeLanguage = useCallback(
+        (language: string, ranges: CodeTargetRange[]) => {
+            const range = ranges[0];
+            setCodePopover(null);
+            if (!range) return;
+            const selected = rangeSelection(range);
+            const value = language.trim();
+            run(selected, (state, activeSelection, context) =>
+                value
+                    ? setAnnotationBodyCodeMark(state, activeSelection, value, context)
+                    : clearAnnotationBodyCodeLanguage(state, activeSelection, context),
+            );
+        },
+        [rangeSelection, run],
+    );
+
+    const clearBodyCodeLanguage = useCallback((ranges: CodeTargetRange[]) => {
+        const range = ranges[0];
+        setCodePopover(null);
+        if (!range) return;
+        run(rangeSelection(range), clearAnnotationBodyCodeLanguage);
+    }, [rangeSelection, run]);
+
+    const removeBodyCode = useCallback((ranges: CodeTargetRange[]) => {
+        const range = ranges[0];
+        setCodePopover(null);
+        if (!range) return;
+        run(rangeSelection(range), removeAnnotationBodyCodeMark);
+    }, [rangeSelection, run]);
+
     const cancelBodyLinkHoverHide = useCallback(() => {
         if (linkHoverHideTimerRef.current) clearTimeout(linkHoverHideTimerRef.current);
         linkHoverHideTimerRef.current = null;
@@ -3467,9 +3875,23 @@ function AnnotationBodyBlock({
         }, 100);
     }, []);
 
+    const cancelBodyCodeHoverHide = useCallback(() => {
+        if (codeHoverHideTimerRef.current) clearTimeout(codeHoverHideTimerRef.current);
+        codeHoverHideTimerRef.current = null;
+    }, []);
+
+    const scheduleBodyCodeHoverHide = useCallback(() => {
+        if (codeHoverHideTimerRef.current) clearTimeout(codeHoverHideTimerRef.current);
+        codeHoverHideTimerRef.current = setTimeout(() => {
+            setCodeHoverPopover(null);
+            codeHoverHideTimerRef.current = null;
+        }, 100);
+    }, []);
+
     useLayoutEffect(
         () => () => {
             if (linkHoverHideTimerRef.current) clearTimeout(linkHoverHideTimerRef.current);
+            if (codeHoverHideTimerRef.current) clearTimeout(codeHoverHideTimerRef.current);
         },
         [],
     );
@@ -3490,6 +3912,24 @@ function AnnotationBodyBlock({
             });
         },
         [cancelBodyLinkHoverHide],
+    );
+
+    const showBodyCodeHover = useCallback(
+        (range: CodeTargetRange & {language: string}, element: HTMLElement) => {
+            cancelBodyCodeHoverHide();
+            setCodeHoverPopover({
+                ranges: [
+                    {
+                        blockId: range.blockId,
+                        startOffset: range.startOffset,
+                        endOffset: range.endOffset,
+                    },
+                ],
+                language: range.language,
+                ...linkPopoverPositionFromElement(element),
+            });
+        },
+        [cancelBodyCodeHoverHide],
     );
 
     return (
@@ -3518,11 +3958,28 @@ function AnnotationBodyBlock({
                 }
                 onLinkHoverEnter={showBodyLinkHover}
                 onLinkHoverLeave={scheduleBodyLinkHoverHide}
+                onCodeClick={openBodyCodePopover}
+                onCodeHoverEnter={showBodyCodeHover}
+                onCodeHoverLeave={scheduleBodyCodeHoverHide}
                 onSelectionChange={updateSelection}
                 onInsertText={(text, activeSelection) =>
-                    run(activeSelection ?? selection, (state, selected, context) =>
-                        replaceAnnotationBodySelection(state, selected, text, context),
-                    )
+                    run(activeSelection ?? selection, (state, selected, context) => {
+                        if (pendingCodeMark && selected.type === 'caret') {
+                            const result = insertTextWithRetainedMarks(
+                                state,
+                                selected,
+                                text,
+                                [CODE_MARK],
+                                retainedCodeMarks,
+                                context,
+                            );
+                            setRetainedCodeMarks(result.sessions);
+                            return result;
+                        }
+                        return text === '`'
+                            ? insertTextWithMarkdownShortcuts(state, selected, text, context)
+                            : replaceAnnotationBodySelection(state, selected, text, context);
+                    })
                 }
                 onDeleteBackward={(activeSelection) =>
                     run(activeSelection ?? selection, (state, selected, context) =>
@@ -3582,6 +4039,33 @@ function AnnotationBodyBlock({
                                 context,
                             ),
                         );
+                    } else if (modifierPressed && key === 'e') {
+                        event.preventDefault();
+                        if (selected.type === 'caret') {
+                            if (pendingCodeMark) {
+                                run(selected, (state, _activeSelection, context) => {
+                                    const result = closeRetainedInlineMarkSessions(
+                                        state,
+                                        retainedCodeMarks,
+                                        CODE_MARK,
+                                        context,
+                                    );
+                                    setRetainedCodeMarks(result.sessions);
+                                    setPendingCodeMark(false);
+                                    return {
+                                        state: result.state,
+                                        ops: result.ops,
+                                        selection: selected,
+                                    };
+                                });
+                            } else {
+                                setPendingCodeMark(true);
+                            }
+                        } else {
+                            run(selected, (state, activeSelection, context) =>
+                                toggleAnnotationBodyCodeMark(state, activeSelection, context),
+                            );
+                        }
                     } else if (modifierPressed && key === 'k') {
                         event.preventDefault();
                         if (selected.type === 'range') {
@@ -3670,6 +4154,23 @@ function AnnotationBodyBlock({
                 onMouseEnter={cancelBodyLinkHoverHide}
                 onMouseLeave={scheduleBodyLinkHoverHide}
             />
+            <CodeFloatingPopover
+                state={codePopover}
+                onApply={applyBodyCodeLanguage}
+                onClearLanguage={clearBodyCodeLanguage}
+                onRemove={removeBodyCode}
+                onClose={() => setCodePopover(null)}
+            />
+            <CodeHoverPopover
+                state={codeHoverPopover}
+                onEdit={(state) => {
+                    cancelBodyCodeHoverHide();
+                    setCodeHoverPopover(null);
+                    setCodePopover(state);
+                }}
+                onMouseEnter={cancelBodyCodeHoverHide}
+                onMouseLeave={scheduleBodyCodeHoverHide}
+            />
         </>
     );
 }
@@ -3701,6 +4202,7 @@ const renderStaticRuns = (runs: RichFormattedBlock['runs']): ReactElement[] =>
                 run.marks.italic ? 'markItalic' : '',
                 run.marks.strikethrough ? 'markStrikethrough' : '',
                 typeof run.marks[LINK_MARK] === 'string' ? 'markLink' : '',
+                isCodeMarkValue(run.marks[CODE_MARK]) ? 'markCode' : '',
                 hasAnnotationMark(run) ? 'markAnnotation' : '',
             ]
                 .filter(Boolean)
@@ -3723,6 +4225,7 @@ function Toolbar({
     onBold,
     onItalic,
     onStrikethrough,
+    onCode,
     onLink,
     onBlockType,
     onAnnotation,
@@ -3736,6 +4239,7 @@ function Toolbar({
     onBold(): void;
     onItalic(): void;
     onStrikethrough(): void;
+    onCode(): void;
     onLink(): void;
     onBlockType(kind: BlockTypeMenuValue): void;
     onAnnotation(presentation: AnnotationPresentation): void;
@@ -3785,6 +4289,14 @@ function Toolbar({
                     aria-label="Strikethrough"
                 >
                     <span className="toolbarStrike">S</span>
+                </button>
+                <button
+                    type="button"
+                    aria-pressed={!!activeMarks.code}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={onCode}
+                >
+                    Code
                 </button>
                 <button
                     type="button"
@@ -3881,10 +4393,14 @@ function EditableBlock({
     onToggleBold,
     onToggleItalic,
     onToggleStrikethrough,
+    onToggleCode,
     onOpenLink,
     onOpenLinkRange,
     onLinkHoverEnter,
     onLinkHoverLeave,
+    onOpenCodeRange,
+    onCodeHoverEnter,
+    onCodeHoverLeave,
     onToggleTodo,
     onSetCodeLanguage,
     onSetCalloutKind,
@@ -3934,10 +4450,14 @@ function EditableBlock({
     onToggleBold(): void;
     onToggleItalic(): void;
     onToggleStrikethrough(): void;
+    onToggleCode(): void;
     onOpenLink(): void;
     onOpenLinkRange(range: LinkTargetRange & {href: string}, element: HTMLElement): void;
     onLinkHoverEnter(range: LinkTargetRange & {href: string}, element: HTMLElement): void;
     onLinkHoverLeave(): void;
+    onOpenCodeRange(range: CodeTargetRange & {language: string}, element: HTMLElement): void;
+    onCodeHoverEnter(range: CodeTargetRange & {language: string}, element: HTMLElement): void;
+    onCodeHoverLeave(): void;
     onToggleTodo(): void;
     onSetCodeLanguage(language: string): void;
     onSetCalloutKind(kind: 'info' | 'warning' | 'error'): void;
@@ -4037,6 +4557,9 @@ function EditableBlock({
                 onLinkClick={onOpenLinkRange}
                 onLinkHoverEnter={onLinkHoverEnter}
                 onLinkHoverLeave={onLinkHoverLeave}
+                onCodeClick={onOpenCodeRange}
+                onCodeHoverEnter={onCodeHoverEnter}
+                onCodeHoverLeave={onCodeHoverLeave}
                 onInsertText={onInsertText}
                 onDeleteBackward={onDeleteBackward}
                 onDeleteForward={onDeleteForward}
@@ -4062,6 +4585,9 @@ function EditableBlock({
                     } else if (modifierPressed && event.shiftKey && key === 'x') {
                         event.preventDefault();
                         onToggleStrikethrough();
+                    } else if (modifierPressed && key === 'e') {
+                        event.preventDefault();
+                        onToggleCode();
                     } else if (modifierPressed && key === 'k') {
                         event.preventDefault();
                         onOpenLink();
@@ -4317,6 +4843,9 @@ function RichTextEditableSurface({
     onLinkClick,
     onLinkHoverEnter,
     onLinkHoverLeave,
+    onCodeClick,
+    onCodeHoverEnter,
+    onCodeHoverLeave,
     onKeyDown,
     onPaste,
 }: {
@@ -4342,6 +4871,9 @@ function RichTextEditableSurface({
     onLinkClick?(range: LinkTargetRange & {href: string}, element: HTMLElement): void;
     onLinkHoverEnter?(range: LinkTargetRange & {href: string}, element: HTMLElement): void;
     onLinkHoverLeave?(): void;
+    onCodeClick?(range: CodeTargetRange & {language: string}, element: HTMLElement): void;
+    onCodeHoverEnter?(range: CodeTargetRange & {language: string}, element: HTMLElement): void;
+    onCodeHoverLeave?(): void;
     onKeyDown?(event: KeyboardEvent<HTMLDivElement>): void;
     onPaste?(event: ClipboardEvent<HTMLDivElement>): void;
 }) {
@@ -4468,6 +5000,17 @@ function RichTextEditableSurface({
                         if (range) onLinkHoverEnter?.(range, linkTrigger);
                     }
                 }
+                const codeTrigger = codeTriggerFromEvent(event.currentTarget, event.target);
+                if (codeTrigger) {
+                    const relatedCodeTrigger = codeTriggerFromEvent(
+                        event.currentTarget,
+                        event.relatedTarget,
+                    );
+                    if (relatedCodeTrigger !== codeTrigger) {
+                        const range = codeRangeFromTrigger(codeTrigger, blockId, runs);
+                        if (range) onCodeHoverEnter?.(range, codeTrigger);
+                    }
+                }
                 const trigger = popoverTriggerFromEvent(event.currentTarget, event.target);
                 if (!trigger) return;
                 const relatedTrigger = popoverTriggerFromEvent(
@@ -4488,6 +5031,16 @@ function RichTextEditableSurface({
                     );
                     if (relatedLinkTrigger !== linkTrigger) {
                         onLinkHoverLeave?.();
+                    }
+                }
+                const codeTrigger = codeTriggerFromEvent(event.currentTarget, event.target);
+                if (codeTrigger) {
+                    const relatedCodeTrigger = codeTriggerFromEvent(
+                        event.currentTarget,
+                        event.relatedTarget,
+                    );
+                    if (relatedCodeTrigger !== codeTrigger) {
+                        onCodeHoverLeave?.();
                     }
                 }
                 const trigger = popoverTriggerFromEvent(event.currentTarget, event.target);
@@ -4511,6 +5064,11 @@ function RichTextEditableSurface({
                 if (linkTrigger) {
                     const range = linkRangeFromTrigger(linkTrigger, blockId, runs);
                     if (range) onLinkClick?.(range, linkTrigger);
+                }
+                const codeTrigger = codeTriggerFromEvent(event.currentTarget, event.target);
+                if (codeTrigger) {
+                    const range = codeRangeFromTrigger(codeTrigger, blockId, runs);
+                    if (range) onCodeClick?.(range, codeTrigger);
                 }
                 const trigger = popoverTriggerFromEvent(event.currentTarget, event.target);
                 if (!trigger) return;
@@ -4720,6 +5278,16 @@ const linkTriggerFromEvent = (
     return trigger && root.contains(trigger) ? trigger : null;
 };
 
+const codeTriggerFromEvent = (
+    root: HTMLElement,
+    target: EventTarget | null,
+): HTMLElement | null => {
+    const elementConstructor = root.ownerDocument.defaultView?.Element;
+    if (!elementConstructor || !(target instanceof elementConstructor)) return null;
+    const trigger = target.closest<HTMLElement>('[data-code-start-offset]');
+    return trigger && root.contains(trigger) ? trigger : null;
+};
+
 const linkRangeFromTrigger = (
     trigger: HTMLElement,
     blockId: string,
@@ -4728,6 +5296,16 @@ const linkRangeFromTrigger = (
     const startOffset = Number(trigger.dataset.linkStartOffset);
     if (!Number.isFinite(startOffset)) return null;
     return linkRangeAroundOffsetInRuns(blockId, runs, startOffset);
+};
+
+const codeRangeFromTrigger = (
+    trigger: HTMLElement,
+    blockId: string,
+    runs: RichFormattedBlock['runs'],
+): (CodeTargetRange & {language: string}) | null => {
+    const startOffset = Number(trigger.dataset.codeStartOffset);
+    if (!Number.isFinite(startOffset)) return null;
+    return codeRangeAroundOffsetInRuns(blockId, runs, startOffset);
 };
 
 const overlayTransientSelections = (
@@ -4899,20 +5477,27 @@ const linkRangesForSelectionSet = (
         normalizeSelectionSegments(state, entry.selection),
     );
 
-const retainedSelectionSetForLinkRanges = (
+const retainedSelectionSetForRanges = (
     state: Replica['state'],
-    ranges: LinkTargetRange[],
+    ranges: Array<LinkTargetRange | CodeTargetRange>,
+    prefix: string,
 ): RetainedSelectionSet => {
     const entries = ranges.map((range, index) => ({
-        id: `link-${index}`,
+        id: `${prefix}-${index}`,
         selection: {
             type: 'range' as const,
             anchor: {blockId: range.blockId, offset: range.startOffset},
             focus: {blockId: range.blockId, offset: range.endOffset},
         },
     }));
-    return retainSelectionSet(state, {primaryId: entries[0]?.id ?? 'link-0', entries});
+    return retainSelectionSet(state, {primaryId: entries[0]?.id ?? `${prefix}-0`, entries});
 };
+
+const rangeSelectionFromRange = (range: LinkTargetRange | CodeTargetRange): EditorSelection => ({
+    type: 'range',
+    anchor: {blockId: range.blockId, offset: range.startOffset},
+    focus: {blockId: range.blockId, offset: range.endOffset},
+});
 
 const linkPopoverPositionFromSelection = (
     root: HTMLElement | null,
@@ -4949,6 +5534,7 @@ const serializeRuns = (
             run.marks.italic,
             run.marks.strikethrough,
             run.marks[LINK_MARK],
+            run.marks[CODE_MARK],
         ]),
         stackedMarks: runs.map((run) => run.stackedMarks),
         decorations,
@@ -5027,7 +5613,10 @@ const runRenderChunks = (
     syntaxTokens?: SyntaxToken[],
 ): RunRenderChunk[] => {
     const chunks: RunRenderChunk[] = [];
-    const syntaxRanges = syntaxTokenRanges(syntaxTokens, formattedRunsTextLength(runs));
+    const syntaxRanges = [
+        ...syntaxTokenRanges(syntaxTokens, formattedRunsTextLength(runs)),
+        ...inlineCodeSyntaxRanges(runs),
+    ];
     let offset = 0;
     for (const run of runs) {
         const runSegments = segmentText(run.text);
@@ -5113,9 +5702,54 @@ const syntaxClassNameForRange = (
     ranges: SyntaxTokenRange[],
     startOffset: number,
     endOffset: number,
-): string | null =>
-    ranges.find((range) => startOffset >= range.startOffset && endOffset <= range.endOffset)
-        ?.className ?? null;
+): string | null => {
+    for (let index = ranges.length - 1; index >= 0; index--) {
+        const range = ranges[index];
+        if (startOffset >= range.startOffset && endOffset <= range.endOffset) return range.className;
+    }
+    return null;
+};
+
+const inlineCodeSyntaxRanges = (runs: RichFormattedBlock['runs']): SyntaxTokenRange[] => {
+    const ranges: SyntaxTokenRange[] = [];
+    let active:
+        | {
+              language: string;
+              startOffset: number;
+              text: string;
+          }
+        | null = null;
+    let offset = 0;
+
+    const flush = () => {
+        if (!active) return;
+        const current = active;
+        ranges.push(...syntaxTokenRanges(highlightCode(current.text, current.language), segmentText(current.text).length).map((range) => ({
+            ...range,
+            startOffset: range.startOffset + current.startOffset,
+            endOffset: range.endOffset + current.startOffset,
+        })));
+        active = null;
+    };
+
+    for (const run of runs) {
+        const length = segmentText(run.text).length;
+        const language = codeLanguageFromMarkValue(run.marks[CODE_MARK]);
+        if (language) {
+            if (!active || active.language !== language) {
+                flush();
+                active = {language, startOffset: offset, text: ''};
+            }
+            active.text += run.text;
+        } else {
+            flush();
+        }
+        offset += length;
+    }
+    flush();
+
+    return ranges;
+};
 
 const renderEndingFootnoteReferences = (
     chunk: RunRenderChunk,
@@ -5175,6 +5809,13 @@ const applyRunClasses = (
     if (run.marks.bold) span.classList.add('markBold');
     if (run.marks.italic) span.classList.add('markItalic');
     if (run.marks.strikethrough) span.classList.add('markStrikethrough');
+    if (isCodeMarkValue(run.marks[CODE_MARK])) {
+        span.classList.add('markCode');
+        if (typeof run.marks[CODE_MARK] === 'string') span.classList.add('markCodeHighlighted');
+        span.dataset.codeLanguage = typeof run.marks[CODE_MARK] === 'string' ? run.marks[CODE_MARK] : '';
+        span.dataset.codeStartOffset = String(chunk.blockStartOffset);
+        span.dataset.codeEndOffset = String(chunk.blockEndOffset);
+    }
     if (typeof run.marks[LINK_MARK] === 'string') {
         span.classList.add('markLink');
         span.dataset.linkHref = run.marks[LINK_MARK];

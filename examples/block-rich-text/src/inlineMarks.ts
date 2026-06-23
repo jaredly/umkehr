@@ -1,17 +1,23 @@
 import type {FormattedBlock} from 'umkehr/block-crdt';
 import type {RichBlockMeta} from './blockMeta';
 import {segmentText, type SelectionSegment} from './selectionModel';
+import {normalizeCodeLanguage} from './syntaxHighlight';
 
 export type BooleanInlineMark = 'bold' | 'italic' | 'strikethrough';
-export type InlineMark = BooleanInlineMark | 'link';
+export type BareInlineMark = BooleanInlineMark | 'code';
+export type InlineMark = BareInlineMark | 'link';
 
-export type LinkTargetRange = {
+export type InlineTargetRange = {
     blockId: string;
     startOffset: number;
     endOffset: number;
 };
 
+export type LinkTargetRange = InlineTargetRange;
+export type CodeTargetRange = InlineTargetRange;
+
 export const LINK_MARK = 'link';
+export const CODE_MARK = 'code';
 
 export const isLinkLikeText = (text: string): boolean => {
     const value = text.trim();
@@ -74,6 +80,78 @@ export const linkRangeAroundOffsetInRuns = (
     }
 
     return {blockId, startOffset, endOffset, href};
+};
+
+export const isCodeMarkValue = (value: unknown): value is true | string =>
+    value === true || typeof value === 'string';
+
+export const normalizeStoredCodeLanguage = (language: string): string => {
+    const trimmed = language.trim();
+    if (!trimmed) return '';
+    return normalizeCodeLanguage(trimmed) ?? trimmed.toLowerCase();
+};
+
+export const codeLanguageFromMarkValue = (value: unknown): string =>
+    typeof value === 'string' ? normalizeStoredCodeLanguage(value) : '';
+
+export const codeLanguageForSelectionSegments = (
+    blocks: Array<FormattedBlock<RichBlockMeta>>,
+    segments: SelectionSegment[],
+): string | null => {
+    let language: string | null = null;
+    for (const segment of segments) {
+        const block = blocks.find((candidate) => candidate.id === segment.blockId);
+        if (!block) return null;
+        for (const run of runsInRange(block, segment.startOffset, segment.endOffset)) {
+            const value = run.marks[CODE_MARK];
+            if (!isCodeMarkValue(value)) return null;
+            const runLanguage = codeLanguageFromMarkValue(value);
+            if (language === null) {
+                language = runLanguage;
+            } else if (language !== runLanguage) {
+                return null;
+            }
+        }
+    }
+    return language;
+};
+
+export const codeRangeAroundOffset = (
+    block: FormattedBlock<RichBlockMeta>,
+    offset: number,
+): (CodeTargetRange & {language: string}) | null => {
+    return codeRangeAroundOffsetInRuns(block.id, block.runs, offset);
+};
+
+export const codeRangeAroundOffsetInRuns = (
+    blockId: string,
+    blockRuns: FormattedBlock<RichBlockMeta>['runs'],
+    offset: number,
+): (CodeTargetRange & {language: string}) | null => {
+    const runs = runsWithOffsets(blockRuns);
+    const target = runs.find((run) => {
+        if (!isCodeMarkValue(run.run.marks[CODE_MARK])) return false;
+        if (run.startOffset === run.endOffset) return false;
+        if (offset === run.endOffset) return false;
+        return offset >= run.startOffset && offset <= run.endOffset;
+    });
+    if (!target) return null;
+
+    const language = codeLanguageFromMarkValue(target.run.marks[CODE_MARK]);
+    let startOffset = target.startOffset;
+    let endOffset = target.endOffset;
+    for (let index = runs.indexOf(target) - 1; index >= 0; index--) {
+        if (codeLanguageFromMarkValue(runs[index].run.marks[CODE_MARK]) !== language) break;
+        if (!isCodeMarkValue(runs[index].run.marks[CODE_MARK])) break;
+        startOffset = runs[index].startOffset;
+    }
+    for (let index = runs.indexOf(target) + 1; index < runs.length; index++) {
+        if (codeLanguageFromMarkValue(runs[index].run.marks[CODE_MARK]) !== language) break;
+        if (!isCodeMarkValue(runs[index].run.marks[CODE_MARK])) break;
+        endOffset = runs[index].endOffset;
+    }
+
+    return {blockId, startOffset, endOffset, language};
 };
 
 export const textForSelectionSegments = (

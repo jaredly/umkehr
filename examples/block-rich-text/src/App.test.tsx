@@ -1976,6 +1976,69 @@ describe('Block rich text example UI', () => {
         });
     });
 
+    it('applies inline code to ranges and pending collapsed typing', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abcd');
+        await waitFor(() => expect(blockText(blocks(left)[0])).toBe('abcd'));
+
+        selectRange(blocks(left)[0], 1, 3);
+        fireEvent.click(within(left).getByRole('button', {name: 'Code'}));
+        await waitFor(() => expect(blocks(left)[0].querySelector('.markCode')?.textContent).toBe('bc'));
+
+        selectCaret(blocks(left)[0], 4);
+        fireEvent.keyDown(blocks(left)[0], {key: 'e', metaKey: true});
+        beforeInputText(blocks(left)[0], 'x');
+
+        await waitFor(() => expect(blockText(blocks(left)[0])).toBe('abcdx'));
+        expect([...blocks(left)[0].querySelectorAll('.markCode')].map((node) => node.textContent)).toEqual([
+            'bc',
+            'x',
+        ]);
+    });
+
+    it('edits inline code language from hover actions and highlights the marked range', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'const answer = 1;');
+        await waitFor(() => expect(blockText(blocks(left)[0])).toBe('const answer = 1;'));
+
+        selectRange(blocks(left)[0], 0, 'const'.length);
+        fireEvent.click(within(left).getByRole('button', {name: 'Code'}));
+        await waitFor(() => expect(blocks(left)[0].querySelector('.markCode')).toBeTruthy());
+        const code = blocks(left)[0].querySelector<HTMLElement>('.markCode')!;
+
+        fireEvent.mouseOver(code);
+        const actions = await waitFor(() => within(left).getByRole('dialog', {name: 'Inline code actions'}));
+        fireEvent.click(within(actions).getByRole('button', {name: 'Edit'}));
+
+        const dialog = await waitFor(() => within(left).getByRole('dialog', {name: 'Inline code language'}));
+        const input = within(dialog).getByRole('textbox', {name: 'Code language'});
+        fireEvent.change(input, {target: {value: 'ts'}});
+        fireEvent.click(within(dialog).getByRole('button', {name: 'Apply'}));
+
+        await waitFor(() =>
+            expect(blocks(left)[0].querySelector<HTMLElement>('.markCode')?.dataset.codeLanguage).toBe(
+                'typescript',
+            ),
+        );
+        expect(blocks(left)[0].querySelector('.syntax-keyword')?.textContent).toBe('const');
+
+        fireEvent.mouseOver(blocks(left)[0].querySelector<HTMLElement>('.markCode')!);
+        const updatedActions = await waitFor(() => within(left).getByRole('dialog', {name: 'Inline code actions'}));
+        fireEvent.click(within(updatedActions).getByRole('button', {name: 'Edit'}));
+        const clearDialog = await waitFor(() => within(left).getByRole('dialog', {name: 'Inline code language'}));
+        fireEvent.click(within(clearDialog).getByRole('button', {name: 'Clear language'}));
+
+        await waitFor(() =>
+            expect(blocks(left)[0].querySelector<HTMLElement>('.markCode')?.dataset.codeLanguage).toBe(''),
+        );
+    });
+
     it('shows toolbar pressed state when the next typed character will inherit a mark', async () => {
         const view = render(<App />);
         const {left} = panels(view);

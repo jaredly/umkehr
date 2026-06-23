@@ -28,7 +28,7 @@ import type {BlockOrderTs, Boundary, CachedState, Lamport} from 'umkehr/block-cr
 import {lamportToString, parseLamportString} from 'umkehr/block-crdt/utils';
 import {paragraphMeta, sameTypeWithTs, type RichBlockMeta} from './blockMeta';
 import {annotationVirtualParents} from './annotations';
-import type {BooleanInlineMark} from './inlineMarks';
+import {CODE_MARK, isCodeMarkValue, normalizeStoredCodeLanguage, type BareInlineMark, type BooleanInlineMark} from './inlineMarks';
 import {markdownShortcutPrefix, type MarkdownShortcutMatch} from './markdownShortcuts';
 import {
     caret,
@@ -59,7 +59,7 @@ export type CommandResult = {
 };
 
 export type RetainedInlineMarkSession = {
-    markType: BooleanInlineMark;
+    markType: BareInlineMark;
     start: Boundary;
     end?: Boundary;
     lastTypedCharId: string | null;
@@ -123,6 +123,10 @@ export const insertTextWithMarkdownShortcuts = (
     context: CommandContext,
 ): CommandResult => {
     const inserted = insertText(state, selection, text, context);
+    if (text === '`' && isCollapsed(inserted.selection)) {
+        const inlineCode = applyInlineCodeMarkdownShortcut(inserted, context);
+        if (inlineCode) return inlineCode;
+    }
     if (text !== ' ' || !isCollapsed(inserted.selection)) return inserted;
 
     const point = focusPoint(inserted.selection);
@@ -152,11 +156,70 @@ export const insertTextWithMarkdownShortcuts = (
     return {state: working, ops, selection: caret(point.blockId, 0)};
 };
 
+const applyInlineCodeMarkdownShortcut = (
+    inserted: CommandResult,
+    context: CommandContext,
+): CommandResult | null => {
+    const point = focusPoint(inserted.selection);
+    const block = inserted.state.state.blocks[point.blockId];
+    if (!block || point.offset < 2) return null;
+
+    const segments = segmentText(blockContents(inserted.state, point.blockId));
+    const closingOffset = point.offset - 1;
+    if (segments[closingOffset] !== '`') return null;
+
+    let openingOffset = -1;
+    for (let index = closingOffset - 1; index >= 0; index--) {
+        if (segments[index] === '`') {
+            openingOffset = index;
+            break;
+        }
+    }
+    if (openingOffset < 0 || closingOffset - openingOffset <= 1) return null;
+
+    let working = inserted.state;
+    const ops: Array<Op<RichBlockMeta>> = [...inserted.ops];
+
+    const deleteClosing = deleteRangeOps(working, {
+        block: parseLamportString(point.blockId),
+        startOffset: closingOffset,
+        endOffset: closingOffset + 1,
+    });
+    working = applyMany(working, deleteClosing, annotationVirtualParents(working));
+    ops.push(...deleteClosing);
+
+    const deleteOpening = deleteRangeOps(working, {
+        block: parseLamportString(point.blockId),
+        startOffset: openingOffset,
+        endOffset: openingOffset + 1,
+    });
+    working = applyMany(working, deleteOpening, annotationVirtualParents(working));
+    ops.push(...deleteOpening);
+
+    const codeEndOffset = closingOffset - 1;
+    if (openingOffset < codeEndOffset) {
+        const mark = markRangeOp(
+            working,
+            parseLamportString(point.blockId),
+            openingOffset,
+            codeEndOffset,
+            CODE_MARK,
+            undefined,
+            false,
+            [working.state.maxSeenCount + 1, context.actor],
+        );
+        working = applyMany(working, [mark], annotationVirtualParents(working));
+        ops.push(mark);
+    }
+
+    return {state: working, ops, selection: caret(point.blockId, codeEndOffset)};
+};
+
 export const insertTextWithMarks = (
     state: CachedState<RichBlockMeta>,
     selection: EditorSelection,
     text: string,
-    markTypes: BooleanInlineMark[],
+    markTypes: BareInlineMark[],
     context: CommandContext,
 ): CommandResult => {
     const insertionStart = firstPointForSelection(state, selection);
@@ -194,7 +257,7 @@ export const insertTextWithRetainedMarks = (
     state: CachedState<RichBlockMeta>,
     selection: EditorSelection,
     text: string,
-    markTypes: BooleanInlineMark[],
+    markTypes: BareInlineMark[],
     sessions: RetainedInlineMarkSession[],
     context: CommandContext,
 ): RetainedInlineMarkInsertResult => {
@@ -252,7 +315,7 @@ export const insertTextWithRetainedMarks = (
 export const closeRetainedInlineMarkSessions = (
     state: CachedState<RichBlockMeta>,
     sessions: RetainedInlineMarkSession[],
-    markType: BooleanInlineMark,
+    markType: BareInlineMark,
     context: CommandContext,
 ): {state: CachedState<RichBlockMeta>; ops: Array<Op<RichBlockMeta>>; sessions: RetainedInlineMarkSession[]} => {
     let working = state;
@@ -1077,6 +1140,59 @@ export const removeLinkMark = (
     selection: EditorSelection,
     context: CommandContext,
 ): CommandResult => setValuedMark(state, selection, 'link', undefined, true, context);
+
+export const toggleCodeMark = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    context: CommandContext,
+): CommandResult => {
+    const segments = normalizeSelectionSegments(state, selection);
+    if (!segments.length) return {state, ops: [], selection};
+
+    const remove = selectionFullyHasMark(state, segments, CODE_MARK);
+    let working = state;
+    const ops: Array<Op<RichBlockMeta>> = [];
+    for (const segment of segments) {
+        const op = markRangeOp(
+            working,
+            parseLamportString(segment.blockId),
+            segment.startOffset,
+            segment.endOffset,
+            CODE_MARK,
+            undefined,
+            remove,
+            [working.state.maxSeenCount + 1, context.actor],
+        );
+        working = applyMany(working, [op], annotationVirtualParents(working));
+        ops.push(op);
+    }
+
+    return {state: working, ops, selection};
+};
+
+export const setCodeMark = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    language: string,
+    context: CommandContext,
+): CommandResult => {
+    const normalized = normalizeStoredCodeLanguage(language);
+    return normalized
+        ? setValuedMark(state, selection, CODE_MARK, normalized, false, context)
+        : clearCodeLanguage(state, selection, context);
+};
+
+export const clearCodeLanguage = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    context: CommandContext,
+): CommandResult => setValuedMark(state, selection, CODE_MARK, undefined, false, context);
+
+export const removeCodeMark = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    context: CommandContext,
+): CommandResult => setValuedMark(state, selection, CODE_MARK, undefined, true, context);
 
 export const setBlockType = (
     state: CachedState<RichBlockMeta>,
@@ -2403,7 +2519,7 @@ const lastBlockOrderTs = (ts: BlockOrderTs) => (typeof ts === 'string' ? ts : ts
 const selectionFullyHasMark = (
     state: CachedState<RichBlockMeta>,
     segments: ReturnType<typeof normalizeSelectionSegments>,
-    markType: BooleanInlineMark,
+    markType: BareInlineMark,
 ): boolean => {
     const blocks = materializeFormattedBlocks(state);
     const byId = new Map(blocks.map((block) => [block.id, block]));
@@ -2418,7 +2534,9 @@ const selectionFullyHasMark = (
             }
         }
         const selected = marksByOffset.slice(segment.startOffset, segment.endOffset);
-        return selected.length > 0 && selected.every((marks) => equal(marks[markType], true));
+        return selected.length > 0 && selected.every((marks) =>
+            markType === CODE_MARK ? isCodeMarkValue(marks[markType]) : equal(marks[markType], true),
+        );
     });
 };
 

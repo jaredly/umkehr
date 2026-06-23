@@ -14,11 +14,15 @@ import {
     pastePlainText,
     pastePlainTextWithMarkdownShortcuts,
     removeLinkMark,
+    removeCodeMark,
     setBlockMeta,
+    setCodeMark,
+    clearCodeLanguage,
     setLinkMark,
     setBlockType,
     splitBlock,
     splitTableRowHeader,
+    toggleCodeMark,
     toggleMark,
     updateBlockMeta,
     commandApplied,
@@ -28,7 +32,7 @@ import {
     type CommandContext,
     type RetainedInlineMarkSession,
 } from './blockCommands';
-import type {BooleanInlineMark} from './inlineMarks';
+import type {BareInlineMark, BooleanInlineMark} from './inlineMarks';
 import {resolveSelection, retainSelection} from './retainedSelection';
 import {
     dedupeSelectionSet,
@@ -90,7 +94,7 @@ export const insertTextWithMarksEverywhere = (
     state: CachedState<RichBlockMeta>,
     selection: RetainedSelectionSet,
     text: string,
-    markTypes: BooleanInlineMark[],
+    markTypes: BareInlineMark[],
     context: CommandContext,
 ): MultiCommandResult =>
     runReplacingCommand(state, selection, (working, entry) =>
@@ -101,7 +105,7 @@ export const insertTextWithRetainedMarksEverywhere = (
     state: CachedState<RichBlockMeta>,
     selection: RetainedSelectionSet,
     text: string,
-    markTypes: BooleanInlineMark[],
+    markTypes: BareInlineMark[],
     retainedMarks: RetainedInlineMarkSessionMap,
     context: CommandContext,
 ): RetainedInlineMarkMultiCommandResult => {
@@ -148,7 +152,7 @@ export const closeRetainedInlineMarkSessionsEverywhere = (
     state: CachedState<RichBlockMeta>,
     selection: RetainedSelectionSet,
     retainedMarks: RetainedInlineMarkSessionMap,
-    markType: BooleanInlineMark,
+    markType: BareInlineMark,
     context: CommandContext,
 ): RetainedInlineMarkMultiCommandResult => {
     let working = state;
@@ -263,12 +267,18 @@ export const toggleMarkEverywhere = (
     };
 };
 
+export const toggleCodeMarkEverywhere = (
+    state: CachedState<RichBlockMeta>,
+    selection: RetainedSelectionSet,
+    context: CommandContext,
+): MultiCommandResult => runRangeMarkCommand(state, selection, context, toggleCodeMark);
+
 export const setLinkMarkEverywhere = (
     state: CachedState<RichBlockMeta>,
     selection: RetainedSelectionSet,
     href: string,
     context: CommandContext,
-): MultiCommandResult => runLinkMarkCommand(state, selection, context, (working, selected, commandContext) =>
+): MultiCommandResult => runRangeMarkCommand(state, selection, context, (working, selected, commandContext) =>
     setLinkMark(working, selected, href, commandContext),
 );
 
@@ -276,9 +286,30 @@ export const removeLinkMarkEverywhere = (
     state: CachedState<RichBlockMeta>,
     selection: RetainedSelectionSet,
     context: CommandContext,
-): MultiCommandResult => runLinkMarkCommand(state, selection, context, removeLinkMark);
+): MultiCommandResult => runRangeMarkCommand(state, selection, context, removeLinkMark);
 
-const runLinkMarkCommand = (
+export const setCodeMarkEverywhere = (
+    state: CachedState<RichBlockMeta>,
+    selection: RetainedSelectionSet,
+    language: string,
+    context: CommandContext,
+): MultiCommandResult => runRangeMarkCommand(state, selection, context, (working, selected, commandContext) =>
+    setCodeMark(working, selected, language, commandContext),
+);
+
+export const clearCodeLanguageEverywhere = (
+    state: CachedState<RichBlockMeta>,
+    selection: RetainedSelectionSet,
+    context: CommandContext,
+): MultiCommandResult => runRangeMarkCommand(state, selection, context, clearCodeLanguage);
+
+export const removeCodeMarkEverywhere = (
+    state: CachedState<RichBlockMeta>,
+    selection: RetainedSelectionSet,
+    context: CommandContext,
+): MultiCommandResult => runRangeMarkCommand(state, selection, context, removeCodeMark);
+
+const runRangeMarkCommand = (
     state: CachedState<RichBlockMeta>,
     selection: RetainedSelectionSet,
     context: CommandContext,

@@ -2,9 +2,12 @@ import {describe, expect, it} from 'vitest';
 import type {FormattedBlock} from 'umkehr/block-crdt';
 import type {RichBlockMeta} from './blockMeta';
 import {
+    codeLanguageForSelectionSegments,
+    codeRangeAroundOffset,
     isLinkLikeText,
     linkHrefForSelectionSegments,
     linkRangeAroundOffset,
+    normalizeStoredCodeLanguage,
     textForSelectionSegments,
 } from './inlineMarks';
 
@@ -71,5 +74,64 @@ describe('block rich text inline mark helpers', () => {
                 {blockId: 'second', startOffset: 0, endOffset: 2},
             ]),
         ).toBe('lpha\nbe');
+    });
+
+    it('finds a bare code range across adjacent formatted runs', () => {
+        const formatted = block([
+            {text: 'a', marks: {}},
+            {text: 'bc', marks: {code: true}},
+            {text: 'de', marks: {bold: true, code: true}},
+            {text: 'f', marks: {}},
+        ]);
+
+        expect(codeRangeAroundOffset(formatted, 3)).toEqual({
+            blockId: 'block-1',
+            startOffset: 1,
+            endOffset: 5,
+            language: '',
+        });
+    });
+
+    it('finds a language code range using normalized aliases', () => {
+        const formatted = block([
+            {text: 'a', marks: {}},
+            {text: 'bc', marks: {code: 'ts'}},
+            {text: 'de', marks: {italic: true, code: 'typescript'}},
+            {text: 'f', marks: {code: 'javascript'}},
+        ]);
+
+        expect(codeRangeAroundOffset(formatted, 2)).toEqual({
+            blockId: 'block-1',
+            startOffset: 1,
+            endOffset: 5,
+            language: 'typescript',
+        });
+    });
+
+    it('returns a consistent code language only when every selected character has the same code mark', () => {
+        const blocks = [
+            block([
+                {text: 'ab', marks: {code: 'ts'}},
+                {text: 'cd', marks: {code: 'typescript'}},
+                {text: 'e', marks: {code: true}},
+                {text: 'f', marks: {}},
+            ]),
+        ];
+
+        expect(codeLanguageForSelectionSegments(blocks, [{blockId: 'block-1', startOffset: 0, endOffset: 4}])).toBe(
+            'typescript',
+        );
+        expect(codeLanguageForSelectionSegments(blocks, [{blockId: 'block-1', startOffset: 4, endOffset: 5}])).toBe(
+            '',
+        );
+        expect(codeLanguageForSelectionSegments(blocks, [{blockId: 'block-1', startOffset: 0, endOffset: 5}])).toBeNull();
+        expect(codeLanguageForSelectionSegments(blocks, [{blockId: 'block-1', startOffset: 5, endOffset: 6}])).toBeNull();
+    });
+
+    it('normalizes known code languages and keeps unknown languages lowercase', () => {
+        expect(normalizeStoredCodeLanguage(' TS ')).toBe('typescript');
+        expect(normalizeStoredCodeLanguage('JS')).toBe('javascript');
+        expect(normalizeStoredCodeLanguage('Made-Up-Language')).toBe('made-up-language');
+        expect(normalizeStoredCodeLanguage('   ')).toBe('');
     });
 });

@@ -1,6 +1,12 @@
 :root {
     font-family:
-        Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        Inter,
+        ui-sans-serif,
+        system-ui,
+        -apple-system,
+        BlinkMacSystemFont,
+        'Segoe UI',
+        sans-serif;
     color: #182026;
     background: #f4f6f8;
 }
@@ -56,7 +62,7 @@ select {
     border-radius: 8px;
 }
 
-.historyControls input[type="range"] {
+.historyControls input[type='range'] {
     min-width: 0;
 }
 
@@ -231,13 +237,13 @@ select {
     background: #eef3f7;
 }
 
-.toolbar button[aria-pressed="true"] {
+.toolbar button[aria-pressed='true'] {
     border-color: #4f7fb3;
     color: #15395d;
     background: #dcecff;
 }
 
-.toolbar button[aria-pressed="true"]:hover {
+.toolbar button[aria-pressed='true']:hover {
     background: #cfe4fb;
 }
 
@@ -306,7 +312,7 @@ select {
 
 .blockRow.dropBefore::before,
 .blockRow.dropAfter::after {
-    content: "";
+    content: '';
     position: absolute;
     left: calc(42px + var(--drop-offset, 0px));
     right: 0;
@@ -412,7 +418,7 @@ select {
     border-radius: 6px;
     color: #1c2b36;
     background: #f5f7f9;
-    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
     line-height: 1.5;
 }
 
@@ -432,7 +438,10 @@ select {
 .tableGrid {
     --table-row-gutter: 30px;
     display: grid;
-    grid-template-columns: fit-content(180px) repeat(calc(var(--table-columns, 1)), minmax(150px, 1fr)) 0;
+    grid-template-columns: fit-content(180px) repeat(
+            calc(var(--table-columns, 1)),
+            minmax(150px, 1fr)
+        ) 0;
     width: 100%;
     max-width: 100%;
     overflow-x: auto;
@@ -592,7 +601,7 @@ select {
 
 .tableRow.dropBefore::before,
 .tableRow.dropAfter::after {
-    content: "";
+    content: '';
     position: absolute;
     left: 0;
     right: 0;
@@ -665,7 +674,7 @@ select {
 
 .tableCell.cellDropBefore::before,
 .tableCell.cellDropAfter::after {
-    content: "";
+    content: '';
     position: absolute;
     top: 4px;
     bottom: 4px;
@@ -774,18 +783,18 @@ select {
     box-shadow: inset 0 0 0 1px #a8c8e8;
 }
 
-.editableBlock[data-empty="true"]::before {
+.editableBlock[data-empty='true']::before {
     content: attr(data-placeholder);
     display: inline-block;
     opacity: 0.5;
 }
 
-.editableBlock[data-empty="true"]:focus::before {
-    content: "";
+.editableBlock[data-empty='true']:focus::before {
+    content: '';
 }
 
-.editableBlock[data-empty="true"]:has(.retainedSelectionCaret)::before {
-    content: "";
+.editableBlock[data-empty='true']:has(.retainedSelectionCaret)::before {
+    content: '';
 }
 
 .markBold {
@@ -798,6 +807,21 @@ select {
 
 .markStrikethrough {
     text-decoration-line: line-through;
+}
+
+.markCode {
+    border: 1px solid #d7dee6;
+    border-radius: 4px;
+    padding: 0 0.18em;
+    background: #f4f7f9;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 0.94em;
+}
+
+.markCodeHighlighted {
+    border: none;
+    margin: 0;
+    padding: 0;
 }
 
 .markLink {
@@ -859,7 +883,7 @@ select {
 }
 
 .retainedSelectionCaret::after {
-    content: "";
+    content: '';
     position: absolute;
     left: -1px;
     bottom: -0.2rem;
@@ -970,7 +994,13 @@ select {
     height: auto;
     color: #1e2c38;
     font-family:
-        Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        Inter,
+        ui-sans-serif,
+        system-ui,
+        -apple-system,
+        BlinkMacSystemFont,
+        'Segoe UI',
+        sans-serif;
 }
 
 .demoPanelBox {
@@ -1170,7 +1200,7 @@ select {
 
 .demoCodeLine {
     fill: #253747;
-    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
     font-size: 14px;
 }
 
@@ -1339,6 +1369,16 @@ select {
     /*font-size: 13px;*/
     text-overflow: ellipsis;
     text-decoration-line: underline;
+    white-space: nowrap;
+}
+
+.codeHoverLanguage {
+    min-width: 0;
+    overflow: hidden;
+    color: #33404c;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 13px;
+    text-overflow: ellipsis;
     white-space: nowrap;
 }
 
@@ -1584,7 +1624,7 @@ select {
         padding: 8px;
     }
 
-    .historyControls input[type="range"] {
+    .historyControls input[type='range'] {
         grid-column: 1 / -1;
     }
 
@@ -1642,7 +1682,10 @@ select {
     }
 
     .tableGrid {
-        grid-template-columns: fit-content(150px) repeat(var(--table-columns, 1), minmax(132px, 1fr)) 0;
+        grid-template-columns: fit-content(150px) repeat(
+                var(--table-columns, 1),
+                minmax(132px, 1fr)
+            ) 0;
     }
 
     .tableRowHeader {

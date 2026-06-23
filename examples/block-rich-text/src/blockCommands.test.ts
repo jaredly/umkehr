@@ -39,6 +39,7 @@ import {
     pastePlainText,
     pastePlainTextWithMarkdownShortcuts,
     removeLinkMark,
+    setCodeMark,
     setBlockType,
     setLinkMark,
     splitBlock,
@@ -196,6 +197,37 @@ describe('block rich text commands', () => {
             expect(focusPoint(result.selection)).toEqual({blockId, offset: text.length});
         },
     );
+
+    it('converts typed backtick markdown into an inline code mark', () => {
+        const state = init();
+        const blockId = onlyBlock(state);
+        const result = typeWithMarkdownShortcuts(state, blockId, 'say `hello`');
+        const formatted = materializeFormattedBlocks(result.state);
+
+        expect(blockContents(result.state, blockId)).toBe('say hello');
+        expect(formatted[0].runs).toEqual([
+            {text: 'say ', marks: {}},
+            {text: 'hello', marks: {code: true}},
+        ]);
+        expect(result.selection).toEqual(caret(blockId, 'say hello'.length));
+    });
+
+    it('sets a language over an existing bare inline code mark', () => {
+        const state = init();
+        const blockId = onlyBlock(state);
+        const context = ctx();
+        const typed = typeWithMarkdownShortcuts(state, blockId, '`const`', context);
+        const language = setCodeMark(
+            typed.state,
+            {type: 'range', anchor: {blockId, offset: 0}, focus: {blockId, offset: 5}},
+            'ts',
+            context,
+        );
+
+        expect(materializeFormattedBlocks(language.state)[0].runs).toEqual([
+            {text: 'const', marks: {code: 'typescript'}},
+        ]);
+    });
 
     it('does not convert markdown shortcuts in non-paragraph blocks', () => {
         const state = init();
