@@ -93,6 +93,11 @@ const keyPerfBarMs = (bar: HTMLElement): number => {
     return Number(match[1]);
 };
 
+const rainbowNodes = (block: HTMLElement): HTMLElement[] =>
+    Array.from(block.querySelectorAll<HTMLElement>('*')).filter(
+        (element) => element.style.backgroundColor,
+    );
+
 const latestKeyPerfBarMs = async (view: ReturnType<typeof render>, label: string): Promise<number> => {
     const prefix = `${label}: `;
     const bar = await waitFor(() => {
@@ -3265,6 +3270,10 @@ describe('Block rich text example UI', () => {
         expect(within(monitor).getByText('Event ms')).toBeTruthy();
         expect(within(monitor).getByText('-- ms')).toBeTruthy();
         expect(within(monitor).getByText('No samples')).toBeTruthy();
+        expect(
+            (within(monitor).getByRole('checkbox', {name: 'Rainbow IDs'}) as HTMLInputElement)
+                .checked,
+        ).toBe(false);
         expect(keyPerfBars(view)).toHaveLength(0);
     });
 
@@ -3361,6 +3370,69 @@ describe('Block rich text example UI', () => {
 
         expect(markedRenderMs).toBeLessThan(Math.max(1, plainRenderMs * 4));
     }, 30_000);
+
+    it('toggles rainbow Lamport ID backgrounds per visible character', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        const block = blocks(left)[0];
+
+        selectCaret(block, 0);
+        typeText(block, 'abc');
+        await waitFor(() => expect(blockText(block)).toBe('abc'));
+        expect(rainbowNodes(block)).toHaveLength(0);
+
+        fireEvent.click(within(keyPerfMonitor(view)).getByRole('checkbox', {name: 'Rainbow IDs'}));
+
+        await waitFor(() => expect(rainbowNodes(block).map((node) => node.textContent)).toEqual(['a', 'b', 'c']));
+        expect(rainbowNodes(block).map((node) => node.style.backgroundColor)).toEqual([
+            'rgb(255, 21, 0)',
+            'rgb(255, 43, 0)',
+            'rgb(255, 64, 0)',
+        ]);
+
+        fireEvent.click(within(keyPerfMonitor(view)).getByRole('checkbox', {name: 'Rainbow IDs'}));
+        await waitFor(() => expect(rainbowNodes(block)).toHaveLength(0));
+    });
+
+    it('splits formatted runs per character in rainbow Lamport ID mode', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        const block = blocks(left)[0];
+
+        selectCaret(block, 0);
+        typeText(block, 'abc');
+        await waitFor(() => expect(blockText(block)).toBe('abc'));
+        selectRange(block, 0, 3);
+        fireEvent.click(within(left).getByRole('button', {name: 'B'}));
+        await waitFor(() => expect(block.querySelector('.markBold')?.textContent).toBe('abc'));
+
+        fireEvent.click(within(keyPerfMonitor(view)).getByRole('checkbox', {name: 'Rainbow IDs'}));
+
+        await waitFor(() => expect(rainbowNodes(block).map((node) => node.textContent)).toEqual(['a', 'b', 'c']));
+        expect(rainbowNodes(block).every((node) => node.classList.contains('markBold'))).toBe(true);
+    });
+
+    it('colors inline embeds in rainbow Lamport ID mode', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        fireEvent.click(within(left).getByRole('button', {name: 'Date'}));
+
+        const embed = await waitFor(() => {
+            const found = blocks(left)[0].querySelector<HTMLElement>('[data-inline-embed="true"]');
+            if (!found) throw new Error('missing inline embed');
+            return found;
+        });
+        expect(embed.style.backgroundColor).toBe('');
+
+        fireEvent.click(within(keyPerfMonitor(view)).getByRole('checkbox', {name: 'Rainbow IDs'}));
+
+        await waitFor(() => {
+            const colored = blocks(left)[0].querySelector<HTMLElement>('[data-inline-embed="true"]');
+            expect(colored?.style.backgroundColor).toBe('rgb(255, 21, 0)');
+        });
+    });
 
     it('caps keypress performance bars to the latest samples', async () => {
         const view = render(<App />);

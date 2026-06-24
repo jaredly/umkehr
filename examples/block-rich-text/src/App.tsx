@@ -374,6 +374,7 @@ function EditorApp() {
     const [historyStatus, setHistoryStatus] = useState('');
     const [undoStatus, setUndoStatus] = useState<Partial<Record<EditorId, string>>>({});
     const [historyResetSignal, setHistoryResetSignal] = useState(0);
+    const [rainbowLamportIds, setRainbowLamportIds] = useState(false);
     const importInputRef = useRef<HTMLInputElement>(null);
     const attachmentsRef = useRef(attachments);
     const nextKeyPerfSampleIdRef = useRef(1);
@@ -621,7 +622,11 @@ function EditorApp() {
 
     return (
         <main className="appShell">
-            <KeyPerfMonitor samples={keyPerfSamples} />
+            <KeyPerfMonitor
+                samples={keyPerfSamples}
+                rainbowLamportIds={rainbowLamportIds}
+                onRainbowLamportIdsChange={setRainbowLamportIds}
+            />
             <header className="topBar">
                 <h1>Block Rich Text CRDT</h1>
                 <p>Two local replicas exchange block rich-text operations.</p>
@@ -687,6 +692,7 @@ function EditorApp() {
                     resetSignal={historyResetSignal}
                     undoState={undoStates.left}
                     undoStatus={undoStatus.left ?? ''}
+                    rainbowLamportIds={rainbowLamportIds}
                     onCommand={(command) => runCommand('left', command)}
                     onUndo={() => runUndoCommand('left', 'undo')}
                     onRedo={() => runUndoCommand('left', 'redo')}
@@ -704,6 +710,7 @@ function EditorApp() {
                     resetSignal={historyResetSignal}
                     undoState={undoStates.right}
                     undoStatus={undoStatus.right ?? ''}
+                    rainbowLamportIds={rainbowLamportIds}
                     onCommand={(command) => runCommand('right', command)}
                     onUndo={() => runUndoCommand('right', 'undo')}
                     onRedo={() => runUndoCommand('right', 'redo')}
@@ -744,7 +751,15 @@ const orderDraggedBlockIdsForCellSlot = (
     return [...new Set(blockIds)].sort((a, b) => order.indexOf(b) - order.indexOf(a));
 };
 
-function KeyPerfMonitor({samples}: {samples: KeyPerfSample[]}) {
+function KeyPerfMonitor({
+    samples,
+    rainbowLamportIds,
+    onRainbowLamportIdsChange,
+}: {
+    samples: KeyPerfSample[];
+    rainbowLamportIds: boolean;
+    onRainbowLamportIdsChange(value: boolean): void;
+}) {
     const latest = samples.at(-1);
     return (
         <aside className="keyPerfMonitor" aria-label="Keypress performance monitor">
@@ -768,6 +783,14 @@ function KeyPerfMonitor({samples}: {samples: KeyPerfSample[]}) {
                     );
                 })}
             </div>
+            <label className="keyPerfDebugToggle">
+                <input
+                    type="checkbox"
+                    checked={rainbowLamportIds}
+                    onChange={(event) => onRainbowLamportIdsChange(event.currentTarget.checked)}
+                />
+                <span>Rainbow IDs</span>
+            </label>
         </aside>
     );
 }
@@ -778,6 +801,7 @@ function BlockEditor({
     resetSignal,
     undoState,
     undoStatus,
+    rainbowLamportIds,
     onCommand,
     onUndo,
     onRedo,
@@ -792,6 +816,7 @@ function BlockEditor({
     resetSignal: number;
     undoState: ReturnType<typeof deriveUndoState>;
     undoStatus: string;
+    rainbowLamportIds: boolean;
     onCommand(command: (replica: Replica) => MultiCommandResult): void;
     onUndo(): void;
     onRedo(): void;
@@ -3003,6 +3028,7 @@ function BlockEditor({
                                 state: replica.state,
                                 attachments,
                                 charIdsByBlock,
+                                rainbowLamportIds,
                                 selection: primaryResolvedSelection,
                                 hasMultipleSelections: resolvedSelectionSet.entries.length > 1,
                                 decorationsByBlock,
@@ -3108,6 +3134,7 @@ function BlockEditor({
                         onBodySelectionChange={setActiveAnnotationBodySelection}
                         popoverTextById={popoverTextById}
                         footnoteNumberById={footnoteNumberById}
+                        rainbowLamportIds={rainbowLamportIds}
                         onPopoverTriggerEnter={showPopover}
                         onPopoverTriggerLeave={schedulePopoverHideFromPointer}
                         onInputMeasured={onInputMeasured}
@@ -3137,6 +3164,7 @@ function BlockEditor({
                     }}
                     popoverTextById={popoverTextById}
                     footnoteNumberById={footnoteNumberById}
+                    rainbowLamportIds={rainbowLamportIds}
                     onPopoverTriggerEnter={showPopover}
                     onPopoverTriggerLeave={schedulePopoverHideFromPointer}
                     onInputMeasured={onInputMeasured}
@@ -3167,6 +3195,7 @@ function BlockEditor({
                     onBodySelectionChange={setActiveAnnotationBodySelection}
                     popoverTextById={popoverTextById}
                     footnoteNumberById={footnoteNumberById}
+                    rainbowLamportIds={rainbowLamportIds}
                     onPopoverTriggerEnter={showPopover}
                     onPopoverTriggerLeave={schedulePopoverHideFromPointer}
                     onInputMeasured={onInputMeasured}
@@ -3425,6 +3454,7 @@ type RenderBlockContext = {
     state: Replica['state'];
     attachments: AttachmentStore;
     charIdsByBlock: Map<string, string[]>;
+    rainbowLamportIds: boolean;
     selection: EditorSelection;
     hasMultipleSelections: boolean;
     decorationsByBlock: Map<string, BlockSelectionDecorations>;
@@ -4529,6 +4559,7 @@ const renderEditableBlock = (
             }
             blockLength={pointTextLength(context.state, block.id)}
             charIdsByOffset={context.charIdsByBlock.get(block.id) ?? []}
+            rainbowLamportIds={context.rainbowLamportIds}
             nextBlockId={nextBlock?.id ?? null}
             selection={context.selection}
             hasMultipleSelections={context.hasMultipleSelections}
@@ -5016,6 +5047,7 @@ function AnnotationSidebar({
     onResolveAnnotation,
     popoverTextById,
     footnoteNumberById,
+    rainbowLamportIds,
     onPopoverTriggerEnter,
     onPopoverTriggerLeave,
     onInputMeasured,
@@ -5041,6 +5073,7 @@ function AnnotationSidebar({
     onResolveAnnotation(annotation: RenderedAnnotation): void;
     popoverTextById: Map<string, string>;
     footnoteNumberById: Map<string, number>;
+    rainbowLamportIds: boolean;
     onPopoverTriggerEnter(id: string, element: HTMLElement): void;
     onPopoverTriggerLeave(id?: string, transition?: PopoverPointerTransition): void;
     onInputMeasured(label: string, ms: number): void;
@@ -5095,6 +5128,7 @@ function AnnotationSidebar({
                                         onBodySelectionChange={onBodySelectionChange}
                                         popoverTextById={popoverTextById}
                                         footnoteNumberById={footnoteNumberById}
+                                        rainbowLamportIds={rainbowLamportIds}
                                         onPopoverTriggerEnter={onPopoverTriggerEnter}
                                         onPopoverTriggerLeave={onPopoverTriggerLeave}
                                         onInputMeasured={onInputMeasured}
@@ -5135,6 +5169,7 @@ function Footnotes({
     onBodySelectionChange,
     popoverTextById,
     footnoteNumberById,
+    rainbowLamportIds,
     onPopoverTriggerEnter,
     onPopoverTriggerLeave,
     onInputMeasured,
@@ -5154,6 +5189,7 @@ function Footnotes({
     onBodySelectionChange(selection: EditorSelection | null): void;
     popoverTextById: Map<string, string>;
     footnoteNumberById: Map<string, number>;
+    rainbowLamportIds: boolean;
     onPopoverTriggerEnter(id: string, element: HTMLElement): void;
     onPopoverTriggerLeave(id?: string, transition?: PopoverPointerTransition): void;
     onInputMeasured(label: string, ms: number): void;
@@ -5178,6 +5214,7 @@ function Footnotes({
                                   onBodySelectionChange={onBodySelectionChange}
                                   popoverTextById={popoverTextById}
                                   footnoteNumberById={footnoteNumberById}
+                                  rainbowLamportIds={rainbowLamportIds}
                                   onPopoverTriggerEnter={onPopoverTriggerEnter}
                                   onPopoverTriggerLeave={onPopoverTriggerLeave}
                                   onInputMeasured={onInputMeasured}
@@ -5206,6 +5243,7 @@ function FloatingAnnotationPopover({
     onBodySelectionChange,
     popoverTextById,
     footnoteNumberById,
+    rainbowLamportIds,
     onPopoverTriggerEnter,
     onPopoverTriggerLeave,
     onInputMeasured,
@@ -5230,6 +5268,7 @@ function FloatingAnnotationPopover({
     onBodySelectionChange(selection: EditorSelection | null): void;
     popoverTextById: Map<string, string>;
     footnoteNumberById: Map<string, number>;
+    rainbowLamportIds: boolean;
     onPopoverTriggerEnter(id: string, element: HTMLElement): void;
     onPopoverTriggerLeave(id?: string, transition?: PopoverPointerTransition): void;
     onInputMeasured(label: string, ms: number): void;
@@ -5269,6 +5308,7 @@ function FloatingAnnotationPopover({
                     onBodySelectionChange={onBodySelectionChange}
                     popoverTextById={popoverTextById}
                     footnoteNumberById={footnoteNumberById}
+                    rainbowLamportIds={rainbowLamportIds}
                     onPopoverTriggerEnter={onPopoverTriggerEnter}
                     onPopoverTriggerLeave={onPopoverTriggerLeave}
                     onInputMeasured={onInputMeasured}
@@ -5617,6 +5657,7 @@ function AnnotationBodyBlock({
     onBodySelectionChange,
     popoverTextById,
     footnoteNumberById,
+    rainbowLamportIds,
     onPopoverTriggerEnter,
     onPopoverTriggerLeave,
     onInputMeasured,
@@ -5639,6 +5680,7 @@ function AnnotationBodyBlock({
     onBodySelectionChange(selection: EditorSelection | null): void;
     popoverTextById: Map<string, string>;
     footnoteNumberById: Map<string, number>;
+    rainbowLamportIds: boolean;
     onPopoverTriggerEnter(id: string, element: HTMLElement): void;
     onPopoverTriggerLeave(id?: string, transition?: PopoverPointerTransition): void;
     onInputMeasured(label: string, ms: number): void;
@@ -5884,6 +5926,7 @@ function AnnotationBodyBlock({
                 blockId={block.id}
                 runs={block.runs}
                 charIdsByOffset={orderedCharIdsForBlock(state, block.id, {visibleOnly: true})}
+                rainbowLamportIds={rainbowLamportIds}
                 decorations={null}
                 pendingCaretRestoreBlockIdRef={pendingCaretRestoreBlockIdRef}
                 pendingSelectionRestoreRef={pendingSelectionRestoreRef}
@@ -6377,6 +6420,7 @@ function EditableBlock({
     previousBlockLength,
     blockLength,
     charIdsByOffset,
+    rainbowLamportIds,
     nextBlockId,
     selection,
     hasMultipleSelections,
@@ -6452,6 +6496,7 @@ function EditableBlock({
     previousBlockLength: number;
     blockLength: number;
     charIdsByOffset: string[];
+    rainbowLamportIds: boolean;
     nextBlockId: string | null;
     selection: EditorSelection;
     hasMultipleSelections: boolean;
@@ -6550,6 +6595,7 @@ function EditableBlock({
             blockId={block.id}
             runs={block.runs}
             charIdsByOffset={charIdsByOffset}
+            rainbowLamportIds={rainbowLamportIds}
             decorations={decorations}
             pendingCaretRestoreBlockIdRef={pendingCaretRestoreBlockIdRef}
             suppressNextFocusSelectionRef={suppressNextFocusSelectionRef}
@@ -6899,6 +6945,7 @@ function RichTextEditableSurface({
     blockId,
     runs,
     charIdsByOffset,
+    rainbowLamportIds,
     decorations,
     pendingCaretRestoreBlockIdRef,
     pendingSelectionRestoreRef,
@@ -6933,6 +6980,7 @@ function RichTextEditableSurface({
     blockId: string;
     runs: RichFormattedBlock['runs'];
     charIdsByOffset: string[];
+    rainbowLamportIds: boolean;
     decorations: BlockSelectionDecorations | null;
     pendingCaretRestoreBlockIdRef: MutableRefObject<string | null>;
     pendingSelectionRestoreRef?: MutableRefObject<EditorSelection | null>;
@@ -7011,6 +7059,7 @@ function RichTextEditableSurface({
         const renderedRuns = serializeRuns(
             runs,
             charIdsByOffset,
+            rainbowLamportIds,
             decorations,
             trailingCodeNewline,
             footnoteNumberById,
@@ -7023,6 +7072,7 @@ function RichTextEditableSurface({
                 ...renderRunNodes(runs, decorations, {
                     blockId,
                     charIdsByOffset,
+                    rainbowLamportIds,
                     trailingCodeNewline,
                     syntaxTokens,
                     ingredientTokens,
@@ -7052,6 +7102,7 @@ function RichTextEditableSurface({
         pendingCaretRestoreBlockIdRef,
         pendingSelectionRestoreRef,
         popoverTextById,
+        rainbowLamportIds,
         runs,
         selection,
         syntaxTokens,
@@ -7083,6 +7134,7 @@ function RichTextEditableSurface({
                     ...renderRunNodes(runs, nextDecorations, {
                         blockId,
                         charIdsByOffset,
+                        rainbowLamportIds,
                         trailingCodeNewline,
                         syntaxTokens,
                         ingredientTokens,
@@ -7093,6 +7145,7 @@ function RichTextEditableSurface({
                 renderedRunsRef.current = serializeRuns(
                     runs,
                     charIdsByOffset,
+                    rainbowLamportIds,
                     nextDecorations,
                     trailingCodeNewline,
                     footnoteNumberById,
@@ -7201,6 +7254,7 @@ function RichTextEditableSurface({
                         ...renderRunNodes(runs, decorations, {
                             blockId,
                             charIdsByOffset,
+                            rainbowLamportIds,
                             trailingCodeNewline,
                             syntaxTokens,
                             ingredientTokens,
@@ -8156,6 +8210,7 @@ const linkPopoverPositionFromElement = (element: HTMLElement): {top: number; lef
 const serializeRuns = (
     runs: RichFormattedBlock['runs'],
     charIdsByOffset: string[],
+    rainbowLamportIds: boolean,
     decorations: BlockSelectionDecorations | null,
     trailingCodeNewline = false,
     footnoteNumberById: Map<string, number> = new Map(),
@@ -8174,6 +8229,7 @@ const serializeRuns = (
         ]),
         stackedMarks: runs.map((run) => run.stackedMarks),
         charIdsByOffset,
+        rainbowLamportIds,
         decorations,
         trailingCodeNewline,
         syntaxTokens,
@@ -8187,6 +8243,7 @@ const renderRunNodes = (
     options: {
         blockId?: string;
         charIdsByOffset?: string[];
+        rainbowLamportIds?: boolean;
         trailingCodeNewline?: boolean;
         syntaxTokens?: SyntaxToken[];
         ingredientTokens?: IngredientHighlightToken[];
@@ -8194,7 +8251,13 @@ const renderRunNodes = (
         footnoteNumberById?: Map<string, number>;
     } = {},
 ): Node[] => {
-    const chunks = runRenderChunks(runs, decorations, options.syntaxTokens, options.ingredientTokens);
+    const chunks = runRenderChunks(
+        runs,
+        decorations,
+        options.rainbowLamportIds ?? false,
+        options.syntaxTokens,
+        options.ingredientTokens,
+    );
     const nodes: Node[] = [];
     const renderedCarets = new Set<string>();
     for (let index = 0; index < chunks.length; index++) {
@@ -8240,26 +8303,43 @@ const renderRunChunkNode = (
     options: {
         blockId?: string;
         charIdsByOffset?: string[];
+        rainbowLamportIds?: boolean;
         popoverTextById?: Map<string, string>;
     },
 ): HTMLElement => {
+    const rainbowColor = options.rainbowLamportIds
+        ? rainbowLamportColor(options.charIdsByOffset?.[chunk.blockStartOffset])
+        : null;
     if (chunk.text === INLINE_EMBED_TEXT && segmentText(chunk.text).length === 1) {
         const data = inlineEmbedDataForRun(chunk.run);
         const plainText = plainTextForInlineEmbed(data, inlineEmbedPlugins, {
             ambientMarks: chunk.run.marks,
         });
-        return renderInlineEmbed(data, inlineEmbedPlugins, {
+        const element = renderInlineEmbed(data, inlineEmbedPlugins, {
             blockId: options.blockId ?? '',
             charId: options.charIdsByOffset?.[chunk.blockStartOffset] ?? '',
             startOffset: chunk.blockStartOffset,
             ambientMarks: chunk.run.marks,
             plainText,
         });
+        if (rainbowColor) element.style.backgroundColor = rainbowColor;
+        return element;
     }
     const span = document.createElement('span');
     span.textContent = chunk.text;
     applyRunClasses(span, chunk, options.popoverTextById);
+    if (rainbowColor) span.style.backgroundColor = rainbowColor;
     return span;
+};
+
+const rainbowLamportColor = (charId: string | undefined): string | null => {
+    if (!charId) return null;
+    try {
+        const counter = parseLamportString(charId)[0];
+        return `hsl(${(counter % 72) * 5}, 100%, 50%)`;
+    } catch {
+        return null;
+    }
 };
 
 type RunRenderChunk = {
@@ -8273,6 +8353,7 @@ type RunRenderChunk = {
 const runRenderChunks = (
     runs: RichFormattedBlock['runs'],
     decorations: BlockSelectionDecorations | null,
+    rainbowLamportIds: boolean,
     syntaxTokens?: SyntaxToken[],
     ingredientTokens?: IngredientHighlightToken[],
 ): RunRenderChunk[] => {
@@ -8287,6 +8368,11 @@ const runRenderChunks = (
         const runStart = offset;
         const runEnd = runStart + runSegments.length;
         const boundaries = new Set([0, runSegments.length]);
+        if (rainbowLamportIds) {
+            for (let index = 1; index < runSegments.length; index++) {
+                boundaries.add(index);
+            }
+        }
         for (let index = 0; index < runSegments.length; index++) {
             if (runSegments[index] !== INLINE_EMBED_TEXT) continue;
             boundaries.add(index);

@@ -141,7 +141,7 @@ select {
     right: 12px;
     z-index: 100;
     display: grid;
-    grid-template-rows: auto auto 34px;
+    grid-template-rows: auto auto 34px auto;
     gap: 4px;
     width: 166px;
     min-height: 72px;
@@ -151,7 +151,7 @@ select {
     color: #edf4f8;
     background: rgb(24 32 38 / 88%);
     box-shadow: 0 8px 24px rgb(16 24 31 / 18%);
-    pointer-events: none;
+    pointer-events: auto;
 }
 
 .keyPerfHeader {
@@ -206,6 +206,23 @@ select {
 
 .keyPerfBar.slow {
     background: #e05c51;
+}
+
+.keyPerfDebugToggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: #dce7ee;
+    font-size: 11px;
+    line-height: 1.2;
+    cursor: pointer;
+    user-select: none;
+}
+
+.keyPerfDebugToggle input {
+    width: 13px;
+    height: 13px;
+    margin: 0;
 }
 
 .editorGrid {

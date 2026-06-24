@@ -1,0 +1,1 @@
+examples/block-rich-text: let's add a 'mermaid diagram' block type. The content is the mermaid diagram config. the editor part should be similar to 'code' blocks, with the Enter key adding a newline instead of splitting the block. There should be a toggle at the top of the block to switch between "view" and "edit" modes. Start in edit mode.

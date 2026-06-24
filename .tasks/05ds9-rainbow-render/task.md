@@ -1,0 +1,2 @@
+examples/block-rich-text: let's have a debug option in the app (maybe a checkbox under the perf card in the top right) to turn on "rainbow lamport IDs" mode. So you take the numeric component of the lamport ID of a character, mod 36, and then `background-color: HSL(${id % 36},100%,50%)` for that character.
+That will make it easier to see where runs of IDs are interrupted, and what operations move chars while preserving IDs, versus creating new characters.

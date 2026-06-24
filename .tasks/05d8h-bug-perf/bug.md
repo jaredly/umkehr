@@ -1,0 +1,1 @@
+examples/block-rich-text: something seems to have regressed with typing perf; in an empty document, pressing `a` to add a single character to the empty block is taking 10ms as measured by the perf dialog. That seems quite high.

@@ -1,0 +1,497 @@
+import {
+    applyMany,
+    blockContents,
+    cachedState,
+    formattedMarkValues,
+    graphemeLength,
+    insertBlockOps,
+    insertTextOps,
+    markRangeOp,
+    materializeFormattedBlocks,
+    segmentGraphemes,
+    visibleBlockChildren,
+} from 'umkehr/block-crdt';
+import type {CachedState, Op, State} from 'umkehr/block-crdt/types';
+import {lamportToString} from 'umkehr/block-crdt/utils';
+import {annotationVirtualParents} from './annotations';
+import {
+    type ImagePresentationSize,
+    type PreviewMetadata,
+    type RichBlockMeta,
+} from './blockMeta';
+import type {CommandContext} from './blockCommands';
+import {CODE_MARK, isCodeMarkValue, LINK_MARK, normalizeStoredCodeLanguage} from './inlineMarks';
+
+export type DocumentBlockType = RichBlockMeta['type'];
+
+export type DocumentBlock = {
+    type?: DocumentBlockType;
+    meta?: DocumentBlockMeta;
+    content?: string;
+    marks?: DocumentMark[];
+    children?: DocumentBlock[];
+};
+
+export type ImportDocument = DocumentBlock[];
+export type ExportDocument = DocumentBlock[];
+
+export type DocumentBlockMeta = {
+    level?: 1 | 2 | 3;
+    kind?: 'ordered' | 'unordered' | 'info' | 'warning' | 'error';
+    checked?: boolean;
+    language?: string;
+    attachmentId?: string;
+    size?: ImagePresentationSize;
+    url?: string;
+    preview?: PreviewMetadata | null;
+};
+
+export type DocumentMark =
+    | {type: 'bold' | 'italic' | 'strikethrough'; start: number; end: number}
+    | {type: 'code'; start: number; end: number; language?: string}
+    | {type: 'link'; start: number; end: number; href: string};
+
+export type ImportDocumentResult = {
+    state: CachedState<RichBlockMeta>;
+    ops: Array<Op<RichBlockMeta>>;
+    blockIds: string[];
+};
+
+type ParsedDocumentBlock = {
+    type: DocumentBlockType;
+    meta: DocumentBlockMeta;
+    content: string;
+    marks: DocumentMark[];
+    children: ParsedDocumentBlock[];
+};
+
+const ROOT_ID = lamportToString([0, 'root']);
+const ROOT: [number, string] = [0, 'root'];
+const BLOCK_TYPES = new Set<DocumentBlockType>([
+    'paragraph',
+    'heading',
+    'list_item',
+    'todo',
+    'blockquote',
+    'code',
+    'callout',
+    'recipe_ingredient',
+    'table',
+    'image',
+    'preview',
+]);
+const IMAGE_SIZES = new Set<ImagePresentationSize>(['small', 'medium', 'large', 'original']);
+const BOOLEAN_MARK_TYPES = new Set(['bold', 'italic', 'strikethrough']);
+
+export class DocumentFormatError extends Error {
+    constructor(path: string, message: string) {
+        super(`${path}: ${message}`);
+        this.name = 'DocumentFormatError';
+    }
+}
+
+export const importDocument = (document: unknown, context: CommandContext): ImportDocumentResult => {
+    const parsed = parseDocument(document);
+    let working = emptyDocumentState();
+    const ops: Array<Op<RichBlockMeta>> = [];
+    const blockIds: string[] = [];
+
+    const insertChildren = (children: ParsedDocumentBlock[], parentId: string): string[] => {
+        const insertedIds: string[] = [];
+        let previousSiblingId: string | null = null;
+        for (const child of children) {
+            const parent = parentId === ROOT_ID ? ROOT : working.state.blocks[parentId]?.id;
+            if (!parent) {
+                throw new Error(`Import parent block ${parentId} not found`);
+            }
+            const blockOps = insertBlockOps(working, {
+                actor: context.actor,
+                parent,
+                before: previousSiblingId ? working.state.blocks[previousSiblingId].id : null,
+                after: null,
+                meta: richMetaForDocumentBlock(child, context.nextTs()),
+                ts: context.nextTs(),
+                virtualParents: annotationVirtualParents(working),
+            });
+            working = applyOps(working, blockOps);
+            ops.push(...blockOps);
+            const inserted = insertedBlockId(blockOps);
+            previousSiblingId = inserted;
+            insertedIds.push(inserted);
+
+            if (child.content) {
+                const textOps = insertTextOps(working, {
+                    actor: context.actor,
+                    block: working.state.blocks[inserted].id,
+                    offset: 0,
+                    text: child.content,
+                    ts: context.nextTs,
+                });
+                working = applyOps(working, textOps);
+                ops.push(...textOps);
+            }
+
+            for (const mark of child.marks) {
+                const markOp = markOpForDocumentMark(working, inserted, mark, context);
+                working = applyOps(working, [markOp]);
+                ops.push(markOp);
+            }
+
+            insertChildren(child.children, inserted);
+        }
+        return insertedIds;
+    };
+
+    blockIds.push(...insertChildren(parsed, ROOT_ID));
+    return {state: working, ops, blockIds};
+};
+
+export const exportDocument = (state: CachedState<RichBlockMeta>): ExportDocument =>
+    visibleBlockChildren(state, ROOT_ID, annotationVirtualParents(state)).map((blockId) =>
+        exportBlock(state, blockId),
+    );
+
+const parseDocument = (value: unknown): ParsedDocumentBlock[] => {
+    if (!Array.isArray(value)) {
+        throw new DocumentFormatError('$', 'document must be an array');
+    }
+    return value.map((block, index) => parseBlock(block, `$[${index}]`));
+};
+
+const parseBlock = (value: unknown, path: string): ParsedDocumentBlock => {
+    if (!isRecord(value)) {
+        throw new DocumentFormatError(path, 'block must be an object');
+    }
+    const rawType = value.type ?? 'paragraph';
+    if (typeof rawType !== 'string' || !BLOCK_TYPES.has(rawType as DocumentBlockType)) {
+        throw new DocumentFormatError(`${path}.type`, 'must be a known block type');
+    }
+    const type = rawType as DocumentBlockType;
+    const meta = parseMeta(type, value.meta, `${path}.meta`);
+    const content = value.content ?? '';
+    if (typeof content !== 'string') {
+        throw new DocumentFormatError(`${path}.content`, 'must be a string');
+    }
+    const marks = parseMarks(value.marks, content, `${path}.marks`);
+    const children = parseChildren(value.children, `${path}.children`);
+    return {type, meta, content, marks, children};
+};
+
+const parseChildren = (value: unknown, path: string): ParsedDocumentBlock[] => {
+    if (value === undefined) return [];
+    if (!Array.isArray(value)) {
+        throw new DocumentFormatError(path, 'must be an array');
+    }
+    return value.map((child, index) => parseBlock(child, `${path}[${index}]`));
+};
+
+const parseMarks = (value: unknown, content: string, path: string): DocumentMark[] => {
+    if (value === undefined) return [];
+    if (!Array.isArray(value)) {
+        throw new DocumentFormatError(path, 'must be an array');
+    }
+    const contentLength = graphemeLength(content);
+    return value.map((mark, index) => parseMark(mark, contentLength, `${path}[${index}]`));
+};
+
+const parseMark = (value: unknown, contentLength: number, path: string): DocumentMark => {
+    if (!isRecord(value)) {
+        throw new DocumentFormatError(path, 'mark must be an object');
+    }
+    if (typeof value.type !== 'string') {
+        throw new DocumentFormatError(`${path}.type`, 'must be a string');
+    }
+    const start = value.start;
+    const end = value.end;
+    if (!Number.isInteger(start)) {
+        throw new DocumentFormatError(`${path}.start`, 'must be an integer grapheme offset');
+    }
+    if (!Number.isInteger(end)) {
+        throw new DocumentFormatError(`${path}.end`, 'must be an integer grapheme offset');
+    }
+    if ((start as number) < 0 || (end as number) <= (start as number) || (end as number) > contentLength) {
+        throw new DocumentFormatError(path, `mark range must satisfy 0 <= start < end <= ${contentLength}`);
+    }
+    if (BOOLEAN_MARK_TYPES.has(value.type)) {
+        return {type: value.type as 'bold' | 'italic' | 'strikethrough', start: start as number, end: end as number};
+    }
+    if (value.type === 'code') {
+        if (value.language !== undefined && typeof value.language !== 'string') {
+            throw new DocumentFormatError(`${path}.language`, 'must be a string');
+        }
+        const language = typeof value.language === 'string' ? normalizeStoredCodeLanguage(value.language) : '';
+        return {
+            type: 'code',
+            start: start as number,
+            end: end as number,
+            ...(language ? {language} : {}),
+        };
+    }
+    if (value.type === 'link') {
+        if (typeof value.href !== 'string' || value.href.length === 0) {
+            throw new DocumentFormatError(`${path}.href`, 'must be a non-empty string');
+        }
+        return {type: 'link', start: start as number, end: end as number, href: value.href};
+    }
+    throw new DocumentFormatError(`${path}.type`, 'must be a supported mark type');
+};
+
+const parseMeta = (type: DocumentBlockType, value: unknown, path: string): DocumentBlockMeta => {
+    const meta = value === undefined ? {} : value;
+    if (!isRecord(meta)) {
+        throw new DocumentFormatError(path, 'must be an object');
+    }
+    switch (type) {
+        case 'paragraph':
+        case 'blockquote':
+        case 'recipe_ingredient':
+        case 'table':
+            return {};
+        case 'heading': {
+            const level = meta.level ?? 1;
+            if (level !== 1 && level !== 2 && level !== 3) {
+                throw new DocumentFormatError(`${path}.level`, 'must be 1, 2, or 3');
+            }
+            return {level};
+        }
+        case 'list_item': {
+            const kind = meta.kind ?? 'unordered';
+            if (kind !== 'ordered' && kind !== 'unordered') {
+                throw new DocumentFormatError(`${path}.kind`, 'must be "ordered" or "unordered"');
+            }
+            return {kind};
+        }
+        case 'todo': {
+            const checked = meta.checked ?? false;
+            if (typeof checked !== 'boolean') {
+                throw new DocumentFormatError(`${path}.checked`, 'must be a boolean');
+            }
+            return {checked};
+        }
+        case 'code': {
+            const language = meta.language ?? '';
+            if (typeof language !== 'string') {
+                throw new DocumentFormatError(`${path}.language`, 'must be a string');
+            }
+            return {language: normalizeStoredCodeLanguage(language)};
+        }
+        case 'callout': {
+            const kind = meta.kind ?? 'info';
+            if (kind !== 'info' && kind !== 'warning' && kind !== 'error') {
+                throw new DocumentFormatError(`${path}.kind`, 'must be "info", "warning", or "error"');
+            }
+            return {kind};
+        }
+        case 'image': {
+            if (typeof meta.attachmentId !== 'string' || meta.attachmentId.length === 0) {
+                throw new DocumentFormatError(`${path}.attachmentId`, 'must be a non-empty string');
+            }
+            const size = meta.size ?? 'medium';
+            if (typeof size !== 'string' || !IMAGE_SIZES.has(size as ImagePresentationSize)) {
+                throw new DocumentFormatError(`${path}.size`, 'must be a valid image size');
+            }
+            return {attachmentId: meta.attachmentId, size: size as ImagePresentationSize};
+        }
+        case 'preview': {
+            if (typeof meta.url !== 'string' || meta.url.length === 0) {
+                throw new DocumentFormatError(`${path}.url`, 'must be a non-empty string');
+            }
+            if (meta.preview !== undefined && meta.preview !== null && !isPreviewMetadata(meta.preview)) {
+                throw new DocumentFormatError(`${path}.preview`, 'must be null or preview metadata');
+            }
+            return {url: meta.url, preview: (meta.preview ?? null) as PreviewMetadata | null};
+        }
+    }
+};
+
+const richMetaForDocumentBlock = (block: ParsedDocumentBlock, ts: string): RichBlockMeta => {
+    switch (block.type) {
+        case 'paragraph':
+            return {type: 'paragraph', ts};
+        case 'heading':
+            return {type: 'heading', level: block.meta.level ?? 1, ts};
+        case 'list_item':
+            return {type: 'list_item', kind: (block.meta.kind as 'ordered' | 'unordered') ?? 'unordered', ts};
+        case 'todo':
+            return {type: 'todo', checked: block.meta.checked ?? false, ts};
+        case 'blockquote':
+            return {type: 'blockquote', ts};
+        case 'code':
+            return {type: 'code', language: block.meta.language ?? '', ts};
+        case 'callout':
+            return {type: 'callout', kind: (block.meta.kind as 'info' | 'warning' | 'error') ?? 'info', ts};
+        case 'recipe_ingredient':
+            return {type: 'recipe_ingredient', ts};
+        case 'table':
+            return {type: 'table', ts};
+        case 'image':
+            return {
+                type: 'image',
+                attachmentId: block.meta.attachmentId ?? '',
+                size: block.meta.size ?? 'medium',
+                ts,
+            };
+        case 'preview':
+            return {type: 'preview', url: block.meta.url ?? '', preview: block.meta.preview ?? null, ts};
+    }
+};
+
+const markOpForDocumentMark = (
+    state: CachedState<RichBlockMeta>,
+    blockId: string,
+    mark: DocumentMark,
+    context: CommandContext,
+): Op<RichBlockMeta> => {
+    const id = [state.state.maxSeenCount + 1, context.actor] as [number, string];
+    if (mark.type === 'link') {
+        return markRangeOp(state, state.state.blocks[blockId].id, mark.start, mark.end, LINK_MARK, mark.href, false, id);
+    }
+    if (mark.type === 'code') {
+        return markRangeOp(
+            state,
+            state.state.blocks[blockId].id,
+            mark.start,
+            mark.end,
+            CODE_MARK,
+            mark.language || undefined,
+            false,
+            id,
+        );
+    }
+    return markRangeOp(state, state.state.blocks[blockId].id, mark.start, mark.end, mark.type, undefined, false, id);
+};
+
+const exportBlock = (state: CachedState<RichBlockMeta>, blockId: string): DocumentBlock => {
+    const block = state.state.blocks[blockId];
+    const result = documentBlockForMeta(block.meta);
+    const content = blockContents(state, blockId);
+    if (content) result.content = content;
+    const marks = marksForBlock(state, blockId);
+    if (marks.length) result.marks = marks;
+    const children = visibleBlockChildren(state, blockId, annotationVirtualParents(state)).map((childId) =>
+        exportBlock(state, childId),
+    );
+    if (children.length) result.children = children;
+    return result;
+};
+
+const documentBlockForMeta = (meta: RichBlockMeta): DocumentBlock => {
+    switch (meta.type) {
+        case 'paragraph':
+            return {type: 'paragraph'};
+        case 'heading':
+            return {type: 'heading', meta: {level: meta.level}};
+        case 'list_item':
+            return {type: 'list_item', meta: {kind: meta.kind}};
+        case 'todo':
+            return {type: 'todo', meta: {checked: meta.checked}};
+        case 'blockquote':
+            return {type: 'blockquote'};
+        case 'code':
+            return {type: 'code', meta: {language: meta.language}};
+        case 'callout':
+            return {type: 'callout', meta: {kind: meta.kind}};
+        case 'recipe_ingredient':
+            return {type: 'recipe_ingredient'};
+        case 'table':
+            return {type: 'table'};
+        case 'image':
+            return {type: 'image', meta: {attachmentId: meta.attachmentId, size: meta.size}};
+        case 'preview':
+            return {type: 'preview', meta: {url: meta.url, preview: meta.preview}};
+    }
+};
+
+const marksForBlock = (state: CachedState<RichBlockMeta>, blockId: string): DocumentMark[] => {
+    const formatted = materializeFormattedBlocks(state, annotationVirtualParents(state)).find(
+        (block) => block.id === blockId,
+    );
+    if (!formatted) return [];
+    const marks: DocumentMark[] = [];
+    let offset = 0;
+    for (const run of formatted.runs) {
+        const length = segmentGraphemes(run.text).length;
+        const start = offset;
+        const end = offset + length;
+        offset = end;
+        if (length === 0) continue;
+
+        for (const type of ['bold', 'italic', 'strikethrough'] as const) {
+            if (formattedMarkValues(run, type).length) {
+                marks.push({type, start, end});
+            }
+        }
+        for (const value of formattedMarkValues(run, CODE_MARK)) {
+            if (isCodeMarkValue(value)) {
+                const language = typeof value === 'string' ? normalizeStoredCodeLanguage(value) : '';
+                marks.push({type: 'code', start, end, ...(language ? {language} : {})});
+            }
+        }
+        for (const value of formattedMarkValues(run, LINK_MARK)) {
+            if (typeof value === 'string') {
+                marks.push({type: 'link', start, end, href: value});
+            }
+        }
+    }
+    return mergeAdjacentMarks(marks);
+};
+
+const mergeAdjacentMarks = (marks: DocumentMark[]): DocumentMark[] => {
+    const merged: DocumentMark[] = [];
+    for (const mark of marks) {
+        const previous = merged[merged.length - 1];
+        if (previous && marksCanMerge(previous, mark)) {
+            previous.end = mark.end;
+        } else {
+            merged.push({...mark});
+        }
+    }
+    return merged;
+};
+
+const marksCanMerge = (left: DocumentMark, right: DocumentMark): boolean => {
+    if (left.type !== right.type || left.end !== right.start) return false;
+    if (left.type === 'link' && right.type === 'link') return left.href === right.href;
+    if (left.type === 'code' && right.type === 'code') return left.language === right.language;
+    return left.type !== 'link' && left.type !== 'code';
+};
+
+const insertedBlockId = (ops: Array<Op<RichBlockMeta>>): string => {
+    const op = ops[0];
+    if (op?.type !== 'block') {
+        throw new Error('insertBlockOps did not return a block op');
+    }
+    return lamportToString(op.block.id);
+};
+
+const applyOps = (
+    state: CachedState<RichBlockMeta>,
+    ops: Array<Op<RichBlockMeta>>,
+): CachedState<RichBlockMeta> => applyMany(state, ops, annotationVirtualParents(state));
+
+const emptyDocumentState = (): CachedState<RichBlockMeta> =>
+    cachedState<RichBlockMeta>({
+        chars: {},
+        blocks: {},
+        marks: {},
+        splits: {},
+        joins: {},
+        maxSeenCount: 0,
+    } satisfies State<RichBlockMeta>);
+
+const isPreviewMetadata = (value: unknown): value is PreviewMetadata => {
+    if (!isRecord(value)) return false;
+    return (
+        optionalString(value.title) &&
+        optionalString(value.description) &&
+        optionalString(value.siteName) &&
+        optionalString(value.imageUrl) &&
+        optionalString(value.resolvedUrl) &&
+        optionalString(value.fetchedAt)
+    );
+};
+
+const optionalString = (value: unknown): boolean => value === undefined || typeof value === 'string';
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+    typeof value === 'object' && value !== null && !Array.isArray(value);
