@@ -859,6 +859,86 @@ describe('Block rich text example UI', () => {
         }
     });
 
+    it('does not style appending to a kanban column as a card child drop', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'kanban-board'},
+        });
+        await waitFor(() => expect(view.getByText('Loaded fixture: Kanban board.')).toBeTruthy());
+
+        const columns = kanbanColumns(left);
+        const sourceCard = columns[0].querySelector<HTMLElement>('.kanbanCard')!;
+        const targetColumn = columns[1];
+        const targetCards = Array.from(targetColumn.querySelectorAll<HTMLElement>('.kanbanCard'));
+        targetColumn.getBoundingClientRect = () =>
+            ({
+                left: 0,
+                top: 0,
+                right: 260,
+                bottom: 180,
+                width: 260,
+                height: 180,
+                x: 0,
+                y: 0,
+                toJSON: () => ({}),
+            }) as DOMRect;
+        targetCards[targetCards.length - 1].getBoundingClientRect = () =>
+            ({
+                left: 8,
+                top: 64,
+                right: 248,
+                bottom: 112,
+                width: 240,
+                height: 48,
+                x: 8,
+                y: 64,
+                toJSON: () => ({}),
+            }) as DOMRect;
+        const originalElementsFromPoint = document.elementsFromPoint;
+        document.elementsFromPoint = () => [targetColumn.querySelector<HTMLElement>('.kanbanCards')!];
+        try {
+            const handle = within(sourceCard).getByRole('button', {name: 'Move card'}) as HTMLElement & {
+                setPointerCapture?: (pointerId: number) => void;
+            };
+            handle.setPointerCapture = () => {};
+            fireEvent.pointerDown(handle, {
+                button: 0,
+                buttons: 1,
+                isPrimary: true,
+                pointerId: 1,
+                clientX: 24,
+                clientY: 16,
+            });
+            fireEvent.pointerMove(window, {
+                button: 0,
+                buttons: 1,
+                isPrimary: true,
+                pointerId: 1,
+                clientX: 24,
+                clientY: 150,
+            });
+
+            await waitFor(() => {
+                const indicator = targetCards[targetCards.length - 1].querySelector('.blockRow.dropAfter');
+                expect(indicator).toBeTruthy();
+                expect(indicator?.classList.contains('dropChildTarget')).toBe(false);
+            });
+
+            fireEvent.pointerUp(window, {
+                button: 0,
+                buttons: 0,
+                isPrimary: true,
+                pointerId: 1,
+                clientX: 24,
+                clientY: 150,
+            });
+        } finally {
+            document.elementsFromPoint = originalElementsFromPoint;
+        }
+    });
+
     it('does not fallback to a horizontally unrelated kanban column', async () => {
         const view = render(<App />);
         const {left} = panels(view);

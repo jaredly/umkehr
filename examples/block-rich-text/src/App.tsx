@@ -7135,7 +7135,9 @@ function EditableBlock({
                 isDragging ? 'dragging' : '',
                 isDraggingRoot ? 'draggingRoot' : '',
                 dropTarget ? `drop${capitalize(dropTarget.indicatorPlacement)}` : '',
-                dropTarget?.command.type === 'child' ? 'dropChildTarget' : '',
+                dropTarget?.command.type === 'child' && dropTarget.command.parentBlockId === block.id
+                    ? 'dropChildTarget'
+                    : '',
             ]
                 .filter(Boolean)
                 .join(' ')}

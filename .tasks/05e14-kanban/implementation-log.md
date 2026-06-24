@@ -49,3 +49,4 @@
 - Follow-up adjustment: moved self/no-op rejection into target normalization and added an explicit kanban "handled with no target" result, so no-op placements over the dragged card or adjacent sibling do not fall through to a nearby fallback target.
 - Added a UI regression test for dragging a card over its adjacent sibling in a way that would place the card back where it already is.
 - Follow-up adjustment: child drop targets now add a `dropChildTarget` class. Kanban card child indicators use a green, indented line while sibling before/after indicators remain full-width blue.
+- Follow-up fix: `dropChildTarget` now only applies when the block being rendered is the actual child target parent. Appending to a column after its last card remains a full-width sibling-style indicator.
