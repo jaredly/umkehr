@@ -939,6 +939,89 @@ describe('Block rich text example UI', () => {
         }
     });
 
+    it('uses after-card target for the bottom-left of the last card in a kanban column', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'kanban-board'},
+        });
+        await waitFor(() => expect(view.getByText('Loaded fixture: Kanban board.')).toBeTruthy());
+
+        const columns = kanbanColumns(left);
+        const sourceCard = columns[0].querySelector<HTMLElement>('.kanbanCard')!;
+        const targetColumn = columns[1];
+        const nextColumn = columns[2];
+        const targetCards = Array.from(targetColumn.querySelectorAll<HTMLElement>('.kanbanCard'));
+        const lastCard = targetCards[targetCards.length - 1];
+        lastCard.getBoundingClientRect = () =>
+            ({
+                left: 0,
+                top: 64,
+                right: 240,
+                bottom: 112,
+                width: 240,
+                height: 48,
+                x: 0,
+                y: 64,
+                toJSON: () => ({}),
+            }) as DOMRect;
+        nextColumn.getBoundingClientRect = () =>
+            ({
+                left: 300,
+                top: 0,
+                right: 560,
+                bottom: 180,
+                width: 260,
+                height: 180,
+                x: 300,
+                y: 0,
+                toJSON: () => ({}),
+            }) as DOMRect;
+        const originalElementsFromPoint = document.elementsFromPoint;
+        document.elementsFromPoint = () => [lastCard];
+        try {
+            const handle = within(sourceCard).getByRole('button', {name: 'Move card'}) as HTMLElement & {
+                setPointerCapture?: (pointerId: number) => void;
+            };
+            handle.setPointerCapture = () => {};
+            fireEvent.pointerDown(handle, {
+                button: 0,
+                buttons: 1,
+                isPrimary: true,
+                pointerId: 1,
+                clientX: 20,
+                clientY: 16,
+            });
+            fireEvent.pointerMove(window, {
+                button: 0,
+                buttons: 1,
+                isPrimary: true,
+                pointerId: 1,
+                clientX: 20,
+                clientY: 104,
+            });
+
+            await waitFor(() => {
+                const indicator = lastCard.querySelector('.blockRow.dropAfter');
+                expect(indicator).toBeTruthy();
+                expect(indicator?.classList.contains('dropChildTarget')).toBe(false);
+                expect(nextColumn.classList.contains('dropBefore')).toBe(false);
+            });
+
+            fireEvent.pointerUp(window, {
+                button: 0,
+                buttons: 0,
+                isPrimary: true,
+                pointerId: 1,
+                clientX: 20,
+                clientY: 104,
+            });
+        } finally {
+            document.elementsFromPoint = originalElementsFromPoint;
+        }
+    });
+
     it('does not fallback to a horizontally unrelated kanban column', async () => {
         const view = render(<App />);
         const {left} = panels(view);

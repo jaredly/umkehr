@@ -301,7 +301,7 @@ const resolveKanbanDropTarget = (
         const cardId = card.dataset.kanbanCardId;
         const hovered = cardId ? blocks.find((block) => block.id === cardId) : null;
         if (!cardId || !hovered) return null;
-        return resolveDropTarget(blocks, hovered, {
+        return resolveKanbanCardDropTarget(blocks, hovered, {
             clientX,
             clientY,
             rect: card.getBoundingClientRect(),
@@ -352,6 +352,57 @@ const resolveKanbanDropTarget = (
         });
     }
     return null;
+};
+
+const resolveKanbanCardDropTarget = (
+    blocks: BlockOutlineItem[],
+    hovered: BlockOutlineItem,
+    {
+        clientX,
+        clientY,
+        rect,
+        dragged,
+        draggedIds,
+    }: {
+        clientX: number;
+        clientY: number;
+        rect: DOMRect;
+        dragged: string | null;
+        draggedIds: string[];
+    },
+): DropTarget | null => {
+    const ratio = rect.height > 0 ? (clientY - rect.top) / rect.height : 0.5;
+    const childIntent = clientX >= rect.left + 64;
+
+    if (childIntent && ratio >= 0.25 && ratio <= 0.75) {
+        const at = ratio < 0.5 ? 'start' : 'end';
+        return normalizeDropTarget(blocks, hovered, {
+            command: {type: 'child', parentBlockId: hovered.id, at},
+            ...targetChildIndicator(blocks, hovered, at),
+            dragged,
+            draggedIds,
+        });
+    }
+
+    if (ratio < 0.5) {
+        return normalizeDropTarget(blocks, hovered, {
+            command: {type: 'before', targetBlockId: hovered.id},
+            indicatorBlockId: hovered.id,
+            indicatorPlacement: 'before',
+            indicatorDepth: hovered.depth,
+            dragged,
+            draggedIds,
+        });
+    }
+
+    return normalizeDropTarget(blocks, hovered, {
+        command: {type: 'after', targetBlockId: hovered.id},
+        indicatorBlockId: hovered.id,
+        indicatorPlacement: 'after',
+        indicatorDepth: hovered.depth,
+        dragged,
+        draggedIds,
+    });
 };
 
 const isRenderedKanbanColumn = (blockId: string): boolean =>
