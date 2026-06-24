@@ -326,12 +326,22 @@ Visual/manual checks:
 ## Open Questions
 
 1. What default columns should a newly converted kanban board create?
+    - todo, in progress, done
 2. Should a board title be editable as the kanban block's own text, matching table titles?
+    - yes
 3. Should column drag/reorder ship in the first version, or only card drag/reorder?
+    - yes
 4. Should dragging a column out of a board be allowed as a normal block move?
+    - yes
 5. Should dropping a card into the blank body of a card make it a child, or should child drops require hovering the card title/body center?
+    - yes
 6. Should cards expose normal block affordances, a dedicated card drag handle, or both?
+    - dedicated handle
 7. Should Enter at the end of a card create a sibling card, a child/body block, or keep the existing generic split behavior?
+    - generic split (will create a sibling)
 8. Should empty columns be preserved when their last card is moved out?
+    - yes
 9. Should outside blocks be draggable into columns in the first pass?
+    - yes
 10. Should kanban-specific keyboard movement exist eventually, e.g. shortcuts to move cards between columns, or is drag-only enough for now?
+    - drag only for now
