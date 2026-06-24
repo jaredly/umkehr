@@ -843,6 +843,27 @@ describe('Block rich text example UI', () => {
         expect(targetCell.querySelectorAll('.tableCellDragEdge')).toHaveLength(2);
     });
 
+    it('shows the cell drag affordance when text inside a table cell is selected', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        selectCaret(blocks(left)[0], 0);
+
+        setBlockType(left, 'table');
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+
+        selectCaret(tableBlocks(left)[0], 0);
+        typeText(tableBlocks(left)[0], 'Cell text');
+        await waitFor(() => expect(tableBlockTexts(left)[0]).toBe('Cell text'));
+
+        selectRange(tableBlocks(left)[0], 0, 4);
+        fireEvent.mouseUp(tableBlocks(left)[0]);
+
+        const activeCell = tableCells(left)[0];
+        await waitFor(() => expect(activeCell.classList.contains('activeTableCell')).toBe(true));
+        expect(activeCell.classList.contains('cellDragCandidate')).toBe(true);
+        expect(activeCell.querySelectorAll('.tableCellDragEdge')).toHaveLength(2);
+    });
+
     it('undoes while a table cell block selection is focused', async () => {
         const view = render(<App />);
         const {left} = panels(view);
@@ -1349,6 +1370,57 @@ describe('Block rich text example UI', () => {
             buttons: 0,
             isPrimary: true,
             pointerId: 2,
+            clientX: 42,
+            clientY: 70,
+        });
+        document.elementsFromPoint = originalElementsFromPoint;
+
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['', '', 'A', 'B']));
+        expect(tableCells(left)[2].classList.contains('cellSelected')).toBe(true);
+        expect(tableCells(left)[3].classList.contains('cellSelectionFocus')).toBe(true);
+    });
+
+    it('drags every table cell touched by a text selection', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        selectCaret(blocks(left)[0], 0);
+
+        setBlockType(left, 'table');
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+        ['A', 'B', 'C', 'D'].forEach((text, index) => {
+            selectCaret(tableBlocks(left)[index], 0);
+            typeText(tableBlocks(left)[index], text);
+        });
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['A', 'B', 'C', 'D']));
+
+        stubTableCellRects(left);
+        selectCrossBlockRange(tableBlocks(left)[0], 0, tableBlocks(left)[1], 1);
+        await waitFor(() => expect(tableCells(left)[1].classList.contains('cellDragCandidate')).toBe(true));
+
+        const rows = Array.from(left.querySelectorAll<HTMLElement>('[data-row-id]'));
+        const originalElementsFromPoint = document.elementsFromPoint;
+        document.elementsFromPoint = () => [rows[1]];
+        fireEvent.pointerDown(tableCells(left)[1], {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 142,
+            clientY: 20,
+        });
+        fireEvent.pointerMove(window, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 70,
+        });
+        fireEvent.pointerUp(window, {
+            button: 0,
+            buttons: 0,
+            isPrimary: true,
+            pointerId: 1,
             clientX: 42,
             clientY: 70,
         });

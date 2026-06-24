@@ -3692,7 +3692,6 @@ function TableBlock({node, context}: {node: RenderTreeNode; context: RenderBlock
                                     const cell = row.children[columnIndex] ?? null;
                                     const canStartCellDrag =
                                         !!cell &&
-                                        context.selection.type === 'table-cells' &&
                                         cell.block.id === selectedCellId;
                                     return (
                                         <div
@@ -3793,6 +3792,10 @@ function TableBlock({node, context}: {node: RenderTreeNode; context: RenderBlock
                                                     node.block.id,
                                                 );
                                                 const selectedRectangle = selectedTableRectangleSelection(
+                                                    context.state,
+                                                    context.selection,
+                                                    node.block.id,
+                                                ) ?? tableCellRectangleSelectionForTextSelection(
                                                     context.state,
                                                     context.selection,
                                                     node.block.id,
@@ -4175,6 +4178,30 @@ const selectedTableRectangleSelection = (
     if (!rectangle || rectangle.cellIds.length <= 1) return null;
     if (fullColumnSelectionCellIds(state, selection, tableId)) return null;
     return selection;
+};
+
+const tableCellRectangleSelectionForTextSelection = (
+    state: Replica['state'],
+    selection: EditorSelection,
+    tableId: string,
+): EditorSelection | null => {
+    if (selection.type !== 'range') return null;
+    const anchorCell = tableCellIdForSelection(state, {
+        type: 'caret',
+        point: selection.anchor,
+    });
+    const focusCell = tableCellIdForSelection(state, {
+        type: 'caret',
+        point: selection.focus,
+    });
+    if (!anchorCell || !focusCell || anchorCell === focusCell) return null;
+    const cellSelection: EditorSelection = {
+        type: 'table-cells',
+        tableId,
+        anchorCellId: anchorCell,
+        focusCellId: focusCell,
+    };
+    return tableCellRectangleForSelection(state, cellSelection) ? cellSelection : null;
 };
 
 const isFocusedCellBorderDrag = (
