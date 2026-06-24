@@ -1,0 +1,2 @@
+examples/block-rich-text: let's add support for "preview chips/cards" as a block type. This would use opengraph as a fallback, but might have special cases for well known sites, and would take a configurable cors-proxy (optional). The URL would be stored on the block meta (LWW). The text contents of the block would serve as a subtitle/description, if present.
+You'd select 'Preview' from the /slash menu, and the 'empty state' would render as a text box to paste in the URL. Thereafter, there would be a little three-dot menu in the top right to edit the URL.

@@ -1877,6 +1877,83 @@ describe('Block rich text example UI', () => {
         expect(tableBlockTexts(right)).toEqual(['', 'cell!', '', '']);
     });
 
+    it('removes an empty table row with Backspace from its empty row header', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'table');
+        await waitFor(() => expect(tableRowHeaders(left)).toHaveLength(2));
+
+        selectCaret(tableRowHeaders(left)[1], 0);
+        fireEvent.keyDown(tableRowHeaders(left)[1], {key: 'Backspace'});
+
+        await waitFor(() => expect(tableRowHeaders(left)).toHaveLength(1));
+        expect(tableBlocks(left)).toHaveLength(2);
+        expect(tableRowHeaders(right)).toHaveLength(1);
+        expect(tableBlocks(right)).toHaveLength(2);
+    });
+
+    it('keeps a non-empty table row when Backspace starts in its empty row header', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'table');
+        await waitFor(() => expect(tableBlocks(left)).toHaveLength(4));
+        selectCaret(tableBlocks(left)[2], 0);
+        beforeInputText(tableBlocks(left)[2], 'cell');
+        await waitFor(() => expect(tableBlockTexts(left)[2]).toBe('cell'));
+
+        selectCaret(tableRowHeaders(left)[1], 0);
+        fireEvent.keyDown(tableRowHeaders(left)[1], {key: 'Backspace'});
+
+        await waitFor(() => expect(tableRowHeaders(left)).toHaveLength(2));
+        expect(tableBlocks(left)).toHaveLength(4);
+        expect(tableBlockTexts(left)[2]).toBe('cell');
+        expect(tableRowHeaders(right)).toHaveLength(2);
+        expect(tableBlocks(right)).toHaveLength(4);
+        expect(tableBlockTexts(right)[2]).toBe('cell');
+        await waitFor(() => expect(domSelectionBlock()).toBe(tableRowHeaders(left)[0]));
+    });
+
+    it('uses normal block shortcuts in table row headers', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'table');
+        await waitFor(() => expect(tableRowHeaders(left)).toHaveLength(2));
+
+        const rowHeader = tableRowHeaders(left)[0];
+        selectCaret(rowHeader, 0);
+        beforeInputText(rowHeader, 'Row');
+        await waitFor(() => expect(blockText(rowHeader)).toBe('Row'));
+
+        selectRange(rowHeader, 0, 3);
+        fireEvent.keyDown(rowHeader, {key: 'x', metaKey: true, shiftKey: true});
+
+        await waitFor(() =>
+            expect(tableRowHeaders(left)[0].querySelector('.markStrikethrough')?.textContent).toBe('Row'),
+        );
+        expect(tableRowHeaders(right)[0].querySelector('.markStrikethrough')?.textContent).toBe('Row');
+    });
+
+    it('changes table row header block types through the normal toolbar', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'table');
+        await waitFor(() => expect(tableRowHeaders(left)).toHaveLength(2));
+
+        selectCaret(tableRowHeaders(left)[0], 0);
+        setBlockType(left, 'heading2');
+
+        await waitFor(() => expect(tableRowHeaders(left)[0].classList.contains('headingLevel2')).toBe(true));
+        expect(tableRowHeaders(right)[0].classList.contains('headingLevel2')).toBe(true);
+    });
+
     it('keeps focus in the code language field while typing', async () => {
         const view = render(<App />);
         const {left, right} = panels(view);

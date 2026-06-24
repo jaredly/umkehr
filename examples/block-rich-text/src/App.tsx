@@ -39,6 +39,7 @@ import {
     convertBlockToTable,
     createMissingTableCell,
     deleteEmptyTableRowBackward,
+    deleteTableRowHeaderBackward,
     deleteTableCellSelection,
     exitEmptyLastTableRow,
     insertInlineEmbed,
@@ -3917,190 +3918,15 @@ function TableRowHeader({
             >
                 ⋮
             </button>
-            <RichTextEditableSurface
-                blockId={row.id}
-                runs={row.runs}
-                charIdsByOffset={context.charIdsByBlock.get(row.id) ?? []}
-                decorations={context.decorationsByBlock.get(row.id) ?? null}
-                pendingCaretRestoreBlockIdRef={context.pendingCaretRestoreBlockIdRef}
-                selection={context.selection}
-                className="editableBlock tableRowHeaderText"
-                ariaLabel={`Row header ${rowIndex + 1}`}
-                placeholder={`${rowIndex + 1}`}
-                popoverTextById={context.popoverTextById}
-                footnoteNumberById={context.footnoteNumberById}
-                onPopoverTriggerEnter={context.onPopoverTriggerEnter}
-                onPopoverTriggerLeave={context.onPopoverTriggerLeave}
-                onLinkHoverEnter={context.showLinkHoverFromRange}
-                onLinkHoverLeave={context.hideLinkHover}
-                onCodeHoverEnter={context.showCodeHoverFromRange}
-                onCodeHoverLeave={context.hideCodeHover}
-                onInlineEmbedOpen={context.openInlineEmbed}
-                onInputMeasured={context.onInputMeasured}
-                onDisplayInputRenderStarted={context.onDisplayInputRenderStarted}
-                onInsertText={(text, activeSelection) =>
-                    context.runEditCommand((current, selection) =>
-                        context.insertText(
-                            current,
-                            activeSelection
-                                ? replacePrimarySelection(current.state, selection, activeSelection)
-                                : selection,
-                            text,
-                        ),
-                    )
-                }
-                onDeleteBackward={(activeSelection) =>
-                    context.runEditCommand((current, selection) =>
-                        deleteBackwardEverywhere(
-                            current.state,
-                            activeSelection
-                                ? replacePrimarySelection(current.state, selection, activeSelection)
-                                : selection,
-                            makeCommandContext(current),
-                        ),
-                    )
-                }
-                onDeleteForward={(activeSelection) =>
-                    context.runEditCommand((current, selection) =>
-                        deleteForwardEverywhere(
-                            current.state,
-                            activeSelection
-                                ? replacePrimarySelection(current.state, selection, activeSelection)
-                                : selection,
-                            makeCommandContext(current),
-                        ),
-                    )
-                }
-                onKeyDown={(event) => {
-                    context.onKeystroke(row.id, event);
-                    const modifierPressed = event.metaKey || event.ctrlKey;
-                    const key = event.key.toLowerCase();
-                    if (modifierPressed && key === 'z' && event.shiftKey) {
-                        event.preventDefault();
-                        context.onRedo();
-                    } else if (modifierPressed && key === 'z') {
-                        event.preventDefault();
-                        context.onUndo();
-                    } else if (modifierPressed && key === 'y') {
-                        event.preventDefault();
-                        context.onRedo();
-                    } else if (modifierPressed && key === 'b') {
-                        event.preventDefault();
-                        context.runInlineMarkToggle('bold');
-                    } else if (modifierPressed && key === 'i') {
-                        event.preventDefault();
-                        context.runInlineMarkToggle('italic');
-                    } else if (modifierPressed && key === 'k') {
-                        event.preventDefault();
-                        context.openLinkFromCurrentSelection();
-                    } else if (event.key === 'Enter') {
-                        event.preventDefault();
-                        context.runEditCommand((current, selection) =>
-                            splitBlockEverywhere(
-                                current.state,
-                                selection,
-                                makeCommandContext(current),
-                            ),
-                        );
-                    } else if (event.key === 'Backspace') {
-                        event.preventDefault();
-                        context.runEditCommand((current, selection) =>
-                            deleteBackwardEverywhere(
-                                current.state,
-                                selection,
-                                makeCommandContext(current),
-                            ),
-                        );
-                    } else if (event.key === 'Delete') {
-                        event.preventDefault();
-                        context.runEditCommand((current, selection) =>
-                            deleteForwardEverywhere(
-                                current.state,
-                                selection,
-                                makeCommandContext(current),
-                            ),
-                        );
-                    } else if (
-                        isPlainArrowKey(event.key) &&
-                        event.shiftKey &&
-                        !event.altKey &&
-                        !modifierPressed
-                    ) {
-                        const currentSelection = readSelectionFromDom(event.currentTarget);
-                        const focus = currentSelection ? focusPoint(currentSelection) : null;
-                        const direction =
-                            event.key === 'ArrowLeft'
-                                ? 'left'
-                                : event.key === 'ArrowRight'
-                                  ? 'right'
-                                  : event.key === 'ArrowUp'
-                                    ? 'up'
-                                    : 'down';
-                        const shouldHandle =
-                            !!currentSelection &&
-                            ((event.key === 'ArrowLeft' && focus?.offset === 0) ||
-                                (event.key === 'ArrowRight' &&
-                                    focus?.offset === pointTextLength(context.state, row.id)) ||
-                                (event.key === 'ArrowUp' &&
-                                    isCaretOnFirstVisualLine(event.currentTarget)) ||
-                                (event.key === 'ArrowDown' &&
-                                    isCaretOnLastVisualLine(event.currentTarget)));
-                        if (
-                            shouldHandle &&
-                            context.extendTableSelectionByArrowKey(
-                                currentSelection,
-                                direction,
-                                event.currentTarget,
-                            )
-                        ) {
-                            event.preventDefault();
-                        }
-                    } else if (
-                        isPlainArrowKey(event.key) &&
-                        !event.shiftKey &&
-                        !event.altKey &&
-                        !modifierPressed
-                    ) {
-                        const currentSelection = readSelectionFromDom(event.currentTarget);
-                        const focus = currentSelection ? focusPoint(currentSelection) : null;
-                        const direction =
-                            event.key === 'ArrowLeft'
-                                ? 'left'
-                                : event.key === 'ArrowRight'
-                                  ? 'right'
-                                  : event.key === 'ArrowUp'
-                                    ? 'up'
-                                    : 'down';
-                        const shouldHandle =
-                            currentSelection?.type === 'caret' &&
-                            ((event.key === 'ArrowLeft' && focus?.offset === 0) ||
-                                (event.key === 'ArrowRight' &&
-                                    focus?.offset === pointTextLength(context.state, row.id)) ||
-                                (event.key === 'ArrowUp' &&
-                                    isCaretOnFirstVisualLine(event.currentTarget)) ||
-                                (event.key === 'ArrowDown' &&
-                                    isCaretOnLastVisualLine(event.currentTarget)));
-                        if (
-                            shouldHandle &&
-                            context.moveTableSelectionByArrowKey(
-                                currentSelection,
-                                direction,
-                                event.currentTarget,
-                            )
-                        ) {
-                            event.preventDefault();
-                        }
-                    } else if (event.key === 'Tab' && !event.altKey && !modifierPressed) {
-                        event.preventDefault();
-                        context.moveSelectionsHorizontallyEverywhere(
-                            event.shiftKey ? 'left' : 'right',
-                            'block',
-                        );
-                    }
-                }}
-                onCopy={context.onCopy}
-                onPaste={context.onPaste}
-            />
+            {renderEditableBlock({...row, depth: 0}, context, {
+                variant: 'table-row-header',
+                ariaLabel: `Row header ${rowIndex + 1}`,
+                placeholder: `${rowIndex + 1}`,
+                surfaceClassName: 'tableRowHeaderText',
+                hideBlockAffordance: true,
+                hideInlineControls: true,
+                registerBlockRow: false,
+            })}
         </div>
     );
 }
@@ -4264,7 +4090,21 @@ const tableCellElementFromPoint = (
         .map((element) => element.closest<HTMLElement>('.tableCell[data-cell-id]'))
         .find((element): element is HTMLElement => !!element?.dataset.cellId) ?? null;
 
-const renderEditableBlock = (block: RichFormattedBlock, context: RenderBlockContext) => {
+type EditableBlockRenderOptions = {
+    variant?: 'block' | 'table-row-header';
+    ariaLabel?: string;
+    placeholder?: string;
+    surfaceClassName?: string;
+    hideBlockAffordance?: boolean;
+    hideInlineControls?: boolean;
+    registerBlockRow?: boolean;
+};
+
+const renderEditableBlock = (
+    block: RichFormattedBlock,
+    context: RenderBlockContext,
+    options: EditableBlockRenderOptions = {},
+) => {
     const index = context.blocks.findIndex((candidate) => candidate.id === block.id);
     const previousBlock = context.blocks[index - 1] ?? null;
     const nextBlock = context.blocks[index + 1] ?? null;
@@ -4277,6 +4117,13 @@ const renderEditableBlock = (block: RichFormattedBlock, context: RenderBlockCont
                     ? context.attachments.get(block.block.meta.attachmentId) ?? null
                     : null
             }
+            variant={options.variant}
+            ariaLabel={options.ariaLabel}
+            placeholder={options.placeholder}
+            surfaceClassName={options.surfaceClassName}
+            hideBlockAffordance={options.hideBlockAffordance}
+            hideInlineControls={options.hideInlineControls}
+            registerBlockRow={options.registerBlockRow}
             isTableCell={isTableCellBlock(context.state, block.id)}
             listNumber={context.orderedListNumbers.get(block.id) ?? null}
             previousBlockId={previousBlock?.id ?? null}
@@ -4334,6 +4181,22 @@ const renderEditableBlock = (block: RichFormattedBlock, context: RenderBlockCont
                                 tableResult.state,
                                 current.selection,
                                 tableResult.selection,
+                            ),
+                        };
+                    }
+                    const rowHeaderResult = deleteTableRowHeaderBackward(
+                        current.state,
+                        selected,
+                        makeCommandContext(current),
+                    );
+                    if (commandApplied(rowHeaderResult)) {
+                        return {
+                            state: rowHeaderResult.state,
+                            ops: rowHeaderResult.ops,
+                            selection: replacePrimarySelection(
+                                rowHeaderResult.state,
+                                current.selection,
+                                rowHeaderResult.selection,
                             ),
                         };
                     }
@@ -6049,6 +5912,13 @@ function Toolbar({
 function EditableBlock({
     block,
     attachment,
+    variant = 'block',
+    ariaLabel = 'Block text',
+    placeholder,
+    surfaceClassName,
+    hideBlockAffordance = false,
+    hideInlineControls = false,
+    registerBlockRow = true,
     isTableCell,
     listNumber,
     previousBlockId,
@@ -6115,6 +5985,13 @@ function EditableBlock({
 }: {
     block: RichFormattedBlock;
     attachment: ImageAttachment | null;
+    variant?: 'block' | 'table-row-header';
+    ariaLabel?: string;
+    placeholder?: string;
+    surfaceClassName?: string;
+    hideBlockAffordance?: boolean;
+    hideInlineControls?: boolean;
+    registerBlockRow?: boolean;
     isTableCell: boolean;
     listNumber: number | null;
     previousBlockId: string | null;
@@ -6222,10 +6099,12 @@ function EditableBlock({
                 meta.type === 'code' ? 'codeBlock' : '',
                 meta.type === 'heading' ? `headingLevel${meta.level}` : '',
                 meta.type === 'image' ? 'imageCaption' : '',
+                surfaceClassName ?? '',
             ]
                 .filter(Boolean)
                 .join(' ')}
-            ariaLabel="Block text"
+            ariaLabel={ariaLabel}
+            placeholder={placeholder}
             trailingCodeNewline={codeHasTrailingNewline}
             syntaxTokens={syntaxTokens}
             popoverTextById={popoverTextById}
@@ -6492,9 +6371,12 @@ function EditableBlock({
 
     return (
         <div
-            ref={(element) => registerRow(block.id, element)}
+            ref={(element) => {
+                if (registerBlockRow) registerRow(block.id, element);
+            }}
             className={[
                 'blockRow',
+                variant === 'table-row-header' ? 'tableRowHeaderBlock' : '',
                 `blockType-${meta.type}`,
                 meta.type === 'callout' ? `callout${capitalize(meta.kind)}` : '',
                 blockLevelDecoration?.selected ? 'blockSelected' : '',
@@ -6513,7 +6395,7 @@ function EditableBlock({
                 } as CSSProperties
             }
         >
-            {!isTableCell && (
+            {!isTableCell && !hideBlockAffordance && (
                 <BlockAffordance
                     blockId={block.id}
                     meta={meta}
@@ -6531,12 +6413,14 @@ function EditableBlock({
             ) : (
                 editableSurface
             )}
-            <BlockInlineControls
-                meta={meta}
-                onSetCodeLanguage={onSetCodeLanguage}
-                onSetCalloutKind={onSetCalloutKind}
-                onSetImageSize={onSetImageSize}
-            />
+            {!hideInlineControls && (
+                <BlockInlineControls
+                    meta={meta}
+                    onSetCodeLanguage={onSetCodeLanguage}
+                    onSetCalloutKind={onSetCalloutKind}
+                    onSetImageSize={onSetImageSize}
+                />
+            )}
         </div>
     );
 }
