@@ -168,11 +168,20 @@ Mock preview fetching in App tests rather than doing real network I/O.
 ## Open Questions
 
 - Should the preview visual be one responsive card, a selectable `card`/`chip` presentation, or a heuristic based on viewport/content?
+    - card
 - Where should the optional CORS proxy be configured in this example: hardcoded constant, `App` prop, environment variable, or toolbar/debug setting?
+    - let's skip it for now
 - Should fetched Open Graph data be purely ephemeral view state, or should successful metadata be cached/stored in block meta for deterministic offline replay?
+    - cache in the block meta
 - Which well-known sites should be special-cased for the initial implementation?
+    - we can ignore that for now
 - Should converting an existing non-empty paragraph with `/ Preview` preserve that text as the subtitle, or should the slash command always create an empty preview block with a URL box?
+    - block content is a subtitle
 - Should toolbar block-type selection include `Preview`, or should preview creation be slash-menu only?
+    - sure
 - What URL validation should be accepted: only absolute `http(s)` URLs, or should bare domains like `example.com` be normalized?
+    - absolute only
 - Should the preview card be allowed inside table cells and annotation body blocks, or should slash command availability exclude those contexts?
+    - everywhere
 - If a remote edit changes the URL while the local user is editing the URL textbox, should the local draft win on commit or should the UI surface the remote update?
+    - win on commit

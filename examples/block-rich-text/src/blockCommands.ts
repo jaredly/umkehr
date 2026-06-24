@@ -76,6 +76,17 @@ export type MoveTarget =
     | {type: 'after'; targetBlockId: string}
     | {type: 'child'; parentBlockId: string; at: 'start' | 'end'};
 
+export type TableRowSlotTarget = {
+    tableId: string;
+    beforeRowId: string | null;
+    afterRowId: string | null;
+};
+
+export type TableCellSlotTarget = {
+    rowId: string;
+    index: number;
+};
+
 const ROOT: Lamport = [0, 'root'];
 const ROOT_ID = lamportToString(ROOT);
 
@@ -1681,7 +1692,7 @@ export const moveTableCellByTab = (
 export const moveTableCell = (
     state: CachedState<RichBlockMeta>,
     cellId: string,
-    target: {rowId: string; index: number},
+    target: TableCellSlotTarget,
     context: CommandContext,
 ): CommandResult => {
     const cell = tableCellContext(state, cellId);
@@ -1725,10 +1736,207 @@ export const moveTableCell = (
     return {state: next, ops, selection: caret(cellId, 0)};
 };
 
+export const moveTableCellsToNewRow = (
+    state: CachedState<RichBlockMeta>,
+    cellIds: string[],
+    target: TableRowSlotTarget,
+    context: CommandContext,
+): CommandResult => {
+    const table = state.state.blocks[target.tableId];
+    if (!table || table.meta.type !== 'table') {
+        return {state, ops: [], selection: caret(target.tableId, 0)};
+    }
+    const rowAnchors = rowSlotAnchors(state, target);
+    if (!rowAnchors) return {state, ops: [], selection: caret(target.tableId, 0)};
+
+    const orderedCellIds = orderBlockIdsByVisiblePosition(state, cellIds).filter((cellId) =>
+        Boolean(tableCellContext(state, cellId)),
+    );
+    if (!orderedCellIds.length) return {state, ops: [], selection: caret(target.tableId, 0)};
+
+    let working = state;
+    const ops: Array<Op<RichBlockMeta>> = [];
+    const rowOps = insertBlockOps(working, {
+        actor: context.actor,
+        parent: table.id,
+        before: rowAnchors.beforeId ? working.state.blocks[rowAnchors.beforeId].id : null,
+        after: rowAnchors.afterId ? working.state.blocks[rowAnchors.afterId].id : null,
+        meta: paragraphMeta(context.nextTs()),
+        ts: context.nextTs(),
+        virtualParents: annotationVirtualParents(working),
+    });
+    working = applyMany(working, rowOps, annotationVirtualParents(working));
+    ops.push(...rowOps);
+    const rowId = lamportToString(insertedBlockFromOps(rowOps).id);
+
+    let previousCellId: string | null = null;
+    for (const cellId of orderedCellIds) {
+        const cell = working.state.blocks[cellId];
+        if (!cell || cell.deleted) continue;
+        const moveOps = moveBlockOps(working, {
+            actor: context.actor,
+            block: cell.id,
+            parent: working.state.blocks[rowId].id,
+            before: previousCellId ? working.state.blocks[previousCellId].id : null,
+            after: null,
+            ts: context.nextTs(),
+            virtualParents: annotationVirtualParents(working),
+        });
+        working = applyMany(working, moveOps, annotationVirtualParents(working));
+        ops.push(...moveOps);
+        previousCellId = cellId;
+    }
+
+    return {state: working, ops, selection: caret(orderedCellIds[0], 0)};
+};
+
+export const moveTableCellsOutAsBlocks = (
+    state: CachedState<RichBlockMeta>,
+    cellIds: string[],
+    target: MoveTarget,
+    context: CommandContext,
+): CommandResult => {
+    const orderedCellIds = orderDraggedBlockIdsForTarget(state, cellIds, target).filter((cellId) =>
+        Boolean(tableCellContext(state, cellId)),
+    );
+    if (!orderedCellIds.length) {
+        return {state, ops: [], selection: caret(focusTargetBlockId(target), 0)};
+    }
+
+    let working = state;
+    const ops: Array<Op<RichBlockMeta>> = [];
+    for (const cellId of orderedCellIds) {
+        const result = moveBlock(working, cellId, target, context);
+        working = result.state;
+        ops.push(...result.ops);
+    }
+    return {state: working, ops, selection: caret(orderedCellIds[orderedCellIds.length - 1], 0)};
+};
+
+export const moveCellRectangleOutToNewTable = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    target: MoveTarget,
+    context: CommandContext,
+): CommandResult | null => {
+    const rectangle = tableCellRectangleForSelection(state, selection);
+    if (!rectangle) return null;
+    const insertion = resolveInsertionTarget(state, target);
+    if (!insertion) return {state, ops: [], selection};
+
+    const tableMeta: RichBlockMeta = {type: 'table', ts: context.nextTs()};
+    let working = state;
+    const ops: Array<Op<RichBlockMeta>> = [];
+    const tableOps = insertBlockOps(working, {
+        actor: context.actor,
+        parent: parentFromPath(insertion.parentPath),
+        before: insertion.beforeId ? working.state.blocks[insertion.beforeId].id : null,
+        after: insertion.afterId ? working.state.blocks[insertion.afterId].id : null,
+        meta: tableMeta,
+        ts: context.nextTs(),
+        virtualParents: annotationVirtualParents(working),
+    });
+    working = applyMany(working, tableOps, annotationVirtualParents(working));
+    ops.push(...tableOps);
+    const tableId = lamportToString(insertedBlockFromOps(tableOps).id);
+
+    const sourceRows = tableRows(state, rectangle.tableId).slice(
+        rectangle.startRowIndex,
+        rectangle.endRowIndex + 1,
+    );
+    let firstMovedCellId: string | null = null;
+    for (const sourceRowId of sourceRows) {
+        const existingRows = tableRows(working, tableId);
+        const previousRowId = existingRows[existingRows.length - 1] ?? null;
+        const rowOps = insertBlockOps(working, {
+            actor: context.actor,
+            parent: working.state.blocks[tableId].id,
+            before: previousRowId ? working.state.blocks[previousRowId].id : null,
+            after: null,
+            meta: paragraphMeta(context.nextTs()),
+            ts: context.nextTs(),
+            virtualParents: annotationVirtualParents(working),
+        });
+        working = applyMany(working, rowOps, annotationVirtualParents(working));
+        ops.push(...rowOps);
+        const rowId = lamportToString(insertedBlockFromOps(rowOps).id);
+
+        let previousCellId: string | null = null;
+        const sourceCells = tableCells(state, sourceRowId).slice(
+            rectangle.startColumnIndex,
+            rectangle.endColumnIndex + 1,
+        );
+        for (const cellId of sourceCells) {
+            const cell = working.state.blocks[cellId];
+            if (!cell || cell.deleted) continue;
+            const moveOps = moveBlockOps(working, {
+                actor: context.actor,
+                block: cell.id,
+                parent: working.state.blocks[rowId].id,
+                before: previousCellId ? working.state.blocks[previousCellId].id : null,
+                after: null,
+                ts: context.nextTs(),
+                virtualParents: annotationVirtualParents(working),
+            });
+            working = applyMany(working, moveOps, annotationVirtualParents(working));
+            ops.push(...moveOps);
+            previousCellId = cellId;
+            firstMovedCellId ??= cellId;
+        }
+    }
+
+    return {state: working, ops, selection: caret(firstMovedCellId ?? tableId, 0)};
+};
+
+export const moveBlockToTableCellSlot = (
+    state: CachedState<RichBlockMeta>,
+    blockId: string,
+    target: TableCellSlotTarget,
+    context: CommandContext,
+): CommandResult => {
+    const row = state.state.blocks[target.rowId];
+    if (!row || row.meta.type === 'table' || !tableRowContext(state, target.rowId)) {
+        return {state, ops: [], selection: caret(blockId, 0)};
+    }
+
+    let working = state;
+    const ops: Array<Op<RichBlockMeta>> = [];
+    while (tableCells(working, target.rowId).filter((id) => id !== blockId).length < target.index) {
+        const inserted = createMissingTableCell(
+            working,
+            target.rowId,
+            tableCells(working, target.rowId).length,
+            context,
+        );
+        working = inserted.state;
+        ops.push(...inserted.ops);
+    }
+
+    const targetCells = tableCells(working, target.rowId).filter((id) => id !== blockId);
+    const insertIndex = Math.max(0, Math.min(target.index, targetCells.length));
+    const beforeId = insertIndex > 0 ? targetCells[insertIndex - 1] : null;
+    const afterId = targetCells[insertIndex] ?? null;
+    const current = working.state.blocks[blockId];
+    if (!current || current.deleted) return {state: working, ops, selection: caret(blockId, 0)};
+
+    const moveOps = moveBlockOps(working, {
+        actor: context.actor,
+        block: current.id,
+        parent: row.id,
+        before: beforeId ? working.state.blocks[beforeId].id : null,
+        after: afterId ? working.state.blocks[afterId].id : null,
+        ts: context.nextTs(),
+        virtualParents: annotationVirtualParents(working),
+    });
+    working = applyMany(working, moveOps, annotationVirtualParents(working));
+    ops.push(...moveOps);
+    return {state: working, ops, selection: caret(blockId, 0)};
+};
+
 export const moveTableCellRectangleContents = (
     state: CachedState<RichBlockMeta>,
     selection: EditorSelection,
-    target: {rowId: string; index: number},
+    target: TableCellSlotTarget,
     context: CommandContext,
 ): CommandResult | null => {
     if (selection.type !== 'table-cells') return null;
@@ -2454,6 +2662,76 @@ export const moveBlock = (
     });
     const next = applyMany(state, ops, annotationVirtualParents(state));
     return {state: next, ops, selection: caret(movedBlockId, 0)};
+};
+
+const rowSlotAnchors = (
+    state: CachedState<RichBlockMeta>,
+    target: TableRowSlotTarget,
+): {beforeId: string | null; afterId: string | null} | null => {
+    const rows = tableRows(state, target.tableId);
+    if (target.beforeRowId && !rows.includes(target.beforeRowId)) return null;
+    if (target.afterRowId && !rows.includes(target.afterRowId)) return null;
+    if (target.beforeRowId && target.afterRowId) {
+        const beforeIndex = rows.indexOf(target.beforeRowId);
+        const afterIndex = rows.indexOf(target.afterRowId);
+        if (afterIndex !== beforeIndex + 1) return null;
+    }
+    if (!target.beforeRowId && !target.afterRowId && rows.length > 0) return null;
+    return {beforeId: target.beforeRowId, afterId: target.afterRowId};
+};
+
+const orderBlockIdsByVisiblePosition = (
+    state: CachedState<RichBlockMeta>,
+    blockIds: string[],
+): string[] => {
+    const order = editableBlockIds(state);
+    return [...new Set(blockIds)].sort((a, b) => order.indexOf(a) - order.indexOf(b));
+};
+
+const orderDraggedBlockIdsForTarget = (
+    state: CachedState<RichBlockMeta>,
+    blockIds: string[],
+    target: MoveTarget,
+): string[] => {
+    const sorted = orderBlockIdsByVisiblePosition(state, blockIds);
+    if (target.type === 'after' || (target.type === 'child' && target.at === 'start')) {
+        return sorted.reverse();
+    }
+    return sorted;
+};
+
+const focusTargetBlockId = (target: MoveTarget): string =>
+    target.type === 'child' ? target.parentBlockId : target.targetBlockId;
+
+const resolveInsertionTarget = (
+    state: CachedState<RichBlockMeta>,
+    target: MoveTarget,
+): {parentPath: Lamport[]; beforeId: string | null; afterId: string | null} | null => {
+    const targetParentId =
+        target.type === 'child'
+            ? target.parentBlockId
+            : rawParentIdForVisibleBlock(state, target.targetBlockId);
+    if (targetParentId === null) return null;
+    if (target.type === 'child' && tableRowContext(state, target.parentBlockId)) return null;
+
+    const siblings = visibleBlockChildren(state, targetParentId, annotationVirtualParents(state));
+    let insertIndex: number;
+    if (target.type === 'child') {
+        if (targetParentId !== ROOT_ID && !state.state.blocks[targetParentId]) return null;
+        insertIndex = target.at === 'start' ? 0 : siblings.length;
+    } else {
+        const targetIndex = siblings.indexOf(target.targetBlockId);
+        if (targetIndex < 0) return null;
+        insertIndex = target.type === 'after' ? targetIndex + 1 : targetIndex;
+    }
+
+    const parentPath = materializedPathForMoveParent(state, targetParentId);
+    if (!parentPath) return null;
+    return {
+        parentPath,
+        beforeId: insertIndex > 0 ? siblings[insertIndex - 1] : null,
+        afterId: siblings[insertIndex] ?? null,
+    };
 };
 
 const resolveMoveTarget = (

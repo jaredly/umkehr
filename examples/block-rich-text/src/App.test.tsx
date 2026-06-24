@@ -756,6 +756,7 @@ describe('Block rich text example UI', () => {
             clientX: 42,
             clientY: 20,
         });
+        await waitFor(() => expect(firstCell.classList.contains('draggingCell')).toBe(true));
         fireEvent.pointerMove(window, {
             button: 0,
             buttons: 1,
@@ -776,6 +777,181 @@ describe('Block rich text example UI', () => {
         document.elementsFromPoint = originalElementsFromPoint;
 
         await waitFor(() => expect(tableBlockTexts(left)).toEqual(['B', 'C', 'A', 'D']));
+    });
+
+    it('drags a normal block into a table cell boundary', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        selectCaret(blocks(left)[0], 0);
+        typeText(blocks(left)[0], 'Title');
+        fireEvent.keyDown(blocks(left)[0], {key: 'Enter'});
+        await waitFor(() => expect(blocks(left)).toHaveLength(2));
+        selectCaret(blocks(left)[1], 0);
+        typeText(blocks(left)[1], 'Outside');
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'table');
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+        selectCaret(tableBlocks(left)[0], 0);
+        typeText(tableBlocks(left)[0], 'A');
+        await waitFor(() => expect(tableBlockTexts(left)[0]).toBe('A'));
+
+        stubTableCellRects(left);
+        const targetCell = tableCells(left)[0];
+        const outsideBlock = blocks(left).find((block) => blockText(block) === 'Outside');
+        if (!outsideBlock) throw new Error('missing outside block');
+        const handle = outsideBlock.closest<HTMLElement>('.blockRow')?.querySelector<HTMLElement>('button[aria-label="Move block"]');
+        if (!handle) throw new Error('missing outside block handle');
+        const originalElementsFromPoint = document.elementsFromPoint;
+        document.elementsFromPoint = () => [targetCell];
+        dragElementTo(handle, 130, 20);
+        document.elementsFromPoint = originalElementsFromPoint;
+
+        await waitFor(() => expect(tableBlockTexts(left).slice(0, 2)).toEqual(['A', 'Outside']));
+    });
+
+    it('drags a selected table cell out to a normal block drop target', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        selectCaret(blocks(left)[0], 0);
+        typeText(blocks(left)[0], 'Title');
+        fireEvent.keyDown(blocks(left)[0], {key: 'Enter'});
+        await waitFor(() => expect(blocks(left)).toHaveLength(2));
+        selectCaret(blocks(left)[1], 0);
+        typeText(blocks(left)[1], 'Outside');
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'table');
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+        selectCaret(tableBlocks(left)[0], 0);
+        typeText(tableBlocks(left)[0], 'A');
+        await waitFor(() => expect(tableBlockTexts(left)[0]).toBe('A'));
+
+        stubTableCellRects(left);
+        const firstCell = tableCells(left)[0];
+        selectCaret(tableBlocks(left)[0], 0);
+        fireEvent.mouseUp(tableBlocks(left)[0]);
+        await waitFor(() => expect(firstCell.classList.contains('cellDragCandidate')).toBe(true));
+        const outsideBlock = blocks(left).find((block) => blockText(block) === 'Outside');
+        if (!outsideBlock) throw new Error('missing outside block');
+        const outsideRowFor = () =>
+            blocks(left)
+                .find((block) => blockText(block) === 'Outside')
+                ?.closest<HTMLElement>('.blockRow') ?? null;
+        const outsideRow = outsideRowFor();
+        if (!outsideRow) throw new Error('missing outside row');
+        outsideRow.getBoundingClientRect = () =>
+            ({
+                left: 0,
+                top: 160,
+                right: 340,
+                bottom: 200,
+                width: 340,
+                height: 40,
+                x: 0,
+                y: 160,
+                toJSON: () => ({}),
+            }) as DOMRect;
+        const originalElementsFromPoint = document.elementsFromPoint;
+        document.elementsFromPoint = () => [outsideRow];
+
+        fireEvent.pointerDown(firstCell, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 20,
+        });
+        fireEvent.pointerMove(window, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 20,
+            clientY: 190,
+        });
+        await waitFor(() => expect(outsideRowFor()?.classList.contains('dropAfter')).toBe(true));
+        fireEvent.pointerUp(window, {
+            button: 0,
+            buttons: 0,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 20,
+            clientY: 190,
+        });
+        document.elementsFromPoint = originalElementsFromPoint;
+
+        await waitFor(() => {
+            const moved = blocks(left).find(
+                (block) => blockText(block) === 'A' && !block.closest('.tableCell'),
+            );
+            expect(moved).toBeTruthy();
+        });
+    });
+
+    it('drags selected cells into a row gap as a compact new row', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        selectCaret(blocks(left)[0], 0);
+
+        setBlockType(left, 'table');
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+        ['A', 'B', 'C', 'D'].forEach((text, index) => {
+            selectCaret(tableBlocks(left)[index], 0);
+            typeText(tableBlocks(left)[index], text);
+        });
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['A', 'B', 'C', 'D']));
+
+        stubTableCellRects(left);
+        const rows = Array.from(left.querySelectorAll<HTMLElement>('.tableRow[data-row-id]'));
+        rows.forEach((row, rowIndex) => {
+            row.getBoundingClientRect = () =>
+                ({
+                    left: 0,
+                    top: rowIndex * 50,
+                    right: 340,
+                    bottom: rowIndex * 50 + 50,
+                    width: 340,
+                    height: 50,
+                    x: 0,
+                    y: rowIndex * 50,
+                    toJSON: () => ({}),
+                }) as DOMRect;
+        });
+        selectCaret(tableBlocks(left)[0], 0);
+        fireEvent.mouseUp(tableBlocks(left)[0]);
+        const firstCell = tableCells(left)[0];
+        const rowGap = left.querySelector<HTMLElement>('.tableRowInsertControl[data-after-row-id]');
+        if (!rowGap) throw new Error('missing row gap');
+        const originalElementsFromPoint = document.elementsFromPoint;
+        document.elementsFromPoint = () => [rowGap];
+
+        fireEvent.pointerDown(firstCell, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 20,
+        });
+        fireEvent.pointerMove(window, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 52,
+        });
+        fireEvent.pointerUp(window, {
+            button: 0,
+            buttons: 0,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 52,
+        });
+        document.elementsFromPoint = originalElementsFromPoint;
+
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['B', 'A', 'C', 'D']));
     });
 
     it('tabs from a table cell into a single-cell block selection', async () => {

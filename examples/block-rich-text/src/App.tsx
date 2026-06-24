@@ -46,17 +46,23 @@ import {
     insertTextWithMarkdownShortcuts,
     insertTextWithRetainedMarks,
     moveBlock,
+    moveBlockToTableCellSlot,
+    moveCellRectangleOutToNewTable,
     moveTableSelectionByArrow,
     removeCodeMark,
     moveTableCell,
     moveTableCellRectangleContents,
     moveTableCellByTab,
+    moveTableCellsOutAsBlocks,
+    moveTableCellsToNewRow,
     setCodeMark,
     setInlineEmbedDataByCharId,
     setBlockMeta,
     splitTableTitleToParagraph,
     type CommandResult,
+    type MoveTarget,
     type RetainedInlineMarkSession,
+    type TableCellSlotTarget,
 } from './blockCommands';
 import {
     annotationVirtualParents,
@@ -719,6 +725,14 @@ const orderDraggedBlockIds = (
     return sorted;
 };
 
+const orderDraggedBlockIdsForCellSlot = (
+    state: Replica['state'],
+    blockIds: string[],
+): string[] => {
+    const order = editableBlockIds(state);
+    return [...new Set(blockIds)].sort((a, b) => order.indexOf(b) - order.indexOf(a));
+};
+
 function KeyPerfMonitor({samples}: {samples: KeyPerfSample[]}) {
     const latest = samples.at(-1);
     return (
@@ -950,12 +964,27 @@ function BlockEditor({
         () => blockLevelDecorationsForSelectionSet(replica.state, resolvedSelectionSet),
         [replica.state, resolvedSelectionSet],
     );
+    const [cellDragBlockDropTarget, setCellDragBlockDropTarget] = useState<DropTarget | null>(null);
     const {draggingId, draggingSubtreeIds, dropTarget, registerRow, startDrag} = useBlockReorder({
         blocks: blocks.map(({id, depth, parentId}) => ({id, depth, parentId})),
         onMove: (blockIds, target) =>
             onCommand((current) => {
                 let working = current.state;
                 const ops: Array<Op<RichBlockMeta>> = [];
+                if (target.type === 'table-cell-slot') {
+                    const orderedBlockIds = orderDraggedBlockIdsForCellSlot(current.state, blockIds);
+                    for (const blockId of orderedBlockIds) {
+                        const result = moveBlockToTableCellSlot(
+                            working,
+                            blockId,
+                            target.target,
+                            makeCommandContext(current),
+                        );
+                        working = result.state;
+                        ops.push(...result.ops);
+                    }
+                    return {state: working, ops, selection: current.selection};
+                }
                 const orderedBlockIds = orderDraggedBlockIds(current.state, blockIds, target);
                 for (const blockId of orderedBlockIds) {
                     const result = moveBlock(
@@ -2944,6 +2973,8 @@ function BlockEditor({
                                 draggingSubtreeIds,
                                 draggingId,
                                 dropTarget,
+                                cellDragBlockDropTarget,
+                                setCellDragBlockDropTarget,
                                 registerRow,
                                 startDrag,
                                 orderedListNumbers,
@@ -3360,6 +3391,8 @@ type RenderBlockContext = {
     draggingSubtreeIds: Set<string>;
     draggingId: string | null;
     dropTarget: DropTarget | null;
+    cellDragBlockDropTarget: DropTarget | null;
+    setCellDragBlockDropTarget(target: DropTarget | null): void;
     registerRow(id: string, element: HTMLElement | null): void;
     startDrag: ReturnType<typeof useBlockReorder>['startDrag'];
     orderedListNumbers: Map<string, number>;
@@ -3469,12 +3502,27 @@ const renderBlockNode = (node: RenderTreeNode, context: RenderBlockContext): Rea
     );
 };
 
+type TableCellDragTarget =
+    | ({kind: 'cell-slot'} & TableCellSlotTarget)
+    | {
+          kind: 'row-slot';
+          tableId: string;
+          beforeRowId: string | null;
+          afterRowId: string | null;
+          indicatorRowId: string;
+          indicatorPlacement: 'before' | 'after';
+      }
+    | {
+          kind: 'block-slot';
+          dropTarget: DropTarget;
+      };
+
 function TableBlock({node, context}: {node: RenderTreeNode; context: RenderBlockContext}) {
     const [cellDrag, setCellDrag] = useState<{
         sourceCellId: string;
         columnCellIds?: string[];
         rectangleSelection?: EditorSelection;
-        target: {rowId: string; index: number} | null;
+        target: TableCellDragTarget | null;
     } | null>(null);
     const [cellSelectionDrag, setCellSelectionDrag] = useState<{
         tableId: string;
@@ -3492,11 +3540,20 @@ function TableBlock({node, context}: {node: RenderTreeNode; context: RenderBlock
         if (!cellDrag) return;
         const onPointerMove = (event: globalThis.PointerEvent) => {
             event.preventDefault();
+            const nextTarget = tableCellDragTargetFromPoint(
+                event.clientX,
+                event.clientY,
+                node.block.id,
+                context,
+            );
+            context.setCellDragBlockDropTarget(
+                nextTarget?.kind === 'block-slot' ? nextTarget.dropTarget : null,
+            );
             setCellDrag((current) =>
                 current
                     ? {
                           ...current,
-                          target: tableCellDropTargetFromPoint(event.clientX, event.clientY),
+                          target: nextTarget,
                       }
                     : current,
             );
@@ -3504,11 +3561,82 @@ function TableBlock({node, context}: {node: RenderTreeNode; context: RenderBlock
         const onPointerUp = (event: globalThis.PointerEvent) => {
             event.preventDefault();
             const target =
-                tableCellDropTargetFromPoint(event.clientX, event.clientY) ?? cellDrag.target;
+                tableCellDragTargetFromPoint(event.clientX, event.clientY, node.block.id, context) ??
+                cellDrag.target;
             const sourceCellId = cellDrag.sourceCellId;
             setCellDrag(null);
+            context.setCellDragBlockDropTarget(null);
             if (!target) return;
             context.runBlockControlCommand((current) => {
+                const rectangle = cellDrag.rectangleSelection
+                    ? tableCellRectangleForSelection(current.state, cellDrag.rectangleSelection)
+                    : null;
+                const draggedCellIds = cellDrag.columnCellIds?.length
+                    ? cellDrag.columnCellIds
+                    : rectangle?.cellIds.length
+                      ? rectangle.cellIds
+                      : [sourceCellId];
+                if (target.kind === 'row-slot') {
+                    const result = moveTableCellsToNewRow(
+                        current.state,
+                        draggedCellIds,
+                        {
+                            tableId: target.tableId,
+                            beforeRowId: target.beforeRowId,
+                            afterRowId: target.afterRowId,
+                        },
+                        makeCommandContext(current),
+                    );
+                    return {
+                        state: result.state,
+                        ops: result.ops,
+                        selection: replaceSelectionSet(
+                            result.state,
+                            result.selection,
+                            current.selection.primaryId,
+                        ),
+                    };
+                }
+                if (target.kind === 'block-slot') {
+                    const command = target.dropTarget.command;
+                    if (command.type === 'table-cell-slot') {
+                        return {state: current.state, ops: [], selection: current.selection};
+                    }
+                    if (cellDrag.rectangleSelection) {
+                        const result = moveCellRectangleOutToNewTable(
+                            current.state,
+                            cellDrag.rectangleSelection,
+                            command,
+                            makeCommandContext(current),
+                        );
+                        return result
+                            ? {
+                                  state: result.state,
+                                  ops: result.ops,
+                                  selection: replaceSelectionSet(
+                                      result.state,
+                                      result.selection,
+                                      current.selection.primaryId,
+                                  ),
+                              }
+                            : {state: current.state, ops: [], selection: current.selection};
+                    }
+                    const result = moveTableCellsOutAsBlocks(
+                        current.state,
+                        draggedCellIds,
+                        command,
+                        makeCommandContext(current),
+                    );
+                    return {
+                        state: result.state,
+                        ops: result.ops,
+                        selection: replaceSelectionSet(
+                            result.state,
+                            result.selection,
+                            current.selection.primaryId,
+                        ),
+                    };
+                }
                 if (cellDrag.rectangleSelection) {
                     const result = moveTableCellRectangleContents(
                         current.state,
@@ -3555,7 +3683,10 @@ function TableBlock({node, context}: {node: RenderTreeNode; context: RenderBlock
                 return {state: working, ops, selection: current.selection};
             });
         };
-        const onPointerCancel = () => setCellDrag(null);
+        const onPointerCancel = () => {
+            setCellDrag(null);
+            context.setCellDragBlockDropTarget(null);
+        };
         window.addEventListener('pointermove', onPointerMove, {passive: false});
         window.addEventListener('pointerup', onPointerUp, {passive: false});
         window.addEventListener('pointercancel', onPointerCancel);
@@ -3657,6 +3788,10 @@ function TableBlock({node, context}: {node: RenderTreeNode; context: RenderBlock
                                     context.dropTarget?.indicatorBlockId === row.block.id
                                         ? `drop${capitalize(context.dropTarget.indicatorPlacement)}`
                                         : '',
+                                    cellDrag?.target?.kind === 'row-slot' &&
+                                    cellDrag.target.indicatorRowId === row.block.id
+                                        ? `drop${capitalize(cellDrag.target.indicatorPlacement)}`
+                                        : '',
                                 ]
                                     .filter(Boolean)
                                     .join(' ')}
@@ -3680,6 +3815,10 @@ function TableBlock({node, context}: {node: RenderTreeNode; context: RenderBlock
                                     context.draggingId === row.block.id ? 'draggingRoot' : '',
                                     context.dropTarget?.indicatorBlockId === row.block.id
                                         ? `drop${capitalize(context.dropTarget.indicatorPlacement)}`
+                                        : '',
+                                    cellDrag?.target?.kind === 'row-slot' &&
+                                    cellDrag.target.indicatorRowId === row.block.id
+                                        ? `drop${capitalize(cellDrag.target.indicatorPlacement)}`
                                         : '',
                                 ]
                                     .filter(Boolean)
@@ -3716,12 +3855,32 @@ function TableBlock({node, context}: {node: RenderTreeNode; context: RenderBlock
                                                     ? 'draggingCell'
                                                     : '',
                                                 canStartCellDrag ? 'cellDragCandidate' : '',
-                                                cellDrag?.target?.rowId === row.block.id &&
+                                                cellDrag?.target?.kind === 'cell-slot' &&
+                                                cellDrag.target.rowId === row.block.id &&
                                                 cellDrag.target.index === columnIndex
                                                     ? 'cellDropBefore'
                                                     : '',
-                                                cellDrag?.target?.rowId === row.block.id &&
+                                                cellDrag?.target?.kind === 'cell-slot' &&
+                                                cellDrag.target.rowId === row.block.id &&
                                                 cellDrag.target.index === columnIndex + 1
+                                                    ? 'cellDropAfter'
+                                                    : '',
+                                                context.dropTarget?.indicatorBlockId === cell?.block.id &&
+                                                context.dropTarget?.indicatorPlacement === 'before'
+                                                    ? 'cellDropBefore'
+                                                    : '',
+                                                context.dropTarget?.indicatorBlockId === cell?.block.id &&
+                                                context.dropTarget?.indicatorPlacement === 'after'
+                                                    ? 'cellDropAfter'
+                                                    : '',
+                                                context.dropTarget?.command.type === 'table-cell-slot' &&
+                                                context.dropTarget.command.target.rowId === row.block.id &&
+                                                context.dropTarget.command.target.index === columnIndex
+                                                    ? 'cellDropBefore'
+                                                    : '',
+                                                context.dropTarget?.command.type === 'table-cell-slot' &&
+                                                context.dropTarget.command.target.rowId === row.block.id &&
+                                                context.dropTarget.command.target.index === columnIndex + 1
                                                     ? 'cellDropAfter'
                                                     : '',
                                             ]
@@ -3808,7 +3967,7 @@ function TableBlock({node, context}: {node: RenderTreeNode; context: RenderBlock
                                                         : selectedRectangle
                                                           ? {rectangleSelection: selectedRectangle}
                                                         : {}),
-                                                    target: {rowId: row.block.id, index: columnIndex},
+                                                    target: {kind: 'cell-slot', rowId: row.block.id, index: columnIndex},
                                                 });
                                             }}
                                         >
@@ -3850,6 +4009,9 @@ function TableBlock({node, context}: {node: RenderTreeNode; context: RenderBlock
                         <div
                             className="tableRowInsertControl"
                             aria-label={`Row ${rowIndex + 1} insert control`}
+                            data-table-id={node.block.id}
+                            data-after-row-id={row.block.id}
+                            data-before-row-id={rowNodes[rowIndex + 1]?.block.id}
                         >
                             <button
                                 type="button"
@@ -4056,15 +4218,33 @@ const isCellBorderPointer = (
     );
 };
 
-const tableCellDropTargetFromPoint = (
+const tableCellDragTargetFromPoint = (
     clientX: number,
     clientY: number,
-): {rowId: string; index: number} | null => {
+    tableId: string,
+    context: RenderBlockContext,
+): TableCellDragTarget | null => {
+    const cellSlot = tableCellSlotTargetFromPoint(clientX, clientY, tableId);
+    if (cellSlot) return {kind: 'cell-slot', ...cellSlot};
+    const rowSlot = tableRowSlotTargetFromPoint(clientX, clientY, tableId);
+    if (rowSlot) return rowSlot;
+    const blockSlot = blockDropTargetFromPoint(clientX, clientY, tableId, context);
+    return blockSlot ? {kind: 'block-slot', dropTarget: blockSlot} : null;
+};
+
+const tableCellSlotTargetFromPoint = (
+    clientX: number,
+    clientY: number,
+    tableId: string,
+): TableCellSlotTarget | null => {
+    if (typeof document.elementsFromPoint !== 'function') return null;
     const row = document
         .elementsFromPoint(clientX, clientY)
+        .map((element) => element.closest<HTMLElement>('[data-row-id]'))
         .find(
             (element): element is HTMLElement =>
-                element instanceof HTMLElement && element.matches('[data-row-id]'),
+                !!element?.dataset.rowId &&
+                element.closest<HTMLElement>('[data-table-id]')?.dataset.tableId === tableId,
         );
     if (!row) return null;
     const rowId = row.dataset.rowId;
@@ -4079,6 +4259,179 @@ const tableCellDropTargetFromPoint = (
         return clientX < rect.left + rect.width / 2;
     });
     return {rowId, index: before >= 0 ? before : cells.length};
+};
+
+const tableRowSlotTargetFromPoint = (
+    clientX: number,
+    clientY: number,
+    tableId: string,
+): TableCellDragTarget | null => {
+    const slot =
+        typeof document.elementsFromPoint === 'function'
+            ? document
+                  .elementsFromPoint(clientX, clientY)
+                  .find(
+                      (element): element is HTMLElement =>
+                          element instanceof HTMLElement &&
+                          element.matches('.tableRowInsertControl[data-table-id]') &&
+                          element.dataset.tableId === tableId,
+                  )
+            : null;
+    if (slot) {
+        const afterRowId = slot.dataset.afterRowId ?? null;
+        const beforeRowId = slot.dataset.beforeRowId ?? null;
+        return {
+            kind: 'row-slot',
+            tableId,
+            beforeRowId: afterRowId,
+            afterRowId: beforeRowId,
+            indicatorRowId: afterRowId ?? beforeRowId ?? tableId,
+            indicatorPlacement: afterRowId ? 'after' : 'before',
+        };
+    }
+
+    const table = document.querySelector<HTMLElement>(`[data-table-id="${CSS.escape(tableId)}"]`);
+    if (!table) return null;
+    const rows = Array.from(table.querySelectorAll<HTMLElement>('.tableRow[data-row-id]')).filter(
+        (row) => row.closest<HTMLElement>('[data-table-id]')?.dataset.tableId === tableId,
+    );
+    if (!rows.length) return null;
+    const rowRects = rows.map((row) => ({row, rect: row.getBoundingClientRect()}));
+    const first = rowRects[0];
+    const last = rowRects[rowRects.length - 1];
+    const edgeBand = 8;
+    if (clientY >= first.rect.top - edgeBand && clientY < first.rect.top + edgeBand) {
+        const rowId = first.row.dataset.rowId;
+        return rowId
+            ? {
+                  kind: 'row-slot',
+                  tableId,
+                  beforeRowId: null,
+                  afterRowId: rowId,
+                  indicatorRowId: rowId,
+                  indicatorPlacement: 'before',
+              }
+            : null;
+    }
+    for (let index = 0; index < rowRects.length - 1; index++) {
+        const before = rowRects[index];
+        const after = rowRects[index + 1];
+        if (clientY >= before.rect.bottom - edgeBand && clientY <= after.rect.top + edgeBand) {
+            const beforeRowId = before.row.dataset.rowId;
+            const afterRowId = after.row.dataset.rowId;
+            return beforeRowId && afterRowId
+                ? {
+                      kind: 'row-slot',
+                      tableId,
+                      beforeRowId,
+                      afterRowId,
+                      indicatorRowId: beforeRowId,
+                      indicatorPlacement: 'after',
+                  }
+                : null;
+        }
+    }
+    if (clientY > last.rect.bottom - edgeBand && clientY <= last.rect.bottom + edgeBand) {
+        const rowId = last.row.dataset.rowId;
+        return rowId
+            ? {
+                  kind: 'row-slot',
+                  tableId,
+                  beforeRowId: rowId,
+                  afterRowId: null,
+                  indicatorRowId: rowId,
+                  indicatorPlacement: 'after',
+              }
+            : null;
+    }
+    return null;
+};
+
+const blockDropTargetFromPoint = (
+    clientX: number,
+    clientY: number,
+    sourceTableId: string,
+    context: RenderBlockContext,
+): DropTarget | null => {
+    const blockElement =
+        typeof document.elementsFromPoint === 'function'
+            ? document
+                  .elementsFromPoint(clientX, clientY)
+                  .map((element) => blockElementFromHitTestElement(element))
+                  .find(
+                      (element): element is HTMLElement =>
+                          !!element?.dataset.blockId &&
+                          element.closest<HTMLElement>('[data-table-id]')?.dataset.tableId !== sourceTableId,
+                  )
+            : null;
+    if (blockElement) return dropTargetForBlockElement(blockElement, clientY, context);
+
+    const rows = context.blocks
+        .map((block) => {
+            const editable = document.querySelector<HTMLElement>(
+                `[data-block-id="${CSS.escape(block.id)}"]`,
+            );
+            const row = editable?.closest<HTMLElement>('.blockRow');
+            if (!row || row.closest<HTMLElement>('[data-table-id]')?.dataset.tableId === sourceTableId) {
+                return null;
+            }
+            return {block, row, rect: row.getBoundingClientRect()};
+        })
+        .filter((row) => row !== null);
+    if (!rows.length) return null;
+
+    const containing = rows.find(({rect}) => clientY >= rect.top && clientY <= rect.bottom);
+    if (containing) return dropTargetForBlockElement(containing.row, clientY, context, containing.block);
+
+    const before = rows.find(({rect}) => clientY < rect.top);
+    if (before) {
+        return {
+            command: {type: 'before', targetBlockId: before.block.id},
+            indicatorBlockId: before.block.id,
+            indicatorPlacement: 'before',
+            indicatorDepth: before.block.depth,
+        };
+    }
+    const last = rows[rows.length - 1];
+    return {
+        command: {type: 'after', targetBlockId: last.block.id},
+        indicatorBlockId: last.block.id,
+        indicatorPlacement: 'after',
+        indicatorDepth: last.block.depth,
+    };
+};
+
+const blockElementFromHitTestElement = (element: Element): HTMLElement | null => {
+    const editable = element.closest<HTMLElement>('[data-block-id]');
+    if (editable) return editable;
+    const row = element.closest<HTMLElement>('.blockRow');
+    return row?.querySelector<HTMLElement>('[data-block-id]') ?? null;
+};
+
+const dropTargetForBlockElement = (
+    blockElement: HTMLElement,
+    clientY: number,
+    context: RenderBlockContext,
+    knownBlock?: RichFormattedBlock,
+): DropTarget | null => {
+    const blockId = blockElement.dataset.blockId;
+    const block = knownBlock ?? (blockId ? context.blocks.find((candidate) => candidate.id === blockId) : null);
+    if (!block) return null;
+    const row = blockElement.classList.contains('blockRow')
+        ? blockElement
+        : blockElement.closest<HTMLElement>('.blockRow') ?? blockElement;
+    const rect = row.getBoundingClientRect();
+    const placement = rect.height > 0 && clientY > rect.top + rect.height / 2 ? 'after' : 'before';
+    const command: MoveTarget =
+        placement === 'after'
+            ? {type: 'after', targetBlockId: block.id}
+            : {type: 'before', targetBlockId: block.id};
+    return {
+        command,
+        indicatorBlockId: block.id,
+        indicatorPlacement: placement,
+        indicatorDepth: block.depth,
+    };
 };
 
 const tableCellElementFromPoint = (
@@ -4143,7 +4496,11 @@ const renderEditableBlock = (
             isDraggingRoot={context.draggingId === block.id}
             blockLevelDecoration={context.blockLevelDecorationsByBlock.get(block.id) ?? null}
             dropTarget={
-                context.dropTarget?.indicatorBlockId === block.id ? context.dropTarget : null
+                context.dropTarget?.indicatorBlockId === block.id
+                    ? context.dropTarget
+                    : context.cellDragBlockDropTarget?.indicatorBlockId === block.id
+                      ? context.cellDragBlockDropTarget
+                      : null
             }
             registerRow={context.registerRow}
             onStartDrag={context.startDrag}

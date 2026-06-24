@@ -35,9 +35,13 @@ import {
     insertTextWithMarks,
     insertTextWithRetainedMarks,
     moveBlock,
+    moveBlockToTableCellSlot,
+    moveCellRectangleOutToNewTable,
     moveTableCell,
     moveTableCellRectangleContents,
     moveTableCellByTab,
+    moveTableCellsOutAsBlocks,
+    moveTableCellsToNewRow,
     moveTableRow,
     moveTableSelectionByArrow,
     pastePlainText,
@@ -1334,6 +1338,94 @@ describe('block rich text commands', () => {
         expect(shape.cells[0]).toEqual([secondCell, firstCell]);
         expect(lamportToString(materializedBlockParent(result.state, child.childId, annotationVirtualParents(result.state)))).toBe(firstCell);
         expect(blockContents(result.state, child.childId)).toBe('child');
+    });
+
+    it('moves selected cells into a new row without padding missing columns', () => {
+        const demo = createDemoState();
+        const context = ctx();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = createTable(demo.left.state, caret(blockId, 0), context, {rows: 2, columns: 3});
+        const tableId = rootBlockIds(result.state)[1];
+        let shape = tableShape(result.state, tableId);
+        const [a, b, c] = shape.cells[0];
+        const [d, e, f] = shape.cells[1];
+
+        result = moveTableCellsToNewRow(
+            result.state,
+            [b, e],
+            {tableId, beforeRowId: shape.rows[0], afterRowId: shape.rows[1]},
+            context,
+        );
+        shape = tableShape(result.state, tableId);
+
+        expect(shape.rows).toHaveLength(3);
+        expect(shape.cells).toEqual([[a, c], [b, e], [d, f]]);
+    });
+
+    it('moves table cells out as normal blocks while preserving metadata and children', () => {
+        const demo = createDemoState();
+        const context = ctx();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = createTable(demo.left.state, caret(blockId, 0), context, {rows: 1, columns: 2});
+        const tableId = rootBlockIds(result.state)[1];
+        let shape = tableShape(result.state, tableId);
+        const [firstCell, secondCell] = shape.cells[0];
+        result = setBlockType(result.state, firstCell, {type: 'heading', level: 2, ts: context.nextTs()});
+        const child = insertParagraphChild(result.state, firstCell, context);
+        result = insertText(child.state, caret(child.childId, 0), 'child', context);
+
+        result = moveTableCellsOutAsBlocks(result.state, [firstCell], {type: 'after', targetBlockId: tableId}, context);
+        shape = tableShape(result.state, tableId);
+
+        expect(shape.rows).toHaveLength(1);
+        expect(shape.cells[0]).toEqual([secondCell]);
+        expect(rootBlockIds(result.state)).toContain(firstCell);
+        expect(result.state.state.blocks[firstCell].meta).toMatchObject({type: 'heading', level: 2});
+        expect(lamportToString(materializedBlockParent(result.state, child.childId, annotationVirtualParents(result.state)))).toBe(firstCell);
+        expect(blockContents(result.state, child.childId)).toBe('child');
+    });
+
+    it('moves a rectangular cell selection out to a new table with row parents', () => {
+        const demo = createDemoState();
+        const context = ctx();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = createTable(demo.left.state, caret(blockId, 0), context, {rows: 2, columns: 2});
+        const tableId = rootBlockIds(result.state)[1];
+        const shape = tableShape(result.state, tableId);
+        const [[a, b], [c, d]] = shape.cells;
+
+        const moved = moveCellRectangleOutToNewTable(
+            result.state,
+            {type: 'table-cells', tableId, anchorCellId: a, focusCellId: d},
+            {type: 'after', targetBlockId: tableId},
+            context,
+        );
+        if (!moved) throw new Error('expected rectangular move');
+        result = moved;
+        const oldShape = tableShape(result.state, tableId);
+        const newTableId = rootBlockIds(result.state).find(
+            (id) => id !== tableId && result.state.state.blocks[id]?.meta.type === 'table',
+        );
+
+        expect(oldShape.rows).toEqual(shape.rows);
+        expect(oldShape.cells).toEqual([[], []]);
+        expect(newTableId).toBeTruthy();
+        expect(tableShape(result.state, newTableId!).cells).toEqual([[a, b], [c, d]]);
+    });
+
+    it('moves a normal block into a missing table cell slot', () => {
+        const demo = createDemoState();
+        const context = ctx();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = createTable(demo.left.state, caret(blockId, 0), context, {rows: 1, columns: 1});
+        const tableId = rootBlockIds(result.state)[1];
+        const inserted = insertParagraphAfterBlockForTest(result.state, tableId, context);
+
+        result = moveBlockToTableCellSlot(inserted.state, inserted.blockId, {rowId: tableShape(inserted.state, tableId).rows[0], index: 2}, context);
+        const shape = tableShape(result.state, tableId);
+
+        expect(shape.cells[0]).toHaveLength(3);
+        expect(shape.cells[0][2]).toBe(inserted.blockId);
     });
 
     it('does not indent table cells out of their structural rows', () => {

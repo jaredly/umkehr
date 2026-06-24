@@ -1,5 +1,5 @@
 import {useCallback, useEffect, useMemo, useRef, useState, type PointerEvent} from 'react';
-import type {MoveTarget} from './blockCommands';
+import type {MoveTarget, TableCellSlotTarget} from './blockCommands';
 
 const DRAG_START_THRESHOLD_PX = 4;
 
@@ -10,11 +10,15 @@ export type BlockOutlineItem = {
 };
 
 export type DropTarget = {
-    command: MoveTarget;
+    command: BlockReorderCommand;
     indicatorBlockId: string;
     indicatorPlacement: 'before' | 'after';
     indicatorDepth: number;
 };
+
+export type BlockReorderCommand =
+    | MoveTarget
+    | {type: 'table-cell-slot'; target: TableCellSlotTarget};
 
 type PendingDrag = {
     id: string;
@@ -30,7 +34,7 @@ export function useBlockReorder({
     onMove,
 }: {
     blocks: BlockOutlineItem[];
-    onMove(blockIds: string[], target: MoveTarget): void;
+    onMove(blockIds: string[], target: BlockReorderCommand): void;
 }) {
     const [draggingId, setDraggingId] = useState<string | null>(null);
     const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
@@ -64,6 +68,12 @@ export function useBlockReorder({
             })
             .filter((row) => row !== null);
         if (!rows.length) return null;
+
+        const cellTarget = resolveCellDropTarget(currentBlocks, clientX, clientY, {
+            dragged,
+            draggedIds,
+        });
+        if (cellTarget) return cellTarget;
 
         const containing = rows.find(({rect}) => clientY >= rect.top && clientY <= rect.bottom);
         if (containing) {
@@ -225,6 +235,60 @@ const resolveDropTarget = (
     return normalizeDropTarget(blocks, hovered, {...afterSubtree, dragged, draggedIds});
 };
 
+const resolveCellDropTarget = (
+    blocks: BlockOutlineItem[],
+    clientX: number,
+    clientY: number,
+    {
+        dragged,
+        draggedIds,
+    }: {
+        dragged: string | null;
+        draggedIds: string[];
+    },
+): DropTarget | null => {
+    if (typeof document.elementsFromPoint !== 'function') return null;
+    const cell = document
+        .elementsFromPoint(clientX, clientY)
+        .map((element) => element.closest<HTMLElement>('.tableCell'))
+        .find((element): element is HTMLElement => !!element);
+    if (!cell) return null;
+    const row = cell.closest<HTMLElement>('[data-row-id]');
+    const rowId = row?.dataset.rowId;
+    const cells = row
+        ? Array.from(row.children).filter(
+              (child): child is HTMLElement =>
+                  child instanceof HTMLElement && child.matches('.tableCell'),
+          )
+        : [];
+    const cellIndex = cells.indexOf(cell);
+    if (!rowId || cellIndex < 0) return null;
+    const cellId = cell.dataset.cellId;
+    const hovered = blocks.find((block) => block.id === cellId);
+    const rect = cell.getBoundingClientRect();
+    const placement = rect.width > 0 && clientX > rect.left + rect.width / 2 ? 'after' : 'before';
+    if (!cellId || !hovered) {
+        const targetIndex = placement === 'after' ? cellIndex + 1 : cellIndex;
+        return {
+            command: {type: 'table-cell-slot', target: {rowId, index: targetIndex}},
+            indicatorBlockId: `${rowId}:${targetIndex}`,
+            indicatorPlacement: placement,
+            indicatorDepth: blocks.find((block) => block.id === rowId)?.depth ?? 0,
+        };
+    }
+    return normalizeDropTarget(blocks, hovered, {
+        command:
+            placement === 'after'
+                ? {type: 'after', targetBlockId: cellId}
+                : {type: 'before', targetBlockId: cellId},
+        indicatorBlockId: cellId,
+        indicatorPlacement: placement,
+        indicatorDepth: hovered.depth,
+        dragged,
+        draggedIds,
+    });
+};
+
 const targetAfterSubtree = (
     blocks: BlockOutlineItem[],
     hovered: BlockOutlineItem,
@@ -310,12 +374,14 @@ const normalizeDropTarget = (
     return dropTarget;
 };
 
-const moveTargetTouchesSubtree = (target: MoveTarget, subtree: Set<string>): boolean => {
+const moveTargetTouchesSubtree = (target: BlockReorderCommand, subtree: Set<string>): boolean => {
+    if (target.type === 'table-cell-slot') return subtree.has(target.target.rowId);
     if (target.type === 'child') return subtree.has(target.parentBlockId);
     return subtree.has(target.targetBlockId);
 };
 
-const isNoop = (blocks: BlockOutlineItem[], dragged: string, target: MoveTarget): boolean => {
+const isNoop = (blocks: BlockOutlineItem[], dragged: string, target: BlockReorderCommand): boolean => {
+    if (target.type === 'table-cell-slot') return false;
     const current = blocks.find((block) => block.id === dragged);
     if (!current) return true;
     if (target.type === 'child') {
