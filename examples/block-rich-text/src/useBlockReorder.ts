@@ -314,6 +314,11 @@ const resolveKanbanDropTarget = (
         const columnId = column.dataset.kanbanColumnId;
         const hovered = columnId ? blocks.find((block) => block.id === columnId) : null;
         if (!columnId || !hovered) return null;
+        const cardSlotTarget = resolveKanbanColumnCardSlot(blocks, column, clientY, {
+            dragged,
+            draggedIds,
+        });
+        if (cardSlotTarget) return cardSlotTarget;
         return normalizeDropTarget(blocks, hovered, {
             command: {type: 'child', parentBlockId: columnId, at: 'end'},
             ...targetChildIndicator(blocks, hovered, 'end'),
@@ -351,6 +356,71 @@ const resolveKanbanDropTarget = (
             draggedIds,
         });
     }
+    return null;
+};
+
+const resolveKanbanColumnCardSlot = (
+    blocks: BlockOutlineItem[],
+    column: HTMLElement,
+    clientY: number,
+    {
+        dragged,
+        draggedIds,
+    }: {
+        dragged: string | null;
+        draggedIds: string[];
+    },
+): DropTarget | null => {
+    const cards = Array.from(
+        column.querySelectorAll<HTMLElement>(':scope > .kanbanCards > [data-kanban-card-id]'),
+    )
+        .map((element) => {
+            const cardId = element.dataset.kanbanCardId;
+            const block = cardId ? blocks.find((candidate) => candidate.id === cardId) : null;
+            return cardId && block ? {id: cardId, block, rect: element.getBoundingClientRect()} : null;
+        })
+        .filter((entry): entry is {id: string; block: BlockOutlineItem; rect: DOMRect} => entry !== null);
+    if (!cards.length) return null;
+
+    const first = cards[0];
+    if (clientY < first.rect.top) {
+        return normalizeDropTarget(blocks, first.block, {
+            command: {type: 'before', targetBlockId: first.id},
+            indicatorBlockId: first.id,
+            indicatorPlacement: 'before',
+            indicatorDepth: first.block.depth,
+            dragged,
+            draggedIds,
+        });
+    }
+
+    for (let index = 0; index < cards.length - 1; index++) {
+        const previous = cards[index];
+        const next = cards[index + 1];
+        if (clientY >= previous.rect.bottom && clientY <= next.rect.top) {
+            return normalizeDropTarget(blocks, previous.block, {
+                command: {type: 'after', targetBlockId: previous.id},
+                indicatorBlockId: previous.id,
+                indicatorPlacement: 'after',
+                indicatorDepth: previous.block.depth,
+                dragged,
+                draggedIds,
+            });
+        }
+    }
+
+    const last = cards[cards.length - 1];
+    if (clientY > last.rect.bottom) {
+        return normalizeDropTarget(blocks, last.block, {
+            command: {type: 'after', targetBlockId: last.id},
+            indicatorBlockId: last.id,
+            indicatorPlacement: 'after',
+            indicatorDepth: last.block.depth,
+            dragged,
+            draggedIds,
+        });
+    }
+
     return null;
 };
 

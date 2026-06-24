@@ -1022,6 +1022,87 @@ describe('Block rich text example UI', () => {
         }
     });
 
+    it('uses card geometry for margin space between kanban cards', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'kanban-board'},
+        });
+        await waitFor(() => expect(view.getByText('Loaded fixture: Kanban board.')).toBeTruthy());
+
+        const columns = kanbanColumns(left);
+        const sourceCard = columns[0].querySelector<HTMLElement>('.kanbanCard')!;
+        const targetColumn = columns[1];
+        const targetCards = Array.from(targetColumn.querySelectorAll<HTMLElement>('.kanbanCard'));
+        targetCards[0].getBoundingClientRect = () =>
+            ({
+                left: 8,
+                top: 8,
+                right: 248,
+                bottom: 56,
+                width: 240,
+                height: 48,
+                x: 8,
+                y: 8,
+                toJSON: () => ({}),
+            }) as DOMRect;
+        targetCards[1].getBoundingClientRect = () =>
+            ({
+                left: 8,
+                top: 72,
+                right: 248,
+                bottom: 120,
+                width: 240,
+                height: 48,
+                x: 8,
+                y: 72,
+                toJSON: () => ({}),
+            }) as DOMRect;
+        const originalElementsFromPoint = document.elementsFromPoint;
+        document.elementsFromPoint = () => [targetColumn.querySelector<HTMLElement>('.kanbanCards')!];
+        try {
+            const handle = within(sourceCard).getByRole('button', {name: 'Move card'}) as HTMLElement & {
+                setPointerCapture?: (pointerId: number) => void;
+            };
+            handle.setPointerCapture = () => {};
+            fireEvent.pointerDown(handle, {
+                button: 0,
+                buttons: 1,
+                isPrimary: true,
+                pointerId: 1,
+                clientX: 24,
+                clientY: 16,
+            });
+            fireEvent.pointerMove(window, {
+                button: 0,
+                buttons: 1,
+                isPrimary: true,
+                pointerId: 1,
+                clientX: 24,
+                clientY: 64,
+            });
+
+            await waitFor(() => {
+                const indicator = targetCards[0].querySelector('.blockRow.dropAfter');
+                expect(indicator).toBeTruthy();
+                expect(indicator?.classList.contains('dropChildTarget')).toBe(false);
+                expect(targetCards[1].querySelector('.blockRow.dropBefore')).toBeNull();
+            });
+
+            fireEvent.pointerUp(window, {
+                button: 0,
+                buttons: 0,
+                isPrimary: true,
+                pointerId: 1,
+                clientX: 24,
+                clientY: 64,
+            });
+        } finally {
+            document.elementsFromPoint = originalElementsFromPoint;
+        }
+    });
+
     it('does not fallback to a horizontally unrelated kanban column', async () => {
         const view = render(<App />);
         const {left} = panels(view);

@@ -51,3 +51,4 @@
 - Follow-up adjustment: child drop targets now add a `dropChildTarget` class. Kanban card child indicators use a green, indented line while sibling before/after indicators remain full-width blue.
 - Follow-up fix: `dropChildTarget` now only applies when the block being rendered is the actual child target parent. Appending to a column after its last card remains a full-width sibling-style indicator.
 - Follow-up fix: kanban cards now resolve bottom-half drops as direct after-card sibling targets instead of using generic after-subtree behavior, which could point to the next column when hovering over the last card in a column.
+- Follow-up fix: kanban column margin hit-testing now uses direct card rectangles to resolve gaps between cards as before/after card slots, instead of always appending to the end of the column.
