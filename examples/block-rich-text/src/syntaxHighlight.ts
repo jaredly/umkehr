@@ -39,6 +39,8 @@ const languageAliases = new Map([
     ['ts', 'typescript'],
     ['tsx', 'typescript'],
     ['typescript', 'typescript'],
+    ['vega-lite', 'json'],
+    ['vegalite', 'json'],
     ['xml', 'xml'],
     ['jsx', 'javascript'],
 ]);

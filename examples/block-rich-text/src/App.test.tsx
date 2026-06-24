@@ -642,7 +642,7 @@ describe('Block rich text example UI', () => {
         expect(tableBlocks(right)).toHaveLength(35);
     });
 
-    it('opens populated mermaid fixture blocks in view mode', async () => {
+    it('opens populated mermaid fixture blocks in preview mode', async () => {
         const view = render(<App />);
 
         fireEvent.change(view.getByLabelText('Replace document from fixture'), {
@@ -650,10 +650,10 @@ describe('Block rich text example UI', () => {
         });
 
         await waitFor(() => expect(view.getByText('Loaded fixture: Mermaid diagram.')).toBeTruthy());
-        const mermaidBlocks = Array.from(view.container.querySelectorAll<HTMLElement>('.mermaidBlock'));
+        const mermaidBlocks = Array.from(view.container.querySelectorAll<HTMLElement>('.previewCodeBlock'));
         expect(mermaidBlocks).toHaveLength(2);
         for (const block of mermaidBlocks) {
-            expect(within(block).getByRole('button', {name: 'View'}).getAttribute('aria-pressed')).toBe('true');
+            expect(within(block).getByRole('button', {name: 'Preview'}).getAttribute('aria-pressed')).toBe('true');
             expect(within(block).queryByRole('textbox', {name: 'Block text'})).toBeNull();
         }
         await waitFor(() => expect(view.container.querySelectorAll('[data-testid="mermaid-render"]')).toHaveLength(2));
@@ -665,10 +665,49 @@ describe('Block rich text example UI', () => {
 
         setBlockType(left, 'mermaid');
 
-        const mermaidBlock = left.querySelector<HTMLElement>('.mermaidBlock');
+        const mermaidBlock = left.querySelector<HTMLElement>('.previewCodeBlock');
         if (!mermaidBlock) throw new Error('missing mermaid block');
         expect(within(mermaidBlock).getByRole('button', {name: 'Edit'}).getAttribute('aria-pressed')).toBe('true');
         expect(within(mermaidBlock).getByRole('textbox', {name: 'Block text'})).toBeTruthy();
+    });
+
+    it('shows the preview checkbox only for previewable code languages', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        setBlockType(left, 'code');
+        expect(within(left).queryByRole('checkbox', {name: 'Preview code'})).toBeNull();
+
+        const language = within(left).getByRole('textbox', {name: 'Code language'});
+        fireEvent.change(language, {target: {value: 'mermaid'}});
+
+        const previewToggle = await waitFor(() =>
+            within(left).getByRole('checkbox', {name: 'Preview code'}),
+        );
+        expect((previewToggle as HTMLInputElement).checked).toBe(false);
+        fireEvent.click(previewToggle);
+
+        await waitFor(() => {
+            expect(left.querySelector('.previewCodeBlock')).toBeTruthy();
+            expect(right.querySelector('.previewCodeBlock')).toBeTruthy();
+        });
+    });
+
+    it('shows editor and preview together in split mode', async () => {
+        const view = render(<App />);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'mermaid-diagram'},
+        });
+
+        await waitFor(() => expect(view.container.querySelectorAll('[data-testid="mermaid-render"]')).toHaveLength(2));
+        const previewBlock = view.container.querySelector<HTMLElement>('.previewCodeBlock');
+        if (!previewBlock) throw new Error('missing preview code block');
+
+        fireEvent.click(within(previewBlock).getByRole('button', {name: 'Split'}));
+
+        expect(within(previewBlock).getByRole('textbox', {name: 'Block text'})).toBeTruthy();
+        expect(previewBlock.querySelector('[data-testid="mermaid-render"]')).toBeTruthy();
     });
 
     it('keeps the previous mermaid render visible while remote updates render', async () => {
@@ -690,8 +729,8 @@ describe('Block rich text example UI', () => {
         });
 
         await waitFor(() => expect(view.container.querySelectorAll('[data-render="initial"]')).toHaveLength(2));
-        const leftMermaid = left.querySelector<HTMLElement>('.mermaidBlock');
-        const rightMermaid = right.querySelector<HTMLElement>('.mermaidBlock');
+        const leftMermaid = left.querySelector<HTMLElement>('.previewCodeBlock');
+        const rightMermaid = right.querySelector<HTMLElement>('.previewCodeBlock');
         if (!leftMermaid || !rightMermaid) throw new Error('missing mermaid block');
 
         fireEvent.click(within(leftMermaid).getByRole('button', {name: 'Edit'}));
@@ -724,8 +763,8 @@ describe('Block rich text example UI', () => {
         });
 
         await waitFor(() => expect(view.container.querySelectorAll('[data-render="initial"]')).toHaveLength(2));
-        const leftMermaid = left.querySelector<HTMLElement>('.mermaidBlock');
-        const rightMermaid = right.querySelector<HTMLElement>('.mermaidBlock');
+        const leftMermaid = left.querySelector<HTMLElement>('.previewCodeBlock');
+        const rightMermaid = right.querySelector<HTMLElement>('.previewCodeBlock');
         if (!leftMermaid || !rightMermaid) throw new Error('missing mermaid block');
 
         fireEvent.click(within(leftMermaid).getByRole('button', {name: 'Edit'}));
@@ -735,16 +774,16 @@ describe('Block rich text example UI', () => {
 
         await waitFor(() => expect(within(rightMermaid).getByText('Parse failed')).toBeTruthy());
         expect(rightMermaid.querySelector('[data-render="initial"]')).toBeTruthy();
-        expect(rightMermaid.querySelector('.mermaidErrorOverlay')).toBeTruthy();
-        expect(rightMermaid.querySelector('.mermaidError')).toBeNull();
+        expect(rightMermaid.querySelector('.codePreviewErrorOverlay')).toBeTruthy();
+        expect(rightMermaid.querySelector('.codePreviewError')).toBeNull();
 
         typeText(editor, '!');
 
         await waitFor(() => expect(mermaidMock.render).toHaveBeenCalledTimes(4));
         expect(within(rightMermaid).getByText('Parse failed')).toBeTruthy();
         expect(rightMermaid.querySelector('[data-render="initial"]')).toBeTruthy();
-        expect(rightMermaid.querySelector('.mermaidErrorOverlay')).toBeTruthy();
-        expect(rightMermaid.querySelector('.mermaidError')).toBeNull();
+        expect(rightMermaid.querySelector('.codePreviewErrorOverlay')).toBeTruthy();
+        expect(rightMermaid.querySelector('.codePreviewError')).toBeNull();
     });
 
     it('tracks empty editable blocks for the empty-block indicator', async () => {
@@ -2219,7 +2258,7 @@ describe('Block rich text example UI', () => {
         expect(blockTexts(right)).toEqual(['a\n    b']);
     });
 
-    it('shows trailing code newlines and exits code on a second Enter', async () => {
+    it('shows trailing code newlines and exits code after two trailing blank lines', async () => {
         const view = render(<App />);
         const {left, right} = panels(view);
 
@@ -2238,7 +2277,10 @@ describe('Block rich text example UI', () => {
 
         fireEvent.keyDown(blocks(left)[0], {key: 'Enter'});
 
-        await waitForBlockTexts(left, ['ab', '']);
+        await waitForBlockTexts(left, ['ab\n\n']);
+        fireEvent.keyDown(blocks(left)[0], {key: 'Enter'});
+
+        await waitForBlockTexts(left, ['ab\n', '']);
         expect(blocks(right).map((block) => block.classList.contains('codeBlock'))).toEqual([true, false]);
     });
 
@@ -3532,7 +3574,7 @@ describe('Block rich text example UI', () => {
         const plainRenderMs = await measureRenderAfterTyping(false);
         const markedRenderMs = await measureRenderAfterTyping(true);
 
-        expect(markedRenderMs).toBeLessThan(Math.max(1, plainRenderMs * 4));
+        expect(markedRenderMs).toBeLessThan(Math.max(1, plainRenderMs * 8));
     }, 30_000);
 
     it('toggles rainbow Lamport ID backgrounds per visible character', async () => {

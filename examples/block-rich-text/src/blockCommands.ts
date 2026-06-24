@@ -511,20 +511,6 @@ export const splitBlock = (
         return {state: inserted.state, ops: [...ops, ...inserted.ops], selection: caret(inserted.blockId, 0)};
     }
 
-    if (currentMeta?.type === 'mermaid') {
-        const result = shouldExitMermaidBlock(working, point)
-            ? exitCodeBlock(working, point.blockId, context)
-            : (() => {
-                  const inserted = insertTextAtPoint(working, point, '\n', context);
-                  return {
-                      state: inserted.state,
-                      ops: inserted.ops,
-                      selection: caret(inserted.point.blockId, inserted.point.offset),
-                  };
-              })();
-        return {state: result.state, ops: [...ops, ...result.ops], selection: result.selection};
-    }
-
     if (currentMeta && currentMeta.type !== 'paragraph' && pointTextLength(working, point.blockId) === 0) {
         const ops = setBlockMetaOps(working, {
             block: parseLamportString(point.blockId),
@@ -897,7 +883,6 @@ const pastePlainTextAtBlockEnd = (
     if (
         !block ||
         block.meta.type === 'code' ||
-        block.meta.type === 'mermaid' ||
         parentId !== ROOT_ID ||
         point.offset !== pointTextLength(state, point.blockId)
     ) {
@@ -3052,10 +3037,6 @@ export const joinWithNext = (
 };
 
 const shouldExitCodeBlock = (state: CachedState<RichBlockMeta>, point: BlockPoint): boolean =>
-    point.offset === pointTextLength(state, point.blockId) &&
-    blockContents(state, point.blockId).endsWith('\n');
-
-const shouldExitMermaidBlock = (state: CachedState<RichBlockMeta>, point: BlockPoint): boolean =>
     point.offset === pointTextLength(state, point.blockId) &&
     blockContents(state, point.blockId).endsWith('\n\n');
 

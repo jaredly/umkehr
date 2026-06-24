@@ -454,10 +454,15 @@ describe('block rich text commands', () => {
         expectCache(result.state);
     });
 
-    it('keeps multiline pasted text inside mermaid blocks', () => {
+    it('keeps multiline pasted text inside previewable code blocks', () => {
         const state = init();
         const blockId = onlyBlock(state);
-        const mermaid = setBlockType(state, blockId, {type: 'mermaid', ts: '00001'});
+        const mermaid = setBlockType(state, blockId, {
+            type: 'code',
+            language: 'mermaid',
+            preview: 'mermaid',
+            ts: '00001',
+        });
         const result = pastePlainTextWithMarkdownShortcuts(
             mermaid.state,
             caret(blockId, 0),
@@ -467,7 +472,11 @@ describe('block rich text commands', () => {
 
         expect(rootBlockIds(result.state)).toEqual([blockId]);
         expect(blockContents(result.state, blockId)).toBe('graph TD\nA-->B');
-        expect(result.state.state.blocks[blockId].meta).toMatchObject({type: 'mermaid'});
+        expect(result.state.state.blocks[blockId].meta).toMatchObject({
+            type: 'code',
+            language: 'mermaid',
+            preview: 'mermaid',
+        });
         expectCache(result.state);
     });
 
@@ -1662,11 +1671,16 @@ describe('block rich text commands', () => {
         expect(lines(result.state)).toEqual(['a\nb']);
     });
 
-    it('inserts newline text instead of splitting mermaid blocks', () => {
+    it('inserts newline text instead of splitting previewable code blocks', () => {
         const demo = createDemoState();
         const blockId = rootBlockIds(demo.left.state)[0];
         let result = insertText(demo.left.state, caret(blockId, 0), 'ab', ctx());
-        result = setBlockType(result.state, blockId, {type: 'mermaid', ts: '00010'});
+        result = setBlockType(result.state, blockId, {
+            type: 'code',
+            language: 'mermaid',
+            preview: 'mermaid',
+            ts: '00010',
+        });
 
         result = splitBlock(result.state, caret(blockId, 1), ctx());
 
@@ -1674,23 +1688,23 @@ describe('block rich text commands', () => {
         expect(lines(result.state)).toEqual(['a\nb']);
     });
 
-    it('keeps a mermaid block on Enter at a single trailing blank line', () => {
+    it('keeps code blocks on Enter at a single trailing blank line', () => {
         const demo = createDemoState();
         const blockId = rootBlockIds(demo.left.state)[0];
         let result = insertText(demo.left.state, caret(blockId, 0), 'graph TD', ctx());
-        result = setBlockType(result.state, blockId, {type: 'mermaid', ts: '00010'});
+        result = setBlockType(result.state, blockId, {type: 'code', language: 'mermaid', preview: 'mermaid', ts: '00010'});
         result = splitBlock(result.state, caret(blockId, 8), ctx());
 
         expect(rootBlockIds(result.state)).toEqual([blockId]);
         expect(lines(result.state)).toEqual(['graph TD\n']);
-        expect(result.state.state.blocks[blockId].meta).toMatchObject({type: 'mermaid'});
+        expect(result.state.state.blocks[blockId].meta).toMatchObject({type: 'code', preview: 'mermaid'});
     });
 
-    it('exits a mermaid block on Enter after two trailing blank lines', () => {
+    it('exits previewable code on Enter after two trailing blank lines', () => {
         const demo = createDemoState();
         const blockId = rootBlockIds(demo.left.state)[0];
         let result = insertText(demo.left.state, caret(blockId, 0), 'graph TD', ctx());
-        result = setBlockType(result.state, blockId, {type: 'mermaid', ts: '00010'});
+        result = setBlockType(result.state, blockId, {type: 'code', language: 'mermaid', preview: 'mermaid', ts: '00010'});
         result = splitBlock(result.state, caret(blockId, 8), ctx());
         result = splitBlock(result.state, result.selection, ctx());
 
@@ -1699,22 +1713,23 @@ describe('block rich text commands', () => {
         const [mermaid, paragraph] = rootBlockIds(result.state);
         expect(result.selection).toEqual(caret(paragraph, 0));
         expect(lines(result.state)).toEqual(['graph TD\n', '']);
-        expect(result.state.state.blocks[mermaid].meta).toMatchObject({type: 'mermaid'});
+        expect(result.state.state.blocks[mermaid].meta).toMatchObject({type: 'code', preview: 'mermaid'});
         expect(result.state.state.blocks[paragraph].meta).toMatchObject({type: 'paragraph'});
     });
 
-    it('exits a code block on Enter at a trailing blank line', () => {
+    it('exits plain code on Enter after two trailing blank lines', () => {
         const demo = createDemoState();
         const blockId = rootBlockIds(demo.left.state)[0];
         let result = insertText(demo.left.state, caret(blockId, 0), 'ab', ctx());
         result = setBlockType(result.state, blockId, {type: 'code', language: 'ts', ts: '00010'});
         result = splitBlock(result.state, caret(blockId, 2), ctx());
+        result = splitBlock(result.state, result.selection, ctx());
 
         result = splitBlock(result.state, result.selection, ctx());
 
         const [code, paragraph] = rootBlockIds(result.state);
         expect(result.selection).toEqual(caret(paragraph, 0));
-        expect(lines(result.state)).toEqual(['ab', '']);
+        expect(lines(result.state)).toEqual(['ab\n', '']);
         expect(result.state.state.blocks[code].meta).toMatchObject({type: 'code'});
         expect(result.state.state.blocks[paragraph].meta).toMatchObject({type: 'paragraph'});
     });

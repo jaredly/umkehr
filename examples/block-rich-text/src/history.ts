@@ -9,7 +9,7 @@ import {
     type DemoState,
     type EditorId,
 } from './blockEditorRuntime';
-import type {RichBlockMeta} from './blockMeta';
+import {codePreviewKindForLanguage, type RichBlockMeta} from './blockMeta';
 import type {RetainedSelectionSet} from './selectionSet';
 import {isSerializedImageAttachment, type SerializedImageAttachment} from './attachments';
 import type {ImportDocument} from './documentFormat';
@@ -450,7 +450,12 @@ const isRichBlockMeta = (value: unknown): value is RichBlockMeta => {
         case 'todo':
             return typeof value.checked === 'boolean';
         case 'code':
-            return typeof value.language === 'string';
+            return (
+                typeof value.language === 'string' &&
+                (value.preview === undefined ||
+                    ((value.preview === 'mermaid' || value.preview === 'vega-lite') &&
+                        codePreviewKindForLanguage(value.language) === value.preview))
+            );
         case 'callout':
             return value.kind === 'info' || value.kind === 'warning' || value.kind === 'error';
         case 'image':

@@ -12,14 +12,20 @@ export type PreviewMetadata = {
     fetchedAt?: string;
 };
 
+export type CodePreviewKind = 'mermaid' | 'vega-lite';
+
+export const CODE_PREVIEW_LANGUAGES: Record<CodePreviewKind, string> = {
+    mermaid: 'mermaid',
+    'vega-lite': 'vega-lite',
+};
+
 export type RichBlockMeta =
     | {type: 'paragraph'; ts: HLC}
     | {type: 'heading'; level: 1 | 2 | 3; ts: HLC}
     | {type: 'list_item'; kind: 'ordered' | 'unordered'; ts: HLC}
     | {type: 'todo'; checked: boolean; ts: HLC}
     | {type: 'blockquote'; ts: HLC}
-    | {type: 'code'; language: string; ts: HLC}
-    | {type: 'mermaid'; ts: HLC}
+    | {type: 'code'; language: string; preview?: CodePreviewKind; ts: HLC}
     | {type: 'callout'; kind: 'info' | 'warning' | 'error'; ts: HLC}
     | {type: 'recipe_ingredient'; ts: HLC}
     | {type: 'table'; ts: HLC}
@@ -43,9 +49,7 @@ export const sameTypeWithTs = (meta: RichBlockMeta, ts: HLC): RichBlockMeta => {
         case 'blockquote':
             return {type: 'blockquote', ts};
         case 'code':
-            return {type: 'code', language: meta.language, ts};
-        case 'mermaid':
-            return {type: 'mermaid', ts};
+            return {...meta, ts};
         case 'callout':
             return {type: 'callout', kind: meta.kind, ts};
         case 'recipe_ingredient':
@@ -64,6 +68,30 @@ export const isTableBlock = (meta: RichBlockMeta): boolean => meta.type === 'tab
 export const isCellBlock = (meta: RichBlockMeta): boolean => !isTableBlock(meta);
 
 export const isEditableBlock = (_meta: RichBlockMeta): boolean => true;
+
+export const codePreviewKindForLanguage = (language: string): CodePreviewKind | null => {
+    const normalized = language.trim().toLowerCase();
+    if (normalized === 'mermaid') return 'mermaid';
+    if (normalized === 'vega-lite' || normalized === 'vegalite') return 'vega-lite';
+    return null;
+};
+
+export const isPreviewableCodeMeta = (
+    meta: RichBlockMeta,
+): meta is Extract<RichBlockMeta, {type: 'code'}> & {preview: CodePreviewKind} =>
+    meta.type === 'code' && !!meta.preview && codePreviewKindForLanguage(meta.language) === meta.preview;
+
+export const codeMetaWithPreviewForLanguage = (
+    meta: Extract<RichBlockMeta, {type: 'code'}>,
+    enabled: boolean,
+): Extract<RichBlockMeta, {type: 'code'}> => {
+    const preview = codePreviewKindForLanguage(meta.language);
+    if (!enabled || !preview) {
+        const {preview: _preview, ...rest} = meta;
+        return rest;
+    }
+    return {...meta, language: CODE_PREVIEW_LANGUAGES[preview], preview};
+};
 
 export const isWholeSubtreeStyledBlock = (meta: RichBlockMeta): boolean =>
     meta.type === 'blockquote' || meta.type === 'callout';

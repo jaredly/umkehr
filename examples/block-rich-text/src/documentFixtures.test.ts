@@ -81,10 +81,22 @@ describe('document fixtures', () => {
 
     it('includes a mermaid diagram fixture', () => {
         const document = documentFixture('mermaid-diagram');
-        const mermaid = document.find((block) => block.type === 'mermaid');
+        const mermaid = document.find(
+            (block) => block.type === 'code' && block.meta?.preview === 'mermaid',
+        );
 
         expect(mermaid?.content).toContain('graph TD');
         expect(mermaid?.content).toContain('Diagram preview');
+    });
+
+    it('includes a vega-lite chart fixture', () => {
+        const document = documentFixture('vega-lite-chart');
+        const chart = document.find(
+            (block) => block.type === 'code' && block.meta?.preview === 'vega-lite',
+        );
+
+        expect(chart?.content).toContain('mark: bar');
+        expect(chart?.content).toContain('category: Alpha');
     });
 
     it('includes generated and missing image references', () => {

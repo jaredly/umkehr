@@ -42,6 +42,7 @@ export const documentFixtures: DocumentFixture[] = [
     {id: 'many-blocks', label: 'Many blocks', document: manyBlocks},
     {id: 'mixed-table-and-text', label: 'Mixed table and text', document: mixedTableAndText},
     {id: 'mermaid-diagram', label: 'Mermaid diagram', document: mermaidDiagram},
+    {id: 'vega-lite-chart', label: 'Vega-Lite chart', document: vegaLiteChart},
     {
         id: 'code-callouts-images',
         label: 'Code, callouts, and images',
@@ -214,7 +215,8 @@ function mermaidDiagram(): ImportDocument {
     return [
         {type: 'heading', meta: {level: 2}, content: 'Mermaid diagram fixture'},
         {
-            type: 'mermaid',
+            type: 'code',
+            meta: {language: 'mermaid', preview: 'mermaid'},
             content: [
                 'graph TD',
                 '  A[Draft source] --> B{Render?}',
@@ -224,6 +226,38 @@ function mermaidDiagram(): ImportDocument {
             ].join('\n'),
         },
         {content: 'Use the Mermaid block toggle to switch between editing source and viewing the rendered diagram.'},
+    ];
+}
+
+function vegaLiteChart(): ImportDocument {
+    return [
+        {type: 'heading', meta: {level: 2}, content: 'Vega-Lite chart fixture'},
+        {
+            type: 'code',
+            meta: {language: 'vega-lite', preview: 'vega-lite'},
+            content: [
+                '$schema: https://vega.github.io/schema/vega-lite/v5.json',
+                'width: 320',
+                'height: 180',
+                'data:',
+                '  values:',
+                '    - category: Alpha',
+                '      value: 28',
+                '    - category: Beta',
+                '      value: 55',
+                '    - category: Gamma',
+                '      value: 43',
+                'mark: bar',
+                'encoding:',
+                '  x:',
+                '    field: category',
+                '    type: nominal',
+                '  y:',
+                '    field: value',
+                '    type: quantitative',
+            ].join('\n'),
+        },
+        {content: 'Use split view to edit the chart spec while watching the preview.'},
     ];
 }
 

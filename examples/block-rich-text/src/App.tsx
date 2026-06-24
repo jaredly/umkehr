@@ -101,7 +101,16 @@ import {
     type EditorId,
     type Replica,
 } from './blockEditorRuntime';
-import {paragraphMeta, type ImagePresentationSize, type PreviewMetadata, type RichBlockMeta} from './blockMeta';
+import {
+    codeMetaWithPreviewForLanguage,
+    codePreviewKindForLanguage,
+    isPreviewableCodeMeta,
+    paragraphMeta,
+    type CodePreviewKind,
+    type ImagePresentationSize,
+    type PreviewMetadata,
+    type RichBlockMeta,
+} from './blockMeta';
 import {
     closestCaretOffsetForHorizontalIntent,
     caretRectForBlockOffset,
@@ -3312,6 +3321,7 @@ type BlockTypeMenuValue =
     | 'blockquote'
     | 'code'
     | 'mermaid'
+    | 'vega-lite'
     | 'callout-info'
     | 'callout-warning'
     | 'callout-error'
@@ -3330,6 +3340,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     {type: 'block', value: 'blockquote', label: 'Blockquote', group: 'Block type', keywords: ['quote']},
     {type: 'block', value: 'code', label: 'Code', group: 'Block type', keywords: ['pre']},
     {type: 'block', value: 'mermaid', label: 'Mermaid diagram', group: 'Block type', keywords: ['diagram', 'chart', 'flowchart', 'mermaid']},
+    {type: 'block', value: 'vega-lite', label: 'Vega-Lite chart', group: 'Block type', keywords: ['chart', 'graph', 'vega', 'visualization']},
     {type: 'block', value: 'callout-info', label: 'Info callout', group: 'Block type', keywords: ['info']},
     {type: 'block', value: 'callout-warning', label: 'Warning callout', group: 'Block type', keywords: ['warning']},
     {type: 'block', value: 'callout-error', label: 'Error callout', group: 'Block type', keywords: ['error']},
@@ -4833,11 +4844,35 @@ const renderEditableBlock = (
                     if (!currentBlock || currentBlock.meta.type !== 'code') {
                         return {state: current.state, ops: [], selection: current.selection};
                     }
+                    const nextMeta = codeMetaWithPreviewForLanguage(
+                        {
+                            type: 'code',
+                            language,
+                            ...(currentBlock.meta.preview ? {preview: currentBlock.meta.preview} : {}),
+                            ts: nextReplicaTs(current),
+                        },
+                        !!currentBlock.meta.preview,
+                    );
                     const result = setBlockMeta(current.state, block.id, {
-                        type: 'code',
-                        language,
-                        ts: nextReplicaTs(current),
+                        ...nextMeta,
                     });
+                    return {state: result.state, ops: result.ops, selection: current.selection};
+                })
+            }
+            onSetCodePreview={(enabled) =>
+                context.runBlockControlCommand((current) => {
+                    const currentBlock = current.state.state.blocks[block.id];
+                    if (!currentBlock || currentBlock.meta.type !== 'code') {
+                        return {state: current.state, ops: [], selection: current.selection};
+                    }
+                    const result = setBlockMeta(
+                        current.state,
+                        block.id,
+                        codeMetaWithPreviewForLanguage(
+                            {...currentBlock.meta, ts: nextReplicaTs(current)},
+                            enabled,
+                        ),
+                    );
                     return {state: result.state, ops: result.ops, selection: current.selection};
                 })
             }
@@ -4968,7 +5003,9 @@ const blockTypeMeta = (
         case 'code':
             return {type: 'code', language: current.type === 'code' ? current.language : '', ts};
         case 'mermaid':
-            return {type: 'mermaid', ts};
+            return {type: 'code', language: 'mermaid', preview: 'mermaid', ts};
+        case 'vega-lite':
+            return {type: 'code', language: 'vega-lite', preview: 'vega-lite', ts};
         case 'callout-info':
             return {type: 'callout', kind: 'info', ts};
         case 'callout-warning':
@@ -5003,9 +5040,11 @@ const blockTypeMenuValue = (meta: RichBlockMeta | undefined): BlockTypeMenuValue
         case 'blockquote':
             return 'blockquote';
         case 'code':
-            return 'code';
-        case 'mermaid':
-            return 'mermaid';
+            return meta.preview === 'mermaid'
+                ? 'mermaid'
+                : meta.preview === 'vega-lite'
+                  ? 'vega-lite'
+                  : 'code';
         case 'callout':
             return meta.kind === 'info'
                 ? 'callout-info'
@@ -6445,6 +6484,7 @@ function Toolbar({
                 <option value="blockquote">Quote</option>
                 <option value="code">Code</option>
                 <option value="mermaid">Mermaid diagram</option>
+                <option value="vega-lite">Vega-Lite chart</option>
                 <option value="callout-info">Info callout</option>
                 <option value="callout-warning">Warning callout</option>
                 <option value="callout-error">Error callout</option>
@@ -6512,6 +6552,7 @@ function EditableBlock({
     onInlineEmbedOpen,
     onToggleTodo,
     onSetCodeLanguage,
+    onSetCodePreview,
     onSetCalloutKind,
     onSetImageSize,
     onSetPreviewUrl,
@@ -6588,6 +6629,7 @@ function EditableBlock({
     onInlineEmbedOpen(charId: string, element: HTMLElement): void;
     onToggleTodo(): void;
     onSetCodeLanguage(language: string): void;
+    onSetCodePreview(enabled: boolean): void;
     onSetCalloutKind(kind: 'info' | 'warning' | 'error'): void;
     onSetImageSize(size: ImagePresentationSize): void;
     onSetPreviewUrl(url: string): void;
@@ -6625,7 +6667,7 @@ function EditableBlock({
 }) {
     const meta = block.block.meta;
     const isCodeBlock = meta.type === 'code';
-    const isPlainTextCodeLikeBlock = meta.type === 'code' || meta.type === 'mermaid';
+    const isPlainTextCodeLikeBlock = meta.type === 'code';
     const codeLikeHasTrailingNewline =
         isPlainTextCodeLikeBlock &&
         block.runs
@@ -6657,7 +6699,7 @@ function EditableBlock({
             className={[
                 'editableBlock',
                 isPlainTextCodeLikeBlock ? 'codeBlock' : '',
-                meta.type === 'mermaid' ? 'mermaidEditor' : '',
+                isPreviewableCodeMeta(meta) ? 'previewCodeEditor' : '',
                 meta.type === 'heading' ? `headingLevel${meta.level}` : '',
                 meta.type === 'image' ? 'imageCaption' : '',
                 meta.type === 'recipe_ingredient' ? 'recipeIngredientBlock' : '',
@@ -6980,8 +7022,13 @@ function EditableBlock({
                     onSetUrl={onSetPreviewUrl}
                     onSetMetadata={onSetPreviewMetadata}
                 />
-            ) : meta.type === 'mermaid' ? (
-                <MermaidBlock blockId={block.id} source={blockText} editor={editableSurface} />
+            ) : isPreviewableCodeMeta(meta) ? (
+                <PreviewableCodeBlock
+                    blockId={block.id}
+                    previewKind={meta.preview}
+                    source={blockText}
+                    editor={editableSurface}
+                />
             ) : (
                 editableSurface
             )}
@@ -6989,6 +7036,7 @@ function EditableBlock({
                 <BlockInlineControls
                     meta={meta}
                     onSetCodeLanguage={onSetCodeLanguage}
+                    onSetCodePreview={onSetCodePreview}
                     onSetCalloutKind={onSetCalloutKind}
                     onSetImageSize={onSetImageSize}
                 />
@@ -7440,27 +7488,49 @@ function BlockAffordance({
 function BlockInlineControls({
     meta,
     onSetCodeLanguage,
+    onSetCodePreview,
     onSetCalloutKind,
     onSetImageSize,
 }: {
     meta: RichBlockMeta;
     onSetCodeLanguage(language: string): void;
+    onSetCodePreview(enabled: boolean): void;
     onSetCalloutKind(kind: 'info' | 'warning' | 'error'): void;
     onSetImageSize(size: ImagePresentationSize): void;
 }) {
     if (meta.type === 'code') {
+        const previewKind = codePreviewKindForLanguage(meta.language);
         return (
-            <input
-                className="codeLanguage"
-                value={meta.language}
-                placeholder="plain"
-                aria-label="Code language"
-                onPointerDown={stopEditorControlEvent}
-                onMouseDown={stopEditorControlEvent}
-                onMouseUp={stopEditorControlEvent}
-                onClick={stopEditorControlEvent}
-                onChange={(event) => onSetCodeLanguage(event.currentTarget.value)}
-            />
+            <div className="codeControls" contentEditable={false}>
+                <input
+                    className="codeLanguage"
+                    value={meta.language}
+                    placeholder="plain"
+                    aria-label="Code language"
+                    onPointerDown={stopEditorControlEvent}
+                    onMouseDown={stopEditorControlEvent}
+                    onMouseUp={stopEditorControlEvent}
+                    onClick={stopEditorControlEvent}
+                    onChange={(event) => onSetCodeLanguage(event.currentTarget.value)}
+                />
+                {previewKind ? (
+                    <label
+                        className="codePreviewToggle"
+                        onPointerDown={stopEditorControlEvent}
+                        onMouseDown={stopEditorControlEvent}
+                        onMouseUp={stopEditorControlEvent}
+                        onClick={stopEditorControlEvent}
+                    >
+                        <input
+                            type="checkbox"
+                            checked={meta.preview === previewKind}
+                            aria-label="Preview code"
+                            onChange={(event) => onSetCodePreview(event.currentTarget.checked)}
+                        />
+                        Preview
+                    </label>
+                ) : null}
+            </div>
         );
     }
     if (meta.type === 'callout') {
@@ -7507,12 +7577,20 @@ function BlockInlineControls({
     return null;
 }
 
-type MermaidRenderState =
+type CodePreviewRenderState =
     | {type: 'empty'}
     | {type: 'loading'}
-    | {type: 'rendering'; svg: string}
-    | {type: 'rendered'; svg: string}
-    | {type: 'error'; message: string; svg?: string};
+    | {type: 'rendering'; html: string}
+    | {type: 'rendered'; html: string}
+    | {type: 'error'; message: string; html?: string};
+
+type CodePreviewRenderer = {
+    kind: CodePreviewKind;
+    emptyLabel: string;
+    loadingLabel: string;
+    errorLabel: string;
+    render(source: string, renderId: string): Promise<{html: string}>;
+};
 
 let mermaidInitialized = false;
 
@@ -7522,48 +7600,87 @@ const ensureMermaidInitialized = () => {
     mermaidInitialized = true;
 };
 
-function MermaidBlock({
+const codePreviewRenderers: Record<CodePreviewKind, CodePreviewRenderer> = {
+    mermaid: {
+        kind: 'mermaid',
+        emptyLabel: 'Empty diagram',
+        loadingLabel: 'Rendering diagram...',
+        errorLabel: 'Unable to render Mermaid diagram.',
+        async render(source, renderId) {
+            ensureMermaidInitialized();
+            const result = await mermaid.render(renderId, source);
+            return {html: result.svg};
+        },
+    },
+    'vega-lite': {
+        kind: 'vega-lite',
+        emptyLabel: 'Empty chart',
+        loadingLabel: 'Rendering chart...',
+        errorLabel: 'Unable to render Vega-Lite chart.',
+        async render(source, renderId) {
+            const [vegaLite, vega, yaml] = await Promise.all([import('vega-lite'), import('vega'), import('yaml')]);
+            const spec = parseJsonOrYaml(source, yaml.parse) as Parameters<typeof vegaLite.compile>[0];
+            const compiled = vegaLite.compile(spec).spec;
+            const view = new vega.View(vega.parse(compiled), {renderer: 'none'});
+            const svg = await view.toSVG();
+            await view.finalize();
+            return {html: `<div id="${renderId}">${svg}</div>`};
+        },
+    },
+};
+
+const parseJsonOrYaml = (source: string, parseYaml: (value: string) => unknown): unknown => {
+    try {
+        return JSON.parse(source);
+    } catch {
+        return parseYaml(source);
+    }
+};
+
+function PreviewableCodeBlock({
     blockId,
+    previewKind,
     source,
     editor,
 }: {
     blockId: string;
+    previewKind: CodePreviewKind;
     source: string;
     editor: ReactElement;
 }) {
-    const [mode, setMode] = useState<'edit' | 'view'>(() =>
-        source.trim() === '' ? 'edit' : 'view',
+    const renderer = codePreviewRenderers[previewKind];
+    const [mode, setMode] = useState<'edit' | 'preview' | 'split'>(() =>
+        source.trim() === '' ? 'edit' : 'preview',
     );
-    const [renderState, setRenderState] = useState<MermaidRenderState>({type: 'empty'});
+    const [renderState, setRenderState] = useState<CodePreviewRenderState>({type: 'empty'});
     const renderCounterRef = useRef(0);
 
     useEffect(() => {
-        if (mode !== 'view') return;
+        if (mode === 'edit') return;
         if (source.trim() === '') {
             setRenderState({type: 'empty'});
             return;
         }
 
         let cancelled = false;
-        const renderId = `mermaid-${sanitizeDomId(blockId)}-${++renderCounterRef.current}`;
+        const renderId = `code-preview-${sanitizeDomId(blockId)}-${++renderCounterRef.current}`;
         setRenderState((current) => {
-            const cachedSvg = cachedMermaidSvg(current);
-            return cachedSvg ? {type: 'rendering', svg: cachedSvg} : {type: 'loading'};
+            const cachedHtml = cachedPreviewHtml(current);
+            return cachedHtml ? {type: 'rendering', html: cachedHtml} : {type: 'loading'};
         });
 
         const render = async () => {
             try {
-                ensureMermaidInitialized();
-                const result = await mermaid.render(renderId, source);
-                if (!cancelled) setRenderState({type: 'rendered', svg: result.svg});
+                const result = await renderer.render(source, renderId);
+                if (!cancelled) setRenderState({type: 'rendered', html: result.html});
             } catch (error) {
                 if (!cancelled) {
                     setRenderState((current) => {
-                        const cachedSvg = cachedMermaidSvg(current);
+                        const cachedHtml = cachedPreviewHtml(current);
                         return {
                             type: 'error',
                             message: errorMessage(error),
-                            ...(cachedSvg ? {svg: cachedSvg} : {}),
+                            ...(cachedHtml ? {html: cachedHtml} : {}),
                         };
                     });
                 }
@@ -7574,14 +7691,14 @@ function MermaidBlock({
         return () => {
             cancelled = true;
         };
-    }, [blockId, mode, source]);
+    }, [blockId, mode, renderer, source]);
 
     return (
-        <div className="mermaidBlock">
-            <div className="mermaidToolbar" contentEditable={false}>
+        <div className="previewCodeBlock">
+            <div className="previewCodeToolbar" contentEditable={false}>
                 <button
                     type="button"
-                    className="mermaidModeToggle"
+                    className="previewCodeModeToggle"
                     aria-pressed={mode === 'edit'}
                     onPointerDown={stopEditorControlEvent}
                     onMouseDown={stopEditorControlEvent}
@@ -7595,50 +7712,73 @@ function MermaidBlock({
                 </button>
                 <button
                     type="button"
-                    className="mermaidModeToggle"
-                    aria-pressed={mode === 'view'}
+                    className="previewCodeModeToggle"
+                    aria-pressed={mode === 'preview'}
                     onPointerDown={stopEditorControlEvent}
                     onMouseDown={stopEditorControlEvent}
                     onMouseUp={stopEditorControlEvent}
                     onClick={(event) => {
                         stopEditorControlEvent(event);
-                        setMode('view');
+                        setMode('preview');
                     }}
                 >
-                    View
+                    Preview
+                </button>
+                <button
+                    type="button"
+                    className="previewCodeModeToggle"
+                    aria-pressed={mode === 'split'}
+                    onPointerDown={stopEditorControlEvent}
+                    onMouseDown={stopEditorControlEvent}
+                    onMouseUp={stopEditorControlEvent}
+                    onClick={(event) => {
+                        stopEditorControlEvent(event);
+                        setMode('split');
+                    }}
+                >
+                    Split
                 </button>
             </div>
-            {mode === 'edit' ? editor : <MermaidPreview state={renderState} />}
+            {mode === 'edit' ? (
+                editor
+            ) : mode === 'split' ? (
+                <div className="previewCodeSplit">
+                    <div className="previewCodeSplitEditor">{editor}</div>
+                    <CodePreview state={renderState} renderer={renderer} />
+                </div>
+            ) : (
+                <CodePreview state={renderState} renderer={renderer} />
+            )}
         </div>
     );
 }
 
-const cachedMermaidSvg = (state: MermaidRenderState): string | undefined => {
-    if (state.type === 'rendered' || state.type === 'rendering') return state.svg;
-    if (state.type === 'error') return state.svg;
+const cachedPreviewHtml = (state: CodePreviewRenderState): string | undefined => {
+    if (state.type === 'rendered' || state.type === 'rendering') return state.html;
+    if (state.type === 'error') return state.html;
     return undefined;
 };
 
-function MermaidPreview({state}: {state: MermaidRenderState}) {
-    const visualSvg = cachedMermaidSvg(state);
-    if (visualSvg) {
+function CodePreview({state, renderer}: {state: CodePreviewRenderState; renderer: CodePreviewRenderer}) {
+    const visualHtml = cachedPreviewHtml(state);
+    if (visualHtml) {
         return (
-            <div className="mermaidPreview mermaidPreviewVisual" contentEditable={false}>
-                <div dangerouslySetInnerHTML={{__html: visualSvg}} />
-                {state.type === 'error' ? <div className="mermaidErrorOverlay">{state.message}</div> : null}
+            <div className="codePreview codePreviewVisual" contentEditable={false}>
+                <div dangerouslySetInnerHTML={{__html: visualHtml}} />
+                {state.type === 'error' ? <div className="codePreviewErrorOverlay">{state.message}</div> : null}
             </div>
         );
     }
     if (state.type === 'error') {
         return (
-            <div className="mermaidPreview mermaidError" contentEditable={false}>
+            <div className="codePreview codePreviewError" contentEditable={false}>
                 {state.message}
             </div>
         );
     }
     return (
-        <div className="mermaidPreview" contentEditable={false}>
-            {state.type === 'loading' ? 'Rendering diagram...' : 'Empty diagram'}
+        <div className="codePreview" contentEditable={false}>
+            {state.type === 'loading' ? renderer.loadingLabel : renderer.emptyLabel}
         </div>
     );
 }
@@ -7648,7 +7788,7 @@ const sanitizeDomId = (value: string): string => value.replace(/[^A-Za-z0-9_-]/g
 const errorMessage = (error: unknown): string => {
     if (error instanceof Error && error.message) return error.message;
     if (typeof error === 'string') return error;
-    return 'Unable to render Mermaid diagram.';
+    return 'Unable to render preview.';
 };
 
 type PreviewFetchStatus =

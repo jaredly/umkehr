@@ -31,7 +31,7 @@ import {
     tableRowsForSelection,
     type EditorSelection,
 } from './selectionModel';
-import type {PreviewMetadata, RichBlockMeta} from './blockMeta';
+import {codePreviewKindForLanguage, type PreviewMetadata, type RichBlockMeta} from './blockMeta';
 import {isSerializedImageAttachment, type SerializedImageAttachment} from './attachments';
 import {
     ANNOTATION_MARK,
@@ -595,7 +595,7 @@ const htmlMarkRank = (type: ClipboardInlineMarkType): number => {
 const htmlTagForMeta = (meta: RichBlockMeta): string => {
     if (meta.type === 'heading') return `h${meta.level}`;
     if (meta.type === 'blockquote') return 'blockquote';
-    if (meta.type === 'code' || meta.type === 'mermaid') return 'pre';
+    if (meta.type === 'code') return 'pre';
     if (meta.type === 'list_item') return 'li';
     return 'p';
 };
@@ -706,7 +706,6 @@ const isRichBlockMeta = (value: unknown): value is RichBlockMeta => {
     switch (value.type) {
         case 'paragraph':
         case 'blockquote':
-        case 'mermaid':
         case 'recipe_ingredient':
         case 'table':
             return true;
@@ -717,7 +716,12 @@ const isRichBlockMeta = (value: unknown): value is RichBlockMeta => {
         case 'todo':
             return typeof value.checked === 'boolean';
         case 'code':
-            return typeof value.language === 'string';
+            return (
+                typeof value.language === 'string' &&
+                (value.preview === undefined ||
+                    ((value.preview === 'mermaid' || value.preview === 'vega-lite') &&
+                        codePreviewKindForLanguage(value.language) === value.preview))
+            );
         case 'callout':
             return value.kind === 'info' || value.kind === 'warning' || value.kind === 'error';
         case 'image':

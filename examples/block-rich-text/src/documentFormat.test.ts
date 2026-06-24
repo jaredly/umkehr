@@ -77,7 +77,7 @@ describe('block rich text document format import', () => {
                 {type: 'heading', meta: {level: 2}, content: 'Title'},
                 {type: 'list_item', meta: {kind: 'ordered'}, content: 'One'},
                 {type: 'code', meta: {language: 'TypeScript'}, content: 'const x = 1;'},
-                {type: 'mermaid', content: 'graph TD\nA-->B'},
+                {type: 'code', meta: {language: 'mermaid', preview: 'mermaid'}, content: 'graph TD\nA-->B'},
                 {type: 'callout', meta: {kind: 'warning'}, content: 'Careful'},
                 {type: 'image', meta: {attachmentId: 'image-1', size: 'large'}},
                 {
@@ -97,7 +97,7 @@ describe('block rich text document format import', () => {
             {type: 'heading', level: 2},
             {type: 'list_item', kind: 'ordered'},
             {type: 'code', language: 'typescript'},
-            {type: 'mermaid'},
+            {type: 'code', language: 'mermaid', preview: 'mermaid'},
             {type: 'callout', kind: 'warning'},
             {type: 'image', attachmentId: 'image-1', size: 'large'},
             {
@@ -304,9 +304,10 @@ describe('block rich text document format export', () => {
         expect(exportDocument(imported.state)).toEqual(input);
     });
 
-    it('round-trips mermaid blocks', () => {
+    it('round-trips previewable code blocks', () => {
         const input: DocumentBlock[] = [
-            {type: 'mermaid', content: 'graph TD\nA-->B'},
+            {type: 'code', meta: {language: 'mermaid', preview: 'mermaid'}, content: 'graph TD\nA-->B'},
+            {type: 'code', meta: {language: 'vega-lite', preview: 'vega-lite'}, content: '{"mark":"bar"}'},
         ];
 
         const imported = importDocument(input, ctx());

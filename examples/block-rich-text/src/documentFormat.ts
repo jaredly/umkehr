@@ -21,6 +21,9 @@ import {
     type AnnotationPresentation,
 } from './annotations';
 import {
+    CODE_PREVIEW_LANGUAGES,
+    codePreviewKindForLanguage,
+    type CodePreviewKind,
     type ImagePresentationSize,
     type PreviewMetadata,
     type RichBlockMeta,
@@ -48,10 +51,10 @@ export type DocumentBlockMeta = {
     kind?: 'ordered' | 'unordered' | 'info' | 'warning' | 'error';
     checked?: boolean;
     language?: string;
+    preview?: CodePreviewKind | PreviewMetadata | null;
     attachmentId?: string;
     size?: ImagePresentationSize;
     url?: string;
-    preview?: PreviewMetadata | null;
 };
 
 export type DocumentMark =
@@ -96,7 +99,6 @@ const BLOCK_TYPES = new Set<DocumentBlockType>([
     'todo',
     'blockquote',
     'code',
-    'mermaid',
     'callout',
     'recipe_ingredient',
     'table',
@@ -360,10 +362,18 @@ const parseMeta = (type: DocumentBlockType, value: unknown, path: string): Docum
             if (typeof language !== 'string') {
                 throw new DocumentFormatError(`${path}.language`, 'must be a string');
             }
+            if (meta.preview !== undefined) {
+                const preview = meta.preview;
+                if (preview !== 'mermaid' && preview !== 'vega-lite') {
+                    throw new DocumentFormatError(`${path}.preview`, 'must be a supported code preview');
+                }
+                if (codePreviewKindForLanguage(language) !== preview) {
+                    throw new DocumentFormatError(`${path}.preview`, 'must match the code language');
+                }
+                return {language: CODE_PREVIEW_LANGUAGES[preview], preview};
+            }
             return {language: normalizeStoredCodeLanguage(language)};
         }
-        case 'mermaid':
-            return {};
         case 'callout': {
             const kind = meta.kind ?? 'info';
             if (kind !== 'info' && kind !== 'warning' && kind !== 'error') {
@@ -406,9 +416,12 @@ const richMetaForDocumentBlock = (block: ParsedDocumentBlock, ts: string): RichB
         case 'blockquote':
             return {type: 'blockquote', ts};
         case 'code':
-            return {type: 'code', language: block.meta.language ?? '', ts};
-        case 'mermaid':
-            return {type: 'mermaid', ts};
+            return {
+                type: 'code',
+                language: block.meta.language ?? '',
+                ...(typeof block.meta.preview === 'string' ? {preview: block.meta.preview as CodePreviewKind} : {}),
+                ts,
+            };
         case 'callout':
             return {type: 'callout', kind: (block.meta.kind as 'info' | 'warning' | 'error') ?? 'info', ts};
         case 'recipe_ingredient':
@@ -423,7 +436,12 @@ const richMetaForDocumentBlock = (block: ParsedDocumentBlock, ts: string): RichB
                 ts,
             };
         case 'preview':
-            return {type: 'preview', url: block.meta.url ?? '', preview: block.meta.preview ?? null, ts};
+            return {
+                type: 'preview',
+                url: block.meta.url ?? '',
+                preview: typeof block.meta.preview === 'string' ? null : block.meta.preview ?? null,
+                ts,
+            };
     }
 };
 
@@ -490,9 +508,7 @@ const documentBlockForMeta = (meta: RichBlockMeta): DocumentBlock => {
         case 'blockquote':
             return {type: 'blockquote'};
         case 'code':
-            return {type: 'code', meta: {language: meta.language}};
-        case 'mermaid':
-            return {type: 'mermaid'};
+            return {type: 'code', meta: {language: meta.language, ...(meta.preview ? {preview: meta.preview} : {})}};
         case 'callout':
             return {type: 'callout', meta: {kind: meta.kind}};
         case 'recipe_ingredient':
