@@ -31,6 +31,7 @@ import {
     insertText,
     insertInlineEmbed,
     insertImageBlock,
+    insertPreviewBlock,
     insertTextWithMarkdownShortcuts,
     insertTextWithMarks,
     insertTextWithRetainedMarks,
@@ -51,6 +52,7 @@ import {
     setInlineEmbedDataByCharId,
     setBlockType,
     setLinkMark,
+    setPreviewBlockData,
     splitBlock,
     splitTableRowHeader,
     splitTableTitleToParagraph,
@@ -624,6 +626,108 @@ describe('block rich text commands', () => {
 
         expect(ids).toHaveLength(2);
         expect(result.state.state.blocks[blockId].meta).toMatchObject({type: 'image'});
+        expect(result.state.state.blocks[paragraphId].meta).toMatchObject({type: 'paragraph'});
+        expect(result.selection).toEqual(caret(paragraphId, 0));
+    });
+
+    it('converts an empty block to a preview block', () => {
+        const state = init();
+        const blockId = onlyBlock(state);
+        const result = insertPreviewBlock(state, caret(blockId, 0), '', ctx());
+
+        expect(rootBlockIds(result.state)).toEqual([blockId]);
+        expect(result.state.state.blocks[blockId].meta).toMatchObject({
+            type: 'preview',
+            url: '',
+            preview: null,
+        });
+        expect(result.selection).toEqual(caret(blockId, 0));
+    });
+
+    it('converts a non-empty block to preview and preserves subtitle text', () => {
+        const context = ctx();
+        const typed = insertText(init(), caret(onlyBlock(init()), 0), 'subtitle', context);
+        const textBlockId = onlyBlock(typed.state);
+        const result = insertPreviewBlock(
+            typed.state,
+            caret(textBlockId, 3),
+            'https://example.test/page',
+            context,
+        );
+        const ids = rootBlockIds(result.state);
+
+        expect(ids).toEqual([textBlockId]);
+        expect(blockContents(result.state, textBlockId)).toBe('subtitle');
+        expect(result.state.state.blocks[textBlockId].meta).toMatchObject({
+            type: 'preview',
+            url: 'https://example.test/page',
+            preview: null,
+        });
+        expect(result.selection).toEqual(caret(textBlockId, 0));
+    });
+
+    it('syncs preview metadata to the peer replica', () => {
+        const demo = createDemoState();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        const inserted = insertPreviewBlock(
+            demo.left.state,
+            caret(blockId, 0),
+            'https://example.test',
+            makeCommandContext(demo.left),
+        );
+        const updated = setPreviewBlockData(
+            inserted.state,
+            blockId,
+            'https://example.test',
+            {title: 'Example', siteName: 'Example Site'},
+            makeCommandContext(demo.left),
+        );
+
+        const synced = applyLocalChange(demo, {
+            editorId: 'left',
+            state: updated.state,
+            selection: demo.left.selection,
+            ops: [...inserted.ops, ...updated.ops],
+        });
+
+        expect(synced.right.state.state.blocks[blockId].meta).toMatchObject({
+            type: 'preview',
+            url: 'https://example.test',
+            preview: {title: 'Example', siteName: 'Example Site'},
+        });
+    });
+
+    it('updates preview URL through block metadata', () => {
+        const context = ctx();
+        const state = init();
+        const blockId = onlyBlock(state);
+        const inserted = insertPreviewBlock(state, caret(blockId, 0), 'https://old.example', context);
+        const result = setPreviewBlockData(
+            inserted.state,
+            blockId,
+            'https://new.example',
+            null,
+            context,
+        );
+
+        expect(result.state.state.blocks[blockId].meta).toMatchObject({
+            type: 'preview',
+            url: 'https://new.example',
+            preview: null,
+        });
+    });
+
+    it('creates a paragraph after a preview block on split', () => {
+        const context = ctx();
+        const state = init();
+        const blockId = onlyBlock(state);
+        const preview = insertPreviewBlock(state, caret(blockId, 0), 'https://example.test', context);
+        const result = splitBlock(preview.state, caret(blockId, 0), context);
+        const ids = rootBlockIds(result.state);
+        const paragraphId = ids[1];
+
+        expect(ids).toHaveLength(2);
+        expect(result.state.state.blocks[blockId].meta).toMatchObject({type: 'preview'});
         expect(result.state.state.blocks[paragraphId].meta).toMatchObject({type: 'paragraph'});
         expect(result.selection).toEqual(caret(paragraphId, 0));
     });

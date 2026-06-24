@@ -101,6 +101,25 @@ describe('block rich text clipboard payload parser', () => {
         ).toBeNull();
     });
 
+    it('parses preview block metadata', () => {
+        const previewPayload = payload({
+            fragments: [
+                {
+                    text: 'Subtitle',
+                    meta: {
+                        type: 'preview',
+                        url: 'https://example.test',
+                        preview: {title: 'Example', imageUrl: 'https://example.test/image.png'},
+                        ts: 'preview-ts',
+                    },
+                    marks: [],
+                },
+            ],
+        });
+
+        expect(parseBlockRichTextClipboardPayload(JSON.stringify(previewPayload))).toEqual(previewPayload);
+    });
+
     it('returns null for invalid annotation entries', () => {
         expect(
             parseBlockRichTextClipboardPayload(
@@ -211,6 +230,32 @@ describe('block rich text clipboard serialization', () => {
 
         expect(payload?.fragments[0]?.meta).toEqual({type: 'heading', level: 2, ts: 'heading-ts'});
         expect(payload?.html).toContain('<h2 data-umkehr-block-type="heading">Title</h2>');
+    });
+
+    it('serializes preview block metadata and HTML fallback', () => {
+        const demo = createDemoState();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = insertText(demo.left.state, caret(blockId, 0), 'Subtitle', ctx());
+        result = setBlockMeta(result.state, blockId, {
+            type: 'preview',
+            url: 'https://example.test',
+            preview: {title: 'Example Title', siteName: 'Example'},
+            ts: 'preview-ts',
+        });
+
+        const payload = serializeSelectionToClipboardPayload(
+            result.state,
+            singleRetainedSelectionSet(result.state, range(blockId, 0, 8)),
+        );
+
+        expect(payload?.fragments[0]?.meta).toEqual({
+            type: 'preview',
+            url: 'https://example.test',
+            preview: {title: 'Example Title', siteName: 'Example'},
+            ts: 'preview-ts',
+        });
+        expect(payload?.html).toContain('data-umkehr-block-type="preview"');
+        expect(payload?.html).toContain('<a href="https://example.test">Example Title</a><br>Subtitle');
     });
 
     it('serializes annotation references and body blocks', () => {

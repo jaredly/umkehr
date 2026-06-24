@@ -27,7 +27,7 @@ import {
     tableRowsForSelection,
     type EditorSelection,
 } from './selectionModel';
-import type {RichBlockMeta} from './blockMeta';
+import type {PreviewMetadata, RichBlockMeta} from './blockMeta';
 import {isSerializedImageAttachment, type SerializedImageAttachment} from './attachments';
 import {
     ANNOTATION_MARK,
@@ -469,6 +469,12 @@ const fragmentToHtml = (fragment: ClipboardFragment): string => {
     }
     const tag = htmlTagForMeta(fragment.meta);
     const attrs = ` data-umkehr-block-type="${escapeAttribute(fragment.meta.type)}"`;
+    if (fragment.meta.type === 'preview') {
+        const title = fragment.meta.preview?.title || fragment.meta.url;
+        const link = `<a href="${escapeAttribute(fragment.meta.url)}">${escapeHtml(title)}</a>`;
+        const body = inner ? `${link}<br>${inner}` : link;
+        return `<${tag}${attrs} data-umkehr-preview-url="${escapeAttribute(fragment.meta.url)}">${body}</${tag}>`;
+    }
     return `<${tag}${attrs}>${inner || '<br>'}</${tag}>`;
 };
 
@@ -676,6 +682,12 @@ const isRichBlockMeta = (value: unknown): value is RichBlockMeta => {
                 value.attachmentId.length > 0 &&
                 isImagePresentationSize(value.size)
             );
+        case 'preview':
+            return (
+                typeof value.url === 'string' &&
+                (value.url === '' || isAbsoluteHttpUrl(value.url)) &&
+                (value.preview === null || isPreviewMetadata(value.preview))
+            );
         default:
             return false;
     }
@@ -683,3 +695,26 @@ const isRichBlockMeta = (value: unknown): value is RichBlockMeta => {
 
 const isImagePresentationSize = (value: unknown): boolean =>
     value === 'small' || value === 'medium' || value === 'large' || value === 'original';
+
+const isPreviewMetadata = (value: unknown): value is PreviewMetadata => {
+    if (!isRecord(value)) return false;
+    return (
+        optionalString(value.title) &&
+        optionalString(value.description) &&
+        optionalString(value.siteName) &&
+        optionalString(value.imageUrl) &&
+        optionalString(value.resolvedUrl) &&
+        optionalString(value.fetchedAt)
+    );
+};
+
+const optionalString = (value: unknown): boolean => value === undefined || typeof value === 'string';
+
+const isAbsoluteHttpUrl = (value: string): boolean => {
+    try {
+        const url = new URL(value);
+        return url.protocol === 'http:' || url.protocol === 'https:';
+    } catch {
+        return false;
+    }
+};

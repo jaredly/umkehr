@@ -1,6 +1,7 @@
 import {
     useCallback,
     Fragment,
+    useEffect,
     useLayoutEffect,
     useMemo,
     useRef,
@@ -43,6 +44,7 @@ import {
     deleteTableCellSelection,
     exitEmptyLastTableRow,
     insertInlineEmbed,
+    insertPreviewBlock,
     insertTextWithMarkdownShortcuts,
     insertTextWithRetainedMarks,
     moveBlock,
@@ -58,6 +60,7 @@ import {
     setCodeMark,
     setInlineEmbedDataByCharId,
     setBlockMeta,
+    setPreviewBlockData,
     splitTableTitleToParagraph,
     type CommandResult,
     type MoveTarget,
@@ -97,7 +100,7 @@ import {
     type EditorId,
     type Replica,
 } from './blockEditorRuntime';
-import {paragraphMeta, type ImagePresentationSize, type RichBlockMeta} from './blockMeta';
+import {paragraphMeta, type ImagePresentationSize, type PreviewMetadata, type RichBlockMeta} from './blockMeta';
 import {
     closestCaretOffsetForHorizontalIntent,
     caretRectForBlockOffset,
@@ -240,6 +243,13 @@ import {
     type ImageAttachment,
     type SerializedImageAttachment,
 } from './attachments';
+import {
+    fetchPreviewMetadata,
+    normalizePreviewUrl,
+    previewAssetUrl,
+    previewDomain,
+    type PreviewUrlInvalidReason,
+} from './previewMetadata';
 
 type RichFormattedBlock = FormattedBlock<RichBlockMeta>;
 type RenderedAnnotation = ReturnType<typeof renderedAnnotations>[number];
@@ -2005,6 +2015,18 @@ function BlockEditor({
                                 context,
                             ),
                     );
+                } else if (command.value === 'preview') {
+                    result = runSelectionCommandEverywhere(
+                        deleted.state,
+                        deleted.selection,
+                        (working, entry) =>
+                            insertPreviewBlock(
+                                working,
+                                resolveSelection(working, entry.selection),
+                                '',
+                                context,
+                            ),
+                    );
                 } else {
                     result = setBlockTypeEverywhere(
                         deleted.state,
@@ -2911,6 +2933,23 @@ function BlockEditor({
                                 ),
                             };
                         }
+                        if (kind === 'preview') {
+                            const result = insertPreviewBlock(
+                                current.state,
+                                primarySelection(resolveSelectionSet(current.state, selection)),
+                                '',
+                                makeCommandContext(current),
+                            );
+                            return {
+                                state: result.state,
+                                ops: result.ops,
+                                selection: replacePrimarySelection(
+                                    result.state,
+                                    current.selection,
+                                    result.selection,
+                                ),
+                            };
+                        }
                         return setBlockTypeEverywhere(current.state, selection, (_blockId, meta) =>
                             blockTypeMeta(kind, meta, nextReplicaTs(current)),
                         );
@@ -3200,7 +3239,8 @@ type BlockTypeMenuValue =
     | 'callout-info'
     | 'callout-warning'
     | 'callout-error'
-    | 'table';
+    | 'table'
+    | 'preview';
 
 const SLASH_COMMANDS: SlashCommand[] = [
     {type: 'block', value: 'paragraph', label: 'Paragraph', group: 'Block type', keywords: ['text']},
@@ -3216,6 +3256,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     {type: 'block', value: 'callout-warning', label: 'Warning callout', group: 'Block type', keywords: ['warning']},
     {type: 'block', value: 'callout-error', label: 'Error callout', group: 'Block type', keywords: ['error']},
     {type: 'block', value: 'table', label: 'Table', group: 'Block type', keywords: ['grid']},
+    {type: 'block', value: 'preview', label: 'Preview', group: 'Block type', keywords: ['link', 'card', 'url']},
     {type: 'date-embed', label: 'Date', group: 'Inline embed', keywords: ['embed', 'calendar']},
 ];
 
@@ -4747,6 +4788,42 @@ const renderEditableBlock = (
                     return {state: result.state, ops: result.ops, selection: current.selection};
                 })
             }
+            onSetPreviewUrl={(url) =>
+                context.runBlockControlCommand((current) => {
+                    const currentBlock = current.state.state.blocks[block.id];
+                    if (!currentBlock || currentBlock.meta.type !== 'preview') {
+                        return {state: current.state, ops: [], selection: current.selection};
+                    }
+                    const result = setPreviewBlockData(
+                        current.state,
+                        block.id,
+                        url,
+                        null,
+                        makeCommandContext(current),
+                    );
+                    return {state: result.state, ops: result.ops, selection: current.selection};
+                })
+            }
+            onSetPreviewMetadata={(url, metadata) =>
+                context.runBlockControlCommand((current) => {
+                    const currentBlock = current.state.state.blocks[block.id];
+                    if (
+                        !currentBlock ||
+                        currentBlock.meta.type !== 'preview' ||
+                        currentBlock.meta.url !== url
+                    ) {
+                        return {state: current.state, ops: [], selection: current.selection};
+                    }
+                    const result = setPreviewBlockData(
+                        current.state,
+                        block.id,
+                        url,
+                        metadata,
+                        makeCommandContext(current),
+                    );
+                    return {state: result.state, ops: result.ops, selection: current.selection};
+                })
+            }
             onCopy={context.onCopy}
             onPaste={context.onPaste}
             onMoveCaret={context.moveCaretHorizontally}
@@ -4817,6 +4894,13 @@ const blockTypeMeta = (
             return {type: 'callout', kind: 'error', ts};
         case 'table':
             return current;
+        case 'preview':
+            return {
+                type: 'preview',
+                url: current.type === 'preview' ? current.url : '',
+                preview: current.type === 'preview' ? current.preview : null,
+                ts,
+            };
     }
 };
 
@@ -4845,6 +4929,8 @@ const blockTypeMenuValue = (meta: RichBlockMeta | undefined): BlockTypeMenuValue
             return 'table';
         case 'image':
             return 'paragraph';
+        case 'preview':
+            return 'preview';
     }
 };
 
@@ -6261,6 +6347,7 @@ function Toolbar({
                 <option value="callout-warning">Warning callout</option>
                 <option value="callout-error">Error callout</option>
                 <option value="table">Table</option>
+                <option value="preview">Preview</option>
             </select>
         </div>
     );
@@ -6323,6 +6410,8 @@ function EditableBlock({
     onSetCodeLanguage,
     onSetCalloutKind,
     onSetImageSize,
+    onSetPreviewUrl,
+    onSetPreviewMetadata,
     onCopy,
     onPaste,
     onMoveCaret,
@@ -6396,6 +6485,8 @@ function EditableBlock({
     onSetCodeLanguage(language: string): void;
     onSetCalloutKind(kind: 'info' | 'warning' | 'error'): void;
     onSetImageSize(size: ImagePresentationSize): void;
+    onSetPreviewUrl(url: string): void;
+    onSetPreviewMetadata(url: string, metadata: PreviewMetadata | null): void;
     onCopy(event: ClipboardEvent<HTMLElement>): void;
     onPaste(event: ClipboardEvent<HTMLElement>): void;
     onMoveCaret(selection: EditorSelection): void;
@@ -6767,6 +6858,13 @@ function EditableBlock({
                     <ImagePreview attachment={attachment} attachmentId={meta.attachmentId} />
                     <figcaption>{editableSurface}</figcaption>
                 </figure>
+            ) : meta.type === 'preview' ? (
+                <PreviewBlockCard
+                    meta={meta}
+                    subtitle={editableSurface}
+                    onSetUrl={onSetPreviewUrl}
+                    onSetMetadata={onSetPreviewMetadata}
+                />
             ) : (
                 editableSurface
             )}
@@ -7263,6 +7361,224 @@ function BlockInlineControls({
     }
     return null;
 }
+
+type PreviewFetchStatus =
+    | {type: 'idle'}
+    | {type: 'loading'; url: string}
+    | {type: 'failed'; url: string; reason: string};
+
+const PREVIEW_CORS_PROXY = import.meta.env.VITE_PREVIEW_CORS_PROXY?.trim() || undefined;
+
+function PreviewBlockCard({
+    meta,
+    subtitle,
+    onSetUrl,
+    onSetMetadata,
+}: {
+    meta: Extract<RichBlockMeta, {type: 'preview'}>;
+    subtitle: ReactElement;
+    onSetUrl(url: string): void;
+    onSetMetadata(url: string, metadata: PreviewMetadata | null): void;
+}) {
+    const inputRef = useRef<HTMLInputElement>(null);
+    const [editing, setEditing] = useState(meta.url === '');
+    const [draft, setDraft] = useState(meta.url);
+    const [draftDirty, setDraftDirty] = useState(false);
+    const [menuOpen, setMenuOpen] = useState(false);
+    const [invalidReason, setInvalidReason] = useState<string | null>(null);
+    const [fetchStatus, setFetchStatus] = useState<PreviewFetchStatus>({type: 'idle'});
+    const normalized = normalizePreviewUrl(meta.url);
+    const domain = normalized.valid ? normalized.domain : previewDomain(meta.url);
+    const normalizedUrl = normalized.valid ? normalized.url : '';
+
+    useEffect(() => {
+        if (draftDirty) return;
+        setDraft(meta.url);
+        setDraftDirty(false);
+        setInvalidReason(null);
+        setEditing(meta.url === '');
+    }, [meta.url]);
+
+    useEffect(() => {
+        if (!editing && meta.url === '') return;
+        if (!normalized.valid || meta.preview) {
+            setFetchStatus({type: 'idle'});
+            return;
+        }
+
+        const controller = new AbortController();
+        setFetchStatus({type: 'loading', url: normalizedUrl});
+        void fetchPreviewMetadata(normalizedUrl, {
+            signal: controller.signal,
+            corsProxy: PREVIEW_CORS_PROXY,
+        }).then((result) => {
+            if (controller.signal.aborted) return;
+            if (result.type === 'loaded') {
+                setFetchStatus({type: 'idle'});
+                onSetMetadata(result.url, result.metadata);
+            } else if (result.type === 'failed') {
+                setFetchStatus({type: 'failed', url: result.url, reason: result.reason});
+            } else {
+                setFetchStatus({type: 'idle'});
+            }
+        });
+
+        return () => controller.abort();
+    }, [editing, meta.preview, meta.url, normalizedUrl]);
+
+    useEffect(() => {
+        if (!editing) return;
+        inputRef.current?.focus();
+        inputRef.current?.select();
+    }, [editing]);
+
+    const commitDraft = () => {
+        const next = normalizePreviewUrl(draft);
+        if (!next.valid) {
+            setInvalidReason(previewUrlInvalidMessage(next.reason));
+            return;
+        }
+        setInvalidReason(null);
+        setEditing(false);
+        setDraftDirty(false);
+        setMenuOpen(false);
+        onSetUrl(next.url);
+    };
+
+    const cancelEditing = () => {
+        setDraft(meta.url);
+        setDraftDirty(false);
+        setInvalidReason(null);
+        setEditing(meta.url === '');
+        setMenuOpen(false);
+    };
+
+    const title = meta.preview?.title || meta.url || 'Preview';
+    const description = meta.preview?.description;
+    const imageUrl = previewAssetUrl(meta.preview?.imageUrl, PREVIEW_CORS_PROXY);
+    const loadedUrl = meta.preview?.resolvedUrl || meta.url;
+    const isLoading = fetchStatus.type === 'loading' && fetchStatus.url === normalizedUrl;
+    const failed = fetchStatus.type === 'failed' && fetchStatus.url === normalizedUrl ? fetchStatus : null;
+
+    return (
+        <div className="previewBlock">
+            <div className="previewCard" contentEditable={false}>
+                {editing ? (
+                    <div className="previewUrlEditor">
+                        <input
+                            ref={inputRef}
+                            value={draft}
+                            placeholder="https://example.com"
+                            aria-label="Preview URL"
+                            onPointerDown={stopEditorControlEvent}
+                            onMouseDown={stopEditorControlEvent}
+                            onMouseUp={stopEditorControlEvent}
+                            onClick={stopEditorControlEvent}
+                            onChange={(event) => {
+                                setDraft(event.currentTarget.value);
+                                setDraftDirty(true);
+                                setInvalidReason(null);
+                            }}
+                            onKeyDown={(event) => {
+                                event.stopPropagation();
+                                if (event.key === 'Enter') {
+                                    event.preventDefault();
+                                    commitDraft();
+                                } else if (event.key === 'Escape') {
+                                    event.preventDefault();
+                                    cancelEditing();
+                                }
+                            }}
+                        />
+                        <button
+                            type="button"
+                            onPointerDown={stopEditorControlEvent}
+                            onMouseDown={stopEditorControlEvent}
+                            onClick={(event) => {
+                                stopEditorControlEvent(event);
+                                commitDraft();
+                            }}
+                        >
+                            Save
+                        </button>
+                        {invalidReason ? <span className="previewUrlError">{invalidReason}</span> : null}
+                    </div>
+                ) : (
+                    <>
+                        <button
+                            type="button"
+                            className="previewMenuButton"
+                            aria-label="Preview options"
+                            aria-expanded={menuOpen}
+                            onPointerDown={stopEditorControlEvent}
+                            onMouseDown={stopEditorControlEvent}
+                            onClick={(event) => {
+                                stopEditorControlEvent(event);
+                                setMenuOpen((open) => !open);
+                            }}
+                        >
+                            ...
+                        </button>
+                        {menuOpen ? (
+                            <div
+                                className="previewMenu"
+                                role="menu"
+                                onPointerDown={stopEditorControlEvent}
+                                onMouseDown={stopEditorControlEvent}
+                                onClick={stopEditorControlEvent}
+                            >
+                                <button
+                                    type="button"
+                                    role="menuitem"
+                                    onClick={(event) => {
+                                        stopEditorControlEvent(event);
+                                        setDraft(meta.url);
+                                        setDraftDirty(false);
+                                        setEditing(true);
+                                        setMenuOpen(false);
+                                    }}
+                                >
+                                    Edit URL
+                                </button>
+                            </div>
+                        ) : null}
+                        <a
+                            className="previewCardLink"
+                            href={loadedUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            onClick={stopEditorControlEvent}
+                        >
+                            {imageUrl ? (
+                                <img className="previewImage" src={imageUrl} alt="" />
+                            ) : (
+                                <span className="previewImage previewImageFallback">{domain.slice(0, 1).toUpperCase()}</span>
+                            )}
+                            <span className="previewText">
+                                <span className="previewSite">{domain}</span>
+                                <strong>{isLoading ? 'Loading preview...' : title}</strong>
+                                {description ? <span className="previewDescription">{description}</span> : null}
+                                {failed ? <span className="previewDescription">Preview unavailable</span> : null}
+                            </span>
+                        </a>
+                    </>
+                )}
+            </div>
+            <div className="previewSubtitle">{subtitle}</div>
+        </div>
+    );
+}
+
+const previewUrlInvalidMessage = (reason: PreviewUrlInvalidReason): string => {
+    switch (reason) {
+        case 'empty':
+            return 'Enter a URL.';
+        case 'unsupported-protocol':
+            return 'Use an http or https URL.';
+        case 'invalid':
+            return 'Enter an absolute URL.';
+    }
+};
 
 function ImagePreview({
     attachment,

@@ -572,6 +572,176 @@ select {
     font-size: 13px;
 }
 
+.previewBlock {
+    width: min(100%, 620px);
+    margin: 2px 0 4px;
+}
+
+.previewCard {
+    position: relative;
+    min-width: 0;
+    border: 1px solid #d6dde5;
+    border-radius: 6px;
+    background: #fff;
+    overflow: hidden;
+}
+
+.previewCardLink {
+    display: grid;
+    grid-template-columns: 112px minmax(0, 1fr);
+    min-height: 112px;
+    color: inherit;
+    text-decoration: none;
+}
+
+.previewCardLink:hover .previewText strong {
+    color: #185f99;
+}
+
+.previewImage {
+    display: block;
+    width: 112px;
+    height: 112px;
+    object-fit: cover;
+    background: #eef3f7;
+}
+
+.previewImageFallback {
+    display: grid;
+    place-items: center;
+    color: #52616f;
+    font-size: 28px;
+    font-weight: 760;
+    text-transform: uppercase;
+}
+
+.previewText {
+    display: grid;
+    align-content: start;
+    gap: 5px;
+    min-width: 0;
+    padding: 14px 42px 14px 14px;
+}
+
+.previewSite,
+.previewDescription {
+    min-width: 0;
+    overflow: hidden;
+    color: #657380;
+    font-size: 12px;
+    line-height: 1.35;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.previewText strong {
+    min-width: 0;
+    overflow: hidden;
+    color: #1f2d38;
+    font-size: 15px;
+    line-height: 1.3;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.previewMenuButton {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    z-index: 2;
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 1px solid #cbd5df;
+    border-radius: 6px;
+    color: #52616f;
+    background: #fff;
+    cursor: pointer;
+}
+
+.previewMenuButton:hover {
+    background: #eef3f7;
+}
+
+.previewMenu {
+    position: absolute;
+    top: 38px;
+    right: 6px;
+    z-index: 3;
+    min-width: 112px;
+    padding: 4px;
+    border: 1px solid #cbd5df;
+    border-radius: 6px;
+    background: #fff;
+    box-shadow: 0 8px 22px rgb(32 45 57 / 16%);
+}
+
+.previewMenu button {
+    width: 100%;
+    min-height: 30px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: 4px;
+    color: #23313d;
+    text-align: left;
+    background: transparent;
+    cursor: pointer;
+}
+
+.previewMenu button:hover {
+    background: #eef3f7;
+}
+
+.previewUrlEditor {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: center;
+    padding: 12px;
+}
+
+.previewUrlEditor input {
+    min-width: 0;
+    min-height: 34px;
+    padding: 0 10px;
+    border: 1px solid #cbd5df;
+    border-radius: 6px;
+}
+
+.previewUrlEditor button {
+    min-height: 34px;
+    padding: 0 12px;
+    border: 1px solid #b8c5d1;
+    border-radius: 6px;
+    background: #fff;
+    cursor: pointer;
+}
+
+.previewUrlError {
+    grid-column: 1 / -1;
+    color: #b84b42;
+    font-size: 12px;
+}
+
+.previewSubtitle .editableBlock {
+    min-height: 30px;
+    margin-top: 4px;
+    color: #33414d;
+    font-size: 13px;
+}
+
+.tableCell .previewCardLink {
+    grid-template-columns: 72px minmax(0, 1fr);
+    min-height: 72px;
+}
+
+.tableCell .previewImage {
+    width: 72px;
+    height: 72px;
+}
+
 .blockType-blockquote > .editableBlock {
     color: #354452;
 }

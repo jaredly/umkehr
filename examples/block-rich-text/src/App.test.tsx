@@ -1676,6 +1676,120 @@ describe('Block rich text example UI', () => {
         expect(blocks(right)[0].classList.contains('headingLevel2')).toBe(true);
     });
 
+    it('runs a slash preview command and shows the URL empty state', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], '/');
+
+        const dialog = await waitFor(() => within(left).getByRole('dialog', {name: 'Slash commands'}));
+        fireEvent.change(within(dialog).getByRole('textbox', {name: 'Search slash commands'}), {
+            target: {value: 'preview'},
+        });
+        fireEvent.click(within(dialog).getByRole('option', {name: /Preview/}));
+
+        await waitForBlockTexts(left, ['']);
+        await waitFor(() => expect(within(left).getByRole('textbox', {name: 'Preview URL'})).toBeTruthy());
+        expect(within(right).getByRole('textbox', {name: 'Preview URL'})).toBeTruthy();
+    });
+
+    it('converts a block to preview from the toolbar and rejects invalid URLs', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'preview');
+
+        const input = await waitFor(() => within(left).getByRole('textbox', {name: 'Preview URL'}));
+        fireEvent.change(input, {target: {value: 'example.test'}});
+        fireEvent.keyDown(input, {key: 'Enter'});
+
+        expect(within(left).getByText('Enter an absolute URL.')).toBeTruthy();
+        expect(within(left).getByRole('textbox', {name: 'Preview URL'})).toBeTruthy();
+    });
+
+    it('commits preview URLs to both replicas', async () => {
+        vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+            new Response('', {status: 404, statusText: 'Not Found'}),
+        );
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'preview');
+
+        const input = await waitFor(() => within(left).getByRole('textbox', {name: 'Preview URL'}));
+        fireEvent.change(input, {target: {value: 'https://example.test/path#hash'}});
+        fireEvent.keyDown(input, {key: 'Enter'});
+
+        await waitFor(() => {
+            expect(left.querySelector<HTMLAnchorElement>('.previewCardLink')?.href).toBe('https://example.test/path');
+            expect(right.querySelector<HTMLAnchorElement>('.previewCardLink')?.href).toBe('https://example.test/path');
+        });
+    });
+
+    it('stores fetched preview metadata in block meta and replicates the card', async () => {
+        vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+            new Response(
+                `
+                    <html>
+                        <head>
+                            <meta property="og:title" content="Fetched Title">
+                            <meta property="og:description" content="Fetched Description">
+                            <meta property="og:site_name" content="Fetched Site">
+                        </head>
+                    </html>
+                `,
+                {status: 200},
+            ),
+        );
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        typeText(blocks(left)[0], 'Local subtitle');
+        setBlockType(left, 'preview');
+
+        const input = await waitFor(() => within(left).getByRole('textbox', {name: 'Preview URL'}));
+        fireEvent.change(input, {target: {value: 'https://example.test/card'}});
+        fireEvent.keyDown(input, {key: 'Enter'});
+
+        await waitFor(() => {
+            expect(within(left).getByText('Fetched Title')).toBeTruthy();
+            expect(within(right).getByText('Fetched Title')).toBeTruthy();
+        });
+        expect(blockTexts(left)).toEqual(['Local subtitle']);
+        expect(blockTexts(right)).toEqual(['Local subtitle']);
+    });
+
+    it('edits an existing preview URL from the options menu', async () => {
+        vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+            new Response('', {status: 404, statusText: 'Not Found'}),
+        );
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'preview');
+
+        let input = await waitFor(() => within(left).getByRole('textbox', {name: 'Preview URL'}));
+        fireEvent.change(input, {target: {value: 'https://old.example'}});
+        fireEvent.keyDown(input, {key: 'Enter'});
+        await waitFor(() => expect(left.querySelector<HTMLAnchorElement>('.previewCardLink')?.href).toBe('https://old.example/'));
+
+        fireEvent.click(within(left).getByRole('button', {name: 'Preview options'}));
+        fireEvent.click(within(left).getByRole('menuitem', {name: 'Edit URL'}));
+        input = await waitFor(() => within(left).getByRole('textbox', {name: 'Preview URL'}));
+        fireEvent.change(input, {target: {value: 'https://new.example'}});
+        fireEvent.keyDown(input, {key: 'Enter'});
+
+        await waitFor(() => {
+            expect(left.querySelector<HTMLAnchorElement>('.previewCardLink')?.href).toBe('https://new.example/');
+            expect(right.querySelector<HTMLAnchorElement>('.previewCardLink')?.href).toBe('https://new.example/');
+        });
+    });
+
     it('runs a slash date embed command and tombstones the slash', async () => {
         const view = render(<App />);
         const {left, right} = panels(view);

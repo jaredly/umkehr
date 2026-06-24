@@ -26,7 +26,13 @@ import {
 import {compareLseqIds, createLseqIdBetween} from 'umkehr/block-crdt/lseq';
 import type {BlockOrderTs, Boundary, CachedState, JsonValue, Lamport} from 'umkehr/block-crdt/types';
 import {lamportToString, parseLamportString} from 'umkehr/block-crdt/utils';
-import {paragraphMeta, sameTypeWithTs, type ImagePresentationSize, type RichBlockMeta} from './blockMeta';
+import {
+    paragraphMeta,
+    sameTypeWithTs,
+    type ImagePresentationSize,
+    type PreviewMetadata,
+    type RichBlockMeta,
+} from './blockMeta';
 import {annotationVirtualParents} from './annotations';
 import {CODE_MARK, isCodeMarkValue, normalizeStoredCodeLanguage, type BareInlineMark, type BooleanInlineMark} from './inlineMarks';
 import {markdownShortcutPrefix, type MarkdownShortcutMatch} from './markdownShortcuts';
@@ -500,7 +506,7 @@ export const splitBlock = (
 
     const newBlockId = lamportToString([working.state.maxSeenCount + 1, context.actor]);
     const currentMeta = working.state.blocks[point.blockId]?.meta;
-    if (currentMeta?.type === 'image') {
+    if (currentMeta?.type === 'image' || currentMeta?.type === 'preview') {
         const inserted = insertParagraphAfterBlock(working, point.blockId, context);
         return {state: inserted.state, ops: [...ops, ...inserted.ops], selection: caret(inserted.blockId, 0)};
     }
@@ -1348,6 +1354,52 @@ export const insertImageBlock = (
         ops: [...ops, ...inserted.ops],
         selection: caret(inserted.blockId, 0),
     };
+};
+
+export const insertPreviewBlock = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    url: string,
+    context: CommandContext,
+): CommandResult => {
+    let working = state;
+    let point = firstPointForSelection(working, selection);
+    const ops: Array<Op<RichBlockMeta>> = [];
+
+    if (!isCollapsed(selection)) {
+        const deleted = deleteSelectionAndJoinBoundaries(working, selection, context);
+        working = deleted.state;
+        ops.push(...deleted.ops);
+        point = deleted.point;
+    }
+
+    const block = working.state.blocks[point.blockId];
+    if (!block) return {state: working, ops, selection: caret(point.blockId, point.offset)};
+
+    const meta: RichBlockMeta = {type: 'preview', url, preview: null, ts: context.nextTs()};
+    const metaOps = setBlockMetaOps(working, {block: block.id, meta});
+    working = applyMany(working, metaOps, annotationVirtualParents(working));
+    ops.push(...metaOps);
+    return {state: working, ops, selection: caret(point.blockId, 0)};
+};
+
+export const setPreviewBlockData = (
+    state: CachedState<RichBlockMeta>,
+    blockId: string,
+    url: string,
+    preview: PreviewMetadata | null,
+    context: CommandContext,
+): CommandResult => {
+    const current = state.state.blocks[blockId];
+    if (!current || current.meta.type !== 'preview') {
+        return {state, ops: [], selection: caret(blockId, 0)};
+    }
+    return setBlockMeta(state, blockId, {
+        type: 'preview',
+        url,
+        preview,
+        ts: context.nextTs(),
+    });
 };
 
 export const createTable = (
