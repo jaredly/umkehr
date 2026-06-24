@@ -3761,9 +3761,6 @@ function KanbanCard({
                 context.blockLevelDecorationsByBlock.get(node.block.id)?.focus ? 'blockSelectionFocus' : '',
                 context.draggingSubtreeIds.has(node.block.id) ? 'dragging' : '',
                 context.draggingId === node.block.id ? 'draggingRoot' : '',
-                context.dropTarget?.indicatorBlockId === node.block.id
-                    ? `drop${capitalize(context.dropTarget.indicatorPlacement)}`
-                    : '',
             ]
                 .filter(Boolean)
                 .join(' ')}

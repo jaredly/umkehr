@@ -34,3 +34,11 @@
 - Passed focused suite: `npm exec vitest -- run examples/block-rich-text/src/blockCommands.test.ts examples/block-rich-text/src/documentFormat.test.ts examples/block-rich-text/src/clipboard.test.ts examples/block-rich-text/src/history.test.ts examples/block-rich-text/src/documentFixtures.test.ts examples/block-rich-text/src/App.test.tsx` (465 tests).
 - Passed build: `npm run build` in `examples/block-rich-text`.
 - Build note: the command printed `Error connecting to agent: Operation not permitted` before running, but `tsc` and Vite completed successfully and the process exited 0.
+
+### Follow-Up: Drop Indicator Clarity
+
+- Fixed a confusing duplicate kanban card drop indicator where child-drop targets showed both the kanban card wrapper line and the generic nested block line.
+- The kanban card wrapper now draws only before/after card targets; child drops are represented by the nested block-row indicator.
+- Added a UI regression test for hovering the card child zone.
+- Follow-up adjustment: removed the kanban card wrapper before/after indicator entirely. Card before/after targets now use the generic block-row indicator, widened across the full kanban card.
+- Added a UI regression test for hovering before a kanban card.

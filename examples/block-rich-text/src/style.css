@@ -1039,26 +1039,6 @@ select {
     outline-color: #2f76b7;
 }
 
-.kanbanCard.dropBefore::before,
-.kanbanCard.dropAfter::after {
-    content: '';
-    position: absolute;
-    left: 8px;
-    right: 8px;
-    z-index: 3;
-    height: 3px;
-    border-radius: 999px;
-    background: #1b75bb;
-}
-
-.kanbanCard.dropBefore::before {
-    top: -6px;
-}
-
-.kanbanCard.dropAfter::after {
-    bottom: -6px;
-}
-
 .kanbanCardBody {
     min-width: 0;
 }
@@ -1068,6 +1048,22 @@ select {
     gap: 4px;
     margin-left: 0;
     padding: 0;
+}
+
+.kanbanCard .blockRow.dropBefore::before,
+.kanbanCard .blockRow.dropAfter::after {
+    left: -36px;
+    right: -6px;
+    z-index: 3;
+    height: 3px;
+}
+
+.kanbanCard .blockRow.dropBefore::before {
+    top: -7px;
+}
+
+.kanbanCard .blockRow.dropAfter::after {
+    bottom: -7px;
 }
 
 .kanbanCardTitle {
