@@ -1621,6 +1621,37 @@ describe('Block rich text example UI', () => {
         expect(blocks(right)[0].classList.contains('headingLevel2')).toBe(true);
     });
 
+    it('renders recipe ingredient line highlighting from the toolbar', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], '1 cup flour, chopped');
+        setBlockType(left, 'recipe-ingredient');
+
+        await waitFor(() => {
+            expect(blocks(left)[0].classList.contains('recipeIngredientBlock')).toBe(true);
+            expect(blocks(left)[0].querySelector('.ingredient-amount')?.textContent).toBe('1');
+            expect(blocks(left)[0].querySelector('.ingredient-unit')?.textContent).toBe('cup');
+            expect(blocks(left)[0].querySelector('.ingredient-name')?.textContent).toBe('flour');
+            expect(blocks(left)[0].querySelector('.ingredient-prep')?.textContent).toBe('chopped');
+        });
+        expect(blockText(blocks(left)[0])).toBe('1 cup flour, chopped');
+        expect(blocks(right)[0].querySelector('.ingredient-name')?.textContent).toBe('flour');
+        expect(within(left).getAllByRole('button', {name: 'Move block'})[0].textContent).toBe('🥕');
+
+        selectRange(blocks(left)[0], 6, 11);
+        fireEvent.click(within(left).getByRole('button', {name: 'B'}));
+        await waitFor(() => {
+            const ingredient = blocks(left)[0].querySelector('.ingredient-name');
+            expect(ingredient?.textContent).toBe('flour');
+            expect(ingredient?.classList.contains('markBold')).toBe(true);
+        });
+
+        setBlockType(left, 'paragraph');
+        await waitFor(() => expect(blocks(left)[0].querySelector('.ingredient-name')).toBeNull());
+    });
+
     it('opens a slash command menu after inserting a slash and closes it with Escape', async () => {
         const view = render(<App />);
         const {left, right} = panels(view);
@@ -1674,6 +1705,24 @@ describe('Block rich text example UI', () => {
         await waitFor(() => expect(blocks(left)[0].classList.contains('headingLevel2')).toBe(true));
         await waitForBlockTexts(right, ['']);
         expect(blocks(right)[0].classList.contains('headingLevel2')).toBe(true);
+    });
+
+    it('runs the slash ingredient command', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], '/');
+
+        const dialog = await waitFor(() => within(left).getByRole('dialog', {name: 'Slash commands'}));
+        fireEvent.change(within(dialog).getByRole('textbox', {name: 'Search slash commands'}), {
+            target: {value: 'ingredient'},
+        });
+        fireEvent.click(within(dialog).getByRole('option', {name: /Ingredient/}));
+
+        await waitForBlockTexts(left, ['']);
+        await waitFor(() => expect(blocks(left)[0].classList.contains('recipeIngredientBlock')).toBe(true));
+        expect(blocks(right)[0].classList.contains('recipeIngredientBlock')).toBe(true);
     });
 
     it('runs a slash preview command and shows the URL empty state', async () => {

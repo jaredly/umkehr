@@ -233,6 +233,7 @@ import {
     plainTextForInlineEmbed,
     renderInlineEmbed,
 } from './inlineEmbeds';
+import {highlightIngredientLine, type IngredientHighlightToken} from './ingredientHighlight';
 import {highlightCode, type SyntaxToken} from './syntaxHighlight';
 import {
     createAttachmentFromFile,
@@ -3239,6 +3240,7 @@ type BlockTypeMenuValue =
     | 'callout-info'
     | 'callout-warning'
     | 'callout-error'
+    | 'recipe-ingredient'
     | 'table'
     | 'preview';
 
@@ -3255,6 +3257,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     {type: 'block', value: 'callout-info', label: 'Info callout', group: 'Block type', keywords: ['info']},
     {type: 'block', value: 'callout-warning', label: 'Warning callout', group: 'Block type', keywords: ['warning']},
     {type: 'block', value: 'callout-error', label: 'Error callout', group: 'Block type', keywords: ['error']},
+    {type: 'block', value: 'recipe-ingredient', label: 'Ingredient', group: 'Block type', keywords: ['ingredient', 'recipe', 'food', 'line']},
     {type: 'block', value: 'table', label: 'Table', group: 'Block type', keywords: ['grid']},
     {type: 'block', value: 'preview', label: 'Preview', group: 'Block type', keywords: ['link', 'card', 'url']},
     {type: 'date-embed', label: 'Date', group: 'Inline embed', keywords: ['embed', 'calendar']},
@@ -4892,6 +4895,8 @@ const blockTypeMeta = (
             return {type: 'callout', kind: 'warning', ts};
         case 'callout-error':
             return {type: 'callout', kind: 'error', ts};
+        case 'recipe-ingredient':
+            return {type: 'recipe_ingredient', ts};
         case 'table':
             return current;
         case 'preview':
@@ -4925,6 +4930,8 @@ const blockTypeMenuValue = (meta: RichBlockMeta | undefined): BlockTypeMenuValue
                 : meta.kind === 'warning'
                   ? 'callout-warning'
                   : 'callout-error';
+        case 'recipe_ingredient':
+            return 'recipe-ingredient';
         case 'table':
             return 'table';
         case 'image':
@@ -6346,6 +6353,7 @@ function Toolbar({
                 <option value="callout-info">Info callout</option>
                 <option value="callout-warning">Warning callout</option>
                 <option value="callout-error">Error callout</option>
+                <option value="recipe-ingredient">Ingredient line</option>
                 <option value="table">Table</option>
                 <option value="preview">Preview</option>
             </select>
@@ -6528,9 +6536,14 @@ function EditableBlock({
     const isCodeBlock = meta.type === 'code';
     const codeText = isCodeBlock ? block.runs.map((run) => run.text).join('') : '';
     const codeLanguage = isCodeBlock ? meta.language : '';
+    const blockText = block.runs.map((run) => run.text).join('');
     const syntaxTokens = useMemo(
         () => (isCodeBlock ? highlightCode(codeText, codeLanguage) : undefined),
         [codeLanguage, codeText, isCodeBlock],
+    );
+    const ingredientTokens = useMemo(
+        () => (meta.type === 'recipe_ingredient' ? highlightIngredientLine(blockText) : undefined),
+        [blockText, meta.type],
     );
     const editableSurface = (
         <RichTextEditableSurface
@@ -6547,6 +6560,7 @@ function EditableBlock({
                 meta.type === 'code' ? 'codeBlock' : '',
                 meta.type === 'heading' ? `headingLevel${meta.level}` : '',
                 meta.type === 'image' ? 'imageCaption' : '',
+                meta.type === 'recipe_ingredient' ? 'recipeIngredientBlock' : '',
                 surfaceClassName ?? '',
             ]
                 .filter(Boolean)
@@ -6555,6 +6569,7 @@ function EditableBlock({
             placeholder={placeholder}
             trailingCodeNewline={codeHasTrailingNewline}
             syntaxTokens={syntaxTokens}
+            ingredientTokens={ingredientTokens}
             popoverTextById={popoverTextById}
             footnoteNumberById={footnoteNumberById}
             onPopoverTriggerEnter={onPopoverTriggerEnter}
@@ -6895,6 +6910,7 @@ function RichTextEditableSurface({
     placeholder,
     trailingCodeNewline = false,
     syntaxTokens,
+    ingredientTokens,
     popoverTextById = new Map(),
     footnoteNumberById = new Map(),
     onInsertText,
@@ -6928,6 +6944,7 @@ function RichTextEditableSurface({
     placeholder?: string;
     trailingCodeNewline?: boolean;
     syntaxTokens?: SyntaxToken[];
+    ingredientTokens?: IngredientHighlightToken[];
     popoverTextById?: Map<string, string>;
     footnoteNumberById?: Map<string, number>;
     onInsertText(text: string, selection?: EditorSelection): void;
@@ -6998,6 +7015,7 @@ function RichTextEditableSurface({
             trailingCodeNewline,
             footnoteNumberById,
             syntaxTokens,
+            ingredientTokens,
         );
         if (renderedRunsRef.current !== renderedRuns) {
             renderedRunsRef.current = renderedRuns;
@@ -7007,6 +7025,7 @@ function RichTextEditableSurface({
                     charIdsByOffset,
                     trailingCodeNewline,
                     syntaxTokens,
+                    ingredientTokens,
                     popoverTextById,
                     footnoteNumberById,
                 }),
@@ -7029,6 +7048,7 @@ function RichTextEditableSurface({
         charIdsByOffset,
         decorations,
         footnoteNumberById,
+        ingredientTokens,
         pendingCaretRestoreBlockIdRef,
         pendingSelectionRestoreRef,
         popoverTextById,
@@ -7065,6 +7085,7 @@ function RichTextEditableSurface({
                         charIdsByOffset,
                         trailingCodeNewline,
                         syntaxTokens,
+                        ingredientTokens,
                         popoverTextById,
                         footnoteNumberById,
                     }),
@@ -7076,6 +7097,7 @@ function RichTextEditableSurface({
                     trailingCodeNewline,
                     footnoteNumberById,
                     syntaxTokens,
+                    ingredientTokens,
                 );
             }}
             onMouseUp={(event) => onSelectionChange?.(readSelectionFromDom(event.currentTarget))}
@@ -7181,6 +7203,7 @@ function RichTextEditableSurface({
                             charIdsByOffset,
                             trailingCodeNewline,
                             syntaxTokens,
+                            ingredientTokens,
                             popoverTextById,
                             footnoteNumberById,
                         }),
@@ -7278,6 +7301,18 @@ function BlockAffordance({
                     onChange={onToggleTodo}
                 />
             </span>
+        );
+    }
+    if (meta.type === 'recipe_ingredient') {
+        return (
+            <button
+                type="button"
+                className="blockAffordance blockAffordanceButton blockAffordanceIngredient"
+                aria-label="Move block"
+                onPointerDown={selectAndStartDrag}
+            >
+                🥕
+            </button>
         );
     }
     return (
@@ -8124,6 +8159,7 @@ const serializeRuns = (
     trailingCodeNewline = false,
     footnoteNumberById: Map<string, number> = new Map(),
     syntaxTokens?: SyntaxToken[],
+    ingredientTokens?: IngredientHighlightToken[],
 ) =>
     JSON.stringify({
         runs: runs.map((run) => [
@@ -8140,6 +8176,7 @@ const serializeRuns = (
         decorations,
         trailingCodeNewline,
         syntaxTokens,
+        ingredientTokens,
         footnoteNumbers: [...footnoteNumberById.entries()].sort(([a], [b]) => a.localeCompare(b)),
     });
 
@@ -8151,11 +8188,12 @@ const renderRunNodes = (
         charIdsByOffset?: string[];
         trailingCodeNewline?: boolean;
         syntaxTokens?: SyntaxToken[];
+        ingredientTokens?: IngredientHighlightToken[];
         popoverTextById?: Map<string, string>;
         footnoteNumberById?: Map<string, number>;
     } = {},
 ): Node[] => {
-    const chunks = runRenderChunks(runs, decorations, options.syntaxTokens);
+    const chunks = runRenderChunks(runs, decorations, options.syntaxTokens, options.ingredientTokens);
     const nodes: Node[] = [];
     const renderedCarets = new Set<string>();
     for (let index = 0; index < chunks.length; index++) {
@@ -8228,13 +8266,14 @@ type RunRenderChunk = {
     text: string;
     blockStartOffset: number;
     blockEndOffset: number;
-    syntaxClassName: string | null;
+    decoratorClassNames: string[];
 };
 
 const runRenderChunks = (
     runs: RichFormattedBlock['runs'],
     decorations: BlockSelectionDecorations | null,
     syntaxTokens?: SyntaxToken[],
+    ingredientTokens?: IngredientHighlightToken[],
 ): RunRenderChunk[] => {
     const chunks: RunRenderChunk[] = [];
     const syntaxRanges = [
@@ -8274,6 +8313,10 @@ const runRenderChunks = (
             addBoundaryInRun(boundaries, range.startOffset - runStart, runSegments.length);
             addBoundaryInRun(boundaries, range.endOffset - runStart, runSegments.length);
         }
+        for (const token of ingredientTokens ?? []) {
+            addBoundaryInRun(boundaries, token.startOffset - runStart, runSegments.length);
+            addBoundaryInRun(boundaries, token.endOffset - runStart, runSegments.length);
+        }
 
         const sortedBoundaries = [...boundaries].sort((a, b) => a - b);
         for (let index = 0; index < sortedBoundaries.length - 1; index++) {
@@ -8285,8 +8328,9 @@ const runRenderChunks = (
                 text: runSegments.slice(start, end).join(''),
                 blockStartOffset: runStart + start,
                 blockEndOffset: runStart + end,
-                syntaxClassName: syntaxClassNameForRange(
+                decoratorClassNames: decoratorClassNamesForRange(
                     syntaxRanges,
+                    ingredientTokens ?? [],
                     runStart + start,
                     runStart + end,
                 ),
@@ -8327,16 +8371,26 @@ const syntaxTokenRanges = (
     return offset === expectedLength ? ranges : [];
 };
 
-const syntaxClassNameForRange = (
+const decoratorClassNamesForRange = (
     ranges: SyntaxTokenRange[],
+    ingredientTokens: IngredientHighlightToken[],
     startOffset: number,
     endOffset: number,
-): string | null => {
+): string[] => {
+    const classNames: string[] = [];
     for (let index = ranges.length - 1; index >= 0; index--) {
         const range = ranges[index];
-        if (startOffset >= range.startOffset && endOffset <= range.endOffset) return range.className;
+        if (startOffset >= range.startOffset && endOffset <= range.endOffset) {
+            if (range.className) classNames.push(range.className);
+            break;
+        }
     }
-    return null;
+    for (const token of ingredientTokens) {
+        if (startOffset >= token.startOffset && endOffset <= token.endOffset) {
+            classNames.push(token.className);
+        }
+    }
+    return classNames;
 };
 
 const inlineCodeSyntaxRanges = (runs: RichFormattedBlock['runs']): SyntaxTokenRange[] => {
@@ -8434,7 +8488,7 @@ const applyRunClasses = (
     popoverTextById?: Map<string, string>,
 ) => {
     const run = chunk.run;
-    if (chunk.syntaxClassName) span.classList.add(chunk.syntaxClassName);
+    if (chunk.decoratorClassNames.length) span.classList.add(...chunk.decoratorClassNames);
     if (run.marks.bold) span.classList.add('markBold');
     if (run.marks.italic) span.classList.add('markItalic');
     if (run.marks.strikethrough) span.classList.add('markStrikethrough');

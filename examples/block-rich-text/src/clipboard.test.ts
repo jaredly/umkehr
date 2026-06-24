@@ -120,6 +120,20 @@ describe('block rich text clipboard payload parser', () => {
         expect(parseBlockRichTextClipboardPayload(JSON.stringify(previewPayload))).toEqual(previewPayload);
     });
 
+    it('parses recipe ingredient block metadata', () => {
+        const ingredientPayload = payload({
+            fragments: [
+                {
+                    text: '1 cup flour',
+                    meta: {type: 'recipe_ingredient', ts: 'ingredient-ts'},
+                    marks: [],
+                },
+            ],
+        });
+
+        expect(parseBlockRichTextClipboardPayload(JSON.stringify(ingredientPayload))).toEqual(ingredientPayload);
+    });
+
     it('returns null for invalid annotation entries', () => {
         expect(
             parseBlockRichTextClipboardPayload(
@@ -230,6 +244,24 @@ describe('block rich text clipboard serialization', () => {
 
         expect(payload?.fragments[0]?.meta).toEqual({type: 'heading', level: 2, ts: 'heading-ts'});
         expect(payload?.html).toContain('<h2 data-umkehr-block-type="heading">Title</h2>');
+    });
+
+    it('serializes recipe ingredient metadata and generated HTML styling', () => {
+        const demo = createDemoState();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = insertText(demo.left.state, caret(blockId, 0), '1 cup flour, chopped', ctx());
+        result = setBlockMeta(result.state, blockId, {type: 'recipe_ingredient', ts: 'ingredient-ts'});
+
+        const payload = serializeSelectionToClipboardPayload(
+            result.state,
+            singleRetainedSelectionSet(result.state, range(blockId, 0, 20)),
+        );
+
+        expect(payload?.fragments[0]?.meta).toEqual({type: 'recipe_ingredient', ts: 'ingredient-ts'});
+        expect(payload?.html).toContain('data-umkehr-block-type="recipe_ingredient"');
+        expect(payload?.html).toContain('<strong>1</strong> <strong>cup</strong> ');
+        expect(payload?.html).toContain('<span style="color: #1e7f4f">flour</span>');
+        expect(payload?.html).toContain(', <em>chopped</em>');
     });
 
     it('serializes preview block metadata and HTML fallback', () => {

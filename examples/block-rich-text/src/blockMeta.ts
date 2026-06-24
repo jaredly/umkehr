@@ -20,6 +20,7 @@ export type RichBlockMeta =
     | {type: 'blockquote'; ts: HLC}
     | {type: 'code'; language: string; ts: HLC}
     | {type: 'callout'; kind: 'info' | 'warning' | 'error'; ts: HLC}
+    | {type: 'recipe_ingredient'; ts: HLC}
     | {type: 'table'; ts: HLC}
     | {type: 'image'; attachmentId: string; size: ImagePresentationSize; ts: HLC}
     | {type: 'preview'; url: string; preview: PreviewMetadata | null; ts: HLC};
@@ -44,6 +45,8 @@ export const sameTypeWithTs = (meta: RichBlockMeta, ts: HLC): RichBlockMeta => {
             return {type: 'code', language: meta.language, ts};
         case 'callout':
             return {type: 'callout', kind: meta.kind, ts};
+        case 'recipe_ingredient':
+            return {type: 'recipe_ingredient', ts};
         case 'table':
             return {type: 'table', ts};
         case 'image':

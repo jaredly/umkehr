@@ -455,6 +455,11 @@ select {
     opacity: 0;
 }
 
+.blockAffordanceIngredient {
+    color: #2f7d4d;
+    font-size: 17px;
+}
+
 .blockRow:hover .blockAffordanceHandle,
 .blockRow:focus-within .blockAffordanceHandle,
 .blockAffordanceHandle:focus-visible {
@@ -508,6 +513,10 @@ select {
     background: #f5f7f9;
     font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
     line-height: 1.5;
+}
+
+.recipeIngredientBlock {
+    color: #223025;
 }
 
 .imageBlock {
@@ -1285,6 +1294,19 @@ select {
 .syntax-selector-tag,
 .syntax-meta {
     color: #7a4bb0;
+}
+
+.ingredient-amount,
+.ingredient-unit {
+    font-weight: 700;
+}
+
+.ingredient-name {
+    color: #1e7f4f;
+}
+
+.ingredient-prep {
+    font-style: italic;
 }
 
 .retainedSelectionHighlight {

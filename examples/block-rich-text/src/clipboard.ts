@@ -18,6 +18,10 @@ import {
     plainTextForInlineEmbed,
 } from './inlineEmbeds';
 import {
+    highlightIngredientLine,
+    type IngredientHighlightClassName,
+} from './ingredientHighlight';
+import {
     editableBlockIds,
     normalizeSelectionSegments,
     segmentText,
@@ -453,9 +457,15 @@ export const fragmentsToHtml = (fragments: ClipboardFragment[]): string =>
 
 const fragmentToHtml = (fragment: ClipboardFragment): string => {
     const boundaries = new Set<number>([0, segmentText(fragment.text).length]);
+    const ingredientTokens =
+        fragment.meta.type === 'recipe_ingredient' ? highlightIngredientLine(fragment.text) : [];
     for (const mark of fragment.marks) {
         boundaries.add(mark.startOffset);
         boundaries.add(mark.endOffset);
+    }
+    for (const token of ingredientTokens) {
+        boundaries.add(token.startOffset);
+        boundaries.add(token.endOffset);
     }
     const offsets = [...boundaries].sort((a, b) => a - b);
     const chars = segmentText(fragment.text);
@@ -465,7 +475,10 @@ const fragmentToHtml = (fragment: ClipboardFragment): string => {
         const end = offsets[index + 1];
         if (start === undefined || end === undefined || start >= end) continue;
         const active = fragment.marks.filter((mark) => mark.startOffset <= start && mark.endOffset >= end);
-        inner += wrapHtmlText(chars.slice(start, end).join(''), active);
+        const activeIngredients = ingredientTokens
+            .filter((token) => token.startOffset <= start && token.endOffset >= end)
+            .map((token) => token.className);
+        inner += wrapHtmlText(chars.slice(start, end).join(''), active, activeIngredients);
     }
     const tag = htmlTagForMeta(fragment.meta);
     const attrs = ` data-umkehr-block-type="${escapeAttribute(fragment.meta.type)}"`;
@@ -502,7 +515,11 @@ const fragmentToPlainText = (fragment: ClipboardFragment): string => {
     return result;
 };
 
-const wrapHtmlText = (text: string, marks: ClipboardMarkRange[]): string => {
+const wrapHtmlText = (
+    text: string,
+    marks: ClipboardMarkRange[],
+    ingredientClasses: IngredientHighlightClassName[] = [],
+): string => {
     const embed = marks.find((mark) => mark.type === 'embed' && isInlineEmbedData(mark.data));
     if (text === INLINE_EMBED_TEXT) {
         const plainText = plainTextForInlineEmbed(
@@ -525,6 +542,31 @@ const wrapHtmlText = (text: string, marks: ClipboardMarkRange[]): string => {
         if (mark.type === 'annotation' && isClipboardAnnotationRef(mark.data)) {
             const resolved = mark.data.resolved ? ` data-umkehr-annotation-resolved="true"` : '';
             result = `<span data-umkehr-annotation-id="${escapeAttribute(mark.data.originalId)}" data-umkehr-annotation-presentation="${escapeAttribute(mark.data.presentation)}"${resolved}>${result}</span>`;
+        }
+    }
+    result = wrapIngredientHtml(result, marks, ingredientClasses);
+    return result;
+};
+
+const wrapIngredientHtml = (
+    html: string,
+    marks: ClipboardMarkRange[],
+    ingredientClasses: IngredientHighlightClassName[],
+): string => {
+    let result = html;
+    for (const className of ingredientClasses) {
+        if (
+            (className === 'ingredient-amount' || className === 'ingredient-unit') &&
+            !marks.some((mark) => mark.type === 'bold')
+        ) {
+            result = `<strong>${result}</strong>`;
+        } else if (
+            className === 'ingredient-prep' &&
+            !marks.some((mark) => mark.type === 'italic')
+        ) {
+            result = `<em>${result}</em>`;
+        } else if (className === 'ingredient-name') {
+            result = `<span style="color: #1e7f4f">${result}</span>`;
         }
     }
     return result;
@@ -664,6 +706,7 @@ const isRichBlockMeta = (value: unknown): value is RichBlockMeta => {
     switch (value.type) {
         case 'paragraph':
         case 'blockquote':
+        case 'recipe_ingredient':
         case 'table':
             return true;
         case 'heading':
