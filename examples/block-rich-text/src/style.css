@@ -1058,6 +1058,13 @@ select {
     height: 3px;
 }
 
+.kanbanCard .blockRow.dropChildTarget::before,
+.kanbanCard .blockRow.dropChildTarget::after {
+    left: calc(18px + var(--drop-offset, 0px));
+    right: 10px;
+    background: #2c8a57;
+}
+
 .kanbanCard .blockRow.dropBefore::before {
     top: -7px;
 }

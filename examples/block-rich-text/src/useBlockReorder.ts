@@ -20,6 +20,10 @@ export type BlockReorderCommand =
     | MoveTarget
     | {type: 'table-cell-slot'; target: TableCellSlotTarget};
 
+const NO_DROP_TARGET = Symbol('no-drop-target');
+
+type DropTargetResolution = DropTarget | null | typeof NO_DROP_TARGET;
+
 type PendingDrag = {
     id: string;
     ids: string[];
@@ -79,9 +83,13 @@ export function useBlockReorder({
             dragged,
             draggedIds,
         });
+        if (kanbanTarget === NO_DROP_TARGET) return null;
         if (kanbanTarget) return kanbanTarget;
 
-        const containing = rows.find(({rect}) => clientY >= rect.top && clientY <= rect.bottom);
+        const horizontalRows = rows.filter(({rect}) => rectContainsX(rect, clientX));
+        if (!horizontalRows.length) return null;
+
+        const containing = horizontalRows.find(({rect}) => clientY >= rect.top && clientY <= rect.bottom);
         if (containing) {
             return resolveDropTarget(currentBlocks, containing.block, {
                 clientX,
@@ -92,7 +100,7 @@ export function useBlockReorder({
             });
         }
 
-        const before = rows.find(({rect}) => clientY < rect.top);
+        const before = horizontalRows.find(({rect}) => clientY < rect.top);
         if (before) {
             return normalizeDropTarget(currentBlocks, before.block, {
                 command: {type: 'before', targetBlockId: before.block.id},
@@ -103,7 +111,7 @@ export function useBlockReorder({
                 draggedIds,
             });
         }
-        const last = rows[rows.length - 1].block;
+        const last = horizontalRows[horizontalRows.length - 1].block;
         return normalizeDropTarget(currentBlocks, last, {
             command: {type: 'after', targetBlockId: last.id},
             indicatorBlockId: last.id,
@@ -196,6 +204,11 @@ export function useBlockReorder({
     return {draggingId, draggingSubtreeIds, dropTarget, registerRow, startDrag};
 }
 
+const rectContainsX = (rect: DOMRect, clientX: number): boolean => {
+    if (rect.width <= 0) return false;
+    return clientX >= rect.left && clientX <= rect.right;
+};
+
 const resolveDropTarget = (
     blocks: BlockOutlineItem[],
     hovered: BlockOutlineItem,
@@ -212,7 +225,7 @@ const resolveDropTarget = (
         dragged: string | null;
         draggedIds: string[];
     },
-): DropTarget | null => {
+): DropTargetResolution => {
     const ratio = rect.height > 0 ? (clientY - rect.top) / rect.height : 0.5;
     const childIntent = clientX >= rect.left + 64;
 
@@ -278,7 +291,7 @@ const resolveKanbanDropTarget = (
             indicatorDepth: hovered.depth,
             dragged,
             draggedIds,
-        });
+        }) ?? NO_DROP_TARGET;
     }
 
     const card = elements
@@ -294,7 +307,7 @@ const resolveKanbanDropTarget = (
             rect: card.getBoundingClientRect(),
             dragged,
             draggedIds,
-        });
+        }) ?? NO_DROP_TARGET;
     }
 
     if (column) {
@@ -306,7 +319,7 @@ const resolveKanbanDropTarget = (
             ...targetChildIndicator(blocks, hovered, 'end'),
             dragged,
             draggedIds,
-        });
+        }) ?? NO_DROP_TARGET;
     }
 
     const columnsContainer = elements
@@ -479,9 +492,8 @@ const normalizeDropTarget = (
     const {dragged, draggedIds, ...dropTarget} = target;
     if (!dragged) return dropTarget;
     const draggedSubtree = subtreeIdsForRoots(blocks, draggedIds.length ? draggedIds : [dragged]);
-    if (draggedSubtree.has(hovered.id)) return null;
-    if (moveTargetTouchesSubtree(dropTarget.command, draggedSubtree)) return null;
     if ((draggedIds.length <= 1) && isNoop(blocks, dragged, dropTarget.command)) return null;
+    if (moveTargetTouchesSubtree(dropTarget.command, draggedSubtree)) return null;
     return dropTarget;
 };
 

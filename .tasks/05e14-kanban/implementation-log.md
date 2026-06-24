@@ -42,3 +42,10 @@
 - Added a UI regression test for hovering the card child zone.
 - Follow-up adjustment: removed the kanban card wrapper before/after indicator entirely. Card before/after targets now use the generic block-row indicator, widened across the full kanban card.
 - Added a UI regression test for hovering before a kanban card.
+- Follow-up adjustment: generic block reorder fallback now filters candidate rows by `clientX` before applying vertical hit-testing. This prevents side-by-side kanban columns from receiving fallback drop targets just because they share a vertical range with the pointer.
+- Added a UI regression test for dragging over a right-hand kanban card while a left-hand column shares the same `clientY`.
+- Follow-up adjustment: hovering over the dragged block or any block in its dragged subtree now returns no drop target before fallback targeting runs, instead of searching for a nearby insertion point.
+- Strengthened the kanban regression to assert that self-hover shows no column or card drop indicator.
+- Follow-up adjustment: moved self/no-op rejection into target normalization and added an explicit kanban "handled with no target" result, so no-op placements over the dragged card or adjacent sibling do not fall through to a nearby fallback target.
+- Added a UI regression test for dragging a card over its adjacent sibling in a way that would place the card back where it already is.
+- Follow-up adjustment: child drop targets now add a `dropChildTarget` class. Kanban card child indicators use a green, indented line while sibling before/after indicators remain full-width blue.
