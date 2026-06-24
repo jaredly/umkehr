@@ -277,6 +277,38 @@ describe('block rich text history', () => {
         expect(visibleText(replayHistory(parsed.history.actions, parsed.history.cursor).left)).toEqual(['Example']);
     });
 
+    it('serializes and imports replace-document histories with kanban blocks', () => {
+        const history = appendHistoryAction(initialHistoryState(), {
+            type: 'replace-document',
+            fixtureId: 'kanban-fixture',
+            document: [
+                {
+                    type: 'kanban',
+                    content: 'Project board',
+                    children: [
+                        {content: 'todo', children: [{content: 'Draft proposal'}]},
+                        {content: 'done'},
+                    ],
+                },
+            ],
+        });
+
+        const parsed = parseHistoryExport(serializeHistory(history));
+
+        expect('history' in parsed).toBe(true);
+        if (!('history' in parsed)) return;
+        expect(parsed.history.actions[0]).toMatchObject({
+            type: 'replace-document',
+            fixtureId: 'kanban-fixture',
+        });
+        expect(visibleOutline(replayHistory(parsed.history.actions, parsed.history.cursor).left)).toEqual([
+            {text: 'Project board', depth: 0},
+            {text: 'todo', depth: 1},
+            {text: 'Draft proposal', depth: 2},
+            {text: 'done', depth: 1},
+        ]);
+    });
+
     it('keeps replayed peer clocks ahead of imported block ids before a first remote reorder', () => {
         let history = initialHistoryState();
         for (const command of [

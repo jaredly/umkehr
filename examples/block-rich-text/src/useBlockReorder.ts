@@ -75,6 +75,12 @@ export function useBlockReorder({
         });
         if (cellTarget) return cellTarget;
 
+        const kanbanTarget = resolveKanbanDropTarget(currentBlocks, clientX, clientY, {
+            dragged,
+            draggedIds,
+        });
+        if (kanbanTarget) return kanbanTarget;
+
         const containing = rows.find(({rect}) => clientY >= rect.top && clientY <= rect.bottom);
         if (containing) {
             return resolveDropTarget(currentBlocks, containing.block, {
@@ -234,6 +240,111 @@ const resolveDropTarget = (
     const afterSubtree = targetAfterSubtree(blocks, hovered);
     return normalizeDropTarget(blocks, hovered, {...afterSubtree, dragged, draggedIds});
 };
+
+const resolveKanbanDropTarget = (
+    blocks: BlockOutlineItem[],
+    clientX: number,
+    clientY: number,
+    {
+        dragged,
+        draggedIds,
+    }: {
+        dragged: string | null;
+        draggedIds: string[];
+    },
+): DropTarget | null => {
+    if (typeof document.elementsFromPoint !== 'function') return null;
+    const elements = document.elementsFromPoint(clientX, clientY);
+    const column = elements
+        .map((element) => element.closest<HTMLElement>('[data-kanban-column-id]'))
+        .find((element): element is HTMLElement => !!element?.dataset.kanbanColumnId);
+    const draggedRootIds = draggedIds.length ? draggedIds : dragged ? [dragged] : [];
+    const draggingColumn =
+        draggedRootIds.length === 1 && isRenderedKanbanColumn(draggedRootIds[0]);
+
+    if (draggingColumn && column) {
+        const columnId = column.dataset.kanbanColumnId;
+        const hovered = columnId ? blocks.find((block) => block.id === columnId) : null;
+        if (!columnId || !hovered) return null;
+        const rect = column.getBoundingClientRect();
+        const placement = rect.width > 0 && clientX > rect.left + rect.width / 2 ? 'after' : 'before';
+        return normalizeDropTarget(blocks, hovered, {
+            command:
+                placement === 'after'
+                    ? {type: 'after', targetBlockId: columnId}
+                    : {type: 'before', targetBlockId: columnId},
+            indicatorBlockId: columnId,
+            indicatorPlacement: placement,
+            indicatorDepth: hovered.depth,
+            dragged,
+            draggedIds,
+        });
+    }
+
+    const card = elements
+        .map((element) => element.closest<HTMLElement>('[data-kanban-card-id]'))
+        .find((element): element is HTMLElement => !!element?.dataset.kanbanCardId);
+    if (card) {
+        const cardId = card.dataset.kanbanCardId;
+        const hovered = cardId ? blocks.find((block) => block.id === cardId) : null;
+        if (!cardId || !hovered) return null;
+        return resolveDropTarget(blocks, hovered, {
+            clientX,
+            clientY,
+            rect: card.getBoundingClientRect(),
+            dragged,
+            draggedIds,
+        });
+    }
+
+    if (column) {
+        const columnId = column.dataset.kanbanColumnId;
+        const hovered = columnId ? blocks.find((block) => block.id === columnId) : null;
+        if (!columnId || !hovered) return null;
+        return normalizeDropTarget(blocks, hovered, {
+            command: {type: 'child', parentBlockId: columnId, at: 'end'},
+            ...targetChildIndicator(blocks, hovered, 'end'),
+            dragged,
+            draggedIds,
+        });
+    }
+
+    const columnsContainer = elements
+        .map((element) => element.closest<HTMLElement>('.kanbanColumns[data-kanban-board-id]'))
+        .find((element): element is HTMLElement => !!element?.dataset.kanbanBoardId);
+    if (!columnsContainer || !draggingColumn) return null;
+    const boardId = columnsContainer.dataset.kanbanBoardId;
+    const columns = Array.from(
+        columnsContainer.querySelectorAll<HTMLElement>(':scope > [data-kanban-column-id]'),
+    );
+    const lastColumnId = columns[columns.length - 1]?.dataset.kanbanColumnId;
+    const lastColumn = lastColumnId ? blocks.find((block) => block.id === lastColumnId) : null;
+    const board = boardId ? blocks.find((block) => block.id === boardId) : null;
+    if (lastColumnId && lastColumn) {
+        return normalizeDropTarget(blocks, lastColumn, {
+            command: {type: 'after', targetBlockId: lastColumnId},
+            indicatorBlockId: lastColumnId,
+            indicatorPlacement: 'after',
+            indicatorDepth: lastColumn.depth,
+            dragged,
+            draggedIds,
+        });
+    }
+    if (boardId && board) {
+        return normalizeDropTarget(blocks, board, {
+            command: {type: 'child', parentBlockId: boardId, at: 'end'},
+            ...targetChildIndicator(blocks, board, 'end'),
+            dragged,
+            draggedIds,
+        });
+    }
+    return null;
+};
+
+const isRenderedKanbanColumn = (blockId: string): boolean =>
+    Array.from(document.querySelectorAll<HTMLElement>('[data-kanban-column-id]')).some(
+        (element) => element.dataset.kanbanColumnId === blockId,
+    );
 
 const resolveCellDropTarget = (
     blocks: BlockOutlineItem[],

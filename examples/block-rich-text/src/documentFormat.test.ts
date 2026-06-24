@@ -132,6 +132,40 @@ describe('block rich text document format import', () => {
         expect(cellIds.map((id) => blockContents(result.state, id))).toEqual(['A1', 'B1']);
     });
 
+    it('represents kanban boards as normal nested blocks', () => {
+        const result = importDocument(
+            [
+                {
+                    type: 'kanban',
+                    content: 'Project board',
+                    children: [
+                        {
+                            content: 'todo',
+                            children: [{content: 'Draft proposal'}],
+                        },
+                        {
+                            content: 'done',
+                            children: [{type: 'todo', meta: {checked: true}, content: 'Kickoff'}],
+                        },
+                    ],
+                },
+            ],
+            ctx(),
+        );
+
+        const [boardId] = rootBlockIds(result.state);
+        const columnIds = visibleBlockChildren(result.state, boardId, annotationVirtualParents(result.state));
+        const firstColumnCardIds = visibleBlockChildren(
+            result.state,
+            columnIds[0],
+            annotationVirtualParents(result.state),
+        );
+        expect(result.state.state.blocks[boardId].meta.type).toBe('kanban');
+        expect(blockContents(result.state, boardId)).toBe('Project board');
+        expect(columnIds.map((id) => blockContents(result.state, id))).toEqual(['todo', 'done']);
+        expect(firstColumnCardIds.map((id) => blockContents(result.state, id))).toEqual(['Draft proposal']);
+    });
+
     it('imports marks with grapheme offsets', () => {
         const result = importDocument(
             [
@@ -313,6 +347,38 @@ describe('block rich text document format export', () => {
         const imported = importDocument(input, ctx());
 
         expect(exportDocument(imported.state)).toEqual(input);
+    });
+
+    it('round-trips kanban boards', () => {
+        const input: DocumentBlock[] = [
+            {
+                type: 'kanban',
+                content: 'Project board',
+                children: [
+                    {content: 'todo', children: [{content: 'Draft proposal'}]},
+                    {content: 'in progress', children: [{type: 'code', meta: {language: 'text'}, content: 'notes'}]},
+                    {content: 'done'},
+                ],
+            },
+        ];
+
+        const imported = importDocument(input, ctx());
+
+        expect(exportDocument(imported.state)).toEqual([
+            {
+                type: 'kanban',
+                content: 'Project board',
+                children: [
+                    {type: 'paragraph', content: 'todo', children: [{type: 'paragraph', content: 'Draft proposal'}]},
+                    {
+                        type: 'paragraph',
+                        content: 'in progress',
+                        children: [{type: 'code', meta: {language: 'plaintext'}, content: 'notes'}],
+                    },
+                    {type: 'paragraph', content: 'done'},
+                ],
+            },
+        ]);
     });
 
     it('round-trips footnote annotation metadata', () => {

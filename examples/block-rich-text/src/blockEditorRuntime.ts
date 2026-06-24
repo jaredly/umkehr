@@ -7,7 +7,6 @@ import type {
     HLC,
     State,
 } from 'umkehr/block-crdt/types';
-import {lamportToString} from 'umkehr/block-crdt/utils';
 import * as hlc from '../../../src/crdt/hlc';
 import {paragraphMeta, type RichBlockMeta} from './blockMeta';
 import {annotationVirtualParents} from './annotations';
@@ -51,7 +50,7 @@ export const createDemoStateFromDocument = (document: ImportDocument): DemoState
     let i = 1;
     const imported = importDocument(document, {
         actor: 'fixture',
-        nextTs: () => lamportToString([i++, 'fixture']),
+        nextTs: () => hlc.pack({ts: 1, count: i++, node: 'fixture'}),
     });
     return {
         left: createReplica('left', imported.state),

@@ -29,6 +29,7 @@ export type RichBlockMeta =
     | {type: 'callout'; kind: 'info' | 'warning' | 'error'; ts: HLC}
     | {type: 'recipe_ingredient'; ts: HLC}
     | {type: 'table'; ts: HLC}
+    | {type: 'kanban'; ts: HLC}
     | {type: 'image'; attachmentId: string; size: ImagePresentationSize; ts: HLC}
     | {type: 'preview'; url: string; preview: PreviewMetadata | null; ts: HLC};
 
@@ -56,6 +57,8 @@ export const sameTypeWithTs = (meta: RichBlockMeta, ts: HLC): RichBlockMeta => {
             return {type: 'recipe_ingredient', ts};
         case 'table':
             return {type: 'table', ts};
+        case 'kanban':
+            return {type: 'kanban', ts};
         case 'image':
             return {type: 'image', attachmentId: meta.attachmentId, size: meta.size, ts};
         case 'preview':
@@ -64,6 +67,8 @@ export const sameTypeWithTs = (meta: RichBlockMeta, ts: HLC): RichBlockMeta => {
 };
 
 export const isTableBlock = (meta: RichBlockMeta): boolean => meta.type === 'table';
+
+export const isKanbanBlock = (meta: RichBlockMeta): boolean => meta.type === 'kanban';
 
 export const isCellBlock = (meta: RichBlockMeta): boolean => !isTableBlock(meta);
 

@@ -95,6 +95,7 @@ export type TableCellSlotTarget = {
 
 const ROOT: Lamport = [0, 'root'];
 const ROOT_ID = lamportToString(ROOT);
+const DEFAULT_KANBAN_COLUMNS = ['todo', 'in progress', 'done'];
 
 const insertedBlockFromOps = (ops: Array<Op<RichBlockMeta>>) => {
     const op = ops[0];
@@ -1544,6 +1545,54 @@ export const convertBlockToTable = (
     return {state: working, ops, selection: caret(firstCellId ?? focus.blockId, 0)};
 };
 
+export const convertBlockToKanban = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    context: CommandContext,
+): CommandResult => {
+    const focus = firstPointForSelection(state, selection);
+    const focusBlock = state.state.blocks[focus.blockId];
+    if (!focusBlock) return {state, ops: [], selection};
+    if (focusBlock.meta.type === 'kanban') return {state, ops: [], selection: caret(focus.blockId, focus.offset)};
+
+    const ops: Array<Op<RichBlockMeta>> = [];
+    let working = state;
+    const kanbanOps = setBlockMetaOps(working, {
+        block: focusBlock.id,
+        meta: {type: 'kanban', ts: context.nextTs()},
+    });
+    working = applyMany(working, kanbanOps, annotationVirtualParents(working));
+    ops.push(...kanbanOps);
+
+    if (kanbanColumns(working, focus.blockId).length > 0) {
+        return {state: working, ops, selection: caret(focus.blockId, focus.offset)};
+    }
+
+    let firstColumnId: string | null = null;
+    for (const title of DEFAULT_KANBAN_COLUMNS) {
+        const existingColumns = kanbanColumns(working, focus.blockId);
+        const previousColumnId = existingColumns[existingColumns.length - 1] ?? null;
+        const columnOps = insertBlockOps(working, {
+            actor: context.actor,
+            parent: focusBlock.id,
+            before: previousColumnId ? working.state.blocks[previousColumnId].id : null,
+            meta: paragraphMeta(context.nextTs()),
+            ts: context.nextTs(),
+            virtualParents: annotationVirtualParents(working),
+        });
+        working = applyMany(working, columnOps, annotationVirtualParents(working));
+        ops.push(...columnOps);
+        const columnId = lamportToString(insertedBlockFromOps(columnOps).id);
+        firstColumnId ??= columnId;
+
+        const titleResult = insertTextAtPoint(working, {blockId: columnId, offset: 0}, title, context);
+        working = titleResult.state;
+        ops.push(...titleResult.ops);
+    }
+
+    return {state: working, ops, selection: caret(firstColumnId ?? focus.blockId, 0)};
+};
+
 export const createMissingTableCell = (
     state: CachedState<RichBlockMeta>,
     rowId: string,
@@ -2211,6 +2260,73 @@ const tableColumnCount = (state: CachedState<RichBlockMeta>, tableId: string): n
         ...rows.map((rowId) => tableCells(state, rowId).length),
     );
 };
+
+export const kanbanColumns = (state: CachedState<RichBlockMeta>, boardId: string): string[] => {
+    const board = state.state.blocks[boardId];
+    if (!board || board.meta.type !== 'kanban') return [];
+    return visibleBlockChildren(state, boardId, annotationVirtualParents(state));
+};
+
+export const kanbanCards = (state: CachedState<RichBlockMeta>, columnId: string): string[] => {
+    if (!kanbanColumnContext(state, columnId)) return [];
+    return visibleBlockChildren(state, columnId, annotationVirtualParents(state));
+};
+
+export type KanbanColumnContext = {
+    boardId: string;
+    columnId: string;
+    columnIndex: number;
+    columns: string[];
+};
+
+export const kanbanColumnContext = (
+    state: CachedState<RichBlockMeta>,
+    columnId: string,
+): KanbanColumnContext | null => {
+    if (!state.state.blocks[columnId]) return null;
+    const boardId = lamportToString(materializedBlockParent(state, columnId, annotationVirtualParents(state)));
+    if (state.state.blocks[boardId]?.meta.type !== 'kanban') return null;
+    const columns = kanbanColumns(state, boardId);
+    const columnIndex = columns.indexOf(columnId);
+    if (columnIndex < 0) return null;
+    return {boardId, columnId, columnIndex, columns};
+};
+
+export type KanbanCardContext = {
+    boardId: string;
+    columnId: string;
+    cardId: string;
+    columnIndex: number;
+    cardIndex: number;
+    cards: string[];
+};
+
+export const kanbanCardContext = (
+    state: CachedState<RichBlockMeta>,
+    cardId: string,
+): KanbanCardContext | null => {
+    if (!state.state.blocks[cardId]) return null;
+    const columnId = lamportToString(materializedBlockParent(state, cardId, annotationVirtualParents(state)));
+    const column = kanbanColumnContext(state, columnId);
+    if (!column) return null;
+    const cards = kanbanCards(state, columnId);
+    const cardIndex = cards.indexOf(cardId);
+    if (cardIndex < 0) return null;
+    return {
+        boardId: column.boardId,
+        columnId,
+        cardId,
+        columnIndex: column.columnIndex,
+        cardIndex,
+        cards,
+    };
+};
+
+export const isKanbanColumn = (state: CachedState<RichBlockMeta>, blockId: string): boolean =>
+    kanbanColumnContext(state, blockId) !== null;
+
+export const isKanbanCard = (state: CachedState<RichBlockMeta>, blockId: string): boolean =>
+    kanbanCardContext(state, blockId) !== null;
 
 const deleteTableRows = (
     state: CachedState<RichBlockMeta>,

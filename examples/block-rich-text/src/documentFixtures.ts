@@ -38,6 +38,7 @@ export const documentFixtures: DocumentFixture[] = [
     {id: 'large-table', label: 'Large table', document: largeTable},
     {id: 'sparse-table', label: 'Sparse table', document: sparseTable},
     {id: 'complex-table', label: 'Complex table', document: complexTable},
+    {id: 'kanban-board', label: 'Kanban board', document: kanbanBoard},
     {id: 'deep-list-nesting', label: 'Deep list nesting', document: deepListNesting},
     {id: 'many-blocks', label: 'Many blocks', document: manyBlocks},
     {id: 'mixed-table-and-text', label: 'Mixed table and text', document: mixedTableAndText},
@@ -183,6 +184,46 @@ function complexTable(): ImportDocument {
                         ],
                     },
                     {content: 'Queued'},
+                ],
+            },
+        ],
+    }];
+}
+
+function kanbanBoard(): ImportDocument {
+    return [{
+        type: 'kanban',
+        content: 'Launch board',
+        children: [
+            {
+                content: 'todo',
+                children: [
+                    {
+                        content: 'Draft release notes',
+                        children: [
+                            {type: 'todo', meta: {checked: false}, content: 'Collect screenshots'},
+                            {content: 'Confirm publish date'},
+                        ],
+                    },
+                    {type: 'code', meta: {language: 'text'}, content: 'owner: docs\nrisk: medium'},
+                ],
+            },
+            {
+                content: 'in progress',
+                children: [
+                    {type: 'todo', meta: {checked: false}, content: 'QA import/export'},
+                    {
+                        type: 'callout',
+                        meta: {kind: 'warning'},
+                        content: 'Design review pending',
+                    },
+                ],
+            },
+            {
+                content: 'done',
+                children: [
+                    {type: 'todo', meta: {checked: true}, content: 'Kickoff'},
+                    smallNestedTable('Metrics card'),
                 ],
             },
         ],

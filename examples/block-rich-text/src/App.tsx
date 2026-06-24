@@ -38,6 +38,7 @@ import {
     clearCodeLanguage,
     closeRetainedInlineMarkSessions,
     commandApplied,
+    convertBlockToKanban,
     convertBlockToTable,
     createMissingTableCell,
     deleteEmptyTableRowBackward,
@@ -2095,6 +2096,17 @@ function BlockEditor({
                                 context,
                             ),
                     );
+                } else if (command.value === 'kanban') {
+                    result = runSelectionCommandEverywhere(
+                        deleted.state,
+                        deleted.selection,
+                        (working, entry) =>
+                            convertBlockToKanban(
+                                working,
+                                resolveSelection(working, entry.selection),
+                                context,
+                            ),
+                    );
                 } else if (command.value === 'preview') {
                     result = runSelectionCommandEverywhere(
                         deleted.state,
@@ -3013,6 +3025,22 @@ function BlockEditor({
                                 ),
                             };
                         }
+                        if (kind === 'kanban') {
+                            const result = convertBlockToKanban(
+                                current.state,
+                                primarySelection(resolveSelectionSet(current.state, selection)),
+                                makeCommandContext(current),
+                            );
+                            return {
+                                state: result.state,
+                                ops: result.ops,
+                                selection: replacePrimarySelection(
+                                    result.state,
+                                    current.selection,
+                                    result.selection,
+                                ),
+                            };
+                        }
                         if (kind === 'preview') {
                             const result = insertPreviewBlock(
                                 current.state,
@@ -3327,6 +3355,7 @@ type BlockTypeMenuValue =
     | 'callout-error'
     | 'recipe-ingredient'
     | 'table'
+    | 'kanban'
     | 'preview';
 
 const SLASH_COMMANDS: SlashCommand[] = [
@@ -3346,6 +3375,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     {type: 'block', value: 'callout-error', label: 'Error callout', group: 'Block type', keywords: ['error']},
     {type: 'block', value: 'recipe-ingredient', label: 'Ingredient', group: 'Block type', keywords: ['ingredient', 'recipe', 'food', 'line']},
     {type: 'block', value: 'table', label: 'Table', group: 'Block type', keywords: ['grid']},
+    {type: 'block', value: 'kanban', label: 'Kanban board', group: 'Block type', keywords: ['board', 'trello', 'cards', 'columns']},
     {type: 'block', value: 'preview', label: 'Preview', group: 'Block type', keywords: ['link', 'card', 'url']},
     {type: 'date-embed', label: 'Date', group: 'Inline embed', keywords: ['embed', 'calendar']},
 ];
@@ -3607,6 +3637,9 @@ const renderBlockNode = (node: RenderTreeNode, context: RenderBlockContext): Rea
     if (meta.type === 'table') {
         return <TableBlock key={node.block.id} node={node} context={context} />;
     }
+    if (meta.type === 'kanban') {
+        return <KanbanBlock key={node.block.id} node={node} context={context} />;
+    }
     if (meta.type === 'blockquote' || meta.type === 'callout') {
         return (
             <div
@@ -3648,6 +3681,117 @@ type TableCellDragTarget =
           kind: 'block-slot';
           dropTarget: DropTarget;
       };
+
+function KanbanBlock({node, context}: {node: RenderTreeNode; context: RenderBlockContext}) {
+    return (
+        <section
+            className="kanbanBlock"
+            data-kanban-board-id={node.block.id}
+            style={{'--block-depth': node.block.depth} as CSSProperties}
+        >
+            <div className="kanbanTitle">
+                {renderEditableBlock(node.block, context, {
+                    surfaceClassName: 'kanbanTitleText',
+                })}
+            </div>
+            <div className="kanbanColumns" data-kanban-board-id={node.block.id}>
+                {node.children.map((column) => (
+                    <KanbanColumn key={column.block.id} node={column} context={context} />
+                ))}
+            </div>
+        </section>
+    );
+}
+
+function KanbanColumn({node, context}: {node: RenderTreeNode; context: RenderBlockContext}) {
+    return (
+        <section
+            ref={(element) => context.registerRow(node.block.id, element)}
+            className={[
+                'kanbanColumn',
+                context.draggingSubtreeIds.has(node.block.id) ? 'dragging' : '',
+                context.draggingId === node.block.id ? 'draggingRoot' : '',
+                context.dropTarget?.indicatorBlockId === node.block.id
+                    ? `drop${capitalize(context.dropTarget.indicatorPlacement)}`
+                    : '',
+            ]
+                .filter(Boolean)
+                .join(' ')}
+            data-kanban-column-id={node.block.id}
+        >
+            <div className="kanbanColumnHeader">
+                <button
+                    type="button"
+                    className="kanbanColumnHandle"
+                    aria-label="Move column"
+                    onPointerDown={(event) => context.startBlockDragFromHandle(node.block.id, event)}
+                >
+                    ::
+                </button>
+                {renderEditableBlock({...node.block, depth: 0}, context, {
+                    surfaceClassName: 'kanbanColumnTitle',
+                    hideBlockAffordance: true,
+                    registerBlockRow: false,
+                })}
+            </div>
+            <div className="kanbanCards" data-kanban-column-cards={node.block.id}>
+                {node.children.map((card) => (
+                    <KanbanCard key={card.block.id} node={card} context={context} baseDepth={node.block.depth + 1} />
+                ))}
+            </div>
+        </section>
+    );
+}
+
+function KanbanCard({
+    node,
+    context,
+    baseDepth,
+}: {
+    node: RenderTreeNode;
+    context: RenderBlockContext;
+    baseDepth: number;
+}) {
+    return (
+        <article
+            ref={(element) => context.registerRow(node.block.id, element)}
+            className={[
+                'kanbanCard',
+                context.blockLevelDecorationsByBlock.get(node.block.id)?.selected ? 'blockSelected' : '',
+                context.blockLevelDecorationsByBlock.get(node.block.id)?.focus ? 'blockSelectionFocus' : '',
+                context.draggingSubtreeIds.has(node.block.id) ? 'dragging' : '',
+                context.draggingId === node.block.id ? 'draggingRoot' : '',
+                context.dropTarget?.indicatorBlockId === node.block.id
+                    ? `drop${capitalize(context.dropTarget.indicatorPlacement)}`
+                    : '',
+            ]
+                .filter(Boolean)
+                .join(' ')}
+            data-kanban-card-id={node.block.id}
+        >
+            <button
+                type="button"
+                className="kanbanCardHandle"
+                aria-label="Move card"
+                onPointerDown={(event) => context.startBlockDragFromHandle(node.block.id, event)}
+            >
+                ::
+            </button>
+            <div className="kanbanCardBody">
+                {renderEditableBlock({...node.block, depth: 0}, context, {
+                    surfaceClassName: 'kanbanCardTitle',
+                    hideBlockAffordance: true,
+                    registerBlockRow: false,
+                })}
+                {node.children.length > 0 ? (
+                    <div className="kanbanCardChildren">
+                        {node.children.map((child) => renderBlockNodeAtRelativeDepth(child, context, baseDepth + 1))}
+                    </div>
+                ) : null}
+            </div>
+        </article>
+    );
+}
 
 function TableBlock({node, context}: {node: RenderTreeNode; context: RenderBlockContext}) {
     const [cellDrag, setCellDrag] = useState<{
@@ -5016,6 +5160,8 @@ const blockTypeMeta = (
             return {type: 'recipe_ingredient', ts};
         case 'table':
             return current;
+        case 'kanban':
+            return current;
         case 'preview':
             return {
                 type: 'preview',
@@ -5055,6 +5201,8 @@ const blockTypeMenuValue = (meta: RichBlockMeta | undefined): BlockTypeMenuValue
             return 'recipe-ingredient';
         case 'table':
             return 'table';
+        case 'kanban':
+            return 'kanban';
         case 'image':
             return 'paragraph';
         case 'preview':
@@ -6490,6 +6638,7 @@ function Toolbar({
                 <option value="callout-error">Error callout</option>
                 <option value="recipe-ingredient">Ingredient line</option>
                 <option value="table">Table</option>
+                <option value="kanban">Kanban board</option>
                 <option value="preview">Preview</option>
             </select>
         </div>

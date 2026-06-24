@@ -76,6 +76,35 @@ const tableTitleBlock = (panel: HTMLElement): HTMLElement => {
     return title;
 };
 
+const kanbanBoards = (panel: HTMLElement): HTMLElement[] =>
+    Array.from(panel.querySelectorAll<HTMLElement>('.kanbanBlock'));
+
+const kanbanColumns = (panel: HTMLElement): HTMLElement[] =>
+    Array.from(panel.querySelectorAll<HTMLElement>('.kanbanColumn'));
+
+const kanbanCards = (panel: HTMLElement): HTMLElement[] =>
+    Array.from(panel.querySelectorAll<HTMLElement>('.kanbanCard'));
+
+const kanbanColumnTitle = (column: HTMLElement): string => {
+    const title = column.querySelector<HTMLElement>('.kanbanColumnTitle[role="textbox"]');
+    if (!title) throw new Error('missing kanban column title');
+    return blockText(title);
+};
+
+const kanbanCardTitle = (card: HTMLElement): string => {
+    const title = card.querySelector<HTMLElement>('.kanbanCardTitle[role="textbox"]');
+    if (!title) throw new Error('missing kanban card title');
+    return blockText(title);
+};
+
+const kanbanColumnCardTexts = (column: HTMLElement): string[] => {
+    const cards = column.querySelector<HTMLElement>('.kanbanCards');
+    if (!cards) throw new Error('missing kanban cards container');
+    return Array.from(cards.children)
+        .filter((child): child is HTMLElement => child instanceof HTMLElement && child.classList.contains('kanbanCard'))
+        .map(kanbanCardTitle);
+};
+
 const tableRowHeaders = (panel: HTMLElement): HTMLElement[] =>
     Array.from(panel.querySelectorAll<HTMLElement>('.tableRowHeaderText[role="textbox"]'));
 
@@ -642,6 +671,96 @@ describe('Block rich text example UI', () => {
         expect(tableBlocks(right)).toHaveLength(35);
     });
 
+    it('renders the kanban board fixture', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'kanban-board'},
+        });
+
+        await waitFor(() => expect(view.getByText('Loaded fixture: Kanban board.')).toBeTruthy());
+        expect(kanbanBoards(left)).toHaveLength(1);
+        expect(kanbanBoards(right)).toHaveLength(1);
+        expect(kanbanColumns(left)).toHaveLength(3);
+        expect(kanbanCards(left).length).toBeGreaterThanOrEqual(6);
+        expect(blockTexts(left)).toContain('Launch board');
+        expect(blockTexts(left)).toContain('Draft release notes');
+        expect(within(left).getAllByRole('button', {name: 'Move card'}).length).toBeGreaterThan(0);
+    });
+
+    it('drags a kanban card between columns through normal block movement', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'kanban-board'},
+        });
+        await waitFor(() => expect(view.getByText('Loaded fixture: Kanban board.')).toBeTruthy());
+
+        const columns = kanbanColumns(left);
+        const sourceCard = columns[0].querySelector<HTMLElement>('.kanbanCard')!;
+        const targetCard = columns[1].querySelector<HTMLElement>('.kanbanCard')!;
+        targetCard.getBoundingClientRect = () =>
+            ({
+                left: 0,
+                top: 0,
+                right: 240,
+                bottom: 48,
+                width: 240,
+                height: 48,
+                x: 0,
+                y: 0,
+                toJSON: () => ({}),
+            }) as DOMRect;
+        const originalElementsFromPoint = document.elementsFromPoint;
+        document.elementsFromPoint = () => [targetCard];
+        dragElementTo(within(sourceCard).getByRole('button', {name: 'Move card'}), 120, 40);
+        document.elementsFromPoint = originalElementsFromPoint;
+
+        await waitFor(() =>
+            expect(kanbanColumnCardTexts(kanbanColumns(left)[1]).slice(0, 2)).toEqual([
+                'QA import/export',
+                'Draft release notes',
+            ]),
+        );
+        expect(kanbanColumnCardTexts(kanbanColumns(left)[0])).not.toContain('Draft release notes');
+    });
+
+    it('drags a kanban column before another column through normal block movement', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'kanban-board'},
+        });
+        await waitFor(() => expect(view.getByText('Loaded fixture: Kanban board.')).toBeTruthy());
+
+        const columns = kanbanColumns(left);
+        const doneColumn = columns[2];
+        const todoColumn = columns[0];
+        todoColumn.getBoundingClientRect = () =>
+            ({
+                left: 0,
+                top: 0,
+                right: 260,
+                bottom: 180,
+                width: 260,
+                height: 180,
+                x: 0,
+                y: 0,
+                toJSON: () => ({}),
+            }) as DOMRect;
+        const originalElementsFromPoint = document.elementsFromPoint;
+        document.elementsFromPoint = () => [todoColumn];
+        dragElementTo(within(doneColumn).getByRole('button', {name: 'Move column'}), 20, 40);
+        document.elementsFromPoint = originalElementsFromPoint;
+
+        await waitFor(() =>
+            expect(kanbanColumns(left).map(kanbanColumnTitle)).toEqual(['done', 'todo', 'in progress']),
+        );
+    });
+
     it('opens populated mermaid fixture blocks in preview mode', async () => {
         const view = render(<App />);
 
@@ -843,6 +962,23 @@ describe('Block rich text example UI', () => {
 
         fireEvent.click(within(left).getByRole('button', {name: 'Add column 3'}));
         await waitFor(() => expect(tableBlocks(right)).toHaveLength(9));
+    });
+
+    it('converts a block to a kanban board from the block type menu', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+        selectCaret(blocks(left)[0], 0);
+        typeText(blocks(left)[0], 'Board');
+
+        setBlockType(left, 'kanban');
+
+        await waitFor(() => {
+            expect(kanbanBoards(left)).toHaveLength(1);
+            expect(kanbanBoards(right)).toHaveLength(1);
+        });
+        expect(kanbanColumns(left)).toHaveLength(3);
+        expect(blockTexts(left).slice(0, 4)).toEqual(['Board', 'todo', 'in progress', 'done']);
+        expect(within(left).getAllByRole('button', {name: 'Move column'})).toHaveLength(3);
     });
 
     it('converts a selected table header back to a normal block from the block type menu', async () => {
@@ -1949,6 +2085,27 @@ describe('Block rich text example UI', () => {
         await waitForBlockTexts(left, ['']);
         await waitFor(() => expect(within(left).getByRole('textbox', {name: 'Preview URL'})).toBeTruthy());
         expect(within(right).getByRole('textbox', {name: 'Preview URL'})).toBeTruthy();
+    });
+
+    it('runs a slash kanban command and creates default columns', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], '/');
+
+        const dialog = await waitFor(() => within(left).getByRole('dialog', {name: 'Slash commands'}));
+        fireEvent.change(within(dialog).getByRole('textbox', {name: 'Search slash commands'}), {
+            target: {value: 'kanban'},
+        });
+        fireEvent.click(within(dialog).getByRole('option', {name: /Kanban board/}));
+
+        await waitFor(() => {
+            expect(kanbanBoards(left)).toHaveLength(1);
+            expect(kanbanBoards(right)).toHaveLength(1);
+        });
+        expect(blockTexts(left).slice(0, 4)).toEqual(['', 'todo', 'in progress', 'done']);
+        expect(kanbanColumns(left)).toHaveLength(3);
     });
 
     it('converts a block to preview from the toolbar and rejects invalid URLs', async () => {

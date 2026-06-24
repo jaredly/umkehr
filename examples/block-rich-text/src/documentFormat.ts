@@ -102,6 +102,7 @@ const BLOCK_TYPES = new Set<DocumentBlockType>([
     'callout',
     'recipe_ingredient',
     'table',
+    'kanban',
     'image',
     'preview',
 ]);
@@ -335,6 +336,7 @@ const parseMeta = (type: DocumentBlockType, value: unknown, path: string): Docum
         case 'blockquote':
         case 'recipe_ingredient':
         case 'table':
+        case 'kanban':
             return {};
         case 'heading': {
             const level = meta.level ?? 1;
@@ -428,6 +430,8 @@ const richMetaForDocumentBlock = (block: ParsedDocumentBlock, ts: string): RichB
             return {type: 'recipe_ingredient', ts};
         case 'table':
             return {type: 'table', ts};
+        case 'kanban':
+            return {type: 'kanban', ts};
         case 'image':
             return {
                 type: 'image',
@@ -515,6 +519,8 @@ const documentBlockForMeta = (meta: RichBlockMeta): DocumentBlock => {
             return {type: 'recipe_ingredient'};
         case 'table':
             return {type: 'table'};
+        case 'kanban':
+            return {type: 'kanban'};
         case 'image':
             return {type: 'image', meta: {attachmentId: meta.attachmentId, size: meta.size}};
         case 'preview':

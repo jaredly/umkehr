@@ -24,6 +24,7 @@ import {
     advanceFromTableCellEnd,
     addTableRow,
     commandApplied,
+    convertBlockToKanban,
     convertBlockToTable,
     createMissingTableCell,
     createTable,
@@ -35,6 +36,8 @@ import {
     insertTextWithMarkdownShortcuts,
     insertTextWithMarks,
     insertTextWithRetainedMarks,
+    kanbanCards,
+    kanbanColumns,
     moveBlock,
     moveBlockToTableCellSlot,
     moveCellRectangleOutToNewTable,
@@ -128,6 +131,17 @@ const tableShape = (state: CachedState<RichBlockMeta>, tableId: string) => {
                 ? []
                 : visibleBlockChildren(state, rowId, annotationVirtualParents(state)),
         ),
+    };
+};
+
+const kanbanShape = (state: CachedState<RichBlockMeta>, boardId: string) => {
+    const board = state.state.blocks[boardId];
+    if (!board || board.meta.type !== 'kanban') throw new Error(`kanban ${boardId} not found`);
+    const columns = kanbanColumns(state, boardId);
+    return {
+        board,
+        columns,
+        cards: columns.map((columnId) => kanbanCards(state, columnId)),
     };
 };
 
@@ -798,6 +812,111 @@ describe('block rich text commands', () => {
         expect(tableShape(result.state, parentId).rows).toEqual([childId]);
         expect(tableShape(result.state, parentId).cells).toEqual([[]]);
         expect(result.selection).toEqual(caret(parentId, 0));
+    });
+
+    it('converts a text block to a kanban board with default columns', () => {
+        const demo = createDemoState();
+        const context = ctx();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = insertText(demo.left.state, caret(blockId, 0), 'Project board', context);
+
+        result = convertBlockToKanban(result.state, caret(blockId, 0), context);
+
+        const shape = kanbanShape(result.state, blockId);
+        expect(shape.board.meta.type).toBe('kanban');
+        expect(blockContents(result.state, blockId)).toBe('Project board');
+        expect(shape.columns.map((columnId) => blockContents(result.state, columnId))).toEqual([
+            'todo',
+            'in progress',
+            'done',
+        ]);
+        expect(shape.cards).toEqual([[], [], []]);
+        expect(result.selection).toEqual(caret(shape.columns[0], 0));
+    });
+
+    it('does not add default columns when converting a block that already has children', () => {
+        const context = ctx();
+        let result = pastePlainText(init(), caret(onlyBlock(init()), 0), 'Board\nExisting column', context);
+        const [boardId, columnId] = rootBlockIds(result.state);
+        result = moveBlock(result.state, columnId, {type: 'child', parentBlockId: boardId, at: 'end'}, context);
+
+        result = convertBlockToKanban(result.state, caret(boardId, 0), context);
+
+        expect(result.state.state.blocks[boardId].meta.type).toBe('kanban');
+        expect(kanbanShape(result.state, boardId).columns).toEqual([columnId]);
+        expect(blockContents(result.state, columnId)).toBe('Existing column');
+        expect(result.selection).toEqual(caret(boardId, 0));
+    });
+
+    it('moves kanban cards with normal block moves while preserving subtree and metadata', () => {
+        const context = ctx();
+        const state = init();
+        const boardId = onlyBlock(state);
+        let result = convertBlockToKanban(state, caret(boardId, 0), context);
+        const [todoColumnId, inProgressColumnId] = kanbanShape(result.state, boardId).columns;
+        const card = insertParagraphChild(result.state, todoColumnId, context);
+        result = insertText(card.state, caret(card.childId, 0), 'Draft proposal', context);
+        const child = insertParagraphChild(result.state, card.childId, context);
+        result = insertText(child.state, caret(child.childId, 0), 'Checklist item', context);
+
+        result = moveBlock(result.state, card.childId, {type: 'child', parentBlockId: inProgressColumnId, at: 'end'}, context);
+
+        expect(kanbanCards(result.state, todoColumnId)).toEqual([]);
+        expect(kanbanCards(result.state, inProgressColumnId)).toEqual([card.childId]);
+        expect(blockContents(result.state, card.childId)).toBe('Draft proposal');
+        expect(visibleBlockChildren(result.state, card.childId, annotationVirtualParents(result.state))).toEqual([
+            child.childId,
+        ]);
+        expect(blockContents(result.state, child.childId)).toBe('Checklist item');
+    });
+
+    it('makes kanban cards children of other cards through normal child moves', () => {
+        const context = ctx();
+        const state = init();
+        const boardId = onlyBlock(state);
+        let result = convertBlockToKanban(state, caret(boardId, 0), context);
+        const [todoColumnId] = kanbanShape(result.state, boardId).columns;
+        const first = insertParagraphChild(result.state, todoColumnId, context);
+        result = insertText(first.state, caret(first.childId, 0), 'Parent card', context);
+        const second = insertParagraphChild(result.state, todoColumnId, context);
+        result = insertText(second.state, caret(second.childId, 0), 'Child card', context);
+
+        result = moveBlock(result.state, second.childId, {type: 'child', parentBlockId: first.childId, at: 'end'}, context);
+
+        expect(kanbanCards(result.state, todoColumnId)).toEqual([first.childId]);
+        expect(visibleBlockChildren(result.state, first.childId, annotationVirtualParents(result.state))).toEqual([
+            second.childId,
+        ]);
+    });
+
+    it('reorders kanban columns with normal block moves', () => {
+        const context = ctx();
+        const state = init();
+        const boardId = onlyBlock(state);
+        let result = convertBlockToKanban(state, caret(boardId, 0), context);
+        const columns = kanbanShape(result.state, boardId).columns;
+
+        result = moveBlock(result.state, columns[2], {type: 'before', targetBlockId: columns[0]}, context);
+
+        expect(kanbanColumns(result.state, boardId)).toEqual([columns[2], columns[0], columns[1]]);
+    });
+
+    it('moves kanban columns out of the board as normal blocks', () => {
+        const context = ctx();
+        const state = init();
+        const boardId = onlyBlock(state);
+        let result = convertBlockToKanban(state, caret(boardId, 0), context);
+        const [todoColumnId] = kanbanShape(result.state, boardId).columns;
+        const afterBoard = insertParagraphAfterBlockForTest(result.state, boardId, context);
+
+        result = moveBlock(afterBoard.state, todoColumnId, {type: 'after', targetBlockId: afterBoard.blockId}, context);
+
+        expect(rootBlockIds(result.state)).toEqual([boardId, afterBoard.blockId, todoColumnId]);
+        expect(kanbanColumns(result.state, boardId).map((columnId) => blockContents(result.state, columnId))).toEqual([
+            'in progress',
+            'done',
+        ]);
+        expect(blockContents(result.state, todoColumnId)).toBe('todo');
     });
 
     it('orders table rows by normal block order under the row virtual parent', () => {

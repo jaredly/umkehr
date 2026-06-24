@@ -66,6 +66,15 @@ describe('document fixtures', () => {
         expect(countBlocksOfType([table], 'table')).toBeGreaterThan(1);
     });
 
+    it('includes a kanban board fixture with mixed cards', () => {
+        const [board] = documentFixture('kanban-board');
+
+        expect(board.type).toBe('kanban');
+        expect(board.children?.map((column) => column.content)).toEqual(['todo', 'in progress', 'done']);
+        expect(countBlocksOfType([board], 'todo')).toBeGreaterThan(1);
+        expect(countBlocksOfType([board], 'table')).toBe(1);
+    });
+
     it('generates depth-five list nesting', () => {
         const document = documentFixture('deep-list-nesting');
 

@@ -708,6 +708,7 @@ const isRichBlockMeta = (value: unknown): value is RichBlockMeta => {
         case 'blockquote':
         case 'recipe_ingredient':
         case 'table':
+        case 'kanban':
             return true;
         case 'heading':
             return value.level === 1 || value.level === 2 || value.level === 3;
