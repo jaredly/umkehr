@@ -578,6 +578,10 @@ select {
     background: #fff;
 }
 
+.mermaidPreviewVisual {
+    position: relative;
+}
+
 .mermaidPreview svg {
     display: block;
     max-width: 100%;
@@ -589,6 +593,21 @@ select {
     min-height: 60px;
     color: #8a2b2b;
     background: #fff6f4;
+    white-space: pre-wrap;
+}
+
+.mermaidErrorOverlay {
+    position: sticky;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    margin: 12px -12px -12px;
+    padding: 8px 12px;
+    border-top: 1px solid #f0b8ae;
+    color: #8a2b2b;
+    background: rgba(255, 246, 244, 0.96);
+    font-size: 12px;
+    line-height: 1.35;
     white-space: pre-wrap;
 }
 

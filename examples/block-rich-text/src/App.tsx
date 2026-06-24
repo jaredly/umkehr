@@ -7512,7 +7512,7 @@ type MermaidRenderState =
     | {type: 'loading'}
     | {type: 'rendering'; svg: string}
     | {type: 'rendered'; svg: string}
-    | {type: 'error'; message: string};
+    | {type: 'error'; message: string; svg?: string};
 
 let mermaidInitialized = false;
 
@@ -7546,11 +7546,10 @@ function MermaidBlock({
 
         let cancelled = false;
         const renderId = `mermaid-${sanitizeDomId(blockId)}-${++renderCounterRef.current}`;
-        setRenderState((current) =>
-            current.type === 'rendered' || current.type === 'rendering'
-                ? {type: 'rendering', svg: current.svg}
-                : {type: 'loading'},
-        );
+        setRenderState((current) => {
+            const cachedSvg = cachedMermaidSvg(current);
+            return cachedSvg ? {type: 'rendering', svg: cachedSvg} : {type: 'loading'};
+        });
 
         const render = async () => {
             try {
@@ -7558,7 +7557,16 @@ function MermaidBlock({
                 const result = await mermaid.render(renderId, source);
                 if (!cancelled) setRenderState({type: 'rendered', svg: result.svg});
             } catch (error) {
-                if (!cancelled) setRenderState({type: 'error', message: errorMessage(error)});
+                if (!cancelled) {
+                    setRenderState((current) => {
+                        const cachedSvg = cachedMermaidSvg(current);
+                        return {
+                            type: 'error',
+                            message: errorMessage(error),
+                            ...(cachedSvg ? {svg: cachedSvg} : {}),
+                        };
+                    });
+                }
             }
         };
 
@@ -7605,14 +7613,20 @@ function MermaidBlock({
     );
 }
 
+const cachedMermaidSvg = (state: MermaidRenderState): string | undefined => {
+    if (state.type === 'rendered' || state.type === 'rendering') return state.svg;
+    if (state.type === 'error') return state.svg;
+    return undefined;
+};
+
 function MermaidPreview({state}: {state: MermaidRenderState}) {
-    if (state.type === 'rendered' || state.type === 'rendering') {
+    const visualSvg = cachedMermaidSvg(state);
+    if (visualSvg) {
         return (
-            <div
-                className="mermaidPreview"
-                contentEditable={false}
-                dangerouslySetInnerHTML={{__html: state.svg}}
-            />
+            <div className="mermaidPreview mermaidPreviewVisual" contentEditable={false}>
+                <div dangerouslySetInnerHTML={{__html: visualSvg}} />
+                {state.type === 'error' ? <div className="mermaidErrorOverlay">{state.message}</div> : null}
+            </div>
         );
     }
     if (state.type === 'error') {

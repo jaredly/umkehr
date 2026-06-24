@@ -76,3 +76,21 @@
 - Ran `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx -t "mermaid"`: passed, 1 file / 3 tests.
 - Ran `npm exec vitest -- run examples/block-rich-text/src/blockCommands.test.ts examples/block-rich-text/src/documentFormat.test.ts examples/block-rich-text/src/clipboard.test.ts examples/block-rich-text/src/documentFixtures.test.ts`: passed, 4 files / 215 tests.
 - Ran `npm run build` in `examples/block-rich-text`: passed, with the same non-fatal SSH agent message and Vite Mermaid chunk-size warning noted above.
+
+## Follow-up: Mermaid Error Overlay
+
+- Changed Mermaid render errors after a successful render to preserve the cached SVG and show the error in a bottom overlay.
+- First-render errors still use the full error panel because there is no cached visual yet.
+- Added an App UI regression test that makes the remote Mermaid re-render fail and verifies the previous SVG remains visible with `.mermaidErrorOverlay`.
+- Initial build caught a TypeScript narrowing issue for cached error SVGs; fixed by deriving an explicit `visualSvg` local before rendering.
+- Ran `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx -t "mermaid"`: passed, 1 file / 4 tests.
+- Ran `npm exec vitest -- run examples/block-rich-text/src/blockCommands.test.ts examples/block-rich-text/src/documentFormat.test.ts examples/block-rich-text/src/clipboard.test.ts examples/block-rich-text/src/documentFixtures.test.ts`: passed, 4 files / 215 tests.
+- Ran `npm run build` in `examples/block-rich-text`: passed, with the same non-fatal SSH agent message and Vite Mermaid chunk-size warning noted above.
+
+## Follow-up: Consecutive Mermaid Errors
+
+- Fixed a cache drop after consecutive render errors: `error` states with a cached SVG are now treated as cache sources during the next pending render and catch transition.
+- Added a `cachedMermaidSvg` helper so `rendered`, `rendering`, and cached `error` states all preserve the same SVG consistently.
+- Extended the error-overlay regression test to trigger a second failing update and verify the original SVG remains visible.
+- Ran `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx -t "mermaid"`: passed, 1 file / 4 tests.
+- Ran `npm run build` in `examples/block-rich-text`: passed, with the same non-fatal SSH agent message and Vite Mermaid chunk-size warning noted above.

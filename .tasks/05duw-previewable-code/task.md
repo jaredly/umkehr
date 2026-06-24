@@ -3,3 +3,6 @@ Some other code things that could be previewable:
 - vega-lite charts
 - dot/graphviz
 - turtle
+- any other ideas you have would be great
+
+would be great to have syntax highlighting too.

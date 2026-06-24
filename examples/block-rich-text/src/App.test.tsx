@@ -709,6 +709,44 @@ describe('Block rich text example UI', () => {
         await waitFor(() => expect(rightMermaid.querySelector('[data-render="updated"]')).toBeTruthy());
     });
 
+    it('keeps the previous mermaid render visible with an error overlay when remote updates fail', async () => {
+        mermaidMock.render.mockImplementation(async () => {
+            if (mermaidMock.render.mock.calls.length <= 2) {
+                return {svg: '<svg data-testid="mermaid-render" data-render="initial"></svg>'};
+            }
+            throw new Error('Parse failed');
+        });
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'mermaid-diagram'},
+        });
+
+        await waitFor(() => expect(view.container.querySelectorAll('[data-render="initial"]')).toHaveLength(2));
+        const leftMermaid = left.querySelector<HTMLElement>('.mermaidBlock');
+        const rightMermaid = right.querySelector<HTMLElement>('.mermaidBlock');
+        if (!leftMermaid || !rightMermaid) throw new Error('missing mermaid block');
+
+        fireEvent.click(within(leftMermaid).getByRole('button', {name: 'Edit'}));
+        const editor = within(leftMermaid).getByRole('textbox', {name: 'Block text'});
+        selectCaret(editor, blockText(editor).length);
+        typeText(editor, ' ');
+
+        await waitFor(() => expect(within(rightMermaid).getByText('Parse failed')).toBeTruthy());
+        expect(rightMermaid.querySelector('[data-render="initial"]')).toBeTruthy();
+        expect(rightMermaid.querySelector('.mermaidErrorOverlay')).toBeTruthy();
+        expect(rightMermaid.querySelector('.mermaidError')).toBeNull();
+
+        typeText(editor, '!');
+
+        await waitFor(() => expect(mermaidMock.render).toHaveBeenCalledTimes(4));
+        expect(within(rightMermaid).getByText('Parse failed')).toBeTruthy();
+        expect(rightMermaid.querySelector('[data-render="initial"]')).toBeTruthy();
+        expect(rightMermaid.querySelector('.mermaidErrorOverlay')).toBeTruthy();
+        expect(rightMermaid.querySelector('.mermaidError')).toBeNull();
+    });
+
     it('tracks empty editable blocks for the empty-block indicator', async () => {
         const view = render(<App />);
         const {left} = panels(view);
