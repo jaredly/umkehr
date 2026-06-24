@@ -1,9 +1,21 @@
 import '../../../src/react/test-dom';
 
 import {act, cleanup, fireEvent, render, waitFor, within} from '@testing-library/react';
-import {afterEach, describe, expect, it, vi} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {App} from './App';
 import {BLOCK_RICH_TEXT_MIME, htmlWithClipboardPayload, type RichClipboardPayload} from './clipboard';
+
+const mermaidMock = vi.hoisted(() => ({
+    initialize: vi.fn(),
+    render: vi.fn(async () => ({svg: '<svg data-testid="mermaid-render"></svg>'})),
+}));
+
+vi.mock('mermaid', () => ({
+    default: {
+        initialize: mermaidMock.initialize,
+        render: mermaidMock.render,
+    },
+}));
 
 Object.defineProperty(globalThis, 'NodeFilter', {
     value: window.NodeFilter,
@@ -16,6 +28,12 @@ Object.defineProperty(globalThis, 'CSS', {
 });
 
 let restoreCaretGeometry: (() => void) | null = null;
+
+beforeEach(() => {
+    mermaidMock.initialize.mockReset();
+    mermaidMock.render.mockReset();
+    mermaidMock.render.mockResolvedValue({svg: '<svg data-testid="mermaid-render"></svg>'});
+});
 
 afterEach(() => {
     restoreCaretGeometry?.();
@@ -622,6 +640,73 @@ describe('Block rich text example UI', () => {
         await waitFor(() => expect(view.getByText('Loaded fixture: Large table.')).toBeTruthy());
         expect(tableBlocks(left)).toHaveLength(35);
         expect(tableBlocks(right)).toHaveLength(35);
+    });
+
+    it('opens populated mermaid fixture blocks in view mode', async () => {
+        const view = render(<App />);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'mermaid-diagram'},
+        });
+
+        await waitFor(() => expect(view.getByText('Loaded fixture: Mermaid diagram.')).toBeTruthy());
+        const mermaidBlocks = Array.from(view.container.querySelectorAll<HTMLElement>('.mermaidBlock'));
+        expect(mermaidBlocks).toHaveLength(2);
+        for (const block of mermaidBlocks) {
+            expect(within(block).getByRole('button', {name: 'View'}).getAttribute('aria-pressed')).toBe('true');
+            expect(within(block).queryByRole('textbox', {name: 'Block text'})).toBeNull();
+        }
+        await waitFor(() => expect(view.container.querySelectorAll('[data-testid="mermaid-render"]')).toHaveLength(2));
+    });
+
+    it('opens empty mermaid blocks in edit mode', () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        setBlockType(left, 'mermaid');
+
+        const mermaidBlock = left.querySelector<HTMLElement>('.mermaidBlock');
+        if (!mermaidBlock) throw new Error('missing mermaid block');
+        expect(within(mermaidBlock).getByRole('button', {name: 'Edit'}).getAttribute('aria-pressed')).toBe('true');
+        expect(within(mermaidBlock).getByRole('textbox', {name: 'Block text'})).toBeTruthy();
+    });
+
+    it('keeps the previous mermaid render visible while remote updates render', async () => {
+        let pendingUpdateResolve: (() => void) | null = null;
+        mermaidMock.render.mockImplementation(async () => {
+            if (mermaidMock.render.mock.calls.length <= 2) {
+                return {svg: '<svg data-testid="mermaid-render" data-render="initial"></svg>'};
+            }
+            return new Promise((resolve) => {
+                pendingUpdateResolve = () =>
+                    resolve({svg: '<svg data-testid="mermaid-render" data-render="updated"></svg>'});
+            });
+        });
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'mermaid-diagram'},
+        });
+
+        await waitFor(() => expect(view.container.querySelectorAll('[data-render="initial"]')).toHaveLength(2));
+        const leftMermaid = left.querySelector<HTMLElement>('.mermaidBlock');
+        const rightMermaid = right.querySelector<HTMLElement>('.mermaidBlock');
+        if (!leftMermaid || !rightMermaid) throw new Error('missing mermaid block');
+
+        fireEvent.click(within(leftMermaid).getByRole('button', {name: 'Edit'}));
+        const editor = within(leftMermaid).getByRole('textbox', {name: 'Block text'});
+        selectCaret(editor, blockText(editor).length);
+        typeText(editor, ' ');
+
+        await waitFor(() => expect(mermaidMock.render).toHaveBeenCalledTimes(3));
+        expect(within(rightMermaid).queryByText('Rendering diagram...')).toBeNull();
+        expect(rightMermaid.querySelector('[data-render="initial"]')).toBeTruthy();
+
+        await act(async () => {
+            pendingUpdateResolve?.();
+        });
+        await waitFor(() => expect(rightMermaid.querySelector('[data-render="updated"]')).toBeTruthy());
     });
 
     it('tracks empty editable blocks for the empty-block indicator', async () => {

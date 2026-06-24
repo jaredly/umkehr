@@ -19,6 +19,7 @@ export type RichBlockMeta =
     | {type: 'todo'; checked: boolean; ts: HLC}
     | {type: 'blockquote'; ts: HLC}
     | {type: 'code'; language: string; ts: HLC}
+    | {type: 'mermaid'; ts: HLC}
     | {type: 'callout'; kind: 'info' | 'warning' | 'error'; ts: HLC}
     | {type: 'recipe_ingredient'; ts: HLC}
     | {type: 'table'; ts: HLC}
@@ -43,6 +44,8 @@ export const sameTypeWithTs = (meta: RichBlockMeta, ts: HLC): RichBlockMeta => {
             return {type: 'blockquote', ts};
         case 'code':
             return {type: 'code', language: meta.language, ts};
+        case 'mermaid':
+            return {type: 'mermaid', ts};
         case 'callout':
             return {type: 'callout', kind: meta.kind, ts};
         case 'recipe_ingredient':

@@ -79,6 +79,14 @@ describe('document fixtures', () => {
         expect(document.every((block) => wordCount(block.content ?? '') === 10)).toBe(true);
     });
 
+    it('includes a mermaid diagram fixture', () => {
+        const document = documentFixture('mermaid-diagram');
+        const mermaid = document.find((block) => block.type === 'mermaid');
+
+        expect(mermaid?.content).toContain('graph TD');
+        expect(mermaid?.content).toContain('Diagram preview');
+    });
+
     it('includes generated and missing image references', () => {
         const images = documentFixture('code-callouts-images').filter((block) => block.type === 'image');
 

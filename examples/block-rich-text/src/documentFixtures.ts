@@ -41,6 +41,7 @@ export const documentFixtures: DocumentFixture[] = [
     {id: 'deep-list-nesting', label: 'Deep list nesting', document: deepListNesting},
     {id: 'many-blocks', label: 'Many blocks', document: manyBlocks},
     {id: 'mixed-table-and-text', label: 'Mixed table and text', document: mixedTableAndText},
+    {id: 'mermaid-diagram', label: 'Mermaid diagram', document: mermaidDiagram},
     {
         id: 'code-callouts-images',
         label: 'Code, callouts, and images',
@@ -206,6 +207,23 @@ function mixedTableAndText(): ImportDocument {
         {content: 'Paragraph before the table to test navigation into the grid.'},
         ...largeTable(),
         {content: 'Paragraph after the table to test navigation out of the grid.'},
+    ];
+}
+
+function mermaidDiagram(): ImportDocument {
+    return [
+        {type: 'heading', meta: {level: 2}, content: 'Mermaid diagram fixture'},
+        {
+            type: 'mermaid',
+            content: [
+                'graph TD',
+                '  A[Draft source] --> B{Render?}',
+                '  B -->|View| C[Diagram preview]',
+                '  B -->|Edit| D[Code-like editor]',
+                '  D --> A',
+            ].join('\n'),
+        },
+        {content: 'Use the Mermaid block toggle to switch between editing source and viewing the rendered diagram.'},
     ];
 }
 

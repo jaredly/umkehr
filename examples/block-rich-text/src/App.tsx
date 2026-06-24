@@ -14,6 +14,7 @@ import {
     type PointerEvent,
     type ReactElement,
 } from 'react';
+import mermaid from 'mermaid';
 import {
     applyMany,
     blockContents,
@@ -3310,6 +3311,7 @@ type BlockTypeMenuValue =
     | 'todo'
     | 'blockquote'
     | 'code'
+    | 'mermaid'
     | 'callout-info'
     | 'callout-warning'
     | 'callout-error'
@@ -3327,6 +3329,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     {type: 'block', value: 'todo', label: 'Todo', group: 'Block type', keywords: ['task', 'checkbox']},
     {type: 'block', value: 'blockquote', label: 'Blockquote', group: 'Block type', keywords: ['quote']},
     {type: 'block', value: 'code', label: 'Code', group: 'Block type', keywords: ['pre']},
+    {type: 'block', value: 'mermaid', label: 'Mermaid diagram', group: 'Block type', keywords: ['diagram', 'chart', 'flowchart', 'mermaid']},
     {type: 'block', value: 'callout-info', label: 'Info callout', group: 'Block type', keywords: ['info']},
     {type: 'block', value: 'callout-warning', label: 'Warning callout', group: 'Block type', keywords: ['warning']},
     {type: 'block', value: 'callout-error', label: 'Error callout', group: 'Block type', keywords: ['error']},
@@ -4964,6 +4967,8 @@ const blockTypeMeta = (
             return {type: 'blockquote', ts};
         case 'code':
             return {type: 'code', language: current.type === 'code' ? current.language : '', ts};
+        case 'mermaid':
+            return {type: 'mermaid', ts};
         case 'callout-info':
             return {type: 'callout', kind: 'info', ts};
         case 'callout-warning':
@@ -4999,6 +5004,8 @@ const blockTypeMenuValue = (meta: RichBlockMeta | undefined): BlockTypeMenuValue
             return 'blockquote';
         case 'code':
             return 'code';
+        case 'mermaid':
+            return 'mermaid';
         case 'callout':
             return meta.kind === 'info'
                 ? 'callout-info'
@@ -6437,6 +6444,7 @@ function Toolbar({
                 <option value="todo">Todo</option>
                 <option value="blockquote">Quote</option>
                 <option value="code">Code</option>
+                <option value="mermaid">Mermaid diagram</option>
                 <option value="callout-info">Info callout</option>
                 <option value="callout-warning">Warning callout</option>
                 <option value="callout-error">Error callout</option>
@@ -6616,13 +6624,14 @@ function EditableBlock({
     onDisplayInputRenderStarted(label: string, started: number): void;
 }) {
     const meta = block.block.meta;
-    const codeHasTrailingNewline =
-        meta.type === 'code' &&
+    const isCodeBlock = meta.type === 'code';
+    const isPlainTextCodeLikeBlock = meta.type === 'code' || meta.type === 'mermaid';
+    const codeLikeHasTrailingNewline =
+        isPlainTextCodeLikeBlock &&
         block.runs
             .map((run) => run.text)
             .join('')
             .endsWith('\n');
-    const isCodeBlock = meta.type === 'code';
     const codeText = isCodeBlock ? block.runs.map((run) => run.text).join('') : '';
     const codeLanguage = isCodeBlock ? meta.language : '';
     const blockText = block.runs.map((run) => run.text).join('');
@@ -6647,7 +6656,8 @@ function EditableBlock({
             selection={selection}
             className={[
                 'editableBlock',
-                meta.type === 'code' ? 'codeBlock' : '',
+                isPlainTextCodeLikeBlock ? 'codeBlock' : '',
+                meta.type === 'mermaid' ? 'mermaidEditor' : '',
                 meta.type === 'heading' ? `headingLevel${meta.level}` : '',
                 meta.type === 'image' ? 'imageCaption' : '',
                 meta.type === 'recipe_ingredient' ? 'recipeIngredientBlock' : '',
@@ -6657,7 +6667,7 @@ function EditableBlock({
                 .join(' ')}
             ariaLabel={ariaLabel}
             placeholder={placeholder}
-            trailingCodeNewline={codeHasTrailingNewline}
+            trailingCodeNewline={codeLikeHasTrailingNewline}
             syntaxTokens={syntaxTokens}
             ingredientTokens={ingredientTokens}
             popoverTextById={popoverTextById}
@@ -6707,7 +6717,7 @@ function EditableBlock({
                     event.preventDefault();
                     if (meta.type === 'code' && event.shiftKey) {
                         onForceCodeNewline();
-                    } else if (meta.type === 'code') {
+                    } else if (isPlainTextCodeLikeBlock) {
                         onSplit();
                     } else if (isTableCell && !event.shiftKey && meta.type !== 'image') {
                         onAdvanceFromTableCellEnd(
@@ -6719,7 +6729,7 @@ function EditableBlock({
                     }
                 } else if (event.key === 'Tab' && !event.altKey && !modifierPressed) {
                     event.preventDefault();
-                    if (meta.type === 'code') {
+                    if (isPlainTextCodeLikeBlock) {
                         onInsertText('    ');
                     } else if (isTableCell) {
                         onMoveTableCellByTab(event.shiftKey ? 'backward' : 'forward');
@@ -6970,6 +6980,8 @@ function EditableBlock({
                     onSetUrl={onSetPreviewUrl}
                     onSetMetadata={onSetPreviewMetadata}
                 />
+            ) : meta.type === 'mermaid' ? (
+                <MermaidBlock blockId={block.id} source={blockText} editor={editableSurface} />
             ) : (
                 editableSurface
             )}
@@ -7494,6 +7506,136 @@ function BlockInlineControls({
     }
     return null;
 }
+
+type MermaidRenderState =
+    | {type: 'empty'}
+    | {type: 'loading'}
+    | {type: 'rendering'; svg: string}
+    | {type: 'rendered'; svg: string}
+    | {type: 'error'; message: string};
+
+let mermaidInitialized = false;
+
+const ensureMermaidInitialized = () => {
+    if (mermaidInitialized) return;
+    mermaid.initialize({startOnLoad: false, securityLevel: 'strict'});
+    mermaidInitialized = true;
+};
+
+function MermaidBlock({
+    blockId,
+    source,
+    editor,
+}: {
+    blockId: string;
+    source: string;
+    editor: ReactElement;
+}) {
+    const [mode, setMode] = useState<'edit' | 'view'>(() =>
+        source.trim() === '' ? 'edit' : 'view',
+    );
+    const [renderState, setRenderState] = useState<MermaidRenderState>({type: 'empty'});
+    const renderCounterRef = useRef(0);
+
+    useEffect(() => {
+        if (mode !== 'view') return;
+        if (source.trim() === '') {
+            setRenderState({type: 'empty'});
+            return;
+        }
+
+        let cancelled = false;
+        const renderId = `mermaid-${sanitizeDomId(blockId)}-${++renderCounterRef.current}`;
+        setRenderState((current) =>
+            current.type === 'rendered' || current.type === 'rendering'
+                ? {type: 'rendering', svg: current.svg}
+                : {type: 'loading'},
+        );
+
+        const render = async () => {
+            try {
+                ensureMermaidInitialized();
+                const result = await mermaid.render(renderId, source);
+                if (!cancelled) setRenderState({type: 'rendered', svg: result.svg});
+            } catch (error) {
+                if (!cancelled) setRenderState({type: 'error', message: errorMessage(error)});
+            }
+        };
+
+        void render();
+        return () => {
+            cancelled = true;
+        };
+    }, [blockId, mode, source]);
+
+    return (
+        <div className="mermaidBlock">
+            <div className="mermaidToolbar" contentEditable={false}>
+                <button
+                    type="button"
+                    className="mermaidModeToggle"
+                    aria-pressed={mode === 'edit'}
+                    onPointerDown={stopEditorControlEvent}
+                    onMouseDown={stopEditorControlEvent}
+                    onMouseUp={stopEditorControlEvent}
+                    onClick={(event) => {
+                        stopEditorControlEvent(event);
+                        setMode('edit');
+                    }}
+                >
+                    Edit
+                </button>
+                <button
+                    type="button"
+                    className="mermaidModeToggle"
+                    aria-pressed={mode === 'view'}
+                    onPointerDown={stopEditorControlEvent}
+                    onMouseDown={stopEditorControlEvent}
+                    onMouseUp={stopEditorControlEvent}
+                    onClick={(event) => {
+                        stopEditorControlEvent(event);
+                        setMode('view');
+                    }}
+                >
+                    View
+                </button>
+            </div>
+            {mode === 'edit' ? editor : <MermaidPreview state={renderState} />}
+        </div>
+    );
+}
+
+function MermaidPreview({state}: {state: MermaidRenderState}) {
+    if (state.type === 'rendered' || state.type === 'rendering') {
+        return (
+            <div
+                className="mermaidPreview"
+                contentEditable={false}
+                dangerouslySetInnerHTML={{__html: state.svg}}
+            />
+        );
+    }
+    if (state.type === 'error') {
+        return (
+            <div className="mermaidPreview mermaidError" contentEditable={false}>
+                {state.message}
+            </div>
+        );
+    }
+    return (
+        <div className="mermaidPreview" contentEditable={false}>
+            {state.type === 'loading' ? 'Rendering diagram...' : 'Empty diagram'}
+        </div>
+    );
+}
+
+const sanitizeDomId = (value: string): string => value.replace(/[^A-Za-z0-9_-]/g, '-');
+
+const errorMessage = (error: unknown): string => {
+    if (error instanceof Error && error.message) return error.message;
+    if (typeof error === 'string') return error;
+    return 'Unable to render Mermaid diagram.';
+};
 
 type PreviewFetchStatus =
     | {type: 'idle'}

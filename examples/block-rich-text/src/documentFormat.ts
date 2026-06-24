@@ -96,6 +96,7 @@ const BLOCK_TYPES = new Set<DocumentBlockType>([
     'todo',
     'blockquote',
     'code',
+    'mermaid',
     'callout',
     'recipe_ingredient',
     'table',
@@ -361,6 +362,8 @@ const parseMeta = (type: DocumentBlockType, value: unknown, path: string): Docum
             }
             return {language: normalizeStoredCodeLanguage(language)};
         }
+        case 'mermaid':
+            return {};
         case 'callout': {
             const kind = meta.kind ?? 'info';
             if (kind !== 'info' && kind !== 'warning' && kind !== 'error') {
@@ -404,6 +407,8 @@ const richMetaForDocumentBlock = (block: ParsedDocumentBlock, ts: string): RichB
             return {type: 'blockquote', ts};
         case 'code':
             return {type: 'code', language: block.meta.language ?? '', ts};
+        case 'mermaid':
+            return {type: 'mermaid', ts};
         case 'callout':
             return {type: 'callout', kind: (block.meta.kind as 'info' | 'warning' | 'error') ?? 'info', ts};
         case 'recipe_ingredient':
@@ -486,6 +491,8 @@ const documentBlockForMeta = (meta: RichBlockMeta): DocumentBlock => {
             return {type: 'blockquote'};
         case 'code':
             return {type: 'code', meta: {language: meta.language}};
+        case 'mermaid':
+            return {type: 'mermaid'};
         case 'callout':
             return {type: 'callout', meta: {kind: meta.kind}};
         case 'recipe_ingredient':

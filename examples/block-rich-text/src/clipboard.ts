@@ -595,7 +595,7 @@ const htmlMarkRank = (type: ClipboardInlineMarkType): number => {
 const htmlTagForMeta = (meta: RichBlockMeta): string => {
     if (meta.type === 'heading') return `h${meta.level}`;
     if (meta.type === 'blockquote') return 'blockquote';
-    if (meta.type === 'code') return 'pre';
+    if (meta.type === 'code' || meta.type === 'mermaid') return 'pre';
     if (meta.type === 'list_item') return 'li';
     return 'p';
 };
@@ -706,6 +706,7 @@ const isRichBlockMeta = (value: unknown): value is RichBlockMeta => {
     switch (value.type) {
         case 'paragraph':
         case 'blockquote':
+        case 'mermaid':
         case 'recipe_ingredient':
         case 'table':
             return true;
