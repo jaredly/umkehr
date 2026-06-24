@@ -51,7 +51,7 @@ select {
 
 .historyControls {
     display: grid;
-    grid-template-columns: minmax(160px, 1fr) auto auto auto auto minmax(0, auto);
+    grid-template-columns: minmax(160px, 1fr) auto auto auto auto minmax(180px, auto) minmax(0, auto);
     align-items: center;
     gap: 8px;
     max-width: 1280px;
@@ -66,7 +66,8 @@ select {
     min-width: 0;
 }
 
-.historyControls button {
+.historyControls button,
+.historyControls select {
     min-height: 32px;
     padding: 0 10px;
     border: 1px solid #cbd5df;
@@ -76,7 +77,12 @@ select {
     cursor: pointer;
 }
 
-.historyControls button:hover {
+.historyControls select {
+    min-width: 0;
+}
+
+.historyControls button:hover,
+.historyControls select:hover {
     background: #eef3f7;
 }
 
@@ -1730,6 +1736,7 @@ select {
     }
 
     .historyControls button,
+    .historyControls select,
     .historyStatus {
         grid-column: span 1;
     }

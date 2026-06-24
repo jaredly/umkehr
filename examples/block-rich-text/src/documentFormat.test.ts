@@ -159,6 +159,67 @@ describe('block rich text document format import', () => {
         ]);
     });
 
+    it('imports annotations with body blocks', () => {
+        const result = importDocument(
+            [
+                {
+                    content: 'alpha beta gamma',
+                    annotations: [
+                        {
+                            type: 'annotation',
+                            presentation: 'popover',
+                            start: 6,
+                            end: 10,
+                            body: [
+                                {
+                                    content: 'Popover note',
+                                    marks: [{type: 'italic', start: 0, end: 7}],
+                                },
+                            ],
+                        },
+                        {
+                            type: 'annotation',
+                            presentation: 'sidebar',
+                            start: 11,
+                            end: 16,
+                            body: [{content: 'Sidebar note'}],
+                        },
+                    ],
+                },
+            ],
+            ctx(),
+        );
+
+        expect(exportDocument(result.state)).toEqual([
+            {
+                type: 'paragraph',
+                content: 'alpha beta gamma',
+                annotations: [
+                    {
+                        type: 'annotation',
+                        presentation: 'popover',
+                        start: 6,
+                        end: 10,
+                        body: [
+                            {
+                                type: 'paragraph',
+                                content: 'Popover note',
+                                marks: [{type: 'italic', start: 0, end: 7}],
+                            },
+                        ],
+                    },
+                    {
+                        type: 'annotation',
+                        presentation: 'sidebar',
+                        start: 11,
+                        end: 16,
+                        body: [{type: 'paragraph', content: 'Sidebar note'}],
+                    },
+                ],
+            },
+        ]);
+    });
+
     it('throws detailed path-aware validation errors', () => {
         expect(() => importDocument([{type: 'heading', meta: {level: 4}}], ctx())).toThrow(
             new DocumentFormatError('$[0].meta.level', 'must be 1, 2, or 3'),
@@ -169,6 +230,18 @@ describe('block rich text document format import', () => {
             '$[0].meta.attachmentId: must be a non-empty string',
         );
         expect(() => importDocument([{children: ['nope']}], ctx())).toThrow('$[0].children[0]: block must be an object');
+        expect(() =>
+            importDocument(
+                [{content: 'abc', annotations: [{type: 'annotation', presentation: 'popover', start: 0, end: 4}]}],
+                ctx(),
+            ),
+        ).toThrow('$[0].annotations[0]: annotation range must satisfy 0 <= start < end <= 3');
+        expect(() =>
+            importDocument(
+                [{content: 'abc', annotations: [{type: 'annotation', presentation: 'tooltip', start: 0, end: 1}]}],
+                ctx(),
+            ),
+        ).toThrow('$[0].annotations[0].presentation: must be "sidebar", "footnote", or "popover"');
     });
 });
 
@@ -227,5 +300,40 @@ describe('block rich text document format export', () => {
         const imported = importDocument(input, ctx());
 
         expect(exportDocument(imported.state)).toEqual(input);
+    });
+
+    it('round-trips footnote annotation metadata', () => {
+        const input: DocumentBlock[] = [
+            {
+                content: 'Annotated text',
+                annotations: [
+                    {
+                        type: 'annotation',
+                        presentation: 'footnote',
+                        start: 0,
+                        end: 9,
+                        body: [{content: 'Footnote body'}],
+                    },
+                ],
+            },
+        ];
+
+        const imported = importDocument(input, ctx());
+
+        expect(exportDocument(imported.state)).toEqual([
+            {
+                type: 'paragraph',
+                content: 'Annotated text',
+                annotations: [
+                    {
+                        type: 'annotation',
+                        presentation: 'footnote',
+                        start: 0,
+                        end: 9,
+                        body: [{type: 'paragraph', content: 'Footnote body'}],
+                    },
+                ],
+            },
+        ]);
     });
 });

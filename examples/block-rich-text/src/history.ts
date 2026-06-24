@@ -4,6 +4,7 @@ import * as hlc from '../../../src/crdt/hlc';
 import {
     applyLocalChange,
     createDemoState,
+    createDemoStateFromDocument,
     toggleOnline,
     type DemoState,
     type EditorId,
@@ -11,6 +12,7 @@ import {
 import type {RichBlockMeta} from './blockMeta';
 import type {RetainedSelectionSet} from './selectionSet';
 import {isSerializedImageAttachment, type SerializedImageAttachment} from './attachments';
+import type {ImportDocument} from './documentFormat';
 
 export type HistoryAction =
     | {
@@ -23,6 +25,11 @@ export type HistoryAction =
     | {
           type: 'toggle-online';
           editorId: EditorId;
+      }
+    | {
+          type: 'replace-document';
+          document: ImportDocument;
+          fixtureId?: string;
       };
 
 export type BlockCommandIntent = 'edit' | 'undo' | 'redo';
@@ -150,6 +157,9 @@ export const applyHistoryAction = (demo: DemoState, action: HistoryAction): Demo
 };
 
 const applyHistoryActionWithoutClockAdvance = (demo: DemoState, action: HistoryAction): DemoState => {
+    if (action.type === 'replace-document') {
+        return createDemoStateFromDocument(action.document);
+    }
     if (action.type === 'toggle-online') {
         return toggleOnline(demo, action.editorId);
     }
@@ -249,6 +259,21 @@ const snapshotReplica = (replica: DemoState[EditorId]): ReplicaSnapshot => ({
 
 const parseAction = (value: unknown): {action: HistoryAction} | {error: string} => {
     if (!isRecord(value)) return {error: 'must be an object.'};
+
+    if (value.type === 'replace-document') {
+        if (!Array.isArray(value.document)) return {error: 'replace-document document must be an array.'};
+        if (value.fixtureId !== undefined && typeof value.fixtureId !== 'string') {
+            return {error: 'replace-document fixtureId must be a string.'};
+        }
+        return {
+            action: {
+                type: 'replace-document',
+                document: value.document as ImportDocument,
+                ...(typeof value.fixtureId === 'string' ? {fixtureId: value.fixtureId} : {}),
+            },
+        };
+    }
+
     if (!isEditorId(value.editorId)) return {error: 'has an invalid editorId.'};
 
     if (value.type === 'toggle-online') {
@@ -434,10 +459,23 @@ const isRichBlockMeta = (value: unknown): value is RichBlockMeta => {
                 value.attachmentId.length > 0 &&
                 isImagePresentationSize(value.size)
             );
+        case 'preview':
+            return typeof value.url === 'string' && (value.preview === null || isPreviewMetadata(value.preview));
         default:
             return false;
     }
 };
+
+const isPreviewMetadata = (value: unknown): boolean =>
+    isRecord(value) &&
+    optionalString(value.title) &&
+    optionalString(value.description) &&
+    optionalString(value.siteName) &&
+    optionalString(value.imageUrl) &&
+    optionalString(value.resolvedUrl) &&
+    optionalString(value.fetchedAt);
+
+const optionalString = (value: unknown): boolean => value === undefined || typeof value === 'string';
 
 const isImagePresentationSize = (value: unknown): boolean =>
     value === 'small' || value === 'medium' || value === 'large' || value === 'original';

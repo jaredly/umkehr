@@ -148,6 +148,32 @@ describe('block rich text history', () => {
         expect(visibleText(replayHistory(history.actions, 2).left)).toEqual(['ab']);
     });
 
+    it('replays replace-document actions as a new document base', () => {
+        const history = appendHistoryAction(initialHistoryState(), {
+            type: 'replace-document',
+            fixtureId: 'test-fixture',
+            document: [
+                {type: 'heading', meta: {level: 2}, content: 'Fixture title'},
+                {content: 'Fixture body'},
+            ],
+        });
+
+        expect(visibleText(replayHistory(history.actions, 0).left)).toEqual(['']);
+        expect(visibleText(replayHistory(history.actions, 1).left)).toEqual(['Fixture title', 'Fixture body']);
+        expect(visibleText(replayHistory(history.actions, 1).right)).toEqual(['Fixture title', 'Fixture body']);
+    });
+
+    it('applies local edits after a replace-document action', () => {
+        let history = appendHistoryAction(initialHistoryState(), {
+            type: 'replace-document',
+            document: [{content: 'Base'}],
+        });
+        history = appendLocal(history, 'left', insert('!'));
+
+        expect(visibleText(replayHistory(history.actions, history.cursor).left)).toEqual(['!Base']);
+        expect(visibleText(replayHistory(history.actions, history.cursor).right)).toEqual(['!Base']);
+    });
+
     it('treats pasted markdown shortcut conversion as one history action', () => {
         let history = initialHistoryState();
         history = appendLocal(history, 'left', pasteMarkdown('- item'));
@@ -225,6 +251,30 @@ describe('block rich text history', () => {
         expect(buildHistorySnapshot(replayHistory(parsed.history.actions, parsed.history.cursor))).toEqual(
             buildHistorySnapshot(replayHistory(history.actions, history.actions.length)),
         );
+    });
+
+    it('serializes and imports replace-document histories', () => {
+        const history = appendHistoryAction(initialHistoryState(), {
+            type: 'replace-document',
+            fixtureId: 'preview-fixture',
+            document: [
+                {
+                    type: 'preview',
+                    meta: {url: 'https://example.test', preview: {title: 'Example'}},
+                    content: 'Example',
+                },
+            ],
+        });
+
+        const parsed = parseHistoryExport(serializeHistory(history));
+
+        expect('history' in parsed).toBe(true);
+        if (!('history' in parsed)) return;
+        expect(parsed.history.actions[0]).toMatchObject({
+            type: 'replace-document',
+            fixtureId: 'preview-fixture',
+        });
+        expect(visibleText(replayHistory(parsed.history.actions, parsed.history.cursor).left)).toEqual(['Example']);
     });
 
     it('keeps replayed peer clocks ahead of imported block ids before a first remote reorder', () => {

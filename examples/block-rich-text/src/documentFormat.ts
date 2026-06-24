@@ -9,11 +9,17 @@ import {
     markRangeOp,
     materializeFormattedBlocks,
     segmentGraphemes,
+    visibleRangesForMark,
     visibleBlockChildren,
 } from 'umkehr/block-crdt';
-import type {CachedState, Op, State} from 'umkehr/block-crdt/types';
+import type {CachedState, JsonValue, Lamport, Op, State} from 'umkehr/block-crdt/types';
 import {lamportToString} from 'umkehr/block-crdt/utils';
-import {annotationVirtualParents} from './annotations';
+import {
+    ANNOTATION_MARK,
+    annotationVirtualParents,
+    isActiveAnnotationData,
+    type AnnotationPresentation,
+} from './annotations';
 import {
     type ImagePresentationSize,
     type PreviewMetadata,
@@ -21,6 +27,7 @@ import {
 } from './blockMeta';
 import type {CommandContext} from './blockCommands';
 import {CODE_MARK, isCodeMarkValue, LINK_MARK, normalizeStoredCodeLanguage} from './inlineMarks';
+import {applyCharInsertOps} from './localTextOps';
 
 export type DocumentBlockType = RichBlockMeta['type'];
 
@@ -29,6 +36,7 @@ export type DocumentBlock = {
     meta?: DocumentBlockMeta;
     content?: string;
     marks?: DocumentMark[];
+    annotations?: DocumentAnnotation[];
     children?: DocumentBlock[];
 };
 
@@ -51,6 +59,15 @@ export type DocumentMark =
     | {type: 'code'; start: number; end: number; language?: string}
     | {type: 'link'; start: number; end: number; href: string};
 
+export type DocumentAnnotation = {
+    type: 'annotation';
+    presentation: AnnotationPresentation;
+    start: number;
+    end: number;
+    resolved?: boolean;
+    body?: DocumentBlock[];
+};
+
 export type ImportDocumentResult = {
     state: CachedState<RichBlockMeta>;
     ops: Array<Op<RichBlockMeta>>;
@@ -62,11 +79,16 @@ type ParsedDocumentBlock = {
     meta: DocumentBlockMeta;
     content: string;
     marks: DocumentMark[];
+    annotations: ParsedDocumentAnnotation[];
     children: ParsedDocumentBlock[];
 };
 
-const ROOT_ID = lamportToString([0, 'root']);
+type ParsedDocumentAnnotation = Omit<DocumentAnnotation, 'body'> & {
+    body: ParsedDocumentBlock[];
+};
+
 const ROOT: [number, string] = [0, 'root'];
+const ROOT_ID = lamportToString(ROOT);
 const BLOCK_TYPES = new Set<DocumentBlockType>([
     'paragraph',
     'heading',
@@ -96,14 +118,10 @@ export const importDocument = (document: unknown, context: CommandContext): Impo
     const ops: Array<Op<RichBlockMeta>> = [];
     const blockIds: string[] = [];
 
-    const insertChildren = (children: ParsedDocumentBlock[], parentId: string): string[] => {
+    const insertChildren = (children: ParsedDocumentBlock[], parent: Lamport): string[] => {
         const insertedIds: string[] = [];
         let previousSiblingId: string | null = null;
         for (const child of children) {
-            const parent = parentId === ROOT_ID ? ROOT : working.state.blocks[parentId]?.id;
-            if (!parent) {
-                throw new Error(`Import parent block ${parentId} not found`);
-            }
             const blockOps = insertBlockOps(working, {
                 actor: context.actor,
                 parent,
@@ -127,7 +145,7 @@ export const importDocument = (document: unknown, context: CommandContext): Impo
                     text: child.content,
                     ts: context.nextTs,
                 });
-                working = applyOps(working, textOps);
+                working = applyCharInsertOps(working, textOps) ?? applyOps(working, textOps);
                 ops.push(...textOps);
             }
 
@@ -137,17 +155,38 @@ export const importDocument = (document: unknown, context: CommandContext): Impo
                 ops.push(markOp);
             }
 
-            insertChildren(child.children, inserted);
+            for (const annotation of child.annotations) {
+                const markId = [working.state.maxSeenCount + 1, context.actor] as Lamport;
+                const markOp = markRangeOp(
+                    working,
+                    working.state.blocks[inserted].id,
+                    annotation.start,
+                    annotation.end,
+                    ANNOTATION_MARK,
+                    {
+                        id: markId,
+                        presentation: annotation.presentation,
+                        ...(annotation.resolved ? {resolved: true} : {}),
+                    } satisfies JsonValue,
+                    false,
+                    markId,
+                );
+                working = applyOps(working, [markOp]);
+                ops.push(markOp);
+                insertChildren(annotation.body.length ? annotation.body : [emptyAnnotationBody()], markId);
+            }
+
+            insertChildren(child.children, working.state.blocks[inserted].id);
         }
         return insertedIds;
     };
 
-    blockIds.push(...insertChildren(parsed, ROOT_ID));
+    blockIds.push(...insertChildren(parsed, ROOT));
     return {state: working, ops, blockIds};
 };
 
 export const exportDocument = (state: CachedState<RichBlockMeta>): ExportDocument =>
-    visibleBlockChildren(state, ROOT_ID, annotationVirtualParents(state)).map((blockId) =>
+    visibleBlockChildren(state, ROOT_ID).map((blockId) =>
         exportBlock(state, blockId),
     );
 
@@ -173,8 +212,9 @@ const parseBlock = (value: unknown, path: string): ParsedDocumentBlock => {
         throw new DocumentFormatError(`${path}.content`, 'must be a string');
     }
     const marks = parseMarks(value.marks, content, `${path}.marks`);
+    const annotations = parseAnnotations(value.annotations, content, `${path}.annotations`);
     const children = parseChildren(value.children, `${path}.children`);
-    return {type, meta, content, marks, children};
+    return {type, meta, content, marks, annotations, children};
 };
 
 const parseChildren = (value: unknown, path: string): ParsedDocumentBlock[] => {
@@ -192,6 +232,52 @@ const parseMarks = (value: unknown, content: string, path: string): DocumentMark
     }
     const contentLength = graphemeLength(content);
     return value.map((mark, index) => parseMark(mark, contentLength, `${path}[${index}]`));
+};
+
+const parseAnnotations = (value: unknown, content: string, path: string): ParsedDocumentAnnotation[] => {
+    if (value === undefined) return [];
+    if (!Array.isArray(value)) {
+        throw new DocumentFormatError(path, 'must be an array');
+    }
+    const contentLength = graphemeLength(content);
+    return value.map((annotation, index) =>
+        parseAnnotation(annotation, contentLength, `${path}[${index}]`),
+    );
+};
+
+const parseAnnotation = (value: unknown, contentLength: number, path: string): ParsedDocumentAnnotation => {
+    if (!isRecord(value)) {
+        throw new DocumentFormatError(path, 'annotation must be an object');
+    }
+    if (value.type !== 'annotation') {
+        throw new DocumentFormatError(`${path}.type`, 'must be "annotation"');
+    }
+    if (!isAnnotationPresentation(value.presentation)) {
+        throw new DocumentFormatError(`${path}.presentation`, 'must be "sidebar", "footnote", or "popover"');
+    }
+    const start = value.start;
+    const end = value.end;
+    if (!Number.isInteger(start)) {
+        throw new DocumentFormatError(`${path}.start`, 'must be an integer grapheme offset');
+    }
+    if (!Number.isInteger(end)) {
+        throw new DocumentFormatError(`${path}.end`, 'must be an integer grapheme offset');
+    }
+    if ((start as number) < 0 || (end as number) <= (start as number) || (end as number) > contentLength) {
+        throw new DocumentFormatError(path, `annotation range must satisfy 0 <= start < end <= ${contentLength}`);
+    }
+    if (value.resolved !== undefined && typeof value.resolved !== 'boolean') {
+        throw new DocumentFormatError(`${path}.resolved`, 'must be a boolean');
+    }
+    const body = parseChildren(value.body, `${path}.body`);
+    return {
+        type: 'annotation',
+        presentation: value.presentation,
+        start: start as number,
+        end: end as number,
+        ...(value.resolved ? {resolved: true} : {}),
+        body,
+    };
 };
 
 const parseMark = (value: unknown, contentLength: number, path: string): DocumentMark => {
@@ -368,12 +454,23 @@ const exportBlock = (state: CachedState<RichBlockMeta>, blockId: string): Docume
     if (content) result.content = content;
     const marks = marksForBlock(state, blockId);
     if (marks.length) result.marks = marks;
-    const children = visibleBlockChildren(state, blockId, annotationVirtualParents(state)).map((childId) =>
+    const annotations = annotationsForBlock(state, blockId);
+    if (annotations.length) result.annotations = annotations;
+    const children = visibleBlockChildren(state, blockId).map((childId) =>
         exportBlock(state, childId),
     );
     if (children.length) result.children = children;
     return result;
 };
+
+const emptyAnnotationBody = (): ParsedDocumentBlock => ({
+    type: 'paragraph',
+    meta: {},
+    content: '',
+    marks: [],
+    annotations: [],
+    children: [],
+});
 
 const documentBlockForMeta = (meta: RichBlockMeta): DocumentBlock => {
     switch (meta.type) {
@@ -436,6 +533,36 @@ const marksForBlock = (state: CachedState<RichBlockMeta>, blockId: string): Docu
     return mergeAdjacentMarks(marks);
 };
 
+const annotationsForBlock = (state: CachedState<RichBlockMeta>, blockId: string): DocumentAnnotation[] => {
+    const annotations: DocumentAnnotation[] = [];
+    const seen = new Set<string>();
+    for (const mark of Object.values(state.state.marks)) {
+        if (mark.type !== ANNOTATION_MARK || !isActiveAnnotationData(mark.data)) continue;
+        const ranges = visibleRangesForMark(state, mark, annotationVirtualParents(state)).filter(
+            (range) => range.blockId === blockId && range.startOffset < range.endOffset,
+        );
+        if (!ranges.length) continue;
+        const annotationId = lamportToString(mark.data.id);
+        for (const range of ranges) {
+            const key = `${annotationId}:${range.startOffset}:${range.endOffset}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            const body = visibleBlockChildren(state, annotationId, annotationVirtualParents(state)).map((childId) =>
+                exportBlock(state, childId),
+            );
+            annotations.push({
+                type: 'annotation',
+                presentation: mark.data.presentation,
+                start: range.startOffset,
+                end: range.endOffset,
+                ...(mark.data.resolved ? {resolved: true} : {}),
+                ...(body.length ? {body} : {}),
+            });
+        }
+    }
+    return annotations.sort((a, b) => a.start - b.start || a.end - b.end || a.presentation.localeCompare(b.presentation));
+};
+
 const mergeAdjacentMarks = (marks: DocumentMark[]): DocumentMark[] => {
     const merged: DocumentMark[] = [];
     for (const mark of marks) {
@@ -463,6 +590,9 @@ const insertedBlockId = (ops: Array<Op<RichBlockMeta>>): string => {
     }
     return lamportToString(op.block.id);
 };
+
+const isAnnotationPresentation = (value: unknown): value is AnnotationPresentation =>
+    value === 'sidebar' || value === 'footnote' || value === 'popover';
 
 const applyOps = (
     state: CachedState<RichBlockMeta>,

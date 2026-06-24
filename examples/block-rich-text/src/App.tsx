@@ -251,6 +251,7 @@ import {
     previewDomain,
     type PreviewUrlInvalidReason,
 } from './previewMetadata';
+import {documentFixtures, fixtureById} from './documentFixtures';
 
 type RichFormattedBlock = FormattedBlock<RichBlockMeta>;
 type RenderedAnnotation = ReturnType<typeof renderedAnnotations>[number];
@@ -598,6 +599,33 @@ function EditorApp() {
         setUndoStatus({});
     }, [clearReplayUiState, history.actions.length]);
 
+    const replaceDocumentFromFixture = useCallback(
+        async (fixtureId: string) => {
+            const fixture = fixtureById(fixtureId);
+            if (!fixture) return;
+            if (history.actions.length && !window.confirm('Replace the current document and reset history?')) return;
+
+            const nextAttachments = fixture.attachments ? await fixture.attachments() : new Map();
+            revokeAttachments(attachmentsRef.current);
+            setAttachments(nextAttachments);
+            setHistory({
+                actions: [
+                    {
+                        type: 'replace-document',
+                        document: fixture.document(),
+                        fixtureId: fixture.id,
+                    },
+                ],
+                cursor: 1,
+                keystrokes: [],
+            });
+            clearReplayUiState();
+            setHistoryStatus(`Loaded fixture: ${fixture.label}.`);
+            setUndoStatus({});
+        },
+        [clearReplayUiState, history.actions.length],
+    );
+
     const runUndoCommand = useCallback(
         (editorId: EditorId, direction: 'undo' | 'redo') => {
             const result =
@@ -652,6 +680,22 @@ function EditorApp() {
                 <button type="button" onClick={resetHistory}>
                     Reset
                 </button>
+                <select
+                    aria-label="Replace document from fixture"
+                    value=""
+                    onChange={(event) => {
+                        const fixtureId = event.currentTarget.value;
+                        event.currentTarget.value = '';
+                        if (fixtureId) void replaceDocumentFromFixture(fixtureId);
+                    }}
+                >
+                    <option value="">Replace document...</option>
+                    {documentFixtures.map((fixture) => (
+                        <option key={fixture.id} value={fixture.id}>
+                            {fixture.label}
+                        </option>
+                    ))}
+                </select>
                 <input
                     ref={importInputRef}
                     className="historyImportInput"

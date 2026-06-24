@@ -583,6 +583,47 @@ describe('Block rich text example UI', () => {
         expect(blocks(right)).toHaveLength(1);
     });
 
+    it('replaces the document from a fixture in both editors', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'simple-mixed-blocks'},
+        });
+
+        await waitFor(() => expect(view.getByText('Loaded fixture: Simple mixed blocks.')).toBeTruthy());
+        expect(blockTexts(left).slice(0, 2)).toEqual([
+            'Fixture document',
+            'This paragraph has bold text, italic text, a link, and a popover note.',
+        ]);
+        expect(blockTexts(right).slice(0, 2)).toEqual(blockTexts(left).slice(0, 2));
+    });
+
+    it('loads generated fixture images and leaves missing images visible', async () => {
+        const view = render(<App />);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'code-callouts-images'},
+        });
+
+        await waitFor(() => expect(view.getByText('Loaded fixture: Code, callouts, and images.')).toBeTruthy());
+        expect(view.container.querySelectorAll('.imagePreview').length).toBeGreaterThan(0);
+        expect(view.getAllByText('Missing image').length).toBeGreaterThan(0);
+    });
+
+    it('renders the large table fixture', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'large-table'},
+        });
+
+        await waitFor(() => expect(view.getByText('Loaded fixture: Large table.')).toBeTruthy());
+        expect(tableBlocks(left)).toHaveLength(35);
+        expect(tableBlocks(right)).toHaveLength(35);
+    });
+
     it('tracks empty editable blocks for the empty-block indicator', async () => {
         const view = render(<App />);
         const {left} = panels(view);

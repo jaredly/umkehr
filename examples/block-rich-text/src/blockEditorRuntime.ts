@@ -7,11 +7,13 @@ import type {
     HLC,
     State,
 } from 'umkehr/block-crdt/types';
+import {lamportToString} from 'umkehr/block-crdt/utils';
 import * as hlc from '../../../src/crdt/hlc';
 import {paragraphMeta, type RichBlockMeta} from './blockMeta';
 import {annotationVirtualParents} from './annotations';
 import {initialRetainedSelectionSet, type RetainedSelectionSet} from './selectionSet';
 import {applyCharInsertOps} from './localTextOps';
+import {importDocument, type ImportDocument} from './documentFormat';
 
 export type EditorId = 'left' | 'right';
 
@@ -42,6 +44,18 @@ export const createDemoState = (): DemoState => {
     return {
         left: createReplica('left', state),
         right: createReplica('right', state),
+    };
+};
+
+export const createDemoStateFromDocument = (document: ImportDocument): DemoState => {
+    let i = 1;
+    const imported = importDocument(document, {
+        actor: 'fixture',
+        nextTs: () => lamportToString([i++, 'fixture']),
+    });
+    return {
+        left: createReplica('left', imported.state),
+        right: createReplica('right', imported.state),
     };
 };
 

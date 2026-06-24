@@ -4,6 +4,7 @@ import * as hlc from '../../../src/crdt/hlc';
 import {
     applyLocalChange,
     createDemoState,
+    createDemoStateFromDocument,
     nextReplicaTs,
     previewReplicaTs,
     toggleOnline,
@@ -139,6 +140,14 @@ const deriveUndoIndex = (history: HistoryState, editorId: EditorId): DerivedUndo
     for (const [actionIndex, action] of history.actions.slice(0, cursor).entries()) {
         if (action.type === 'toggle-online') {
             demo = toggleOnline(demo, action.editorId);
+            continue;
+        }
+        if (action.type === 'replace-document') {
+            demo = createDemoStateFromDocument(action.document);
+            commands.splice(0);
+            undoStack.splice(0);
+            redoStack.splice(0);
+            commandById.clear();
             continue;
         }
 
