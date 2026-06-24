@@ -3280,6 +3280,17 @@ describe('Block rich text example UI', () => {
         expect(within(keyPerfMonitor(view)).getByText('Render b')).toBeTruthy();
     });
 
+    it('keeps a single printable input in an empty document under the perf budget', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        typeText(blocks(left)[0], 'a');
+
+        await waitForBlockTexts(left, ['a']);
+        expect(await latestKeyPerfBarMs(view, 'Render a')).toBeLessThan(5);
+    });
+
     it('records handled keydown input in the keypress performance monitor', async () => {
         const view = render(<App />);
         const {left} = panels(view);

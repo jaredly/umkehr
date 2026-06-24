@@ -129,10 +129,26 @@ export const materializeFormattedBlocks = <M extends TimestampedBlockMeta>(
     state: CachedState<M>,
     config: VirtualBlockParentConfig<M> = {},
 ): FormattedBlock<M>[] => {
+    const marks = Object.values(state.state.marks);
+    if (marks.length === 0) {
+        return visibleBlockOutline(state, config).map(({id, depth, parentId}) => {
+            let text = '';
+            for (const charId of orderedCharIdsForBlock(state, id, {visibleOnly: true})) {
+                text += charRecord(state, charId)?.text ?? '';
+            }
+            return {
+                id,
+                block: state.state.blocks[id],
+                runs: text ? [{text, marks: {}}] : [],
+                depth,
+                parentId,
+            };
+        });
+    }
+
     const context = createMarkTraversalContext(state, config);
     const coveredByMark: Record<string, Mark[]> = {};
-    const marks = Object.values(state.state.marks).sort((a, b) => compareLamports(a.id, b.id));
-    for (const mark of marks) {
+    for (const mark of marks.sort((a, b) => compareLamports(a.id, b.id))) {
         for (const charId of coveredCharIdsForMarkWithContext(state, mark, context)) {
             coveredByMark[charId] = coveredByMark[charId] ?? [];
             coveredByMark[charId].push(mark);

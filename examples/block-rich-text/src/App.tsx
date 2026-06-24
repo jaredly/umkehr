@@ -7824,13 +7824,14 @@ const measureTextInput = (
 ) => {
     const started = performance.now();
     const label = textInputLabel(text);
-    if (isDisplayableKeyText(text)) {
-        onDisplayInputRenderStarted?.(label, started);
-    }
     try {
         action();
     } finally {
-        onInputMeasured?.(label, performance.now() - started);
+        const handledAt = performance.now();
+        onInputMeasured?.(label, handledAt - started);
+        if (isDisplayableKeyText(text)) {
+            onDisplayInputRenderStarted?.(label, performance.now());
+        }
     }
 };
 
