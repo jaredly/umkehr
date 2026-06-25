@@ -3690,6 +3690,29 @@ describe('Block rich text example UI', () => {
         expect(blockTexts(right)).toEqual(['b']);
     });
 
+    it('selects only the parent from a handle but deletes the subtree', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        pasteText(blocks(left)[0], 'parent\nchild\nsibling');
+        await waitForBlockTexts(left, ['parent', 'child', 'sibling']);
+        selectCaret(blocks(left)[1], 0);
+        fireEvent.keyDown(blocks(left)[1], {key: 'Tab'});
+        await waitFor(() => expect(blockDepth(blocks(left)[1])).toBe('1'));
+
+        const parentHandle = within(left).getAllByRole('button', {name: 'Move block'})[0];
+        fireEvent.pointerDown(parentHandle, {button: 0, buttons: 1, isPrimary: true, pointerId: 1});
+        fireEvent.pointerUp(window, {button: 0, buttons: 0, isPrimary: true, pointerId: 1});
+
+        await waitFor(() => expect(blocks(left)[0].closest('.blockRow')?.classList.contains('blockSelected')).toBe(true));
+        expect(blocks(left)[1].closest('.blockRow')?.classList.contains('blockSelected')).toBe(false);
+        fireEvent.keyDown(blocks(left)[0], {key: 'Delete'});
+
+        await waitForBlockTexts(left, ['sibling']);
+        expect(blockTexts(right)).toEqual(['sibling']);
+    });
+
     it('applies block type changes to a block selection', async () => {
         const view = render(<App />);
         const {left} = panels(view);
@@ -3858,18 +3881,102 @@ describe('Block rich text example UI', () => {
         const slideTitle = currentSlide()?.querySelector<HTMLElement>('[role="textbox"]');
         if (!slideTitle) throw new Error('missing slide title');
         fireEvent.keyDown(slideTitle, {key: 'ArrowLeft'});
-        await waitFor(() => expect(currentSlide()?.dataset.slideId).toBe(overviewSlideIds[1]));
-        expect(currentSlide()?.classList.contains('blockSelected')).toBe(true);
+        await waitFor(() => {
+            expect(currentSlide()?.dataset.slideId).toBe(overviewSlideIds[1]);
+            expect(currentSlide()?.classList.contains('blockSelected')).toBe(true);
+            expect(currentSlide()?.classList.contains('blockSelectionFocus')).toBe(true);
+        });
 
         const presentation = left.querySelector<HTMLElement>('.slideDeckPresentation');
         if (!presentation) throw new Error('missing presentation deck');
         fireEvent.keyDown(presentation, {key: ' '});
-        await waitFor(() => expect(currentSlide()?.dataset.slideId).toBe(overviewSlideIds[2]));
+        await waitFor(() => {
+            expect(currentSlide()?.dataset.slideId).toBe(overviewSlideIds[2]);
+            expect(currentSlide()?.classList.contains('blockSelected')).toBe(true);
+            expect(currentSlide()?.classList.contains('blockSelectionFocus')).toBe(true);
+        });
 
         fireEvent.keyDown(presentation, {key: 'ArrowLeft'});
-        await waitFor(() => expect(currentSlide()?.dataset.slideId).toBe(overviewSlideIds[1]));
+        await waitFor(() => {
+            expect(currentSlide()?.dataset.slideId).toBe(overviewSlideIds[1]);
+            expect(currentSlide()?.classList.contains('blockSelected')).toBe(true);
+            expect(currentSlide()?.classList.contains('blockSelectionFocus')).toBe(true);
+        });
         fireEvent.keyDown(presentation, {key: 'ArrowRight'});
-        await waitFor(() => expect(currentSlide()?.dataset.slideId).toBe(overviewSlideIds[2]));
+        await waitFor(() => {
+            expect(currentSlide()?.dataset.slideId).toBe(overviewSlideIds[2]);
+            expect(currentSlide()?.classList.contains('blockSelected')).toBe(true);
+            expect(currentSlide()?.classList.contains('blockSelectionFocus')).toBe(true);
+        });
+    });
+
+    it('does not advance presentation slides from a text selection', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'slide-deck');
+        await waitFor(() => expect(left.querySelectorAll('.slideViewport')).toHaveLength(1));
+        fireEvent.click(within(left).getByRole('button', {name: 'Add slide'}));
+        await waitFor(() => expect(left.querySelectorAll('.slideViewport')).toHaveLength(2));
+
+        const secondOverviewTitle = left.querySelectorAll<HTMLElement>('.slideViewport [role="textbox"]')[1];
+        selectCaret(secondOverviewTitle, 0);
+        typeText(secondOverviewTitle, 'Second');
+        await waitFor(() => expect(blockText(secondOverviewTitle)).toBe('Second'));
+
+        const overviewSlideIds = Array.from(left.querySelectorAll<HTMLElement>('.slideViewport')).map(
+            (viewport) => viewport.dataset.slideId,
+        );
+        fireEvent.click(within(left).getByRole('button', {name: 'Presentation'}));
+        fireEvent.click(within(left).getByRole('button', {name: 'Full screen'}));
+
+        const currentSlide = () => left.querySelector<HTMLElement>('.slideDeckPresentation .slideViewport');
+        await waitFor(() => expect(currentSlide()?.dataset.slideId).toBe(overviewSlideIds[1]));
+        const slideTitle = currentSlide()?.querySelector<HTMLElement>('[role="textbox"]');
+        if (!slideTitle) throw new Error('missing slide title');
+
+        selectRange(slideTitle, 0, 3);
+        fireEvent.keyDown(slideTitle, {key: 'ArrowLeft'});
+        fireEvent.keyDown(slideTitle, {key: ' '});
+
+        expect(currentSlide()?.dataset.slideId).toBe(overviewSlideIds[1]);
+        expect(window.getSelection()?.toString()).toBe('Sec');
+    });
+
+    it('does not advance presentation slides from a child block selection', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'slide-deck'},
+        });
+        await waitFor(() => expect(view.getByText('Loaded fixture: Slide deck.')).toBeTruthy());
+        fireEvent.click(within(left).getByRole('button', {name: 'Presentation'}));
+
+        const currentSlide = () => left.querySelector<HTMLElement>('.slideDeckPresentation .slideViewport');
+        await waitFor(() => expect(currentSlide()?.dataset.slideId).toBeTruthy());
+        const originalSlideId = currentSlide()?.dataset.slideId;
+        const childBlock = blocks(left).find((block) => blockText(block) === 'Revenue grew 18%');
+        if (!childBlock) throw new Error('missing slide child block');
+        childBlock.focus();
+        setDomCaret(childBlock, 0);
+        fireEvent.mouseUp(childBlock);
+        const handle = childBlock.closest<HTMLElement>('.blockRow')?.querySelector<HTMLElement>('button[aria-label="Move block"]');
+        if (!handle) throw new Error('missing slide child handle');
+        (handle as HTMLElement & {setPointerCapture?: (pointerId: number) => void}).setPointerCapture = () => {};
+        fireEvent.pointerDown(handle, {button: 0, buttons: 1, isPrimary: true, pointerId: 1});
+        fireEvent.pointerUp(window, {button: 0, buttons: 0, isPrimary: true, pointerId: 1});
+        await waitFor(() => {
+            const selectedChild = blocks(left).find((block) => blockText(block) === 'Revenue grew 18%');
+            expect(selectedChild?.closest('.blockRow')?.classList.contains('blockSelected')).toBe(true);
+        });
+
+        const presentation = left.querySelector<HTMLElement>('.slideDeckPresentation');
+        if (!presentation) throw new Error('missing presentation deck');
+        fireEvent.keyDown(presentation, {key: 'ArrowRight'});
+
+        expect(currentSlide()?.dataset.slideId).toBe(originalSlideId);
     });
 
     it('converts typed markdown bullet shortcuts through beforeinput', async () => {

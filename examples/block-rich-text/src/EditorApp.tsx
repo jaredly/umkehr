@@ -143,6 +143,7 @@ import {
     normalizeSelectionSegments,
     pointTextLength,
     selectedBlockIdsForSelection,
+    selectedTopLevelBlockIdsForSelection,
     segmentText,
     tableCellRectangleForSelection,
     tableCellsForSelection,
@@ -2288,28 +2289,26 @@ function BlockEditor({
         [runBlockControlCommand],
     );
 
-    const selectBlockSubtreeFromHandle = useCallback(
+    const selectBlockFromHandle = useCallback(
         (blockId: string) => {
             onCommand((current) => {
-                const subtree = visibleSubtreeBlockIds(current.state, blockId);
-                const focusBlockId = subtree[subtree.length - 1] ?? blockId;
                 return {
                     state: current.state,
                     ops: [],
                     selection: replaceSelectionSet(current.state, {
                         type: 'block',
                         anchorBlockId: blockId,
-                        focusBlockId,
+                        focusBlockId: blockId,
                     }),
                 };
             });
             focusBlockSelectionTarget({
                 type: 'block',
                 anchorBlockId: blockId,
-                focusBlockId: visibleSubtreeBlockIds(replica.state, blockId).at(-1) ?? blockId,
+                focusBlockId: blockId,
             });
         },
-        [focusBlockSelectionTarget, onCommand, replica.state],
+        [focusBlockSelectionTarget, onCommand],
     );
 
     const startBlockDragFromHandle = useCallback(
@@ -2326,10 +2325,10 @@ function BlockEditor({
                 startDrag(blockId, event, selectedTopLevelBlockIds);
                 return;
             }
-            selectBlockSubtreeFromHandle(blockId);
+            selectBlockFromHandle(blockId);
             startDrag(blockId, event, [blockId]);
         },
-        [replica.state, resolvedSelectionSet, selectBlockSubtreeFromHandle, startDrag],
+        [replica.state, resolvedSelectionSet, selectBlockFromHandle, startDrag],
     );
 
     const textCaretForBlockSelection = useCallback(
@@ -3797,7 +3796,7 @@ function SlideDeckBlock({node, context}: {node: RenderTreeNode; context: RenderB
         const selection = {
             type: 'block' as const,
             anchorBlockId: slideId,
-            focusBlockId: visibleSubtreeBlockIds(context.state, slideId).at(-1) ?? slideId,
+            focusBlockId: slideId,
         };
         context.runBlockControlCommand((current) => ({
             state: current.state,
@@ -3807,12 +3806,12 @@ function SlideDeckBlock({node, context}: {node: RenderTreeNode; context: RenderB
         context.focusBlockSelectionTarget(selection);
     };
     const setMode = (mode: SlideDeckDisplayMode) => {
-        context.setSlideDeckUiForBlock(node.block.id, (current) => ({...current, mode}));
         if (mode === 'presentation') selectSlideBlock(currentSlideId);
+        context.setSlideDeckUiForBlock(node.block.id, (current) => ({...current, mode}));
     };
     const setCurrentSlide = (slideId: string | null, select = ui.mode === 'presentation') => {
-        context.setSlideDeckUiForBlock(node.block.id, (current) => ({...current, currentSlideId: slideId}));
         if (select) selectSlideBlock(slideId);
+        context.setSlideDeckUiForBlock(node.block.id, (current) => ({...current, currentSlideId: slideId}));
     };
     const showPrevious = () => {
         if (!slides.length) return;
@@ -3850,15 +3849,32 @@ function SlideDeckBlock({node, context}: {node: RenderTreeNode; context: RenderB
 
     const handlePresentationKeyDown = (event: KeyboardEvent<HTMLElement>) => {
         const modifierPressed = event.altKey || event.metaKey || event.ctrlKey;
-        if (!modifierPressed && (event.key === 'ArrowRight' || event.key === 'PageDown' || event.key === ' ')) {
+        const selectedRoots =
+            context.selection.type === 'block'
+                ? selectedTopLevelBlockIdsForSelection(context.state, context.selection)
+                : [];
+        const hasCurrentSlideBlockSelection =
+            currentSlideId !== null && selectedRoots.length === 1 && selectedRoots[0] === currentSlideId;
+        if (
+            hasCurrentSlideBlockSelection &&
+            !modifierPressed &&
+            (event.key === 'ArrowRight' || event.key === 'PageDown' || event.key === ' ')
+        ) {
             event.preventDefault();
+            event.stopPropagation();
             showNext();
-        } else if (!modifierPressed && (event.key === 'ArrowLeft' || event.key === 'PageUp')) {
+        } else if (
+            hasCurrentSlideBlockSelection &&
+            !modifierPressed &&
+            (event.key === 'ArrowLeft' || event.key === 'PageUp')
+        ) {
             event.preventDefault();
+            event.stopPropagation();
             showPrevious();
         } else if (event.key === 'Escape' && document.fullscreenElement === presentationRef.current) {
             if (eventFromEditableSurface(event.target)) return;
             event.preventDefault();
+            event.stopPropagation();
             void document.exitFullscreen?.();
             setFullScreen(false);
         }
@@ -4159,7 +4175,9 @@ const slideFooterText = (
 };
 
 const eventFromEditableSurface = (target: EventTarget | null): boolean => {
-    if (!(target instanceof Element)) return false;
+    const ownerDocument = (target as {ownerDocument?: Document} | null)?.ownerDocument;
+    const elementConstructor = ownerDocument?.defaultView?.Element;
+    if (!elementConstructor || !(target instanceof elementConstructor)) return false;
     return Boolean(target.closest('[contenteditable="true"], input, textarea, select, button'));
 };
 

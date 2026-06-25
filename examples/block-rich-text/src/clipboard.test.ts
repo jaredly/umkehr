@@ -16,6 +16,7 @@ import {
     convertBlockToTable,
     insertInlineEmbed,
     insertText,
+    moveBlock,
     pastePlainText,
     setBlockMeta,
     setLinkMark,
@@ -460,6 +461,32 @@ describe('block rich text clipboard serialization', () => {
         expect(payload?.plainText).toBe('two');
         expect(payload?.fragments).toHaveLength(1);
         expect(payload?.fragments[0]?.text).toBe('two');
+    });
+
+    it('serializes the subtree for a selected parent block', () => {
+        const context = ctx();
+        const demo = createDemoState();
+        const first = rootBlockIds(demo.left.state)[0];
+        const pasted = pastePlainText(demo.left.state, caret(first, 0), 'parent\nchild\nsibling', context);
+        const [parentBlock, childBlock] = rootBlockIds(pasted.state);
+        const nested = moveBlock(
+            pasted.state,
+            childBlock,
+            {type: 'child', parentBlockId: parentBlock, at: 'end'},
+            context,
+        );
+
+        const payload = serializeSelectionToClipboardPayload(
+            nested.state,
+            singleRetainedSelectionSet(nested.state, {
+                type: 'block',
+                anchorBlockId: parentBlock,
+                focusBlockId: parentBlock,
+            }),
+        );
+
+        expect(payload?.plainText).toBe('parent\nchild');
+        expect(payload?.fragments.map((fragment) => fragment.text)).toEqual(['parent', 'child']);
     });
 
     it('serializes a table-cell rectangle with TSV fallback', () => {

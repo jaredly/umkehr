@@ -26,9 +26,11 @@ import {
     normalizeSelectionSegments,
     segmentText,
     selectedBlockIdsForSelection,
+    selectedTopLevelBlockIdsForSelection,
     tableCellRectangleForSelection,
     tableCellsForSelection,
     tableRowsForSelection,
+    visibleSubtreeBlockIds,
     type EditorSelection,
 } from './selectionModel';
 import {
@@ -181,7 +183,7 @@ export const serializeSelectionToClipboardPayload = (
 
     for (const entry of resolved.entries) {
         if (entry.selection.type === 'block' || entry.selection.type === 'table-cells') {
-            for (const blockId of selectedBlockIdsForSelection(state, entry.selection)) {
+            for (const blockId of clipboardBlockIdsForBlockLevelSelection(state, entry.selection)) {
                 if (includedBlockIds.has(blockId)) continue;
                 const block = formattedById.get(blockId);
                 if (!block) continue;
@@ -237,6 +239,16 @@ export const serializeSelectionToClipboardPayload = (
         ...(copiedAttachments.length ? {attachments: copiedAttachments} : {}),
         ...(tsv ? {tsv} : {}),
     };
+};
+
+const clipboardBlockIdsForBlockLevelSelection = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+): string[] => {
+    if (selection.type !== 'block') return selectedBlockIdsForSelection(state, selection);
+    return selectedTopLevelBlockIdsForSelection(state, selection).flatMap((blockId) =>
+        visibleSubtreeBlockIds(state, blockId),
+    );
 };
 
 const tableSelectionToTsv = (
