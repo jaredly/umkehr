@@ -46,4 +46,8 @@ export type BlockTypeMenuValue =
     | 'recipe-ingredient'
     | 'table'
     | 'kanban'
-    | 'preview';
+    | 'preview'
+    | 'poll-rating'
+    | 'poll-children'
+    | 'poll-matrix'
+    | 'poll-long';

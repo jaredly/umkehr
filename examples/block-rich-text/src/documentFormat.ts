@@ -25,9 +25,13 @@ import {
     codePreviewKindForLanguage,
     type CodePreviewKind,
     type ImagePresentationSize,
+    type PollKind,
+    type PollChoiceMode,
+    type PollVote,
     type PreviewMetadata,
     type RichBlockMeta,
 } from './blockMeta';
+import {isPollVote} from './pollBlocks';
 import type {CommandContext} from './blockCommands';
 import {
     CODE_MARK,
@@ -56,13 +60,18 @@ export type ExportDocument = DocumentBlock[];
 
 export type DocumentBlockMeta = {
     level?: 1 | 2 | 3;
-    kind?: 'ordered' | 'unordered' | 'info' | 'warning' | 'error';
+    kind?: 'ordered' | 'unordered' | 'info' | 'warning' | 'error' | PollKind;
     checked?: boolean;
     language?: string;
     preview?: CodePreviewKind | PreviewMetadata | null;
     attachmentId?: string;
     size?: ImagePresentationSize;
     url?: string;
+    allowChange?: boolean;
+    choiceMode?: PollChoiceMode;
+    min?: number;
+    max?: number;
+    votes?: Record<string, PollVote>;
 };
 
 export type DocumentMark =
@@ -112,6 +121,7 @@ const BLOCK_TYPES = new Set<DocumentBlockType>([
     'recipe_ingredient',
     'table',
     'kanban',
+    'poll',
     'image',
     'preview',
 ]);
@@ -358,6 +368,48 @@ const parseMeta = (type: DocumentBlockType, value: unknown, path: string): Docum
         case 'table':
         case 'kanban':
             return {};
+        case 'poll': {
+            const kind = meta.kind ?? 'rating';
+            if (kind !== 'rating' && kind !== 'children' && kind !== 'matrix' && kind !== 'long') {
+                throw new DocumentFormatError(`${path}.kind`, 'must be a supported poll kind');
+            }
+            const allowChange = meta.allowChange ?? true;
+            if (typeof allowChange !== 'boolean') {
+                throw new DocumentFormatError(`${path}.allowChange`, 'must be a boolean');
+            }
+            const choiceMode = meta.choiceMode ?? (kind === 'long' ? undefined : 'single');
+            if (choiceMode !== undefined && choiceMode !== 'single' && choiceMode !== 'multiple') {
+                throw new DocumentFormatError(`${path}.choiceMode`, 'must be "single" or "multiple"');
+            }
+            const rawMin = meta.min ?? (kind === 'rating' ? 1 : undefined);
+            const rawMax = meta.max ?? (kind === 'rating' ? 5 : undefined);
+            const min = typeof rawMin === 'number' ? rawMin : undefined;
+            const max = typeof rawMax === 'number' ? rawMax : undefined;
+            if (rawMin !== undefined && typeof rawMin !== 'number') {
+                throw new DocumentFormatError(`${path}.min`, 'must be an integer');
+            }
+            if (rawMax !== undefined && typeof rawMax !== 'number') {
+                throw new DocumentFormatError(`${path}.max`, 'must be an integer');
+            }
+            if (min !== undefined && !Number.isInteger(min)) {
+                throw new DocumentFormatError(`${path}.min`, 'must be an integer');
+            }
+            if (max !== undefined && !Number.isInteger(max)) {
+                throw new DocumentFormatError(`${path}.max`, 'must be an integer');
+            }
+            const votes = meta.votes ?? {};
+            if (!isRecord(votes) || !Object.values(votes).every(isPollVote)) {
+                throw new DocumentFormatError(`${path}.votes`, 'must be a poll vote record');
+            }
+            return {
+                kind,
+                allowChange,
+                ...(choiceMode ? {choiceMode} : {}),
+                ...(min !== undefined ? {min} : {}),
+                ...(max !== undefined ? {max} : {}),
+                votes: votes as Record<string, PollVote>,
+            };
+        }
         case 'heading': {
             const level = meta.level ?? 1;
             if (level !== 1 && level !== 2 && level !== 3) {
@@ -452,6 +504,17 @@ const richMetaForDocumentBlock = (block: ParsedDocumentBlock, ts: string): RichB
             return {type: 'table', ts};
         case 'kanban':
             return {type: 'kanban', ts};
+        case 'poll':
+            return {
+                type: 'poll',
+                kind: (block.meta.kind as PollKind | undefined) ?? 'rating',
+                allowChange: block.meta.allowChange ?? true,
+                ...(block.meta.choiceMode ? {choiceMode: block.meta.choiceMode as PollChoiceMode} : {}),
+                ...(block.meta.min !== undefined ? {min: block.meta.min} : {}),
+                ...(block.meta.max !== undefined ? {max: block.meta.max} : {}),
+                votes: block.meta.votes ?? {},
+                ts,
+            };
         case 'image':
             return {
                 type: 'image',
@@ -553,6 +616,18 @@ const documentBlockForMeta = (meta: RichBlockMeta): DocumentBlock => {
             return {type: 'table'};
         case 'kanban':
             return {type: 'kanban'};
+        case 'poll':
+            return {
+                type: 'poll',
+                meta: {
+                    kind: meta.kind,
+                    allowChange: meta.allowChange,
+                    ...(meta.choiceMode ? {choiceMode: meta.choiceMode} : {}),
+                    ...(meta.min !== undefined ? {min: meta.min} : {}),
+                    ...(meta.max !== undefined ? {max: meta.max} : {}),
+                    votes: meta.votes,
+                },
+            };
         case 'image':
             return {type: 'image', meta: {attachmentId: meta.attachmentId, size: meta.size}};
         case 'preview':

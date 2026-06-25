@@ -1845,7 +1845,7 @@ describe('block rich text commands', () => {
         expect(result.state.state.blocks[blockId].meta).toMatchObject({type: 'paragraph'});
     });
 
-    it('preserves metadata on non-empty splits', () => {
+    it('uses paragraph metadata for the new block on most non-empty splits', () => {
         const demo = createDemoState();
         const blockId = rootBlockIds(demo.left.state)[0];
         let result = insertText(demo.left.state, caret(blockId, 0), 'Title', ctx());
@@ -1855,8 +1855,46 @@ describe('block rich text commands', () => {
 
         const [first, second] = rootBlockIds(result.state);
         expect(result.state.state.blocks[first].meta).toMatchObject({type: 'heading', level: 1});
-        expect(result.state.state.blocks[second].meta).toMatchObject({type: 'heading', level: 1});
+        expect(result.state.state.blocks[second].meta).toMatchObject({type: 'paragraph'});
         expect(lines(result.state)).toEqual(['Ti', 'tle']);
+    });
+
+    it('inserts a blank paragraph before the current block when splitting at the start', () => {
+        const demo = createDemoState();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = insertText(demo.left.state, caret(blockId, 0), 'Task', ctx());
+        result = setBlockType(result.state, blockId, {type: 'todo', checked: false, ts: '00010'});
+
+        result = splitBlock(result.state, caret(blockId, 0), ctx());
+
+        const [first, second] = rootBlockIds(result.state);
+        expect(result.selection).toEqual(caret(second, 0));
+        expect(second).toBe(blockId);
+        expect(result.state.state.blocks[first].meta).toMatchObject({type: 'paragraph'});
+        expect(result.state.state.blocks[second].meta).toMatchObject({type: 'todo', checked: false});
+        expect(lines(result.state)).toEqual(['', 'Task']);
+    });
+
+    it.each([
+        [
+            'list item',
+            {type: 'list_item', kind: 'unordered', ts: '00010'},
+            {type: 'list_item', kind: 'unordered'},
+        ],
+        ['todo', {type: 'todo', checked: true, ts: '00010'}, {type: 'todo', checked: true}],
+        ['ingredient line', {type: 'recipe_ingredient', ts: '00010'}, {type: 'recipe_ingredient'}],
+    ] as const)('preserves metadata on non-start splits for %s blocks', (_label, meta, expected) => {
+        const demo = createDemoState();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = insertText(demo.left.state, caret(blockId, 0), 'Item', ctx());
+        result = setBlockType(result.state, blockId, meta);
+
+        result = splitBlock(result.state, caret(blockId, 2), ctx());
+
+        const [first, second] = rootBlockIds(result.state);
+        expect(result.state.state.blocks[first].meta).toMatchObject(expected);
+        expect(result.state.state.blocks[second].meta).toMatchObject(expected);
+        expect(lines(result.state)).toEqual(['It', 'em']);
     });
 
     it('inserts newline text instead of splitting code blocks', () => {

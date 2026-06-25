@@ -641,16 +641,29 @@ export const splitBlock = (
         return {state: inserted.state, ops: inserted.ops, selection: caret(inserted.point.blockId, inserted.point.offset)};
     }
 
+    const splitTs = context.nextTs();
     const splitOps = splitBlockOps<RichBlockMeta>(working, {
         actor: context.actor,
         block: parseLamportString(point.blockId),
         offset: point.offset,
-        ts: context.nextTs(),
+        ts: splitTs,
         virtualParents: annotationVirtualParents(working),
     });
+    const splitBlockOp = splitOps[0];
+    if (splitBlockOp?.type === 'block' && currentMeta) {
+        splitBlockOp.block.meta = splitContinuationMeta(currentMeta, point.offset, splitTs);
+    }
     const next = applyMany(working, splitOps, annotationVirtualParents(working));
     ops.push(...splitOps);
-    return {state: next, ops, selection: caret(newBlockId, 0)};
+    return {state: next, ops, selection: caret(point.offset === 0 ? point.blockId : newBlockId, 0)};
+};
+
+const splitContinuationMeta = (current: RichBlockMeta, offset: number, ts: string): RichBlockMeta => {
+    if (offset === 0) return paragraphMeta(ts);
+    if (current.type === 'list_item' || current.type === 'todo' || current.type === 'recipe_ingredient') {
+        return sameTypeWithTs(current, ts);
+    }
+    return paragraphMeta(ts);
 };
 
 export const splitTableRowHeader = (

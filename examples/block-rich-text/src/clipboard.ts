@@ -32,6 +32,7 @@ import {
     type EditorSelection,
 } from './selectionModel';
 import {codePreviewKindForLanguage, type PreviewMetadata, type RichBlockMeta} from './blockMeta';
+import {isPollMeta} from './pollBlocks';
 import {isSerializedImageAttachment, type SerializedImageAttachment} from './attachments';
 import {
     ANNOTATION_MARK,
@@ -733,6 +734,8 @@ const isRichBlockMeta = (value: unknown): value is RichBlockMeta => {
         case 'table':
         case 'kanban':
             return true;
+        case 'poll':
+            return isPollMeta(value);
         case 'heading':
             return value.level === 1 || value.level === 2 || value.level === 3;
         case 'list_item':

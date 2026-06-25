@@ -328,12 +328,13 @@ const applyBlockMeta = <M extends TimestampedBlockMeta>(
     if (!current) {
         return false;
     }
-    if (op.meta.ts <= current.meta.ts) {
+    const merged = mergeBlockMeta(config, current.meta, op.meta);
+    if (!merged) {
         return {state, cache};
     }
     const nextState = {
         ...state,
-        blocks: {...state.blocks, [id]: {...current, meta: op.meta}},
+        blocks: {...state.blocks, [id]: {...current, meta: merged}},
         maxSeenCount: Math.max(state.maxSeenCount, maxLamportCounterForOp(op)),
     };
     return {
@@ -352,7 +353,10 @@ const applyBlock = <M extends TimestampedBlockMeta>(
     const id = lamportToString(block.id);
     const current = state.blocks[id];
     if (current) {
-        if (current.meta.ts > block.meta.ts) {
+        const meta = mergeBlockMeta(config, current.meta, block.meta);
+        if (meta) {
+            block = {...block, meta};
+        } else {
             block = {...block, meta: current.meta};
         }
         if (!blockOrderWins(block.order, current.order)) {
@@ -417,6 +421,16 @@ const applyChar = <M extends TimestampedBlockMeta>(
             charContents,
         },
     };
+};
+
+const mergeBlockMeta = <M extends TimestampedBlockMeta>(
+    config: VirtualBlockParentConfig<M>,
+    current: M,
+    incoming: M,
+): M | null => {
+    const custom = config.mergeBlockMeta?.(current, incoming);
+    if (custom) return custom;
+    return incoming.ts > current.ts ? incoming : null;
 };
 
 const blockOrderWins = (incoming: Block['order'], current: Block['order']) => {

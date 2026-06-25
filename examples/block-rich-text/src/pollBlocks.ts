@@ -1,0 +1,122 @@
+import type {HLC} from 'umkehr/block-crdt/types';
+import type {PollMeta, PollVote, RichBlockMeta} from './blockMeta';
+
+export type PollResult = {
+    optionId: string;
+    count: number;
+    percentage: number;
+};
+
+export type PollVoteCommandData = {
+    blockId: string;
+    userId: string;
+    before?: PollVote;
+    after: PollVote;
+};
+
+export const normalizeUserId = (value: string): string => value.trim().toLowerCase();
+
+export const ratingOptionIds = (meta: PollMeta): string[] => {
+    const min = Number.isInteger(meta.min) ? meta.min ?? 1 : 1;
+    const max = Number.isInteger(meta.max) ? meta.max ?? 5 : 5;
+    const start = Math.min(min, max);
+    const end = Math.max(min, max);
+    return Array.from({length: end - start + 1}, (_, index) => String(start + index));
+};
+
+export const activePollVotes = (meta: PollMeta): Record<string, PollVote> =>
+    Object.fromEntries(Object.entries(meta.votes).filter(([, vote]) => !vote.deleted));
+
+export const currentUserVote = (meta: PollMeta, userId: string): PollVote | null => {
+    const vote = meta.votes[userId];
+    return vote && !vote.deleted ? vote : null;
+};
+
+export const singleChoiceResults = (meta: PollMeta, optionIds: string[]): PollResult[] => {
+    const counts = new Map(optionIds.map((optionId) => [optionId, 0]));
+    let total = 0;
+    for (const vote of Object.values(activePollVotes(meta))) {
+        if (vote.type !== 'single') continue;
+        counts.set(vote.optionId, (counts.get(vote.optionId) ?? 0) + 1);
+        total++;
+    }
+    return Array.from(counts.entries()).map(([optionId, count]) => ({
+        optionId,
+        count,
+        percentage: total ? Math.round((count / total) * 100) : 0,
+    }));
+};
+
+export const mergeRichBlockMeta = (
+    current: RichBlockMeta,
+    incoming: RichBlockMeta,
+): RichBlockMeta | null => {
+    if (current.type === 'poll' && incoming.type === 'poll') {
+        return mergePollMeta(current, incoming);
+    }
+    return incoming.ts > current.ts ? incoming : null;
+};
+
+export const mergePollMeta = (current: PollMeta, incoming: PollMeta): PollMeta => {
+    const base = incoming.ts > current.ts ? incoming : current;
+    const mergedVotes: Record<string, PollVote> = {...current.votes};
+    for (const [userId, incomingVote] of Object.entries(incoming.votes)) {
+        const currentVote = mergedVotes[userId];
+        if (!currentVote || incomingVote.ts > currentVote.ts) {
+            mergedVotes[userId] = incomingVote;
+        }
+    }
+    return {...base, votes: mergedVotes};
+};
+
+export const isPollMeta = (value: unknown): value is PollMeta => {
+    if (!isRecord(value) || value.type !== 'poll' || typeof value.ts !== 'string') return false;
+    if (
+        value.kind !== 'rating' &&
+        value.kind !== 'children' &&
+        value.kind !== 'matrix' &&
+        value.kind !== 'long'
+    ) {
+        return false;
+    }
+    if (typeof value.allowChange !== 'boolean') return false;
+    if (value.choiceMode !== undefined && value.choiceMode !== 'single' && value.choiceMode !== 'multiple') {
+        return false;
+    }
+    if (value.min !== undefined && !Number.isInteger(value.min)) return false;
+    if (value.max !== undefined && !Number.isInteger(value.max)) return false;
+    if (!isRecord(value.votes)) return false;
+    return Object.values(value.votes).every(isPollVote);
+};
+
+export const isPollVote = (value: unknown): value is PollVote => {
+    if (!isRecord(value) || typeof value.ts !== 'string') return false;
+    if (value.deleted !== undefined && typeof value.deleted !== 'boolean') return false;
+    switch (value.type) {
+        case 'single':
+            return typeof value.optionId === 'string';
+        case 'multiple':
+            return Array.isArray(value.optionIds) && value.optionIds.every((item) => typeof item === 'string');
+        case 'matrix':
+            return (
+                isRecord(value.answers) &&
+                Object.values(value.answers).every(
+                    (answer) =>
+                        typeof answer === 'string' ||
+                        (Array.isArray(answer) && answer.every((item) => typeof item === 'string')),
+                )
+            );
+        case 'long':
+            return typeof value.text === 'string';
+        default:
+            return false;
+    }
+};
+
+export const deletedPollVote = (previous: PollVote | undefined, ts: HLC): PollVote => {
+    if (previous) return {...previous, ts, deleted: true};
+    return {type: 'single', optionId: '', ts, deleted: true};
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+    typeof value === 'object' && value !== null && !Array.isArray(value);

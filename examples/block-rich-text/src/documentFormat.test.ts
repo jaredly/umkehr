@@ -359,6 +359,30 @@ describe('block rich text document format export', () => {
         expect(exportDocument(imported.state)).toEqual(input);
     });
 
+    it('round-trips poll metadata and votes', () => {
+        const input: DocumentBlock[] = [
+            {
+                type: 'poll',
+                meta: {
+                    kind: 'rating',
+                    allowChange: true,
+                    choiceMode: 'single',
+                    min: 1,
+                    max: 5,
+                    votes: {
+                        ulrich: {type: 'single', optionId: '5', ts: '00010'},
+                        uwe: {type: 'single', optionId: '4', ts: '00011'},
+                    },
+                },
+                content: 'Rate this feature',
+            },
+        ];
+
+        const imported = importDocument(input, ctx());
+
+        expect(exportDocument(imported.state)).toEqual(input);
+    });
+
     it('round-trips kanban boards', () => {
         const input: DocumentBlock[] = [
             {

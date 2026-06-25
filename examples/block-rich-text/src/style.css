@@ -257,6 +257,7 @@ select {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 12px;
     padding: 14px 16px;
     border-bottom: 1px solid #e6ebf0;
     background: #fbfcfd;
@@ -270,6 +271,73 @@ select {
 .editorHeader span {
     color: #657380;
     font-size: 13px;
+}
+
+.userIdControl {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+    color: #33414d;
+    font-size: 13px;
+}
+
+.userIdControl input {
+    width: 112px;
+    min-width: 0;
+    border: 1px solid #cbd5df;
+    border-radius: 6px;
+    padding: 5px 8px;
+    font: inherit;
+    color: #1f2c37;
+    background: #fff;
+}
+
+.pollBlock {
+    min-width: 0;
+}
+
+.pollControls {
+    margin-top: 8px;
+    padding-left: 2px;
+}
+
+.pollOptions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.pollOption {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 30px;
+    border: 1px solid #cbd5df;
+    border-radius: 6px;
+    padding: 4px 9px;
+    font: inherit;
+    font-size: 13px;
+    color: #24313c;
+    background: #fff;
+    cursor: pointer;
+}
+
+.pollOption:hover:not(:disabled),
+.pollOption.selected {
+    border-color: #4d7c9f;
+    background: #eef6fb;
+}
+
+.pollOption:disabled {
+    cursor: default;
+    color: #657380;
+    background: #f6f8fa;
+}
+
+.pollResult {
+    color: #657380;
+    font-size: 12px;
 }
 
 .switch {

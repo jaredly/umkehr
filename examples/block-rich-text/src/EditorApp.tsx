@@ -105,6 +105,8 @@ import {
     codePreviewKindForLanguage,
     isPreviewableCodeMeta,
     paragraphMeta,
+    type PollMeta,
+    type PollVote,
     type ImagePresentationSize,
     type PreviewMetadata,
     type RichBlockMeta,
@@ -287,6 +289,13 @@ import {
     orderDraggedBlockIdsForCellSlot,
 } from './blockDropTargets';
 import {
+    currentUserVote,
+    normalizeUserId,
+    ratingOptionIds,
+    singleChoiceResults,
+    type PollVoteCommandData,
+} from './pollBlocks';
+import {
     beforeInputLabel,
     editorSelectionKey,
     imageFilesFromDataTransfer,
@@ -347,6 +356,10 @@ export function EditorApp() {
     const [undoStatus, setUndoStatus] = useState<Partial<Record<EditorId, string>>>({});
     const [historyResetSignal, setHistoryResetSignal] = useState(0);
     const [rainbowLamportIds, setRainbowLamportIds] = useState(false);
+    const [userIds, setUserIds] = useState<Record<EditorId, string>>({
+        left: 'ulrich',
+        right: 'uwe',
+    });
     const importInputRef = useRef<HTMLInputElement>(null);
     const attachmentsRef = useRef(attachments);
     const nextKeyPerfSampleIdRef = useRef(1);
@@ -447,6 +460,8 @@ export function EditorApp() {
                         intent: 'edit',
                         beforeSelection: replica.selection,
                         afterSelection: result.selection,
+                        ...(result.commandLabel ? {label: result.commandLabel} : {}),
+                        ...(result.pollVote ? {pollVote: result.pollVote} : {}),
                     },
                 };
                 const nextHistory = appendHistoryAction(current, action);
@@ -708,6 +723,10 @@ export function EditorApp() {
                     undoState={undoStates.left}
                     undoStatus={undoStatus.left ?? ''}
                     rainbowLamportIds={rainbowLamportIds}
+                    userId={userIds.left}
+                    onUserIdChange={(value) =>
+                        setUserIds((current) => ({...current, left: normalizeUserId(value)}))
+                    }
                     onCommand={(command) => runCommand('left', command)}
                     onUndo={() => runUndoCommand('left', 'undo')}
                     onRedo={() => runUndoCommand('left', 'redo')}
@@ -726,6 +745,10 @@ export function EditorApp() {
                     undoState={undoStates.right}
                     undoStatus={undoStatus.right ?? ''}
                     rainbowLamportIds={rainbowLamportIds}
+                    userId={userIds.right}
+                    onUserIdChange={(value) =>
+                        setUserIds((current) => ({...current, right: normalizeUserId(value)}))
+                    }
                     onCommand={(command) => runCommand('right', command)}
                     onUndo={() => runUndoCommand('right', 'undo')}
                     onRedo={() => runUndoCommand('right', 'redo')}
@@ -749,6 +772,8 @@ function BlockEditor({
     undoState,
     undoStatus,
     rainbowLamportIds,
+    userId,
+    onUserIdChange,
     onCommand,
     onUndo,
     onRedo,
@@ -764,6 +789,8 @@ function BlockEditor({
     undoState: ReturnType<typeof deriveUndoState>;
     undoStatus: string;
     rainbowLamportIds: boolean;
+    userId: string;
+    onUserIdChange(value: string): void;
     onCommand(command: (replica: Replica) => MultiCommandResult): void;
     onUndo(): void;
     onRedo(): void;
@@ -2883,6 +2910,17 @@ function BlockEditor({
                         {replica.online ? 'online' : 'offline'} · queued {replica.queue.length}
                     </span>
                 </div>
+                <label className="userIdControl">
+                    <span>User</span>
+                    <input
+                        type="text"
+                        value={userId}
+                        autoCapitalize="none"
+                        autoCorrect="off"
+                        spellCheck={false}
+                        onChange={(event) => onUserIdChange(event.currentTarget.value)}
+                    />
+                </label>
                 <label className="switch">
                     <input type="checkbox" checked={replica.online} onChange={onToggleOnline} />
                     <span>Online</span>
@@ -3048,6 +3086,7 @@ function BlockEditor({
                                 blocks,
                                 state: replica.state,
                                 attachments,
+                                userId,
                                 charIdsByBlock,
                                 rainbowLamportIds,
                                 selection: primaryResolvedSelection,
@@ -3312,6 +3351,7 @@ type RenderBlockContext = {
     blocks: RichFormattedBlock[];
     state: Replica['state'];
     attachments: AttachmentStore;
+    userId: string;
     charIdsByBlock: Map<string, string[]>;
     rainbowLamportIds: boolean;
     selection: EditorSelection;
@@ -4422,6 +4462,7 @@ const renderEditableBlock = (
         <EditableBlock
             key={block.id}
             block={block}
+            userId={context.userId}
             attachment={
                 block.block.meta.type === 'image'
                     ? context.attachments.get(block.block.meta.attachmentId) ?? null
@@ -4650,6 +4691,44 @@ const renderEditableBlock = (
             onCodeHoverEnter={context.showCodeHoverFromRange}
             onCodeHoverLeave={context.hideCodeHover}
             onInlineEmbedOpen={context.openInlineEmbed}
+            onPollVote={(optionId) => {
+                context.runEditCommand((current) => {
+                    const currentBlock = current.state.state.blocks[block.id];
+                    if (
+                        !context.userId ||
+                        !currentBlock ||
+                        currentBlock.meta.type !== 'poll' ||
+                        currentBlock.meta.kind !== 'rating'
+                    ) {
+                        return {state: current.state, ops: [], selection: current.selection};
+                    }
+                    const previous = currentBlock.meta.votes[context.userId];
+                    if (previous && !previous.deleted && !currentBlock.meta.allowChange) {
+                        return {state: current.state, ops: [], selection: current.selection};
+                    }
+                    const voteTs = nextReplicaTs(current);
+                    const after: PollVote = {type: 'single', optionId, ts: voteTs};
+                    const nextMeta = {
+                        ...currentBlock.meta,
+                        votes: {...currentBlock.meta.votes, [context.userId]: after},
+                        ts: nextReplicaTs(current),
+                    };
+                    const result = setBlockMeta(current.state, block.id, nextMeta);
+                    const pollVote: PollVoteCommandData = {
+                        blockId: block.id,
+                        userId: context.userId,
+                        ...(previous ? {before: previous} : {}),
+                        after,
+                    };
+                    return {
+                        state: result.state,
+                        ops: result.ops,
+                        selection: current.selection,
+                        commandLabel: 'Vote in poll',
+                        pollVote,
+                    };
+                });
+            }}
             onToggleTodo={() =>
                 context.runEditCommand((current, selection) =>
                     updateBlockMetaEverywhere(
@@ -5651,6 +5730,7 @@ const renderStaticRuns = (runs: RichFormattedBlock['runs']): ReactElement[] =>
 
 function EditableBlock({
     block,
+    userId,
     attachment,
     variant = 'block',
     ariaLabel = 'Block text',
@@ -5703,6 +5783,7 @@ function EditableBlock({
     onCodeHoverEnter,
     onCodeHoverLeave,
     onInlineEmbedOpen,
+    onPollVote,
     onToggleTodo,
     onSetCodeLanguage,
     onSetCodePreview,
@@ -5728,6 +5809,7 @@ function EditableBlock({
     onDisplayInputRenderStarted,
 }: {
     block: RichFormattedBlock;
+    userId: string;
     attachment: ImageAttachment | null;
     variant?: 'block' | 'table-row-header';
     ariaLabel?: string;
@@ -5780,6 +5862,7 @@ function EditableBlock({
     onCodeHoverEnter(range: CodeTargetRange & {language: string}, element: HTMLElement): void;
     onCodeHoverLeave(): void;
     onInlineEmbedOpen(charId: string, element: HTMLElement): void;
+    onPollVote(optionId: string): void;
     onToggleTodo(): void;
     onSetCodeLanguage(language: string): void;
     onSetCodePreview(enabled: boolean): void;
@@ -6178,6 +6261,13 @@ function EditableBlock({
                     onSetUrl={onSetPreviewUrl}
                     onSetMetadata={onSetPreviewMetadata}
                 />
+            ) : meta.type === 'poll' ? (
+                <PollBlock
+                    meta={meta}
+                    userId={userId}
+                    question={editableSurface}
+                    onVote={onPollVote}
+                />
             ) : isPreviewableCodeMeta(meta) ? (
                 <PreviewableCodeBlock
                     blockId={block.id}
@@ -6197,6 +6287,61 @@ function EditableBlock({
                     onSetImageSize={onSetImageSize}
                 />
             )}
+        </div>
+    );
+}
+
+function PollBlock({
+    meta,
+    userId,
+    question,
+    onVote,
+}: {
+    meta: PollMeta;
+    userId: string;
+    question: ReactElement;
+    onVote(optionId: string): void;
+}) {
+    if (meta.kind !== 'rating') {
+        return <div className="pollBlock">{question}</div>;
+    }
+    const optionIds = ratingOptionIds(meta);
+    const userVote = userId ? currentUserVote(meta, userId) : null;
+    const votedOptionId = userVote?.type === 'single' ? userVote.optionId : null;
+    const results = singleChoiceResults(meta, optionIds);
+    const resultsByOption = new Map(results.map((result) => [result.optionId, result]));
+    const canVote = Boolean(userId) && (!userVote || meta.allowChange);
+    const showResults = Boolean(userVote);
+
+    return (
+        <div className="pollBlock">
+            {question}
+            <div className="pollControls" contentEditable={false}>
+                <div className="pollOptions" role="radiogroup" aria-label="Poll rating">
+                    {optionIds.map((optionId) => {
+                        const result = resultsByOption.get(optionId);
+                        const selected = votedOptionId === optionId;
+                        return (
+                            <button
+                                key={optionId}
+                                type="button"
+                                className={selected ? 'pollOption selected' : 'pollOption'}
+                                aria-pressed={selected}
+                                disabled={!canVote}
+                                onMouseDown={(event) => event.preventDefault()}
+                                onClick={() => onVote(optionId)}
+                            >
+                                <span>{optionId}</span>
+                                {showResults ? (
+                                    <span className="pollResult">
+                                        {result?.percentage ?? 0}% · {result?.count ?? 0}
+                                    </span>
+                                ) : null}
+                            </button>
+                        );
+                    })}
+                </div>
+            </div>
         </div>
     );
 }

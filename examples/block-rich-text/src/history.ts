@@ -1,5 +1,4 @@
 import {applyMany, materializeFormattedBlocks, type Op} from 'umkehr/block-crdt';
-import {annotationVirtualParents} from './annotations';
 import * as hlc from '../../../src/crdt/hlc';
 import {
     applyLocalChange,
@@ -10,6 +9,8 @@ import {
     type EditorId,
 } from './blockEditorRuntime';
 import {codePreviewKindForLanguage, type RichBlockMeta} from './blockMeta';
+import {richTextCrdtConfig} from './editorCrdtConfig';
+import {isPollMeta, isPollVote, type PollVoteCommandData} from './pollBlocks';
 import type {RetainedSelectionSet} from './selectionSet';
 import {isSerializedImageAttachment, type SerializedImageAttachment} from './attachments';
 import type {ImportDocument} from './documentFormat';
@@ -42,6 +43,7 @@ export type BlockCommandInfo = {
     beforeSelection: RetainedSelectionSet;
     afterSelection: RetainedSelectionSet;
     label?: string;
+    pollVote?: PollVoteCommandData;
 };
 
 export type HistoryState = {
@@ -168,7 +170,7 @@ const applyHistoryActionWithoutClockAdvance = (demo: DemoState, action: HistoryA
     return applyLocalChange(demo, {
         editorId: action.editorId,
         state: action.ops.length
-            ? applyMany(current.state, action.ops, annotationVirtualParents(current.state))
+            ? applyMany(current.state, action.ops, richTextCrdtConfig(current.state))
             : current.state,
         selection: action.selection,
         ops: action.ops,
@@ -328,6 +330,9 @@ const parseCommandInfo = (
     if (value.label !== undefined && typeof value.label !== 'string') {
         return {error: 'label must be a string.'};
     }
+    if (value.pollVote !== undefined && !isPollVoteCommandData(value.pollVote)) {
+        return {error: 'pollVote must be a valid poll vote command.'};
+    }
     const targetCommandId = typeof value.targetCommandId === 'string' ? value.targetCommandId : undefined;
     const label = typeof value.label === 'string' ? value.label : undefined;
     return {
@@ -339,9 +344,18 @@ const parseCommandInfo = (
             beforeSelection: value.beforeSelection,
             afterSelection: value.afterSelection,
             ...(label ? {label} : {}),
+            ...(value.pollVote ? {pollVote: value.pollVote} : {}),
         },
     };
 };
+
+const isPollVoteCommandData = (value: unknown): value is PollVoteCommandData =>
+    isRecord(value) &&
+    typeof value.blockId === 'string' &&
+    typeof value.userId === 'string' &&
+    value.userId.length > 0 &&
+    (value.before === undefined || isPollVote(value.before)) &&
+    isPollVote(value.after);
 
 const parseKeystrokes = (
     value: unknown,
@@ -444,6 +458,8 @@ const isRichBlockMeta = (value: unknown): value is RichBlockMeta => {
         case 'table':
         case 'kanban':
             return true;
+        case 'poll':
+            return isPollMeta(value);
         case 'heading':
             return value.level === 1 || value.level === 2 || value.level === 3;
         case 'list_item':

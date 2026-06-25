@@ -14,6 +14,27 @@ export type PreviewMetadata = {
 
 export type CodePreviewKind = 'mermaid' | 'vega-lite';
 
+export type PollChoiceMode = 'single' | 'multiple';
+
+export type PollKind = 'rating' | 'children' | 'matrix' | 'long';
+
+export type PollVote =
+    | {type: 'single'; optionId: string; ts: HLC; deleted?: boolean}
+    | {type: 'multiple'; optionIds: string[]; ts: HLC; deleted?: boolean}
+    | {type: 'matrix'; answers: Record<string, string | string[]>; ts: HLC; deleted?: boolean}
+    | {type: 'long'; text: string; ts: HLC; deleted?: boolean};
+
+export type PollMeta = {
+    type: 'poll';
+    kind: PollKind;
+    allowChange: boolean;
+    choiceMode?: PollChoiceMode;
+    min?: number;
+    max?: number;
+    votes: Record<string, PollVote>;
+    ts: HLC;
+};
+
 export const CODE_PREVIEW_LANGUAGES: Record<CodePreviewKind, string> = {
     mermaid: 'mermaid',
     'vega-lite': 'vega-lite',
@@ -30,6 +51,7 @@ export type RichBlockMeta =
     | {type: 'recipe_ingredient'; ts: HLC}
     | {type: 'table'; ts: HLC}
     | {type: 'kanban'; ts: HLC}
+    | PollMeta
     | {type: 'image'; attachmentId: string; size: ImagePresentationSize; ts: HLC}
     | {type: 'preview'; url: string; preview: PreviewMetadata | null; ts: HLC};
 
@@ -59,12 +81,24 @@ export const sameTypeWithTs = (meta: RichBlockMeta, ts: HLC): RichBlockMeta => {
             return {type: 'table', ts};
         case 'kanban':
             return {type: 'kanban', ts};
+        case 'poll':
+            return {...meta, ts};
         case 'image':
             return {type: 'image', attachmentId: meta.attachmentId, size: meta.size, ts};
         case 'preview':
             return {type: 'preview', url: meta.url, preview: meta.preview, ts};
     }
 };
+
+export const defaultRatingPollMeta = (ts: HLC): PollMeta => ({
+    type: 'poll',
+    kind: 'rating',
+    allowChange: true,
+    min: 1,
+    max: 5,
+    votes: {},
+    ts,
+});
 
 export const isTableBlock = (meta: RichBlockMeta): boolean => meta.type === 'table';
 

@@ -45,6 +45,7 @@ export const documentFixtures: DocumentFixture[] = [
     {id: 'mixed-table-and-text', label: 'Mixed table and text', document: mixedTableAndText},
     {id: 'mermaid-diagram', label: 'Mermaid diagram', document: mermaidDiagram},
     {id: 'vega-lite-chart', label: 'Vega-Lite chart', document: vegaLiteChart},
+    {id: 'rating-polls', label: 'Rating polls', document: ratingPolls},
     {
         id: 'code-callouts-images',
         label: 'Code, callouts, and images',
@@ -207,6 +208,44 @@ function largeTable(): ImportDocument {
             })),
         })),
     }];
+}
+
+function ratingPolls(): ImportDocument {
+    return [
+        {type: 'heading', meta: {level: 2}, content: 'Poll fixture'},
+        {
+            type: 'poll',
+            meta: {kind: 'rating', allowChange: true, min: 1, max: 5, votes: {}},
+            content: 'How useful is this example?',
+        },
+        {
+            type: 'poll',
+            meta: {
+                kind: 'rating',
+                allowChange: true,
+                min: 1,
+                max: 5,
+                votes: {
+                    ulrich: {type: 'single', optionId: '5', ts: '00010'},
+                    uwe: {type: 'single', optionId: '4', ts: '00011'},
+                },
+            },
+            content: 'How polished is the current poll UI?',
+        },
+        {
+            type: 'poll',
+            meta: {
+                kind: 'rating',
+                allowChange: false,
+                min: 1,
+                max: 5,
+                votes: {
+                    ulrich: {type: 'single', optionId: '3', ts: '00012'},
+                },
+            },
+            content: 'Locked poll: how risky is the metadata merge?',
+        },
+    ];
 }
 
 function sparseTable(): ImportDocument {

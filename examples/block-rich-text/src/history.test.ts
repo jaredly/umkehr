@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest';
 import {materializeFormattedBlocks, rootBlockIds} from 'umkehr/block-crdt';
-import {indentBlock, moveBlock} from './blockCommands';
+import {indentBlock, moveBlock, setBlockMeta} from './blockCommands';
 import {makeCommandContext, nextReplicaTs, type EditorId, type Replica} from './blockEditorRuntime';
 import * as hlc from '../../../src/crdt/hlc';
 import {
@@ -26,6 +26,7 @@ import {
 } from './multiSelectionCommands';
 import {caret} from './selectionModel';
 import {replacePrimarySelection} from './selectionSet';
+import type {PollVote} from './blockMeta';
 
 const appendLocal = (
     history: HistoryState,
@@ -80,6 +81,19 @@ const visibleOutline = (replica: Replica): Array<{text: string; depth: number}> 
         text: block.runs.map((run) => run.text).join(''),
         depth: block.depth,
     }));
+
+const voteInFirstPoll = (userId: string, optionId: string) => (replica: Replica): MultiCommandResult => {
+    const blockId = rootBlockIds(replica.state)[0];
+    const block = replica.state.state.blocks[blockId];
+    if (!block || block.meta.type !== 'poll') return {state: replica.state, ops: [], selection: replica.selection};
+    const vote: PollVote = {type: 'single', optionId, ts: nextReplicaTs(replica)};
+    const result = setBlockMeta(replica.state, blockId, {
+        ...block.meta,
+        votes: {...block.meta.votes, [userId]: vote},
+        ts: nextReplicaTs(replica),
+    });
+    return {state: result.state, ops: result.ops, selection: replica.selection};
+};
 
 const paste = (text: string) => (replica: Replica) =>
     pastePlainTextEverywhere(replica.state, replica.selection, text, makeCommandContext(replica));
@@ -136,6 +150,37 @@ describe('block rich text history', () => {
         demo = replayHistory(history.actions, history.cursor);
         expect(visibleText(demo.right)).toEqual(['x']);
         expect(demo.left.queue).toHaveLength(0);
+    });
+
+    it('replays concurrent offline poll votes without dropping either voter', () => {
+        let history = appendHistoryAction(initialHistoryState(), {
+            type: 'replace-document',
+            document: [
+                {
+                    type: 'poll',
+                    meta: {kind: 'rating', allowChange: true, min: 1, max: 5, votes: {}},
+                    content: 'Rate this',
+                },
+            ],
+        });
+        history = appendToggle(history, 'left');
+        history = appendLocal(history, 'left', voteInFirstPoll('ulrich', '5'));
+        history = appendLocal(history, 'right', voteInFirstPoll('uwe', '4'));
+        history = appendToggle(history, 'left');
+
+        const demo = replayHistory(history.actions, history.cursor);
+        const blockId = rootBlockIds(demo.left.state)[0];
+        const leftMeta = demo.left.state.state.blocks[blockId].meta;
+        const rightMeta = demo.right.state.state.blocks[blockId].meta;
+
+        expect(leftMeta).toMatchObject({
+            type: 'poll',
+            votes: {
+                ulrich: {type: 'single', optionId: '5'},
+                uwe: {type: 'single', optionId: '4'},
+            },
+        });
+        expect(rightMeta).toEqual(leftMeta);
     });
 
     it('scrubs to intermediate cursors', () => {

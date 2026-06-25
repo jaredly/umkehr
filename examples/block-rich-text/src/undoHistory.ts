@@ -1,5 +1,6 @@
 import {applyMany, planUndoOps, type Op} from 'umkehr/block-crdt';
 import type {CachedState} from 'umkehr/block-crdt/types';
+import {parseLamportString} from 'umkehr/block-crdt/utils';
 import * as hlc from '../../../src/crdt/hlc';
 import {
     applyLocalChange,
@@ -13,13 +14,14 @@ import {
     type Replica,
 } from './blockEditorRuntime';
 import type {RichBlockMeta} from './blockMeta';
-import {annotationVirtualParents} from './annotations';
+import {richTextCrdtConfig} from './editorCrdtConfig';
 import {
     type BlockCommandInfo,
     type HistoryAction,
     type HistoryState,
 } from './history';
 import type {RetainedSelectionSet} from './selectionSet';
+import {deletedPollVote, type PollVoteCommandData} from './pollBlocks';
 
 type DerivedBlockCommand = {
     id: string;
@@ -33,6 +35,7 @@ type DerivedBlockCommand = {
     beforeSelection: RetainedSelectionSet;
     afterSelection: RetainedSelectionSet;
     label?: string;
+    pollVote?: PollVoteCommandData;
     undoCommand?: DerivedBlockCommand;
 };
 
@@ -153,7 +156,7 @@ const deriveUndoIndex = (history: HistoryState, editorId: EditorId): DerivedUndo
 
         const beforeReplica = demo[action.editorId];
         const before = beforeReplica.state;
-        const after = action.ops.length ? applyMany(before, action.ops, annotationVirtualParents(before)) : before;
+        const after = action.ops.length ? applyMany(before, action.ops, richTextCrdtConfig(before)) : before;
         demo = applyLocalChange(demo, {
             editorId: action.editorId,
             state: after,
@@ -176,6 +179,7 @@ const deriveUndoIndex = (history: HistoryState, editorId: EditorId): DerivedUndo
             beforeSelection: action.command.beforeSelection,
             afterSelection: action.command.afterSelection,
             label: action.command.label,
+            pollVote: action.command.pollVote,
         };
         commands.push(command);
         commandById.set(command.id, command);
@@ -217,6 +221,9 @@ const planForUndo = (
     mutateClock = false,
 ): {ok: true; ops: Array<Op<RichBlockMeta>>} | {ok: false; error: string} => {
     const ts = makeTs(replica, mutateClock);
+    if (command.pollVote) {
+        return planPollVoteChange(replica, command.pollVote, command.pollVote.before, ts);
+    }
     const plan = planUndoOps(command.before, replica.state, command.ops, {actor: replica.actor, ts});
     if (!plan.complete) return {ok: false, error: plan.unsupported[0]?.reason ?? 'Undo is blocked.'};
     if (!plan.ops.length) return {ok: false, error: 'Undo has no effect.'};
@@ -230,6 +237,9 @@ const planForRedo = (
 ): {ok: true; ops: Array<Op<RichBlockMeta>>} | {ok: false; error: string} => {
     if (!command.undoCommand) return {ok: false, error: 'Redo is missing its undo command.'};
     const ts = makeTs(replica, mutateClock);
+    if (command.pollVote) {
+        return planPollVoteChange(replica, command.pollVote, command.pollVote.after, ts);
+    }
     const plan = planUndoOps(command.undoCommand.before, replica.state, command.undoCommand.ops, {
         actor: replica.actor,
         ts,
@@ -237,6 +247,31 @@ const planForRedo = (
     if (!plan.complete) return {ok: false, error: plan.unsupported[0]?.reason ?? 'Redo is blocked.'};
     if (!plan.ops.length) return {ok: false, error: 'Redo has no effect.'};
     return {ok: true, ops: plan.ops};
+};
+
+const planPollVoteChange = (
+    replica: Replica,
+    command: PollVoteCommandData,
+    targetVote: PollVoteCommandData['before'] | PollVoteCommandData['after'],
+    ts: () => string,
+): {ok: true; ops: Array<Op<RichBlockMeta>>} | {ok: false; error: string} => {
+    const block = replica.state.state.blocks[command.blockId];
+    if (!block || block.meta.type !== 'poll') {
+        return {ok: false, error: 'Poll vote undo requires the poll block.'};
+    }
+    const voteTs = ts();
+    const nextVote = targetVote
+        ? {...targetVote, ts: voteTs}
+        : deletedPollVote(block.meta.votes[command.userId], voteTs);
+    const nextMeta: RichBlockMeta = {
+        ...block.meta,
+        votes: {...block.meta.votes, [command.userId]: nextVote},
+        ts: ts(),
+    };
+    return {
+        ok: true,
+        ops: [{type: 'block:meta', id: parseLamportString(command.blockId), meta: nextMeta}],
+    };
 };
 
 const makeTs = (replica: Replica, mutateClock: boolean) => {

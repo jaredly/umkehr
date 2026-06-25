@@ -941,6 +941,88 @@ it('applies block meta by timestamp', () => {
     expectCache(state);
 });
 
+it('supports custom block meta merge for block meta ops', () => {
+    type MergeMeta = {type: 'mergeable'; ts: string; title: string; votes: Record<string, string>};
+    const config: VirtualBlockParentConfig<MergeMeta> = {
+        mergeBlockMeta: (current, incoming) => {
+            if (current.type !== 'mergeable' || incoming.type !== 'mergeable') return null;
+            const base = incoming.ts > current.ts ? incoming : current;
+            return {
+                ...base,
+                votes: {...current.votes, ...incoming.votes},
+            };
+        },
+    };
+    let state = cachedState(
+        initialStateWithMeta<MergeMeta>('self', {
+            type: 'mergeable',
+            ts: '00003',
+            title: 'current',
+            votes: {alice: 'yes'},
+        }),
+    );
+
+    state = apply(
+        state,
+        {
+            type: 'block:meta',
+            id: [0, 'self'],
+            meta: {type: 'mergeable', ts: '00002', title: 'stale', votes: {bob: 'no'}},
+        },
+        config,
+    ) as typeof state;
+
+    expect(state.state.blocks['0000-self'].meta).toEqual({
+        type: 'mergeable',
+        ts: '00003',
+        title: 'current',
+        votes: {alice: 'yes', bob: 'no'},
+    });
+    expectCache(state);
+});
+
+it('supports custom block meta merge for duplicate block ops', () => {
+    type MergeMeta = {type: 'mergeable'; ts: string; title: string; votes: Record<string, string>};
+    const config: VirtualBlockParentConfig<MergeMeta> = {
+        mergeBlockMeta: (current, incoming) => {
+            if (current.type !== 'mergeable' || incoming.type !== 'mergeable') return null;
+            const base = incoming.ts > current.ts ? incoming : current;
+            return {
+                ...base,
+                votes: {...current.votes, ...incoming.votes},
+            };
+        },
+    };
+    let state = cachedState(
+        initialStateWithMeta<MergeMeta>('self', {
+            type: 'mergeable',
+            ts: '00003',
+            title: 'current',
+            votes: {alice: 'yes'},
+        }),
+    );
+
+    state = apply(
+        state,
+        {
+            type: 'block',
+            block: {
+                ...state.state.blocks['0000-self'],
+                meta: {type: 'mergeable', ts: '00002', title: 'stale', votes: {bob: 'no'}},
+            },
+        },
+        config,
+    ) as typeof state;
+
+    expect(state.state.blocks['0000-self'].meta).toEqual({
+        type: 'mergeable',
+        ts: '00003',
+        title: 'current',
+        votes: {alice: 'yes', bob: 'no'},
+    });
+    expectCache(state);
+});
+
 it('moves blocks by timestamp and updates child cache', () => {
     let state = apply(cachedState(init), {
         type: 'block',

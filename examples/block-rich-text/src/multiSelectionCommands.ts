@@ -93,11 +93,14 @@ import {
     type ClipboardMarkRange,
     type RichClipboardPayload,
 } from './clipboard';
+import type {PollVoteCommandData} from './pollBlocks';
 
 export type MultiCommandResult = {
     state: CachedState<RichBlockMeta>;
     ops: Array<Op<RichBlockMeta>>;
     selection: RetainedSelectionSet;
+    commandLabel?: string;
+    pollVote?: PollVoteCommandData;
 };
 
 export type RetainedInlineMarkSessionMap = Record<string, RetainedInlineMarkSession[]>;

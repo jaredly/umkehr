@@ -1,6 +1,6 @@
 import type {FormattedBlock} from 'umkehr/block-crdt';
 
-import {paragraphMeta, type RichBlockMeta} from './blockMeta';
+import {defaultRatingPollMeta, paragraphMeta, type RichBlockMeta} from './blockMeta';
 import type {BlockTypeMenuValue} from './blockEditorTypes';
 
 type RichFormattedBlock = FormattedBlock<RichBlockMeta>;
@@ -68,6 +68,14 @@ export const blockTypeMeta = (
                 preview: current.type === 'preview' ? current.preview : null,
                 ts,
             };
+        case 'poll-rating':
+            return defaultRatingPollMeta(ts);
+        case 'poll-children':
+            return {type: 'poll', kind: 'children', choiceMode: 'single', allowChange: true, votes: {}, ts};
+        case 'poll-matrix':
+            return {type: 'poll', kind: 'matrix', choiceMode: 'single', allowChange: true, votes: {}, ts};
+        case 'poll-long':
+            return {type: 'poll', kind: 'long', allowChange: true, votes: {}, ts};
     }
 };
 
@@ -102,6 +110,14 @@ export const blockTypeMenuValue = (meta: RichBlockMeta | undefined): BlockTypeMe
             return 'table';
         case 'kanban':
             return 'kanban';
+        case 'poll':
+            return meta.kind === 'rating'
+                ? 'poll-rating'
+                : meta.kind === 'children'
+                  ? 'poll-children'
+                  : meta.kind === 'matrix'
+                    ? 'poll-matrix'
+                    : 'poll-long';
         case 'image':
             return 'paragraph';
         case 'preview':
