@@ -3061,7 +3061,10 @@ describe('Block rich text example UI', () => {
         const leftBranch = leftPoll?.closest<HTMLElement>('.renderTreeBranch');
         if (!leftPoll || !leftBranch) throw new Error('missing left answer poll');
 
-        expect(within(leftPoll).getByRole('button', {name: /Matrix polls/})).toBeTruthy();
+        const matrixOption = within(leftPoll).getByRole('button', {name: /Matrix polls/});
+        expect(matrixOption).toBeTruthy();
+        expect(matrixOption.getAttribute('title')).toBe('0% · 0 votes');
+        expect(leftPoll.querySelector('.pollResult')).toBeNull();
         expect(blockTexts(leftBranch)).not.toContain('Matrix polls');
 
         fireEvent.click(within(leftPoll).getByRole('button', {name: 'Edit poll'}));
@@ -3118,6 +3121,10 @@ describe('Block rich text example UI', () => {
         if (!leftPoll || !leftBranch) throw new Error('missing left matrix poll');
 
         expect(leftPoll.querySelector('.matrixPollGrid')).toBeTruthy();
+        expect(leftPoll.querySelector('.pollResult')).toBeNull();
+        expect(leftPoll.querySelector<HTMLButtonElement>('.matrixPollCell')?.getAttribute('title')).toBe(
+            '0% · 0 votes',
+        );
         expect(blockTexts(leftBranch)).not.toContain('Rows');
         expect(blockTexts(leftBranch)).not.toContain('Ignored extra child');
 
@@ -3164,6 +3171,25 @@ describe('Block rich text example UI', () => {
 
         fireEvent.mouseEnter(starButtons[0]);
         expect(left.querySelectorAll('.ratingStar.lit')).toHaveLength(1);
+    });
+
+    it('shows rating poll stats as background with hover details', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'rating-polls'},
+        });
+        await waitFor(() => expect(view.getByText('Loaded fixture: Rating polls.')).toBeTruthy());
+
+        const pollRows = left.querySelectorAll<HTMLElement>('.blockType-poll');
+        const ratedPoll = pollRows[1];
+        if (!ratedPoll) throw new Error('missing rated poll');
+
+        const fiveButton = within(ratedPoll).getByRole('button', {name: '5'});
+        expect(fiveButton.classList.contains('pollResultBackground')).toBe(true);
+        expect(fiveButton.getAttribute('title')).toBe('50% · 1 vote');
+        expect(ratedPoll.querySelector('.pollResult')).toBeNull();
     });
 
     it('configures long-answer poll change policy from the block options menu', async () => {

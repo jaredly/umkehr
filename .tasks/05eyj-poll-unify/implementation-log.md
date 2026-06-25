@@ -39,3 +39,12 @@
   - `keeps a single printable input in an empty document under the perf budget`: measured `6.87ms`, threshold `<5ms`.
   - `handles Enter at the end of the second 400 character pasted block in less than 50ms`: measured `58.5ms`, threshold `<50ms`.
 - Reran the failed perf filter. The Enter perf case passed on rerun, but the printable-input perf case still exceeded the strict local threshold (`14ms`, threshold `<5ms`). No functional poll tests failed.
+
+## Follow-up: Compact Poll Stats
+
+- Changed rating poll, inline answer poll, and matrix poll stats to render as subtle background fills instead of inline percentage/count text.
+- Moved exact stat details into native hover text via `title` attributes.
+- Left list answer polls with inline stats, since the follow-up specifically called out inline answer polls.
+- Added focused assertions that compact poll stats use hover details and do not render `.pollResult` inline text.
+- Passed after follow-up: `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx -t "poll"`
+- Passed after follow-up: `npx tsc -p examples/block-rich-text/tsconfig.json --noEmit`

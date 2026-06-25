@@ -6653,6 +6653,8 @@ function PollBlock({
     const showResults = Boolean(userVote);
     const multiple = meta.kind === 'children' && meta.choiceMode === 'multiple';
     const displayMode = meta.kind === 'children' ? meta.displayMode ?? 'inline' : 'inline';
+    const useResultBackground =
+        showResults && (meta.kind === 'rating' || displayMode === 'inline');
     const modeToggle =
         meta.kind === 'children' && onSetEditorMode ? (
             <PollEditorModeToggle mode={editorMode ?? 'view'} onSetMode={onSetEditorMode} />
@@ -6698,16 +6700,27 @@ function PollBlock({
                                         'pollOption',
                                         selected ? 'selected' : '',
                                         option.archived ? 'archived' : '',
+                                        useResultBackground ? 'pollResultBackground' : '',
                                     ]
                                         .filter(Boolean)
                                         .join(' ')}
                                     aria-pressed={selected}
                                     disabled={!canVote}
+                                    title={
+                                        useResultBackground
+                                            ? pollResultTitle(result)
+                                            : undefined
+                                    }
+                                    style={
+                                        useResultBackground
+                                            ? pollResultBackgroundStyle(result, selected)
+                                            : undefined
+                                    }
                                     onMouseDown={(event) => event.preventDefault()}
                                     onClick={() => onVote(option.id)}
                                 >
                                     <span>{option.label}</span>
-                                    {showResults ? (
+                                    {showResults && !useResultBackground ? (
                                         <span className="pollResult">
                                             {result?.percentage ?? 0}% · {result?.count ?? 0}
                                         </span>
@@ -6771,7 +6784,6 @@ function RatingStars({
     const [hovered, setHovered] = useState<number | null>(null);
     const selected = userVote?.type === 'single' ? Number(userVote.optionId) : 0;
     const active = hovered ?? (Number.isInteger(selected) ? selected : 0);
-    const activeResult = active ? resultsByOption.get(String(active)) : null;
     const starValues = Array.from({length: normalizedRatingMax(max)}, (_, index) => index + 1);
 
     return (
@@ -6783,6 +6795,7 @@ function RatingStars({
         >
             {starValues.map((value) => {
                 const selectedValue = selected === value;
+                const result = resultsByOption.get(String(value));
                 return (
                     <button
                         key={value}
@@ -6791,12 +6804,19 @@ function RatingStars({
                             'ratingStar',
                             value <= active ? 'lit' : '',
                             selectedValue ? 'selected' : '',
+                            showResults ? 'pollResultBackground' : '',
                         ]
                             .filter(Boolean)
                             .join(' ')}
                         aria-label={`${value} ${value === 1 ? 'star' : 'stars'}`}
                         aria-pressed={selectedValue}
                         disabled={!canVote}
+                        title={showResults ? pollResultTitle(result) : undefined}
+                        style={
+                            showResults
+                                ? pollResultBackgroundStyle(result, selectedValue)
+                                : undefined
+                        }
                         onMouseDown={(event) => event.preventDefault()}
                         onMouseEnter={() => setHovered(value)}
                         onFocus={() => setHovered(value)}
@@ -6807,11 +6827,6 @@ function RatingStars({
                     </button>
                 );
             })}
-            {showResults && activeResult ? (
-                <span className="pollResult">
-                    {activeResult.percentage}% · {activeResult.count}
-                </span>
-            ) : null}
         </div>
     );
 }
@@ -6839,6 +6854,20 @@ const toggleOptionId = (optionIds: string[], optionId: string): string[] =>
 const normalizedRatingMax = (max: number): number => {
     const normalizedMax = Number.isFinite(max) ? Math.trunc(max) : 5;
     return Math.max(1, Math.min(10, normalizedMax));
+};
+
+const pollResultTitle = (result: PollResult | undefined): string =>
+    result ? `${result.percentage}% · ${result.count} ${result.count === 1 ? 'vote' : 'votes'}` : '0% · 0 votes';
+
+const pollResultBackgroundStyle = (
+    result: PollResult | undefined,
+    selected = false,
+): CSSProperties => {
+    const percentage = Math.max(0, Math.min(100, result?.percentage ?? 0));
+    return {
+        '--poll-result-fill': `${percentage}%`,
+        '--poll-result-base': selected ? '#eef6fb' : '#fff',
+    } as CSSProperties;
 };
 
 function MatrixPollBlock({
@@ -6910,13 +6939,25 @@ function MatrixPollBlock({
                                         <button
                                             key={column.id}
                                             type="button"
-                                            className={
-                                                selected
-                                                    ? 'matrixPollCell selected'
-                                                    : 'matrixPollCell'
-                                            }
+                                            className={[
+                                                'matrixPollCell',
+                                                selected ? 'selected' : '',
+                                                showResults ? 'pollResultBackground' : '',
+                                            ]
+                                                .filter(Boolean)
+                                                .join(' ')}
                                             aria-pressed={selected}
                                             disabled={!canVote}
+                                            title={
+                                                showResults
+                                                    ? pollResultTitle(result)
+                                                    : undefined
+                                            }
+                                            style={
+                                                showResults
+                                                    ? pollResultBackgroundStyle(result, selected)
+                                                    : undefined
+                                            }
                                             onMouseDown={(event) => event.preventDefault()}
                                             onClick={() => onVote(column.id, row.id)}
                                         >
@@ -6929,11 +6970,6 @@ function MatrixPollBlock({
                                                       ? '●'
                                                       : '○'}
                                             </span>
-                                            {showResults ? (
-                                                <span className="pollResult">
-                                                    {result?.percentage ?? 0}% · {result?.count ?? 0}
-                                                </span>
-                                            ) : null}
                                         </button>
                                     );
                                 })}
