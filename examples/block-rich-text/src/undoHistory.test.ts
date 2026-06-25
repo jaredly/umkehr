@@ -409,14 +409,19 @@ describe('block rich text undo history', () => {
         ).toMatchObject({type: 'blockquote'});
     });
 
-    it('keeps undo available after undoing code block double-enter exit', () => {
+    it('keeps undo available after undoing code block exit', () => {
         let history = initialHistoryState();
         history = appendEdit(history, 'left', insert('ab'), 'insert text');
         history = appendEdit(history, 'left', code(), 'code block');
         history = appendEdit(history, 'left', enter(), 'code newline');
+        history = appendEdit(history, 'left', enter(), 'second code newline');
         history = appendEdit(history, 'left', enter(), 'exit code');
 
-        expect(visibleText(history)).toEqual(['ab', '']);
+        expect(visibleText(history)).toEqual(['ab\n', '']);
+
+        history = appendActionResult(history, createUndoAction(history, 'left'));
+        expect(visibleText(history)).toEqual(['ab\n\n']);
+        expect(deriveUndoState(history, 'left').canUndo).toBe(true);
 
         history = appendActionResult(history, createUndoAction(history, 'left'));
         expect(visibleText(history)).toEqual(['ab\n']);
