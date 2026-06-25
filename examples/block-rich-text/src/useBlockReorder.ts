@@ -225,7 +225,7 @@ const resolveDropTarget = (
         dragged: string | null;
         draggedIds: string[];
     },
-): DropTargetResolution => {
+): DropTarget | null => {
     const ratio = rect.height > 0 ? (clientY - rect.top) / rect.height : 0.5;
     const childIntent = clientX >= rect.left + 64;
 
@@ -265,7 +265,7 @@ const resolveKanbanDropTarget = (
         dragged: string | null;
         draggedIds: string[];
     },
-): DropTarget | null => {
+): DropTargetResolution => {
     if (typeof document.elementsFromPoint !== 'function') return null;
     const elements = document.elementsFromPoint(clientX, clientY);
     const column = elements

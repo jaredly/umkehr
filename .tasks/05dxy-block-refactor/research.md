@@ -228,7 +228,12 @@ pnpm exec vitest -- run src/*.test.ts
 ## Open Questions
 
 - Should `App.tsx` remain the compatibility entrypoint permanently, or should imports be migrated to `EditorApp.tsx`/new modules after the split?
+    - EditorApp & stuff sounds good
 - Is the goal only file organization, or is it acceptable to introduce small architectural seams such as a `useBlockEditorController` hook to shrink `BlockEditor` itself?
+    - architectural seams would be great
 - Should tests be updated to import `deriveActiveInlineMarks` from its new home, or should `App.tsx` continue re-exporting it to reduce test churn?
+    - let's update imports
 - Should `style.css` also be split by component ownership, or left alone for this task?
+    - yeah let's split it too
 - How aggressive should the first pass be? A minimal pass can move leaf components and pure helpers; a deeper pass can also split table rendering, annotation rendering, and editable block rendering, but that has more import-cycle risk.
+    - let's go deep

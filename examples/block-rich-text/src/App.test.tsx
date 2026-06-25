@@ -656,6 +656,33 @@ describe('Block rich text example UI', () => {
         expect(blockTexts(right).slice(0, 2)).toEqual(blockTexts(left).slice(0, 2));
     });
 
+    it('selects a block in the many blocks fixture in less than 50ms', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'many-blocks'},
+        });
+
+        await waitFor(() => expect(view.getByText('Loaded fixture: Many blocks.')).toBeTruthy());
+        const targetHandle = within(left).getAllByRole('button', {name: 'Move block'})[100];
+        const targetRow = targetHandle.closest<HTMLElement>('.blockRow');
+        if (!targetRow) throw new Error('missing target block row');
+
+        const started = performance.now();
+        fireEvent.pointerDown(targetHandle, {
+            button: 0,
+            clientX: 8,
+            clientY: 8,
+            isPrimary: true,
+            pointerId: 1,
+        });
+        const elapsed = performance.now() - started;
+
+        expect(targetRow.classList.contains('blockSelected')).toBe(true);
+        expect(elapsed).toBeLessThan(50);
+    });
+
     it('loads generated fixture images and leaves missing images visible', async () => {
         const view = render(<App />);
 
