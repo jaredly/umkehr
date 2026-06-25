@@ -3835,6 +3835,9 @@ describe('Block rich text example UI', () => {
 
         await waitFor(() => expect(slide.classList.contains('blockSelected')).toBe(true));
         expect(slide.classList.contains('blockSelectionFocus')).toBe(true);
+        const titleRow = slide.querySelector<HTMLElement>('.slideTitle .blockRow');
+        expect(titleRow?.classList.contains('blockSelected')).toBe(false);
+        expect(titleRow?.classList.contains('blockSelectionFocus')).toBe(false);
         expect(window.getSelection()?.rangeCount ?? 0).toBe(0);
     });
 

@@ -4153,6 +4153,7 @@ function SlideBlockView({
                         {renderEditableBlock({...node.block, depth: 0}, context, {
                             surfaceClassName: 'slideTitleText',
                             hideBlockAffordance: true,
+                            hideBlockLevelDecoration: true,
                             registerBlockRow: false,
                             ...(deckId ? {onSplit: () => context.addSlideToDeck(deckId, node.block.id)} : {}),
                         })}
@@ -5143,6 +5144,7 @@ type EditableBlockRenderOptions = {
     surfaceClassName?: string;
     hideBlockAffordance?: boolean;
     hideInlineControls?: boolean;
+    hideBlockLevelDecoration?: boolean;
     registerBlockRow?: boolean;
     pollOptions?: PollOptionView[];
     matrixPoll?: MatrixPollView;
@@ -5198,7 +5200,11 @@ const renderEditableBlock = (
             suppressNextKeySelectionRef={context.suppressNextBlockKeySelectionRef}
             isDragging={context.draggingSubtreeIds.has(block.id)}
             isDraggingRoot={context.draggingId === block.id}
-            blockLevelDecoration={context.blockLevelDecorationsByBlock.get(block.id) ?? null}
+            blockLevelDecoration={
+                options.hideBlockLevelDecoration
+                    ? null
+                    : context.blockLevelDecorationsByBlock.get(block.id) ?? null
+            }
             dropTarget={
                 context.dropTarget?.indicatorBlockId === block.id
                     ? context.dropTarget
