@@ -548,6 +548,24 @@ const installMockBlockRowGeometry = (panel: HTMLElement) => {
     });
 };
 
+const installMockSlideViewportGeometry = (panel: HTMLElement) => {
+    const viewports = Array.from(panel.querySelectorAll<HTMLElement>('.slideViewport'));
+    viewports.forEach((viewport, index) => {
+        viewport.getBoundingClientRect = () =>
+            ({
+                left: 0,
+                top: index * 80,
+                width: 320,
+                height: 72,
+                right: 320,
+                bottom: index * 80 + 72,
+                x: 0,
+                y: index * 80,
+                toJSON: () => ({}),
+            }) as DOMRect;
+    });
+};
+
 const dragElementTo = (element: HTMLElement, clientX: number, clientY: number) => {
     const handle = element as HTMLElement & {setPointerCapture?: (pointerId: number) => void};
     handle.setPointerCapture = () => {};
@@ -3737,6 +3755,37 @@ describe('Block rich text example UI', () => {
 
         await waitForBlockTexts(right, ['c', 'a', 'b']);
         expect(blockTexts(left)).toEqual(['c', 'a', 'b']);
+    });
+
+    it('drags rendered slides from the slide rim', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'slide-deck');
+        await waitFor(() => expect(left.querySelectorAll('.slideViewport')).toHaveLength(1));
+
+        fireEvent.click(within(left).getByRole('button', {name: 'Add slide'}));
+        await waitFor(() => expect(left.querySelectorAll('.slideViewport')).toHaveLength(2));
+        await waitFor(() => expect(right.querySelectorAll('.slideViewport')).toHaveLength(2));
+
+        const originalLeftSlideIds = Array.from(left.querySelectorAll<HTMLElement>('.slideViewport')).map(
+            (viewport) => viewport.dataset.slideId,
+        );
+        installMockSlideViewportGeometry(left);
+        dragElementTo(left.querySelectorAll<HTMLElement>('.slideViewport')[1], 20, 5);
+
+        await waitFor(() =>
+            expect(
+                Array.from(left.querySelectorAll<HTMLElement>('.slideViewport')).map(
+                    (viewport) => viewport.dataset.slideId,
+                ),
+            ).toEqual([originalLeftSlideIds[1], originalLeftSlideIds[0]]),
+        );
+        expect(Array.from(right.querySelectorAll<HTMLElement>('.slideViewport')).map((viewport) => viewport.dataset.slideId)).toEqual([
+            originalLeftSlideIds[1],
+            originalLeftSlideIds[0],
+        ]);
     });
 
     it('converts typed markdown bullet shortcuts through beforeinput', async () => {

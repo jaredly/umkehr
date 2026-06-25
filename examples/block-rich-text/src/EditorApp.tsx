@@ -4073,11 +4073,24 @@ function SlideBlockView({
     } as CSSProperties;
     return (
         <article
-            className={['slideViewport', `slideViewport-${mode}`, `slideTransition-${meta.transition}`].join(' ')}
+            ref={(element) => context.registerRow(node.block.id, element)}
+            className={[
+                'slideViewport',
+                `slideViewport-${mode}`,
+                `slideTransition-${meta.transition}`,
+                context.draggingSubtreeIds.has(node.block.id) ? 'dragging' : '',
+                context.draggingId === node.block.id ? 'draggingRoot' : '',
+                context.dropTarget?.indicatorBlockId === node.block.id
+                    ? `drop${capitalize(context.dropTarget.indicatorPlacement)}`
+                    : '',
+            ]
+                .filter(Boolean)
+                .join(' ')}
             data-slide-id={node.block.id}
             style={style}
+            onPointerDown={(event) => context.startBlockDragFromHandle(node.block.id, event)}
         >
-            <div className="slideSurface">
+            <div className="slideSurface" onPointerDown={(event) => event.stopPropagation()}>
                 {meta.showTitle ? (
                     <div className="slideTitle">
                         {renderEditableBlock({...node.block, depth: 0}, context, {
