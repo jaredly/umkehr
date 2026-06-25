@@ -1410,6 +1410,15 @@ select {
     opacity: 0.46;
 }
 
+.slideViewport.blockSelected {
+    outline: 1px solid #6aa7d8;
+    outline-offset: 2px;
+}
+
+.slideViewport.blockSelectionFocus {
+    outline-color: #2f76b7;
+}
+
 .slideViewport.dropBefore::before,
 .slideViewport.dropAfter::after {
     content: '';

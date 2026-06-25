@@ -3792,10 +3792,28 @@ function SlideDeckBlock({node, context}: {node: RenderTreeNode; context: RenderB
         : -1;
     const currentSlide = currentIndex >= 0 ? slides[currentIndex] : null;
     const deckTitle = blockPlainText(node.block);
-    const setMode = (mode: SlideDeckDisplayMode) =>
+    const selectSlideBlock = (slideId: string | null) => {
+        if (!slideId) return;
+        const selection = {
+            type: 'block' as const,
+            anchorBlockId: slideId,
+            focusBlockId: visibleSubtreeBlockIds(context.state, slideId).at(-1) ?? slideId,
+        };
+        context.runBlockControlCommand((current) => ({
+            state: current.state,
+            ops: [],
+            selection: replaceSelectionSet(current.state, selection, current.selection.primaryId),
+        }));
+        context.focusBlockSelectionTarget(selection);
+    };
+    const setMode = (mode: SlideDeckDisplayMode) => {
         context.setSlideDeckUiForBlock(node.block.id, (current) => ({...current, mode}));
-    const setCurrentSlide = (slideId: string | null) =>
+        if (mode === 'presentation') selectSlideBlock(currentSlideId);
+    };
+    const setCurrentSlide = (slideId: string | null, select = ui.mode === 'presentation') => {
         context.setSlideDeckUiForBlock(node.block.id, (current) => ({...current, currentSlideId: slideId}));
+        if (select) selectSlideBlock(slideId);
+    };
     const showPrevious = () => {
         if (!slides.length) return;
         const previous = slides[Math.max(0, currentIndex - 1)] ?? slides[0];
@@ -3831,14 +3849,15 @@ function SlideDeckBlock({node, context}: {node: RenderTreeNode; context: RenderB
     }, [ui.fullScreen]);
 
     const handlePresentationKeyDown = (event: KeyboardEvent<HTMLElement>) => {
-        if (eventFromEditableSurface(event.target)) return;
-        if (event.key === 'ArrowRight' || event.key === 'PageDown' || event.key === ' ') {
+        const modifierPressed = event.altKey || event.metaKey || event.ctrlKey;
+        if (!modifierPressed && (event.key === 'ArrowRight' || event.key === 'PageDown' || event.key === ' ')) {
             event.preventDefault();
             showNext();
-        } else if (event.key === 'ArrowLeft' || event.key === 'PageUp') {
+        } else if (!modifierPressed && (event.key === 'ArrowLeft' || event.key === 'PageUp')) {
             event.preventDefault();
             showPrevious();
         } else if (event.key === 'Escape' && document.fullscreenElement === presentationRef.current) {
+            if (eventFromEditableSurface(event.target)) return;
             event.preventDefault();
             void document.exitFullscreen?.();
             setFullScreen(false);
@@ -4080,6 +4099,8 @@ function SlideBlockView({
                 `slideTransition-${meta.transition}`,
                 context.draggingSubtreeIds.has(node.block.id) ? 'dragging' : '',
                 context.draggingId === node.block.id ? 'draggingRoot' : '',
+                context.blockLevelDecorationsByBlock.get(node.block.id)?.selected ? 'blockSelected' : '',
+                context.blockLevelDecorationsByBlock.get(node.block.id)?.focus ? 'blockSelectionFocus' : '',
                 context.dropTarget?.indicatorBlockId === node.block.id
                     ? `drop${capitalize(context.dropTarget.indicatorPlacement)}`
                     : '',

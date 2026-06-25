@@ -3788,6 +3788,47 @@ describe('Block rich text example UI', () => {
         ]);
     });
 
+    it('advances presentation slides with keyboard navigation and selects the shown slide', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'slide-deck');
+        await waitFor(() => expect(left.querySelectorAll('.slideViewport')).toHaveLength(1));
+        fireEvent.click(within(left).getByRole('button', {name: 'Add slide'}));
+        await waitFor(() => expect(left.querySelectorAll('.slideViewport')).toHaveLength(2));
+        fireEvent.click(within(left).getByRole('button', {name: 'Add slide'}));
+        await waitFor(() => expect(left.querySelectorAll('.slideViewport')).toHaveLength(3));
+
+        const overviewSlideIds = Array.from(left.querySelectorAll<HTMLElement>('.slideViewport')).map(
+            (viewport) => viewport.dataset.slideId,
+        );
+        fireEvent.click(within(left).getByRole('button', {name: 'Presentation'}));
+
+        const currentSlide = () => left.querySelector<HTMLElement>('.slideDeckPresentation .slideViewport');
+        await waitFor(() => {
+            expect(currentSlide()?.dataset.slideId).toBe(overviewSlideIds[2]);
+            expect(currentSlide()?.classList.contains('blockSelected')).toBe(true);
+            expect(currentSlide()?.classList.contains('blockSelectionFocus')).toBe(true);
+        });
+
+        const slideTitle = currentSlide()?.querySelector<HTMLElement>('[role="textbox"]');
+        if (!slideTitle) throw new Error('missing slide title');
+        fireEvent.keyDown(slideTitle, {key: 'ArrowLeft'});
+        await waitFor(() => expect(currentSlide()?.dataset.slideId).toBe(overviewSlideIds[1]));
+        expect(currentSlide()?.classList.contains('blockSelected')).toBe(true);
+
+        const presentation = left.querySelector<HTMLElement>('.slideDeckPresentation');
+        if (!presentation) throw new Error('missing presentation deck');
+        fireEvent.keyDown(presentation, {key: ' '});
+        await waitFor(() => expect(currentSlide()?.dataset.slideId).toBe(overviewSlideIds[2]));
+
+        fireEvent.keyDown(presentation, {key: 'ArrowLeft'});
+        await waitFor(() => expect(currentSlide()?.dataset.slideId).toBe(overviewSlideIds[1]));
+        fireEvent.keyDown(presentation, {key: 'ArrowRight'});
+        await waitFor(() => expect(currentSlide()?.dataset.slideId).toBe(overviewSlideIds[2]));
+    });
+
     it('converts typed markdown bullet shortcuts through beforeinput', async () => {
         const view = render(<App />);
         const {left, right} = panels(view);
