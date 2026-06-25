@@ -6566,6 +6566,42 @@ describe('Block rich text example UI', () => {
         expect(retainedHighlightText(blocks(left)[1])).toBe('wx');
     });
 
+    it('shows a text selection while pointer-dragging before mouseup', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abcd');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abcd'));
+
+        withCaretRangeFromPoints(
+            [
+                {maxY: 20, block: blocks(left)[0], offset: 1},
+                {maxY: 80, block: blocks(left)[0], offset: 3},
+            ],
+            () => {
+                fireEvent.pointerDown(blocks(left)[0], {
+                    button: 0,
+                    buttons: 1,
+                    isPrimary: true,
+                    pointerId: 1,
+                    clientX: 10,
+                    clientY: 10,
+                });
+                fireEvent.pointerMove(window, {
+                    button: 0,
+                    buttons: 1,
+                    isPrimary: true,
+                    pointerId: 1,
+                    clientX: 12,
+                    clientY: 60,
+                });
+            },
+        );
+
+        await waitFor(() => expect(retainedHighlightText(blocks(left)[0])).toBe('bc'));
+    });
+
     it('keeps the existing selection visible while Cmd-dragging another selection', async () => {
         const view = render(<App />);
         const {left} = panels(view);

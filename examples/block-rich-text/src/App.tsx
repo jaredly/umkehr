@@ -1046,10 +1046,10 @@ function BlockEditor({
     const decorationsByBlock = useMemo(
         () =>
             decorationsForSelectionSet(replica.state, resolvedSelectionSet, {
-                includePrimary: !hasFocus || isExtendingSelection,
+                includePrimary: !hasFocus || isExtendingSelection || dragSelection !== null,
                 includePrimaryBoundaryCaret: true,
             }),
-        [hasFocus, isExtendingSelection, replica.state, resolvedSelectionSet],
+        [dragSelection, hasFocus, isExtendingSelection, replica.state, resolvedSelectionSet],
     );
     const blockLevelDecorationsByBlock = useMemo(
         () => blockLevelDecorationsForSelectionSet(replica.state, resolvedSelectionSet),
