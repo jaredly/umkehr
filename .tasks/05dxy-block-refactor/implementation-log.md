@@ -54,21 +54,34 @@
 - Moved shared popover state types into `blockEditorTypes.ts`.
 - Verification: `pnpm build` passes.
 
+## Additional EditorApp Split
+
+- Added `src/mediaBlocks.tsx`.
+  - Moved `PreviewableCodeBlock`, dynamic Mermaid/Vega-Lite rendering, code preview state/rendering, preview URL card fetching/editing, and image preview rendering.
+  - Kept media controls wired through existing props/callbacks.
+- Added `src/slashCommands.tsx`.
+  - Moved slash command types, command list/filtering, trigger extraction/deletion helpers, and `SlashCommandPopover`.
+  - Left `runSelectionCommandEverywhere` in `EditorApp.tsx` because it is a broader multi-selection command helper.
+- Added `src/blockTypeHelpers.ts`.
+  - Moved ordered list numbering plus block type menu/meta conversion helpers.
+- Added `src/editorAppUtils.ts`.
+  - Moved app-level history replay helpers, toolbar undo derivation, transient selection overlaying, and keystroke formatting.
+- Verification: `pnpm build` passes after each extraction.
+- Current size checkpoint: `EditorApp.tsx` is about 7,494 lines.
+
 ## Verification Summary
 
 - Final `pnpm build`: passes.
 - Final `pnpm exec vitest -- run src/App.test.tsx src/typingPerf.test.ts`: fails.
-  - Existing/baseline failure: `src/App.test.tsx` many-blocks block-selection performance test still exceeds 50ms. It measured about 336ms in the final run.
+  - Existing/baseline failure: `src/App.test.tsx` many-blocks block-selection performance test still exceeds 50ms. It measured about 332ms in the latest run.
   - Existing/baseline failure: `src/undoHistory.test.ts` code block double-enter undo expectation still receives `['ab\n\n']` instead of `['ab', '']`.
-  - Additional observed perf failure in final run: `src/typingPerf.test.ts` moderate sequential typing workload measured about 138ms against a 120ms threshold. This appears timing-sensitive; no command/model logic was changed by this refactor.
+  - Additional observed perf failure: `src/typingPerf.test.ts` moderate sequential typing workload measured about 152ms against a 120ms threshold. This appears timing-sensitive; no command/model logic was changed by this refactor.
 
 ## Deferred Work
 
 - `EditorApp.tsx` is still large. The first implementation pass created the app entrypoint and several leaf/shared modules, but deeper phases remain:
   - annotation views
-  - slash command module
   - table/kanban rendering
   - editable block surface
-  - media/code preview blocks
   - controller hook seam
   - CSS split
