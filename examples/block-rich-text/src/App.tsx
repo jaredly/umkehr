@@ -7650,36 +7650,38 @@ function BlockInlineControls({
     if (meta.type === 'code') {
         const previewKind = codePreviewKindForLanguage(meta.language);
         return (
-            <div className="codeControls" contentEditable={false}>
-                <input
-                    className="codeLanguage"
-                    value={meta.language}
-                    placeholder="plain"
-                    aria-label="Code language"
-                    onPointerDown={stopEditorControlEvent}
-                    onMouseDown={stopEditorControlEvent}
-                    onMouseUp={stopEditorControlEvent}
-                    onClick={stopEditorControlEvent}
-                    onChange={(event) => onSetCodeLanguage(event.currentTarget.value)}
-                />
-                {previewKind ? (
-                    <label
-                        className="codePreviewToggle"
-                        onPointerDown={stopEditorControlEvent}
-                        onMouseDown={stopEditorControlEvent}
-                        onMouseUp={stopEditorControlEvent}
-                        onClick={stopEditorControlEvent}
-                    >
-                        <input
-                            type="checkbox"
-                            checked={meta.preview === previewKind}
-                            aria-label="Preview code"
-                            onChange={(event) => onSetCodePreview(event.currentTarget.checked)}
-                        />
-                        Preview
-                    </label>
-                ) : null}
-            </div>
+            <details
+                className="codeControls"
+                contentEditable={false}
+                onPointerDown={stopEditorControlEvent}
+                onMouseDown={stopEditorControlEvent}
+                onMouseUp={stopEditorControlEvent}
+                onClick={stopEditorControlEvent}
+            >
+                <summary className="codeControlsButton" aria-label="Code block options">
+                    <span aria-hidden="true">...</span>
+                </summary>
+                <div className="codeControlsMenu">
+                    <input
+                        className="codeLanguage"
+                        value={meta.language}
+                        placeholder="plain"
+                        aria-label="Code language"
+                        onChange={(event) => onSetCodeLanguage(event.currentTarget.value)}
+                    />
+                    {previewKind ? (
+                        <label className="codePreviewToggle">
+                            <input
+                                type="checkbox"
+                                checked={meta.preview === previewKind}
+                                aria-label="Preview code"
+                                onChange={(event) => onSetCodePreview(event.currentTarget.checked)}
+                            />
+                            Preview
+                        </label>
+                    ) : null}
+                </div>
+            </details>
         );
     }
     if (meta.type === 'callout') {

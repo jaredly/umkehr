@@ -197,6 +197,16 @@ const setBlockType = (panel: HTMLElement, value: string) => {
     fireEvent.change(select, {target: {value}});
 };
 
+const openCodeBlockOptions = (panel: HTMLElement) => {
+    const button = within(panel).getByLabelText('Code block options');
+    if (!button.closest('details')?.hasAttribute('open')) fireEvent.click(button);
+};
+
+const codeLanguageField = (panel: HTMLElement): HTMLInputElement => {
+    openCodeBlockOptions(panel);
+    return within(panel).getByRole('textbox', {name: 'Code language'}) as HTMLInputElement;
+};
+
 const waitForBlockTexts = async (panel: HTMLElement, expected: string[]) => {
     await waitFor(
         () => {
@@ -1351,6 +1361,7 @@ describe('Block rich text example UI', () => {
         const {left, right} = panels(view);
 
         setBlockType(left, 'code');
+        openCodeBlockOptions(left);
         expect(within(left).queryByRole('checkbox', {name: 'Preview code'})).toBeNull();
 
         const language = within(left).getByRole('textbox', {name: 'Code language'});
@@ -3223,7 +3234,7 @@ describe('Block rich text example UI', () => {
 
         selectCaret(blocks(left)[0], 0);
         setBlockType(left, 'code');
-        const language = within(left).getByRole('textbox', {name: 'Code language'});
+        const language = codeLanguageField(left);
 
         language.focus();
         fireEvent.change(language, {target: {value: 't'}});
@@ -3232,7 +3243,7 @@ describe('Block rich text example UI', () => {
         fireEvent.change(language, {target: {value: 'ts'}});
         await waitFor(() => {
             expect(document.activeElement).toBe(language);
-            expect((within(right).getByRole('textbox', {name: 'Code language'}) as HTMLInputElement).value).toBe('ts');
+            expect(codeLanguageField(right).value).toBe('ts');
         });
     });
 
@@ -3243,7 +3254,7 @@ describe('Block rich text example UI', () => {
         selectCaret(blocks(left)[0], 0);
         beforeInputText(blocks(left)[0], 'const answer = "yes";');
         setBlockType(left, 'code');
-        const language = within(left).getByRole('textbox', {name: 'Code language'});
+        const language = codeLanguageField(left);
         fireEvent.change(language, {target: {value: 'js'}});
 
         await waitFor(() => {

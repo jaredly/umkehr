@@ -539,13 +539,71 @@ select {
 }
 
 .codeControls {
-    display: inline-flex;
-    align-items: center;
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    z-index: 4;
+}
+
+.codeControlsButton {
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    border: 1px solid #cbd5df;
+    border-radius: 6px;
+    color: #5f6f7d;
+    background: rgba(255, 255, 255, 0.92);
+    box-shadow: 0 1px 3px rgba(31, 45, 58, 0.12);
+    cursor: pointer;
+    font: inherit;
+    line-height: 1;
+    list-style: none;
+    opacity: 0;
+    user-select: none;
+}
+
+.codeControlsButton::-webkit-details-marker {
+    display: none;
+}
+
+.blockRow:hover .codeControlsButton,
+.blockRow:focus-within .codeControlsButton,
+.codeControls[open] .codeControlsButton {
+    opacity: 1;
+}
+
+.codeControlsButton:hover,
+.codeControlsButton:focus-visible,
+.codeControls[open] .codeControlsButton {
+    border-color: #9fb0bf;
+    color: #23313d;
+    background: #fff;
+}
+
+.codeControlsMenu {
+    position: absolute;
+    top: 30px;
+    right: 0;
     gap: 8px;
+    min-width: 154px;
+    padding: 8px;
+    border: 1px solid #cbd5df;
+    border-radius: 6px;
+    background: #fff;
+    box-shadow: 0 8px 22px rgba(31, 45, 58, 0.16);
+}
+
+.codeControls:not([open]) .codeControlsMenu {
+    display: none;
+}
+
+.codeControls[open] .codeControlsMenu {
+    display: grid;
 }
 
 .codePreviewToggle {
-    display: inline-flex;
+    display: flex;
     align-items: center;
     gap: 4px;
     color: #4a5967;
@@ -1485,8 +1543,13 @@ select {
 }
 
 .codeLanguage {
-    width: 92px;
+    width: 100%;
     padding: 0 8px;
+}
+
+.codeControlsMenu .codeLanguage {
+    box-sizing: border-box;
+    margin-top: 0;
 }
 
 .calloutKind {
