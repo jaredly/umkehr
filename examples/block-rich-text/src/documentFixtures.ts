@@ -46,6 +46,9 @@ export const documentFixtures: DocumentFixture[] = [
     {id: 'mermaid-diagram', label: 'Mermaid diagram', document: mermaidDiagram},
     {id: 'vega-lite-chart', label: 'Vega-Lite chart', document: vegaLiteChart},
     {id: 'rating-polls', label: 'Rating polls', document: ratingPolls},
+    {id: 'answer-polls', label: 'Answer polls', document: answerPolls},
+    {id: 'matrix-polls', label: 'Matrix polls', document: matrixPolls},
+    {id: 'long-answer-polls', label: 'Long-answer polls', document: longAnswerPolls},
     {
         id: 'code-callouts-images',
         label: 'Code, callouts, and images',
@@ -244,6 +247,126 @@ function ratingPolls(): ImportDocument {
                 },
             },
             content: 'Locked poll: how risky is the metadata merge?',
+        },
+    ];
+}
+
+function answerPolls(): ImportDocument {
+    return [
+        {type: 'heading', meta: {level: 2}, content: 'Answer poll fixture'},
+        {
+            type: 'poll',
+            meta: {
+                kind: 'children',
+                choiceMode: 'single',
+                allowChange: true,
+                votes: {
+                    ulrich: {type: 'single', optionId: 'archived-answer', ts: '00010'},
+                },
+            },
+            content: 'Which direction should we explore next?',
+            children: [
+                {content: 'Matrix polls'},
+                {content: 'Long-answer polls'},
+                {content: 'Export polish'},
+            ],
+        },
+        {
+            type: 'poll',
+            meta: {
+                kind: 'children',
+                choiceMode: 'multiple',
+                allowChange: true,
+                votes: {},
+            },
+            content: 'Which improvements matter?',
+            children: [
+                {content: 'Accessibility'},
+                {content: 'Offline conflict tests'},
+                {content: 'Mobile layout'},
+            ],
+        },
+    ];
+}
+
+function matrixPolls(): ImportDocument {
+    return [
+        {type: 'heading', meta: {level: 2}, content: 'Matrix poll fixture'},
+        {
+            type: 'poll',
+            meta: {
+                kind: 'matrix',
+                choiceMode: 'single',
+                allowChange: true,
+                votes: {
+                    ulrich: {
+                        type: 'matrix',
+                        answers: {
+                            'row-archived': 'column-archived',
+                        },
+                        ts: '00020',
+                    },
+                },
+            },
+            content: 'How do these areas feel?',
+            children: [
+                {
+                    content: 'Rows',
+                    children: [{content: 'Editing'}, {content: 'Sync'}, {content: 'Export'}],
+                },
+                {
+                    content: 'Columns',
+                    children: [{content: 'Needs work'}, {content: 'Good'}, {content: 'Excellent'}],
+                },
+                {content: 'Ignored extra child'},
+            ],
+        },
+        {
+            type: 'poll',
+            meta: {
+                kind: 'matrix',
+                choiceMode: 'multiple',
+                allowChange: true,
+                votes: {},
+            },
+            content: 'Which teams should review each area?',
+            children: [
+                {
+                    content: 'Rows',
+                    children: [{content: 'Accessibility'}, {content: 'Persistence'}],
+                },
+                {
+                    content: 'Columns',
+                    children: [{content: 'Design'}, {content: 'Engineering'}, {content: 'QA'}],
+                },
+            ],
+        },
+    ];
+}
+
+function longAnswerPolls(): ImportDocument {
+    return [
+        {type: 'heading', meta: {level: 2}, content: 'Long-answer poll fixture'},
+        {
+            type: 'poll',
+            meta: {
+                kind: 'long',
+                allowChange: true,
+                votes: {
+                    ulrich: {type: 'long', text: 'The merge semantics are the most interesting part.', ts: '00030'},
+                    uwe: {type: 'long', text: 'The UI should stay compact inside the editor.', ts: '00031'},
+                },
+            },
+            content: 'What should we improve next?',
+        },
+        {
+            type: 'poll',
+            meta: {
+                kind: 'long',
+                allowChange: false,
+                votes: {},
+            },
+            content: 'Locked long-answer prompt',
         },
     ];
 }

@@ -289,10 +289,14 @@ import {
     orderDraggedBlockIdsForCellSlot,
 } from './blockDropTargets';
 import {
+    activePollVotes,
+    choiceResults,
     currentUserVote,
+    matrixPollResults,
     normalizeUserId,
     ratingOptionIds,
     singleChoiceResults,
+    votedOptionIds,
     type PollVoteCommandData,
 } from './pollBlocks';
 import {
@@ -331,6 +335,8 @@ import {
 type RichFormattedBlock = FormattedBlock<RichBlockMeta>;
 type RenderedAnnotation = ReturnType<typeof renderedAnnotations>[number];
 type CommentFocusRequest = {blockId: string; token: number; selection?: EditorSelection};
+type PollOptionView = {id: string; label: string; archived?: boolean};
+type MatrixPollView = {rows: PollOptionView[]; columns: PollOptionView[]};
 
 const BOOLEAN_INLINE_MARKS: BooleanInlineMark[] = ['bold', 'italic', 'strikethrough'];
 const BARE_INLINE_MARKS: BareInlineMark[] = [...BOOLEAN_INLINE_MARKS, CODE_MARK];
@@ -3443,6 +3449,23 @@ const buildRenderTree = (blocks: RichFormattedBlock[]): RenderTreeNode[] => {
     return roots;
 };
 
+const blockPlainText = (block: RichFormattedBlock): string =>
+    block.runs.map((run) => run.text).join('');
+
+const matrixPollViewForNode = (node: RenderTreeNode): MatrixPollView => {
+    const [rowGroup, columnGroup] = node.children;
+    return {
+        rows: (rowGroup?.children ?? []).map((row) => ({
+            id: row.block.id,
+            label: blockPlainText(row.block) || 'Untitled row',
+        })),
+        columns: (columnGroup?.children ?? []).map((column) => ({
+            id: column.block.id,
+            label: blockPlainText(column.block) || 'Untitled column',
+        })),
+    };
+};
+
 const renderBlockNode = (node: RenderTreeNode, context: RenderBlockContext): ReactElement => {
     const meta = node.block.block.meta;
     if (meta.type === 'table') {
@@ -3472,7 +3495,19 @@ const renderBlockNode = (node: RenderTreeNode, context: RenderBlockContext): Rea
 
     return (
         <div key={node.block.id} className="renderTreeBranch">
-            {renderEditableBlock(node.block, context)}
+            {renderEditableBlock(node.block, context, {
+                pollOptions:
+                    meta.type === 'poll' && meta.kind === 'children'
+                        ? node.children.map((child) => ({
+                              id: child.block.id,
+                              label: blockPlainText(child.block) || 'Untitled option',
+                          }))
+                        : undefined,
+                matrixPoll:
+                    meta.type === 'poll' && meta.kind === 'matrix'
+                        ? matrixPollViewForNode(node)
+                        : undefined,
+            })}
             {node.children.map((child) => renderBlockNode(child, context))}
         </div>
     );
@@ -4448,6 +4483,8 @@ type EditableBlockRenderOptions = {
     hideBlockAffordance?: boolean;
     hideInlineControls?: boolean;
     registerBlockRow?: boolean;
+    pollOptions?: PollOptionView[];
+    matrixPoll?: MatrixPollView;
 };
 
 const renderEditableBlock = (
@@ -4475,6 +4512,8 @@ const renderEditableBlock = (
             hideBlockAffordance={options.hideBlockAffordance}
             hideInlineControls={options.hideInlineControls}
             registerBlockRow={options.registerBlockRow}
+            pollOptions={options.pollOptions ?? []}
+            matrixPoll={options.matrixPoll ?? {rows: [], columns: []}}
             isTableCell={isTableCellBlock(context.state, block.id)}
             listNumber={context.orderedListNumbers.get(block.id) ?? null}
             previousBlockId={previousBlock?.id ?? null}
@@ -4691,15 +4730,22 @@ const renderEditableBlock = (
             onCodeHoverEnter={context.showCodeHoverFromRange}
             onCodeHoverLeave={context.hideCodeHover}
             onInlineEmbedOpen={context.openInlineEmbed}
-            onPollVote={(optionId) => {
+            onPollVote={(optionId, rowId) => {
                 context.runEditCommand((current) => {
                     const currentBlock = current.state.state.blocks[block.id];
                     if (
                         !context.userId ||
                         !currentBlock ||
                         currentBlock.meta.type !== 'poll' ||
-                        currentBlock.meta.kind !== 'rating'
+                        (
+                            currentBlock.meta.kind !== 'rating' &&
+                            currentBlock.meta.kind !== 'children' &&
+                            currentBlock.meta.kind !== 'matrix'
+                        )
                     ) {
+                        return {state: current.state, ops: [], selection: current.selection};
+                    }
+                    if (currentBlock.meta.kind === 'matrix' && !rowId) {
                         return {state: current.state, ops: [], selection: current.selection};
                     }
                     const previous = currentBlock.meta.votes[context.userId];
@@ -4707,7 +4753,32 @@ const renderEditableBlock = (
                         return {state: current.state, ops: [], selection: current.selection};
                     }
                     const voteTs = nextReplicaTs(current);
-                    const after: PollVote = {type: 'single', optionId, ts: voteTs};
+                    const after: PollVote =
+                        currentBlock.meta.kind === 'children' && currentBlock.meta.choiceMode === 'multiple'
+                            ? {
+                                  type: 'multiple',
+                                  optionIds: toggleOptionId(
+                                      previous?.type === 'multiple' && !previous.deleted
+                                          ? previous.optionIds
+                                          : [],
+                                      optionId,
+                                  ),
+                                  ts: voteTs,
+                              }
+                            : currentBlock.meta.kind === 'matrix'
+                              ? {
+                                    type: 'matrix',
+                                    answers: nextMatrixAnswers(
+                                        previous?.type === 'matrix' && !previous.deleted
+                                            ? previous.answers
+                                            : {},
+                                        rowId ?? '',
+                                        optionId,
+                                        currentBlock.meta.choiceMode === 'multiple',
+                                    ),
+                                    ts: voteTs,
+                                }
+                            : {type: 'single', optionId, ts: voteTs};
                     const nextMeta = {
                         ...currentBlock.meta,
                         votes: {...currentBlock.meta.votes, [context.userId]: after},
@@ -4726,6 +4797,43 @@ const renderEditableBlock = (
                         selection: current.selection,
                         commandLabel: 'Vote in poll',
                         pollVote,
+                    };
+                });
+            }}
+            onPollLongAnswer={(text) => {
+                context.runEditCommand((current) => {
+                    const currentBlock = current.state.state.blocks[block.id];
+                    if (
+                        !context.userId ||
+                        !currentBlock ||
+                        currentBlock.meta.type !== 'poll' ||
+                        currentBlock.meta.kind !== 'long' ||
+                        !text.trim()
+                    ) {
+                        return {state: current.state, ops: [], selection: current.selection};
+                    }
+                    const previous = currentBlock.meta.votes[context.userId];
+                    if (previous && !previous.deleted && !currentBlock.meta.allowChange) {
+                        return {state: current.state, ops: [], selection: current.selection};
+                    }
+                    const after: PollVote = {type: 'long', text, ts: nextReplicaTs(current)};
+                    const nextMeta = {
+                        ...currentBlock.meta,
+                        votes: {...currentBlock.meta.votes, [context.userId]: after},
+                        ts: nextReplicaTs(current),
+                    };
+                    const result = setBlockMeta(current.state, block.id, nextMeta);
+                    return {
+                        state: result.state,
+                        ops: result.ops,
+                        selection: current.selection,
+                        commandLabel: 'Answer poll',
+                        pollVote: {
+                            blockId: block.id,
+                            userId: context.userId,
+                            ...(previous ? {before: previous} : {}),
+                            after,
+                        },
                     };
                 });
             }}
@@ -5732,6 +5840,8 @@ function EditableBlock({
     block,
     userId,
     attachment,
+    pollOptions,
+    matrixPoll,
     variant = 'block',
     ariaLabel = 'Block text',
     placeholder,
@@ -5784,6 +5894,7 @@ function EditableBlock({
     onCodeHoverLeave,
     onInlineEmbedOpen,
     onPollVote,
+    onPollLongAnswer,
     onToggleTodo,
     onSetCodeLanguage,
     onSetCodePreview,
@@ -5811,6 +5922,8 @@ function EditableBlock({
     block: RichFormattedBlock;
     userId: string;
     attachment: ImageAttachment | null;
+    pollOptions: PollOptionView[];
+    matrixPoll: MatrixPollView;
     variant?: 'block' | 'table-row-header';
     ariaLabel?: string;
     placeholder?: string;
@@ -5862,7 +5975,8 @@ function EditableBlock({
     onCodeHoverEnter(range: CodeTargetRange & {language: string}, element: HTMLElement): void;
     onCodeHoverLeave(): void;
     onInlineEmbedOpen(charId: string, element: HTMLElement): void;
-    onPollVote(optionId: string): void;
+    onPollVote(optionId: string, rowId?: string): void;
+    onPollLongAnswer(text: string): void;
     onToggleTodo(): void;
     onSetCodeLanguage(language: string): void;
     onSetCodePreview(enabled: boolean): void;
@@ -6266,7 +6380,10 @@ function EditableBlock({
                     meta={meta}
                     userId={userId}
                     question={editableSurface}
+                    childOptions={pollOptions}
+                    matrixPoll={matrixPoll}
                     onVote={onPollVote}
+                    onLongAnswer={onPollLongAnswer}
                 />
             ) : isPreviewableCodeMeta(meta) ? (
                 <PreviewableCodeBlock
@@ -6295,43 +6412,81 @@ function PollBlock({
     meta,
     userId,
     question,
+    childOptions,
+    matrixPoll,
     onVote,
+    onLongAnswer,
 }: {
     meta: PollMeta;
     userId: string;
     question: ReactElement;
-    onVote(optionId: string): void;
+    childOptions: PollOptionView[];
+    matrixPoll: MatrixPollView;
+    onVote(optionId: string, rowId?: string): void;
+    onLongAnswer(text: string): void;
 }) {
-    if (meta.kind !== 'rating') {
+    if (meta.kind === 'long') {
+        return (
+            <LongAnswerPollBlock
+                meta={meta}
+                userId={userId}
+                question={question}
+                onAnswer={onLongAnswer}
+            />
+        );
+    }
+    if (meta.kind === 'matrix') {
+        return (
+            <MatrixPollBlock
+                meta={meta}
+                userId={userId}
+                question={question}
+                matrixPoll={matrixPollWithArchivedOptions(meta, matrixPoll)}
+                onVote={onVote}
+            />
+        );
+    }
+    if (meta.kind !== 'rating' && meta.kind !== 'children') {
         return <div className="pollBlock">{question}</div>;
     }
-    const optionIds = ratingOptionIds(meta);
+    const options: PollOptionView[] =
+        meta.kind === 'rating'
+            ? ratingOptionIds(meta).map((id) => ({id, label: id}))
+            : childPollOptions(meta, childOptions);
+    const optionIds = options.map((option) => option.id);
     const userVote = userId ? currentUserVote(meta, userId) : null;
-    const votedOptionId = userVote?.type === 'single' ? userVote.optionId : null;
-    const results = singleChoiceResults(meta, optionIds);
+    const selectedOptionIds = selectedPollOptionIds(userVote);
+    const results = meta.kind === 'rating' ? singleChoiceResults(meta, optionIds) : choiceResults(meta, optionIds);
     const resultsByOption = new Map(results.map((result) => [result.optionId, result]));
     const canVote = Boolean(userId) && (!userVote || meta.allowChange);
     const showResults = Boolean(userVote);
+    const multiple = meta.kind === 'children' && meta.choiceMode === 'multiple';
 
     return (
         <div className="pollBlock">
             {question}
             <div className="pollControls" contentEditable={false}>
-                <div className="pollOptions" role="radiogroup" aria-label="Poll rating">
-                    {optionIds.map((optionId) => {
-                        const result = resultsByOption.get(optionId);
-                        const selected = votedOptionId === optionId;
+                <div className="pollOptions" role={multiple ? 'group' : 'radiogroup'} aria-label="Poll options">
+                    {options.map((option) => {
+                        const result = resultsByOption.get(option.id);
+                        const selected = selectedOptionIds.has(option.id);
                         return (
                             <button
-                                key={optionId}
+                                key={option.id}
                                 type="button"
-                                className={selected ? 'pollOption selected' : 'pollOption'}
+                                className={[
+                                    'pollOption',
+                                    selected ? 'selected' : '',
+                                    option.archived ? 'archived' : '',
+                                ]
+                                    .filter(Boolean)
+                                    .join(' ')}
                                 aria-pressed={selected}
                                 disabled={!canVote}
                                 onMouseDown={(event) => event.preventDefault()}
-                                onClick={() => onVote(optionId)}
+                                onClick={() => onVote(option.id)}
                             >
-                                <span>{optionId}</span>
+                                <span>{option.label}</span>
                                 {showResults ? (
                                     <span className="pollResult">
                                         {result?.percentage ?? 0}% · {result?.count ?? 0}
@@ -6345,6 +6500,192 @@ function PollBlock({
         </div>
     );
 }
+
+const selectedPollOptionIds = (vote: PollVote | null): Set<string> => {
+    if (!vote) return new Set();
+    if (vote.type === 'single') return new Set([vote.optionId]);
+    if (vote.type === 'multiple') return new Set(vote.optionIds);
+    return new Set();
+};
+
+const childPollOptions = (meta: PollMeta, childOptions: PollOptionView[]): PollOptionView[] => {
+    const activeIds = new Set(childOptions.map((option) => option.id));
+    const archived = votedOptionIds(meta)
+        .filter((id) => !activeIds.has(id))
+        .map((id) => ({id, label: 'Deleted option', archived: true}));
+    return [...childOptions, ...archived];
+};
+
+const toggleOptionId = (optionIds: string[], optionId: string): string[] =>
+    optionIds.includes(optionId)
+        ? optionIds.filter((id) => id !== optionId)
+        : [...optionIds, optionId];
+
+function MatrixPollBlock({
+    meta,
+    userId,
+    question,
+    matrixPoll,
+    onVote,
+}: {
+    meta: PollMeta;
+    userId: string;
+    question: ReactElement;
+    matrixPoll: MatrixPollView;
+    onVote(optionId: string, rowId?: string): void;
+}) {
+    const userVote = userId ? currentUserVote(meta, userId) : null;
+    const matrixVote = userVote?.type === 'matrix' ? userVote : null;
+    const canVote = Boolean(userId) && (!userVote || meta.allowChange);
+    const showResults = Boolean(matrixVote);
+    const multiple = meta.choiceMode === 'multiple';
+    const results = matrixPollResults(meta, matrixPoll.rows.map((row) => row.id), matrixPoll.columns.map((column) => column.id));
+
+    return (
+        <div className="pollBlock">
+            {question}
+            <div className="pollControls matrixPollControls" contentEditable={false}>
+                <div className="matrixPollGrid" style={{'--matrix-columns': matrixPoll.columns.length} as CSSProperties}>
+                    <div className="matrixPollCorner" />
+                    {matrixPoll.columns.map((column) => (
+                        <div key={column.id} className={column.archived ? 'matrixPollHeader archived' : 'matrixPollHeader'}>
+                            {column.label}
+                        </div>
+                    ))}
+                    {matrixPoll.rows.map((row) => (
+                        <Fragment key={row.id}>
+                            <div className={row.archived ? 'matrixPollRowLabel archived' : 'matrixPollRowLabel'}>
+                                {row.label}
+                            </div>
+                            {matrixPoll.columns.map((column) => {
+                                const selected = matrixVote ? matrixAnswerSelected(matrixVote.answers[row.id], column.id) : false;
+                                const result = results.get(row.id)?.get(column.id);
+                                return (
+                                    <button
+                                        key={column.id}
+                                        type="button"
+                                        className={selected ? 'matrixPollCell selected' : 'matrixPollCell'}
+                                        aria-pressed={selected}
+                                        disabled={!canVote}
+                                        onMouseDown={(event) => event.preventDefault()}
+                                        onClick={() => onVote(column.id, row.id)}
+                                    >
+                                        <span>{multiple ? (selected ? '✓' : '+') : selected ? '●' : '○'}</span>
+                                        {showResults ? (
+                                            <span className="pollResult">
+                                                {result?.percentage ?? 0}% · {result?.count ?? 0}
+                                            </span>
+                                        ) : null}
+                                    </button>
+                                );
+                            })}
+                        </Fragment>
+                    ))}
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function LongAnswerPollBlock({
+    meta,
+    userId,
+    question,
+    onAnswer,
+}: {
+    meta: PollMeta;
+    userId: string;
+    question: ReactElement;
+    onAnswer(text: string): void;
+}) {
+    const userVote = userId ? currentUserVote(meta, userId) : null;
+    const userText = userVote?.type === 'long' ? userVote.text : '';
+    const [draft, setDraft] = useState(userText);
+    useEffect(() => setDraft(userText), [userText]);
+    const canSubmit = Boolean(userId) && (!userVote || meta.allowChange) && draft.trim().length > 0;
+    const showResponses = Boolean(userVote);
+    const responses = Object.entries(activePollVotes(meta))
+        .filter(([, vote]) => vote.type === 'long' && vote.text.trim().length > 0)
+        .map(([responseUserId, vote]) => ({userId: responseUserId, text: vote.type === 'long' ? vote.text : ''}));
+
+    return (
+        <div className="pollBlock">
+            {question}
+            <div className="pollControls longPollControls" contentEditable={false}>
+                {(!userVote || meta.allowChange) ? (
+                    <div className="longPollComposer">
+                        <textarea
+                            value={draft}
+                            rows={3}
+                            disabled={!userId}
+                            onChange={(event) => setDraft(event.currentTarget.value)}
+                        />
+                        <button
+                            type="button"
+                            disabled={!canSubmit}
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => onAnswer(draft)}
+                        >
+                            Submit
+                        </button>
+                    </div>
+                ) : null}
+                {showResponses ? (
+                    <div className="longPollResponses">
+                        {responses.map((response) => (
+                            <div key={response.userId} className="longPollResponse">
+                                <span>{response.userId}</span>
+                                <p>{response.text}</p>
+                            </div>
+                        ))}
+                    </div>
+                ) : null}
+            </div>
+        </div>
+    );
+}
+
+const nextMatrixAnswers = (
+    answers: Record<string, string | string[]>,
+    rowId: string,
+    columnId: string,
+    multiple: boolean,
+): Record<string, string | string[]> => {
+    if (!multiple) return {...answers, [rowId]: columnId};
+    const current = answers[rowId];
+    const currentIds = Array.isArray(current) ? current : typeof current === 'string' ? [current] : [];
+    return {...answers, [rowId]: toggleOptionId(currentIds, columnId)};
+};
+
+const matrixAnswerSelected = (answer: string | string[] | undefined, columnId: string): boolean =>
+    Array.isArray(answer) ? answer.includes(columnId) : answer === columnId;
+
+const matrixPollWithArchivedOptions = (meta: PollMeta, matrixPoll: MatrixPollView): MatrixPollView => {
+    const rowIds = new Set(matrixPoll.rows.map((row) => row.id));
+    const columnIds = new Set(matrixPoll.columns.map((column) => column.id));
+    const archivedRows = new Set<string>();
+    const archivedColumns = new Set<string>();
+    for (const vote of Object.values(activePollVotes(meta))) {
+        if (vote.type !== 'matrix') continue;
+        for (const [rowId, answer] of Object.entries(vote.answers)) {
+            if (!rowIds.has(rowId)) archivedRows.add(rowId);
+            const answers = Array.isArray(answer) ? answer : [answer];
+            for (const columnId of answers) {
+                if (!columnIds.has(columnId)) archivedColumns.add(columnId);
+            }
+        }
+    }
+    return {
+        rows: [
+            ...matrixPoll.rows,
+            ...[...archivedRows].map((id) => ({id, label: 'Deleted row', archived: true})),
+        ],
+        columns: [
+            ...matrixPoll.columns,
+            ...[...archivedColumns].map((id) => ({id, label: 'Deleted column', archived: true})),
+        ],
+    };
+};
 
 function RichTextEditableSurfaceInner({
     blockId,

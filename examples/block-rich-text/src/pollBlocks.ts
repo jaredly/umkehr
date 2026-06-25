@@ -47,6 +47,69 @@ export const singleChoiceResults = (meta: PollMeta, optionIds: string[]): PollRe
     }));
 };
 
+export const choiceResults = (meta: PollMeta, optionIds: string[]): PollResult[] => {
+    const counts = new Map(optionIds.map((optionId) => [optionId, 0]));
+    let total = 0;
+    for (const vote of Object.values(activePollVotes(meta))) {
+        if (vote.type === 'single') {
+            counts.set(vote.optionId, (counts.get(vote.optionId) ?? 0) + 1);
+            total++;
+        } else if (vote.type === 'multiple') {
+            for (const optionId of vote.optionIds) {
+                counts.set(optionId, (counts.get(optionId) ?? 0) + 1);
+            }
+            total++;
+        }
+    }
+    return Array.from(counts.entries()).map(([optionId, count]) => ({
+        optionId,
+        count,
+        percentage: total ? Math.round((count / total) * 100) : 0,
+    }));
+};
+
+export const votedOptionIds = (meta: PollMeta): string[] => {
+    const result = new Set<string>();
+    for (const vote of Object.values(activePollVotes(meta))) {
+        if (vote.type === 'single') {
+            result.add(vote.optionId);
+        } else if (vote.type === 'multiple') {
+            for (const optionId of vote.optionIds) result.add(optionId);
+        }
+    }
+    return [...result];
+};
+
+export const matrixPollResults = (
+    meta: PollMeta,
+    rowIds: string[],
+    columnIds: string[],
+): Map<string, Map<string, PollResult>> => {
+    const results = new Map<string, Map<string, PollResult>>();
+    for (const rowId of rowIds) {
+        const counts = new Map(columnIds.map((columnId) => [columnId, 0]));
+        let total = 0;
+        for (const vote of Object.values(activePollVotes(meta))) {
+            if (vote.type !== 'matrix') continue;
+            const answer = vote.answers[rowId];
+            if (answer === undefined) continue;
+            const answers = Array.isArray(answer) ? answer : [answer];
+            for (const columnId of answers) counts.set(columnId, (counts.get(columnId) ?? 0) + 1);
+            total++;
+        }
+        results.set(
+            rowId,
+            new Map(
+                [...counts.entries()].map(([columnId, count]) => [
+                    columnId,
+                    {optionId: columnId, count, percentage: total ? Math.round((count / total) * 100) : 0},
+                ]),
+            ),
+        );
+    }
+    return results;
+};
+
 export const mergeRichBlockMeta = (
     current: RichBlockMeta,
     incoming: RichBlockMeta,

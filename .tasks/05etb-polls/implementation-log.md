@@ -26,3 +26,22 @@
 - Added history replay coverage for concurrent offline poll votes from different users; replay preserves both votes after reconnect.
 - Verification: `npm exec vitest -- run examples/block-rich-text/src/undoHistory.test.ts examples/block-rich-text/src/history.test.ts examples/block-rich-text/src/documentFormat.test.ts examples/block-rich-text/src/pollBlocks.test.ts src/block-crdt/index.test.ts` passed.
 - Issue: `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx` failed only the existing performance-budget test `selects a block in the many blocks fixture in less than 50ms`; the measured time was ~339ms. Rerunning just that test also failed at ~373ms. The other 222 app tests passed in the full run.
+- Continued Phase 6: child-answer poll UI.
+- Implemented single-choice and multiple-choice child-answer poll controls. Direct child blocks remain normal editable answer labels, and option identity is the child block id.
+- Added archived result rows for votes that reference no-longer-visible child option ids. First pass label is `Deleted option`.
+- Added `Answer polls` fixture and helper tests for multiple-choice results and archived option id derivation.
+- Verification: `npm run build` in `examples/block-rich-text` passed with the same harmless pre-command agent warning.
+- Verification: `npm exec vitest -- run examples/block-rich-text/src/pollBlocks.test.ts examples/block-rich-text/src/documentFormat.test.ts examples/block-rich-text/src/history.test.ts` passed.
+- Continued Phase 7: matrix poll UI.
+- Implemented matrix poll derivation from the first direct child as the row group and the second direct child as the column group; extra direct children are ignored by the matrix UI.
+- Implemented single-choice and multiple-choice matrix voting. Matrix answers are incremental/partial: selecting any cell writes the user's matrix vote and unlocks results.
+- Added archived deleted row/column display for matrix votes that reference no-longer-visible row or column ids.
+- Added `Matrix polls` fixture and focused matrix result tests.
+- Verification: `npm run build` in `examples/block-rich-text` passed with the same harmless pre-command agent warning.
+- Verification: `npm exec vitest -- run examples/block-rich-text/src/pollBlocks.test.ts examples/block-rich-text/src/documentFormat.test.ts examples/block-rich-text/src/history.test.ts` passed.
+- Continued Phase 8: long-answer poll UI.
+- Implemented plain-text long-answer poll responses using a textarea composer. Other responses remain hidden until the current user submits. Empty responses are blocked in the UI.
+- Added `Long-answer polls` fixture.
+- Verification: `npm run build` in `examples/block-rich-text` passed with the same harmless pre-command agent warning.
+- Verification: `npm exec vitest -- run examples/block-rich-text/src/pollBlocks.test.ts examples/block-rich-text/src/documentFormat.test.ts examples/block-rich-text/src/history.test.ts examples/block-rich-text/src/undoHistory.test.ts src/block-crdt/index.test.ts` passed.
+- Phase 9 regression sweep: reran `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx`; it passed with 222 tests and 1 skipped test. The earlier performance-budget failure did not recur in this run.
