@@ -1652,17 +1652,13 @@ select {
 
 .markMath {
     border-radius: 4px;
-    padding: 0 0.12em;
     background: #eef7f1;
     font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
     font-size: 0.94em;
 }
 
 .markMathDisplay {
-    display: inline-block;
-    min-width: 100%;
-    margin: 0.3em 0;
-    text-align: center;
+    background: #e9f3f6;
 }
 
 .markLink {
