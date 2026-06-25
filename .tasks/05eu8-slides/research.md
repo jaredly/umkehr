@@ -314,15 +314,29 @@ Polished version:
 ## Open Questions
 
 - Should converting an existing nested outline make each direct child a slide, or move all existing children into one first slide?
+    - don't mess with children
 - Should `slide` be available as a normal block type outside a deck?
+    - yes. an orphaned slide block has its own ui-only state toggle between (view) and (outline) modes
 - Are non-slide direct children under a deck allowed, ignored, auto-converted, or rendered only in outline mode?
+    - rendered only in outline mode
 - How should hidden slide titles be edited in presentation and overview modes?
+    - they should just be hidden
 - Should deck resolution be semantic metadata for export, or should CSS render only from aspect ratio?
+    - eh let's ditch the aspect ratio, and use width/height as source of truth
 - Should background color be a free hex value, a palette token, or a theme variable?
+    - free hex for now
 - Are transition animations collaborative document data, or purely presentation runtime preferences?
+    - collaborative document data. a string that's like `none | fade | slide`
 - Should slide numbering count only visible `slide` children, or every direct child under the deck?
+    - only visible slide children
 - Should presentation mode support full-screen browser presentation, or only in-editor one-slide view?
+    - yes please
 - Should slide body content be limited to paragraphs/lists, or can tables, kanban boards, images, previews, math, and annotations all render inside slides?
+    - anything goes
 - How should comments/footnotes render in presentation mode?
+    - footnotes should render at the bottom of the given slide
+    - comments should be hidden
 - Should remote collaborators see another user's current presentation slide, or is current slide strictly local?
+    - strictly local for now
 - Should deck title footer use live deck text even when the deck title is hidden/collapsed?
+    - yes

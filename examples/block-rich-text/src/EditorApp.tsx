@@ -301,6 +301,7 @@ import {
     ratingOptionIds,
     singleChoiceResults,
     votedOptionIds,
+    type PollResult,
     type PollVoteCommandData,
 } from './pollBlocks';
 import {
@@ -4970,7 +4971,7 @@ const renderEditableBlock = (
                     return {state: result.state, ops: result.ops, selection: current.selection};
                 })
             }
-            onSetRatingPollRange={(min, max) =>
+            onSetRatingPollMax={(max) =>
                 context.runBlockControlCommand((current) => {
                     const currentBlock = current.state.state.blocks[block.id];
                     if (
@@ -4980,11 +4981,9 @@ const renderEditableBlock = (
                     ) {
                         return {state: current.state, ops: [], selection: current.selection};
                     }
-                    const range = normalizedRatingRange(min, max);
                     const result = setBlockMeta(current.state, block.id, {
                         ...currentBlock.meta,
-                        min: range.min,
-                        max: range.max,
+                        max: normalizedRatingMax(max),
                         ts: nextReplicaTs(current),
                     });
                     return {state: result.state, ops: result.ops, selection: current.selection};
@@ -5995,7 +5994,7 @@ function EditableBlock({
     onSetPollChoiceMode,
     onSetPollDisplayMode,
     onSetPollAllowChange,
-    onSetRatingPollRange,
+    onSetRatingPollMax,
     onSetRatingPollPresentation,
     onSetPreviewUrl,
     onSetPreviewMetadata,
@@ -6082,7 +6081,7 @@ function EditableBlock({
     onSetPollChoiceMode(mode: PollChoiceMode): void;
     onSetPollDisplayMode(mode: PollDisplayMode): void;
     onSetPollAllowChange(allowChange: boolean): void;
-    onSetRatingPollRange(min: number, max: number): void;
+    onSetRatingPollMax(max: number): void;
     onSetRatingPollPresentation(presentation: PollRatingPresentation): void;
     onSetPreviewUrl(url: string): void;
     onSetPreviewMetadata(url: string, metadata: PreviewMetadata | null): void;
@@ -6507,7 +6506,7 @@ function EditableBlock({
                     onSetPollChoiceMode={onSetPollChoiceMode}
                     onSetPollDisplayMode={onSetPollDisplayMode}
                     onSetPollAllowChange={onSetPollAllowChange}
-                    onSetRatingPollRange={onSetRatingPollRange}
+                    onSetRatingPollMax={onSetRatingPollMax}
                     onSetRatingPollPresentation={onSetRatingPollPresentation}
                 />
             )}
@@ -6558,10 +6557,7 @@ function PollBlock({
     }
     const options: PollOptionView[] =
         meta.kind === 'rating'
-            ? ratingOptionIds(meta).map((id) => ({
-                  id,
-                  label: meta.ratingPresentation === 'stars' ? ratingOptionLabelForStars(id) : id,
-              }))
+            ? ratingOptionIds(meta).map((id) => ({id, label: id}))
             : childPollOptions(meta, childOptions);
     const optionIds = options.map((option) => option.id);
     const userVote = userId ? currentUserVote(meta, userId) : null;
@@ -6572,6 +6568,24 @@ function PollBlock({
     const showResults = Boolean(userVote);
     const multiple = meta.kind === 'children' && meta.choiceMode === 'multiple';
     const displayMode = meta.kind === 'children' ? meta.displayMode ?? 'inline' : 'inline';
+
+    if (meta.kind === 'rating' && meta.ratingPresentation === 'stars') {
+        return (
+            <div className="pollBlock">
+                {question}
+                <div className="pollControls" contentEditable={false}>
+                    <RatingStars
+                        userVote={userVote}
+                        canVote={canVote}
+                        showResults={showResults}
+                        resultsByOption={resultsByOption}
+                        max={Number.isInteger(meta.max) ? meta.max ?? 5 : 5}
+                        onVote={onVote}
+                    />
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="pollBlock">
@@ -6597,11 +6611,6 @@ function PollBlock({
                                     .filter(Boolean)
                                     .join(' ')}
                                 aria-pressed={selected}
-                                aria-label={
-                                    meta.kind === 'rating' && meta.ratingPresentation === 'stars'
-                                        ? `${option.id} stars`
-                                        : undefined
-                                }
                                 disabled={!canVote}
                                 onMouseDown={(event) => event.preventDefault()}
                                 onClick={() => onVote(option.id)}
@@ -6621,17 +6630,74 @@ function PollBlock({
     );
 }
 
+function RatingStars({
+    userVote,
+    canVote,
+    showResults,
+    resultsByOption,
+    max,
+    onVote,
+}: {
+    userVote: PollVote | null;
+    canVote: boolean;
+    showResults: boolean;
+    resultsByOption: Map<string, PollResult>;
+    max: number;
+    onVote(optionId: string): void;
+}) {
+    const [hovered, setHovered] = useState<number | null>(null);
+    const selected = userVote?.type === 'single' ? Number(userVote.optionId) : 0;
+    const active = hovered ?? (Number.isInteger(selected) ? selected : 0);
+    const activeResult = active ? resultsByOption.get(String(active)) : null;
+    const starValues = Array.from({length: normalizedRatingMax(max)}, (_, index) => index + 1);
+
+    return (
+        <div
+            className="ratingStars"
+            role="radiogroup"
+            aria-label="Poll options"
+            onMouseLeave={() => setHovered(null)}
+        >
+            {starValues.map((value) => {
+                const selectedValue = selected === value;
+                return (
+                    <button
+                        key={value}
+                        type="button"
+                        className={[
+                            'ratingStar',
+                            value <= active ? 'lit' : '',
+                            selectedValue ? 'selected' : '',
+                        ]
+                            .filter(Boolean)
+                            .join(' ')}
+                        aria-label={`${value} ${value === 1 ? 'star' : 'stars'}`}
+                        aria-pressed={selectedValue}
+                        disabled={!canVote}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onMouseEnter={() => setHovered(value)}
+                        onFocus={() => setHovered(value)}
+                        onBlur={() => setHovered(null)}
+                        onClick={() => onVote(String(value))}
+                    >
+                        ★
+                    </button>
+                );
+            })}
+            {showResults && activeResult ? (
+                <span className="pollResult">
+                    {activeResult.percentage}% · {activeResult.count}
+                </span>
+            ) : null}
+        </div>
+    );
+}
+
 const selectedPollOptionIds = (vote: PollVote | null): Set<string> => {
     if (!vote) return new Set();
     if (vote.type === 'single') return new Set([vote.optionId]);
     if (vote.type === 'multiple') return new Set(vote.optionIds);
     return new Set();
-};
-
-const ratingOptionLabelForStars = (optionId: string): string => {
-    const value = Number(optionId);
-    if (!Number.isInteger(value) || value <= 0) return optionId;
-    return '★'.repeat(Math.min(value, 10));
 };
 
 const childPollOptions = (meta: PollMeta, childOptions: PollOptionView[]): PollOptionView[] => {
@@ -6647,15 +6713,9 @@ const toggleOptionId = (optionIds: string[], optionId: string): string[] =>
         ? optionIds.filter((id) => id !== optionId)
         : [...optionIds, optionId];
 
-const normalizedRatingRange = (min: number, max: number): {min: number; max: number} => {
-    const normalizedMin = Number.isFinite(min) ? Math.trunc(min) : 1;
+const normalizedRatingMax = (max: number): number => {
     const normalizedMax = Number.isFinite(max) ? Math.trunc(max) : 5;
-    const clampedMin = Math.max(0, Math.min(10, normalizedMin));
-    const clampedMax = Math.max(0, Math.min(10, normalizedMax));
-    return {
-        min: Math.min(clampedMin, clampedMax),
-        max: Math.max(clampedMin, clampedMax),
-    };
+    return Math.max(1, Math.min(10, normalizedMax));
 };
 
 function MatrixPollBlock({
@@ -7379,7 +7439,7 @@ function BlockOptions({
     onSetPollChoiceMode,
     onSetPollDisplayMode,
     onSetPollAllowChange,
-    onSetRatingPollRange,
+    onSetRatingPollMax,
     onSetRatingPollPresentation,
 }: {
     meta: RichBlockMeta;
@@ -7390,7 +7450,7 @@ function BlockOptions({
     onSetPollChoiceMode(mode: PollChoiceMode): void;
     onSetPollDisplayMode(mode: PollDisplayMode): void;
     onSetPollAllowChange(allowChange: boolean): void;
-    onSetRatingPollRange(min: number, max: number): void;
+    onSetRatingPollMax(max: number): void;
     onSetRatingPollPresentation(presentation: PollRatingPresentation): void;
 }) {
     let label: string | null = null;
@@ -7475,42 +7535,18 @@ function BlockOptions({
                             />
                             Allow changes
                         </label>
-                        <div className="blockOptionsNumberRow">
-                            <label className="blockOptionsField">
-                                <span>Min</span>
-                                <input
-                                    className="blockOptionsNumber"
-                                    type="number"
-                                    min={0}
-                                    max={10}
-                                    value={meta.min ?? 1}
-                                    aria-label="Rating minimum"
-                                    onChange={(event) =>
-                                        onSetRatingPollRange(
-                                            Number(event.currentTarget.value),
-                                            meta.max ?? 5,
-                                        )
-                                    }
-                                />
-                            </label>
-                            <label className="blockOptionsField">
-                                <span>Max</span>
-                                <input
-                                    className="blockOptionsNumber"
-                                    type="number"
-                                    min={0}
-                                    max={10}
-                                    value={meta.max ?? 5}
-                                    aria-label="Rating maximum"
-                                    onChange={(event) =>
-                                        onSetRatingPollRange(
-                                            meta.min ?? 1,
-                                            Number(event.currentTarget.value),
-                                        )
-                                    }
-                                />
-                            </label>
-                        </div>
+                        <label className="blockOptionsField">
+                            <span>Max</span>
+                            <input
+                                className="blockOptionsNumber"
+                                type="number"
+                                min={1}
+                                max={10}
+                                value={meta.max ?? 5}
+                                aria-label="Rating maximum"
+                                onChange={(event) => onSetRatingPollMax(Number(event.currentTarget.value))}
+                            />
+                        </label>
                         <label className="blockOptionsField">
                             <span>Style</span>
                             <select

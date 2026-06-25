@@ -16,7 +16,6 @@ describe('pollBlocks', () => {
             type: 'poll',
             kind: 'rating',
             allowChange: true,
-            min: 1,
             max: 5,
             votes: {ulrich: {type: 'single', optionId: '5', ts: '00004'}},
             ts: '00005',
@@ -25,7 +24,6 @@ describe('pollBlocks', () => {
             type: 'poll',
             kind: 'rating',
             allowChange: true,
-            min: 1,
             max: 5,
             votes: {uwe: {type: 'single', optionId: '4', ts: '00003'}},
             ts: '00002',
@@ -45,7 +43,6 @@ describe('pollBlocks', () => {
             type: 'poll',
             kind: 'rating',
             allowChange: true,
-            min: 1,
             max: 5,
             votes: {
                 ulrich: {type: 'single', optionId: '5', ts: '00002'},

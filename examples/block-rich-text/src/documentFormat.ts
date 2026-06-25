@@ -73,7 +73,6 @@ export type DocumentBlockMeta = {
     choiceMode?: PollChoiceMode;
     displayMode?: PollDisplayMode;
     ratingPresentation?: PollRatingPresentation;
-    min?: number;
     max?: number;
     votes?: Record<string, PollVote>;
 };
@@ -397,18 +396,10 @@ const parseMeta = (type: DocumentBlockType, value: unknown, path: string): Docum
             ) {
                 throw new DocumentFormatError(`${path}.ratingPresentation`, 'must be "numbers" or "stars"');
             }
-            const rawMin = meta.min ?? (kind === 'rating' ? 1 : undefined);
             const rawMax = meta.max ?? (kind === 'rating' ? 5 : undefined);
-            const min = typeof rawMin === 'number' ? rawMin : undefined;
             const max = typeof rawMax === 'number' ? rawMax : undefined;
-            if (rawMin !== undefined && typeof rawMin !== 'number') {
-                throw new DocumentFormatError(`${path}.min`, 'must be an integer');
-            }
             if (rawMax !== undefined && typeof rawMax !== 'number') {
                 throw new DocumentFormatError(`${path}.max`, 'must be an integer');
-            }
-            if (min !== undefined && !Number.isInteger(min)) {
-                throw new DocumentFormatError(`${path}.min`, 'must be an integer');
             }
             if (max !== undefined && !Number.isInteger(max)) {
                 throw new DocumentFormatError(`${path}.max`, 'must be an integer');
@@ -423,7 +414,6 @@ const parseMeta = (type: DocumentBlockType, value: unknown, path: string): Docum
                 ...(choiceMode ? {choiceMode} : {}),
                 ...(displayMode ? {displayMode} : {}),
                 ...(ratingPresentation ? {ratingPresentation} : {}),
-                ...(min !== undefined ? {min} : {}),
                 ...(max !== undefined ? {max} : {}),
                 votes: votes as Record<string, PollVote>,
             };
@@ -532,7 +522,6 @@ const richMetaForDocumentBlock = (block: ParsedDocumentBlock, ts: string): RichB
                 ...(block.meta.ratingPresentation
                     ? {ratingPresentation: block.meta.ratingPresentation as PollRatingPresentation}
                     : {}),
-                ...(block.meta.min !== undefined ? {min: block.meta.min} : {}),
                 ...(block.meta.max !== undefined ? {max: block.meta.max} : {}),
                 votes: block.meta.votes ?? {},
                 ts,
@@ -647,7 +636,6 @@ const documentBlockForMeta = (meta: RichBlockMeta): DocumentBlock => {
                     ...(meta.choiceMode ? {choiceMode: meta.choiceMode} : {}),
                     ...(meta.displayMode ? {displayMode: meta.displayMode} : {}),
                     ...(meta.ratingPresentation ? {ratingPresentation: meta.ratingPresentation} : {}),
-                    ...(meta.min !== undefined ? {min: meta.min} : {}),
                     ...(meta.max !== undefined ? {max: meta.max} : {}),
                     votes: meta.votes,
                 },

@@ -3092,9 +3092,17 @@ describe('Block rich text example UI', () => {
             target: {value: 'stars'},
         });
 
-        await waitFor(() => expect(within(left).getByRole('button', {name: '3 stars'})).toBeTruthy());
-        expect(within(right).getByRole('button', {name: '3 stars'})).toBeTruthy();
-        expect(within(left).queryByRole('button', {name: '5 stars'})).toBeNull();
+        const starButtons = await waitFor(() =>
+            within(left).getAllByRole('button', {name: /^[1-5] stars?$/}),
+        );
+        expect(starButtons).toHaveLength(3);
+        expect(within(right).getAllByRole('button', {name: /^[1-5] stars?$/})).toHaveLength(3);
+
+        fireEvent.mouseEnter(starButtons[2]);
+        expect(left.querySelectorAll('.ratingStar.lit')).toHaveLength(3);
+
+        fireEvent.mouseEnter(starButtons[0]);
+        expect(left.querySelectorAll('.ratingStar.lit')).toHaveLength(1);
     });
 
     it('configures long-answer poll change policy from the block options menu', async () => {

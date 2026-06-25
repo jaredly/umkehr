@@ -218,7 +218,7 @@ function ratingPolls(): ImportDocument {
         {type: 'heading', meta: {level: 2}, content: 'Poll fixture'},
         {
             type: 'poll',
-            meta: {kind: 'rating', allowChange: true, min: 1, max: 5, votes: {}},
+            meta: {kind: 'rating', allowChange: true, max: 5, votes: {}},
             content: 'How useful is this example?',
         },
         {
@@ -226,7 +226,6 @@ function ratingPolls(): ImportDocument {
             meta: {
                 kind: 'rating',
                 allowChange: true,
-                min: 1,
                 max: 5,
                 votes: {
                     ulrich: {type: 'single', optionId: '5', ts: '00010'},
@@ -240,7 +239,6 @@ function ratingPolls(): ImportDocument {
             meta: {
                 kind: 'rating',
                 allowChange: false,
-                min: 1,
                 max: 5,
                 votes: {
                     ulrich: {type: 'single', optionId: '3', ts: '00012'},

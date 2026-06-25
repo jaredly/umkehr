@@ -17,11 +17,9 @@ export type PollVoteCommandData = {
 export const normalizeUserId = (value: string): string => value.trim().toLowerCase();
 
 export const ratingOptionIds = (meta: PollMeta): string[] => {
-    const min = Number.isInteger(meta.min) ? meta.min ?? 1 : 1;
     const max = Number.isInteger(meta.max) ? meta.max ?? 5 : 5;
-    const start = Math.min(min, max);
-    const end = Math.max(min, max);
-    return Array.from({length: end - start + 1}, (_, index) => String(start + index));
+    const end = Math.max(1, max);
+    return Array.from({length: end}, (_, index) => String(index + 1));
 };
 
 export const activePollVotes = (meta: PollMeta): Record<string, PollVote> =>
@@ -205,7 +203,6 @@ export const isPollMeta = (value: unknown): value is PollMeta => {
     ) {
         return false;
     }
-    if (value.min !== undefined && !Number.isInteger(value.min)) return false;
     if (value.max !== undefined && !Number.isInteger(value.max)) return false;
     if (!isRecord(value.votes)) return false;
     return Object.values(value.votes).every(isPollVote);

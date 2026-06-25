@@ -357,6 +357,43 @@ select {
     font-size: 12px;
 }
 
+.ratingStars {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.ratingStar {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border: 0;
+    border-radius: 6px;
+    padding: 0;
+    color: #b7c1ca;
+    background: transparent;
+    cursor: pointer;
+    font: inherit;
+    font-size: 22px;
+    line-height: 1;
+}
+
+.ratingStar.lit {
+    color: #d79325;
+}
+
+.ratingStar:hover:not(:disabled),
+.ratingStar:focus-visible,
+.ratingStar.selected {
+    background: #fff7e8;
+}
+
+.ratingStar:disabled {
+    cursor: default;
+    opacity: 0.72;
+}
+
 .matrixPollControls {
     overflow-x: auto;
 }

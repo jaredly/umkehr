@@ -368,7 +368,6 @@ describe('block rich text document format export', () => {
                     allowChange: true,
                     choiceMode: 'single',
                     ratingPresentation: 'stars',
-                    min: 1,
                     max: 5,
                     votes: {
                         ulrich: {type: 'single', optionId: '5', ts: '00010'},

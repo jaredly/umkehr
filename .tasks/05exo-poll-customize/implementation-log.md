@@ -27,3 +27,20 @@
   - `npm exec vitest -- run src/App.test.tsx` passed: 227 tests, 1 skipped.
   - `npm run build` passed.
   - The build continues to print the environment SSH agent warning noted above, but TypeScript and Vite complete successfully.
+- Follow-up adjustment:
+  - Changed rating poll star presentation from repeated star labels per option to a dedicated five-star control.
+  - Hovering/focusing a star lights all stars up to that value; star mode always renders exactly five total stars.
+  - Updated the rating poll UI test to assert five star buttons and hover-lighting behavior.
+- Issue encountered: the first follow-up build caught a missing `PollResult` type import for the new star component props. Added the import and reran successfully.
+- Follow-up verification:
+  - `npm exec vitest -- run src/App.test.tsx -t "block options menu|answer polls from the block options|matrix polls from the block options|rating polls from the block options|long-answer poll change policy|preview checkbox"` passed: 7 tests.
+  - `npm run build` passed.
+- Follow-up adjustment:
+  - Removed rating poll `min` from current metadata, document export, fixtures, tests, and the block options menu.
+  - Rating polls now always start at 1 and only expose `max`.
+  - Star presentation now renders `max` stars, not a hard-coded five stars.
+- Follow-up verification:
+  - `npm exec vitest -- run src/pollBlocks.test.ts src/documentFormat.test.ts` passed: 25 tests.
+  - `npm exec vitest -- run src/App.test.tsx -t "configures rating polls from the block options menu"` passed: 1 test.
+  - `npm exec vitest -- run src/App.test.tsx -t "block options menu|answer polls from the block options|matrix polls from the block options|rating polls from the block options|long-answer poll change policy|preview checkbox"` passed: 7 tests.
+  - `npm run build` passed.

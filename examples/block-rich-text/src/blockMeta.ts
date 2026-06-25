@@ -35,7 +35,6 @@ export type PollMeta = {
     choiceMode?: PollChoiceMode;
     displayMode?: PollDisplayMode;
     ratingPresentation?: PollRatingPresentation;
-    min?: number;
     max?: number;
     votes: Record<string, PollVote>;
     ts: HLC;
@@ -100,7 +99,6 @@ export const defaultRatingPollMeta = (ts: HLC): PollMeta => ({
     type: 'poll',
     kind: 'rating',
     allowChange: true,
-    min: 1,
     max: 5,
     votes: {},
     ts,
