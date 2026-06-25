@@ -52,4 +52,22 @@ describe('math rendering adapter', () => {
             html: '<span>xy</span>',
         });
     });
+
+    it('treats MathJax error html as a literal fallback', async () => {
+        const renderer = new BrowserMathJaxRenderer(undefined, async (source) => ({
+            type: 'html',
+            html: `<svg><g data-mml-node="merror" data-mjx-error="Bad math">${source}</g></svg>`,
+        }));
+
+        expect(renderer.render('\\bad{', 'inline')).toEqual({
+            type: 'literal',
+            text: '\\bad{',
+        });
+        await Promise.resolve();
+
+        expect(renderer.render('\\bad{', 'inline')).toEqual({
+            type: 'literal',
+            text: '\\bad{',
+        });
+    });
 });

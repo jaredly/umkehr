@@ -46,9 +46,10 @@ export class BrowserMathJaxRenderer implements MathRenderer {
                 : undefined;
             const promise = this.renderSource(source, mode)
                 .then((result) => {
-                    this.cache.set(key, {status: 'ready', result});
-                    if (options.fallbackKey && result.type === 'html') {
-                        this.previousReadyByFallbackKey.set(options.fallbackKey, result);
+                    const normalized = normalizeRenderedResult(source, result);
+                    this.cache.set(key, {status: 'ready', result: normalized});
+                    if (options.fallbackKey && normalized.type === 'html') {
+                        this.previousReadyByFallbackKey.set(options.fallbackKey, normalized);
                     }
                     this.onRendered?.();
                 })
@@ -72,8 +73,27 @@ const renderWithMathJax = async (
         return {type: 'literal', text: source};
     }
     const node = await mathJax.tex2svgPromise(source, {display: mode === 'display'});
-    return {type: 'html', html: mathJax.startup.adaptor.serializeXML(node)};
+    return normalizeRenderedResult(source, {
+        type: 'html',
+        html: mathJax.startup.adaptor.serializeXML(node),
+    });
 };
+
+const normalizeRenderedResult = (
+    source: string,
+    result: MathRenderResult,
+): MathRenderResult => {
+    if (result.type === 'html' && isMathJaxErrorHtml(result.html)) {
+        return {type: 'literal', text: source};
+    }
+    return result;
+};
+
+const isMathJaxErrorHtml = (html: string): boolean =>
+    /data-mml-node=["']merror["']/.test(html) ||
+    /\bdata-mjx-error=/.test(html) ||
+    /<merror\b/i.test(html) ||
+    /<mjx-merror\b/i.test(html);
 
 export class FakeMathRenderer implements MathRenderer {
     render(source: string, mode: MathRenderMode): MathRenderResult {
