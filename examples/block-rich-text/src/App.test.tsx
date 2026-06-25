@@ -3048,6 +3048,35 @@ describe('Block rich text example UI', () => {
         });
     });
 
+    it('toggles answer polls between rendered view and child edit mode', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'answer-polls'},
+        });
+        await waitFor(() => expect(view.getByText('Loaded fixture: Answer polls.')).toBeTruthy());
+
+        const leftPoll = left.querySelector<HTMLElement>('.blockType-poll');
+        const leftBranch = leftPoll?.closest<HTMLElement>('.renderTreeBranch');
+        if (!leftPoll || !leftBranch) throw new Error('missing left answer poll');
+
+        expect(within(leftPoll).getByRole('button', {name: /Matrix polls/})).toBeTruthy();
+        expect(blockTexts(leftBranch)).not.toContain('Matrix polls');
+
+        fireEvent.click(within(leftPoll).getByRole('button', {name: 'Edit poll'}));
+
+        await waitFor(() => expect(leftPoll.querySelector('.pollOptions')).toBeNull());
+        expect(blockTexts(leftBranch)).toContain('Matrix polls');
+        expect(blockTexts(leftBranch)).toContain('Long-answer polls');
+        expect(right.querySelector('.pollOptions')).toBeTruthy();
+
+        fireEvent.click(within(leftPoll).getByRole('button', {name: 'View poll'}));
+
+        await waitFor(() => expect(leftPoll.querySelector('.pollOptions')).toBeTruthy());
+        expect(blockTexts(leftBranch)).not.toContain('Matrix polls');
+    });
+
     it('configures matrix polls from the block options menu', async () => {
         const view = render(<App />);
         const {left, right} = panels(view);
@@ -3073,6 +3102,38 @@ describe('Block rich text example UI', () => {
             expect(cells[0].classList.contains('selected')).toBe(true);
             expect(cells[1].classList.contains('selected')).toBe(true);
         });
+    });
+
+    it('toggles matrix polls between rendered view and child edit mode', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'matrix-polls'},
+        });
+        await waitFor(() => expect(view.getByText('Loaded fixture: Matrix polls.')).toBeTruthy());
+
+        const leftPoll = left.querySelector<HTMLElement>('.blockType-poll');
+        const leftBranch = leftPoll?.closest<HTMLElement>('.renderTreeBranch');
+        if (!leftPoll || !leftBranch) throw new Error('missing left matrix poll');
+
+        expect(leftPoll.querySelector('.matrixPollGrid')).toBeTruthy();
+        expect(blockTexts(leftBranch)).not.toContain('Rows');
+        expect(blockTexts(leftBranch)).not.toContain('Ignored extra child');
+
+        fireEvent.click(within(leftPoll).getByRole('button', {name: 'Edit poll'}));
+
+        await waitFor(() => expect(leftPoll.querySelector('.matrixPollGrid')).toBeNull());
+        expect(blockTexts(leftBranch)).toContain('Rows');
+        expect(blockTexts(leftBranch)).toContain('Columns');
+        expect(blockTexts(leftBranch)).toContain('Ignored extra child');
+        expect(right.querySelector('.matrixPollGrid')).toBeTruthy();
+
+        fireEvent.click(within(leftPoll).getByRole('button', {name: 'View poll'}));
+
+        await waitFor(() => expect(leftPoll.querySelector('.matrixPollGrid')).toBeTruthy());
+        expect(blockTexts(leftBranch)).not.toContain('Rows');
+        expect(blockTexts(leftBranch)).not.toContain('Ignored extra child');
     });
 
     it('configures rating polls from the block options menu', async () => {

@@ -342,6 +342,7 @@ type RenderedAnnotation = ReturnType<typeof renderedAnnotations>[number];
 type CommentFocusRequest = {blockId: string; token: number; selection?: EditorSelection};
 type PollOptionView = {id: string; label: string; archived?: boolean};
 type MatrixPollView = {rows: PollOptionView[]; columns: PollOptionView[]};
+type PollEditorMode = 'view' | 'edit';
 
 const BOOLEAN_INLINE_MARKS: BooleanInlineMark[] = ['bold', 'italic', 'strikethrough'];
 const BARE_INLINE_MARKS: BareInlineMark[] = [...BOOLEAN_INLINE_MARKS, CODE_MARK];
@@ -867,6 +868,9 @@ function BlockEditor({
     const [codeHoverPopover, setCodeHoverPopover] = useState<CodeHoverPopoverState | null>(null);
     const [embedPopover, setEmbedPopover] = useState<EmbedPopoverState | null>(null);
     const [slashMenu, setSlashMenu] = useState<SlashMenuState | null>(null);
+    const [pollModesByBlockId, setPollModesByBlockId] = useState<
+        Record<string, PollEditorMode>
+    >({});
     const [pendingInlineMarks, setPendingInlineMarks] = useState<PendingInlineMarks>({});
     const [retainedInlineMarks, setRetainedInlineMarks] = useState<RetainedInlineMarkSessionMap>(
         {},
@@ -1246,6 +1250,7 @@ function BlockEditor({
         setCodeHoverPopover(null);
         setEmbedPopover(null);
         setSlashMenu(null);
+        setPollModesByBlockId({});
         setPendingInlineMarks({});
         setRetainedInlineMarks({});
         if (linkHoverHideTimerRef.current) clearTimeout(linkHoverHideTimerRef.current);
@@ -2114,6 +2119,57 @@ function BlockEditor({
             onCommand((current) => command(current));
         },
         [onCommand],
+    );
+
+    const pollModeForBlock = useCallback(
+        (blockId: string): PollEditorMode => pollModesByBlockId[blockId] ?? 'view',
+        [pollModesByBlockId],
+    );
+
+    const moveSelectionFromHiddenPollChildren = useCallback(
+        (blockId: string) => {
+            onCommand((current) => {
+                const hiddenBlockIds = new Set(
+                    visibleSubtreeBlockIds(current.state, blockId).filter((id) => id !== blockId),
+                );
+                const currentSelection = primarySelection(
+                    resolveSelectionSet(current.state, current.selection),
+                );
+                const selectedBlockIds = selectedBlockIdsForSelection(
+                    current.state,
+                    currentSelection,
+                );
+                if (!selectedBlockIds.some((id) => hiddenBlockIds.has(id))) {
+                    return {state: current.state, ops: [], selection: current.selection};
+                }
+                const nextSelection = caret(blockId, pointTextLength(current.state, blockId));
+                scheduleSelectionRestore(nextSelection);
+                return {
+                    state: current.state,
+                    ops: [],
+                    selection: replacePrimarySelection(
+                        current.state,
+                        current.selection,
+                        nextSelection,
+                    ),
+                };
+            });
+        },
+        [onCommand, scheduleSelectionRestore],
+    );
+
+    const setPollModeForBlock = useCallback(
+        (blockId: string, mode: PollEditorMode) => {
+            const currentMode = pollModeForBlock(blockId);
+            setPollModesByBlockId((current) => {
+                if ((current[blockId] ?? 'view') === mode) return current;
+                return {...current, [blockId]: mode};
+            });
+            if (currentMode === 'edit' && mode === 'view') {
+                moveSelectionFromHiddenPollChildren(blockId);
+            }
+        },
+        [moveSelectionFromHiddenPollChildren, pollModeForBlock],
     );
 
     const selectBlockSubtreeFromHandle = useCallback(
@@ -3170,6 +3226,8 @@ function BlockEditor({
                                             selection: current.selection,
                                         };
                                 }),
+                                pollModeForBlock,
+                                setPollModeForBlock,
                                 runEditCommand,
                                 runBlockControlCommand,
                                 focusBlockSelectionTarget,
@@ -3430,6 +3488,8 @@ type RenderBlockContext = {
     createMissingTableCell(tableId: string, rowId: string, columnIndex: number): void;
     addTableRow(tableId: string, afterRowId?: string): void;
     addTableColumn(tableId: string, columnIndex?: number): void;
+    pollModeForBlock(blockId: string): PollEditorMode;
+    setPollModeForBlock(blockId: string, mode: PollEditorMode): void;
     onUndo(): void;
     onRedo(): void;
     onKeystroke(blockId: string, event: KeyboardEvent<HTMLElement>): void;
@@ -3473,6 +3533,9 @@ const matrixPollViewForNode = (node: RenderTreeNode): MatrixPollView => {
 
 const renderBlockNode = (node: RenderTreeNode, context: RenderBlockContext): ReactElement => {
     const meta = node.block.block.meta;
+    const isChildBackedPoll =
+        meta.type === 'poll' && (meta.kind === 'children' || meta.kind === 'matrix');
+    const pollEditorMode = isChildBackedPoll ? context.pollModeForBlock(node.block.id) : undefined;
     if (meta.type === 'table') {
         return <TableBlock key={node.block.id} node={node} context={context} />;
     }
@@ -3512,8 +3575,14 @@ const renderBlockNode = (node: RenderTreeNode, context: RenderBlockContext): Rea
                     meta.type === 'poll' && meta.kind === 'matrix'
                         ? matrixPollViewForNode(node)
                         : undefined,
+                pollEditorMode,
+                onSetPollEditorMode: pollEditorMode
+                    ? (mode) => context.setPollModeForBlock(node.block.id, mode)
+                    : undefined,
             })}
-            {node.children.map((child) => renderBlockNode(child, context))}
+            {(!isChildBackedPoll || pollEditorMode === 'edit')
+                ? node.children.map((child) => renderBlockNode(child, context))
+                : null}
         </div>
     );
 };
@@ -4490,6 +4559,8 @@ type EditableBlockRenderOptions = {
     registerBlockRow?: boolean;
     pollOptions?: PollOptionView[];
     matrixPoll?: MatrixPollView;
+    pollEditorMode?: PollEditorMode;
+    onSetPollEditorMode?(mode: PollEditorMode): void;
 };
 
 const renderEditableBlock = (
@@ -4519,6 +4590,8 @@ const renderEditableBlock = (
             registerBlockRow={options.registerBlockRow}
             pollOptions={options.pollOptions ?? []}
             matrixPoll={options.matrixPoll ?? {rows: [], columns: []}}
+            pollEditorMode={options.pollEditorMode}
+            onSetPollEditorMode={options.onSetPollEditorMode}
             isTableCell={isTableCellBlock(context.state, block.id)}
             listNumber={context.orderedListNumbers.get(block.id) ?? null}
             previousBlockId={previousBlock?.id ?? null}
@@ -5933,6 +6006,8 @@ function EditableBlock({
     attachment,
     pollOptions,
     matrixPoll,
+    pollEditorMode,
+    onSetPollEditorMode,
     variant = 'block',
     ariaLabel = 'Block text',
     placeholder,
@@ -6020,6 +6095,8 @@ function EditableBlock({
     attachment: ImageAttachment | null;
     pollOptions: PollOptionView[];
     matrixPoll: MatrixPollView;
+    pollEditorMode?: PollEditorMode;
+    onSetPollEditorMode?(mode: PollEditorMode): void;
     variant?: 'block' | 'table-row-header';
     ariaLabel?: string;
     placeholder?: string;
@@ -6483,6 +6560,8 @@ function EditableBlock({
                     question={editableSurface}
                     childOptions={pollOptions}
                     matrixPoll={matrixPoll}
+                    editorMode={pollEditorMode}
+                    onSetEditorMode={onSetPollEditorMode}
                     onVote={onPollVote}
                     onLongAnswer={onPollLongAnswer}
                 />
@@ -6520,6 +6599,8 @@ function PollBlock({
     question,
     childOptions,
     matrixPoll,
+    editorMode,
+    onSetEditorMode,
     onVote,
     onLongAnswer,
 }: {
@@ -6528,6 +6609,8 @@ function PollBlock({
     question: ReactElement;
     childOptions: PollOptionView[];
     matrixPoll: MatrixPollView;
+    editorMode?: PollEditorMode;
+    onSetEditorMode?(mode: PollEditorMode): void;
     onVote(optionId: string, rowId?: string): void;
     onLongAnswer(text: string): void;
 }) {
@@ -6548,6 +6631,8 @@ function PollBlock({
                 userId={userId}
                 question={question}
                 matrixPoll={matrixPollWithArchivedOptions(meta, matrixPoll)}
+                editorMode={editorMode ?? 'view'}
+                onSetEditorMode={onSetEditorMode}
                 onVote={onVote}
             />
         );
@@ -6568,6 +6653,10 @@ function PollBlock({
     const showResults = Boolean(userVote);
     const multiple = meta.kind === 'children' && meta.choiceMode === 'multiple';
     const displayMode = meta.kind === 'children' ? meta.displayMode ?? 'inline' : 'inline';
+    const modeToggle =
+        meta.kind === 'children' && onSetEditorMode ? (
+            <PollEditorModeToggle mode={editorMode ?? 'view'} onSetMode={onSetEditorMode} />
+        ) : null;
 
     if (meta.kind === 'rating' && meta.ratingPresentation === 'stars') {
         return (
@@ -6590,42 +6679,76 @@ function PollBlock({
     return (
         <div className="pollBlock">
             {question}
-            <div className="pollControls" contentEditable={false}>
-                <div
-                    className={['pollOptions', `pollOptions-${displayMode}`].join(' ')}
-                    role={multiple ? 'group' : 'radiogroup'}
-                    aria-label="Poll options"
-                >
-                    {options.map((option) => {
-                        const result = resultsByOption.get(option.id);
-                        const selected = selectedOptionIds.has(option.id);
-                        return (
-                            <button
-                                key={option.id}
-                                type="button"
-                                className={[
-                                    'pollOption',
-                                    selected ? 'selected' : '',
-                                    option.archived ? 'archived' : '',
-                                ]
-                                    .filter(Boolean)
-                                    .join(' ')}
-                                aria-pressed={selected}
-                                disabled={!canVote}
-                                onMouseDown={(event) => event.preventDefault()}
-                                onClick={() => onVote(option.id)}
-                            >
-                                <span>{option.label}</span>
-                                {showResults ? (
-                                    <span className="pollResult">
-                                        {result?.percentage ?? 0}% · {result?.count ?? 0}
-                                    </span>
-                                ) : null}
-                            </button>
-                        );
-                    })}
+            {modeToggle}
+            {(editorMode ?? 'view') === 'view' ? (
+                <div className="pollControls" contentEditable={false}>
+                    <div
+                        className={['pollOptions', `pollOptions-${displayMode}`].join(' ')}
+                        role={multiple ? 'group' : 'radiogroup'}
+                        aria-label="Poll options"
+                    >
+                        {options.map((option) => {
+                            const result = resultsByOption.get(option.id);
+                            const selected = selectedOptionIds.has(option.id);
+                            return (
+                                <button
+                                    key={option.id}
+                                    type="button"
+                                    className={[
+                                        'pollOption',
+                                        selected ? 'selected' : '',
+                                        option.archived ? 'archived' : '',
+                                    ]
+                                        .filter(Boolean)
+                                        .join(' ')}
+                                    aria-pressed={selected}
+                                    disabled={!canVote}
+                                    onMouseDown={(event) => event.preventDefault()}
+                                    onClick={() => onVote(option.id)}
+                                >
+                                    <span>{option.label}</span>
+                                    {showResults ? (
+                                        <span className="pollResult">
+                                            {result?.percentage ?? 0}% · {result?.count ?? 0}
+                                        </span>
+                                    ) : null}
+                                </button>
+                            );
+                        })}
+                    </div>
                 </div>
-            </div>
+            ) : null}
+        </div>
+    );
+}
+
+function PollEditorModeToggle({
+    mode,
+    onSetMode,
+}: {
+    mode: PollEditorMode;
+    onSetMode(mode: PollEditorMode): void;
+}) {
+    return (
+        <div className="pollEditorMode" contentEditable={false} aria-label="Poll editor mode">
+            {(['view', 'edit'] as const).map((option) => (
+                <button
+                    key={option}
+                    type="button"
+                    className={[
+                        'pollEditorModeButton',
+                        mode === option ? 'selected' : '',
+                    ]
+                        .filter(Boolean)
+                        .join(' ')}
+                    aria-label={`${capitalize(option)} poll`}
+                    aria-pressed={mode === option}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => onSetMode(option)}
+                >
+                    {capitalize(option)}
+                </button>
+            ))}
         </div>
     );
 }
@@ -6723,12 +6846,16 @@ function MatrixPollBlock({
     userId,
     question,
     matrixPoll,
+    editorMode,
+    onSetEditorMode,
     onVote,
 }: {
     meta: PollMeta;
     userId: string;
     question: ReactElement;
     matrixPoll: MatrixPollView;
+    editorMode: PollEditorMode;
+    onSetEditorMode?(mode: PollEditorMode): void;
     onVote(optionId: string, rowId?: string): void;
 }) {
     const userVote = userId ? currentUserVote(meta, userId) : null;
@@ -6741,45 +6868,80 @@ function MatrixPollBlock({
     return (
         <div className="pollBlock">
             {question}
-            <div className="pollControls matrixPollControls" contentEditable={false}>
-                <div className="matrixPollGrid" style={{'--matrix-columns': matrixPoll.columns.length} as CSSProperties}>
-                    <div className="matrixPollCorner" />
-                    {matrixPoll.columns.map((column) => (
-                        <div key={column.id} className={column.archived ? 'matrixPollHeader archived' : 'matrixPollHeader'}>
-                            {column.label}
-                        </div>
-                    ))}
-                    {matrixPoll.rows.map((row) => (
-                        <Fragment key={row.id}>
-                            <div className={row.archived ? 'matrixPollRowLabel archived' : 'matrixPollRowLabel'}>
-                                {row.label}
+            {onSetEditorMode ? (
+                <PollEditorModeToggle mode={editorMode} onSetMode={onSetEditorMode} />
+            ) : null}
+            {editorMode === 'view' ? (
+                <div className="pollControls matrixPollControls" contentEditable={false}>
+                    <div
+                        className="matrixPollGrid"
+                        style={{'--matrix-columns': matrixPoll.columns.length} as CSSProperties}
+                    >
+                        <div className="matrixPollCorner" />
+                        {matrixPoll.columns.map((column) => (
+                            <div
+                                key={column.id}
+                                className={
+                                    column.archived
+                                        ? 'matrixPollHeader archived'
+                                        : 'matrixPollHeader'
+                                }
+                            >
+                                {column.label}
                             </div>
-                            {matrixPoll.columns.map((column) => {
-                                const selected = matrixVote ? matrixAnswerSelected(matrixVote.answers[row.id], column.id) : false;
-                                const result = results.get(row.id)?.get(column.id);
-                                return (
-                                    <button
-                                        key={column.id}
-                                        type="button"
-                                        className={selected ? 'matrixPollCell selected' : 'matrixPollCell'}
-                                        aria-pressed={selected}
-                                        disabled={!canVote}
-                                        onMouseDown={(event) => event.preventDefault()}
-                                        onClick={() => onVote(column.id, row.id)}
-                                    >
-                                        <span>{multiple ? (selected ? '✓' : '+') : selected ? '●' : '○'}</span>
-                                        {showResults ? (
-                                            <span className="pollResult">
-                                                {result?.percentage ?? 0}% · {result?.count ?? 0}
+                        ))}
+                        {matrixPoll.rows.map((row) => (
+                            <Fragment key={row.id}>
+                                <div
+                                    className={
+                                        row.archived
+                                            ? 'matrixPollRowLabel archived'
+                                            : 'matrixPollRowLabel'
+                                    }
+                                >
+                                    {row.label}
+                                </div>
+                                {matrixPoll.columns.map((column) => {
+                                    const selected = matrixVote
+                                        ? matrixAnswerSelected(matrixVote.answers[row.id], column.id)
+                                        : false;
+                                    const result = results.get(row.id)?.get(column.id);
+                                    return (
+                                        <button
+                                            key={column.id}
+                                            type="button"
+                                            className={
+                                                selected
+                                                    ? 'matrixPollCell selected'
+                                                    : 'matrixPollCell'
+                                            }
+                                            aria-pressed={selected}
+                                            disabled={!canVote}
+                                            onMouseDown={(event) => event.preventDefault()}
+                                            onClick={() => onVote(column.id, row.id)}
+                                        >
+                                            <span>
+                                                {multiple
+                                                    ? selected
+                                                        ? '✓'
+                                                        : '+'
+                                                    : selected
+                                                      ? '●'
+                                                      : '○'}
                                             </span>
-                                        ) : null}
-                                    </button>
-                                );
-                            })}
-                        </Fragment>
-                    ))}
+                                            {showResults ? (
+                                                <span className="pollResult">
+                                                    {result?.percentage ?? 0}% · {result?.count ?? 0}
+                                                </span>
+                                            ) : null}
+                                        </button>
+                                    );
+                                })}
+                            </Fragment>
+                        ))}
+                    </div>
                 </div>
-            </div>
+            ) : null}
         </div>
     );
 }

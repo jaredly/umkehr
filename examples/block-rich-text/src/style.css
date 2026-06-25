@@ -302,6 +302,34 @@ select {
     padding-left: 2px;
 }
 
+.pollEditorMode {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    margin-top: 8px;
+    border: 1px solid #cbd5df;
+    border-radius: 6px;
+    padding: 2px;
+    background: #f6f8fa;
+}
+
+.pollEditorModeButton {
+    border: 0;
+    border-radius: 4px;
+    padding: 3px 8px;
+    color: #51606d;
+    background: transparent;
+    cursor: pointer;
+    font: inherit;
+    font-size: 12px;
+}
+
+.pollEditorModeButton:hover,
+.pollEditorModeButton.selected {
+    color: #24313c;
+    background: #fff;
+}
+
 .pollOptions {
     gap: 8px;
 }
