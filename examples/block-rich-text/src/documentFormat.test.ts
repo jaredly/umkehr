@@ -461,6 +461,86 @@ describe('block rich text document format export', () => {
         ]);
     });
 
+    it('round-trips slide decks and orphan slides', () => {
+        const input: DocumentBlock[] = [
+            {
+                type: 'slide_deck',
+                meta: {width: 1600, height: 900, footer: 'deck-title-and-slide-number'},
+                content: 'Quarterly review',
+                children: [
+                    {
+                        type: 'slide',
+                        meta: {showTitle: true, backgroundColor: '#ABCDEF', transition: 'fade'},
+                        content: 'Highlights',
+                        children: [
+                            {type: 'heading', meta: {level: 2}, content: 'Growth'},
+                            {type: 'paragraph', content: 'Revenue grew 18%.'},
+                        ],
+                    },
+                    {
+                        type: 'paragraph',
+                        content: 'Outline-only note',
+                    },
+                ],
+            },
+            {
+                type: 'slide',
+                meta: {showTitle: false, backgroundColor: '#123', transition: 'slide'},
+                content: 'Orphan slide',
+                children: [{type: 'todo', meta: {checked: true}, content: 'Polish'}],
+            },
+        ];
+
+        const imported = importDocument(input, ctx());
+
+        expect(exportDocument(imported.state)).toEqual([
+            {
+                type: 'slide_deck',
+                meta: {width: 1600, height: 900, footer: 'deck-title-and-slide-number'},
+                content: 'Quarterly review',
+                children: [
+                    {
+                        type: 'slide',
+                        meta: {showTitle: true, backgroundColor: '#abcdef', transition: 'fade'},
+                        content: 'Highlights',
+                        children: [
+                            {type: 'heading', meta: {level: 2}, content: 'Growth'},
+                            {type: 'paragraph', content: 'Revenue grew 18%.'},
+                        ],
+                    },
+                    {type: 'paragraph', content: 'Outline-only note'},
+                ],
+            },
+            {
+                type: 'slide',
+                meta: {showTitle: false, backgroundColor: '#123', transition: 'slide'},
+                content: 'Orphan slide',
+                children: [{type: 'todo', meta: {checked: true}, content: 'Polish'}],
+            },
+        ]);
+    });
+
+    it('rejects invalid slide deck and slide metadata', () => {
+        expect(() =>
+            importDocument([{type: 'slide_deck', meta: {width: 0}}], ctx()),
+        ).toThrow('$[0].meta.width: must be a positive integer');
+        expect(() =>
+            importDocument([{type: 'slide_deck', meta: {height: 720.5}}], ctx()),
+        ).toThrow('$[0].meta.height: must be a positive integer');
+        expect(() =>
+            importDocument([{type: 'slide_deck', meta: {footer: 'notes' as never}}], ctx()),
+        ).toThrow('$[0].meta.footer: must be a supported slide deck footer mode');
+        expect(() =>
+            importDocument([{type: 'slide', meta: {showTitle: 'yes' as never}}], ctx()),
+        ).toThrow('$[0].meta.showTitle: must be a boolean');
+        expect(() =>
+            importDocument([{type: 'slide', meta: {backgroundColor: 'white'}}], ctx()),
+        ).toThrow('$[0].meta.backgroundColor: must be a hex color');
+        expect(() =>
+            importDocument([{type: 'slide', meta: {transition: 'zoom' as never}}], ctx()),
+        ).toThrow('$[0].meta.transition: must be a supported slide transition');
+    });
+
     it('round-trips footnote annotation metadata', () => {
         const input: DocumentBlock[] = [
             {

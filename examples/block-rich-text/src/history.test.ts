@@ -116,6 +116,28 @@ const heading = () => (replica: Replica) => {
     }));
 };
 
+const slideDeck = () => (replica: Replica) => {
+    const context = makeCommandContext(replica);
+    return setBlockTypeEverywhere(replica.state, replica.selection, (_blockId, _meta) => ({
+        type: 'slide_deck',
+        width: 1600,
+        height: 900,
+        footer: 'deck-title-and-slide-number',
+        ts: context.nextTs(),
+    }));
+};
+
+const slide = () => (replica: Replica) => {
+    const context = makeCommandContext(replica);
+    return setBlockTypeEverywhere(replica.state, replica.selection, (_blockId, _meta) => ({
+        type: 'slide',
+        showTitle: false,
+        backgroundColor: '#123abc',
+        transition: 'fade',
+        ts: context.nextTs(),
+    }));
+};
+
 const toggleTodo = () => (replica: Replica) =>
     updateBlockMetaEverywhere(
         replica.state,
@@ -413,6 +435,42 @@ describe('block rich text history', () => {
             level: 2,
         });
         expect(hlc.tryUnpack(materializeFormattedBlocks(replayed.left.state)[0].block.meta.ts)).not.toBeNull();
+    });
+
+    it('round-trips slide metadata through export/import', () => {
+        let history = initialHistoryState();
+        history = appendLocal(history, 'left', slideDeck());
+
+        const parsed = parseHistoryExport(serializeHistory(history));
+
+        expect('history' in parsed).toBe(true);
+        if (!('history' in parsed)) return;
+        const replayed = replayHistory(parsed.history.actions, parsed.history.cursor);
+        const blocks = materializeFormattedBlocks(replayed.left.state);
+        expect(blocks[0].block.meta).toMatchObject({
+            type: 'slide_deck',
+            width: 1600,
+            height: 900,
+            footer: 'deck-title-and-slide-number',
+        });
+    });
+
+    it('round-trips orphan slide metadata through export/import', () => {
+        let history = initialHistoryState();
+        history = appendLocal(history, 'left', slide());
+
+        const parsed = parseHistoryExport(serializeHistory(history));
+
+        expect('history' in parsed).toBe(true);
+        if (!('history' in parsed)) return;
+        const replayed = replayHistory(parsed.history.actions, parsed.history.cursor);
+        const blocks = materializeFormattedBlocks(replayed.left.state);
+        expect(blocks[0].block.meta).toMatchObject({
+            type: 'slide',
+            showTitle: false,
+            backgroundColor: '#123abc',
+            transition: 'fade',
+        });
     });
 
     it('replays todo toggle metadata through history', () => {

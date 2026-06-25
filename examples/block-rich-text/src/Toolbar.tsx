@@ -204,6 +204,8 @@ export function Toolbar({
                 <option value="recipe-ingredient">Ingredient line</option>
                 <option value="table">Table</option>
                 <option value="kanban">Kanban board</option>
+                <option value="slide-deck">Slide deck</option>
+                <option value="slide">Slide</option>
                 <option value="preview">Preview</option>
                 <option value="poll-rating">Rating poll</option>
                 <option value="poll-children">Answer poll</option>

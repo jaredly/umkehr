@@ -8,7 +8,13 @@ import {
     type DemoState,
     type EditorId,
 } from './blockEditorRuntime';
-import {codePreviewKindForLanguage, type RichBlockMeta} from './blockMeta';
+import {
+    codePreviewKindForLanguage,
+    isSlideDeckFooterMode,
+    isSlideHexColor,
+    isSlideTransition,
+    type RichBlockMeta,
+} from './blockMeta';
 import {richTextCrdtConfig} from './editorCrdtConfig';
 import {isPollMeta, isPollVote, type PollVoteCommandData} from './pollBlocks';
 import type {RetainedSelectionSet} from './selectionSet';
@@ -458,6 +464,20 @@ const isRichBlockMeta = (value: unknown): value is RichBlockMeta => {
         case 'table':
         case 'kanban':
             return true;
+        case 'slide_deck':
+            return (
+                Number.isInteger(value.width) &&
+                (value.width as number) > 0 &&
+                Number.isInteger(value.height) &&
+                (value.height as number) > 0 &&
+                isSlideDeckFooterMode(value.footer)
+            );
+        case 'slide':
+            return (
+                typeof value.showTitle === 'boolean' &&
+                isSlideHexColor(value.backgroundColor) &&
+                isSlideTransition(value.transition)
+            );
         case 'poll':
             return isPollMeta(value);
         case 'heading':

@@ -23,6 +23,11 @@ import {
 import {
     CODE_PREVIEW_LANGUAGES,
     codePreviewKindForLanguage,
+    defaultSlideDeckMeta,
+    defaultSlideMeta,
+    isSlideDeckFooterMode,
+    isSlideTransition,
+    normalizeSlideHexColor,
     type CodePreviewKind,
     type ImagePresentationSize,
     type PollKind,
@@ -32,6 +37,8 @@ import {
     type PollVote,
     type PreviewMetadata,
     type RichBlockMeta,
+    type SlideDeckFooterMode,
+    type SlideTransition,
 } from './blockMeta';
 import {isPollVote} from './pollBlocks';
 import type {CommandContext} from './blockCommands';
@@ -75,6 +82,12 @@ export type DocumentBlockMeta = {
     ratingPresentation?: PollRatingPresentation;
     max?: number;
     votes?: Record<string, PollVote>;
+    width?: number;
+    height?: number;
+    footer?: SlideDeckFooterMode;
+    showTitle?: boolean;
+    backgroundColor?: string;
+    transition?: SlideTransition;
 };
 
 export type DocumentMark =
@@ -124,6 +137,8 @@ const BLOCK_TYPES = new Set<DocumentBlockType>([
     'recipe_ingredient',
     'table',
     'kanban',
+    'slide_deck',
+    'slide',
     'poll',
     'image',
     'preview',
@@ -371,6 +386,40 @@ const parseMeta = (type: DocumentBlockType, value: unknown, path: string): Docum
         case 'table':
         case 'kanban':
             return {};
+        case 'slide_deck': {
+            const width = meta.width ?? 1920;
+            if (typeof width !== 'number' || !Number.isInteger(width) || width <= 0) {
+                throw new DocumentFormatError(`${path}.width`, 'must be a positive integer');
+            }
+            const height = meta.height ?? 1080;
+            if (typeof height !== 'number' || !Number.isInteger(height) || height <= 0) {
+                throw new DocumentFormatError(`${path}.height`, 'must be a positive integer');
+            }
+            const footer = meta.footer ?? 'slide-number';
+            if (!isSlideDeckFooterMode(footer)) {
+                throw new DocumentFormatError(`${path}.footer`, 'must be a supported slide deck footer mode');
+            }
+            return {width, height, footer};
+        }
+        case 'slide': {
+            const showTitle = meta.showTitle ?? true;
+            if (typeof showTitle !== 'boolean') {
+                throw new DocumentFormatError(`${path}.showTitle`, 'must be a boolean');
+            }
+            const backgroundColor = meta.backgroundColor ?? '#ffffff';
+            if (typeof backgroundColor !== 'string') {
+                throw new DocumentFormatError(`${path}.backgroundColor`, 'must be a hex color');
+            }
+            const normalizedColor = normalizeSlideHexColor(backgroundColor);
+            if (!normalizedColor) {
+                throw new DocumentFormatError(`${path}.backgroundColor`, 'must be a hex color');
+            }
+            const transition = meta.transition ?? 'none';
+            if (!isSlideTransition(transition)) {
+                throw new DocumentFormatError(`${path}.transition`, 'must be a supported slide transition');
+            }
+            return {showTitle, backgroundColor: normalizedColor, transition};
+        }
         case 'poll': {
             const kind = meta.kind ?? 'rating';
             if (kind !== 'rating' && kind !== 'children' && kind !== 'matrix' && kind !== 'long') {
@@ -512,6 +561,20 @@ const richMetaForDocumentBlock = (block: ParsedDocumentBlock, ts: string): RichB
             return {type: 'table', ts};
         case 'kanban':
             return {type: 'kanban', ts};
+        case 'slide_deck':
+            return {
+                ...defaultSlideDeckMeta(ts),
+                width: block.meta.width ?? 1920,
+                height: block.meta.height ?? 1080,
+                footer: block.meta.footer ?? 'slide-number',
+            };
+        case 'slide':
+            return {
+                ...defaultSlideMeta(ts),
+                showTitle: block.meta.showTitle ?? true,
+                backgroundColor: block.meta.backgroundColor ?? '#ffffff',
+                transition: block.meta.transition ?? 'none',
+            };
         case 'poll':
             return {
                 type: 'poll',
@@ -627,6 +690,17 @@ const documentBlockForMeta = (meta: RichBlockMeta): DocumentBlock => {
             return {type: 'table'};
         case 'kanban':
             return {type: 'kanban'};
+        case 'slide_deck':
+            return {type: 'slide_deck', meta: {width: meta.width, height: meta.height, footer: meta.footer}};
+        case 'slide':
+            return {
+                type: 'slide',
+                meta: {
+                    showTitle: meta.showTitle,
+                    backgroundColor: meta.backgroundColor,
+                    transition: meta.transition,
+                },
+            };
         case 'poll':
             return {
                 type: 'poll',

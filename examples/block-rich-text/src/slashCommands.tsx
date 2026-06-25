@@ -58,6 +58,8 @@ const SLASH_COMMANDS: SlashCommand[] = [
     {type: 'block', value: 'recipe-ingredient', label: 'Ingredient', group: 'Block type', keywords: ['ingredient', 'recipe', 'food', 'line']},
     {type: 'block', value: 'table', label: 'Table', group: 'Block type', keywords: ['grid']},
     {type: 'block', value: 'kanban', label: 'Kanban board', group: 'Block type', keywords: ['board', 'trello', 'cards', 'columns']},
+    {type: 'block', value: 'slide-deck', label: 'Slide deck', group: 'Block type', keywords: ['presentation', 'deck', 'slides']},
+    {type: 'block', value: 'slide', label: 'Slide', group: 'Block type', keywords: ['presentation', 'deck']},
     {type: 'block', value: 'preview', label: 'Preview', group: 'Block type', keywords: ['link', 'card', 'url']},
     {type: 'date-embed', label: 'Date', group: 'Inline embed', keywords: ['embed', 'calendar']},
 ];

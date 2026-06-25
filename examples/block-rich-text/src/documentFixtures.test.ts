@@ -84,6 +84,17 @@ describe('document fixtures', () => {
         expect(countBlocksOfType([board], 'table')).toBe(1);
     });
 
+    it('includes a slide deck fixture with slides and an orphan slide', () => {
+        const [deck, orphan] = documentFixture('slide-deck');
+
+        expect(deck.type).toBe('slide_deck');
+        expect(deck.meta).toMatchObject({width: 1600, height: 900, footer: 'deck-title-and-slide-number'});
+        expect(deck.children?.filter((child) => child.type === 'slide')).toHaveLength(2);
+        expect(deck.children?.some((child) => child.type !== 'slide')).toBe(true);
+        expect(countBlocksOfType([deck], 'table')).toBe(1);
+        expect(orphan.type).toBe('slide');
+    });
+
     it('generates depth-five list nesting', () => {
         const document = documentFixture('deep-list-nesting');
 

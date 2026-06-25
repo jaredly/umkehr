@@ -1,6 +1,12 @@
 import type {FormattedBlock} from 'umkehr/block-crdt';
 
-import {defaultRatingPollMeta, paragraphMeta, type RichBlockMeta} from './blockMeta';
+import {
+    defaultRatingPollMeta,
+    defaultSlideDeckMeta,
+    defaultSlideMeta,
+    paragraphMeta,
+    type RichBlockMeta,
+} from './blockMeta';
 import type {BlockTypeMenuValue} from './blockEditorTypes';
 
 type RichFormattedBlock = FormattedBlock<RichBlockMeta>;
@@ -61,6 +67,10 @@ export const blockTypeMeta = (
             return current;
         case 'kanban':
             return current;
+        case 'slide-deck':
+            return defaultSlideDeckMeta(ts);
+        case 'slide':
+            return defaultSlideMeta(ts);
         case 'preview':
             return {
                 type: 'preview',
@@ -110,6 +120,10 @@ export const blockTypeMenuValue = (meta: RichBlockMeta | undefined): BlockTypeMe
             return 'table';
         case 'kanban':
             return 'kanban';
+        case 'slide_deck':
+            return 'slide-deck';
+        case 'slide':
+            return 'slide';
         case 'poll':
             return meta.kind === 'rating'
                 ? 'poll-rating'

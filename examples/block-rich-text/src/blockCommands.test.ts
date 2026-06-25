@@ -23,8 +23,11 @@ import {
     exitEmptyLastTableRow,
     advanceFromTableCellEnd,
     addTableRow,
+    addSlide,
     commandApplied,
     convertBlockToKanban,
+    convertBlockToSlide,
+    convertBlockToSlideDeck,
     convertBlockToTable,
     createMissingTableCell,
     createTable,
@@ -57,6 +60,7 @@ import {
     setBlockType,
     setLinkMark,
     setPreviewBlockData,
+    slideChildren,
     splitBlock,
     splitTableRowHeader,
     splitTableTitleToParagraph,
@@ -145,6 +149,13 @@ const kanbanShape = (state: CachedState<RichBlockMeta>, boardId: string) => {
         columns,
         cards: columns.map((columnId) => kanbanCards(state, columnId)),
     };
+};
+
+const slideDeckShape = (state: CachedState<RichBlockMeta>, deckId: string) => {
+    const deck = state.state.blocks[deckId];
+    if (!deck || deck.meta.type !== 'slide_deck') throw new Error(`slide deck ${deckId} not found`);
+    const slides = slideChildren(state, deckId);
+    return {deck, slides};
 };
 
 const insertParagraphChild = (
@@ -927,6 +938,91 @@ describe('block rich text commands', () => {
         expect(kanbanShape(result.state, boardId).columns).toEqual([columnId]);
         expect(blockContents(result.state, columnId)).toBe('Existing column');
         expect(result.selection).toEqual(caret(boardId, 0));
+    });
+
+    it('converts an empty text block to a slide deck with one default slide', () => {
+        const demo = createDemoState();
+        const context = ctx();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = insertText(demo.left.state, caret(blockId, 0), 'Quarterly review', context);
+
+        result = convertBlockToSlideDeck(result.state, caret(blockId, 0), context);
+
+        const shape = slideDeckShape(result.state, blockId);
+        expect(shape.deck.meta).toMatchObject({
+            type: 'slide_deck',
+            width: 1920,
+            height: 1080,
+            footer: 'slide-number',
+        });
+        expect(blockContents(result.state, blockId)).toBe('Quarterly review');
+        expect(shape.slides).toHaveLength(1);
+        expect(result.state.state.blocks[shape.slides[0]].meta).toMatchObject({
+            type: 'slide',
+            showTitle: true,
+            backgroundColor: '#ffffff',
+            transition: 'none',
+        });
+        expect(result.selection).toEqual(caret(shape.slides[0], 0));
+    });
+
+    it('does not rearrange existing children when converting a block to a slide deck', () => {
+        const context = ctx();
+        let result = pastePlainText(init(), caret(onlyBlock(init()), 0), 'Deck\nOutline child', context);
+        const [deckId, childId] = rootBlockIds(result.state);
+        result = moveBlock(result.state, childId, {type: 'child', parentBlockId: deckId, at: 'end'}, context);
+
+        result = convertBlockToSlideDeck(result.state, caret(deckId, 0), context);
+
+        expect(result.state.state.blocks[deckId].meta.type).toBe('slide_deck');
+        expect(visibleBlockChildren(result.state, deckId, annotationVirtualParents(result.state))).toEqual([childId]);
+        expect(slideChildren(result.state, deckId)).toEqual([]);
+        expect(result.state.state.blocks[childId].meta.type).toBe('paragraph');
+        expect(result.selection).toEqual(caret(deckId, 0));
+    });
+
+    it('converts a normal block to an orphan slide while preserving content and children', () => {
+        const context = ctx();
+        let result = pastePlainText(init(), caret(onlyBlock(init()), 0), 'Slide title\nBody', context);
+        const [slideId, bodyId] = rootBlockIds(result.state);
+        result = moveBlock(result.state, bodyId, {type: 'child', parentBlockId: slideId, at: 'end'}, context);
+
+        result = convertBlockToSlide(result.state, caret(slideId, 3), context);
+
+        expect(result.state.state.blocks[slideId].meta).toMatchObject({
+            type: 'slide',
+            showTitle: true,
+            backgroundColor: '#ffffff',
+            transition: 'none',
+        });
+        expect(blockContents(result.state, slideId)).toBe('Slide title');
+        expect(visibleBlockChildren(result.state, slideId, annotationVirtualParents(result.state))).toEqual([bodyId]);
+        expect(result.selection).toEqual(caret(slideId, 3));
+    });
+
+    it('adds slides at the end and around existing slides', () => {
+        const demo = createDemoState();
+        const context = ctx();
+        const deckId = rootBlockIds(demo.left.state)[0];
+        let result = convertBlockToSlideDeck(demo.left.state, caret(deckId, 0), context);
+        const firstSlide = slideChildren(result.state, deckId)[0];
+
+        result = addSlide(result.state, deckId, context);
+        const secondSlide = focusPoint(result.selection).blockId;
+        result = addSlide(result.state, deckId, context, {type: 'before', slideId: secondSlide});
+        const insertedBeforeSecond = focusPoint(result.selection).blockId;
+        result = addSlide(result.state, deckId, context, {type: 'after', slideId: secondSlide});
+        const insertedAfterSecond = focusPoint(result.selection).blockId;
+
+        expect(slideChildren(result.state, deckId)).toEqual([
+            firstSlide,
+            insertedBeforeSecond,
+            secondSlide,
+            insertedAfterSecond,
+        ]);
+        expect([firstSlide, secondSlide, insertedBeforeSecond, insertedAfterSecond].every(
+            (slideId) => result.state.state.blocks[slideId].meta.type === 'slide',
+        )).toBe(true);
     });
 
     it('moves kanban cards with normal block moves while preserving subtree and metadata', () => {

@@ -40,6 +40,7 @@ export const documentFixtures: DocumentFixture[] = [
     {id: 'sparse-table', label: 'Sparse table', document: sparseTable},
     {id: 'complex-table', label: 'Complex table', document: complexTable},
     {id: 'kanban-board', label: 'Kanban board', document: kanbanBoard},
+    {id: 'slide-deck', label: 'Slide deck', document: slideDeck},
     {id: 'deep-list-nesting', label: 'Deep list nesting', document: deepListNesting},
     {id: 'many-blocks', label: 'Many blocks', document: manyBlocks},
     {id: 'mixed-table-and-text', label: 'Mixed table and text', document: mixedTableAndText},
@@ -199,6 +200,50 @@ const displayMathBlock = (source: string): DocumentBlock => ({
     content: source,
     marks: [mathMark(source, source, true)],
 });
+
+function slideDeck(): ImportDocument {
+    return [
+        {
+            type: 'slide_deck',
+            meta: {width: 1600, height: 900, footer: 'deck-title-and-slide-number'},
+            content: 'Quarterly review',
+            children: [
+                {
+                    type: 'slide',
+                    meta: {showTitle: true, backgroundColor: '#ffffff', transition: 'fade'},
+                    content: 'Highlights',
+                    children: [
+                        {type: 'heading', meta: {level: 2}, content: 'Revenue grew 18%'},
+                        {type: 'paragraph', content: 'Expansion was strongest in self-serve accounts.'},
+                    ],
+                },
+                {
+                    type: 'slide',
+                    meta: {showTitle: false, backgroundColor: '#f3f8ff', transition: 'slide'},
+                    content: 'Hidden title slide',
+                    children: [
+                        {type: 'blockquote', content: 'The title stays editable in outline mode.'},
+                        {
+                            type: 'table',
+                            content: 'Regional summary',
+                            children: [
+                                {content: 'North America', children: [{content: '+22%'}, {content: 'Stable churn'}]},
+                                {content: 'Europe', children: [{content: '+13%'}, {content: 'Pipeline building'}]},
+                            ],
+                        },
+                    ],
+                },
+                {type: 'paragraph', content: 'Outline-only deck note'},
+            ],
+        },
+        {
+            type: 'slide',
+            meta: {showTitle: true, backgroundColor: '#fff7ed', transition: 'none'},
+            content: 'Orphan slide',
+            children: [{type: 'todo', meta: {checked: false}, content: 'Promote into a deck later'}],
+        },
+    ];
+}
 
 function largeTable(): ImportDocument {
     return [{

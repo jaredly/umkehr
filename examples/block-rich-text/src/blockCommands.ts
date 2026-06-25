@@ -27,6 +27,8 @@ import {compareLseqIds, createLseqIdBetween} from 'umkehr/block-crdt/lseq';
 import type {BlockOrderTs, Boundary, CachedState, JsonValue, Lamport} from 'umkehr/block-crdt/types';
 import {lamportToString, parseLamportString} from 'umkehr/block-crdt/utils';
 import {
+    defaultSlideDeckMeta,
+    defaultSlideMeta,
     paragraphMeta,
     sameTypeWithTs,
     type ImagePresentationSize,
@@ -1755,6 +1757,113 @@ export const convertBlockToKanban = (
     return {state: working, ops, selection: caret(firstColumnId ?? focus.blockId, 0)};
 };
 
+export const convertBlockToSlideDeck = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    context: CommandContext,
+): CommandResult => {
+    const focus = firstPointForSelection(state, selection);
+    const focusBlock = state.state.blocks[focus.blockId];
+    if (!focusBlock) return {state, ops: [], selection};
+    if (focusBlock.meta.type === 'slide_deck') {
+        return {state, ops: [], selection: caret(focus.blockId, focus.offset)};
+    }
+
+    const ops: Array<Op<RichBlockMeta>> = [];
+    let working = state;
+    const deckOps = setBlockMetaOps(working, {
+        block: focusBlock.id,
+        meta: defaultSlideDeckMeta(context.nextTs()),
+    });
+    working = applyMany(working, deckOps, annotationVirtualParents(working));
+    ops.push(...deckOps);
+
+    if (visibleBlockChildren(working, focus.blockId, annotationVirtualParents(working)).length > 0) {
+        return {state: working, ops, selection: caret(focus.blockId, focus.offset)};
+    }
+
+    const slideOps = insertBlockOps(working, {
+        actor: context.actor,
+        parent: focusBlock.id,
+        before: null,
+        after: null,
+        meta: defaultSlideMeta(context.nextTs()),
+        ts: context.nextTs(),
+        virtualParents: annotationVirtualParents(working),
+    });
+    working = applyMany(working, slideOps, annotationVirtualParents(working));
+    ops.push(...slideOps);
+    const slideId = lamportToString(insertedBlockFromOps(slideOps).id);
+
+    return {state: working, ops, selection: caret(slideId, 0)};
+};
+
+export const convertBlockToSlide = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    context: CommandContext,
+): CommandResult => {
+    const focus = firstPointForSelection(state, selection);
+    const focusBlock = state.state.blocks[focus.blockId];
+    if (!focusBlock) return {state, ops: [], selection};
+    if (focusBlock.meta.type === 'slide') return {state, ops: [], selection: caret(focus.blockId, focus.offset)};
+
+    const ops = setBlockMetaOps(state, {
+        block: focusBlock.id,
+        meta: defaultSlideMeta(context.nextTs()),
+    });
+    const next = applyMany(state, ops, annotationVirtualParents(state));
+    return {state: next, ops, selection: caret(focus.blockId, focus.offset)};
+};
+
+export type AddSlidePosition =
+    | {type: 'end'}
+    | {type: 'before'; slideId: string}
+    | {type: 'after'; slideId: string};
+
+export const addSlide = (
+    state: CachedState<RichBlockMeta>,
+    deckId: string,
+    context: CommandContext,
+    position: AddSlidePosition = {type: 'end'},
+): CommandResult => {
+    const deck = state.state.blocks[deckId];
+    if (!deck || deck.meta.type !== 'slide_deck') return {state, ops: [], selection: caret(deckId, 0)};
+
+    const slides = slideChildren(state, deckId);
+    let before: Lamport | null = null;
+    let after: Lamport | null = null;
+    if (position.type === 'end') {
+        const previousId = slides[slides.length - 1] ?? null;
+        before = previousId ? state.state.blocks[previousId].id : null;
+    } else {
+        const index = slides.indexOf(position.slideId);
+        if (index < 0) return {state, ops: [], selection: caret(deckId, 0)};
+        if (position.type === 'before') {
+            const previousId = slides[index - 1] ?? null;
+            before = previousId ? state.state.blocks[previousId].id : null;
+            after = state.state.blocks[position.slideId].id;
+        } else {
+            const nextId = slides[index + 1] ?? null;
+            before = state.state.blocks[position.slideId].id;
+            after = nextId ? state.state.blocks[nextId].id : null;
+        }
+    }
+
+    const ops = insertBlockOps(state, {
+        actor: context.actor,
+        parent: deck.id,
+        before,
+        after,
+        meta: defaultSlideMeta(context.nextTs()),
+        ts: context.nextTs(),
+        virtualParents: annotationVirtualParents(state),
+    });
+    const next = applyMany(state, ops, annotationVirtualParents(state));
+    const slideId = lamportToString(insertedBlockFromOps(ops).id);
+    return {state: next, ops, selection: caret(slideId, 0)};
+};
+
 export const createMissingTableCell = (
     state: CachedState<RichBlockMeta>,
     rowId: string,
@@ -2433,6 +2542,24 @@ export const kanbanCards = (state: CachedState<RichBlockMeta>, columnId: string)
     if (!kanbanColumnContext(state, columnId)) return [];
     return visibleBlockChildren(state, columnId, annotationVirtualParents(state));
 };
+
+export const slideChildren = (state: CachedState<RichBlockMeta>, deckId: string): string[] => {
+    const deck = state.state.blocks[deckId];
+    if (!deck || deck.meta.type !== 'slide_deck') return [];
+    return visibleBlockChildren(state, deckId, annotationVirtualParents(state)).filter(
+        (childId) => state.state.blocks[childId]?.meta.type === 'slide',
+    );
+};
+
+export const slideDeckForSlide = (state: CachedState<RichBlockMeta>, slideId: string): string | null => {
+    const slide = state.state.blocks[slideId];
+    if (!slide || slide.meta.type !== 'slide') return null;
+    const deckId = lamportToString(materializedBlockParent(state, slideId, annotationVirtualParents(state)));
+    return state.state.blocks[deckId]?.meta.type === 'slide_deck' ? deckId : null;
+};
+
+export const isSlideChildOfDeck = (state: CachedState<RichBlockMeta>, slideId: string): boolean =>
+    slideDeckForSlide(state, slideId) !== null;
 
 export type KanbanColumnContext = {
     boardId: string;

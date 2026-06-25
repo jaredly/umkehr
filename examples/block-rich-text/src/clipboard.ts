@@ -31,7 +31,14 @@ import {
     tableRowsForSelection,
     type EditorSelection,
 } from './selectionModel';
-import {codePreviewKindForLanguage, type PreviewMetadata, type RichBlockMeta} from './blockMeta';
+import {
+    codePreviewKindForLanguage,
+    isSlideDeckFooterMode,
+    isSlideHexColor,
+    isSlideTransition,
+    type PreviewMetadata,
+    type RichBlockMeta,
+} from './blockMeta';
 import {isPollMeta} from './pollBlocks';
 import {isSerializedImageAttachment, type SerializedImageAttachment} from './attachments';
 import {
@@ -734,6 +741,20 @@ const isRichBlockMeta = (value: unknown): value is RichBlockMeta => {
         case 'table':
         case 'kanban':
             return true;
+        case 'slide_deck':
+            return (
+                Number.isInteger(value.width) &&
+                (value.width as number) > 0 &&
+                Number.isInteger(value.height) &&
+                (value.height as number) > 0 &&
+                isSlideDeckFooterMode(value.footer)
+            );
+        case 'slide':
+            return (
+                typeof value.showTitle === 'boolean' &&
+                isSlideHexColor(value.backgroundColor) &&
+                isSlideTransition(value.transition)
+            );
         case 'poll':
             return isPollMeta(value);
         case 'heading':
