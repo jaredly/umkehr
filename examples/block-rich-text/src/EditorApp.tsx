@@ -7336,7 +7336,14 @@ const renderRunChunkNode = (
             !selectionIntersectsChunk(options.blockId ?? '', options.selection, chunk) &&
             options.mathRenderer
         ) {
-            const element = renderMathPreview(chunk.text, mathMode, chunk.blockStartOffset, chunk.blockEndOffset, options.mathRenderer);
+            const element = renderMathPreview(
+                options.blockId ?? '',
+                chunk.text,
+                mathMode,
+                chunk.blockStartOffset,
+                chunk.blockEndOffset,
+                options.mathRenderer,
+            );
             if (rainbowColor) element.style.backgroundColor = rainbowColor;
             return element;
         }
@@ -7359,6 +7366,7 @@ const rainbowLamportColor = (charId: string | undefined): string | null => {
 };
 
 const renderMathPreview = (
+    blockId: string,
     source: string,
     mode: 'inline' | 'display',
     startOffset: number,
@@ -7378,7 +7386,9 @@ const renderMathPreview = (
     const rendered = document.createElement('span');
     rendered.className = 'mathPreviewRendered';
     rendered.dataset.offsetSentinel = 'true';
-    const result = renderer.render(source, mode);
+    const result = renderer.render(source, mode, {
+        fallbackKey: mathSourceFallbackKey(blockId, startOffset, mode),
+    });
     if (result.type === 'html') {
         rendered.innerHTML = result.html;
     } else {
@@ -7393,6 +7403,12 @@ const renderMathPreview = (
     span.append(rendered, offsetText);
     return span;
 };
+
+const mathSourceFallbackKey = (
+    blockId: string,
+    startOffset: number,
+    mode: 'inline' | 'display',
+): string => `${blockId}\0${startOffset}\0${mode}`;
 
 const selectionIntersectsChunk = (
     blockId: string,

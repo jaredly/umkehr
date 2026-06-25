@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {FakeMathRenderer} from './mathRendering';
+import {BrowserMathJaxRenderer, FakeMathRenderer, type MathRenderResult} from './mathRendering';
 
 describe('math rendering adapter', () => {
     it('renders deterministic fake math html for tests', () => {
@@ -19,5 +19,37 @@ describe('math rendering adapter', () => {
         const renderer = new FakeMathRenderer();
 
         expect(renderer.render('INVALID', 'inline')).toEqual({type: 'literal', text: 'INVALID'});
+    });
+
+    it('uses the previous rendered result for the same fallback key while rerendering', async () => {
+        const pending: Array<{
+            source: string;
+            resolve(result: MathRenderResult): void;
+        }> = [];
+        const renderer = new BrowserMathJaxRenderer(undefined, (source) => {
+            return new Promise<MathRenderResult>((resolve) => pending.push({source, resolve}));
+        });
+        const fallbackKey = ['block', '0', 'inline'].join('\0');
+
+        expect(renderer.render('x', 'inline', {fallbackKey})).toEqual({
+            type: 'literal',
+            text: 'x',
+        });
+        pending.shift()?.resolve({type: 'html', html: '<span>x</span>'});
+        await Promise.resolve();
+
+        expect(renderer.render('xy', 'inline', {fallbackKey})).toEqual({
+            type: 'html',
+            html: '<span>x</span>',
+        });
+        expect(pending[0]?.source).toBe('xy');
+
+        pending.shift()?.resolve({type: 'html', html: '<span>xy</span>'});
+        await Promise.resolve();
+
+        expect(renderer.render('xy', 'inline', {fallbackKey})).toEqual({
+            type: 'html',
+            html: '<span>xy</span>',
+        });
     });
 });
