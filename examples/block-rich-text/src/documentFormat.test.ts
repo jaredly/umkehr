@@ -367,6 +367,7 @@ describe('block rich text document format export', () => {
                     kind: 'rating',
                     allowChange: true,
                     choiceMode: 'single',
+                    ratingPresentation: 'stars',
                     min: 1,
                     max: 5,
                     votes: {
@@ -381,6 +382,52 @@ describe('block rich text document format export', () => {
         const imported = importDocument(input, ctx());
 
         expect(exportDocument(imported.state)).toEqual(input);
+    });
+
+    it('round-trips answer poll display mode', () => {
+        const input: DocumentBlock[] = [
+            {
+                type: 'poll',
+                meta: {
+                    kind: 'children',
+                    allowChange: true,
+                    choiceMode: 'multiple',
+                    displayMode: 'list',
+                    votes: {},
+                },
+                content: 'Pick priorities',
+                children: [{type: 'paragraph', content: 'Design'}, {type: 'paragraph', content: 'Sync'}],
+            },
+        ];
+
+        const imported = importDocument(input, ctx());
+
+        expect(exportDocument(imported.state)).toEqual(input);
+    });
+
+    it('rejects invalid poll display metadata', () => {
+        expect(() =>
+            importDocument(
+                [
+                    {
+                        type: 'poll',
+                        meta: {kind: 'children', displayMode: 'grid' as never},
+                    },
+                ],
+                ctx(),
+            ),
+        ).toThrow('$[0].meta.displayMode: must be "inline" or "list"');
+        expect(() =>
+            importDocument(
+                [
+                    {
+                        type: 'poll',
+                        meta: {kind: 'rating', ratingPresentation: 'emoji' as never},
+                    },
+                ],
+                ctx(),
+            ),
+        ).toThrow('$[0].meta.ratingPresentation: must be "numbers" or "stars"');
     });
 
     it('round-trips kanban boards', () => {

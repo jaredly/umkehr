@@ -1,5 +1,5 @@
 import type {HLC} from 'umkehr/block-crdt/types';
-import type {PollMeta, PollVote, RichBlockMeta} from './blockMeta';
+import type {PollChoiceMode, PollMeta, PollVote, RichBlockMeta} from './blockMeta';
 
 export type PollResult = {
     optionId: string;
@@ -110,6 +110,55 @@ export const matrixPollResults = (
     return results;
 };
 
+export const pollMetaWithChoiceMode = (
+    meta: PollMeta,
+    choiceMode: PollChoiceMode,
+    ts: HLC,
+): PollMeta => {
+    if (choiceMode === 'multiple' || meta.choiceMode !== 'multiple') {
+        return {...meta, choiceMode, ts};
+    }
+    if (meta.kind === 'children') {
+        return {...meta, choiceMode, votes: singleChoicePollVotes(meta.votes, ts), ts};
+    }
+    if (meta.kind === 'matrix') {
+        return {...meta, choiceMode, votes: singleChoiceMatrixPollVotes(meta.votes, ts), ts};
+    }
+    return {...meta, choiceMode, ts};
+};
+
+export const singleChoicePollVotes = (
+    votes: Record<string, PollVote>,
+    ts: HLC,
+): Record<string, PollVote> =>
+    Object.fromEntries(
+        Object.entries(votes).map(([userId, vote]) => {
+            if (vote.deleted || vote.type !== 'multiple') return [userId, vote];
+            const optionId = vote.optionIds[0];
+            if (optionId === undefined) {
+                return [userId, deletedPollVote(vote, ts)];
+            }
+            return [userId, {type: 'single', optionId, ts} satisfies PollVote];
+        }),
+    );
+
+export const singleChoiceMatrixPollVotes = (
+    votes: Record<string, PollVote>,
+    ts: HLC,
+): Record<string, PollVote> =>
+    Object.fromEntries(
+        Object.entries(votes).map(([userId, vote]) => {
+            if (vote.deleted || vote.type !== 'matrix') return [userId, vote];
+            const answers = Object.fromEntries(
+                Object.entries(vote.answers).flatMap(([rowId, answer]) => {
+                    const optionId = Array.isArray(answer) ? answer[0] : answer;
+                    return optionId === undefined ? [] : [[rowId, optionId]];
+                }),
+            );
+            return [userId, {type: 'matrix', answers, ts} satisfies PollVote];
+        }),
+    );
+
 export const mergeRichBlockMeta = (
     current: RichBlockMeta,
     incoming: RichBlockMeta,
@@ -144,6 +193,16 @@ export const isPollMeta = (value: unknown): value is PollMeta => {
     }
     if (typeof value.allowChange !== 'boolean') return false;
     if (value.choiceMode !== undefined && value.choiceMode !== 'single' && value.choiceMode !== 'multiple') {
+        return false;
+    }
+    if (value.displayMode !== undefined && value.displayMode !== 'inline' && value.displayMode !== 'list') {
+        return false;
+    }
+    if (
+        value.ratingPresentation !== undefined &&
+        value.ratingPresentation !== 'numbers' &&
+        value.ratingPresentation !== 'stars'
+    ) {
         return false;
     }
     if (value.min !== undefined && !Number.isInteger(value.min)) return false;

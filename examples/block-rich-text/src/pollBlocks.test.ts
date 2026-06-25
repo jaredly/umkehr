@@ -1,6 +1,14 @@
 import {describe, expect, it} from 'vitest';
 import type {PollMeta} from './blockMeta';
-import {choiceResults, matrixPollResults, mergePollMeta, singleChoiceResults, votedOptionIds} from './pollBlocks';
+import {
+    choiceResults,
+    isPollMeta,
+    matrixPollResults,
+    mergePollMeta,
+    pollMetaWithChoiceMode,
+    singleChoiceResults,
+    votedOptionIds,
+} from './pollBlocks';
 
 describe('pollBlocks', () => {
     it('merges votes by user timestamp even when incoming poll meta is stale', () => {
@@ -112,5 +120,72 @@ describe('pollBlocks', () => {
             {optionId: 'a', count: 1, percentage: 100},
             {optionId: 'b', count: 0, percentage: 0},
         ]);
+    });
+
+    it('validates optional poll display and rating presentation metadata', () => {
+        const meta: PollMeta = {
+            type: 'poll',
+            kind: 'children',
+            choiceMode: 'single',
+            displayMode: 'list',
+            ratingPresentation: 'stars',
+            allowChange: true,
+            votes: {},
+            ts: '00001',
+        };
+
+        expect(isPollMeta(meta)).toBe(true);
+        expect(isPollMeta({...meta, displayMode: 'grid'})).toBe(false);
+        expect(isPollMeta({...meta, ratingPresentation: 'emoji'})).toBe(false);
+    });
+
+    it('normalizes answer poll votes when switching from multiple to single choice', () => {
+        const meta: PollMeta = {
+            type: 'poll',
+            kind: 'children',
+            choiceMode: 'multiple',
+            allowChange: true,
+            votes: {
+                ulrich: {type: 'multiple', optionIds: ['a', 'b'], ts: '00002'},
+                uwe: {type: 'multiple', optionIds: [], ts: '00003'},
+                old: {type: 'single', optionId: 'c', ts: '00004'},
+            },
+            ts: '00005',
+        };
+
+        expect(pollMetaWithChoiceMode(meta, 'single', '00006')).toEqual({
+            ...meta,
+            choiceMode: 'single',
+            votes: {
+                ulrich: {type: 'single', optionId: 'a', ts: '00006'},
+                uwe: {type: 'multiple', optionIds: [], ts: '00006', deleted: true},
+                old: {type: 'single', optionId: 'c', ts: '00004'},
+            },
+            ts: '00006',
+        });
+    });
+
+    it('normalizes matrix poll row answers when switching from multiple to single choice', () => {
+        const meta: PollMeta = {
+            type: 'poll',
+            kind: 'matrix',
+            choiceMode: 'multiple',
+            allowChange: true,
+            votes: {
+                ulrich: {type: 'matrix', answers: {row1: ['a', 'b'], row2: []}, ts: '00002'},
+                uwe: {type: 'matrix', answers: {row1: 'b'}, ts: '00003'},
+            },
+            ts: '00005',
+        };
+
+        expect(pollMetaWithChoiceMode(meta, 'single', '00006')).toEqual({
+            ...meta,
+            choiceMode: 'single',
+            votes: {
+                ulrich: {type: 'matrix', answers: {row1: 'a'}, ts: '00006'},
+                uwe: {type: 'matrix', answers: {row1: 'b'}, ts: '00006'},
+            },
+            ts: '00006',
+        });
     });
 });

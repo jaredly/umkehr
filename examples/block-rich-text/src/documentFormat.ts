@@ -27,6 +27,8 @@ import {
     type ImagePresentationSize,
     type PollKind,
     type PollChoiceMode,
+    type PollDisplayMode,
+    type PollRatingPresentation,
     type PollVote,
     type PreviewMetadata,
     type RichBlockMeta,
@@ -69,6 +71,8 @@ export type DocumentBlockMeta = {
     url?: string;
     allowChange?: boolean;
     choiceMode?: PollChoiceMode;
+    displayMode?: PollDisplayMode;
+    ratingPresentation?: PollRatingPresentation;
     min?: number;
     max?: number;
     votes?: Record<string, PollVote>;
@@ -381,6 +385,18 @@ const parseMeta = (type: DocumentBlockType, value: unknown, path: string): Docum
             if (choiceMode !== undefined && choiceMode !== 'single' && choiceMode !== 'multiple') {
                 throw new DocumentFormatError(`${path}.choiceMode`, 'must be "single" or "multiple"');
             }
+            const displayMode = meta.displayMode;
+            if (displayMode !== undefined && displayMode !== 'inline' && displayMode !== 'list') {
+                throw new DocumentFormatError(`${path}.displayMode`, 'must be "inline" or "list"');
+            }
+            const ratingPresentation = meta.ratingPresentation;
+            if (
+                ratingPresentation !== undefined &&
+                ratingPresentation !== 'numbers' &&
+                ratingPresentation !== 'stars'
+            ) {
+                throw new DocumentFormatError(`${path}.ratingPresentation`, 'must be "numbers" or "stars"');
+            }
             const rawMin = meta.min ?? (kind === 'rating' ? 1 : undefined);
             const rawMax = meta.max ?? (kind === 'rating' ? 5 : undefined);
             const min = typeof rawMin === 'number' ? rawMin : undefined;
@@ -405,6 +421,8 @@ const parseMeta = (type: DocumentBlockType, value: unknown, path: string): Docum
                 kind,
                 allowChange,
                 ...(choiceMode ? {choiceMode} : {}),
+                ...(displayMode ? {displayMode} : {}),
+                ...(ratingPresentation ? {ratingPresentation} : {}),
                 ...(min !== undefined ? {min} : {}),
                 ...(max !== undefined ? {max} : {}),
                 votes: votes as Record<string, PollVote>,
@@ -510,6 +528,10 @@ const richMetaForDocumentBlock = (block: ParsedDocumentBlock, ts: string): RichB
                 kind: (block.meta.kind as PollKind | undefined) ?? 'rating',
                 allowChange: block.meta.allowChange ?? true,
                 ...(block.meta.choiceMode ? {choiceMode: block.meta.choiceMode as PollChoiceMode} : {}),
+                ...(block.meta.displayMode ? {displayMode: block.meta.displayMode as PollDisplayMode} : {}),
+                ...(block.meta.ratingPresentation
+                    ? {ratingPresentation: block.meta.ratingPresentation as PollRatingPresentation}
+                    : {}),
                 ...(block.meta.min !== undefined ? {min: block.meta.min} : {}),
                 ...(block.meta.max !== undefined ? {max: block.meta.max} : {}),
                 votes: block.meta.votes ?? {},
@@ -623,6 +645,8 @@ const documentBlockForMeta = (meta: RichBlockMeta): DocumentBlock => {
                     kind: meta.kind,
                     allowChange: meta.allowChange,
                     ...(meta.choiceMode ? {choiceMode: meta.choiceMode} : {}),
+                    ...(meta.displayMode ? {displayMode: meta.displayMode} : {}),
+                    ...(meta.ratingPresentation ? {ratingPresentation: meta.ratingPresentation} : {}),
                     ...(meta.min !== undefined ? {min: meta.min} : {}),
                     ...(meta.max !== undefined ? {max: meta.max} : {}),
                     votes: meta.votes,

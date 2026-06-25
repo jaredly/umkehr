@@ -105,7 +105,10 @@ import {
     codePreviewKindForLanguage,
     isPreviewableCodeMeta,
     paragraphMeta,
+    type PollChoiceMode,
+    type PollDisplayMode,
     type PollMeta,
+    type PollRatingPresentation,
     type PollVote,
     type ImagePresentationSize,
     type PreviewMetadata,
@@ -294,6 +297,7 @@ import {
     currentUserVote,
     matrixPollResults,
     normalizeUserId,
+    pollMetaWithChoiceMode,
     ratingOptionIds,
     singleChoiceResults,
     votedOptionIds,
@@ -4916,6 +4920,94 @@ const renderEditableBlock = (
                     return {state: result.state, ops: result.ops, selection: current.selection};
                 })
             }
+            onSetPollChoiceMode={(choiceMode) =>
+                context.runBlockControlCommand((current) => {
+                    const currentBlock = current.state.state.blocks[block.id];
+                    if (
+                        !currentBlock ||
+                        currentBlock.meta.type !== 'poll' ||
+                        (currentBlock.meta.kind !== 'children' && currentBlock.meta.kind !== 'matrix')
+                    ) {
+                        return {state: current.state, ops: [], selection: current.selection};
+                    }
+                    const result = setBlockMeta(
+                        current.state,
+                        block.id,
+                        pollMetaWithChoiceMode(currentBlock.meta, choiceMode, nextReplicaTs(current)),
+                    );
+                    return {state: result.state, ops: result.ops, selection: current.selection};
+                })
+            }
+            onSetPollDisplayMode={(displayMode) =>
+                context.runBlockControlCommand((current) => {
+                    const currentBlock = current.state.state.blocks[block.id];
+                    if (
+                        !currentBlock ||
+                        currentBlock.meta.type !== 'poll' ||
+                        currentBlock.meta.kind !== 'children'
+                    ) {
+                        return {state: current.state, ops: [], selection: current.selection};
+                    }
+                    const result = setBlockMeta(current.state, block.id, {
+                        ...currentBlock.meta,
+                        displayMode,
+                        ts: nextReplicaTs(current),
+                    });
+                    return {state: result.state, ops: result.ops, selection: current.selection};
+                })
+            }
+            onSetPollAllowChange={(allowChange) =>
+                context.runBlockControlCommand((current) => {
+                    const currentBlock = current.state.state.blocks[block.id];
+                    if (!currentBlock || currentBlock.meta.type !== 'poll') {
+                        return {state: current.state, ops: [], selection: current.selection};
+                    }
+                    const result = setBlockMeta(current.state, block.id, {
+                        ...currentBlock.meta,
+                        allowChange,
+                        ts: nextReplicaTs(current),
+                    });
+                    return {state: result.state, ops: result.ops, selection: current.selection};
+                })
+            }
+            onSetRatingPollRange={(min, max) =>
+                context.runBlockControlCommand((current) => {
+                    const currentBlock = current.state.state.blocks[block.id];
+                    if (
+                        !currentBlock ||
+                        currentBlock.meta.type !== 'poll' ||
+                        currentBlock.meta.kind !== 'rating'
+                    ) {
+                        return {state: current.state, ops: [], selection: current.selection};
+                    }
+                    const range = normalizedRatingRange(min, max);
+                    const result = setBlockMeta(current.state, block.id, {
+                        ...currentBlock.meta,
+                        min: range.min,
+                        max: range.max,
+                        ts: nextReplicaTs(current),
+                    });
+                    return {state: result.state, ops: result.ops, selection: current.selection};
+                })
+            }
+            onSetRatingPollPresentation={(ratingPresentation) =>
+                context.runBlockControlCommand((current) => {
+                    const currentBlock = current.state.state.blocks[block.id];
+                    if (
+                        !currentBlock ||
+                        currentBlock.meta.type !== 'poll' ||
+                        currentBlock.meta.kind !== 'rating'
+                    ) {
+                        return {state: current.state, ops: [], selection: current.selection};
+                    }
+                    const result = setBlockMeta(current.state, block.id, {
+                        ...currentBlock.meta,
+                        ratingPresentation,
+                        ts: nextReplicaTs(current),
+                    });
+                    return {state: result.state, ops: result.ops, selection: current.selection};
+                })
+            }
             onSetPreviewUrl={(url) =>
                 context.runBlockControlCommand((current) => {
                     const currentBlock = current.state.state.blocks[block.id];
@@ -5900,6 +5992,11 @@ function EditableBlock({
     onSetCodePreview,
     onSetCalloutKind,
     onSetImageSize,
+    onSetPollChoiceMode,
+    onSetPollDisplayMode,
+    onSetPollAllowChange,
+    onSetRatingPollRange,
+    onSetRatingPollPresentation,
     onSetPreviewUrl,
     onSetPreviewMetadata,
     onCopy,
@@ -5982,6 +6079,11 @@ function EditableBlock({
     onSetCodePreview(enabled: boolean): void;
     onSetCalloutKind(kind: 'info' | 'warning' | 'error'): void;
     onSetImageSize(size: ImagePresentationSize): void;
+    onSetPollChoiceMode(mode: PollChoiceMode): void;
+    onSetPollDisplayMode(mode: PollDisplayMode): void;
+    onSetPollAllowChange(allowChange: boolean): void;
+    onSetRatingPollRange(min: number, max: number): void;
+    onSetRatingPollPresentation(presentation: PollRatingPresentation): void;
     onSetPreviewUrl(url: string): void;
     onSetPreviewMetadata(url: string, metadata: PreviewMetadata | null): void;
     onCopy(event: ClipboardEvent<HTMLElement>): void;
@@ -6396,12 +6498,17 @@ function EditableBlock({
                 editableSurface
             )}
             {!hideInlineControls && (
-                <BlockInlineControls
+                <BlockOptions
                     meta={meta}
                     onSetCodeLanguage={onSetCodeLanguage}
                     onSetCodePreview={onSetCodePreview}
                     onSetCalloutKind={onSetCalloutKind}
                     onSetImageSize={onSetImageSize}
+                    onSetPollChoiceMode={onSetPollChoiceMode}
+                    onSetPollDisplayMode={onSetPollDisplayMode}
+                    onSetPollAllowChange={onSetPollAllowChange}
+                    onSetRatingPollRange={onSetRatingPollRange}
+                    onSetRatingPollPresentation={onSetRatingPollPresentation}
                 />
             )}
         </div>
@@ -6451,7 +6558,10 @@ function PollBlock({
     }
     const options: PollOptionView[] =
         meta.kind === 'rating'
-            ? ratingOptionIds(meta).map((id) => ({id, label: id}))
+            ? ratingOptionIds(meta).map((id) => ({
+                  id,
+                  label: meta.ratingPresentation === 'stars' ? ratingOptionLabelForStars(id) : id,
+              }))
             : childPollOptions(meta, childOptions);
     const optionIds = options.map((option) => option.id);
     const userVote = userId ? currentUserVote(meta, userId) : null;
@@ -6461,12 +6571,17 @@ function PollBlock({
     const canVote = Boolean(userId) && (!userVote || meta.allowChange);
     const showResults = Boolean(userVote);
     const multiple = meta.kind === 'children' && meta.choiceMode === 'multiple';
+    const displayMode = meta.kind === 'children' ? meta.displayMode ?? 'inline' : 'inline';
 
     return (
         <div className="pollBlock">
             {question}
             <div className="pollControls" contentEditable={false}>
-                <div className="pollOptions" role={multiple ? 'group' : 'radiogroup'} aria-label="Poll options">
+                <div
+                    className={['pollOptions', `pollOptions-${displayMode}`].join(' ')}
+                    role={multiple ? 'group' : 'radiogroup'}
+                    aria-label="Poll options"
+                >
                     {options.map((option) => {
                         const result = resultsByOption.get(option.id);
                         const selected = selectedOptionIds.has(option.id);
@@ -6482,6 +6597,11 @@ function PollBlock({
                                     .filter(Boolean)
                                     .join(' ')}
                                 aria-pressed={selected}
+                                aria-label={
+                                    meta.kind === 'rating' && meta.ratingPresentation === 'stars'
+                                        ? `${option.id} stars`
+                                        : undefined
+                                }
                                 disabled={!canVote}
                                 onMouseDown={(event) => event.preventDefault()}
                                 onClick={() => onVote(option.id)}
@@ -6508,6 +6628,12 @@ const selectedPollOptionIds = (vote: PollVote | null): Set<string> => {
     return new Set();
 };
 
+const ratingOptionLabelForStars = (optionId: string): string => {
+    const value = Number(optionId);
+    if (!Number.isInteger(value) || value <= 0) return optionId;
+    return '★'.repeat(Math.min(value, 10));
+};
+
 const childPollOptions = (meta: PollMeta, childOptions: PollOptionView[]): PollOptionView[] => {
     const activeIds = new Set(childOptions.map((option) => option.id));
     const archived = votedOptionIds(meta)
@@ -6520,6 +6646,17 @@ const toggleOptionId = (optionIds: string[], optionId: string): string[] =>
     optionIds.includes(optionId)
         ? optionIds.filter((id) => id !== optionId)
         : [...optionIds, optionId];
+
+const normalizedRatingRange = (min: number, max: number): {min: number; max: number} => {
+    const normalizedMin = Number.isFinite(min) ? Math.trunc(min) : 1;
+    const normalizedMax = Number.isFinite(max) ? Math.trunc(max) : 5;
+    const clampedMin = Math.max(0, Math.min(10, normalizedMin));
+    const clampedMax = Math.max(0, Math.min(10, normalizedMax));
+    return {
+        min: Math.min(clampedMin, clampedMax),
+        max: Math.max(clampedMin, clampedMax),
+    };
+};
 
 function MatrixPollBlock({
     meta,
@@ -7233,98 +7370,267 @@ function BlockAffordance({
     );
 }
 
-function BlockInlineControls({
+function BlockOptions({
     meta,
     onSetCodeLanguage,
     onSetCodePreview,
     onSetCalloutKind,
     onSetImageSize,
+    onSetPollChoiceMode,
+    onSetPollDisplayMode,
+    onSetPollAllowChange,
+    onSetRatingPollRange,
+    onSetRatingPollPresentation,
 }: {
     meta: RichBlockMeta;
     onSetCodeLanguage(language: string): void;
     onSetCodePreview(enabled: boolean): void;
     onSetCalloutKind(kind: 'info' | 'warning' | 'error'): void;
     onSetImageSize(size: ImagePresentationSize): void;
+    onSetPollChoiceMode(mode: PollChoiceMode): void;
+    onSetPollDisplayMode(mode: PollDisplayMode): void;
+    onSetPollAllowChange(allowChange: boolean): void;
+    onSetRatingPollRange(min: number, max: number): void;
+    onSetRatingPollPresentation(presentation: PollRatingPresentation): void;
 }) {
+    let label: string | null = null;
+    let controls: ReactElement | null = null;
+
     if (meta.type === 'code') {
         const previewKind = codePreviewKindForLanguage(meta.language);
-        return (
-            <details
-                className="codeControls"
-                contentEditable={false}
-                onPointerDown={stopEditorControlEvent}
-                onMouseDown={stopEditorControlEvent}
-                onMouseUp={stopEditorControlEvent}
-                onClick={stopEditorControlEvent}
-            >
-                <summary className="codeControlsButton" aria-label="Code block options">
-                    <span aria-hidden="true">...</span>
-                </summary>
-                <div className="codeControlsMenu">
-                    <input
-                        className="codeLanguage"
-                        value={meta.language}
-                        placeholder="plain"
-                        aria-label="Code language"
-                        onChange={(event) => onSetCodeLanguage(event.currentTarget.value)}
-                    />
-                    {previewKind ? (
-                        <label className="codePreviewToggle">
+        label = 'Code block options';
+        controls = (
+            <>
+                <input
+                    className="codeLanguage"
+                    value={meta.language}
+                    placeholder="plain"
+                    aria-label="Code language"
+                    onChange={(event) => onSetCodeLanguage(event.currentTarget.value)}
+                />
+                {previewKind ? (
+                    <label className="blockOptionsToggle">
+                        <input
+                            type="checkbox"
+                            checked={meta.preview === previewKind}
+                            aria-label="Preview code"
+                            onChange={(event) => onSetCodePreview(event.currentTarget.checked)}
+                        />
+                        Preview
+                    </label>
+                ) : null}
+            </>
+        );
+    } else if (meta.type === 'callout') {
+        label = 'Callout block options';
+        controls = (
+            <label className="blockOptionsField">
+                <span>Kind</span>
+                <select
+                    className="blockOptionsSelect"
+                    value={meta.kind}
+                    aria-label="Callout kind"
+                    onChange={(event) =>
+                        onSetCalloutKind(event.currentTarget.value as 'info' | 'warning' | 'error')
+                    }
+                >
+                    <option value="info">Info</option>
+                    <option value="warning">Warning</option>
+                    <option value="error">Error</option>
+                </select>
+            </label>
+        );
+    } else if (meta.type === 'image') {
+        label = 'Image block options';
+        controls = (
+            <label className="blockOptionsField">
+                <span>Size</span>
+                <select
+                    className="blockOptionsSelect"
+                    value={meta.size}
+                    aria-label="Image size"
+                    onChange={(event) =>
+                        onSetImageSize(event.currentTarget.value as ImagePresentationSize)
+                    }
+                >
+                    <option value="small">Small</option>
+                    <option value="medium">Medium</option>
+                    <option value="large">Large</option>
+                    <option value="original">Original</option>
+                </select>
+            </label>
+        );
+    } else if (meta.type === 'poll') {
+        label = 'Poll block options';
+        controls = (
+            <>
+                {meta.kind === 'rating' ? (
+                    <>
+                        <label className="blockOptionsToggle">
                             <input
                                 type="checkbox"
-                                checked={meta.preview === previewKind}
-                                aria-label="Preview code"
-                                onChange={(event) => onSetCodePreview(event.currentTarget.checked)}
+                                checked={meta.allowChange}
+                                aria-label="Allow vote changes"
+                                onChange={(event) => onSetPollAllowChange(event.currentTarget.checked)}
                             />
-                            Preview
+                            Allow changes
                         </label>
-                    ) : null}
-                </div>
-            </details>
+                        <div className="blockOptionsNumberRow">
+                            <label className="blockOptionsField">
+                                <span>Min</span>
+                                <input
+                                    className="blockOptionsNumber"
+                                    type="number"
+                                    min={0}
+                                    max={10}
+                                    value={meta.min ?? 1}
+                                    aria-label="Rating minimum"
+                                    onChange={(event) =>
+                                        onSetRatingPollRange(
+                                            Number(event.currentTarget.value),
+                                            meta.max ?? 5,
+                                        )
+                                    }
+                                />
+                            </label>
+                            <label className="blockOptionsField">
+                                <span>Max</span>
+                                <input
+                                    className="blockOptionsNumber"
+                                    type="number"
+                                    min={0}
+                                    max={10}
+                                    value={meta.max ?? 5}
+                                    aria-label="Rating maximum"
+                                    onChange={(event) =>
+                                        onSetRatingPollRange(
+                                            meta.min ?? 1,
+                                            Number(event.currentTarget.value),
+                                        )
+                                    }
+                                />
+                            </label>
+                        </div>
+                        <label className="blockOptionsField">
+                            <span>Style</span>
+                            <select
+                                className="blockOptionsSelect"
+                                value={meta.ratingPresentation ?? 'numbers'}
+                                aria-label="Rating presentation"
+                                onChange={(event) =>
+                                    onSetRatingPollPresentation(
+                                        event.currentTarget.value as PollRatingPresentation,
+                                    )
+                                }
+                            >
+                                <option value="numbers">Numbers</option>
+                                <option value="stars">Stars</option>
+                            </select>
+                        </label>
+                    </>
+                ) : null}
+                {meta.kind === 'children' ? (
+                    <>
+                        <label className="blockOptionsField">
+                            <span>Display</span>
+                            <select
+                                className="blockOptionsSelect"
+                                value={meta.displayMode ?? 'inline'}
+                                aria-label="Answer poll display"
+                                onChange={(event) =>
+                                    onSetPollDisplayMode(event.currentTarget.value as PollDisplayMode)
+                                }
+                            >
+                                <option value="inline">Inline</option>
+                                <option value="list">List</option>
+                            </select>
+                        </label>
+                        <label className="blockOptionsField">
+                            <span>Selection</span>
+                            <select
+                                className="blockOptionsSelect"
+                                value={meta.choiceMode ?? 'single'}
+                                aria-label="Poll selection mode"
+                                onChange={(event) =>
+                                    onSetPollChoiceMode(event.currentTarget.value as PollChoiceMode)
+                                }
+                            >
+                                <option value="single">Select one</option>
+                                <option value="multiple">Select all</option>
+                            </select>
+                        </label>
+                        <label className="blockOptionsToggle">
+                            <input
+                                type="checkbox"
+                                checked={meta.allowChange}
+                                aria-label="Allow vote changes"
+                                onChange={(event) => onSetPollAllowChange(event.currentTarget.checked)}
+                            />
+                            Allow changes
+                        </label>
+                    </>
+                ) : null}
+                {meta.kind === 'matrix' ? (
+                    <>
+                        <label className="blockOptionsField">
+                            <span>Selection</span>
+                            <select
+                                className="blockOptionsSelect"
+                                value={meta.choiceMode ?? 'single'}
+                                aria-label="Poll selection mode"
+                                onChange={(event) =>
+                                    onSetPollChoiceMode(event.currentTarget.value as PollChoiceMode)
+                                }
+                            >
+                                <option value="single">Select one</option>
+                                <option value="multiple">Select all</option>
+                            </select>
+                        </label>
+                        <label className="blockOptionsToggle">
+                            <input
+                                type="checkbox"
+                                checked={meta.allowChange}
+                                aria-label="Allow vote changes"
+                                onChange={(event) => onSetPollAllowChange(event.currentTarget.checked)}
+                            />
+                            Allow changes
+                        </label>
+                    </>
+                ) : null}
+                {meta.kind === 'long' ? (
+                    <label className="blockOptionsToggle">
+                        <input
+                            type="checkbox"
+                            checked={meta.allowChange}
+                            aria-label="Allow answer changes"
+                            onChange={(event) => onSetPollAllowChange(event.currentTarget.checked)}
+                        />
+                        Allow changes
+                    </label>
+                ) : null}
+            </>
         );
     }
-    if (meta.type === 'callout') {
-        return (
-            <select
-                className="calloutKind"
-                value={meta.kind}
-                aria-label="Callout kind"
-                onPointerDown={stopEditorControlEvent}
-                onMouseDown={stopEditorControlEvent}
-                onMouseUp={stopEditorControlEvent}
-                onClick={stopEditorControlEvent}
-                onChange={(event) =>
-                    onSetCalloutKind(event.currentTarget.value as 'info' | 'warning' | 'error')
-                }
-            >
-                <option value="info">Info</option>
-                <option value="warning">Warning</option>
-                <option value="error">Error</option>
-            </select>
-        );
+
+    if (!label || !controls) {
+        return null;
     }
-    if (meta.type === 'image') {
-        return (
-            <select
-                className="imageSizeControl"
-                value={meta.size}
-                aria-label="Image size"
-                onPointerDown={stopEditorControlEvent}
-                onMouseDown={stopEditorControlEvent}
-                onMouseUp={stopEditorControlEvent}
-                onClick={stopEditorControlEvent}
-                onChange={(event) =>
-                    onSetImageSize(event.currentTarget.value as ImagePresentationSize)
-                }
-            >
-                <option value="small">Small</option>
-                <option value="medium">Medium</option>
-                <option value="large">Large</option>
-                <option value="original">Original</option>
-            </select>
-        );
-    }
-    return null;
+
+    return (
+        <details
+            className="blockOptions"
+            contentEditable={false}
+            onPointerDown={stopEditorControlEvent}
+            onMouseDown={stopEditorControlEvent}
+            onMouseUp={stopEditorControlEvent}
+            onClick={stopEditorControlEvent}
+        >
+            <summary className="blockOptionsButton" aria-label={label}>
+                <span aria-hidden="true">...</span>
+            </summary>
+            <div className="blockOptionsMenu">{controls}</div>
+        </details>
+    );
 }
 
 const popoverTriggerFromEvent = (

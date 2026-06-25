@@ -16,6 +16,10 @@ export type CodePreviewKind = 'mermaid' | 'vega-lite';
 
 export type PollChoiceMode = 'single' | 'multiple';
 
+export type PollDisplayMode = 'inline' | 'list';
+
+export type PollRatingPresentation = 'numbers' | 'stars';
+
 export type PollKind = 'rating' | 'children' | 'matrix' | 'long';
 
 export type PollVote =
@@ -29,6 +33,8 @@ export type PollMeta = {
     kind: PollKind;
     allowChange: boolean;
     choiceMode?: PollChoiceMode;
+    displayMode?: PollDisplayMode;
+    ratingPresentation?: PollRatingPresentation;
     min?: number;
     max?: number;
     votes: Record<string, PollVote>;

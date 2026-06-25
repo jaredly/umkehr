@@ -202,6 +202,14 @@ const openCodeBlockOptions = (panel: HTMLElement) => {
     if (!button.closest('details')?.hasAttribute('open')) fireEvent.click(button);
 };
 
+const openBlockOptions = (panel: HTMLElement, name: string) => {
+    const button = within(panel).getAllByLabelText(name)[0];
+    if (!button.closest('details')?.hasAttribute('open')) fireEvent.click(button);
+    const menu = button.closest<HTMLElement>('details')?.querySelector<HTMLElement>('.blockOptionsMenu');
+    if (!menu) throw new Error(`missing ${name} menu`);
+    return menu;
+};
+
 const codeLanguageField = (panel: HTMLElement): HTMLInputElement => {
     openCodeBlockOptions(panel);
     return within(panel).getByRole('textbox', {name: 'Code language'}) as HTMLInputElement;
@@ -2974,7 +2982,7 @@ describe('Block rich text example UI', () => {
         });
     });
 
-    it('changes callout kind from the inline dropdown', async () => {
+    it('changes callout kind from the block options menu', async () => {
         const view = render(<App />);
         const {left, right} = panels(view);
 
@@ -2983,14 +2991,131 @@ describe('Block rich text example UI', () => {
         setBlockType(left, 'callout-info');
 
         await waitFor(() => expect(left.querySelector('.calloutGroup')).toBeTruthy());
-        const kind = within(left).getByRole('combobox', {name: 'Callout kind'});
-        fireEvent.mouseDown(kind);
+        const menu = openBlockOptions(left, 'Callout block options');
+        const kind = within(menu).getByRole('combobox', {name: 'Callout kind'});
         fireEvent.change(kind, {target: {value: 'warning'}});
 
         await waitFor(() => {
             expect(left.querySelector('.calloutWarning')).toBeTruthy();
         });
         expect(right.querySelector('.calloutWarning')).toBeTruthy();
+    });
+
+    it('changes image size from the block options menu', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'code-callouts-images'},
+        });
+        await waitFor(() => expect(view.getByText('Loaded fixture: Code, callouts, and images.')).toBeTruthy());
+
+        const menu = openBlockOptions(left, 'Image block options');
+        const size = within(menu).getByRole('combobox', {name: 'Image size'});
+        fireEvent.change(size, {target: {value: 'large'}});
+
+        await waitFor(() =>
+            expect(left.querySelector('.imageBlock')?.classList.contains('imageSize-large')).toBe(true),
+        );
+        expect(right.querySelector('.imageBlock')?.classList.contains('imageSize-large')).toBe(true);
+    });
+
+    it('configures answer polls from the block options menu', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'answer-polls'},
+        });
+        await waitFor(() => expect(view.getByText('Loaded fixture: Answer polls.')).toBeTruthy());
+
+        const menu = openBlockOptions(left, 'Poll block options');
+        fireEvent.change(within(menu).getByRole('combobox', {name: 'Answer poll display'}), {
+            target: {value: 'list'},
+        });
+        await waitFor(() => expect(left.querySelector('.pollOptions-list')).toBeTruthy());
+        expect(right.querySelector('.pollOptions-list')).toBeTruthy();
+
+        fireEvent.change(within(menu).getByRole('combobox', {name: 'Poll selection mode'}), {
+            target: {value: 'multiple'},
+        });
+        fireEvent.click(within(left).getByRole('button', {name: /Matrix polls/}));
+        fireEvent.click(within(left).getByRole('button', {name: /Long-answer polls/}));
+
+        await waitFor(() => {
+            expect(within(left).getByRole('button', {name: /Matrix polls/}).classList.contains('selected')).toBe(true);
+            expect(within(left).getByRole('button', {name: /Long-answer polls/}).classList.contains('selected')).toBe(true);
+        });
+    });
+
+    it('configures matrix polls from the block options menu', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'matrix-polls'},
+        });
+        await waitFor(() => expect(view.getByText('Loaded fixture: Matrix polls.')).toBeTruthy());
+
+        const menu = openBlockOptions(left, 'Poll block options');
+        fireEvent.change(within(menu).getByRole('combobox', {name: 'Poll selection mode'}), {
+            target: {value: 'multiple'},
+        });
+
+        await waitFor(() => expect(left.querySelector('.matrixPollCell')?.textContent).toContain('+'));
+        expect(right.querySelector('.matrixPollCell')?.textContent).toContain('+');
+
+        const cells = Array.from(left.querySelectorAll<HTMLButtonElement>('.matrixPollCell'));
+        fireEvent.click(cells[0]);
+        fireEvent.click(cells[1]);
+
+        await waitFor(() => {
+            expect(cells[0].classList.contains('selected')).toBe(true);
+            expect(cells[1].classList.contains('selected')).toBe(true);
+        });
+    });
+
+    it('configures rating polls from the block options menu', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'rating-polls'},
+        });
+        await waitFor(() => expect(view.getByText('Loaded fixture: Rating polls.')).toBeTruthy());
+
+        const menu = openBlockOptions(left, 'Poll block options');
+        fireEvent.change(within(menu).getByRole('spinbutton', {name: 'Rating maximum'}), {
+            target: {value: '3'},
+        });
+        fireEvent.change(within(menu).getByRole('combobox', {name: 'Rating presentation'}), {
+            target: {value: 'stars'},
+        });
+
+        await waitFor(() => expect(within(left).getByRole('button', {name: '3 stars'})).toBeTruthy());
+        expect(within(right).getByRole('button', {name: '3 stars'})).toBeTruthy();
+        expect(within(left).queryByRole('button', {name: '5 stars'})).toBeNull();
+    });
+
+    it('configures long-answer poll change policy from the block options menu', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'long-answer-polls'},
+        });
+        await waitFor(() => expect(view.getByText('Loaded fixture: Long-answer polls.')).toBeTruthy());
+
+        const menu = openBlockOptions(left, 'Poll block options');
+        const firstPollRow = menu.closest<HTMLElement>('.blockRow');
+        if (!firstPollRow) throw new Error('missing long-answer poll row');
+        const allowChanges = within(menu).getByRole('checkbox', {name: 'Allow answer changes'});
+        expect((allowChanges as HTMLInputElement).checked).toBe(true);
+        fireEvent.click(allowChanges);
+
+        await waitFor(() => expect(within(firstPollRow).queryByRole('button', {name: 'Submit'})).toBeNull());
+        const rightFirstPollRow = right.querySelectorAll<HTMLElement>('.blockType-poll')[0];
+        expect(within(rightFirstPollRow).queryByRole('button', {name: 'Submit'})).toBeNull();
     });
 
     it('keeps code Enter and Tab inside the same block', async () => {

@@ -303,9 +303,22 @@ select {
 }
 
 .pollOptions {
+    gap: 8px;
+}
+
+.pollOptions-inline {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
+}
+
+.pollOptions-list {
+    display: grid;
+    max-width: 420px;
+}
+
+.pollOptions-list .pollOption {
+    justify-content: space-between;
+    width: 100%;
 }
 
 .pollOption {
@@ -734,14 +747,14 @@ select {
     line-height: 1.5;
 }
 
-.codeControls {
+.blockOptions {
     position: absolute;
     top: 5px;
     right: 5px;
     z-index: 4;
 }
 
-.codeControlsButton {
+.blockOptionsButton {
     display: grid;
     place-items: center;
     width: 26px;
@@ -759,25 +772,25 @@ select {
     user-select: none;
 }
 
-.codeControlsButton::-webkit-details-marker {
+.blockOptionsButton::-webkit-details-marker {
     display: none;
 }
 
-.blockRow:hover .codeControlsButton,
-.blockRow:focus-within .codeControlsButton,
-.codeControls[open] .codeControlsButton {
+.blockRow:hover .blockOptionsButton,
+.blockRow:focus-within .blockOptionsButton,
+.blockOptions[open] .blockOptionsButton {
     opacity: 1;
 }
 
-.codeControlsButton:hover,
-.codeControlsButton:focus-visible,
-.codeControls[open] .codeControlsButton {
+.blockOptionsButton:hover,
+.blockOptionsButton:focus-visible,
+.blockOptions[open] .blockOptionsButton {
     border-color: #9fb0bf;
     color: #23313d;
     background: #fff;
 }
 
-.codeControlsMenu {
+.blockOptionsMenu {
     position: absolute;
     top: 30px;
     right: 0;
@@ -790,15 +803,26 @@ select {
     box-shadow: 0 8px 22px rgba(31, 45, 58, 0.16);
 }
 
-.codeControls:not([open]) .codeControlsMenu {
+.blockOptions:not([open]) .blockOptionsMenu {
     display: none;
 }
 
-.codeControls[open] .codeControlsMenu {
+.blockOptions[open] .blockOptionsMenu {
     display: grid;
 }
 
-.codePreviewToggle {
+.blockOptionsField {
+    display: grid;
+    gap: 4px;
+    color: #4a5967;
+    font-size: 12px;
+}
+
+.blockOptionsField span {
+    font-weight: 600;
+}
+
+.blockOptionsToggle {
     display: flex;
     align-items: center;
     gap: 4px;
@@ -807,8 +831,14 @@ select {
     user-select: none;
 }
 
-.codePreviewToggle input {
+.blockOptionsToggle input {
     margin: 0;
+}
+
+.blockOptionsNumberRow {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
 }
 
 .previewCodeBlock {
@@ -1727,15 +1757,15 @@ select {
 }
 
 .codeLanguage,
-.calloutKind,
-.imageSizeControl {
+.blockOptionsSelect,
+.blockOptionsNumber {
     min-width: 82px;
     height: 30px;
-    margin-top: 2px;
     border: 1px solid #cbd5df;
     border-radius: 6px;
     color: #33414d;
     background: #fff;
+    font: inherit;
 }
 
 .codeLanguage {
@@ -1743,18 +1773,20 @@ select {
     padding: 0 8px;
 }
 
-.codeControlsMenu .codeLanguage {
+.blockOptionsMenu .codeLanguage {
     box-sizing: border-box;
     margin-top: 0;
 }
 
-.calloutKind {
+.blockOptionsSelect {
+    width: 100%;
     padding: 0 6px;
 }
 
-.imageSizeControl {
-    min-width: 96px;
-    padding: 0 6px;
+.blockOptionsNumber {
+    width: 100%;
+    min-width: 0;
+    padding: 0 4px 0 6px;
 }
 
 .editableBlock:focus {
@@ -2822,13 +2854,6 @@ select {
         gap: 5px;
     }
 
-    .blockRow > .codeLanguage,
-    .blockRow > .calloutKind {
-        grid-column: 3;
-        width: min(180px, 100%);
-        margin-top: 0;
-    }
-
     .tableBlock {
         margin-left: 0;
     }
@@ -2854,11 +2879,6 @@ select {
 
     .tableCell .blockRow {
         grid-template-columns: minmax(0, 1fr);
-    }
-
-    .tableCell .blockRow > .codeLanguage,
-    .tableCell .blockRow > .calloutKind {
-        grid-column: 1;
     }
 
     .editorContent.commentsOpen {
