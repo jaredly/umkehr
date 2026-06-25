@@ -6706,7 +6706,7 @@ function PollBlock({
                                         .join(' ')}
                                     aria-pressed={selected}
                                     disabled={!canVote}
-                                    title={
+                                    data-poll-result={
                                         useResultBackground
                                             ? pollResultTitle(result)
                                             : undefined
@@ -6811,7 +6811,7 @@ function RatingStars({
                         aria-label={`${value} ${value === 1 ? 'star' : 'stars'}`}
                         aria-pressed={selectedValue}
                         disabled={!canVote}
-                        title={showResults ? pollResultTitle(result) : undefined}
+                        data-poll-result={showResults ? pollResultTitle(result) : undefined}
                         style={
                             showResults
                                 ? pollResultBackgroundStyle(result, selectedValue)
@@ -6948,7 +6948,7 @@ function MatrixPollBlock({
                                                 .join(' ')}
                                             aria-pressed={selected}
                                             disabled={!canVote}
-                                            title={
+                                            data-poll-result={
                                                 showResults
                                                     ? pollResultTitle(result)
                                                     : undefined

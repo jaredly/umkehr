@@ -3063,9 +3063,16 @@ describe('Block rich text example UI', () => {
 
         const matrixOption = within(leftPoll).getByRole('button', {name: /Matrix polls/});
         expect(matrixOption).toBeTruthy();
-        expect(matrixOption.getAttribute('title')).toBe('0% · 0 votes');
+        expect(matrixOption.getAttribute('data-poll-result')).toBe('0% · 0 votes');
+        expect(matrixOption.hasAttribute('title')).toBe(false);
         expect(leftPoll.querySelector('.pollResult')).toBeNull();
         expect(blockTexts(leftBranch)).not.toContain('Matrix polls');
+
+        fireEvent.click(matrixOption);
+
+        await waitFor(() => expect(matrixOption.classList.contains('selected')).toBe(true));
+        expect(matrixOption.classList.contains('pollResultBackground')).toBe(true);
+        expect(matrixOption.getAttribute('data-poll-result')).toBe('100% · 1 vote');
 
         fireEvent.click(within(leftPoll).getByRole('button', {name: 'Edit poll'}));
 
@@ -3105,6 +3112,8 @@ describe('Block rich text example UI', () => {
             expect(cells[0].classList.contains('selected')).toBe(true);
             expect(cells[1].classList.contains('selected')).toBe(true);
         });
+        expect(cells[0].classList.contains('pollResultBackground')).toBe(true);
+        expect(cells[0].getAttribute('data-poll-result')).toBe('100% · 1 vote');
     });
 
     it('toggles matrix polls between rendered view and child edit mode', async () => {
@@ -3122,9 +3131,9 @@ describe('Block rich text example UI', () => {
 
         expect(leftPoll.querySelector('.matrixPollGrid')).toBeTruthy();
         expect(leftPoll.querySelector('.pollResult')).toBeNull();
-        expect(leftPoll.querySelector<HTMLButtonElement>('.matrixPollCell')?.getAttribute('title')).toBe(
-            '0% · 0 votes',
-        );
+        const matrixCell = leftPoll.querySelector<HTMLButtonElement>('.matrixPollCell');
+        expect(matrixCell?.getAttribute('data-poll-result')).toBe('0% · 0 votes');
+        expect(matrixCell?.hasAttribute('title')).toBe(false);
         expect(blockTexts(leftBranch)).not.toContain('Rows');
         expect(blockTexts(leftBranch)).not.toContain('Ignored extra child');
 
@@ -3187,8 +3196,10 @@ describe('Block rich text example UI', () => {
         if (!ratedPoll) throw new Error('missing rated poll');
 
         const fiveButton = within(ratedPoll).getByRole('button', {name: '5'});
+        expect(fiveButton.classList.contains('selected')).toBe(true);
         expect(fiveButton.classList.contains('pollResultBackground')).toBe(true);
-        expect(fiveButton.getAttribute('title')).toBe('50% · 1 vote');
+        expect(fiveButton.getAttribute('data-poll-result')).toBe('50% · 1 vote');
+        expect(fiveButton.hasAttribute('title')).toBe(false);
         expect(ratedPoll.querySelector('.pollResult')).toBeNull();
     });
 

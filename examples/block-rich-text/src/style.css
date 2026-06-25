@@ -486,11 +486,57 @@ select {
 }
 
 .pollResultBackground {
+    position: relative;
+}
+
+.pollOption.pollResultBackground,
+.pollOption.pollResultBackground:hover:not(:disabled),
+.pollOption.pollResultBackground.selected,
+.ratingStar.pollResultBackground,
+.ratingStar.pollResultBackground:hover:not(:disabled),
+.ratingStar.pollResultBackground:focus-visible,
+.ratingStar.pollResultBackground.selected,
+.matrixPollCell.pollResultBackground,
+.matrixPollCell.pollResultBackground:hover:not(:disabled),
+.matrixPollCell.pollResultBackground.selected {
     background: linear-gradient(
         90deg,
         rgba(77, 124, 159, 0.22) 0 var(--poll-result-fill, 0%),
         var(--poll-result-base, #fff) var(--poll-result-fill, 0%) 100%
     );
+}
+
+.pollResultBackground[data-poll-result]:hover::after,
+.pollResultBackground[data-poll-result]:focus-visible::after {
+    position: absolute;
+    z-index: 20;
+    left: 50%;
+    bottom: calc(100% + 6px);
+    transform: translateX(-50%);
+    border-radius: 4px;
+    padding: 4px 7px;
+    color: #fff;
+    background: #24313c;
+    box-shadow: 0 4px 12px rgba(31, 44, 55, 0.18);
+    content: attr(data-poll-result);
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.2;
+    pointer-events: none;
+    white-space: nowrap;
+}
+
+.pollResultBackground[data-poll-result]:hover::before,
+.pollResultBackground[data-poll-result]:focus-visible::before {
+    position: absolute;
+    z-index: 21;
+    left: 50%;
+    bottom: calc(100% + 2px);
+    transform: translateX(-50%);
+    border: 4px solid transparent;
+    border-top-color: #24313c;
+    content: '';
+    pointer-events: none;
 }
 
 .longPollControls {

@@ -48,3 +48,19 @@
 - Added focused assertions that compact poll stats use hover details and do not render `.pollResult` inline text.
 - Passed after follow-up: `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx -t "poll"`
 - Passed after follow-up: `npx tsc -p examples/block-rich-text/tsconfig.json --noEmit`
+
+## Follow-up: Immediate Poll Stat Tooltip
+
+- Replaced native `title` hover details with `data-poll-result` attributes plus CSS hover/focus tooltips.
+- Kept the implementation CSS-only so stats appear immediately without adding popover state or timers.
+- Updated tests to assert compact poll controls no longer have native `title` attributes.
+- Passed after tooltip follow-up: `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx -t "poll"`
+- Passed after tooltip follow-up: `npx tsc -p examples/block-rich-text/tsconfig.json --noEmit`
+
+## Follow-up: Selected Result Background
+
+- Issue: selected/hover poll control rules had higher specificity than `.pollResultBackground`, so a user's selected answer could hide the result fill.
+- Fixed by adding result-background selectors that match selected/hover specificity for answer options, rating stars, and matrix cells.
+- Added assertions that selected inline answer, matrix, and rating controls keep `pollResultBackground` and `data-poll-result`.
+- Passed after selected-background follow-up: `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx -t "poll"`
+- Passed after selected-background follow-up: `npx tsc -p examples/block-rich-text/tsconfig.json --noEmit`
