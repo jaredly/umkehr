@@ -1,7 +1,7 @@
 import {describe, expect, it} from 'vitest';
 import {applyMany, blockContents, insertBlockOps, materializeFormattedBlocks, rootBlockIds, type Op} from 'umkehr/block-crdt';
 import {insertText, pastePlainText, splitBlock, toggleMark} from './blockCommands';
-import {deriveActiveInlineMarks} from './App';
+import {deriveActiveInlineMarks} from './inlineRunRendering';
 import {applyLocalChange, createDemoState, makeCommandContext, type DemoState} from './blockEditorRuntime';
 import {annotationVirtualParents} from './annotations';
 import {paragraphMeta, type RichBlockMeta} from './blockMeta';
