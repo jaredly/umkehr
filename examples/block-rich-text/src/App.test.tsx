@@ -3788,6 +3788,49 @@ describe('Block rich text example UI', () => {
         ]);
     });
 
+    it('clicks the rendered slide rim to block-select the slide', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'slide-deck');
+        await waitFor(() => expect(left.querySelectorAll('.slideViewport')).toHaveLength(1));
+
+        const slide = left.querySelector<HTMLElement>('.slideViewport');
+        if (!slide) throw new Error('missing slide viewport');
+        fireEvent.pointerDown(slide, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 4,
+            clientY: 4,
+        });
+        fireEvent.mouseDown(slide, {button: 0, buttons: 1, clientX: 4, clientY: 4});
+        fireEvent.pointerUp(window, {button: 0, buttons: 0, isPrimary: true, pointerId: 1});
+        fireEvent.mouseUp(slide, {button: 0, buttons: 0, clientX: 4, clientY: 4});
+
+        await waitFor(() => expect(slide.classList.contains('blockSelected')).toBe(true));
+        expect(slide.classList.contains('blockSelectionFocus')).toBe(true);
+        expect(window.getSelection()?.rangeCount ?? 0).toBe(0);
+    });
+
+    it('still allows text selection inside rendered slides', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'slide-deck');
+        await waitFor(() => expect(left.querySelectorAll('.slideViewport')).toHaveLength(1));
+
+        const slideTitle = left.querySelector<HTMLElement>('.slideViewport [role="textbox"]');
+        if (!slideTitle) throw new Error('missing slide title');
+        selectRange(slideTitle, 0, 0);
+
+        await waitFor(() => expect(slideTitle.closest('.slideViewport')?.classList.contains('blockSelected')).toBe(false));
+        expect(document.activeElement).toBe(slideTitle);
+    });
+
     it('advances presentation slides with keyboard navigation and selects the shown slide', async () => {
         const view = render(<App />);
         const {left} = panels(view);

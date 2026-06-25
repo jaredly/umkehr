@@ -4090,6 +4090,17 @@ function SlideBlockView({
         '--slide-height': deck.height,
         backgroundColor: meta.backgroundColor,
     } as CSSProperties;
+    const handleRimPointerDown = (event: PointerEvent<HTMLElement>) => {
+        if (event.target !== event.currentTarget) return;
+        event.preventDefault();
+        event.stopPropagation();
+        context.startBlockDragFromHandle(node.block.id, event);
+    };
+    const stopRimMouseDown = (event: MouseEvent<HTMLElement>) => {
+        if (event.target !== event.currentTarget) return;
+        event.preventDefault();
+        event.stopPropagation();
+    };
     return (
         <article
             ref={(element) => context.registerRow(node.block.id, element)}
@@ -4109,7 +4120,8 @@ function SlideBlockView({
                 .join(' ')}
             data-slide-id={node.block.id}
             style={style}
-            onPointerDown={(event) => context.startBlockDragFromHandle(node.block.id, event)}
+            onPointerDown={handleRimPointerDown}
+            onMouseDown={stopRimMouseDown}
         >
             <div className="slideSurface" onPointerDown={(event) => event.stopPropagation()}>
                 {meta.showTitle ? (

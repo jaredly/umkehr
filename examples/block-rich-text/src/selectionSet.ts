@@ -12,6 +12,7 @@ import {
     pointTextLength,
     selectedBlockIdsForSelection,
     selectedTopLevelBlockIdsForSelection,
+    visibleSubtreeBlockIds,
     type BlockPoint,
     type EditorSelection,
     type SelectionSegment,
@@ -304,12 +305,21 @@ export const blockLevelDecorationsForSelectionSet = (
         if (entry.selection.type !== 'block' && entry.selection.type !== 'table-cells') continue;
         const primary = entry.id === set.primaryId;
         const focusId = focusBlockId(entry.selection);
-        for (const blockId of selectedBlockIdsForSelection(state, entry.selection)) {
+        const blockIds =
+            entry.selection.type === 'block'
+                ? selectedTopLevelBlockIdsForSelection(state, entry.selection)
+                : selectedBlockIdsForSelection(state, entry.selection);
+        for (const blockId of blockIds) {
             const current = result.get(blockId);
             result.set(blockId, {
                 selected: true,
                 primary: Boolean(current?.primary || primary),
-                focus: Boolean(current?.focus || blockId === focusId),
+                focus: Boolean(
+                    current?.focus ||
+                        blockId === focusId ||
+                        (entry.selection.type === 'block' &&
+                            visibleSubtreeBlockIds(state, blockId).includes(focusId)),
+                ),
             });
         }
     }

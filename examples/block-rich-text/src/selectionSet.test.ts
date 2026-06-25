@@ -2,7 +2,7 @@ import {describe, expect, it} from 'vitest';
 import {blockContents, cachedState, rootBlockIds} from 'umkehr/block-crdt';
 import {initialState} from 'umkehr/block-crdt/initialState';
 import type {CachedState} from 'umkehr/block-crdt/types';
-import {deleteBackward, insertText, pastePlainText, type CommandContext} from './blockCommands';
+import {deleteBackward, insertText, moveBlock, pastePlainText, type CommandContext} from './blockCommands';
 import {caret, type EditorSelection} from './selectionModel';
 import {
     appendSelection,
@@ -90,6 +90,32 @@ describe('block rich text selection sets', () => {
             ]),
         );
         expect(blockLevelDecorationsForSelectionSet(pasted.state, set).has(thirdBlock)).toBe(false);
+    });
+
+    it('decorates selected block subtrees at the root only', () => {
+        const context = ctx();
+        const pasted = pastePlainText(init(), caret(onlyBlock(init()), 0), 'parent\nchild\nsibling', context);
+        const [parentBlock, childBlock, siblingBlock] = rootBlockIds(pasted.state);
+        const nested = moveBlock(
+            pasted.state,
+            childBlock,
+            {type: 'child', parentBlockId: parentBlock, at: 'end'},
+            context,
+        );
+        const set = resolveSelectionSet(
+            nested.state,
+            singleRetainedSelectionSet(
+                nested.state,
+                {type: 'block', anchorBlockId: parentBlock, focusBlockId: childBlock},
+                'blocks',
+            ),
+        );
+
+        expect(blockLevelDecorationsForSelectionSet(nested.state, set)).toEqual(
+            new Map([[parentBlock, {selected: true, primary: true, focus: true}]]),
+        );
+        expect(blockLevelDecorationsForSelectionSet(nested.state, set).has(childBlock)).toBe(false);
+        expect(blockLevelDecorationsForSelectionSet(nested.state, set).has(siblingBlock)).toBe(false);
     });
 
     it('deduplicates visible-coincident carets and keeps the logical first retained cursor', () => {
