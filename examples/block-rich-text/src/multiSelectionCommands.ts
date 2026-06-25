@@ -30,12 +30,15 @@ import {
     removeCodeMark,
     setBlockMeta,
     setCodeMark,
+    setMathMark,
     clearCodeLanguage,
     setLinkMark,
     setBlockType,
     splitBlock,
     splitTableRowHeader,
     toggleCodeMark,
+    toggleDisplayMathMark,
+    toggleMathMark,
     toggleMark,
     updateBlockMeta,
     commandApplied,
@@ -47,7 +50,7 @@ import {
     type CommandContext,
     type RetainedInlineMarkSession,
 } from './blockCommands';
-import {LINK_MARK, type BareInlineMark, type BooleanInlineMark} from './inlineMarks';
+import {LINK_MARK, MATH_MARK, mathMarkValueForMode, type BareInlineMark, type BooleanInlineMark} from './inlineMarks';
 import {INLINE_EMBED_MARK, isInlineEmbedData} from './inlineEmbeds';
 import {resolveSelection, retainSelection} from './retainedSelection';
 import {
@@ -83,6 +86,7 @@ import {
 import {annotationVirtualParents} from './annotations';
 import {
     isClipboardAnnotationRef,
+    isClipboardMathData,
     type ClipboardAnnotation,
     type ClipboardAnnotationRef,
     type ClipboardFragment,
@@ -568,6 +572,18 @@ export const toggleCodeMarkEverywhere = (
     context: CommandContext,
 ): MultiCommandResult => runRangeMarkCommand(state, selection, context, toggleCodeMark);
 
+export const toggleMathMarkEverywhere = (
+    state: CachedState<RichBlockMeta>,
+    selection: RetainedSelectionSet,
+    context: CommandContext,
+): MultiCommandResult => runRangeMarkCommand(state, selection, context, toggleMathMark);
+
+export const toggleDisplayMathMarkEverywhere = (
+    state: CachedState<RichBlockMeta>,
+    selection: RetainedSelectionSet,
+    context: CommandContext,
+): MultiCommandResult => runRangeMarkCommand(state, selection, context, toggleDisplayMathMark);
+
 export const setLinkMarkEverywhere = (
     state: CachedState<RichBlockMeta>,
     selection: RetainedSelectionSet,
@@ -590,6 +606,15 @@ export const setCodeMarkEverywhere = (
     context: CommandContext,
 ): MultiCommandResult => runRangeMarkCommand(state, selection, context, (working, selected, commandContext) =>
     setCodeMark(working, selected, language, commandContext),
+);
+
+export const setMathMarkEverywhere = (
+    state: CachedState<RichBlockMeta>,
+    selection: RetainedSelectionSet,
+    mode: 'inline' | 'display',
+    context: CommandContext,
+): MultiCommandResult => runRangeMarkCommand(state, selection, context, (working, selected, commandContext) =>
+    setMathMark(working, selected, mode, commandContext),
 );
 
 export const clearCodeLanguageEverywhere = (
@@ -1166,6 +1191,19 @@ const clipboardMarkOp = (
             endOffset,
             INLINE_EMBED_MARK,
             mark.data as unknown as JsonValue,
+            false,
+            [state.state.maxSeenCount + 1, context.actor],
+        );
+    }
+    if (mark.type === 'math') {
+        const mode = isClipboardMathData(mark.data) && mark.data.display ? 'display' : 'inline';
+        return markRangeOp(
+            state,
+            parseLamportString(blockId),
+            startOffset,
+            endOffset,
+            MATH_MARK,
+            mathMarkValueForMode(mode) as JsonValue,
             false,
             [state.state.maxSeenCount + 1, context.actor],
         );

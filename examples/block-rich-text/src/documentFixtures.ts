@@ -35,6 +35,7 @@ export const documentFixtures: DocumentFixture[] = [
     },
     {id: 'long-blocks', label: 'Long blocks', document: longBlocks},
     {id: 'marked-long-block', label: 'Marked long block', document: markedLongBlock},
+    {id: 'math-equations', label: 'Math equations', document: mathEquations},
     {id: 'large-table', label: 'Large table', document: largeTable},
     {id: 'sparse-table', label: 'Sparse table', document: sparseTable},
     {id: 'complex-table', label: 'Complex table', document: complexTable},
@@ -124,6 +125,76 @@ function markedLongBlock(): ImportDocument {
         },
     ];
 }
+
+function mathEquations(): ImportDocument {
+    const inlineBasics = 'Inline math can live inside prose: E = mc^2, a^2 + b^2 = c^2, and \\int_0^1 x^2 dx = 1/3.';
+    const namedVariables = 'Named variables and Greek letters: \\alpha + \\beta = \\gamma, f(x) = \\sin(x), and \\lim_{n \\to \\infty} 1/n = 0.';
+    const mixedFormatting = 'Formatting can sit beside math: bold claim, then y = mx + b, then more text.';
+    const tableCell = 'Cell formula: A = \\pi r^2';
+
+    return [
+        {type: 'heading', meta: {level: 1}, content: 'Math equation fixture'},
+        {
+            content: inlineBasics,
+            marks: [
+                mathMark(inlineBasics, 'E = mc^2'),
+                mathMark(inlineBasics, 'a^2 + b^2 = c^2'),
+                mathMark(inlineBasics, '\\int_0^1 x^2 dx = 1/3'),
+            ],
+        },
+        {
+            content: namedVariables,
+            marks: [
+                mathMark(namedVariables, '\\alpha + \\beta = \\gamma'),
+                mathMark(namedVariables, 'f(x) = \\sin(x)'),
+                mathMark(namedVariables, '\\lim_{n \\to \\infty} 1/n = 0'),
+            ],
+        },
+        displayMathBlock(String.raw`x = \frac{-b \pm \sqrt{b^2 - 4ac}}{2a}`),
+        displayMathBlock(String.raw`\sum_{k=0}^{n} k = \frac{n(n + 1)}{2}`),
+        displayMathBlock(String.raw`\begin{bmatrix} a & b \\ c & d \end{bmatrix}\begin{bmatrix} x \\ y \end{bmatrix} = \begin{bmatrix} ax + by \\ cx + dy \end{bmatrix}`),
+        displayMathBlock(String.raw`\begin{aligned} f(x) &= x^2 + 2x + 1 \\ &= (x + 1)^2 \end{aligned}`),
+        {
+            type: 'blockquote',
+            content: mixedFormatting,
+            marks: [
+                {type: 'bold', start: 33, end: 43},
+                mathMark(mixedFormatting, 'y = mx + b'),
+            ],
+        },
+        {
+            type: 'table',
+            content: 'Math in table cells',
+            children: [
+                {
+                    content: 'Geometry',
+                    children: [
+                        {content: tableCell, marks: [mathMark(tableCell, 'A = \\pi r^2')]},
+                        displayMathBlock(String.raw`V = \frac{4}{3}\pi r^3`),
+                    ],
+                },
+                {
+                    content: 'Calculus',
+                    children: [
+                        displayMathBlock(String.raw`\frac{d}{dx}x^n = nx^{n - 1}`),
+                        displayMathBlock(String.raw`\int e^x\,dx = e^x + C`),
+                    ],
+                },
+            ],
+        },
+    ];
+}
+
+const mathMark = (content: string, source: string, display = false): DocumentMark => {
+    const start = content.indexOf(source);
+    if (start < 0) throw new Error(`missing math source ${source}`);
+    return {type: 'math', start, end: start + source.length, ...(display ? {display: true} : {})};
+};
+
+const displayMathBlock = (source: string): DocumentBlock => ({
+    content: source,
+    marks: [mathMark(source, source, true)],
+});
 
 function largeTable(): ImportDocument {
     return [{

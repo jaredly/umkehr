@@ -155,6 +155,8 @@ import {
     setBlockTypeEverywhere,
     splitBlockEverywhere,
     toggleMarkEverywhere,
+    toggleDisplayMathMarkEverywhere,
+    toggleMathMarkEverywhere,
     updateBlockMetaEverywhere,
     unindentSelections,
     closeRetainedInlineMarkSessionsEverywhere,
@@ -221,10 +223,12 @@ import {
     linkRangeAroundOffsetInRuns,
     LINK_MARK,
     CODE_MARK,
+    MATH_MARK,
     codeLanguageFromMarkValue,
     codeLanguageForSelectionSegments,
     codeRangeAroundOffsetInRuns,
     isCodeMarkValue,
+    mathModeForRun,
     type BareInlineMark,
     type CodeTargetRange,
     textForSelectionSegments,
@@ -240,6 +244,7 @@ import {
     plainTextForInlineEmbed,
     renderInlineEmbed,
 } from './inlineEmbeds';
+import {BrowserMathJaxRenderer, type MathRenderer} from './mathRendering';
 import {highlightIngredientLine, type IngredientHighlightToken} from './ingredientHighlight';
 import {highlightCode, type SyntaxToken} from './syntaxHighlight';
 import {
@@ -1885,6 +1890,47 @@ function BlockEditor({
         scheduleSelectionRestore,
     ]);
 
+    const runMathToggle = useCallback(
+        (mode: 'inline' | 'display') => {
+            onCommand((current) => {
+                resetVerticalCaretIntent();
+                const selection = liveSelectionSet(current);
+                const resolved = resolveSelectionSet(current.state, selection);
+                if (resolved.entries.every((entry) => entry.selection.type === 'caret')) {
+                    const primary = primarySelection(resolved);
+                    scheduleSelectionRestore(primary);
+                    return {state: current.state, ops: [], selection};
+                }
+
+                clearPendingInlineMarks();
+                const result =
+                    mode === 'display'
+                        ? toggleDisplayMathMarkEverywhere(
+                              current.state,
+                              selection,
+                              makeCommandContext(current),
+                          )
+                        : toggleMathMarkEverywhere(
+                              current.state,
+                              selection,
+                              makeCommandContext(current),
+                          );
+                const primaryResultSelection = primarySelection(
+                    resolveSelectionSet(result.state, result.selection),
+                );
+                scheduleSelectionRestore(primaryResultSelection);
+                return result;
+            });
+        },
+        [
+            clearPendingInlineMarks,
+            liveSelectionSet,
+            onCommand,
+            resetVerticalCaretIntent,
+            scheduleSelectionRestore,
+        ],
+    );
+
     const insertTextWithPendingMarks = useCallback(
         (current: Replica, selection: RetainedSelectionSet, text: string): MultiCommandResult => {
             const activeMarks = activePendingInlineMarks(pendingInlineMarks);
@@ -2863,6 +2909,12 @@ function BlockEditor({
                           )
                         : runCodeToggle()
                 }
+                onMath={() => {
+                    if (!activeAnnotationBodySelection) runMathToggle('inline');
+                }}
+                onDisplayMath={() => {
+                    if (!activeAnnotationBodySelection) runMathToggle('display');
+                }}
                 onLink={openLinkFromCurrentSelection}
                 onDateEmbed={insertDateEmbedFromCurrentSelection}
                 onImageUploadStart={captureImageUploadSelection}
@@ -6149,7 +6201,7 @@ function EditableBlock({
     );
 }
 
-function RichTextEditableSurface({
+function RichTextEditableSurfaceInner({
     blockId,
     runs,
     charIdsByOffset,
@@ -6184,6 +6236,10 @@ function RichTextEditableSurface({
     onKeyDown,
     onCopy,
     onPaste,
+    activeMathSourceKey,
+    setActiveMathSourceKey,
+    mathRenderVersion,
+    mathRenderer,
 }: {
     blockId: string;
     runs: RichFormattedBlock['runs'];
@@ -6219,10 +6275,15 @@ function RichTextEditableSurface({
     onKeyDown?(event: KeyboardEvent<HTMLDivElement>): void;
     onCopy?(event: ClipboardEvent<HTMLDivElement>): void;
     onPaste?(event: ClipboardEvent<HTMLDivElement>): void;
+    activeMathSourceKey: string | null;
+    setActiveMathSourceKey(value: string | null): void;
+    mathRenderVersion: number;
+    mathRenderer: MathRenderer | null;
 }) {
     const handledBeforeInputRef = useRef(false);
     const editableRef = useRef<HTMLDivElement>(null);
     const renderedRunsRef = useRef('');
+    const pendingMathSourceRestoreRef = useRef<EditorSelection | null>(null);
 
     useLayoutEffect(() => {
         const element = editableRef.current;
@@ -6273,6 +6334,9 @@ function RichTextEditableSurface({
             footnoteNumberById,
             syntaxTokens,
             ingredientTokens,
+            selection,
+            activeMathSourceKey,
+            mathRenderVersion,
         );
         if (renderedRunsRef.current !== renderedRuns) {
             renderedRunsRef.current = renderedRuns;
@@ -6286,8 +6350,21 @@ function RichTextEditableSurface({
                     ingredientTokens,
                     popoverTextById,
                     footnoteNumberById,
+                    selection,
+                    activeMathSourceKey,
+                    mathRenderer,
                 }),
             );
+        }
+        const pendingMathSelection = pendingMathSourceRestoreRef.current;
+        if (pendingMathSelection) {
+            pendingMathSourceRestoreRef.current = null;
+            if (document.activeElement !== element) element.focus();
+            if (pendingMathSelection.type === 'caret') {
+                restoreCaretToDom(element, pendingMathSelection.point);
+            } else if (pendingMathSelection.type === 'range') {
+                restoreSelectionToDom(element, pendingMathSelection);
+            }
         }
         const point = selection.type === 'caret' ? selection.point : null;
         if (point?.blockId === blockId && pendingCaretRestoreBlockIdRef.current === blockId) {
@@ -6307,6 +6384,9 @@ function RichTextEditableSurface({
         decorations,
         footnoteNumberById,
         ingredientTokens,
+        activeMathSourceKey,
+        mathRenderVersion,
+        mathRenderer,
         pendingCaretRestoreBlockIdRef,
         pendingSelectionRestoreRef,
         popoverTextById,
@@ -6316,6 +6396,22 @@ function RichTextEditableSurface({
         syntaxTokens,
         trailingCodeNewline,
     ]);
+
+    useEffect(() => {
+        if (!activeMathSourceKey) return;
+        if (selection.type === 'caret') {
+            const range = mathRangeFromSourceKey(activeMathSourceKey);
+            if (
+                range &&
+                selection.point.blockId === range.blockId &&
+                selection.point.offset >= range.startOffset &&
+                selection.point.offset <= range.endOffset
+            ) {
+                return;
+            }
+        }
+        setActiveMathSourceKey(null);
+    }, [activeMathSourceKey, selection]);
 
     return (
         <div
@@ -6348,6 +6444,9 @@ function RichTextEditableSurface({
                         ingredientTokens,
                         popoverTextById,
                         footnoteNumberById,
+                        selection,
+                        activeMathSourceKey,
+                        mathRenderer,
                     }),
                 );
                 renderedRunsRef.current = serializeRuns(
@@ -6359,6 +6458,9 @@ function RichTextEditableSurface({
                     footnoteNumberById,
                     syntaxTokens,
                     ingredientTokens,
+                    selection,
+                    activeMathSourceKey,
+                    mathRenderVersion,
                 );
             }}
             onMouseUp={(event) => onSelectionChange?.(readSelectionFromDom(event.currentTarget))}
@@ -6442,6 +6544,18 @@ function RichTextEditableSurface({
                 }
             }}
             onClick={(event) => {
+                const mathTrigger = mathPreviewFromEvent(event.currentTarget, event.target);
+                if (mathTrigger?.dataset.mathStartOffset && mathTrigger.dataset.mathEndOffset && mathTrigger.dataset.mathMode) {
+                    event.preventDefault();
+                    const startOffset = Number(mathTrigger.dataset.mathStartOffset);
+                    const endOffset = Number(mathTrigger.dataset.mathEndOffset);
+                    const mode = mathTrigger.dataset.mathMode === 'display' ? 'display' : 'inline';
+                    const nextSelection = caret(blockId, startOffset);
+                    setActiveMathSourceKey(mathSourceKey(blockId, startOffset, endOffset, mode));
+                    pendingMathSourceRestoreRef.current = nextSelection;
+                    onSelectionChange?.(nextSelection);
+                    return;
+                }
                 const embedTrigger = embedTriggerFromEvent(event.currentTarget, event.target);
                 if (embedTrigger?.dataset.embedCharId) {
                     event.preventDefault();
@@ -6468,6 +6582,9 @@ function RichTextEditableSurface({
                             ingredientTokens,
                             popoverTextById,
                             footnoteNumberById,
+                            selection,
+                            activeMathSourceKey,
+                            mathRenderer,
                         }),
                     );
                     return;
@@ -6497,6 +6614,47 @@ function RichTextEditableSurface({
                 if (!onPaste) return;
                 measureInput(onInputMeasured, 'Paste', () => onPaste(event));
             }}
+        />
+    );
+}
+
+type RichTextEditableSurfaceProps = Omit<
+    Parameters<typeof RichTextEditableSurfaceInner>[0],
+    'activeMathSourceKey' | 'setActiveMathSourceKey' | 'mathRenderVersion' | 'mathRenderer'
+>;
+
+function RichTextEditableSurface(props: RichTextEditableSurfaceProps) {
+    if (blockHasMathRuns(props.runs)) {
+        return <MathRichTextEditableSurface {...props} />;
+    }
+    return (
+        <RichTextEditableSurfaceInner
+            {...props}
+            activeMathSourceKey={null}
+            setActiveMathSourceKey={() => {}}
+            mathRenderVersion={0}
+            mathRenderer={null}
+        />
+    );
+}
+
+function MathRichTextEditableSurface(props: RichTextEditableSurfaceProps) {
+    const [activeMathSourceKey, setActiveMathSourceKey] = useState<string | null>(null);
+    const [mathRenderVersion, setMathRenderVersion] = useState(0);
+    const mathRendererRef = useRef<MathRenderer | null>(null);
+    if (!mathRendererRef.current) {
+        mathRendererRef.current = new BrowserMathJaxRenderer(() =>
+            setMathRenderVersion((version) => version + 1),
+        );
+    }
+
+    return (
+        <RichTextEditableSurfaceInner
+            {...props}
+            activeMathSourceKey={activeMathSourceKey}
+            setActiveMathSourceKey={setActiveMathSourceKey}
+            mathRenderVersion={mathRenderVersion}
+            mathRenderer={mathRendererRef.current}
         />
     );
 }
@@ -6710,6 +6868,16 @@ const codeTriggerFromEvent = (
     const elementConstructor = root.ownerDocument.defaultView?.Element;
     if (!elementConstructor || !(target instanceof elementConstructor)) return null;
     const trigger = target.closest<HTMLElement>('[data-code-start-offset]');
+    return trigger && root.contains(trigger) ? trigger : null;
+};
+
+const mathPreviewFromEvent = (
+    root: HTMLElement,
+    target: EventTarget | null,
+): HTMLElement | null => {
+    const elementConstructor = root.ownerDocument.defaultView?.Element;
+    if (!elementConstructor || !(target instanceof elementConstructor)) return null;
+    const trigger = target.closest<HTMLElement>('[data-math-preview="true"]');
     return trigger && root.contains(trigger) ? trigger : null;
 };
 
@@ -7028,8 +7196,12 @@ const serializeRuns = (
     footnoteNumberById: Map<string, number> = new Map(),
     syntaxTokens?: SyntaxToken[],
     ingredientTokens?: IngredientHighlightToken[],
-) =>
-    JSON.stringify({
+    selection?: EditorSelection,
+    activeMathSourceKey?: string | null,
+    mathRenderVersion = 0,
+) => {
+    const hasMath = blockHasMathRuns(runs);
+    return JSON.stringify({
         runs: runs.map((run) => [
             run.text,
             run.marks.bold,
@@ -7037,6 +7209,7 @@ const serializeRuns = (
             run.marks.strikethrough,
             run.marks[LINK_MARK],
             run.marks[CODE_MARK],
+            run.marks[MATH_MARK],
             run.marks[INLINE_EMBED_MARK],
         ]),
         stackedMarks: runs.map((run) => run.stackedMarks),
@@ -7046,8 +7219,19 @@ const serializeRuns = (
         trailingCodeNewline,
         syntaxTokens,
         ingredientTokens,
+        mathRendering: hasMath
+            ? {
+                  selection,
+                  activeMathSourceKey,
+                  mathRenderVersion,
+              }
+            : undefined,
         footnoteNumbers: [...footnoteNumberById.entries()].sort(([a], [b]) => a.localeCompare(b)),
     });
+};
+
+const blockHasMathRuns = (runs: RichFormattedBlock['runs']): boolean =>
+    runs.some((run) => run.marks[MATH_MARK] !== undefined);
 
 const renderRunNodes = (
     runs: RichFormattedBlock['runs'],
@@ -7061,6 +7245,9 @@ const renderRunNodes = (
         ingredientTokens?: IngredientHighlightToken[];
         popoverTextById?: Map<string, string>;
         footnoteNumberById?: Map<string, number>;
+        selection?: EditorSelection;
+        activeMathSourceKey?: string | null;
+        mathRenderer?: MathRenderer | null;
     } = {},
 ): Node[] => {
     const chunks = runRenderChunks(
@@ -7117,6 +7304,9 @@ const renderRunChunkNode = (
         charIdsByOffset?: string[];
         rainbowLamportIds?: boolean;
         popoverTextById?: Map<string, string>;
+        selection?: EditorSelection;
+        activeMathSourceKey?: string | null;
+        mathRenderer?: MathRenderer | null;
     },
 ): HTMLElement => {
     const rainbowColor = options.rainbowLamportIds
@@ -7137,6 +7327,20 @@ const renderRunChunkNode = (
         if (rainbowColor) element.style.backgroundColor = rainbowColor;
         return element;
     }
+    const mathMode =
+        chunk.run.marks[MATH_MARK] !== undefined ? mathModeForRun(chunk.run) : null;
+    if (mathMode) {
+        const key = mathSourceKey(options.blockId ?? '', chunk.blockStartOffset, chunk.blockEndOffset, mathMode);
+        if (
+            options.activeMathSourceKey !== key &&
+            !selectionIntersectsChunk(options.blockId ?? '', options.selection, chunk) &&
+            options.mathRenderer
+        ) {
+            const element = renderMathPreview(chunk.text, mathMode, chunk.blockStartOffset, chunk.blockEndOffset, options.mathRenderer);
+            if (rainbowColor) element.style.backgroundColor = rainbowColor;
+            return element;
+        }
+    }
     const span = document.createElement('span');
     span.textContent = chunk.text;
     applyRunClasses(span, chunk, options.popoverTextById);
@@ -7152,6 +7356,82 @@ const rainbowLamportColor = (charId: string | undefined): string | null => {
     } catch {
         return null;
     }
+};
+
+const renderMathPreview = (
+    source: string,
+    mode: 'inline' | 'display',
+    startOffset: number,
+    endOffset: number,
+    renderer: MathRenderer,
+): HTMLElement => {
+    const span = document.createElement(mode === 'display' ? 'div' : 'span');
+    span.className = mode === 'display' ? 'mathPreview mathPreviewDisplay' : 'mathPreview mathPreviewInline';
+    span.contentEditable = 'false';
+    span.dataset.mathPreview = 'true';
+    span.dataset.mathMode = mode;
+    span.dataset.mathStartOffset = String(startOffset);
+    span.dataset.mathEndOffset = String(endOffset);
+    span.setAttribute('role', 'button');
+    span.tabIndex = -1;
+
+    const rendered = document.createElement('span');
+    rendered.className = 'mathPreviewRendered';
+    rendered.dataset.offsetSentinel = 'true';
+    const result = renderer.render(source, mode);
+    if (result.type === 'html') {
+        rendered.innerHTML = result.html;
+    } else {
+        rendered.textContent = result.text;
+        span.classList.add('mathPreviewLiteral');
+    }
+
+    const offsetText = document.createElement('span');
+    offsetText.className = 'mathPreviewOffsetText';
+    offsetText.textContent = source;
+
+    span.append(rendered, offsetText);
+    return span;
+};
+
+const selectionIntersectsChunk = (
+    blockId: string,
+    selection: EditorSelection | undefined,
+    chunk: RunRenderChunk,
+): boolean => {
+    if (!selection) return false;
+    if (selection.type === 'caret') {
+        return (
+            selection.point.blockId === blockId &&
+            selection.point.offset >= chunk.blockStartOffset &&
+            selection.point.offset <= chunk.blockEndOffset
+        );
+    }
+    if (selection.type !== 'range') return false;
+    const anchor = selection.anchor.blockId === blockId ? selection.anchor.offset : null;
+    const focus = selection.focus.blockId === blockId ? selection.focus.offset : null;
+    if (anchor === null && focus === null) return false;
+    const start = Math.min(anchor ?? 0, focus ?? 0);
+    const end = Math.max(anchor ?? Number.POSITIVE_INFINITY, focus ?? Number.POSITIVE_INFINITY);
+    return start <= chunk.blockEndOffset && end >= chunk.blockStartOffset;
+};
+
+const mathSourceKey = (
+    blockId: string,
+    startOffset: number,
+    endOffset: number,
+    mode: 'inline' | 'display',
+): string => `${blockId}:${startOffset}:${endOffset}:${mode}`;
+
+const mathRangeFromSourceKey = (
+    key: string,
+): {blockId: string; startOffset: number; endOffset: number; mode: 'inline' | 'display'} | null => {
+    const [blockId, start, end, mode] = key.split(':');
+    const startOffset = Number(start);
+    const endOffset = Number(end);
+    if (!blockId || !Number.isFinite(startOffset) || !Number.isFinite(endOffset)) return null;
+    if (mode !== 'inline' && mode !== 'display') return null;
+    return {blockId, startOffset, endOffset, mode};
 };
 
 type RunRenderChunk = {
@@ -7397,6 +7677,11 @@ const applyRunClasses = (
         span.dataset.codeLanguage = typeof run.marks[CODE_MARK] === 'string' ? run.marks[CODE_MARK] : '';
         span.dataset.codeStartOffset = String(chunk.blockStartOffset);
         span.dataset.codeEndOffset = String(chunk.blockEndOffset);
+    }
+    const mathMode = mathModeForRun(run);
+    if (mathMode) {
+        span.classList.add('markMath');
+        if (mathMode === 'display') span.classList.add('markMathDisplay');
     }
     if (typeof run.marks[LINK_MARK] === 'string') {
         span.classList.add('markLink');

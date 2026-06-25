@@ -29,7 +29,15 @@ import {
     type RichBlockMeta,
 } from './blockMeta';
 import type {CommandContext} from './blockCommands';
-import {CODE_MARK, isCodeMarkValue, LINK_MARK, normalizeStoredCodeLanguage} from './inlineMarks';
+import {
+    CODE_MARK,
+    MATH_MARK,
+    isCodeMarkValue,
+    mathDisplayModeFromMarkValue,
+    mathMarkValueForMode,
+    LINK_MARK,
+    normalizeStoredCodeLanguage,
+} from './inlineMarks';
 import {applyCharInsertOps} from './localTextOps';
 
 export type DocumentBlockType = RichBlockMeta['type'];
@@ -60,6 +68,7 @@ export type DocumentBlockMeta = {
 export type DocumentMark =
     | {type: 'bold' | 'italic' | 'strikethrough'; start: number; end: number}
     | {type: 'code'; start: number; end: number; language?: string}
+    | {type: 'math'; start: number; end: number; display?: boolean}
     | {type: 'link'; start: number; end: number; href: string};
 
 export type DocumentAnnotation = {
@@ -323,6 +332,17 @@ const parseMark = (value: unknown, contentLength: number, path: string): Documen
         }
         return {type: 'link', start: start as number, end: end as number, href: value.href};
     }
+    if (value.type === 'math') {
+        if (value.display !== undefined && typeof value.display !== 'boolean') {
+            throw new DocumentFormatError(`${path}.display`, 'must be a boolean');
+        }
+        return {
+            type: 'math',
+            start: start as number,
+            end: end as number,
+            ...(value.display ? {display: true} : {}),
+        };
+    }
     throw new DocumentFormatError(`${path}.type`, 'must be a supported mark type');
 };
 
@@ -471,6 +491,18 @@ const markOpForDocumentMark = (
             id,
         );
     }
+    if (mark.type === 'math') {
+        return markRangeOp(
+            state,
+            state.state.blocks[blockId].id,
+            mark.start,
+            mark.end,
+            MATH_MARK,
+            mathMarkValueForMode(mark.display ? 'display' : 'inline'),
+            false,
+            id,
+        );
+    }
     return markRangeOp(state, state.state.blocks[blockId].id, mark.start, mark.end, mark.type, undefined, false, id);
 };
 
@@ -558,6 +590,12 @@ const marksForBlock = (state: CachedState<RichBlockMeta>, blockId: string): Docu
                 marks.push({type: 'link', start, end, href: value});
             }
         }
+        for (const value of formattedMarkValues(run, MATH_MARK)) {
+            const mode = mathDisplayModeFromMarkValue(value);
+            if (mode) {
+                marks.push({type: 'math', start, end, ...(mode === 'display' ? {display: true} : {})});
+            }
+        }
     }
     return mergeAdjacentMarks(marks);
 };
@@ -609,7 +647,8 @@ const marksCanMerge = (left: DocumentMark, right: DocumentMark): boolean => {
     if (left.type !== right.type || left.end !== right.start) return false;
     if (left.type === 'link' && right.type === 'link') return left.href === right.href;
     if (left.type === 'code' && right.type === 'code') return left.language === right.language;
-    return left.type !== 'link' && left.type !== 'code';
+    if (left.type === 'math' && right.type === 'math') return left.display === right.display;
+    return left.type !== 'link' && left.type !== 'code' && left.type !== 'math';
 };
 
 const insertedBlockId = (ops: Array<Op<RichBlockMeta>>): string => {

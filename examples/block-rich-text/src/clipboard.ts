@@ -9,7 +9,7 @@ import {
 import {lamportToString} from 'umkehr/block-crdt/utils';
 import type {Lamport} from 'umkehr/block-crdt/types';
 import {annotationBodyBlockIds} from './annotations';
-import {LINK_MARK} from './inlineMarks';
+import {LINK_MARK, MATH_MARK, mathDisplayModeFromMarkValue} from './inlineMarks';
 import {
     INLINE_EMBED_MARK,
     INLINE_EMBED_TEXT,
@@ -51,7 +51,7 @@ export const BLOCK_RICH_TEXT_MIME = 'application/x-umkehr-block-rich-text+json';
 const HTML_PAYLOAD_PREFIX = 'umkehr-block-rich-text:';
 
 export type ClipboardBooleanMarkType = 'bold' | 'italic' | 'strikethrough';
-export type ClipboardInlineMarkType = ClipboardBooleanMarkType | 'link' | 'annotation' | 'embed';
+export type ClipboardInlineMarkType = ClipboardBooleanMarkType | 'link' | 'annotation' | 'embed' | 'math';
 
 export type ClipboardMarkRange = {
     type: ClipboardInlineMarkType;
@@ -95,6 +95,7 @@ const INLINE_MARK_TYPES = new Set<ClipboardInlineMarkType>([
     'link',
     'annotation',
     'embed',
+    'math',
 ]);
 
 const PRESENTATIONS = new Set<AnnotationPresentation>(['sidebar', 'footnote', 'popover']);
@@ -418,6 +419,15 @@ const appendRunMarks = (
     if (typeof href === 'string') {
         marks.push({type: 'link', startOffset, endOffset, data: href});
     }
+    const mathMode = mathDisplayModeFromMarkValue(run.marks[MATH_MARK]);
+    if (mathMode) {
+        marks.push({
+            type: 'math',
+            startOffset,
+            endOffset,
+            ...(mathMode === 'display' ? {data: {display: true}} : {}),
+        });
+    }
     for (const data of formattedMarkValues(run, ANNOTATION_MARK)) {
         if (!isAnnotationMarkData(data)) continue;
         const ref: ClipboardAnnotationRef = {
@@ -543,6 +553,10 @@ const wrapHtmlText = (
             const resolved = mark.data.resolved ? ` data-umkehr-annotation-resolved="true"` : '';
             result = `<span data-umkehr-annotation-id="${escapeAttribute(mark.data.originalId)}" data-umkehr-annotation-presentation="${escapeAttribute(mark.data.presentation)}"${resolved}>${result}</span>`;
         }
+        if (mark.type === 'math') {
+            const display = isClipboardMathData(mark.data) && mark.data.display ? 'true' : 'false';
+            result = `<span data-umkehr-math-display="${display}">${result}</span>`;
+        }
     }
     result = wrapIngredientHtml(result, marks, ingredientClasses);
     return result;
@@ -583,12 +597,14 @@ const htmlMarkRank = (type: ClipboardInlineMarkType): number => {
             return 1;
         case 'link':
             return 2;
-        case 'strikethrough':
+        case 'math':
             return 3;
-        case 'italic':
+        case 'strikethrough':
             return 4;
-        case 'bold':
+        case 'italic':
             return 5;
+        case 'bold':
+            return 6;
     }
 };
 
@@ -666,10 +682,12 @@ const parseMarks = (value: unknown[], textLength: number): ClipboardMarkRange[] 
         if (item.type === 'link' && typeof item.data !== 'string') return null;
         if (item.type === 'annotation' && !isClipboardAnnotationRef(item.data)) return null;
         if (item.type === 'embed' && !isInlineEmbedData(item.data)) return null;
+        if (item.type === 'math' && item.data !== undefined && !isClipboardMathData(item.data)) return null;
         if (
             item.type !== 'link' &&
             item.type !== 'annotation' &&
             item.type !== 'embed' &&
+            item.type !== 'math' &&
             item.data !== undefined &&
             item.data !== true
         ) {
@@ -697,6 +715,11 @@ export const isClipboardAnnotationRef = (value: unknown): value is ClipboardAnno
     value.originalId.length > 0 &&
     PRESENTATIONS.has(value.presentation as AnnotationPresentation) &&
     (value.resolved === undefined || typeof value.resolved === 'boolean');
+
+export const isClipboardMathData = (value: unknown): value is {display?: boolean} =>
+    isRecord(value) &&
+    (value.display === undefined || typeof value.display === 'boolean') &&
+    Object.keys(value).every((key) => key === 'display');
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
     typeof value === 'object' && value !== null && !Array.isArray(value);

@@ -1,0 +1,44 @@
+# Implementation Log
+
+## 2026-06-25
+
+- Started implementation from `plan.md`.
+- Phase 1/2 in progress: adding a single `math` mark with metadata-driven inline/display mode, plus commands and `$...$` / `$$...$$` shortcut conversion.
+- Current decision: inline math accepts either `true` or `{display: false}`; display math uses `{display: true}`.
+- Phase 1/2 partial complete:
+  - Added `MATH_MARK`, math metadata helpers, and contiguous math range detection.
+  - Added single-selection and multi-selection math commands.
+  - Added typed `$...$` and `$$...$$` markdown shortcut conversion that deletes delimiters and marks source text.
+  - Added focused tests for helpers and shortcut/command behavior.
+- Issue encountered: `$$x^2$$` was initially converted too early as inline math when the first closing `$` was typed. Fixed by preventing single-dollar shortcut detection from using a `$` that is adjacent to another `$`.
+- Verification: `npm exec vitest -- run examples/block-rich-text/src/inlineMarks.test.ts examples/block-rich-text/src/blockCommands.test.ts` passes.
+- Phase 3 complete:
+  - Added `mathjax` to `examples/block-rich-text`.
+  - Added `mathRendering.ts` with a browser MathJax renderer and deterministic fake renderer for tests.
+  - Browser renderer loads `mathjax/tex-svg.js` via Vite's `?url` asset import instead of the package default import.
+- Workaround: MathJax's documented default `import MathJax from 'mathjax'` path is Node-oriented and documented as unsuitable for browser bundles. The implementation loads the packaged browser component script and caches async render results behind a synchronous renderer interface.
+- Verification: `npm exec vitest -- run examples/block-rich-text/src/mathRendering.test.ts examples/block-rich-text/src/inlineMarks.test.ts examples/block-rich-text/src/blockCommands.test.ts` passes.
+- Verification: `npx tsc -p examples/block-rich-text/tsconfig.json --noEmit` passes.
+- Phase 4/5 first slice complete:
+  - Added inactive math preview rendering for `math` marked ranges.
+  - Added per-equation source mode on preview click.
+  - Added hidden source text in previews so offset-based selection still counts the CRDT source length while MathJax output is ignored as an offset sentinel.
+  - Added inline/display math styles and literal fallback styles.
+- Phase 6/7 partial complete:
+  - Added document import/export support for `{type: 'math', start, end, display?: boolean}`.
+  - Added internal clipboard serialization/parsing/paste support for math marks.
+  - Added tests for split/join behavior and concurrent source edits inside math.
+- Issue encountered: Vite production build includes a large `tex-svg` asset, about 1.8 MB uncompressed. This is acceptable for the example for now, but a later optimization should consider a smaller MathJax component or more aggressive lazy loading.
+- Verification: `npm exec vitest -- run examples/block-rich-text/src/documentFormat.test.ts examples/block-rich-text/src/clipboard.test.ts examples/block-rich-text/src/mathRendering.test.ts examples/block-rich-text/src/inlineMarks.test.ts examples/block-rich-text/src/blockCommands.test.ts` passes.
+- Verification: `npm run build` in `examples/block-rich-text` passes, with the expected large-chunk warning.
+- Phase 4/5 follow-up:
+  - Fixed an integrated editor regression where math preview state made all blocks rerender on ordinary selection changes, which broke nested annotation/footnote/popover body selections before formatting and Enter commands could read them.
+  - Scoped selection-sensitive render cache keys to blocks that actually contain a `math` mark.
+  - Split the editable surface so ordinary blocks avoid math source-mode state and MathJax renderer state.
+- Verification: `npx tsc -p examples/block-rich-text/tsconfig.json --noEmit` passes.
+- Verification: `npm exec vitest -- run examples/block-rich-text/src/documentFormat.test.ts examples/block-rich-text/src/clipboard.test.ts examples/block-rich-text/src/mathRendering.test.ts examples/block-rich-text/src/inlineMarks.test.ts examples/block-rich-text/src/blockCommands.test.ts --reporter=dot` passes.
+- Verification: `npm run build` in `examples/block-rich-text` passes, with the expected large-chunk warning.
+- Issue remaining: `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx --reporter=dot` has 222 passing tests and 1 failing timing assertion: `selects a block in the many blocks fixture in less than 50ms` measured about 333-340 ms in this environment. The selection behavior itself passes, and the earlier nested-editor selection regressions are fixed.
+- Added a `math-equations` document fixture with inline, display, aligned, matrix, mixed-format, and table-cell math examples. Verification: `npm exec vitest -- run examples/block-rich-text/src/documentFixtures.test.ts examples/block-rich-text/src/documentFormat.test.ts --reporter=dot` passes.
+- Runtime fix: replaced the `mathjax/tex-svg.js?url` import with a Vite plugin that serves/emits `vendor/mathjax/tex-svg.js` as a raw asset. This avoids Vite import-analysis trying to resolve MathJax's conditional worker import `./sre-lab.js`, which is not shipped in the package. Verification: typecheck passes, `npm run build` passes, and the dev server serves `/vendor/mathjax/tex-svg.js` with HTTP 200.
+- Runtime fix follow-up: MathJax also fetches SRE worker assets relative to the component URL. Extended the Vite plugin to serve/emit `/vendor/mathjax/sre/speech-worker.js`, `/vendor/mathjax/sre/require.mjs`, and `/vendor/mathjax/sre/mathmaps/*.json`. Verification: typecheck passes, `npm run build` passes, and the dev server serves the worker and an `en.json` mathmap with HTTP 200.

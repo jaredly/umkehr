@@ -52,6 +52,7 @@ import {
     pastePlainTextWithMarkdownShortcuts,
     removeLinkMark,
     setCodeMark,
+    setMathMark,
     setInlineEmbedDataByCharId,
     setBlockType,
     setLinkMark,
@@ -76,6 +77,7 @@ import {toggleMarkEverywhere} from './multiSelectionCommands';
 import {retainSelection} from './retainedSelection';
 import {caret, focusPoint, pointTextLength, type EditorSelection} from './selectionModel';
 import {INLINE_EMBED_MARK, INLINE_EMBED_TEXT} from './inlineEmbeds';
+import {MATH_MARK} from './inlineMarks';
 
 const ctx = (actor = 'left'): CommandContext => {
     let i = 1;
@@ -236,6 +238,85 @@ describe('block rich text commands', () => {
             {text: 'hello', marks: {code: true}},
         ]);
         expect(result.selection).toEqual(caret(blockId, 'say hello'.length));
+    });
+
+    it('converts typed dollar markdown into an inline math mark', () => {
+        const state = init();
+        const blockId = onlyBlock(state);
+        const result = typeWithMarkdownShortcuts(state, blockId, 'say $2 + \\\\pi$');
+        const formatted = materializeFormattedBlocks(result.state);
+
+        expect(blockContents(result.state, blockId)).toBe('say 2 + \\\\pi');
+        expect(formatted[0].runs).toEqual([
+            {text: 'say ', marks: {}},
+            {text: '2 + \\\\pi', marks: {[MATH_MARK]: true}},
+        ]);
+        expect(result.selection).toEqual(caret(blockId, 'say 2 + \\\\pi'.length));
+    });
+
+    it('converts typed double dollar markdown into a display math mark', () => {
+        const state = init();
+        const blockId = onlyBlock(state);
+        const result = typeWithMarkdownShortcuts(state, blockId, '$$x^2$$');
+        const formatted = materializeFormattedBlocks(result.state);
+
+        expect(blockContents(result.state, blockId)).toBe('x^2');
+        expect(formatted[0].runs).toEqual([
+            {text: 'x^2', marks: {[MATH_MARK]: {display: true}}},
+        ]);
+        expect(result.selection).toEqual(caret(blockId, 3));
+    });
+
+    it('keeps escaped dollar markdown literal', () => {
+        const state = init();
+        const blockId = onlyBlock(state);
+        const text = String.raw`\$x$`;
+        const result = typeWithMarkdownShortcuts(state, blockId, text);
+
+        expect(blockContents(result.state, blockId)).toBe(text);
+        expect(materializeFormattedBlocks(result.state)[0].runs).toEqual([{text, marks: {}}]);
+    });
+
+    it('applies display math to selected text without delimiters', () => {
+        const state = init();
+        const blockId = onlyBlock(state);
+        const typed = insertText(state, caret(blockId, 0), 'x^2', ctx());
+        const result = setMathMark(
+            typed.state,
+            {type: 'range', anchor: {blockId, offset: 0}, focus: {blockId, offset: 3}},
+            'display',
+            ctx(),
+        );
+
+        expect(materializeFormattedBlocks(result.state)[0].runs).toEqual([
+            {text: 'x^2', marks: {[MATH_MARK]: {display: true}}},
+        ]);
+    });
+
+    it('preserves math marks across split and join', () => {
+        const state = init();
+        const blockId = onlyBlock(state);
+        const context = ctx();
+        const typed = insertText(state, caret(blockId, 0), 'abcdef', context);
+        const marked = setMathMark(
+            typed.state,
+            {type: 'range', anchor: {blockId, offset: 0}, focus: {blockId, offset: 6}},
+            'inline',
+            context,
+        );
+        const split = splitBlock(marked.state, caret(blockId, 3), context);
+        const [leftId, rightId] = rootBlockIds(split.state);
+
+        expect(materializeFormattedBlocks(split.state).map((block) => block.runs)).toEqual([
+            [{text: 'abc', marks: {[MATH_MARK]: true}}],
+            [{text: 'def', marks: {[MATH_MARK]: true}}],
+        ]);
+
+        const joined = deleteBackward(split.state, caret(rightId, 0), context);
+        expect(rootBlockIds(joined.state)).toEqual([leftId]);
+        expect(materializeFormattedBlocks(joined.state)[0].runs).toEqual([
+            {text: 'abcdef', marks: {[MATH_MARK]: true}},
+        ]);
     });
 
     it('inserts an inline embed as one marked character', () => {
@@ -2596,5 +2677,49 @@ describe('block rich text runtime', () => {
         demo = toggleOnline(demo, 'left');
         expect(lines(demo.right.state)).toEqual(['offline']);
         expect(demo.left.queue).toHaveLength(0);
+    });
+
+    it('merges concurrent source edits inside a math mark', () => {
+        let demo = createDemoState();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        const leftContext = makeCommandContext(demo.left);
+        const typed = insertText(demo.left.state, caret(blockId, 0), 'abc', leftContext);
+        const initial = setMathMark(
+            typed.state,
+            {type: 'range', anchor: {blockId, offset: 0}, focus: {blockId, offset: 3}},
+            'inline',
+            leftContext,
+        );
+        demo = applyLocalChange(demo, {
+            editorId: 'left',
+            state: initial.state,
+            selection: retainSelection(initial.state, initial.selection),
+            ops: [...typed.ops, ...initial.ops],
+        });
+
+        demo = toggleOnline(toggleOnline(demo, 'left'), 'right');
+        const leftEdit = insertText(demo.left.state, caret(blockId, 1), 'L', makeCommandContext(demo.left));
+        const rightEdit = insertText(demo.right.state, caret(blockId, 2), 'R', makeCommandContext(demo.right));
+        demo = applyLocalChange(demo, {
+            editorId: 'left',
+            state: leftEdit.state,
+            selection: retainSelection(leftEdit.state, leftEdit.selection),
+            ops: leftEdit.ops,
+        });
+        demo = applyLocalChange(demo, {
+            editorId: 'right',
+            state: rightEdit.state,
+            selection: retainSelection(rightEdit.state, rightEdit.selection),
+            ops: rightEdit.ops,
+        });
+
+        demo = toggleOnline(toggleOnline(demo, 'left'), 'right');
+        expect(blockContents(demo.left.state, blockId)).toBe(blockContents(demo.right.state, blockId));
+        expect(blockContents(demo.left.state, blockId)).toContain('L');
+        expect(blockContents(demo.left.state, blockId)).toContain('R');
+        expect(materializeFormattedBlocks(demo.left.state)[0].runs).toEqual(
+            materializeFormattedBlocks(demo.right.state)[0].runs,
+        );
+        expect(materializeFormattedBlocks(demo.left.state)[0].runs.every((run) => run.marks[MATH_MARK])).toBe(true);
     });
 });

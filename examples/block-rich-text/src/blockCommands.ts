@@ -34,7 +34,17 @@ import {
     type RichBlockMeta,
 } from './blockMeta';
 import {annotationVirtualParents} from './annotations';
-import {CODE_MARK, isCodeMarkValue, normalizeStoredCodeLanguage, type BareInlineMark, type BooleanInlineMark} from './inlineMarks';
+import {
+    CODE_MARK,
+    MATH_MARK,
+    isCodeMarkValue,
+    mathDisplayModeFromMarkValue,
+    mathMarkValueForMode,
+    normalizeStoredCodeLanguage,
+    type BareInlineMark,
+    type BooleanInlineMark,
+    type MathRenderMode,
+} from './inlineMarks';
 import {markdownShortcutPrefix, type MarkdownShortcutMatch} from './markdownShortcuts';
 import {
     caret,
@@ -147,6 +157,10 @@ export const insertTextWithMarkdownShortcuts = (
         const inlineCode = applyInlineCodeMarkdownShortcut(inserted, context);
         if (inlineCode) return inlineCode;
     }
+    if (text === '$' && isCollapsed(inserted.selection)) {
+        const math = applyMathMarkdownShortcut(inserted, context);
+        if (math) return math;
+    }
     if (text !== ' ' || !isCollapsed(inserted.selection)) return inserted;
 
     const point = focusPoint(inserted.selection);
@@ -175,6 +189,103 @@ export const insertTextWithMarkdownShortcuts = (
 
     return {state: working, ops, selection: caret(point.blockId, 0)};
 };
+
+const applyMathMarkdownShortcut = (
+    inserted: CommandResult,
+    context: CommandContext,
+): CommandResult | null => {
+    const point = focusPoint(inserted.selection);
+    const block = inserted.state.state.blocks[point.blockId];
+    if (!block || point.offset < 3) return null;
+
+    const segments = segmentText(blockContents(inserted.state, point.blockId));
+    const display = mathShortcutAroundClosingDelimiter(segments, point.offset, 2);
+    const inline = display ?? mathShortcutAroundClosingDelimiter(segments, point.offset, 1);
+    if (!inline) return null;
+
+    let working = inserted.state;
+    const ops: Array<Op<RichBlockMeta>> = [...inserted.ops];
+
+    const deleteClosing = deleteRangeOps(working, {
+        block: parseLamportString(point.blockId),
+        startOffset: inline.closingStart,
+        endOffset: inline.closingStart + inline.delimiterLength,
+    });
+    working = applyMany(working, deleteClosing, annotationVirtualParents(working));
+    ops.push(...deleteClosing);
+
+    const deleteOpening = deleteRangeOps(working, {
+        block: parseLamportString(point.blockId),
+        startOffset: inline.openingStart,
+        endOffset: inline.openingStart + inline.delimiterLength,
+    });
+    working = applyMany(working, deleteOpening, annotationVirtualParents(working));
+    ops.push(...deleteOpening);
+
+    const sourceStart = inline.openingStart;
+    const sourceEnd = inline.closingStart - inline.delimiterLength;
+    if (sourceStart < sourceEnd) {
+        const mark = markRangeOp(
+            working,
+            parseLamportString(point.blockId),
+            sourceStart,
+            sourceEnd,
+            MATH_MARK,
+            mathMarkValueForMode(inline.mode) as JsonValue,
+            false,
+            [working.state.maxSeenCount + 1, context.actor],
+        );
+        working = applyMany(working, [mark], annotationVirtualParents(working));
+        ops.push(mark);
+    }
+
+    return {state: working, ops, selection: caret(point.blockId, sourceEnd)};
+};
+
+const mathShortcutAroundClosingDelimiter = (
+    segments: string[],
+    caretOffset: number,
+    delimiterLength: 1 | 2,
+): {openingStart: number; closingStart: number; delimiterLength: 1 | 2; mode: MathRenderMode} | null => {
+    const closingStart = caretOffset - delimiterLength;
+    if (closingStart <= 0) return null;
+    if (!delimiterAt(segments, closingStart, delimiterLength)) return null;
+    if (delimiterLength === 1 && isPartOfDoubleDollarDelimiter(segments, closingStart)) return null;
+    if (isEscapedDelimiter(segments, closingStart)) return null;
+    for (let openingStart = closingStart - delimiterLength; openingStart >= 0; openingStart--) {
+        if (!delimiterAt(segments, openingStart, delimiterLength)) continue;
+        if (delimiterLength === 1 && isPartOfDoubleDollarDelimiter(segments, openingStart)) continue;
+        if (isEscapedDelimiter(segments, openingStart)) continue;
+        if (openingStart + delimiterLength > closingStart) continue;
+        if (openingStart + delimiterLength === closingStart) return null;
+        return {
+            openingStart,
+            closingStart,
+            delimiterLength,
+            mode: delimiterLength === 2 ? 'display' : 'inline',
+        };
+    }
+    return null;
+};
+
+const delimiterAt = (segments: string[], offset: number, length: 1 | 2): boolean => {
+    if (offset < 0 || offset + length > segments.length) return false;
+    for (let index = 0; index < length; index++) {
+        if (segments[offset + index] !== '$') return false;
+    }
+    return true;
+};
+
+const isEscapedDelimiter = (segments: string[], offset: number): boolean => {
+    let slashCount = 0;
+    for (let index = offset - 1; index >= 0 && segments[index] === '\\'; index--) {
+        slashCount++;
+    }
+    return slashCount % 2 === 1;
+};
+
+const isPartOfDoubleDollarDelimiter = (segments: string[], offset: number): boolean =>
+    segments[offset - 1] === '$' || segments[offset + 1] === '$';
 
 const applyInlineCodeMarkdownShortcut = (
     inserted: CommandResult,
@@ -1281,6 +1392,44 @@ export const removeCodeMark = (
     selection: EditorSelection,
     context: CommandContext,
 ): CommandResult => setValuedMark(state, selection, CODE_MARK, undefined, true, context);
+
+export const toggleMathMark = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    context: CommandContext,
+): CommandResult => toggleMathModeMark(state, selection, 'inline', context);
+
+export const toggleDisplayMathMark = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    context: CommandContext,
+): CommandResult => toggleMathModeMark(state, selection, 'display', context);
+
+export const setMathMark = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    mode: MathRenderMode,
+    context: CommandContext,
+): CommandResult => setValuedMark(state, selection, MATH_MARK, mathMarkValueForMode(mode) as JsonValue, false, context);
+
+export const removeMathMark = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    context: CommandContext,
+): CommandResult => setValuedMark(state, selection, MATH_MARK, undefined, true, context);
+
+const toggleMathModeMark = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    mode: MathRenderMode,
+    context: CommandContext,
+): CommandResult => {
+    const segments = normalizeSelectionSegments(state, selection);
+    if (!segments.length) return {state, ops: [], selection};
+    return selectionFullyHasMathMode(state, segments, mode)
+        ? removeMathMark(state, selection, context)
+        : setMathMark(state, selection, mode, context);
+};
 
 export const setBlockType = (
     state: CachedState<RichBlockMeta>,
@@ -3346,11 +3495,36 @@ const selectionFullyHasMark = (
     });
 };
 
+const selectionFullyHasMathMode = (
+    state: CachedState<RichBlockMeta>,
+    segments: ReturnType<typeof normalizeSelectionSegments>,
+    mode: MathRenderMode,
+): boolean => {
+    const blocks = materializeFormattedBlocks(state);
+    const byId = new Map(blocks.map((block) => [block.id, block]));
+
+    return segments.every((segment) => {
+        const block = byId.get(segment.blockId);
+        if (!block) return false;
+        const marksByOffset: Record<string, unknown>[] = [];
+        for (const run of block.runs) {
+            for (const _ of segmentText(run.text)) {
+                marksByOffset.push(run.marks);
+            }
+        }
+        const selected = marksByOffset.slice(segment.startOffset, segment.endOffset);
+        return (
+            selected.length > 0 &&
+            selected.every((marks) => mathDisplayModeFromMarkValue(marks[MATH_MARK]) === mode)
+        );
+    });
+};
+
 const setValuedMark = (
     state: CachedState<RichBlockMeta>,
     selection: EditorSelection,
     markType: string,
-    value: string | undefined,
+    value: JsonValue | undefined,
     remove: boolean,
     context: CommandContext,
 ): CommandResult => {

@@ -14,6 +14,8 @@ export function Toolbar({
     onItalic,
     onStrikethrough,
     onCode,
+    onMath,
+    onDisplayMath,
     onLink,
     onDateEmbed,
     onImageUploadStart,
@@ -31,6 +33,8 @@ export function Toolbar({
     onItalic(): void;
     onStrikethrough(): void;
     onCode(): void;
+    onMath(): void;
+    onDisplayMath(): void;
     onLink(): void;
     onDateEmbed(): void;
     onImageUploadStart(): void;
@@ -92,6 +96,20 @@ export function Toolbar({
                     onClick={onCode}
                 >
                     Code
+                </button>
+                <button
+                    type="button"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={onMath}
+                >
+                    Math
+                </button>
+                <button
+                    type="button"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={onDisplayMath}
+                >
+                    Display Math
                 </button>
                 <button
                     type="button"

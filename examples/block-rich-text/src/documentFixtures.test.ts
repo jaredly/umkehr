@@ -44,6 +44,15 @@ describe('document fixtures', () => {
         expect(block.annotations?.some((annotation) => annotation.presentation === 'popover')).toBe(true);
     });
 
+    it('includes inline and display math examples', () => {
+        const document = documentFixture('math-equations');
+        const marks = mathMarks(document);
+
+        expect(marks.length).toBeGreaterThanOrEqual(12);
+        expect(marks.some((mark) => mark.display)).toBe(true);
+        expect(marks.some((mark) => !mark.display)).toBe(true);
+    });
+
     it('generates a 5 by 7 large table', () => {
         const [table] = documentFixture('large-table');
 
@@ -132,6 +141,12 @@ const countBlocksOfType = (blocks: DocumentBlock[], type: DocumentBlock['type'])
             countBlocksOfType(block.children ?? [], type),
         0,
     );
+
+const mathMarks = (blocks: DocumentBlock[]) =>
+    blocks.flatMap((block) => [
+        ...(block.marks ?? []).filter((mark) => mark.type === 'math'),
+        ...mathMarks(block.children ?? []),
+    ]);
 
 const maxDepth = (blocks: DocumentBlock[]): number => {
     if (!blocks.length) return 0;

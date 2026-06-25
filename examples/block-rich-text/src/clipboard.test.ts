@@ -19,6 +19,7 @@ import {
     pastePlainText,
     setBlockMeta,
     setLinkMark,
+    setMathMark,
     splitBlock,
     toggleMark,
     type CommandContext,
@@ -243,6 +244,26 @@ describe('block rich text clipboard serialization', () => {
         ]);
         expect(payload?.html).toContain('<strong>hello</strong>');
         expect(payload?.html).toContain('<a href="https://example.test">link</a>');
+    });
+
+    it('serializes inline and display math marks', () => {
+        const demo = createDemoState();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = insertText(demo.left.state, caret(blockId, 0), 'x y', ctx());
+        result = setMathMark(result.state, range(blockId, 0, 1), 'inline', ctx());
+        result = setMathMark(result.state, range(blockId, 2, 3), 'display', ctx());
+
+        const payload = serializeSelectionToClipboardPayload(
+            result.state,
+            singleRetainedSelectionSet(result.state, range(blockId, 0, 3)),
+        );
+
+        expect(payload?.fragments[0]?.marks).toEqual([
+            {type: 'math', startOffset: 0, endOffset: 1},
+            {type: 'math', startOffset: 2, endOffset: 3, data: {display: true}},
+        ]);
+        expect(payload?.html).toContain('data-umkehr-math-display="false"');
+        expect(payload?.html).toContain('data-umkehr-math-display="true"');
     });
 
     it('serializes block metadata for selected fragments', () => {

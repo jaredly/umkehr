@@ -170,13 +170,15 @@ describe('block rich text document format import', () => {
         const result = importDocument(
             [
                 {
-                    content: 'a👨‍👩‍👧‍👦b link code',
+                    content: 'a👨‍👩‍👧‍👦b link code math display',
                     marks: [
                         {type: 'bold', start: 1, end: 2},
                         {type: 'italic', start: 0, end: 1},
                         {type: 'strikethrough', start: 2, end: 3},
                         {type: 'link', start: 4, end: 8, href: 'https://example.test'},
                         {type: 'code', start: 9, end: 13, language: 'TypeScript'},
+                        {type: 'math', start: 14, end: 18},
+                        {type: 'math', start: 19, end: 26, display: true},
                     ],
                 },
             ],
@@ -192,6 +194,10 @@ describe('block rich text document format import', () => {
             {text: 'link', marks: {link: 'https://example.test'}},
             {text: ' ', marks: {}},
             {text: 'code', marks: {code: 'typescript'}},
+            {text: ' ', marks: {}},
+            {text: 'math', marks: {math: true}},
+            {text: ' ', marks: {}},
+            {text: 'display', marks: {math: {display: true}}},
         ]);
     });
 
@@ -291,10 +297,12 @@ describe('block rich text document format export', () => {
                 children: [
                     {content: 'add a block'},
                     {
-                        content: 'type in it',
+                        content: 'type in it x y',
                         marks: [
                             {type: 'bold', start: 0, end: 4},
                             {type: 'link', start: 5, end: 7, href: 'https://example.test'},
+                            {type: 'math', start: 11, end: 12},
+                            {type: 'math', start: 13, end: 14, display: true},
                         ],
                     },
                 ],
@@ -312,10 +320,12 @@ describe('block rich text document format export', () => {
                     {type: 'paragraph', content: 'add a block'},
                     {
                         type: 'paragraph',
-                        content: 'type in it',
+                        content: 'type in it x y',
                         marks: [
                             {type: 'bold', start: 0, end: 4},
                             {type: 'link', start: 5, end: 7, href: 'https://example.test'},
+                            {type: 'math', start: 11, end: 12},
+                            {type: 'math', start: 13, end: 14, display: true},
                         ],
                     },
                 ],

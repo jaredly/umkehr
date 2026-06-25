@@ -5,6 +5,9 @@ import {
     codeLanguageForSelectionSegments,
     codeRangeAroundOffset,
     isLinkLikeText,
+    mathDisplayModeFromMarkValue,
+    mathRangeAroundOffset,
+    MATH_MARK,
     linkHrefForSelectionSegments,
     linkRangeAroundOffset,
     normalizeStoredCodeLanguage,
@@ -89,6 +92,36 @@ describe('block rich text inline mark helpers', () => {
             startOffset: 1,
             endOffset: 5,
             language: '',
+        });
+    });
+
+    it('reads math mode from mark metadata', () => {
+        expect(mathDisplayModeFromMarkValue(true)).toBe('inline');
+        expect(mathDisplayModeFromMarkValue({display: false})).toBe('inline');
+        expect(mathDisplayModeFromMarkValue({display: true})).toBe('display');
+        expect(mathDisplayModeFromMarkValue({display: true, extra: true})).toBeNull();
+        expect(mathDisplayModeFromMarkValue('math')).toBeNull();
+    });
+
+    it('finds contiguous math ranges by display mode', () => {
+        const formatted = block([
+            {text: 'a', marks: {}},
+            {text: 'bc', marks: {[MATH_MARK]: true}},
+            {text: 'de', marks: {bold: true, [MATH_MARK]: {display: false}}},
+            {text: 'fg', marks: {[MATH_MARK]: {display: true}}},
+        ]);
+
+        expect(mathRangeAroundOffset(formatted, 2)).toEqual({
+            blockId: 'block-1',
+            startOffset: 1,
+            endOffset: 5,
+            mode: 'inline',
+        });
+        expect(mathRangeAroundOffset(formatted, 5)).toEqual({
+            blockId: 'block-1',
+            startOffset: 5,
+            endOffset: 7,
+            mode: 'display',
         });
     });
 
