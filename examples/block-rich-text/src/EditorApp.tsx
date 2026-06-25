@@ -143,7 +143,6 @@ import {
     normalizeSelectionSegments,
     pointTextLength,
     selectedBlockIdsForSelection,
-    selectedTopLevelBlockIdsForSelection,
     segmentText,
     tableCellRectangleForSelection,
     tableCellsForSelection,
@@ -1065,7 +1064,7 @@ function BlockEditor({
                   )
                 : focusBlockId
                   ? rootRef.current?.querySelector<HTMLElement>(
-                        `[data-block-id="${CSS.escape(focusBlockId)}"]`,
+                        `.slideViewport[data-slide-id="${CSS.escape(focusBlockId)}"], [data-block-id="${CSS.escape(focusBlockId)}"]`,
                     )
                   : null;
         suppressNextBlockFocusSelectionRef.current = true;
@@ -1073,7 +1072,9 @@ function BlockEditor({
         const focusTarget = target ?? rootRef.current;
         focusTarget?.focus({preventScroll: true});
         window.getSelection()?.removeAllRanges();
-        if (target) pendingBlockSelectionFocusRef.current = null;
+        if (target && !target.matches('.slideViewport:not(.slideViewport-presentation)')) {
+            pendingBlockSelectionFocusRef.current = null;
+        }
     }, []);
 
     const {
@@ -3071,7 +3072,7 @@ function BlockEditor({
         if (!selection || !root) return;
         const focusBlockId = focusPoint(selection).blockId;
         const target = root.querySelector<HTMLElement>(
-            `[data-block-id="${CSS.escape(focusBlockId)}"]`,
+            `.slideViewport[data-slide-id="${CSS.escape(focusBlockId)}"], [data-block-id="${CSS.escape(focusBlockId)}"]`,
         );
         if (!target) return;
         const domSelection = window.getSelection();
@@ -3849,12 +3850,18 @@ function SlideDeckBlock({node, context}: {node: RenderTreeNode; context: RenderB
 
     const handlePresentationKeyDown = (event: KeyboardEvent<HTMLElement>) => {
         const modifierPressed = event.altKey || event.metaKey || event.ctrlKey;
-        const selectedRoots =
-            context.selection.type === 'block'
-                ? selectedTopLevelBlockIdsForSelection(context.state, context.selection)
-                : [];
+        const activeElement = event.currentTarget.ownerDocument.activeElement;
+        const currentSlideElement = currentSlideId
+            ? presentationRef.current?.querySelector<HTMLElement>(
+                  `.slideViewport[data-slide-id="${CSS.escape(currentSlideId)}"]`,
+              )
+            : null;
         const hasCurrentSlideBlockSelection =
-            currentSlideId !== null && selectedRoots.length === 1 && selectedRoots[0] === currentSlideId;
+            currentSlideId !== null &&
+            activeElement === currentSlideElement &&
+            context.selection.type === 'block' &&
+            context.selection.anchorBlockId === currentSlideId &&
+            context.selection.focusBlockId === currentSlideId;
         if (
             hasCurrentSlideBlockSelection &&
             !modifierPressed &&
@@ -4135,6 +4142,7 @@ function SlideBlockView({
                 .filter(Boolean)
                 .join(' ')}
             data-slide-id={node.block.id}
+            tabIndex={-1}
             style={style}
             onPointerDown={handleRimPointerDown}
             onMouseDown={stopRimMouseDown}

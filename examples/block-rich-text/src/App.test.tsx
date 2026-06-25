@@ -3876,15 +3876,17 @@ describe('Block rich text example UI', () => {
             expect(currentSlide()?.dataset.slideId).toBe(overviewSlideIds[2]);
             expect(currentSlide()?.classList.contains('blockSelected')).toBe(true);
             expect(currentSlide()?.classList.contains('blockSelectionFocus')).toBe(true);
+            expect(document.activeElement).toBe(currentSlide());
         });
 
-        const slideTitle = currentSlide()?.querySelector<HTMLElement>('[role="textbox"]');
-        if (!slideTitle) throw new Error('missing slide title');
-        fireEvent.keyDown(slideTitle, {key: 'ArrowLeft'});
+        const focusedSlide = currentSlide();
+        if (!focusedSlide) throw new Error('missing current slide');
+        fireEvent.keyDown(focusedSlide, {key: 'ArrowLeft'});
         await waitFor(() => {
             expect(currentSlide()?.dataset.slideId).toBe(overviewSlideIds[1]);
             expect(currentSlide()?.classList.contains('blockSelected')).toBe(true);
             expect(currentSlide()?.classList.contains('blockSelectionFocus')).toBe(true);
+            expect(document.activeElement).toBe(currentSlide());
         });
 
         const presentation = left.querySelector<HTMLElement>('.slideDeckPresentation');
@@ -3894,6 +3896,7 @@ describe('Block rich text example UI', () => {
             expect(currentSlide()?.dataset.slideId).toBe(overviewSlideIds[2]);
             expect(currentSlide()?.classList.contains('blockSelected')).toBe(true);
             expect(currentSlide()?.classList.contains('blockSelectionFocus')).toBe(true);
+            expect(document.activeElement).toBe(currentSlide());
         });
 
         fireEvent.keyDown(presentation, {key: 'ArrowLeft'});
@@ -3901,12 +3904,14 @@ describe('Block rich text example UI', () => {
             expect(currentSlide()?.dataset.slideId).toBe(overviewSlideIds[1]);
             expect(currentSlide()?.classList.contains('blockSelected')).toBe(true);
             expect(currentSlide()?.classList.contains('blockSelectionFocus')).toBe(true);
+            expect(document.activeElement).toBe(currentSlide());
         });
         fireEvent.keyDown(presentation, {key: 'ArrowRight'});
         await waitFor(() => {
             expect(currentSlide()?.dataset.slideId).toBe(overviewSlideIds[2]);
             expect(currentSlide()?.classList.contains('blockSelected')).toBe(true);
             expect(currentSlide()?.classList.contains('blockSelectionFocus')).toBe(true);
+            expect(document.activeElement).toBe(currentSlide());
         });
     });
 
