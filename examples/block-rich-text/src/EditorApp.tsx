@@ -151,6 +151,7 @@ import {
     visibleSubtreeBlockIds,
     type EditorSelection,
 } from './selectionModel';
+import {constrainSelectionToFullscreenSlide} from './slidePresentationSelection';
 import {
     deleteBackwardEverywhere,
     deleteForwardEverywhere,
@@ -352,6 +353,7 @@ type CommentFocusRequest = {blockId: string; token: number; selection?: EditorSe
 type PollOptionView = {id: string; label: string; archived?: boolean};
 type MatrixPollView = {rows: PollOptionView[]; columns: PollOptionView[]};
 type PollEditorMode = 'view' | 'edit';
+type SubmitCommandOptions = {constrainFullscreenSlideSelection?: boolean};
 
 const BOOLEAN_INLINE_MARKS: BooleanInlineMark[] = ['bold', 'italic', 'strikethrough'];
 const BARE_INLINE_MARKS: BareInlineMark[] = [...BOOLEAN_INLINE_MARKS, CODE_MARK];
@@ -1003,10 +1005,54 @@ function BlockEditor({
         [replica.state, resolvedSelectionSet],
     );
     const [cellDragBlockDropTarget, setCellDragBlockDropTarget] = useState<DropTarget | null>(null);
+
+    const focusBlockSelectionTarget = useCallback((editorSelection?: EditorSelection | null) => {
+        const domSelection = window.getSelection();
+        if (domSelection) domSelection.removeAllRanges();
+        pendingBlockSelectionFocusRef.current = editorSelection ?? null;
+        const focusBlockId = editorSelection ? focusPoint(editorSelection).blockId : null;
+        const target =
+            editorSelection?.type === 'table-cells'
+                ? rootRef.current?.querySelector<HTMLElement>(
+                      `.tableCell[data-cell-id="${CSS.escape(focusBlockId ?? '')}"]`,
+                  )
+                : focusBlockId
+                  ? rootRef.current?.querySelector<HTMLElement>(
+                        `.slideViewport[data-slide-id="${CSS.escape(focusBlockId)}"], [data-block-id="${CSS.escape(focusBlockId)}"]`,
+                    )
+                  : null;
+        suppressNextBlockFocusSelectionRef.current = true;
+        suppressNextBlockKeySelectionRef.current = true;
+        const focusTarget = target ?? rootRef.current;
+        focusTarget?.focus({preventScroll: true});
+        window.getSelection()?.removeAllRanges();
+        if (target && !target.matches('.slideViewport:not(.slideViewport-presentation)')) {
+            pendingBlockSelectionFocusRef.current = null;
+        }
+    }, []);
+
+    const submitCommand = useCallback(
+        (command: (replica: Replica) => MultiCommandResult, options: SubmitCommandOptions = {}) => {
+            onCommand((current) => {
+                const result = command(current);
+                if (options.constrainFullscreenSlideSelection === false) return result;
+                const constrained = constrainSelectionToFullscreenSlide(
+                    result.state,
+                    result.selection,
+                    slideDeckUiByBlockId,
+                );
+                if (!constrained.fallbackSelection) return result;
+                focusBlockSelectionTarget(constrained.fallbackSelection);
+                return {...result, selection: constrained.selection};
+            });
+        },
+        [focusBlockSelectionTarget, onCommand, slideDeckUiByBlockId],
+    );
+
     const {draggingId, draggingSubtreeIds, dropTarget, registerRow, startDrag} = useBlockReorder({
         blocks: blocks.map(({id, depth, parentId}) => ({id, depth, parentId})),
         onMove: (blockIds, target) =>
-            onCommand((current) => {
+            submitCommand((current) => {
                 let working = current.state;
                 const ops: Array<Op<RichBlockMeta>> = [];
                 if (target.type === 'table-cell-slot') {
@@ -1051,31 +1097,6 @@ function BlockEditor({
         }
         pendingCaretRestoreBlockIdRef.current = null;
         pendingSelectionRestoreRef.current = selection;
-    }, []);
-
-    const focusBlockSelectionTarget = useCallback((editorSelection?: EditorSelection | null) => {
-        const domSelection = window.getSelection();
-        if (domSelection) domSelection.removeAllRanges();
-        pendingBlockSelectionFocusRef.current = editorSelection ?? null;
-        const focusBlockId = editorSelection ? focusPoint(editorSelection).blockId : null;
-        const target =
-            editorSelection?.type === 'table-cells'
-                ? rootRef.current?.querySelector<HTMLElement>(
-                      `.tableCell[data-cell-id="${CSS.escape(focusBlockId ?? '')}"]`,
-                  )
-                : focusBlockId
-                  ? rootRef.current?.querySelector<HTMLElement>(
-                        `.slideViewport[data-slide-id="${CSS.escape(focusBlockId)}"], [data-block-id="${CSS.escape(focusBlockId)}"]`,
-                    )
-                  : null;
-        suppressNextBlockFocusSelectionRef.current = true;
-        suppressNextBlockKeySelectionRef.current = true;
-        const focusTarget = target ?? rootRef.current;
-        focusTarget?.focus({preventScroll: true});
-        window.getSelection()?.removeAllRanges();
-        if (target && !target.matches('.slideViewport:not(.slideViewport-presentation)')) {
-            pendingBlockSelectionFocusRef.current = null;
-        }
     }, []);
 
     const {
@@ -1330,7 +1351,7 @@ function BlockEditor({
                 if (isSameClick(pendingClick, event)) {
                     const selection = caret(pendingClick.point.blockId, pendingClick.point.offset);
                     scheduleSelectionRestore(selection);
-                    onCommand((current) => ({
+                    submitCommand((current) => ({
                         state: current.state,
                         ops: [],
                         selection: replaceSelectionSet(
@@ -1352,7 +1373,7 @@ function BlockEditor({
                 ) {
                     const selection = caret(pendingClick.point.blockId, pendingClick.point.offset);
                     scheduleSelectionRestore(selection);
-                    onCommand((current) => ({
+                    submitCommand((current) => ({
                         state: current.state,
                         ops: [],
                         selection: appendSelection(
@@ -1369,7 +1390,7 @@ function BlockEditor({
             if (!selection) return;
             if (event.type === 'mouseup' && 'detail' in event && event.detail === 3) {
                 scheduleSelectionRestore(selection);
-                onCommand((current) => ({
+                submitCommand((current) => ({
                     state: current.state,
                     ops: [],
                     selection: occurrenceSelectionSet(
@@ -1391,7 +1412,7 @@ function BlockEditor({
                 return;
             }
             scheduleSelectionRestore(selection);
-            onCommand((current) => ({
+            submitCommand((current) => ({
                 state: current.state,
                 ops: [],
                 selection: addSelection
@@ -1409,7 +1430,7 @@ function BlockEditor({
         [
             clearPendingInlineMarks,
             nextSelectionId,
-            onCommand,
+            submitCommand,
             primaryResolvedSelection,
             resetVerticalCaretIntent,
             resolvedSelectionSet.entries.length,
@@ -1506,7 +1527,7 @@ function BlockEditor({
             handledTripleClickRef.current = true;
             resetVerticalCaretIntent();
             const selection = caret(point.blockId, point.offset);
-            onCommand((current) => {
+            submitCommand((current) => {
                 const nextSelection = occurrenceSelectionSet(
                     current.state,
                     selection,
@@ -1526,7 +1547,7 @@ function BlockEditor({
         [
             nextSelectionId,
             closeAllPopovers,
-            onCommand,
+            submitCommand,
             resetVerticalCaretIntent,
             resolvedSelectionSet.entries.length,
             scheduleSelectionRestore,
@@ -1607,7 +1628,7 @@ function BlockEditor({
             event.preventDefault();
             suppressNextMouseSelectionRef.current = true;
             scheduleSelectionRestore(committed);
-            onCommand((currentReplica) => ({
+            submitCommand((currentReplica) => ({
                 state: currentReplica.state,
                 ops: [],
                 selection: replaceSelectionSet(
@@ -1634,7 +1655,7 @@ function BlockEditor({
             window.removeEventListener('pointerup', onPointerUp);
             window.removeEventListener('pointercancel', onPointerCancel);
         };
-    }, [hasTextDragGesture, onCommand, scheduleSelectionRestore]);
+    }, [hasTextDragGesture, scheduleSelectionRestore, submitCommand]);
 
     const liveSelectionSet = useCallback((current: Replica): RetainedSelectionSet => {
         const root = rootRef.current;
@@ -1646,7 +1667,7 @@ function BlockEditor({
 
     const runEditCommand = useCallback(
         (command: (current: Replica, selection: RetainedSelectionSet) => MultiCommandResult) => {
-            onCommand((current) => {
+            submitCommand((current) => {
                 resetVerticalCaretIntent();
                 const retainedSelection = current.selection;
                 const currentPrimary = primarySelection(
@@ -1663,7 +1684,7 @@ function BlockEditor({
                 return result;
             });
         },
-        [liveSelectionSet, onCommand, resetVerticalCaretIntent, scheduleSelectionRestore],
+        [liveSelectionSet, resetVerticalCaretIntent, scheduleSelectionRestore, submitCommand],
     );
 
     const currentClipboardPayload = useCallback((): RichClipboardPayload | null => {
@@ -1686,10 +1707,8 @@ function BlockEditor({
         await writeClipboardPayload(payload);
     }, [currentClipboardPayload]);
 
-    const copyRichSelection = useCallback(
-        (event: ClipboardEvent<HTMLElement>) => {
-            const payload = currentClipboardPayload();
-            if (!payload) return;
+    const writeClipboardEventPayload = useCallback(
+        (event: ClipboardEvent<HTMLElement>, payload: RichClipboardPayload): void => {
             event.preventDefault();
             event.clipboardData.setData(BLOCK_RICH_TEXT_MIME, JSON.stringify(payload));
             event.clipboardData.setData('text/plain', payload.tsv ?? payload.plainText);
@@ -1698,7 +1717,16 @@ function BlockEditor({
                 event.clipboardData.setData('text/tab-separated-values', payload.tsv);
             }
         },
-        [currentClipboardPayload],
+        [],
+    );
+
+    const copyRichSelection = useCallback(
+        (event: ClipboardEvent<HTMLElement>) => {
+            const payload = currentClipboardPayload();
+            if (!payload) return;
+            writeClipboardEventPayload(event, payload);
+        },
+        [currentClipboardPayload, writeClipboardEventPayload],
     );
 
     const captureImageUploadSelection = useCallback(() => {
@@ -1713,7 +1741,7 @@ function BlockEditor({
                 selectionSnapshot ?? pendingImageUploadSelectionRef.current ?? liveSelectionSet(replica);
             pendingImageUploadSelectionRef.current = null;
             const attachment = await onCreateImageAttachment(file);
-            onCommand((current) => {
+            submitCommand((current) => {
                 resetVerticalCaretIntent();
                 const result = insertImageBlockEverywhere(
                     current.state,
@@ -1731,7 +1759,7 @@ function BlockEditor({
         },
         [
             liveSelectionSet,
-            onCommand,
+            submitCommand,
             onCreateImageAttachment,
             replica,
             resetVerticalCaretIntent,
@@ -1744,7 +1772,7 @@ function BlockEditor({
             if (rich.attachments?.length) {
                 onMergeSerializedAttachments(rich.attachments);
             }
-            onCommand((current) => {
+            submitCommand((current) => {
                 resetVerticalCaretIntent();
                 const retainedSelection = current.selection;
                 const currentPrimary = primarySelection(
@@ -1768,7 +1796,7 @@ function BlockEditor({
         },
         [
             liveSelectionSet,
-            onCommand,
+            submitCommand,
             onMergeSerializedAttachments,
             resetVerticalCaretIntent,
             scheduleSelectionRestore,
@@ -1842,7 +1870,7 @@ function BlockEditor({
 
     const runInlineMarkToggle = useCallback(
         (markType: BooleanInlineMark) => {
-            onCommand((current) => {
+            submitCommand((current) => {
                 resetVerticalCaretIntent();
                 const selection = liveSelectionSet(current);
                 const resolved = resolveSelectionSet(current.state, selection);
@@ -1888,7 +1916,7 @@ function BlockEditor({
         [
             clearPendingInlineMarks,
             liveSelectionSet,
-            onCommand,
+            submitCommand,
             pendingInlineMarks,
             retainedInlineMarks,
             resetVerticalCaretIntent,
@@ -1897,7 +1925,7 @@ function BlockEditor({
     );
 
     const runCodeToggle = useCallback(() => {
-        onCommand((current) => {
+        submitCommand((current) => {
             resetVerticalCaretIntent();
             const selection = liveSelectionSet(current);
             const resolved = resolveSelectionSet(current.state, selection);
@@ -1941,7 +1969,7 @@ function BlockEditor({
     }, [
         clearPendingInlineMarks,
         liveSelectionSet,
-        onCommand,
+        submitCommand,
         pendingInlineMarks,
         retainedInlineMarks,
         resetVerticalCaretIntent,
@@ -1950,7 +1978,7 @@ function BlockEditor({
 
     const runMathToggle = useCallback(
         (mode: 'inline' | 'display') => {
-            onCommand((current) => {
+            submitCommand((current) => {
                 resetVerticalCaretIntent();
                 const selection = liveSelectionSet(current);
                 const resolved = resolveSelectionSet(current.state, selection);
@@ -1983,7 +2011,7 @@ function BlockEditor({
         [
             clearPendingInlineMarks,
             liveSelectionSet,
-            onCommand,
+            submitCommand,
             resetVerticalCaretIntent,
             scheduleSelectionRestore,
         ],
@@ -2059,7 +2087,7 @@ function BlockEditor({
             const menu = slashMenu;
             if (!menu) return;
             setSlashMenu(null);
-            onCommand((current) => {
+            submitCommand((current) => {
                 resetVerticalCaretIntent();
                 const context = makeCommandContext(current);
                 const deleted = deleteSlashTriggers(current.state, menu);
@@ -2148,14 +2176,14 @@ function BlockEditor({
                 };
             });
         },
-        [onCommand, resetVerticalCaretIntent, scheduleSelectionRestore, slashMenu],
+        [resetVerticalCaretIntent, scheduleSelectionRestore, slashMenu, submitCommand],
     );
 
     const runBlockControlCommand = useCallback(
-        (command: (current: Replica) => MultiCommandResult) => {
-            onCommand((current) => command(current));
+        (command: (current: Replica) => MultiCommandResult, options?: SubmitCommandOptions) => {
+            submitCommand((current) => command(current), options);
         },
-        [onCommand],
+        [submitCommand],
     );
 
     const pollModeForBlock = useCallback(
@@ -2165,7 +2193,7 @@ function BlockEditor({
 
     const moveSelectionFromHiddenPollChildren = useCallback(
         (blockId: string) => {
-            onCommand((current) => {
+            submitCommand((current) => {
                 const hiddenBlockIds = new Set(
                     visibleSubtreeBlockIds(current.state, blockId).filter((id) => id !== blockId),
                 );
@@ -2192,7 +2220,7 @@ function BlockEditor({
                 };
             });
         },
-        [onCommand, scheduleSelectionRestore],
+        [scheduleSelectionRestore, submitCommand],
     );
 
     const setPollModeForBlock = useCallback(
@@ -2293,7 +2321,7 @@ function BlockEditor({
 
     const selectBlockFromHandle = useCallback(
         (blockId: string) => {
-            onCommand((current) => {
+            submitCommand((current) => {
                 return {
                     state: current.state,
                     ops: [],
@@ -2310,7 +2338,7 @@ function BlockEditor({
                 focusBlockId: blockId,
             });
         },
-        [focusBlockSelectionTarget, onCommand],
+        [focusBlockSelectionTarget, submitCommand],
     );
 
     const startBlockDragFromHandle = useCallback(
@@ -2345,6 +2373,78 @@ function BlockEditor({
         [],
     );
 
+    const deleteBlockLevelSelection = useCallback(
+        (current: Replica): MultiCommandResult => {
+            const activeSelection = primarySelection(
+                resolveSelectionSet(current.state, current.selection),
+            );
+            if (activeSelection.type === 'table-cells') {
+                const result = deleteTableCellSelection(current.state, activeSelection);
+                if (!result) return {state: current.state, ops: [], selection: current.selection};
+                scheduleSelectionRestore(result.selection);
+                return {
+                    state: result.state,
+                    ops: result.ops,
+                    selection: replaceSelectionSet(
+                        result.state,
+                        result.selection,
+                        current.selection.primaryId,
+                    ),
+                };
+            }
+            const resolved = resolveSelectionSet(current.state, current.selection);
+            const blockIds = selectedTopLevelBlockIdsForSelectionSet(current.state, resolved);
+            if (!blockIds.length) {
+                return {state: current.state, ops: [], selection: current.selection};
+            }
+            let working = current.state;
+            const ops: Array<Op<RichBlockMeta>> = [];
+            for (const blockId of blockIds) {
+                if (!working.state.blocks[blockId] || working.state.blocks[blockId].deleted) continue;
+                const deleted = deleteBlockOps(working, {
+                    block: parseLamportString(blockId),
+                    mode: 'subtree',
+                    virtualParents: annotationVirtualParents(working),
+                });
+                working = applyMany(working, deleted, annotationVirtualParents(working));
+                ops.push(...deleted);
+            }
+            const fallbackBlockId = editableBlockIds(working)[0] ?? blockIds[0];
+            const fallback = caret(fallbackBlockId, pointTextLength(working, fallbackBlockId));
+            scheduleSelectionRestore(fallback);
+            return {
+                state: working,
+                ops,
+                selection: replaceSelectionSet(working, fallback, current.selection.primaryId),
+            };
+        },
+        [scheduleSelectionRestore],
+    );
+
+    const cutRichSelection = useCallback(
+        (event: ClipboardEvent<HTMLElement>) => {
+            const payload = currentClipboardPayload();
+            if (!payload) return;
+            writeClipboardEventPayload(event, payload);
+            const currentPrimary = primarySelection(resolvedSelectionSet);
+            if (isBlockLevelSelection(currentPrimary)) {
+                submitCommand(deleteBlockLevelSelection);
+                return;
+            }
+            runEditCommand((current, selection) =>
+                deleteBackwardEverywhere(current.state, selection, makeCommandContext(current)),
+            );
+        },
+        [
+            currentClipboardPayload,
+            deleteBlockLevelSelection,
+            resolvedSelectionSet,
+            runEditCommand,
+            submitCommand,
+            writeClipboardEventPayload,
+        ],
+    );
+
     const handleBlockSelectionKeyDown = useCallback(
         (event: KeyboardEvent<HTMLElement>): boolean => {
             const selection = primarySelection(resolvedSelectionSet);
@@ -2358,11 +2458,22 @@ function BlockEditor({
                 void writeCurrentSelectionToClipboard();
                 return true;
             }
+            if (
+                (event.metaKey || event.ctrlKey) &&
+                !event.altKey &&
+                !event.shiftKey &&
+                event.key.toLowerCase() === 'x'
+            ) {
+                event.preventDefault();
+                void writeCurrentSelectionToClipboard();
+                submitCommand(deleteBlockLevelSelection);
+                return true;
+            }
             const modifierPressed = event.metaKey || event.ctrlKey || event.altKey;
 
             if (event.key.length === 1 && !modifierPressed) {
                 event.preventDefault();
-                onCommand((current) => {
+                submitCommand((current) => {
                     const textSelection = textCaretForBlockSelection(current.state, selection, 'focus');
                     const selectionSet = replacePrimarySelection(current.state, current.selection, textSelection);
                     const result = insertTextWithPendingMarks(current, selectionSet, event.key);
@@ -2374,7 +2485,7 @@ function BlockEditor({
 
             if (event.key === 'Enter' && !modifierPressed) {
                 event.preventDefault();
-                onCommand((current) => {
+                submitCommand((current) => {
                     const textSelection = textCaretForBlockSelection(current.state, selection, 'document-end');
                     const selectionSet = replacePrimarySelection(current.state, current.selection, textSelection);
                     const result = splitBlockEverywhere(current.state, selectionSet, makeCommandContext(current));
@@ -2386,50 +2497,7 @@ function BlockEditor({
 
             if ((event.key === 'Backspace' || event.key === 'Delete') && !modifierPressed) {
                 event.preventDefault();
-                onCommand((current) => {
-                    const activeSelection = primarySelection(
-                        resolveSelectionSet(current.state, current.selection),
-                    );
-                    if (activeSelection.type === 'table-cells') {
-                        const result = deleteTableCellSelection(current.state, activeSelection);
-                        if (!result) return {state: current.state, ops: [], selection: current.selection};
-                        scheduleSelectionRestore(result.selection);
-                        return {
-                            state: result.state,
-                            ops: result.ops,
-                            selection: replaceSelectionSet(
-                                result.state,
-                                result.selection,
-                                current.selection.primaryId,
-                            ),
-                        };
-                    }
-                    const resolved = resolveSelectionSet(current.state, current.selection);
-                    const blockIds = selectedTopLevelBlockIdsForSelectionSet(current.state, resolved);
-                    if (!blockIds.length) {
-                        return {state: current.state, ops: [], selection: current.selection};
-                    }
-                    let working = current.state;
-                    const ops: Array<Op<RichBlockMeta>> = [];
-                    for (const blockId of blockIds) {
-                        if (!working.state.blocks[blockId] || working.state.blocks[blockId].deleted) continue;
-                        const deleted = deleteBlockOps(working, {
-                            block: parseLamportString(blockId),
-                            mode: 'subtree',
-                            virtualParents: annotationVirtualParents(working),
-                        });
-                        working = applyMany(working, deleted, annotationVirtualParents(working));
-                        ops.push(...deleted);
-                    }
-                    const fallbackBlockId = editableBlockIds(working)[0] ?? blockIds[0];
-                    const fallback = caret(fallbackBlockId, pointTextLength(working, fallbackBlockId));
-                    scheduleSelectionRestore(fallback);
-                    return {
-                        state: working,
-                        ops,
-                        selection: replaceSelectionSet(working, fallback, current.selection.primaryId),
-                    };
-                });
+                submitCommand(deleteBlockLevelSelection);
                 return true;
             }
 
@@ -2437,7 +2505,8 @@ function BlockEditor({
         },
         [
             insertTextWithPendingMarks,
-            onCommand,
+            submitCommand,
+            deleteBlockLevelSelection,
             resolvedSelectionSet,
             scheduleSelectionRestore,
             textCaretForBlockSelection,
@@ -2594,7 +2663,7 @@ function BlockEditor({
     );
 
     const openLinkFromCurrentSelection = useCallback(() => {
-        onCommand((current) => {
+        submitCommand((current) => {
             const selection = liveSelectionSet(current);
             const ranges = linkRangesForSelectionSet(current.state, selection);
             const formatted = materializeFormattedBlocks(current.state, annotationMarkBehavior);
@@ -2635,7 +2704,7 @@ function BlockEditor({
 
             return {state: current.state, ops: [], selection};
         });
-    }, [liveSelectionSet, onCommand, openLinkPopoverForRanges]);
+    }, [liveSelectionSet, openLinkPopoverForRanges, submitCommand]);
 
     const cancelLinkHoverHide = useCallback(() => {
         if (linkHoverHideTimerRef.current) clearTimeout(linkHoverHideTimerRef.current);
@@ -2802,7 +2871,7 @@ function BlockEditor({
     const extendSelectionVerticallyWithVisualIntent = useCallback(
         (direction: 'up' | 'down', sourceBlock: HTMLElement) => {
             handledNavigationKeyRef.current = true;
-            onCommand((current) => {
+            submitCommand((current) => {
                 const root = rootRef.current;
                 if (!root) return {state: current.state, ops: [], selection: current.selection};
 
@@ -2881,19 +2950,19 @@ function BlockEditor({
                 };
             });
         },
-        [onCommand, scheduleSelectionRestore],
+        [scheduleSelectionRestore, submitCommand],
     );
 
     const moveCaret = useCallback(
         (selection: EditorSelection) => {
             scheduleSelectionRestore(selection);
-            onCommand((current) => ({
+            submitCommand((current) => ({
                 state: current.state,
                 ops: [],
                 selection: replacePrimarySelection(current.state, current.selection, selection),
             }));
         },
-        [onCommand, scheduleSelectionRestore],
+        [scheduleSelectionRestore, submitCommand],
     );
 
     const moveCaretHorizontally = useCallback(
@@ -2941,7 +3010,7 @@ function BlockEditor({
             if (direction === 'left' || direction === 'right') resetVerticalCaretIntent();
 
             let applied = false;
-            onCommand((current) => {
+            submitCommand((current) => {
                 const result = moveTableSelectionByArrow(
                     current.state,
                     selection,
@@ -2970,7 +3039,7 @@ function BlockEditor({
             });
             return applied;
         },
-        [onCommand, replica, resetVerticalCaretIntent, scheduleSelectionRestore],
+        [replica, resetVerticalCaretIntent, scheduleSelectionRestore, submitCommand],
     );
 
     const extendTableSelectionByArrowKey = useCallback(
@@ -2987,7 +3056,7 @@ function BlockEditor({
             if (direction === 'left' || direction === 'right') resetVerticalCaretIntent();
 
             let applied = false;
-            onCommand((current) => {
+            submitCommand((current) => {
                 const result = moveTableSelectionByArrow(
                     current.state,
                     selection,
@@ -3024,7 +3093,7 @@ function BlockEditor({
             });
             return applied;
         },
-        [onCommand, replica, resetVerticalCaretIntent, scheduleSelectionRestore],
+        [replica, resetVerticalCaretIntent, scheduleSelectionRestore, submitCommand],
     );
 
     const adjustTableVerticalSelectionForIntent = useCallback(
@@ -3288,6 +3357,7 @@ function BlockEditor({
                         onMouseDown={captureMouseDown}
                         onMouseUp={captureSelection}
                         onCopy={copyRichSelection}
+                        onCut={cutRichSelection}
                         onPaste={pasteFromClipboard}
                         onKeyDown={(event) => {
                             if (handleBlockSelectionKeyDown(event)) return;
@@ -3387,6 +3457,7 @@ function BlockEditor({
                                 focusBlockSelectionTarget,
                                 startBlockDragFromHandle,
                                 onCopy: copyRichSelection,
+                                onCut: cutRichSelection,
                                 onPaste: pasteFromClipboard,
                                 moveCaretHorizontally,
                                 moveCaretVertically,
@@ -3658,10 +3729,14 @@ type RenderBlockContext = {
     insertText(current: Replica, selection: RetainedSelectionSet, text: string): MultiCommandResult;
     runInlineMarkToggle(markType: BooleanInlineMark): void;
     runCodeToggle(): void;
-    runBlockControlCommand(command: (current: Replica) => MultiCommandResult): void;
+    runBlockControlCommand(
+        command: (current: Replica) => MultiCommandResult,
+        options?: SubmitCommandOptions,
+    ): void;
     focusBlockSelectionTarget(selection?: EditorSelection | null): void;
     startBlockDragFromHandle(blockId: string, event: PointerEvent<HTMLElement>): void;
     onCopy(event: ClipboardEvent<HTMLElement>): void;
+    onCut(event: ClipboardEvent<HTMLElement>): void;
     onPaste(event: ClipboardEvent<HTMLElement>): void;
     moveCaretHorizontally(selection: EditorSelection): void;
     moveCaretVertically(sourceBlock: HTMLElement, targetBlockId: string): void;
@@ -3849,11 +3924,14 @@ function SlideDeckBlock({node, context}: {node: RenderTreeNode; context: RenderB
             anchorBlockId: slideId,
             focusBlockId: slideId,
         };
-        context.runBlockControlCommand((current) => ({
-            state: current.state,
-            ops: [],
-            selection: replaceSelectionSet(current.state, selection, current.selection.primaryId),
-        }));
+        context.runBlockControlCommand(
+            (current) => ({
+                state: current.state,
+                ops: [],
+                selection: replaceSelectionSet(current.state, selection, current.selection.primaryId),
+            }),
+            {constrainFullscreenSlideSelection: false},
+        );
         context.focusBlockSelectionTarget(selection);
     };
     const setMode = (mode: SlideDeckDisplayMode) => {
@@ -4896,6 +4974,7 @@ function TableBlock({node, context}: {node: RenderTreeNode; context: RenderBlock
                                             data-cell-id={cell?.block.id}
                                             tabIndex={cell ? -1 : undefined}
                                             onCopy={context.onCopy}
+                                            onCut={context.onCut}
                                             onPaste={context.onPaste}
                                             onKeyDown={(event) => {
                                                 if (!cell || event.target !== event.currentTarget) return;
@@ -6009,6 +6088,7 @@ const renderEditableBlock = (
                 })
             }
             onCopy={context.onCopy}
+            onCut={context.onCut}
             onPaste={context.onPaste}
             onMoveCaret={context.moveCaretHorizontally}
             onMoveCaretVertically={context.moveCaretVertically}
@@ -6454,6 +6534,25 @@ function AnnotationBodyBlock({
         [block.id, onBodyCommand, onBodyFocusRequest, restoreAfter],
     );
 
+    const cutBodySelection = useCallback(
+        (event: ClipboardEvent<HTMLDivElement>) => {
+            const selected = readSelectionFromDom(event.currentTarget) ?? selection;
+            const payload = serializeSelectionToClipboardPayload(
+                state,
+                singleRetainedSelectionSet(state, selected),
+            );
+            if (!payload) return;
+            event.preventDefault();
+            event.clipboardData.setData(BLOCK_RICH_TEXT_MIME, JSON.stringify(payload));
+            event.clipboardData.setData('text/plain', payload.plainText);
+            event.clipboardData.setData('text/html', htmlWithClipboardPayload(payload));
+            run(selected, (currentState, activeSelection, context) =>
+                replaceAnnotationBodySelection(currentState, activeSelection, '', context),
+            );
+        },
+        [run, selection, state],
+    );
+
     const rangeSelection = useCallback(
         (range: LinkTargetRange): EditorSelection => ({
             type: 'range',
@@ -6650,6 +6749,7 @@ function AnnotationBodyBlock({
                     run(activeSelection ?? selection, deleteAnnotationBodyForward)
                 }
                 onCopy={copyBodySelection}
+                onCut={cutBodySelection}
                 onPaste={(event) => {
                     const selected = readSelectionFromDom(event.currentTarget) ?? selection;
                     const rich = richClipboardPayloadFromDataTransfer(event.clipboardData);
@@ -6971,6 +7071,7 @@ function EditableBlock({
     onSetPreviewUrl,
     onSetPreviewMetadata,
     onCopy,
+    onCut,
     onPaste,
     onMoveCaret,
     onMoveCaretVertically,
@@ -7065,6 +7166,7 @@ function EditableBlock({
     onSetPreviewUrl(url: string): void;
     onSetPreviewMetadata(url: string, metadata: PreviewMetadata | null): void;
     onCopy(event: ClipboardEvent<HTMLElement>): void;
+    onCut(event: ClipboardEvent<HTMLElement>): void;
     onPaste(event: ClipboardEvent<HTMLElement>): void;
     onMoveCaret(selection: EditorSelection): void;
     onMoveCaretVertically(sourceBlock: HTMLElement, targetBlockId: string): void;
@@ -7157,6 +7259,7 @@ function EditableBlock({
             onDeleteBackward={onDeleteBackward}
             onDeleteForward={onDeleteForward}
             onCopy={onCopy}
+            onCut={onCut}
             onKeyDown={(event) => {
                 onKeystroke(block.id, event);
                 const modifierPressed = event.metaKey || event.ctrlKey;
@@ -8024,6 +8127,7 @@ function RichTextEditableSurfaceInner({
     onDisplayInputRenderStarted,
     onKeyDown,
     onCopy,
+    onCut,
     onPaste,
     activeMathSourceKey,
     setActiveMathSourceKey,
@@ -8063,6 +8167,7 @@ function RichTextEditableSurfaceInner({
     onDisplayInputRenderStarted?(label: string, started: number): void;
     onKeyDown?(event: KeyboardEvent<HTMLDivElement>): void;
     onCopy?(event: ClipboardEvent<HTMLDivElement>): void;
+    onCut?(event: ClipboardEvent<HTMLDivElement>): void;
     onPaste?(event: ClipboardEvent<HTMLDivElement>): void;
     activeMathSourceKey: string | null;
     setActiveMathSourceKey(value: string | null): void;
@@ -8098,6 +8203,10 @@ function RichTextEditableSurfaceInner({
                 event.preventDefault();
                 handledBeforeInputRef.current = true;
                 measureInput(onInputMeasured, 'Delete', () => onDeleteForward(selection));
+            } else if (event.inputType === 'deleteByCut') {
+                event.preventDefault();
+                handledBeforeInputRef.current = true;
+                measureInput(onInputMeasured, 'Cut', () => onDeleteBackward(selection));
             }
         };
 
@@ -8399,6 +8508,11 @@ function RichTextEditableSurfaceInner({
                 onInputMeasured?.(keyboardEventLabel(event), performance.now() - started);
             }}
             onCopy={onCopy}
+            onCut={(event) => {
+                if (!onCut) return;
+                measureInput(onInputMeasured, 'Cut', () => onCut(event));
+                if (event.defaultPrevented) event.stopPropagation();
+            }}
             onPaste={(event) => {
                 if (!onPaste) return;
                 measureInput(onInputMeasured, 'Paste', () => onPaste(event));

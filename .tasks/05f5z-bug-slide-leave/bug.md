@@ -1,1 +1,1 @@
-examples/block-rich-text: while in presentation mode, we should prevent `shift-tab` from unindenting a child block outside of the slide parent. And basically any operations that would result in the selection/focus leaving the current slide.
+examples/block-rich-text: while in presentation mode, we should ensure the focus stays within the slide, to prevent confusion. If an operation results in the selection leaving the current slide, it should jump back to the slide, maybe as a block selection of the slide itself.

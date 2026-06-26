@@ -26,6 +26,22 @@ Every inserted character has a stable Lamport ID and a parent pointer.
 Children of the same parent are sorted by ID, so concurrent inserts do not
 interleave unpredictably.
 
+graph LR
+subgraph Block B
+direction RL
+A2(h 2:A)   --> A1(t 1:A)
+A3(e 3:A)   --> A2
+A4(_ 4:A)   --> A3
+B5(r 5:B)   -- concurrent --> A4
+B6(e 6:B)   --> B5
+B7(d 7:B)   --> B6
+B8(_ 8:B)   --> B7
+A5(d 5:A)   -- inserts --> A4
+A6(o 6:A)   --> A5
+A7(g 7:A)   --> A6
+end
+
+
 block B
   |
   v
