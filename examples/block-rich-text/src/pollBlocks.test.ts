@@ -53,8 +53,8 @@ describe('pollBlocks', () => {
         };
 
         expect(singleChoiceResults(meta, ['4', '5'])).toEqual([
-            {optionId: '4', count: 1, percentage: 50},
-            {optionId: '5', count: 1, percentage: 50},
+            {optionId: '4', count: 1, percentage: 50, voterIds: ['uwe']},
+            {optionId: '5', count: 1, percentage: 50, voterIds: ['ulrich']},
         ]);
     });
 
@@ -72,8 +72,8 @@ describe('pollBlocks', () => {
         };
 
         expect(choiceResults(meta, ['a', 'b'])).toEqual([
-            {optionId: 'a', count: 1, percentage: 50},
-            {optionId: 'b', count: 2, percentage: 100},
+            {optionId: 'a', count: 1, percentage: 50, voterIds: ['ulrich']},
+            {optionId: 'b', count: 2, percentage: 100, voterIds: ['ulrich', 'uwe']},
         ]);
     });
 
@@ -110,12 +110,12 @@ describe('pollBlocks', () => {
         const results = matrixPollResults(meta, ['row1', 'row2'], ['a', 'b']);
 
         expect([...results.get('row1')!.values()]).toEqual([
-            {optionId: 'a', count: 1, percentage: 50},
-            {optionId: 'b', count: 2, percentage: 100},
+            {optionId: 'a', count: 1, percentage: 50, voterIds: ['ulrich']},
+            {optionId: 'b', count: 2, percentage: 100, voterIds: ['ulrich', 'uwe']},
         ]);
         expect([...results.get('row2')!.values()]).toEqual([
-            {optionId: 'a', count: 1, percentage: 100},
-            {optionId: 'b', count: 0, percentage: 0},
+            {optionId: 'a', count: 1, percentage: 100, voterIds: ['ulrich']},
+            {optionId: 'b', count: 0, percentage: 0, voterIds: []},
         ]);
     });
 

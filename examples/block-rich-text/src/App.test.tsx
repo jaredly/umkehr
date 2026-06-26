@@ -3103,7 +3103,7 @@ describe('Block rich text example UI', () => {
 
         await waitFor(() => expect(matrixOption.classList.contains('selected')).toBe(true));
         expect(matrixOption.classList.contains('pollResultBackground')).toBe(true);
-        expect(matrixOption.getAttribute('data-poll-result')).toBe('100% · 1 vote');
+        expect(matrixOption.getAttribute('data-poll-result')).toBe('100% · 1 vote · ulrich');
 
         fireEvent.click(within(leftPoll).getByRole('button', {name: 'Edit poll'}));
 
@@ -3144,7 +3144,7 @@ describe('Block rich text example UI', () => {
             expect(cells[1].classList.contains('selected')).toBe(true);
         });
         expect(cells[0].classList.contains('pollResultBackground')).toBe(true);
-        expect(cells[0].getAttribute('data-poll-result')).toBe('100% · 1 vote');
+        expect(cells[0].getAttribute('data-poll-result')).toBe('100% · 1 vote · ulrich');
     });
 
     it('toggles matrix polls between rendered view and child edit mode', async () => {
@@ -3229,7 +3229,7 @@ describe('Block rich text example UI', () => {
         const fiveButton = within(ratedPoll).getByRole('button', {name: '5'});
         expect(fiveButton.classList.contains('selected')).toBe(true);
         expect(fiveButton.classList.contains('pollResultBackground')).toBe(true);
-        expect(fiveButton.getAttribute('data-poll-result')).toBe('50% · 1 vote');
+        expect(fiveButton.getAttribute('data-poll-result')).toBe('50% · 1 vote · ulrich');
         expect(fiveButton.hasAttribute('title')).toBe(false);
         expect(ratedPoll.querySelector('.pollResult')).toBeNull();
     });

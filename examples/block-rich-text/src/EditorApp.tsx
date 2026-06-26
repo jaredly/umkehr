@@ -7935,7 +7935,11 @@ const normalizedRatingMax = (max: number): number => {
 };
 
 const pollResultTitle = (result: PollResult | undefined): string =>
-    result ? `${result.percentage}% · ${result.count} ${result.count === 1 ? 'vote' : 'votes'}` : '0% · 0 votes';
+    result && result.voterIds.length > 0
+        ? `${result.percentage}% · ${result.count} ${result.count === 1 ? 'vote' : 'votes'} · ${result.voterIds.join(', ')}`
+        : result
+          ? `${result.percentage}% · ${result.count} ${result.count === 1 ? 'vote' : 'votes'}`
+          : '0% · 0 votes';
 
 const pollResultBackgroundStyle = (
     result: PollResult | undefined,
