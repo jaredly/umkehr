@@ -5,3 +5,11 @@
 - rows as subtables?
 - in children of cards, the content can grow to render over the handle. this is bad.
 - drop targets should be handled holistically, not ad-hoc maybe.
+
+- table of contents
+- transclusions
+- columns
+- link to headers (or arbitary blocks)
+    - what if you "block copy" and then "selection paste" it does a link?
+- link decorations indicating [local] [on-site] [off-site]
+- [on-site/off-site] link preview cards

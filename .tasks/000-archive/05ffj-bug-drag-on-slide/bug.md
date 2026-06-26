@@ -1,0 +1,1 @@
+examples/block-rich-text: trying to drag a block within a slide is failing. it looks like it's registering as trying to drag the slide itself, but I definitely clicked on the drag handle of a child block.
