@@ -109,6 +109,7 @@ import {
     codeMetaWithPreviewForLanguage,
     codePreviewKindForLanguage,
     isPreviewableCodeMeta,
+    normalizeSlideDeckSize,
     normalizeSlideHexColor,
     paragraphMeta,
     type PollChoiceMode,
@@ -3547,6 +3548,55 @@ type SlideDeckUiState = {
     fullScreen: boolean;
 };
 
+type ElementSize = {
+    width: number;
+    height: number;
+};
+
+const emptyElementSize: ElementSize = {width: 0, height: 0};
+
+const calculateSlideScale = (
+    viewport: ElementSize,
+    deck: Pick<Extract<RichBlockMeta, {type: 'slide_deck'}>, 'width' | 'height'>,
+): number => {
+    if (viewport.width <= 0 || viewport.height <= 0 || deck.width <= 0 || deck.height <= 0) {
+        return 1;
+    }
+    return Math.min(viewport.width / deck.width, viewport.height / deck.height);
+};
+
+const useElementSize = <T extends HTMLElement>(): [(element: T | null) => void, ElementSize] => {
+    const [element, setElement] = useState<T | null>(null);
+    const [size, setSize] = useState<ElementSize>(emptyElementSize);
+
+    useLayoutEffect(() => {
+        if (!element) {
+            setSize(emptyElementSize);
+            return;
+        }
+
+        const updateSize = () => {
+            const rect = element.getBoundingClientRect();
+            setSize((current) =>
+                current.width === rect.width && current.height === rect.height
+                    ? current
+                    : {width: rect.width, height: rect.height},
+            );
+        };
+
+        updateSize();
+        if (typeof ResizeObserver === 'undefined') {
+            return;
+        }
+
+        const observer = new ResizeObserver(updateSize);
+        observer.observe(element);
+        return () => observer.disconnect();
+    }, [element]);
+
+    return [setElement, size];
+};
+
 const runSelectionCommandEverywhere = (
     state: CachedState<RichBlockMeta>,
     selection: RetainedSelectionSet,
@@ -3826,12 +3876,17 @@ function SlideDeckBlock({node, context}: {node: RenderTreeNode; context: RenderB
     };
     const setFullScreen = (fullScreen: boolean) =>
         context.setSlideDeckUiForBlock(node.block.id, (current) => ({...current, fullScreen}));
+    const exitFullScreen = () => {
+        if (document.fullscreenElement === presentationRef.current) {
+            void document.exitFullscreen?.();
+        }
+        setFullScreen(false);
+    };
     const toggleFullScreen = () => {
         const element = presentationRef.current;
         if (!element) return;
         if (document.fullscreenElement === element) {
-            void document.exitFullscreen?.();
-            setFullScreen(false);
+            exitFullScreen();
         } else {
             void element.requestFullscreen?.();
             setFullScreen(true);
@@ -3882,8 +3937,7 @@ function SlideDeckBlock({node, context}: {node: RenderTreeNode; context: RenderB
             if (eventFromEditableSurface(event.target)) return;
             event.preventDefault();
             event.stopPropagation();
-            void document.exitFullscreen?.();
-            setFullScreen(false);
+            exitFullScreen();
         }
     };
 
@@ -3926,36 +3980,49 @@ function SlideDeckBlock({node, context}: {node: RenderTreeNode; context: RenderB
             tabIndex={ui.mode === 'presentation' ? 0 : undefined}
             onKeyDown={ui.mode === 'presentation' ? handlePresentationKeyDown : undefined}
         >
-            <div className="slideDeckHeader">
-                {renderEditableBlock(node.block, context, {
-                    surfaceClassName: 'slideDeckTitleText',
-                    hideBlockAffordance: true,
-                    registerBlockRow: false,
-                })}
-                <SlideDeckToolbar
-                    mode={ui.mode}
-                    currentIndex={currentIndex}
-                    slideCount={slides.length}
-                    onMode={setMode}
-                    onPrevious={showPrevious}
-                    onNext={showNext}
-                    onAddSlide={() => context.addSlideToDeck(node.block.id, currentSlideId ?? undefined)}
-                    onToggleFullScreen={toggleFullScreen}
-                    fullScreen={ui.fullScreen}
-                />
-            </div>
+            {ui.fullScreen ? null : (
+                <div className="slideDeckHeader">
+                    {renderEditableBlock(node.block, context, {
+                        surfaceClassName: 'slideDeckTitleText',
+                        hideBlockAffordance: true,
+                        registerBlockRow: false,
+                    })}
+                    <SlideDeckToolbar
+                        mode={ui.mode}
+                        currentIndex={currentIndex}
+                        slideCount={slides.length}
+                        onMode={setMode}
+                        onPrevious={showPrevious}
+                        onNext={showNext}
+                        onAddSlide={() => context.addSlideToDeck(node.block.id, currentSlideId ?? undefined)}
+                        onToggleFullScreen={toggleFullScreen}
+                        fullScreen={ui.fullScreen}
+                    />
+                </div>
+            )}
             {ui.mode === 'presentation' ? (
                 currentSlide ? (
-                    <SlideBlockView
-                        node={currentSlide}
-                        context={context}
-                        deckId={node.block.id}
-                        deck={meta}
-                        deckTitle={deckTitle}
-                        slideIndex={currentIndex}
-                        slideCount={slides.length}
-                        mode="presentation"
-                    />
+                    <>
+                        <SlideBlockView
+                            node={currentSlide}
+                            context={context}
+                            deckId={node.block.id}
+                            deck={meta}
+                            deckTitle={deckTitle}
+                            slideIndex={currentIndex}
+                            slideCount={slides.length}
+                            mode="presentation"
+                        />
+                        {ui.fullScreen ? (
+                            <SlideFullScreenControls
+                                currentIndex={currentIndex}
+                                slideCount={slides.length}
+                                onPrevious={showPrevious}
+                                onNext={showNext}
+                                onExitFullScreen={exitFullScreen}
+                            />
+                        ) : null}
+                    </>
                 ) : (
                     <div className="slideDeckEmpty">No slides</div>
                 )
@@ -3981,6 +4048,42 @@ function SlideDeckBlock({node, context}: {node: RenderTreeNode; context: RenderB
                 </div>
             )}
         </section>
+    );
+}
+
+function SlideFullScreenControls({
+    currentIndex,
+    slideCount,
+    onPrevious,
+    onNext,
+    onExitFullScreen,
+}: {
+    currentIndex: number;
+    slideCount: number;
+    onPrevious(): void;
+    onNext(): void;
+    onExitFullScreen(): void;
+}) {
+    return (
+        <div
+            className="slideFullScreenControls"
+            contentEditable={false}
+            onMouseDown={stopEditorControlEvent}
+            aria-label="Full screen slide controls"
+        >
+            <button type="button" onClick={onPrevious} disabled={currentIndex <= 0} aria-label="Previous slide">
+                Prev
+            </button>
+            <span>
+                {slideCount ? currentIndex + 1 : 0}/{slideCount}
+            </span>
+            <button type="button" onClick={onNext} disabled={currentIndex < 0 || currentIndex >= slideCount - 1} aria-label="Next slide">
+                Next
+            </button>
+            <button type="button" onClick={onExitFullScreen}>
+                Exit full screen
+            </button>
+        </div>
     );
 }
 
@@ -4104,14 +4207,23 @@ function SlideBlockView({
     mode: 'presentation' | 'overview' | 'orphan';
 }) {
     const meta = node.block.block.meta;
+    const [setViewportElement, viewportSize] = useElementSize<HTMLElement>();
+    const contextRef = useRef(context);
+    contextRef.current = context;
     if (meta.type !== 'slide') {
         return <div className="renderTreeBranch">{renderEditableBlock(node.block, context)}</div>;
     }
     const footer = slideFooterText(deck.footer, deckTitle, slideIndex, slideCount);
+    const scale = calculateSlideScale(viewportSize, deck);
     const style = {
         '--slide-width': deck.width,
         '--slide-height': deck.height,
         backgroundColor: meta.backgroundColor,
+    } as CSSProperties;
+    const scaleLayerStyle = {
+        width: `${deck.width}px`,
+        height: `${deck.height}px`,
+        transform: `scale(${scale})`,
     } as CSSProperties;
     const handleRimPointerDown = (event: PointerEvent<HTMLElement>) => {
         if (event.target !== event.currentTarget) return;
@@ -4124,9 +4236,13 @@ function SlideBlockView({
         event.preventDefault();
         event.stopPropagation();
     };
+    const setSlideViewportElement = useCallback((element: HTMLElement | null) => {
+        contextRef.current.registerRow(node.block.id, element);
+        setViewportElement(element);
+    }, [node.block.id, setViewportElement]);
     return (
         <article
-            ref={(element) => context.registerRow(node.block.id, element)}
+            ref={setSlideViewportElement}
             className={[
                 'slideViewport',
                 `slideViewport-${mode}`,
@@ -4142,31 +4258,112 @@ function SlideBlockView({
                 .filter(Boolean)
                 .join(' ')}
             data-slide-id={node.block.id}
+            data-slide-logical-width={deck.width}
+            data-slide-logical-height={deck.height}
+            data-slide-scale={scale}
             tabIndex={-1}
             style={style}
             onPointerDown={handleRimPointerDown}
             onMouseDown={stopRimMouseDown}
         >
-            <div className="slideSurface" onPointerDown={(event) => event.stopPropagation()}>
-                {meta.showTitle ? (
-                    <div className="slideTitle">
-                        {renderEditableBlock({...node.block, depth: 0}, context, {
-                            surfaceClassName: 'slideTitleText',
-                            hideBlockAffordance: true,
-                            hideBlockLevelDecoration: true,
-                            registerBlockRow: false,
-                            ...(deckId ? {onSplit: () => context.addSlideToDeck(deckId, node.block.id)} : {}),
-                        })}
+            <div className="slideScaleLayer" style={scaleLayerStyle}>
+                <div className="slideSurface" onPointerDown={(event) => event.stopPropagation()}>
+                    {meta.showTitle ? (
+                        <div className="slideTitle">
+                            {renderEditableBlock({...node.block, depth: 0}, context, {
+                                surfaceClassName: 'slideTitleText',
+                                hideBlockAffordance: true,
+                                hideInlineControls: true,
+                                hideBlockLevelDecoration: true,
+                                registerBlockRow: false,
+                                ...(deckId ? {onSplit: () => context.addSlideToDeck(deckId, node.block.id)} : {}),
+                            })}
+                        </div>
+                    ) : null}
+                    <div className="slideBody">
+                        {node.children.map((child) =>
+                            renderBlockNodeAtRelativeDepth(child, context, node.block.depth + 1),
+                        )}
                     </div>
-                ) : null}
-                <div className="slideBody">
-                    {node.children.map((child) =>
-                        renderBlockNodeAtRelativeDepth(child, context, node.block.depth + 1),
-                    )}
+                    {footer ? <div className="slideFooter">{footer}</div> : null}
                 </div>
-                {footer ? <div className="slideFooter">{footer}</div> : null}
             </div>
+            {mode === 'overview' ? (
+                <SlideBlockOptions blockId={node.block.id} meta={meta} context={context} />
+            ) : null}
         </article>
+    );
+}
+
+function SlideBlockOptions({
+    blockId,
+    meta,
+    context,
+}: {
+    blockId: string;
+    meta: Extract<RichBlockMeta, {type: 'slide'}>;
+    context: RenderBlockContext;
+}) {
+    const noop = () => undefined;
+    return (
+        <BlockOptions
+            className="slideBlockOptions"
+            meta={meta}
+            onSetCodeLanguage={noop}
+            onSetCodePreview={noop}
+            onSetCalloutKind={noop}
+            onSetImageSize={noop}
+            onSetPollChoiceMode={noop}
+            onSetPollDisplayMode={noop}
+            onSetPollAllowChange={noop}
+            onSetRatingPollMax={noop}
+            onSetRatingPollPresentation={noop}
+            onSetSlideDeckSize={noop}
+            onSetSlideDeckFooter={noop}
+            onSetSlideShowTitle={(showTitle) =>
+                context.runBlockControlCommand((current) => {
+                    const currentBlock = current.state.state.blocks[blockId];
+                    if (!currentBlock || currentBlock.meta.type !== 'slide') {
+                        return {state: current.state, ops: [], selection: current.selection};
+                    }
+                    const result = setBlockMeta(current.state, blockId, {
+                        ...currentBlock.meta,
+                        showTitle,
+                        ts: nextReplicaTs(current),
+                    });
+                    return {state: result.state, ops: result.ops, selection: current.selection};
+                })
+            }
+            onSetSlideBackgroundColor={(backgroundColor) =>
+                context.runBlockControlCommand((current) => {
+                    const currentBlock = current.state.state.blocks[blockId];
+                    const normalized = normalizeSlideHexColor(backgroundColor);
+                    if (!currentBlock || currentBlock.meta.type !== 'slide' || !normalized) {
+                        return {state: current.state, ops: [], selection: current.selection};
+                    }
+                    const result = setBlockMeta(current.state, blockId, {
+                        ...currentBlock.meta,
+                        backgroundColor: normalized,
+                        ts: nextReplicaTs(current),
+                    });
+                    return {state: result.state, ops: result.ops, selection: current.selection};
+                })
+            }
+            onSetSlideTransition={(transition) =>
+                context.runBlockControlCommand((current) => {
+                    const currentBlock = current.state.state.blocks[blockId];
+                    if (!currentBlock || currentBlock.meta.type !== 'slide') {
+                        return {state: current.state, ops: [], selection: current.selection};
+                    }
+                    const result = setBlockMeta(current.state, blockId, {
+                        ...currentBlock.meta,
+                        transition,
+                        ts: nextReplicaTs(current),
+                    });
+                    return {state: result.state, ops: result.ops, selection: current.selection};
+                })
+            }
+        />
     );
 }
 
@@ -5680,10 +5877,11 @@ const renderEditableBlock = (
                     if (!currentBlock || currentBlock.meta.type !== 'slide_deck') {
                         return {state: current.state, ops: [], selection: current.selection};
                     }
+                    const size = normalizeSlideDeckSize(width, height);
                     const result = setBlockMeta(current.state, block.id, {
                         ...currentBlock.meta,
-                        width: Math.max(1, Math.round(width)),
-                        height: Math.max(1, Math.round(height)),
+                        width: size.width,
+                        height: size.height,
                         ts: nextReplicaTs(current),
                     });
                     return {state: result.state, ops: result.ops, selection: current.selection};
@@ -8311,6 +8509,7 @@ function BlockAffordance({
 }
 
 function BlockOptions({
+    className,
     meta,
     onSetCodeLanguage,
     onSetCodePreview,
@@ -8327,6 +8526,7 @@ function BlockOptions({
     onSetSlideBackgroundColor,
     onSetSlideTransition,
 }: {
+    className?: string;
     meta: RichBlockMeta;
     onSetCodeLanguage(language: string): void;
     onSetCodePreview(enabled: boolean): void;
@@ -8626,7 +8826,7 @@ function BlockOptions({
 
     return (
         <details
-            className="blockOptions"
+            className={['blockOptions', className ?? ''].filter(Boolean).join(' ')}
             contentEditable={false}
             onPointerDown={stopEditorControlEvent}
             onMouseDown={stopEditorControlEvent}

@@ -566,6 +566,19 @@ const installMockSlideViewportGeometry = (panel: HTMLElement) => {
     });
 };
 
+const mockRect = (width: number, height: number): DOMRect =>
+    ({
+        left: 0,
+        top: 0,
+        width,
+        height,
+        right: width,
+        bottom: height,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+    }) as DOMRect;
+
 const dragElementTo = (element: HTMLElement, clientX: number, clientY: number) => {
     const handle = element as HTMLElement & {setPointerCapture?: (pointerId: number) => void};
     handle.setPointerCapture = () => {};
@@ -3857,6 +3870,98 @@ describe('Block rich text example UI', () => {
         expect(document.activeElement).toBe(slideTitle);
     });
 
+    it('renders slide content in a metadata-sized logical layer', async () => {
+        vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function getBoundingClientRect() {
+            return this instanceof HTMLElement && this.classList.contains('slideViewport')
+                ? mockRect(960, 540)
+                : mockRect(0, 0);
+        });
+
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'slide-deck');
+
+        const slide = await waitFor(() => {
+            const viewport = left.querySelector<HTMLElement>('.slideViewport');
+            if (!viewport) throw new Error('missing slide viewport');
+            expect(viewport.dataset.slideLogicalWidth).toBe('1920');
+            expect(viewport.dataset.slideLogicalHeight).toBe('1080');
+            expect(viewport.dataset.slideScale).toBe('0.5');
+            return viewport;
+        });
+        const scaleLayer = slide.querySelector<HTMLElement>('.slideScaleLayer');
+        expect(scaleLayer?.style.width).toBe('1920px');
+        expect(scaleLayer?.style.height).toBe('1080px');
+        expect(scaleLayer?.style.transform).toBe('scale(0.5)');
+    });
+
+    it('shows slide options as an unscaled overview overlay only', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'slide-deck');
+        await waitFor(() => expect(left.querySelectorAll('.slideViewport')).toHaveLength(1));
+
+        expect(within(left).getAllByLabelText('Slide options')).toHaveLength(1);
+
+        fireEvent.click(within(left).getByRole('button', {name: 'Presentation'}));
+        expect(within(left).queryByLabelText('Slide options')).toBeNull();
+
+        fireEvent.click(within(left).getByRole('button', {name: 'Overview'}));
+        const slide = await waitFor(() => {
+            const viewport = left.querySelector<HTMLElement>('.slideViewport-overview');
+            if (!viewport) throw new Error('missing overview slide');
+            expect(within(left).getAllByLabelText('Slide options')).toHaveLength(1);
+            return viewport;
+        });
+
+        const button = within(slide).getByLabelText('Slide options');
+        const options = button.closest<HTMLElement>('.slideBlockOptions');
+        expect(options?.parentElement).toBe(slide);
+        expect(options?.closest('.slideScaleLayer')).toBeNull();
+
+        fireEvent.click(button);
+        const showTitle = within(slide).getByRole('checkbox', {name: 'Show slide title'}) as HTMLInputElement;
+        fireEvent.click(showTitle);
+
+        await waitFor(() => {
+            expect(slide.querySelector('.slideTitle')).toBeNull();
+            expect(within(slide).getAllByLabelText('Slide options')).toHaveLength(1);
+        });
+
+        fireEvent.click(within(left).getByRole('button', {name: 'Presentation'}));
+        await waitFor(() => expect(within(left).queryByLabelText('Slide options')).toBeNull());
+    });
+
+    it('clamps slide deck option edits to the supported aspect ratio range', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'slide-deck');
+        await waitFor(() => expect(left.querySelectorAll('.slideViewport')).toHaveLength(1));
+
+        const deckTitle = left.querySelector<HTMLElement>('.slideDeckHeader [role="textbox"]');
+        if (!deckTitle) throw new Error('missing deck title');
+        selectCaret(deckTitle, 0);
+
+        const menu = openBlockOptions(left, 'Slide deck options');
+        const width = within(menu).getByRole('spinbutton', {name: 'Slide deck width'}) as HTMLInputElement;
+        const height = within(menu).getByRole('spinbutton', {name: 'Slide deck height'}) as HTMLInputElement;
+
+        fireEvent.change(height, {target: {value: '10000'}});
+
+        await waitFor(() => {
+            expect(width.value).toBe('2500');
+            expect(height.value).toBe('10000');
+        });
+        expect(right.querySelector<HTMLElement>('.slideViewport')?.dataset.slideLogicalWidth).toBe('2500');
+        expect(right.querySelector<HTMLElement>('.slideViewport')?.dataset.slideLogicalHeight).toBe('10000');
+    });
+
     it('advances presentation slides with keyboard navigation and selects the shown slide', async () => {
         const view = render(<App />);
         const {left} = panels(view);
@@ -3950,6 +4055,41 @@ describe('Block rich text example UI', () => {
 
         expect(currentSlide()?.dataset.slideId).toBe(overviewSlideIds[1]);
         expect(window.getSelection()?.toString()).toBe('Sec');
+    });
+
+    it('hides presentation chrome in full screen and uses hover controls for navigation', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'slide-deck');
+        await waitFor(() => expect(left.querySelectorAll('.slideViewport')).toHaveLength(1));
+        fireEvent.click(within(left).getByRole('button', {name: 'Add slide'}));
+        await waitFor(() => expect(left.querySelectorAll('.slideViewport')).toHaveLength(2));
+
+        const overviewSlideIds = Array.from(left.querySelectorAll<HTMLElement>('.slideViewport')).map(
+            (viewport) => viewport.dataset.slideId,
+        );
+        fireEvent.click(within(left).getByRole('button', {name: 'Presentation'}));
+        fireEvent.click(within(left).getByRole('button', {name: 'Full screen'}));
+
+        await waitFor(() => {
+            expect(left.querySelector('.slideDeckPresentation')?.classList.contains('slideDeckFullScreen')).toBe(true);
+            expect(left.querySelector('.slideDeckPresentation .slideDeckHeader')).toBeNull();
+            expect(within(left).getByLabelText('Full screen slide controls')).toBeTruthy();
+        });
+
+        const currentSlide = () => left.querySelector<HTMLElement>('.slideDeckPresentation .slideViewport');
+        expect(currentSlide()?.dataset.slideId).toBe(overviewSlideIds[1]);
+
+        fireEvent.click(within(left).getByRole('button', {name: 'Previous slide'}));
+        await waitFor(() => expect(currentSlide()?.dataset.slideId).toBe(overviewSlideIds[0]));
+
+        fireEvent.click(within(left).getByRole('button', {name: 'Exit full screen'}));
+        await waitFor(() => {
+            expect(left.querySelector('.slideDeckPresentation')?.classList.contains('slideDeckFullScreen')).toBe(false);
+            expect(left.querySelector('.slideDeckPresentation .slideDeckHeader')).toBeTruthy();
+        });
     });
 
     it('does not advance presentation slides from a child block selection', async () => {

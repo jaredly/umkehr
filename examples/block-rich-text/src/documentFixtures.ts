@@ -41,6 +41,7 @@ export const documentFixtures: DocumentFixture[] = [
     {id: 'complex-table', label: 'Complex table', document: complexTable},
     {id: 'kanban-board', label: 'Kanban board', document: kanbanBoard},
     {id: 'slide-deck', label: 'Slide deck', document: slideDeck},
+    {id: 'block-crdt-slide-deck', label: 'Block CRDT intro deck', document: blockCrdtSlideDeck},
     {id: 'deep-list-nesting', label: 'Deep list nesting', document: deepListNesting},
     {id: 'many-blocks', label: 'Many blocks', document: manyBlocks},
     {id: 'mixed-table-and-text', label: 'Mixed table and text', document: mixedTableAndText},
@@ -241,6 +242,163 @@ function slideDeck(): ImportDocument {
             meta: {showTitle: true, backgroundColor: '#fff7ed', transition: 'none'},
             content: 'Orphan slide',
             children: [{type: 'todo', meta: {checked: false}, content: 'Promote into a deck later'}],
+        },
+    ];
+}
+
+function blockCrdtSlideDeck(): ImportDocument {
+    return [
+        {
+            type: 'slide_deck',
+            meta: {width: 1920, height: 1080, footer: 'deck-title-and-slide-number'},
+            content: 'Block CRDT and block rich text',
+            children: [
+                {
+                    type: 'slide',
+                    meta: {showTitle: true, backgroundColor: '#f8fbff', transition: 'fade'},
+                    content: 'Local-first structured editing',
+                    children: [
+                        {type: 'heading', meta: {level: 2}, content: 'Block CRDT + block-rich-text'},
+                        {content: 'A demo editor built around stable block ids, rich inline text, and collaborative operations.'},
+                    ],
+                },
+                {
+                    type: 'slide',
+                    meta: {showTitle: true, backgroundColor: '#ffffff', transition: 'slide'},
+                    content: 'Why a block CRDT?',
+                    children: [
+                        {content: 'Documents are more than one text buffer.'},
+                        {
+                            type: 'list_item',
+                            meta: {kind: 'unordered'},
+                            content: 'Blocks move, nest, split, join, and carry metadata.',
+                        },
+                        {
+                            type: 'list_item',
+                            meta: {kind: 'unordered'},
+                            content: 'Characters and blocks keep stable identities across replicas.',
+                        },
+                    ],
+                },
+                {
+                    type: 'slide',
+                    meta: {showTitle: true, backgroundColor: '#f4fbf7', transition: 'fade'},
+                    content: 'Core model',
+                    children: [
+                        {
+                            type: 'table',
+                            content: 'CRDT pieces',
+                            children: [
+                                {content: 'Block', children: [{content: 'Stable id, parent, order, metadata'}]},
+                                {content: 'Character', children: [{content: 'Stable id, block parent, tombstone state'}]},
+                                {content: 'Mark', children: [{content: 'Rich text range anchored to character ids'}]},
+                            ],
+                        },
+                    ],
+                },
+                {
+                    type: 'slide',
+                    meta: {showTitle: true, backgroundColor: '#fffaf0', transition: 'slide'},
+                    content: 'Operations',
+                    children: [
+                        {content: 'The editor records intent as operations that peers can replay in any order.'},
+                        {type: 'code', meta: {language: 'text'}, content: 'insert text\nmove block\nset metadata\nmark range'},
+                    ],
+                },
+                {
+                    type: 'slide',
+                    meta: {showTitle: true, backgroundColor: '#ffffff', transition: 'fade'},
+                    content: 'Rich block metadata',
+                    children: [
+                        {content: 'Block metadata turns the same tree primitive into app-level structures.'},
+                        {
+                            type: 'list_item',
+                            meta: {kind: 'unordered'},
+                            content: 'Headings, todos, tables, kanban boards, polls, previews, images, and slides',
+                        },
+                        {type: 'callout', meta: {kind: 'info'}, content: 'The CRDT core stays generic; the example owns presentation semantics.'},
+                    ],
+                },
+                {
+                    type: 'slide',
+                    meta: {showTitle: true, backgroundColor: '#f7f7ff', transition: 'slide'},
+                    content: 'Retained selections',
+                    children: [
+                        {content: 'Selections can stay meaningful while inactive replicas receive remote edits.'},
+                        {type: 'blockquote', content: 'A caret follows logical content, not just a stale numeric offset.'},
+                    ],
+                },
+                {
+                    type: 'slide',
+                    meta: {showTitle: true, backgroundColor: '#ffffff', transition: 'fade'},
+                    content: 'Block-rich-text UI',
+                    children: [
+                        {content: 'The example layers editor behavior over the CRDT model.'},
+                        {
+                            type: 'list_item',
+                            meta: {kind: 'unordered'},
+                            content: 'Toolbar commands update block metadata and marks.',
+                        },
+                        {
+                            type: 'list_item',
+                            meta: {kind: 'unordered'},
+                            content: 'Drag handles reorder blocks and structured children.',
+                        },
+                        {
+                            type: 'list_item',
+                            meta: {kind: 'unordered'},
+                            content: 'Fixtures exercise import, export, rendering, and editing paths.',
+                        },
+                    ],
+                },
+                {
+                    type: 'slide',
+                    meta: {showTitle: true, backgroundColor: '#f3f8ff', transition: 'slide'},
+                    content: 'Slides as blocks',
+                    children: [
+                        {content: 'A deck is a block. Each slide is a child block. Slide contents are normal nested blocks.'},
+                        {type: 'todo', meta: {checked: true}, content: 'Editable in outline mode'},
+                        {type: 'todo', meta: {checked: true}, content: 'Rendered in overview and presentation modes'},
+                        {type: 'todo', meta: {checked: false}, content: 'Ready for richer templates and layouts'},
+                    ],
+                },
+                {
+                    type: 'slide',
+                    meta: {showTitle: true, backgroundColor: '#ffffff', transition: 'fade'},
+                    content: 'What this unlocks',
+                    children: [
+                        {content: 'Structured collaborative documents can mix prose, data, tasks, and presentation surfaces.'},
+                        {
+                            type: 'callout',
+                            meta: {kind: 'warning'},
+                            content: 'The hard part is preserving intent across concurrent structural edits.',
+                        },
+                    ],
+                },
+                {
+                    type: 'slide',
+                    meta: {showTitle: true, backgroundColor: '#f9fbf7', transition: 'slide'},
+                    content: 'Next directions',
+                    children: [
+                        {type: 'heading', meta: {level: 2}, content: 'Make the model easier to build on'},
+                        {
+                            type: 'list_item',
+                            meta: {kind: 'ordered'},
+                            content: 'Polish slide templates and layouts.',
+                        },
+                        {
+                            type: 'list_item',
+                            meta: {kind: 'ordered'},
+                            content: 'Broaden stress tests for move, split, join, and retained selection behavior.',
+                        },
+                        {
+                            type: 'list_item',
+                            meta: {kind: 'ordered'},
+                            content: 'Keep the demo compact enough to inspect and modify.',
+                        },
+                    ],
+                },
+            ],
         },
     ];
 }

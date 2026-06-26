@@ -528,6 +528,12 @@ describe('block rich text document format export', () => {
             importDocument([{type: 'slide_deck', meta: {height: 720.5}}], ctx()),
         ).toThrow('$[0].meta.height: must be a positive integer');
         expect(() =>
+            importDocument([{type: 'slide_deck', meta: {width: 100, height: 1000}}], ctx()),
+        ).toThrow('$[0].meta: slide deck aspect ratio must be between 1:4 and 4:1');
+        expect(() =>
+            importDocument([{type: 'slide_deck', meta: {width: 5000, height: 1000}}], ctx()),
+        ).toThrow('$[0].meta: slide deck aspect ratio must be between 1:4 and 4:1');
+        expect(() =>
             importDocument([{type: 'slide_deck', meta: {footer: 'notes' as never}}], ctx()),
         ).toThrow('$[0].meta.footer: must be a supported slide deck footer mode');
         expect(() =>

@@ -1,0 +1,1 @@
+examples/block-rich-text:  In presentation mode, the 'slide block meta menu' should not show. In overview mode, it should be rendered on top of the whole slide (so not scaled), whether or not the header is shown or hidden.

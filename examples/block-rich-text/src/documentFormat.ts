@@ -27,6 +27,7 @@ import {
     defaultSlideMeta,
     isSlideDeckFooterMode,
     isSlideTransition,
+    slideDeckAspectRatioIsValid,
     normalizeSlideHexColor,
     type CodePreviewKind,
     type ImagePresentationSize,
@@ -394,6 +395,9 @@ const parseMeta = (type: DocumentBlockType, value: unknown, path: string): Docum
             const height = meta.height ?? 1080;
             if (typeof height !== 'number' || !Number.isInteger(height) || height <= 0) {
                 throw new DocumentFormatError(`${path}.height`, 'must be a positive integer');
+            }
+            if (!slideDeckAspectRatioIsValid(width, height)) {
+                throw new DocumentFormatError(`${path}`, 'slide deck aspect ratio must be between 1:4 and 4:1');
             }
             const footer = meta.footer ?? 'slide-number';
             if (!isSlideDeckFooterMode(footer)) {

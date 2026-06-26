@@ -95,6 +95,17 @@ describe('document fixtures', () => {
         expect(orphan.type).toBe('slide');
     });
 
+    it('includes a block CRDT intro slide deck fixture', () => {
+        const [deck] = documentFixture('block-crdt-slide-deck');
+
+        expect(deck.type).toBe('slide_deck');
+        expect(deck.content).toBe('Block CRDT and block rich text');
+        expect(deck.children?.filter((child) => child.type === 'slide')).toHaveLength(10);
+        expect(countBlocksOfType([deck], 'code')).toBeGreaterThanOrEqual(1);
+        expect(countBlocksOfType([deck], 'table')).toBeGreaterThanOrEqual(1);
+        expect(countBlocksOfType([deck], 'callout')).toBeGreaterThanOrEqual(1);
+    });
+
     it('generates depth-five list nesting', () => {
         const document = documentFixture('deep-list-nesting');
 

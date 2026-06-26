@@ -168,6 +168,28 @@ export const isSlideDeckFooterMode = (value: unknown): value is SlideDeckFooterM
     value === 'slide-number' ||
     value === 'deck-title-and-slide-number';
 
+export const MIN_SLIDE_DECK_ASPECT_RATIO = 1 / 4;
+export const MAX_SLIDE_DECK_ASPECT_RATIO = 4;
+
+export const slideDeckAspectRatioIsValid = (width: number, height: number): boolean => {
+    const ratio = width / height;
+    return ratio >= MIN_SLIDE_DECK_ASPECT_RATIO && ratio <= MAX_SLIDE_DECK_ASPECT_RATIO;
+};
+
+export const normalizeSlideDeckSize = (
+    width: number,
+    height: number,
+): {width: number; height: number} => {
+    const normalizedHeight = Math.max(1, Math.round(Number.isFinite(height) ? height : 1));
+    const roundedWidth = Math.max(1, Math.round(Number.isFinite(width) ? width : 1));
+    const minWidth = Math.max(1, Math.ceil(normalizedHeight * MIN_SLIDE_DECK_ASPECT_RATIO));
+    const maxWidth = Math.max(minWidth, Math.floor(normalizedHeight * MAX_SLIDE_DECK_ASPECT_RATIO));
+    return {
+        width: Math.min(maxWidth, Math.max(minWidth, roundedWidth)),
+        height: normalizedHeight,
+    };
+};
+
 export const normalizeSlideHexColor = (value: string): string | null => {
     const trimmed = value.trim();
     if (/^#[0-9a-fA-F]{3}$/.test(trimmed) || /^#[0-9a-fA-F]{6}$/.test(trimmed)) {
