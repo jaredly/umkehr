@@ -421,6 +421,26 @@ describe('block rich text commands', () => {
         ]);
     });
 
+    it('pastes text verbatim inside inline code without markdown shortcuts or block splitting', () => {
+        const state = init();
+        const blockId = onlyBlock(state);
+        const context = ctx();
+        const typed = typeWithMarkdownShortcuts(state, blockId, '`seed`', context);
+        const result = pastePlainTextWithMarkdownShortcuts(
+            typed.state,
+            caret(blockId, 2),
+            '- item\n# Heading',
+            context,
+        );
+
+        expect(rootBlockIds(result.state)).toEqual([blockId]);
+        expect(blockContents(result.state, blockId)).toBe('se- item\n# Headinged');
+        expect(result.selection).toEqual(caret(blockId, 'se- item\n# Heading'.length));
+        expect(materializeFormattedBlocks(result.state)[0].runs).toEqual([
+            {text: 'se- item\n# Headinged', marks: {code: true}},
+        ]);
+    });
+
     it('does not convert markdown shortcuts in non-paragraph blocks', () => {
         const state = init();
         const blockId = onlyBlock(state);

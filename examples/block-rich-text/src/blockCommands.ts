@@ -39,6 +39,7 @@ import {annotationVirtualParents} from './annotations';
 import {
     CODE_MARK,
     MATH_MARK,
+    codeRangeAroundOffset,
     isCodeMarkValue,
     mathDisplayModeFromMarkValue,
     mathMarkValueForMode,
@@ -950,6 +951,9 @@ export const pastePlainTextDetailed = (
     text: string,
     context: CommandContext,
 ): {result: CommandResult; touchedLines: PastedLineTarget[]} => {
+    const inlineCodePaste = pastePlainTextInsideInlineCode(state, selection, text, context);
+    if (inlineCodePaste) return {result: inlineCodePaste, touchedLines: []};
+
     const lines = text.replace(/\r\n?/g, '\n').split('\n');
     const appended = pastePlainTextAtBlockEnd(state, selection, lines, context);
     if (appended) return appended;
@@ -975,6 +979,38 @@ export const pastePlainTextDetailed = (
     }
 
     return {result: {...result, ops}, touchedLines};
+};
+
+const pastePlainTextInsideInlineCode = (
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    text: string,
+    context: CommandContext,
+): CommandResult | null => {
+    if (!isCollapsed(selection)) return null;
+    const point = firstPointForSelection(state, selection);
+    const block = materializeFormattedBlocks(state, annotationVirtualParents(state)).find(
+        (candidate) => candidate.id === point.blockId,
+    );
+    const code = block ? codeRangeAroundOffset(block, point.offset) : null;
+    if (!code) return null;
+
+    const normalized = text.replace(/\r\n?/g, '\n');
+    const inserted = insertText(state, selection, normalized, context);
+    const insertedLength = segmentText(normalized).length;
+    if (!insertedLength) return inserted;
+
+    const marked = setCodeMark(
+        inserted.state,
+        {
+            type: 'range',
+            anchor: point,
+            focus: {blockId: point.blockId, offset: point.offset + insertedLength},
+        },
+        code.language,
+        context,
+    );
+    return {state: marked.state, ops: [...inserted.ops, ...marked.ops], selection: inserted.selection};
 };
 
 export const pastePlainTextWithMarkdownShortcuts = (

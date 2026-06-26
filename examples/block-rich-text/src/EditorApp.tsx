@@ -148,6 +148,7 @@ import {
     tableCellRectangleForSelection,
     tableCellsForSelection,
     tableRowsForSelection,
+    visibleBlockIds,
     visibleSubtreeBlockIds,
     type EditorSelection,
 } from './selectionModel';
@@ -2483,8 +2484,73 @@ function BlockEditor({
                 return true;
             }
 
+            if (
+                selection.type === 'block' &&
+                !modifierPressed &&
+                (event.key === 'ArrowUp' ||
+                    event.key === 'ArrowDown' ||
+                    event.key === 'ArrowLeft' ||
+                    event.key === 'ArrowRight')
+            ) {
+                event.preventDefault();
+                submitCommand((current) => {
+                    const blocks = visibleBlockIds(current.state);
+                    const focusIndex = blocks.indexOf(selection.focusBlockId);
+                    const delta = event.key === 'ArrowUp' || event.key === 'ArrowLeft' ? -1 : 1;
+                    const targetBlockId =
+                        focusIndex >= 0
+                            ? blocks[Math.max(0, Math.min(blocks.length - 1, focusIndex + delta))]
+                            : null;
+                    if (!targetBlockId) return {state: current.state, ops: [], selection: current.selection};
+                    const nextSelection: EditorSelection = {
+                        type: 'block',
+                        anchorBlockId: targetBlockId,
+                        focusBlockId: targetBlockId,
+                    };
+                    focusBlockSelectionTarget(nextSelection);
+                    return {
+                        state: current.state,
+                        ops: [],
+                        selection: replacePrimarySelection(current.state, current.selection, nextSelection),
+                    };
+                });
+                return true;
+            }
+
+            if (selection.type === 'block' && event.key === 'Tab' && !modifierPressed) {
+                event.preventDefault();
+                submitCommand((current) => {
+                    const result = (event.shiftKey ? unindentSelections : indentSelections)(
+                        current.state,
+                        current.selection,
+                        makeCommandContext(current),
+                    );
+                    const nextSelection = primarySelection(resolveSelectionSet(result.state, result.selection));
+                    if (nextSelection.type === 'block') focusBlockSelectionTarget(nextSelection);
+                    return result;
+                });
+                return true;
+            }
+
             if (event.key === 'Enter' && !modifierPressed) {
                 event.preventDefault();
+                if (selection.type === 'block') {
+                    submitCommand((current) => {
+                        const blockId = focusPoint(selection).blockId;
+                        const nextSelection: EditorSelection = {
+                            type: 'range',
+                            anchor: {blockId, offset: 0},
+                            focus: {blockId, offset: pointTextLength(current.state, blockId)},
+                        };
+                        scheduleSelectionRestore(nextSelection);
+                        return {
+                            state: current.state,
+                            ops: [],
+                            selection: replacePrimarySelection(current.state, current.selection, nextSelection),
+                        };
+                    });
+                    return true;
+                }
                 submitCommand((current) => {
                     const textSelection = textCaretForBlockSelection(current.state, selection, 'document-end');
                     const selectionSet = replacePrimarySelection(current.state, current.selection, textSelection);
@@ -2504,6 +2570,7 @@ function BlockEditor({
             return false;
         },
         [
+            focusBlockSelectionTarget,
             insertTextWithPendingMarks,
             submitCommand,
             deleteBlockLevelSelection,

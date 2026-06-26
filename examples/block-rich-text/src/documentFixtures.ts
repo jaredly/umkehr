@@ -1,5 +1,10 @@
 import type {AttachmentStore, ImageAttachment} from './attachments';
-import type {DocumentAnnotation, DocumentBlock, DocumentMark, ImportDocument} from './documentFormat';
+import type {
+    DocumentAnnotation,
+    DocumentBlock,
+    DocumentMark,
+    ImportDocument,
+} from './documentFormat';
 
 export type DocumentFixture = {
     id: string;
@@ -65,7 +70,11 @@ export const documentFixtures: DocumentFixture[] = [
                 },
             ]),
     },
-    {id: 'empty-short-grapheme-blocks', label: 'Empty, short, and grapheme blocks', document: emptyShortGraphemeBlocks},
+    {
+        id: 'empty-short-grapheme-blocks',
+        label: 'Empty, short, and grapheme blocks',
+        document: emptyShortGraphemeBlocks,
+    },
 ];
 
 export const fixtureById = (id: string): DocumentFixture | null =>
@@ -73,44 +82,54 @@ export const fixtureById = (id: string): DocumentFixture | null =>
 
 function simpleMixedBlocks(): ImportDocument {
     return [
-    {type: 'heading', meta: {level: 1}, content: 'Fixture document'},
-    {
-        content: 'This paragraph has bold text, italic text, a link, and a popover note.',
-        marks: [
-            {type: 'bold', start: 19, end: 28},
-            {type: 'italic', start: 30, end: 41},
-            {type: 'link', start: 45, end: 49, href: 'https://example.test/fixture'},
-        ],
-        annotations: [
-            {
-                type: 'annotation',
-                presentation: 'popover',
-                start: 57,
-                end: 64,
-                body: [{content: 'Popover body generated from fixture JSON.'}],
-            },
-        ],
-    },
-    {type: 'todo', meta: {checked: true}, content: 'Verify fixture replacement'},
-    {type: 'callout', meta: {kind: 'warning'}, content: 'Generated fixtures are intentionally varied.'},
-    {type: 'code', meta: {language: 'TypeScript'}, content: 'const fixture = true;'},
-    {type: 'blockquote', content: 'A quote block keeps styled block rendering covered.'},
-    {
-        type: 'list_item',
-        meta: {kind: 'ordered'},
-        content: 'First ordered item',
-        children: [{type: 'list_item', meta: {kind: 'unordered'}, content: 'Nested unordered item'}],
-    },
-    {
-        type: 'preview',
-        meta: {
-            url: 'https://example.test/fixtures',
-            preview: {title: 'Fixture Preview', siteName: 'Example', fetchedAt: '2026-06-24T00:00:00Z'},
+        {type: 'heading', meta: {level: 1}, content: 'Fixture document'},
+        {
+            content: 'This paragraph has bold text, italic text, a link, and a popover note.',
+            marks: [
+                {type: 'bold', start: 19, end: 28},
+                {type: 'italic', start: 30, end: 41},
+                {type: 'link', start: 45, end: 49, href: 'https://example.test/fixture'},
+            ],
+            annotations: [
+                {
+                    type: 'annotation',
+                    presentation: 'popover',
+                    start: 57,
+                    end: 64,
+                    body: [{content: 'Popover body generated from fixture JSON.'}],
+                },
+            ],
         },
-        content: 'Fixture Preview',
-    },
-    {type: 'image', meta: {attachmentId: VALID_IMAGE_ID, size: 'medium'}},
-    {type: 'image', meta: {attachmentId: MISSING_FIXTURE_IMAGE_ID, size: 'small'}},
+        {type: 'todo', meta: {checked: true}, content: 'Verify fixture replacement'},
+        {
+            type: 'callout',
+            meta: {kind: 'warning'},
+            content: 'Generated fixtures are intentionally varied.',
+        },
+        {type: 'code', meta: {language: 'TypeScript'}, content: 'const fixture = true;'},
+        {type: 'blockquote', content: 'A quote block keeps styled block rendering covered.'},
+        {
+            type: 'list_item',
+            meta: {kind: 'ordered'},
+            content: 'First ordered item',
+            children: [
+                {type: 'list_item', meta: {kind: 'unordered'}, content: 'Nested unordered item'},
+            ],
+        },
+        {
+            type: 'preview',
+            meta: {
+                url: 'https://example.test/fixtures',
+                preview: {
+                    title: 'Fixture Preview',
+                    siteName: 'Example',
+                    fetchedAt: '2026-06-24T00:00:00Z',
+                },
+            },
+            content: 'Fixture Preview',
+        },
+        {type: 'image', meta: {attachmentId: VALID_IMAGE_ID, size: 'medium'}},
+        {type: 'image', meta: {attachmentId: MISSING_FIXTURE_IMAGE_ID, size: 'small'}},
     ];
 }
 
@@ -133,9 +152,12 @@ function markedLongBlock(): ImportDocument {
 }
 
 function mathEquations(): ImportDocument {
-    const inlineBasics = 'Inline math can live inside prose: E = mc^2, a^2 + b^2 = c^2, and \\int_0^1 x^2 dx = 1/3.';
-    const namedVariables = 'Named variables and Greek letters: \\alpha + \\beta = \\gamma, f(x) = \\sin(x), and \\lim_{n \\to \\infty} 1/n = 0.';
-    const mixedFormatting = 'Formatting can sit beside math: bold claim, then y = mx + b, then more text.';
+    const inlineBasics =
+        'Inline math can live inside prose: E = mc^2, a^2 + b^2 = c^2, and \\int_0^1 x^2 dx = 1/3.';
+    const namedVariables =
+        'Named variables and Greek letters: \\alpha + \\beta = \\gamma, f(x) = \\sin(x), and \\lim_{n \\to \\infty} 1/n = 0.';
+    const mixedFormatting =
+        'Formatting can sit beside math: bold claim, then y = mx + b, then more text.';
     const tableCell = 'Cell formula: A = \\pi r^2';
 
     return [
@@ -158,15 +180,16 @@ function mathEquations(): ImportDocument {
         },
         displayMathBlock(String.raw`x = \frac{-b \pm \sqrt{b^2 - 4ac}}{2a}`),
         displayMathBlock(String.raw`\sum_{k=0}^{n} k = \frac{n(n + 1)}{2}`),
-        displayMathBlock(String.raw`\begin{bmatrix} a & b \\ c & d \end{bmatrix}\begin{bmatrix} x \\ y \end{bmatrix} = \begin{bmatrix} ax + by \\ cx + dy \end{bmatrix}`),
-        displayMathBlock(String.raw`\begin{aligned} f(x) &= x^2 + 2x + 1 \\ &= (x + 1)^2 \end{aligned}`),
+        displayMathBlock(
+            String.raw`\begin{bmatrix} a & b \\ c & d \end{bmatrix}\begin{bmatrix} x \\ y \end{bmatrix} = \begin{bmatrix} ax + by \\ cx + dy \end{bmatrix}`,
+        ),
+        displayMathBlock(
+            String.raw`\begin{aligned} f(x) &= x^2 + 2x + 1 \\ &= (x + 1)^2 \end{aligned}`,
+        ),
         {
             type: 'blockquote',
             content: mixedFormatting,
-            marks: [
-                {type: 'bold', start: 33, end: 43},
-                mathMark(mixedFormatting, 'y = mx + b'),
-            ],
+            marks: [{type: 'bold', start: 33, end: 43}, mathMark(mixedFormatting, 'y = mx + b')],
         },
         {
             type: 'table',
@@ -215,7 +238,10 @@ function slideDeck(): ImportDocument {
                     content: 'Highlights',
                     children: [
                         {type: 'heading', meta: {level: 2}, content: 'Revenue grew 18%'},
-                        {type: 'paragraph', content: 'Expansion was strongest in self-serve accounts.'},
+                        {
+                            type: 'paragraph',
+                            content: 'Expansion was strongest in self-serve accounts.',
+                        },
                     ],
                 },
                 {
@@ -228,8 +254,14 @@ function slideDeck(): ImportDocument {
                             type: 'table',
                             content: 'Regional summary',
                             children: [
-                                {content: 'North America', children: [{content: '+22%'}, {content: 'Stable churn'}]},
-                                {content: 'Europe', children: [{content: '+13%'}, {content: 'Pipeline building'}]},
+                                {
+                                    content: 'North America',
+                                    children: [{content: '+22%'}, {content: 'Stable churn'}],
+                                },
+                                {
+                                    content: 'Europe',
+                                    children: [{content: '+13%'}, {content: 'Pipeline building'}],
+                                },
                             ],
                         },
                     ],
@@ -241,7 +273,9 @@ function slideDeck(): ImportDocument {
             type: 'slide',
             meta: {showTitle: true, backgroundColor: '#fff7ed', transition: 'none'},
             content: 'Orphan slide',
-            children: [{type: 'todo', meta: {checked: false}, content: 'Promote into a deck later'}],
+            children: [
+                {type: 'todo', meta: {checked: false}, content: 'Promote into a deck later'},
+            ],
         },
     ];
 }
@@ -258,8 +292,15 @@ function blockCrdtSlideDeck(): ImportDocument {
                     meta: {showTitle: true, backgroundColor: '#f8fbff', transition: 'fade'},
                     content: 'Local-first structured editing',
                     children: [
-                        {type: 'heading', meta: {level: 2}, content: 'Block CRDT + block-rich-text'},
-                        {content: 'A demo editor built around stable block ids, rich inline text, and collaborative operations.'},
+                        {
+                            type: 'heading',
+                            meta: {level: 2},
+                            content: 'Block CRDT + block-rich-text',
+                        },
+                        {
+                            content:
+                                'A demo editor built around stable block ids, rich inline text, and collaborative operations.',
+                        },
                     ],
                 },
                 {
@@ -276,23 +317,53 @@ function blockCrdtSlideDeck(): ImportDocument {
                         {
                             type: 'list_item',
                             meta: {kind: 'unordered'},
-                            content: 'Characters and blocks keep stable identities across replicas.',
+                            content:
+                                'Characters and blocks keep stable identities across replicas.',
                         },
                     ],
                 },
                 {
                     type: 'slide',
                     meta: {showTitle: true, backgroundColor: '#f4fbf7', transition: 'fade'},
-                    content: 'Core model',
+                    content: "Refresher on Peritext's CRDT",
                     children: [
                         {
-                            type: 'table',
-                            content: 'CRDT pieces',
-                            children: [
-                                {content: 'Block', children: [{content: 'Stable id, parent, order, metadata'}]},
-                                {content: 'Character', children: [{content: 'Stable id, block parent, tombstone state'}]},
-                                {content: 'Mark', children: [{content: 'Rich text range anchored to character ids'}]},
-                            ],
+                            type: 'code',
+                            meta: {language: 'mermaid', preview: 'mermaid'},
+                            content: `
+graph LR
+subgraph Block B
+direction RL
+A2(h 2:A)   --> A1(t 1:A)
+A3(e 3:A)   --> A2
+A4(_ 4:A)   --> A3
+B5(r 5:B)   -- concurrent --> A4
+B6(e 6:B)   --> B5
+B7(d 7:B)   --> B6
+B8(_ 8:B)   --> B7
+A5(d 5:A)   -- inserts --> A4
+A6(o 6:A)   --> A5
+A7(g 7:A)   --> A6
+end`,
+                        },
+                    ],
+                },
+                {
+                    type: 'slide',
+                    meta: {showTitle: true, backgroundColor: '#ffffff', transition: 'slide'},
+                    content: 'Why a block CRDT?',
+                    children: [
+                        {content: 'Documents are more than one text buffer.'},
+                        {
+                            type: 'list_item',
+                            meta: {kind: 'unordered'},
+                            content: 'Blocks move, nest, split, join, and carry metadata.',
+                        },
+                        {
+                            type: 'list_item',
+                            meta: {kind: 'unordered'},
+                            content:
+                                'Characters and blocks keep stable identities across replicas.',
                         },
                     ],
                 },
@@ -301,8 +372,15 @@ function blockCrdtSlideDeck(): ImportDocument {
                     meta: {showTitle: true, backgroundColor: '#fffaf0', transition: 'slide'},
                     content: 'Operations',
                     children: [
-                        {content: 'The editor records intent as operations that peers can replay in any order.'},
-                        {type: 'code', meta: {language: 'text'}, content: 'insert text\nmove block\nset metadata\nmark range'},
+                        {
+                            content:
+                                'The editor records intent as operations that peers can replay in any order.',
+                        },
+                        {
+                            type: 'code',
+                            meta: {language: 'text'},
+                            content: 'insert text\nmove block\nset metadata\nmark range',
+                        },
                     ],
                 },
                 {
@@ -310,13 +388,22 @@ function blockCrdtSlideDeck(): ImportDocument {
                     meta: {showTitle: true, backgroundColor: '#ffffff', transition: 'fade'},
                     content: 'Rich block metadata',
                     children: [
-                        {content: 'Block metadata turns the same tree primitive into app-level structures.'},
+                        {
+                            content:
+                                'Block metadata turns the same tree primitive into app-level structures.',
+                        },
                         {
                             type: 'list_item',
                             meta: {kind: 'unordered'},
-                            content: 'Headings, todos, tables, kanban boards, polls, previews, images, and slides',
+                            content:
+                                'Headings, todos, tables, kanban boards, polls, previews, images, and slides',
                         },
-                        {type: 'callout', meta: {kind: 'info'}, content: 'The CRDT core stays generic; the example owns presentation semantics.'},
+                        {
+                            type: 'callout',
+                            meta: {kind: 'info'},
+                            content:
+                                'The CRDT core stays generic; the example owns presentation semantics.',
+                        },
                     ],
                 },
                 {
@@ -324,8 +411,15 @@ function blockCrdtSlideDeck(): ImportDocument {
                     meta: {showTitle: true, backgroundColor: '#f7f7ff', transition: 'slide'},
                     content: 'Retained selections',
                     children: [
-                        {content: 'Selections can stay meaningful while inactive replicas receive remote edits.'},
-                        {type: 'blockquote', content: 'A caret follows logical content, not just a stale numeric offset.'},
+                        {
+                            content:
+                                'Selections can stay meaningful while inactive replicas receive remote edits.',
+                        },
+                        {
+                            type: 'blockquote',
+                            content:
+                                'A caret follows logical content, not just a stale numeric offset.',
+                        },
                     ],
                 },
                 {
@@ -347,7 +441,8 @@ function blockCrdtSlideDeck(): ImportDocument {
                         {
                             type: 'list_item',
                             meta: {kind: 'unordered'},
-                            content: 'Fixtures exercise import, export, rendering, and editing paths.',
+                            content:
+                                'Fixtures exercise import, export, rendering, and editing paths.',
                         },
                     ],
                 },
@@ -356,10 +451,21 @@ function blockCrdtSlideDeck(): ImportDocument {
                     meta: {showTitle: true, backgroundColor: '#f3f8ff', transition: 'slide'},
                     content: 'Slides as blocks',
                     children: [
-                        {content: 'A deck is a block. Each slide is a child block. Slide contents are normal nested blocks.'},
+                        {
+                            content:
+                                'A deck is a block. Each slide is a child block. Slide contents are normal nested blocks.',
+                        },
                         {type: 'todo', meta: {checked: true}, content: 'Editable in outline mode'},
-                        {type: 'todo', meta: {checked: true}, content: 'Rendered in overview and presentation modes'},
-                        {type: 'todo', meta: {checked: false}, content: 'Ready for richer templates and layouts'},
+                        {
+                            type: 'todo',
+                            meta: {checked: true},
+                            content: 'Rendered in overview and presentation modes',
+                        },
+                        {
+                            type: 'todo',
+                            meta: {checked: false},
+                            content: 'Ready for richer templates and layouts',
+                        },
                     ],
                 },
                 {
@@ -367,11 +473,15 @@ function blockCrdtSlideDeck(): ImportDocument {
                     meta: {showTitle: true, backgroundColor: '#ffffff', transition: 'fade'},
                     content: 'What this unlocks',
                     children: [
-                        {content: 'Structured collaborative documents can mix prose, data, tasks, and presentation surfaces.'},
+                        {
+                            content:
+                                'Structured collaborative documents can mix prose, data, tasks, and presentation surfaces.',
+                        },
                         {
                             type: 'callout',
                             meta: {kind: 'warning'},
-                            content: 'The hard part is preserving intent across concurrent structural edits.',
+                            content:
+                                'The hard part is preserving intent across concurrent structural edits.',
                         },
                     ],
                 },
@@ -380,7 +490,11 @@ function blockCrdtSlideDeck(): ImportDocument {
                     meta: {showTitle: true, backgroundColor: '#f9fbf7', transition: 'slide'},
                     content: 'Next directions',
                     children: [
-                        {type: 'heading', meta: {level: 2}, content: 'Make the model easier to build on'},
+                        {
+                            type: 'heading',
+                            meta: {level: 2},
+                            content: 'Make the model easier to build on',
+                        },
                         {
                             type: 'list_item',
                             meta: {kind: 'ordered'},
@@ -389,7 +503,8 @@ function blockCrdtSlideDeck(): ImportDocument {
                         {
                             type: 'list_item',
                             meta: {kind: 'ordered'},
-                            content: 'Broaden stress tests for move, split, join, and retained selection behavior.',
+                            content:
+                                'Broaden stress tests for move, split, join, and retained selection behavior.',
                         },
                         {
                             type: 'list_item',
@@ -404,16 +519,18 @@ function blockCrdtSlideDeck(): ImportDocument {
 }
 
 function largeTable(): ImportDocument {
-    return [{
-        type: 'table',
-        content: 'Large table fixture',
-        children: Array.from({length: 5}, (_, row) => ({
-            content: `Row ${row + 1}`,
-            children: Array.from({length: 7}, (_, column) => ({
-                content: `Cell ${row + 1}-${column + 1} value`,
+    return [
+        {
+            type: 'table',
+            content: 'Large table fixture',
+            children: Array.from({length: 5}, (_, row) => ({
+                content: `Row ${row + 1}`,
+                children: Array.from({length: 7}, (_, column) => ({
+                    content: `Cell ${row + 1}-${column + 1} value`,
+                })),
             })),
-        })),
-    }];
+        },
+    ];
 }
 
 function ratingPolls(): ImportDocument {
@@ -554,8 +671,16 @@ function longAnswerPolls(): ImportDocument {
                 kind: 'long',
                 allowChange: true,
                 votes: {
-                    ulrich: {type: 'long', text: 'The merge semantics are the most interesting part.', ts: '00030'},
-                    uwe: {type: 'long', text: 'The UI should stay compact inside the editor.', ts: '00031'},
+                    ulrich: {
+                        type: 'long',
+                        text: 'The merge semantics are the most interesting part.',
+                        ts: '00030',
+                    },
+                    uwe: {
+                        type: 'long',
+                        text: 'The UI should stay compact inside the editor.',
+                        ts: '00031',
+                    },
                 },
             },
             content: 'What should we improve next?',
@@ -573,95 +698,109 @@ function longAnswerPolls(): ImportDocument {
 }
 
 function sparseTable(): ImportDocument {
-    return [{
-        type: 'table',
-        content: 'Sparse table fixture',
-        children: [7, 4, 6, 2, 5].map((cellCount, row) => ({
-            content: `Sparse row ${row + 1}`,
-            children: Array.from({length: cellCount}, (_, column) => ({
-                content: `Sparse ${row + 1}-${column + 1}`,
+    return [
+        {
+            type: 'table',
+            content: 'Sparse table fixture',
+            children: [7, 4, 6, 2, 5].map((cellCount, row) => ({
+                content: `Sparse row ${row + 1}`,
+                children: Array.from({length: cellCount}, (_, column) => ({
+                    content: `Sparse ${row + 1}-${column + 1}`,
+                })),
             })),
-        })),
-    }];
+        },
+    ];
 }
 
 function complexTable(): ImportDocument {
-    return [{
-        type: 'table',
-        content: 'Complex table fixture',
-        children: [
-            {
-                content: 'Header row',
-                children: [{content: 'Area'}, {content: 'Nested content'}, {content: 'Status'}],
-            },
-            {
-                content: 'Row with nested table in cell',
-                children: [
-                    {content: 'Planning'},
-                    {
-                        content: 'Nested table lives below',
-                        children: [smallNestedTable('Cell nested table')],
-                    },
-                    {content: 'Active'},
-                ],
-            },
-            smallNestedTable('Row nested table'),
-            {
-                content: 'Row with list in cell',
-                children: [
-                    {content: 'Execution'},
-                    {
-                        content: 'Checklist',
-                        children: [
-                            {type: 'list_item', content: 'First nested task'},
-                            {type: 'list_item', content: 'Second nested task'},
-                        ],
-                    },
-                    {content: 'Queued'},
-                ],
-            },
-        ],
-    }];
+    return [
+        {
+            type: 'table',
+            content: 'Complex table fixture',
+            children: [
+                {
+                    content: 'Header row',
+                    children: [{content: 'Area'}, {content: 'Nested content'}, {content: 'Status'}],
+                },
+                {
+                    content: 'Row with nested table in cell',
+                    children: [
+                        {content: 'Planning'},
+                        {
+                            content: 'Nested table lives below',
+                            children: [smallNestedTable('Cell nested table')],
+                        },
+                        {content: 'Active'},
+                    ],
+                },
+                smallNestedTable('Row nested table'),
+                {
+                    content: 'Row with list in cell',
+                    children: [
+                        {content: 'Execution'},
+                        {
+                            content: 'Checklist',
+                            children: [
+                                {type: 'list_item', content: 'First nested task'},
+                                {type: 'list_item', content: 'Second nested task'},
+                            ],
+                        },
+                        {content: 'Queued'},
+                    ],
+                },
+            ],
+        },
+    ];
 }
 
 function kanbanBoard(): ImportDocument {
-    return [{
-        type: 'kanban',
-        content: 'Launch board',
-        children: [
-            {
-                content: 'todo',
-                children: [
-                    {
-                        content: 'Draft release notes',
-                        children: [
-                            {type: 'todo', meta: {checked: false}, content: 'Collect screenshots'},
-                            {content: 'Confirm publish date'},
-                        ],
-                    },
-                    {type: 'code', meta: {language: 'text'}, content: 'owner: docs\nrisk: medium'},
-                ],
-            },
-            {
-                content: 'in progress',
-                children: [
-                    {type: 'todo', meta: {checked: false}, content: 'QA import/export'},
-                    {
-                        type: 'callout',
-                        meta: {kind: 'warning'},
-                        content: 'Design review pending',
-                    },
-                ],
-            },
-            {
-                content: 'done',
-                children: [
-                    {type: 'todo', meta: {checked: true}, content: 'Kickoff'},
-                    smallNestedTable('Metrics card'),
-                ],
-            },
-        ],
-    }];
+    return [
+        {
+            type: 'kanban',
+            content: 'Launch board',
+            children: [
+                {
+                    content: 'todo',
+                    children: [
+                        {
+                            content: 'Draft release notes',
+                            children: [
+                                {
+                                    type: 'todo',
+                                    meta: {checked: false},
+                                    content: 'Collect screenshots',
+                                },
+                                {content: 'Confirm publish date'},
+                            ],
+                        },
+                        {
+                            type: 'code',
+                            meta: {language: 'text'},
+                            content: 'owner: docs\nrisk: medium',
+                        },
+                    ],
+                },
+                {
+                    content: 'in progress',
+                    children: [
+                        {type: 'todo', meta: {checked: false}, content: 'QA import/export'},
+                        {
+                            type: 'callout',
+                            meta: {kind: 'warning'},
+                            content: 'Design review pending',
+                        },
+                    ],
+                },
+                {
+                    content: 'done',
+                    children: [
+                        {type: 'todo', meta: {checked: true}, content: 'Kickoff'},
+                        smallNestedTable('Metrics card'),
+                    ],
+                },
+            ],
+        },
+    ];
 }
 
 function deepListNesting(): ImportDocument {
@@ -669,12 +808,18 @@ function deepListNesting(): ImportDocument {
 }
 
 function manyBlocks(): ImportDocument {
-    return Array.from({length: 200}, (_, index) => ({
-        type: blockTypeForIndex(index),
-        ...(blockTypeForIndex(index) === 'todo' ? {meta: {checked: index % 4 === 0}} : {}),
-        ...(blockTypeForIndex(index) === 'callout' ? {meta: {kind: calloutKindForIndex(index)}} : {}),
-        content: words(10, `many-${index}`),
-    } as DocumentBlock));
+    return Array.from(
+        {length: 200},
+        (_, index) =>
+            ({
+                type: blockTypeForIndex(index),
+                ...(blockTypeForIndex(index) === 'todo' ? {meta: {checked: index % 4 === 0}} : {}),
+                ...(blockTypeForIndex(index) === 'callout'
+                    ? {meta: {kind: calloutKindForIndex(index)}}
+                    : {}),
+                content: words(10, `many-${index}`),
+            }) as DocumentBlock,
+    );
 }
 
 function mixedTableAndText(): ImportDocument {
@@ -700,7 +845,10 @@ function mermaidDiagram(): ImportDocument {
                 '  D --> A',
             ].join('\n'),
         },
-        {content: 'Use the Mermaid block toggle to switch between editing source and viewing the rendered diagram.'},
+        {
+            content:
+                'Use the Mermaid block toggle to switch between editing source and viewing the rendered diagram.',
+        },
     ];
 }
 
@@ -738,7 +886,11 @@ function vegaLiteChart(): ImportDocument {
 
 function codeCalloutsImages(): ImportDocument {
     return [
-        {type: 'code', meta: {language: 'JavaScript'}, content: 'function fixture() {\n  return true;\n}'},
+        {
+            type: 'code',
+            meta: {language: 'JavaScript'},
+            content: 'function fixture() {\n  return true;\n}',
+        },
         {type: 'callout', meta: {kind: 'info'}, content: 'Info callout'},
         {type: 'callout', meta: {kind: 'warning'}, content: 'Warning callout'},
         {type: 'callout', meta: {kind: 'error'}, content: 'Error callout'},
@@ -778,27 +930,13 @@ const nestedList = (depth: number, index: number): DocumentBlock => ({
     ...(depth > 1 ? {children: [nestedList(depth - 1, index + 1)]} : {}),
 });
 
-const vocabulary = [
-    'a',
-    'b',
-    'c',
-    'd',
-    'e',
-    'f',
-    'g',
-    'h',
-    'i',
-    'j',
-    'k',
-    'l',
-    'm',
-    'n',
-    'o',
-    'q',
-];
+const vocabulary = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'q'];
 
 const words = (count: number, seed: string): string =>
-    Array.from({length: count}, (_, index) => vocabulary[(index + seed.length) % vocabulary.length]).join(' ');
+    Array.from(
+        {length: count},
+        (_, index) => vocabulary[(index + seed.length) % vocabulary.length],
+    ).join(' ');
 
 const wordRanges = (content: string): Array<{start: number; end: number}> => {
     const ranges: Array<{start: number; end: number}> = [];
@@ -856,8 +994,7 @@ const blockTypeForIndex = (index: number): DocumentBlock['type'] => {
     return 'paragraph';
 };
 
-const calloutKindForIndex = (index: number) =>
-    (['info', 'warning', 'error'] as const)[index % 3];
+const calloutKindForIndex = (index: number) => (['info', 'warning', 'error'] as const)[index % 3];
 
 const generatedImageAttachments = async (images: FixtureImage[]): Promise<AttachmentStore> => {
     const attachments: AttachmentStore = new Map();
@@ -883,7 +1020,11 @@ const generatedImageAttachment = async (image: FixtureImage): Promise<ImageAttac
     };
 };
 
-const canvasDataUrl = async (width: number, height: number, image: FixtureImage): Promise<string> => {
+const canvasDataUrl = async (
+    width: number,
+    height: number,
+    image: FixtureImage,
+): Promise<string> => {
     if (typeof document === 'undefined') return fallbackSvgDataUrl(width, height, image);
     const canvas = document.createElement('canvas');
     canvas.width = width;

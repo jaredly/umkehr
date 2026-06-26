@@ -3668,7 +3668,7 @@ describe('Block rich text example UI', () => {
         expect(blocks(right)[0].textContent).toBe('abcX');
     });
 
-    it('creates a block after a block selection with Enter', async () => {
+    it('selects the selected block text content with Enter from a block selection', async () => {
         const view = render(<App />);
         const {left} = panels(view);
 
@@ -3682,7 +3682,75 @@ describe('Block rich text example UI', () => {
         expect(document.activeElement).toBe(blocks(left)[0]);
         fireEvent.keyDown(blocks(left)[0], {key: 'Enter'});
 
-        await waitForBlockTexts(left, ['abc', '']);
+        await waitFor(() => expect(domSelectionBlock()).toBe(blocks(left)[0]));
+        expect(domSelectionOffsets(blocks(left)[0])).toEqual({anchor: 0, focus: 3});
+        expect(blockTexts(left)).toEqual(['abc']);
+    });
+
+    it('moves a block selection with arrow keys', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        pasteText(blocks(left)[0], 'a\nb\nc');
+        await waitForBlockTexts(left, ['a', 'b', 'c']);
+
+        const handle = within(left).getAllByRole('button', {name: 'Move block'})[1];
+        fireEvent.pointerDown(handle, {button: 0, buttons: 1, isPrimary: true, pointerId: 1});
+        fireEvent.pointerUp(window, {button: 0, buttons: 0, isPrimary: true, pointerId: 1});
+        await waitFor(() =>
+            expect(blocks(left)[1].closest('.blockRow')?.classList.contains('blockSelectionFocus')).toBe(true),
+        );
+
+        fireEvent.keyDown(blocks(left)[1], {key: 'ArrowDown'});
+        await waitFor(() =>
+            expect(blocks(left)[2].closest('.blockRow')?.classList.contains('blockSelectionFocus')).toBe(true),
+        );
+        expect(blocks(left)[2].closest('.blockRow')?.classList.contains('blockSelected')).toBe(true);
+        expect(blocks(left)[1].closest('.blockRow')?.classList.contains('blockSelected')).toBe(false);
+
+        fireEvent.keyDown(blocks(left)[2], {key: 'ArrowLeft'});
+        await waitFor(() =>
+            expect(blocks(left)[1].closest('.blockRow')?.classList.contains('blockSelectionFocus')).toBe(true),
+        );
+
+        fireEvent.keyDown(blocks(left)[1], {key: 'ArrowUp'});
+        await waitFor(() =>
+            expect(blocks(left)[0].closest('.blockRow')?.classList.contains('blockSelectionFocus')).toBe(true),
+        );
+
+        fireEvent.keyDown(blocks(left)[0], {key: 'ArrowRight'});
+        await waitFor(() =>
+            expect(blocks(left)[1].closest('.blockRow')?.classList.contains('blockSelectionFocus')).toBe(true),
+        );
+    });
+
+    it('indents and unindents a block selection with Tab', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        pasteText(blocks(left)[0], 'one\ntwo');
+        await waitForBlockTexts(left, ['one', 'two']);
+
+        const handle = within(left).getAllByRole('button', {name: 'Move block'})[1];
+        fireEvent.pointerDown(handle, {button: 0, buttons: 1, isPrimary: true, pointerId: 1});
+        fireEvent.pointerUp(window, {button: 0, buttons: 0, isPrimary: true, pointerId: 1});
+        await waitFor(() =>
+            expect(blocks(left)[1].closest('.blockRow')?.classList.contains('blockSelectionFocus')).toBe(true),
+        );
+
+        fireEvent.keyDown(blocks(left)[1], {key: 'Tab'});
+
+        await waitFor(() => expect(blockDepth(blocks(left)[1])).toBe('1'));
+        expect(blocks(left)[1].closest('.blockRow')?.classList.contains('blockSelectionFocus')).toBe(true);
+        expect(blockDepth(blocks(right)[1])).toBe('1');
+
+        fireEvent.keyDown(blocks(left)[1], {key: 'Tab', shiftKey: true});
+
+        await waitFor(() => expect(blockDepth(blocks(left)[1])).toBe('0'));
+        expect(blocks(left)[1].closest('.blockRow')?.classList.contains('blockSelectionFocus')).toBe(true);
+        expect(blockDepth(blocks(right)[1])).toBe('0');
     });
 
     it('deletes a block selection with Delete', async () => {
@@ -4189,6 +4257,22 @@ describe('Block rich text example UI', () => {
         expect(left.querySelector<HTMLElement>('.blockAffordanceMarker')?.textContent).toBe('•');
         await waitForBlockTexts(right, ['item']);
         expect(right.querySelector<HTMLElement>('.blockAffordanceMarker')?.textContent).toBe('•');
+    });
+
+    it('pastes code block text verbatim without markdown shortcuts or block splitting', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'code');
+        pasteText(blocks(left)[0], '- item\n# Heading');
+
+        await waitForBlockTexts(left, ['- item\n# Heading']);
+        expect(blocks(left)).toHaveLength(1);
+        expect(blocks(left)[0].classList.contains('codeBlock')).toBe(true);
+        await waitForBlockTexts(right, ['- item\n# Heading']);
+        expect(blocks(right)).toHaveLength(1);
+        expect(blocks(right)[0].classList.contains('codeBlock')).toBe(true);
     });
 
     it('copies block rich text data with plain text and HTML fallbacks', async () => {
