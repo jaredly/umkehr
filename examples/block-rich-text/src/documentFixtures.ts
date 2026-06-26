@@ -21,6 +21,7 @@ type FixtureImage = {
 };
 
 const VALID_IMAGE_ID = 'fixture-generated-image';
+const EVERYTHING_SLIDES_IMAGE_ID = 'fixture-everything-slides-image';
 export const MISSING_FIXTURE_IMAGE_ID = 'fixture-missing-image';
 
 export const documentFixtures: DocumentFixture[] = [
@@ -47,6 +48,20 @@ export const documentFixtures: DocumentFixture[] = [
     {id: 'kanban-board', label: 'Kanban board', document: kanbanBoard},
     {id: 'slide-deck', label: 'Slide deck', document: slideDeck},
     {id: 'block-crdt-slide-deck', label: 'Block CRDT intro deck', document: blockCrdtSlideDeck},
+    {
+        id: 'simple-everything-slide-deck',
+        label: 'Simple everything slide deck',
+        document: simpleEverythingSlideDeck,
+        attachments: () =>
+            generatedImageAttachments([
+                {
+                    id: EVERYTHING_SLIDES_IMAGE_ID,
+                    label: 'Everything deck',
+                    background: '#e8f1ff',
+                    foreground: '#1f5c99',
+                },
+            ]),
+    },
     {id: 'deep-list-nesting', label: 'Deep list nesting', document: deepListNesting},
     {id: 'many-blocks', label: 'Many blocks', document: manyBlocks},
     {id: 'mixed-table-and-text', label: 'Mixed table and text', document: mixedTableAndText},
@@ -518,6 +533,323 @@ end`,
     ];
 }
 
+function simpleEverythingSlideDeck(): ImportDocument {
+    return [
+        {
+            type: 'slide_deck',
+            meta: {width: 1600, height: 900, footer: 'deck-title-and-slide-number'},
+            content: 'Everything blocks',
+            children: [
+                {
+                    type: 'slide',
+                    meta: {showTitle: true, backgroundColor: '#f8fbff', transition: 'fade'},
+                    content: 'Inline and text blocks',
+                    children: [
+                        {type: 'heading', meta: {level: 2}, content: 'Rich inline coverage'},
+                        inlineShowcaseBlock(),
+                        {
+                            type: 'blockquote',
+                            content: 'A quote block keeps quoted prose visible inside the deck.',
+                        },
+                        {
+                            type: 'list_item',
+                            meta: {kind: 'ordered'},
+                            content: 'Ordered parent item',
+                            children: [
+                                {
+                                    type: 'list_item',
+                                    meta: {kind: 'unordered'},
+                                    content: 'Nested unordered child item',
+                                },
+                            ],
+                        },
+                        {
+                            type: 'todo',
+                            meta: {checked: true},
+                            content: 'Todo block rendered inside a slide',
+                        },
+                        {
+                            type: 'recipe_ingredient',
+                            content: '2 cups structured blocks, folded gently',
+                        },
+                    ],
+                },
+                {
+                    type: 'slide',
+                    meta: {showTitle: true, backgroundColor: '#ffffff', transition: 'slide'},
+                    content: 'Diagrams and data',
+                    children: [
+                        {
+                            type: 'code',
+                            meta: {language: 'mermaid', preview: 'mermaid'},
+                            content: [
+                                'graph TD',
+                                '  Source[Fixture JSON] --> Import[Import document]',
+                                '  Import --> Render[Slide renderer]',
+                                '  Import --> Export[Export document]',
+                            ].join('\n'),
+                        },
+                    ],
+                },
+                {
+                    type: 'slide',
+                    meta: {showTitle: true, backgroundColor: '#ffffff', transition: 'slide'},
+                    content: 'Diagrams and data 2',
+                    children: [
+                        {
+                            type: 'code',
+                            meta: {language: 'vega-lite', preview: 'vega-lite'},
+                            content: [
+                                '$schema: https://vega.github.io/schema/vega-lite/v5.json',
+                                'width: 300',
+                                'height: 150',
+                                'data:',
+                                '  values:',
+                                '    - block: Text',
+                                '      count: 6',
+                                '    - block: Media',
+                                '      count: 3',
+                                '    - block: Structure',
+                                '      count: 5',
+                                'mark: bar',
+                                'encoding:',
+                                '  x:',
+                                '    field: block',
+                                '    type: nominal',
+                                '  y:',
+                                '    field: count',
+                                '    type: quantitative',
+                            ].join('\n'),
+                        },
+                        {
+                            type: 'code',
+                            meta: {language: 'TypeScript'},
+                            content: 'const everyBlockType = true;',
+                        },
+                    ],
+                },
+                {
+                    type: 'slide',
+                    meta: {showTitle: true, backgroundColor: '#fffaf0', transition: 'fade'},
+                    content: 'Callouts, notes, and popovers',
+                    children: [
+                        {
+                            type: 'callout',
+                            meta: {kind: 'info'},
+                            content: 'Info callout: neutral supporting context.',
+                        },
+                        {
+                            type: 'callout',
+                            meta: {kind: 'warning'},
+                            content: 'Warning callout: check presentation overflow.',
+                        },
+                        {
+                            type: 'callout',
+                            meta: {kind: 'error'},
+                            content: 'Error callout: visible critical state.',
+                        },
+                        annotationShowcaseBlock(),
+                    ],
+                },
+                {
+                    type: 'slide',
+                    meta: {showTitle: true, backgroundColor: '#f4fbf7', transition: 'slide'},
+                    content: 'Structured blocks',
+                    children: [
+                        {
+                            type: 'table',
+                            content: 'Release matrix',
+                            children: [
+                                {
+                                    content: 'Header',
+                                    children: [
+                                        {content: 'Area'},
+                                        {content: 'Status'},
+                                        {content: 'Owner'},
+                                    ],
+                                },
+                                {
+                                    content: 'Row 1',
+                                    children: [
+                                        {content: 'Editor'},
+                                        {content: 'Ready'},
+                                        {content: 'Core'},
+                                    ],
+                                },
+                                {
+                                    content: 'Row 2',
+                                    children: [
+                                        {content: 'Slides'},
+                                        {content: 'Review'},
+                                        {content: 'UX'},
+                                    ],
+                                },
+                            ],
+                        },
+                    ],
+                },
+                {
+                    type: 'slide',
+                    meta: {showTitle: true, backgroundColor: '#f4fbf7', transition: 'slide'},
+                    content: 'Structured blocks 2',
+                    children: [
+                        {
+                            type: 'kanban',
+                            content: 'Kanban board',
+                            children: [
+                                {
+                                    content: 'todo',
+                                    children: [
+                                        {content: 'Check nested deck'},
+                                        {content: 'Review annotations'},
+                                    ],
+                                },
+                                {
+                                    content: 'doing',
+                                    children: [{content: 'Render media previews'}],
+                                },
+                                {
+                                    content: 'done',
+                                    children: [
+                                        {
+                                            type: 'todo',
+                                            meta: {checked: true},
+                                            content: 'Import fixture',
+                                        },
+                                    ],
+                                },
+                            ],
+                        },
+                    ],
+                },
+                {
+                    type: 'slide',
+                    meta: {showTitle: true, backgroundColor: '#ffffff', transition: 'fade'},
+                    content: 'Polls and embeds',
+                    children: [
+                        {
+                            type: 'poll',
+                            meta: {
+                                kind: 'rating',
+                                allowChange: true,
+                                max: 5,
+                                ratingPresentation: 'stars',
+                                votes: {
+                                    fixture: {type: 'single', optionId: '5', ts: '00040'},
+                                },
+                            },
+                            content: 'How complete is this slide fixture?',
+                        },
+                        {
+                            type: 'poll',
+                            meta: {
+                                kind: 'children',
+                                choiceMode: 'multiple',
+                                allowChange: true,
+                                votes: {},
+                            },
+                            content: 'Which block groups should stay in smoke tests?',
+                            children: [
+                                {content: 'Inline marks'},
+                                {content: 'Structured children'},
+                                {content: 'Media previews'},
+                            ],
+                        },
+                        {
+                            type: 'poll',
+                            meta: {
+                                kind: 'matrix',
+                                choiceMode: 'single',
+                                allowChange: true,
+                                votes: {},
+                            },
+                            content: 'Where should coverage improve?',
+                            children: [
+                                {
+                                    content: 'Rows',
+                                    children: [
+                                        {content: 'Import'},
+                                        {content: 'Render'},
+                                        {content: 'Export'},
+                                    ],
+                                },
+                                {
+                                    content: 'Columns',
+                                    children: [
+                                        {content: 'Low'},
+                                        {content: 'Medium'},
+                                        {content: 'High'},
+                                    ],
+                                },
+                            ],
+                        },
+                    ],
+                },
+                {
+                    type: 'slide',
+                    meta: {showTitle: true, backgroundColor: '#f7f7ff', transition: 'slide'},
+                    content: 'Image, preview, and nested deck',
+                    children: [
+                        {
+                            type: 'image',
+                            meta: {attachmentId: EVERYTHING_SLIDES_IMAGE_ID, size: 'large'},
+                        },
+                        {
+                            type: 'preview',
+                            meta: {
+                                url: 'https://example.test/everything-slide-deck',
+                                preview: {
+                                    title: 'Everything Slide Deck',
+                                    description: 'Fixture preview metadata for a slide deck.',
+                                    siteName: 'Example',
+                                    fetchedAt: '2026-06-25T00:00:00Z',
+                                },
+                            },
+                            content: 'Everything Slide Deck',
+                        },
+                        {
+                            type: 'slide_deck',
+                            meta: {width: 640, height: 360, footer: 'slide-number'},
+                            content: 'Nested mini deck',
+                            children: [
+                                {
+                                    type: 'slide',
+                                    meta: {
+                                        showTitle: true,
+                                        backgroundColor: '#ffffff',
+                                        transition: 'none',
+                                    },
+                                    content: 'Nested one',
+                                    children: [
+                                        {type: 'paragraph', content: 'A deck inside a slide.'},
+                                    ],
+                                },
+                                {
+                                    type: 'slide',
+                                    meta: {
+                                        showTitle: true,
+                                        backgroundColor: '#eef7f0',
+                                        transition: 'fade',
+                                    },
+                                    content: 'Nested two',
+                                    children: [
+                                        {
+                                            type: 'callout',
+                                            meta: {kind: 'info'},
+                                            content:
+                                                'Small enough to inspect without dominating the parent slide.',
+                                        },
+                                    ],
+                                },
+                            ],
+                        },
+                    ],
+                },
+            ],
+        },
+    ];
+}
+
 function largeTable(): ImportDocument {
     return [
         {
@@ -913,6 +1245,68 @@ function emptyShortGraphemeBlocks(): ImportDocument {
         },
     ];
 }
+
+const inlineShowcaseBlock = (): DocumentBlock => {
+    const content =
+        'Inline marks cover bold, italic, strike, code, link, and math like E = mc^2 in one paragraph.';
+    return {
+        type: 'paragraph',
+        content,
+        marks: [
+            textMark(content, 'bold', {type: 'bold'}),
+            textMark(content, 'italic', {type: 'italic'}),
+            textMark(content, 'strike', {type: 'strikethrough'}),
+            textMark(content, 'code', {type: 'code', language: 'text'}),
+            textMark(content, 'link', {type: 'link', href: 'https://example.test/everything'}),
+            textMark(content, 'E = mc^2', {type: 'math'}),
+        ],
+    };
+};
+
+const annotationShowcaseBlock = (): DocumentBlock => {
+    const content =
+        'Annotations include popover notes, sidebar notes, and footnotes in a single block.';
+    return {
+        type: 'paragraph',
+        content,
+        annotations: [
+            textAnnotation(content, 'popover notes', 'popover', 'Popover annotation body.'),
+            textAnnotation(content, 'sidebar notes', 'sidebar', 'Sidebar annotation body.'),
+            textAnnotation(content, 'footnotes', 'footnote', 'Footnote annotation body.'),
+        ],
+    };
+};
+
+const textMark = (
+    content: string,
+    source: string,
+    mark:
+        | {type: 'bold' | 'italic' | 'strikethrough'}
+        | {type: 'code'; language?: string}
+        | {type: 'math'; display?: boolean}
+        | {type: 'link'; href: string},
+): DocumentMark => {
+    const start = content.indexOf(source);
+    if (start < 0) throw new Error(`missing mark source ${source}`);
+    return {...mark, start, end: start + source.length};
+};
+
+const textAnnotation = (
+    content: string,
+    source: string,
+    presentation: DocumentAnnotation['presentation'],
+    body: string,
+): DocumentAnnotation => {
+    const start = content.indexOf(source);
+    if (start < 0) throw new Error(`missing annotation source ${source}`);
+    return {
+        type: 'annotation',
+        presentation,
+        start,
+        end: start + source.length,
+        body: [{content: body}],
+    };
+};
 
 const smallNestedTable = (title: string): DocumentBlock => ({
     type: 'table',

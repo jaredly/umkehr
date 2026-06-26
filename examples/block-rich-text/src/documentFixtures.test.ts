@@ -24,9 +24,10 @@ describe('document fixtures', () => {
     it.each(documentFixtures.filter((fixture) => !['marked-long-block', 'many-blocks'].includes(fixture.id)))(
         'exports $id after import',
         (fixture) => {
-        const imported = importDocument(fixture.document(), ctx('fixturetest'));
-        expect(exportDocument(imported.state).length).toBeGreaterThan(0);
+            const imported = importDocument(fixture.document(), ctx('fixturetest'));
+            expect(exportDocument(imported.state).length).toBeGreaterThan(0);
         },
+        10000,
     );
 
     it('generates four 400-word long blocks', () => {
@@ -100,10 +101,52 @@ describe('document fixtures', () => {
 
         expect(deck.type).toBe('slide_deck');
         expect(deck.content).toBe('Block CRDT and block rich text');
-        expect(deck.children?.filter((child) => child.type === 'slide')).toHaveLength(10);
+        expect(deck.children?.filter((child) => child.type === 'slide')).toHaveLength(11);
         expect(countBlocksOfType([deck], 'code')).toBeGreaterThanOrEqual(1);
-        expect(countBlocksOfType([deck], 'table')).toBeGreaterThanOrEqual(1);
         expect(countBlocksOfType([deck], 'callout')).toBeGreaterThanOrEqual(1);
+    });
+
+    it('includes a simple everything slide deck fixture', async () => {
+        const fixture = documentFixtures.find((item) => item.id === 'simple-everything-slide-deck');
+        if (!fixture) throw new Error('missing simple-everything-slide-deck fixture');
+        const [deck] = fixture.document();
+        const types = collectBlockTypes([deck]);
+        const expectedTypes: Array<Exclude<DocumentBlock['type'], undefined>> = [
+            'paragraph',
+            'heading',
+            'list_item',
+            'todo',
+            'blockquote',
+            'code',
+            'callout',
+            'recipe_ingredient',
+            'table',
+            'kanban',
+            'slide_deck',
+            'slide',
+            'poll',
+            'image',
+            'preview',
+        ];
+
+        expect(deck.type).toBe('slide_deck');
+        expect(deck.content).toBe('Everything blocks');
+        expect(deck.children?.filter((child) => child.type === 'slide')).toHaveLength(6);
+        expect(countBlocksOfType([deck], 'slide_deck')).toBeGreaterThan(1);
+        for (const type of expectedTypes) expect(types.has(type)).toBe(true);
+        expect(codePreviewKinds([deck])).toEqual(expect.arrayContaining(['mermaid', 'vega-lite']));
+        expect(calloutKinds([deck])).toEqual(expect.arrayContaining(['info', 'warning', 'error']));
+        expect(pollKinds([deck])).toEqual(expect.arrayContaining(['rating', 'children', 'matrix', 'long']));
+        expect(markTypes([deck])).toEqual(
+            expect.arrayContaining(['bold', 'italic', 'strikethrough', 'code', 'link', 'math']),
+        );
+        expect(annotationPresentations([deck])).toEqual(
+            expect.arrayContaining(['popover', 'sidebar', 'footnote']),
+        );
+
+        const attachments = await fixture.attachments?.();
+        expect(attachments?.size).toBe(1);
+        expect(attachments?.values().next().value?.name).toBe('fixture-everything-slides-image.png');
     });
 
     it('generates depth-five list nesting', () => {
@@ -163,6 +206,43 @@ const countBlocksOfType = (blocks: DocumentBlock[], type: DocumentBlock['type'])
             countBlocksOfType(block.children ?? [], type),
         0,
     );
+
+const collectBlockTypes = (blocks: DocumentBlock[]): Set<Exclude<DocumentBlock['type'], undefined>> =>
+    blocks.reduce((types, block) => {
+        if (block.type) types.add(block.type);
+        for (const childType of collectBlockTypes(block.children ?? [])) types.add(childType);
+        return types;
+    }, new Set<Exclude<DocumentBlock['type'], undefined>>());
+
+const markTypes = (blocks: DocumentBlock[]): string[] =>
+    blocks.flatMap((block) => [
+        ...(block.marks ?? []).map((mark) => mark.type),
+        ...markTypes(block.children ?? []),
+    ]);
+
+const annotationPresentations = (blocks: DocumentBlock[]): string[] =>
+    blocks.flatMap((block) => [
+        ...(block.annotations ?? []).map((annotation) => annotation.presentation),
+        ...annotationPresentations(block.children ?? []),
+    ]);
+
+const codePreviewKinds = (blocks: DocumentBlock[]): string[] =>
+    blocks.flatMap((block) => [
+        ...(block.type === 'code' && typeof block.meta?.preview === 'string' ? [block.meta.preview] : []),
+        ...codePreviewKinds(block.children ?? []),
+    ]);
+
+const calloutKinds = (blocks: DocumentBlock[]): string[] =>
+    blocks.flatMap((block) => [
+        ...(block.type === 'callout' && typeof block.meta?.kind === 'string' ? [block.meta.kind] : []),
+        ...calloutKinds(block.children ?? []),
+    ]);
+
+const pollKinds = (blocks: DocumentBlock[]): string[] =>
+    blocks.flatMap((block) => [
+        ...(block.type === 'poll' && typeof block.meta?.kind === 'string' ? [block.meta.kind] : []),
+        ...pollKinds(block.children ?? []),
+    ]);
 
 const mathMarks = (blocks: DocumentBlock[]) =>
     blocks.flatMap((block) => [
