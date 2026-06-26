@@ -2349,10 +2349,7 @@ function BlockEditor({
                 primary.type === 'caret'
                     ? []
                     : selectedTopLevelBlockIdsForSelectionSet(replica.state, resolvedSelectionSet);
-            const selectedGroup = selectedTopLevelBlockIds.filter((selectedBlockId) =>
-                visibleSubtreeBlockIds(replica.state, selectedBlockId).includes(blockId),
-            );
-            if (selectedGroup.length) {
+            if (selectedTopLevelBlockIds.includes(blockId)) {
                 startDrag(blockId, event, selectedTopLevelBlockIds);
                 return;
             }

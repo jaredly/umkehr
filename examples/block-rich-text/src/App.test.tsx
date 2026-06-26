@@ -3892,6 +3892,66 @@ describe('Block rich text example UI', () => {
         ]);
     });
 
+    it('drags a child block inside a selected slide from the child handle', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'slide-deck'},
+        });
+        await waitFor(() => expect(view.getByText('Loaded fixture: Slide deck.')).toBeTruthy());
+
+        const firstSlide = left.querySelector<HTMLElement>('.slideViewport');
+        if (!firstSlide) throw new Error('missing first slide');
+        const originalSlideIds = Array.from(left.querySelectorAll<HTMLElement>('.slideViewport')).map(
+            (viewport) => viewport.dataset.slideId,
+        );
+        fireEvent.pointerDown(firstSlide, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 4,
+            clientY: 4,
+        });
+        fireEvent.pointerUp(window, {button: 0, buttons: 0, isPrimary: true, pointerId: 1});
+        await waitFor(() => expect(firstSlide.classList.contains('blockSelected')).toBe(true));
+
+        const firstSlideChildTexts = () =>
+            Array.from(firstSlide.querySelectorAll<HTMLElement>('.slideBody .blockRow [role="textbox"]')).map(blockText);
+        await waitFor(() =>
+            expect(firstSlideChildTexts()).toEqual([
+                'Revenue grew 18%',
+                'Expansion was strongest in self-serve accounts.',
+            ]),
+        );
+
+        installMockBlockRowGeometry(left);
+        installMockSlideViewportGeometry(left);
+        const expansionBlock = blocks(left).find(
+            (block) => blockText(block) === 'Expansion was strongest in self-serve accounts.',
+        );
+        const childHandle = expansionBlock
+            ?.closest<HTMLElement>('.blockRow')
+            ?.querySelector<HTMLElement>('button[aria-label="Move block"]');
+        if (!childHandle) throw new Error('missing child block handle');
+
+        dragElementTo(childHandle, 80, 80);
+
+        await waitFor(() =>
+            expect(firstSlideChildTexts()).toEqual([
+                'Expansion was strongest in self-serve accounts.',
+                'Revenue grew 18%',
+            ]),
+        );
+        expect(Array.from(left.querySelectorAll<HTMLElement>('.slideViewport')).map((viewport) => viewport.dataset.slideId)).toEqual(
+            originalSlideIds,
+        );
+        expect(Array.from(right.querySelectorAll<HTMLElement>('.slideViewport')).map((viewport) => viewport.dataset.slideId)).toEqual(
+            originalSlideIds,
+        );
+    });
+
     it('clicks the rendered slide rim to block-select the slide', async () => {
         const view = render(<App />);
         const {left} = panels(view);
