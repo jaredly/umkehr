@@ -3854,6 +3854,44 @@ describe('Block rich text example UI', () => {
         expect(window.getSelection()?.rangeCount ?? 0).toBe(0);
     });
 
+    it('clicks the rendered slide background to block-select the slide', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'slide-deck');
+        await waitFor(() => expect(left.querySelectorAll('.slideViewport')).toHaveLength(1));
+
+        const overviewSlide = left.querySelector<HTMLElement>('.slideViewport-overview');
+        const overviewSurface = overviewSlide?.querySelector<HTMLElement>('.slideSurface');
+        if (!overviewSlide || !overviewSurface) throw new Error('missing overview slide surface');
+        fireEvent.pointerDown(overviewSurface, {button: 0, buttons: 1, isPrimary: true, pointerId: 1});
+
+        await waitFor(() => expect(overviewSlide.classList.contains('blockSelected')).toBe(true));
+        expect(overviewSlide.classList.contains('blockSelectionFocus')).toBe(true);
+        expect(document.activeElement).toBe(overviewSlide);
+
+        const deckTitle = left.querySelector<HTMLElement>('.slideDeckHeader [role="textbox"]');
+        if (!deckTitle) throw new Error('missing deck title');
+        selectCaret(deckTitle, 0);
+        fireEvent.click(within(left).getByRole('button', {name: 'Presentation'}));
+        const presentationSlide = await waitFor(() => {
+            const slide = left.querySelector<HTMLElement>('.slideViewport-presentation');
+            if (!slide) throw new Error('missing presentation slide');
+            return slide;
+        });
+        selectCaret(deckTitle, 0);
+
+        const presentationBody = presentationSlide.querySelector<HTMLElement>('.slideBody');
+        if (!presentationBody) throw new Error('missing presentation slide body');
+        fireEvent.pointerDown(presentationBody, {button: 0, buttons: 1, isPrimary: true, pointerId: 2});
+
+        await waitFor(() => expect(presentationSlide.classList.contains('blockSelected')).toBe(true));
+        expect(presentationSlide.classList.contains('blockSelectionFocus')).toBe(true);
+        expect(document.activeElement).toBe(presentationSlide);
+        expect(window.getSelection()?.rangeCount ?? 0).toBe(0);
+    });
+
     it('still allows text selection inside rendered slides', async () => {
         const view = render(<App />);
         const {left} = panels(view);

@@ -4231,6 +4231,30 @@ function SlideBlockView({
         event.stopPropagation();
         context.startBlockDragFromHandle(node.block.id, event);
     };
+    const selectSlideBlock = () => {
+        const selection = {
+            type: 'block' as const,
+            anchorBlockId: node.block.id,
+            focusBlockId: node.block.id,
+        };
+        context.runBlockControlCommand((current) => ({
+            state: current.state,
+            ops: [],
+            selection: replaceSelectionSet(current.state, selection, current.selection.primaryId),
+        }));
+        context.focusBlockSelectionTarget(selection);
+    };
+    const handleSurfacePointerDown = (event: PointerEvent<HTMLElement>) => {
+        if (eventFromEditableSurface(event.target)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        selectSlideBlock();
+    };
+    const stopSurfaceMouseDown = (event: MouseEvent<HTMLElement>) => {
+        if (eventFromEditableSurface(event.target)) return;
+        event.preventDefault();
+        event.stopPropagation();
+    };
     const stopRimMouseDown = (event: MouseEvent<HTMLElement>) => {
         if (event.target !== event.currentTarget) return;
         event.preventDefault();
@@ -4267,7 +4291,11 @@ function SlideBlockView({
             onMouseDown={stopRimMouseDown}
         >
             <div className="slideScaleLayer" style={scaleLayerStyle}>
-                <div className="slideSurface" onPointerDown={(event) => event.stopPropagation()}>
+                <div
+                    className="slideSurface"
+                    onPointerDown={handleSurfacePointerDown}
+                    onMouseDown={stopSurfaceMouseDown}
+                >
                     {meta.showTitle ? (
                         <div className="slideTitle">
                             {renderEditableBlock({...node.block, depth: 0}, context, {
