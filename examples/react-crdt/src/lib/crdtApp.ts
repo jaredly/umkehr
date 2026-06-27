@@ -30,6 +30,7 @@ import type {
 } from 'umkehr/react-crdt';
 import type {StatusStore} from 'umkehr';
 import type {ReactElement} from 'react';
+import type {ArtifactStore} from './artifacts';
 
 export type GridSlot = 'left' | 'right';
 
@@ -137,6 +138,7 @@ export type AppDefinition<
     validateState(input: unknown): IValidation<TState>;
     initialState: TState;
     initialTimestamp?: HlcTimestamp;
+    artifacts?: ArtifactStore;
     renderPanel(props: AppPanelProps<TState, EphemeralData, Extensions>): ReactElement;
 };
 

@@ -11,6 +11,11 @@ import {hydrateCrdtLocalHistoryForApp, type AppDefinition} from '../crdtApp';
 import type {TransportState} from '../local/useLocalDemoSync';
 import type {PersistedReplica, PersistedBatch} from '../local-first/types';
 import type {PersistedServerReplica} from '../server/types';
+import {
+    loadSerializedArtifacts,
+    validateSerializedArtifacts,
+    type SerializedArtifact,
+} from '../artifacts';
 
 export const DOCUMENT_ARCHIVE_KIND = 'umkehr.react-crdt.document';
 export const DOCUMENT_ARCHIVE_VERSION = 1;
@@ -25,28 +30,33 @@ export type DocumentPayloadKind =
 export type SoloDocumentPayload = {
     kind: 'solo';
     history: History<unknown, unknown>;
+    artifacts?: SerializedArtifact[];
 };
 
 export type LocalSimulatorDocumentPayload = {
     kind: 'local-simulator';
     replicas: Record<string, CrdtLocalHistory<unknown>>;
     transportState: TransportState;
+    artifacts?: SerializedArtifact[];
 };
 
 export type PeerJsDocumentPayload = {
     kind: 'peerjs';
     history: CrdtLocalHistory<unknown>;
+    artifacts?: SerializedArtifact[];
 };
 
 export type ServerDocumentPayload = {
     kind: 'server';
     replica: PersistedServerReplica<unknown>;
+    artifacts?: SerializedArtifact[];
 };
 
 export type LocalFirstDocumentPayload = {
     kind: 'local-first';
     replica: PersistedReplica<unknown>;
     batches: PersistedBatch[];
+    artifacts?: SerializedArtifact[];
 };
 
 export type DocumentPayload =
@@ -171,7 +181,7 @@ export function parseArchive(json: string): DocumentArchive {
 
 export function assertArchiveForApp<TKind extends DocumentPayloadKind>(
     archive: DocumentArchive,
-    app: Pick<AppDefinition<unknown>, 'id'>,
+    app: Pick<AppDefinition<unknown>, 'id' | 'artifacts'>,
     expectedPayloadKind: TKind,
 ): asserts archive is DocumentArchive<Extract<DocumentPayload, {kind: TKind}>> {
     if (archive.appId !== app.id) {
@@ -182,6 +192,7 @@ export function assertArchiveForApp<TKind extends DocumentPayloadKind>(
             `Archive payload "${archive.payload.kind}" cannot be imported into "${expectedPayloadKind}".`,
         );
     }
+    loadSerializedArtifacts(app.artifacts, archive.payload.artifacts);
 }
 
 export function archiveFileName({
@@ -633,26 +644,36 @@ function assertDocumentPayload(input: unknown): asserts input is DocumentPayload
     switch (input.kind) {
         case 'solo':
             if (!isRecord(input.history)) throw new Error('Solo archive payload is invalid.');
+            assertSerializedArtifacts(input.artifacts);
             return;
         case 'local-simulator':
             if (!isRecord(input.replicas) || !isRecord(input.transportState)) {
                 throw new Error('Local simulator archive payload is invalid.');
             }
+            assertSerializedArtifacts(input.artifacts);
             return;
         case 'peerjs':
             if (!isRecord(input.history)) throw new Error('PeerJS archive payload is invalid.');
+            assertSerializedArtifacts(input.artifacts);
             return;
         case 'server':
             if (!isRecord(input.replica)) throw new Error('Server archive payload is invalid.');
+            assertSerializedArtifacts(input.artifacts);
             return;
         case 'local-first':
             if (!isRecord(input.replica) || !Array.isArray(input.batches)) {
                 throw new Error('Local-first archive payload is invalid.');
             }
+            assertSerializedArtifacts(input.artifacts);
             return;
         default:
             throw new Error(`Archive payload kind "${input.kind}" is unsupported.`);
     }
+}
+
+function assertSerializedArtifacts(input: unknown): asserts input is SerializedArtifact[] | undefined {
+    if (input === undefined) return;
+    if (!validateSerializedArtifacts(input)) throw new Error('Archive artifacts are invalid.');
 }
 
 function safeFileSegment(input: string) {

@@ -13,6 +13,7 @@ import type {
     ServerMergeEvent,
     ServerUpdateEvent,
     ServerUser,
+    SerializedArtifact,
 } from './types';
 
 const MAIN_BRANCH_ID = 'main';
@@ -31,7 +32,8 @@ export class ServerStore {
                 appId text not null default '',
                 schemaVersion integer not null default 1,
                 schemaFingerprintHash text not null default '',
-                schemaFingerprint text not null
+                schemaFingerprint text not null,
+                artifactsJson text not null default '[]'
             );
             create table if not exists document_metadata (
                 docId text primary key,
@@ -204,8 +206,8 @@ export class ServerStore {
         schemaFingerprintHash: string,
     ) {
         const existing = this.db
-            .query<{appId: string; schemaVersion: number; schemaFingerprint: string; schemaFingerprintHash: string}, [string]>(
-                'select appId, schemaVersion, schemaFingerprint, schemaFingerprintHash from documents where docId = ?',
+            .query<{appId: string; schemaVersion: number; schemaFingerprint: string; schemaFingerprintHash: string; artifactsJson: string}, [string]>(
+                'select appId, schemaVersion, schemaFingerprint, schemaFingerprintHash, artifactsJson from documents where docId = ?',
             )
             .get(docId);
         if (existing) {
@@ -234,18 +236,27 @@ export class ServerStore {
         }
         this.db
             .query(
-                'insert into documents (docId, appId, schemaVersion, schemaFingerprintHash, schemaFingerprint) values (?, ?, ?, ?, ?)',
+                'insert into documents (docId, appId, schemaVersion, schemaFingerprintHash, schemaFingerprint, artifactsJson) values (?, ?, ?, ?, ?, ?)',
             )
-            .run(docId, appId, schemaVersion, schemaFingerprintHash, schemaFingerprint);
+            .run(docId, appId, schemaVersion, schemaFingerprintHash, schemaFingerprint, '[]');
         this.ensureMainBranch(docId);
     }
 
-    getDocument(docId: string): {appId: string; schemaVersion: number; schemaFingerprint: string; schemaFingerprintHash: string} | null {
-        return this.db
-            .query<{appId: string; schemaVersion: number; schemaFingerprint: string; schemaFingerprintHash: string}, [string]>(
-                'select appId, schemaVersion, schemaFingerprint, schemaFingerprintHash from documents where docId = ?',
+    getDocument(docId: string): {appId: string; schemaVersion: number; schemaFingerprint: string; schemaFingerprintHash: string; artifacts: SerializedArtifact[]} | null {
+        const row = this.db
+            .query<{appId: string; schemaVersion: number; schemaFingerprint: string; schemaFingerprintHash: string; artifactsJson: string}, [string]>(
+                'select appId, schemaVersion, schemaFingerprint, schemaFingerprintHash, artifactsJson from documents where docId = ?',
             )
-            .get(docId) ?? null;
+            .get(docId);
+        return row
+            ? {
+                  appId: row.appId,
+                  schemaVersion: row.schemaVersion,
+                  schemaFingerprint: row.schemaFingerprint,
+                  schemaFingerprintHash: row.schemaFingerprintHash,
+                  artifacts: parseArtifacts(row.artifactsJson),
+              }
+            : null;
     }
 
     upsertDocumentMetadata(metadata: DocumentMetadata) {
@@ -420,13 +431,14 @@ export class ServerStore {
             this.db
                 .query(
                     `update documents
-                     set schemaVersion = ?, schemaFingerprintHash = ?, schemaFingerprint = ?
+                     set schemaVersion = ?, schemaFingerprintHash = ?, schemaFingerprint = ?, artifactsJson = ?
                      where docId = ?`,
                 )
                 .run(
                     upload.targetSchemaVersion,
                     upload.targetSchemaFingerprintHash,
                     upload.targetSchemaFingerprint,
+                    serializeArtifacts(upload.artifacts ?? document.artifacts),
                     upload.docId,
                 );
             for (const branch of upload.branches) this.insertBranch(branch);
@@ -453,8 +465,8 @@ export class ServerStore {
             }
             this.db
                 .query(
-                    `insert into documents (docId, appId, schemaVersion, schemaFingerprintHash, schemaFingerprint)
-                     values (?, ?, ?, ?, ?)`,
+                    `insert into documents (docId, appId, schemaVersion, schemaFingerprintHash, schemaFingerprint, artifactsJson)
+                     values (?, ?, ?, ?, ?, ?)`,
                 )
                 .run(
                     upload.docId,
@@ -462,6 +474,7 @@ export class ServerStore {
                     upload.schemaVersion,
                     upload.schemaFingerprintHash,
                     upload.schemaFingerprint,
+                    serializeArtifacts(upload.artifacts),
                 );
             this.insertDocumentMetadata({
                 docId: upload.docId,
@@ -674,13 +687,14 @@ export class ServerStore {
 
     summarizeDocuments(): DocumentSummary[] {
         return this.db
-            .query<DocumentSummary, []>(
+            .query<DocumentSummary & {artifactsJson: string}, []>(
                 `select
                     d.docId as docId,
                     d.appId as appId,
                     d.schemaVersion as schemaVersion,
                     d.schemaFingerprintHash as schemaFingerprintHash,
                     d.schemaFingerprint as schemaFingerprint,
+                    d.artifactsJson as artifactsJson,
                     coalesce(m.title, d.docId) as title,
                     coalesce(m.sizeLabel, '') as sizeLabel,
                     coalesce(m.sizeRank, 0) as sizeRank,
@@ -695,7 +709,11 @@ export class ServerStore {
                  group by d.docId
                  order by coalesce(m.sizeRank, 0) asc, coalesce(m.title, d.docId) asc, d.docId asc`,
             )
-            .all();
+            .all()
+            .map(({artifactsJson, ...summary}) => ({
+                ...summary,
+                artifacts: parseArtifacts(artifactsJson).map(({data: _data, ...entry}) => entry),
+            }));
     }
 
     recentEvents(limit = 50): ServerBranchEvent[] {
@@ -752,6 +770,7 @@ export class ServerStore {
 
     private migrationDump(lock: ServerMigrationLock): ServerMigrationDump {
         const branches = this.listBranches(lock.docId);
+        const document = this.getDocument(lock.docId);
         return {
             docId: lock.docId,
             sourceSchemaVersion: lock.sourceSchemaVersion,
@@ -762,6 +781,7 @@ export class ServerStore {
             targetSchemaFingerprintHash: lock.targetSchemaFingerprintHash,
             branches,
             events: branches.flatMap((branch) => this.listEventsAfter(lock.docId, branch.branchId, 0)),
+            artifacts: document?.artifacts,
         };
     }
 
@@ -829,8 +849,8 @@ export class ServerStore {
     private insertSeedDocument(document: SeedDocument) {
         this.db
             .query(
-                `insert into documents (docId, appId, schemaVersion, schemaFingerprintHash, schemaFingerprint)
-                 values (?, ?, ?, ?, ?)`,
+                `insert into documents (docId, appId, schemaVersion, schemaFingerprintHash, schemaFingerprint, artifactsJson)
+                 values (?, ?, ?, ?, ?, ?)`,
             )
             .run(
                 document.docId,
@@ -838,6 +858,7 @@ export class ServerStore {
                 document.schemaVersion,
                 document.schemaFingerprintHash,
                 document.schemaFingerprint,
+                serializeArtifacts(document.artifacts),
             );
     }
 
@@ -937,10 +958,11 @@ export class ServerStore {
                     appId text not null default '',
                     schemaVersion integer not null default 1,
                     schemaFingerprintHash text not null default '',
-                    schemaFingerprint text not null
+                    schemaFingerprint text not null,
+                    artifactsJson text not null default '[]'
                 );
-                insert or ignore into documents (docId, appId, schemaVersion, schemaFingerprintHash, schemaFingerprint)
-                    select docId, '', 1, '', schemaFingerprint from documents_v2;
+                insert or ignore into documents (docId, appId, schemaVersion, schemaFingerprintHash, schemaFingerprint, artifactsJson)
+                    select docId, '', 1, '', schemaFingerprint, '[]' from documents_v2;
             `);
             columns = this.db
                 .query<{name: string}, []>('pragma table_info(documents)')
@@ -956,7 +978,38 @@ export class ServerStore {
         if (!columns.includes('schemaFingerprintHash')) {
             this.db.exec("alter table documents add column schemaFingerprintHash text not null default ''");
         }
+        if (!columns.includes('artifactsJson')) {
+            this.db.exec("alter table documents add column artifactsJson text not null default '[]'");
+        }
     }
+}
+
+function serializeArtifacts(artifacts: SerializedArtifact[] | undefined): string {
+    return JSON.stringify(artifacts ?? []);
+}
+
+function parseArtifacts(input: string): SerializedArtifact[] {
+    try {
+        const parsed = JSON.parse(input);
+        return Array.isArray(parsed) ? parsed.filter(isSerializedArtifact) : [];
+    } catch {
+        return [];
+    }
+}
+
+function isSerializedArtifact(input: unknown): input is SerializedArtifact {
+    return (
+        isRecord(input) &&
+        typeof input.id === 'string' &&
+        typeof input.kind === 'string' &&
+        typeof input.version === 'number' &&
+        typeof input.fingerprintHash === 'string' &&
+        'data' in input
+    );
+}
+
+function isRecord(input: unknown): input is Record<string, unknown> {
+    return typeof input === 'object' && input !== null && !Array.isArray(input);
 }
 
 type BranchRow = {
@@ -1046,6 +1099,7 @@ function validateSeedDocument(document: SeedDocument) {
         branches: document.branches,
         events: document.events,
     });
+    validateArtifacts(document.artifacts);
 }
 
 function validateDocumentImportUpload(upload: import('./types').ServerDocumentImportUpload) {
@@ -1069,6 +1123,7 @@ function validateDocumentImportUpload(upload: import('./types').ServerDocumentIm
         if (event.docId !== upload.docId) throw new Error('Imported event doc id mismatch.');
         if (!branchIds.has(event.branchId)) throw new Error('Imported event references missing branch.');
     }
+    validateArtifacts(upload.artifacts);
 }
 
 function validateDocumentMetadata(metadata: DocumentMetadata) {
@@ -1087,6 +1142,18 @@ function validateMigrationUpload(upload: ServerMigrationUpload) {
     if (!upload.migrationIds.length) throw new Error('Migration upload must include migration ids.');
     if (!upload.migratedAt.trim()) throw new Error('Migration upload must include migration timestamp.');
     validateBranchEventSet(upload);
+    validateArtifacts(upload.artifacts);
+}
+
+function validateArtifacts(artifacts: SerializedArtifact[] | undefined) {
+    if (artifacts === undefined) return;
+    if (!Array.isArray(artifacts)) throw new Error('Artifacts must be an array.');
+    const ids = new Set<string>();
+    for (const artifact of artifacts) {
+        if (!isSerializedArtifact(artifact)) throw new Error('Artifact payload is invalid.');
+        if (ids.has(artifact.id)) throw new Error('Artifact ids must be unique.');
+        ids.add(artifact.id);
+    }
 }
 
 function validateBranchEventSet({

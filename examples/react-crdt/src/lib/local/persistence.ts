@@ -3,6 +3,7 @@ import type {CrdtLocalHistory, CrdtUpdate} from 'umkehr/crdt';
 import type {LocalDocumentSummary} from '../documentArchive';
 import type {TransportState} from './useLocalDemoSync';
 import {cloneSerializableCrdtLocalHistory} from '../crdtApp';
+import type {SerializedArtifact} from '../artifacts';
 
 const DB_NAME = 'umkehr-react-crdt-local-simulator-documents-v2';
 const DB_VERSION = 2;
@@ -18,6 +19,7 @@ export type PersistedLocalSimulatorDocument<TState> = {
         syncEnabled: boolean;
         outbox: Record<string, CrdtUpdate[]>;
     };
+    artifacts?: SerializedArtifact[];
     createdAt: string;
     updatedAt: string;
 };

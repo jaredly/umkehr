@@ -73,6 +73,18 @@ export type DocumentSummary = {
     lastAccessedAt: string;
     branchCount: number;
     eventCount: number;
+    artifacts?: ArtifactManifestEntry[];
+};
+
+export type ArtifactManifestEntry = {
+    id: string;
+    kind: string;
+    version: number;
+    fingerprintHash: string;
+};
+
+export type SerializedArtifact = ArtifactManifestEntry & {
+    data: unknown;
 };
 
 export type DocumentMetadata = {
@@ -93,6 +105,7 @@ export type SeedDocument = DocumentMetadata & {
     schemaFingerprintHash: string;
     branches: ServerBranch[];
     events: ServerBranchEvent[];
+    artifacts?: SerializedArtifact[];
 };
 
 export type SeedDatabasePayload = {
@@ -112,6 +125,7 @@ export type ServerMigrationDump = {
     targetSchemaFingerprintHash: string;
     branches: ServerBranch[];
     events: ServerBranchEvent[];
+    artifacts?: SerializedArtifact[];
 };
 
 export type ServerMigrationUpload = {
@@ -125,6 +139,7 @@ export type ServerMigrationUpload = {
     migratedAt: string;
     branches: ServerBranch[];
     events: ServerBranchEvent[];
+    artifacts?: SerializedArtifact[];
 };
 
 export type ServerDocumentImportUpload = {
@@ -138,6 +153,7 @@ export type ServerDocumentImportUpload = {
     replace?: boolean;
     branches: ServerBranch[];
     events: ServerBranchEvent[];
+    artifacts?: SerializedArtifact[];
 };
 
 export type ServerMigrationLock = {

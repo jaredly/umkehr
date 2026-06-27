@@ -12,6 +12,7 @@ import {
 import {createStatusStore, type EphemeralMessage, type SyncedTransport} from 'umkehr/react-crdt';
 import {createExternalStore} from '../store';
 import {createInitialCrdtHistory, type AppDefinition} from '../crdtApp';
+import {loadSerializedArtifacts} from '../artifacts';
 import {
     SERVER_PROTOCOL_VERSION,
     SERVER_WS_URL,
@@ -157,6 +158,7 @@ export function useServerSync<TState>({
             branches: branchesRef.current,
             branchList: branchListRef.current,
             staleMergeReview: persistedReviewFromRuntime(reviewRef.current),
+            artifacts: initialReplica.artifacts,
             updatedAt: new Date().toISOString(),
         };
         await saveServerReplica(replica);
@@ -595,6 +597,7 @@ export function useServerSync<TState>({
                 return;
             }
             if (parsed.kind === 'hello' || parsed.kind === 'branchSnapshot') {
+                if (parsed.artifacts?.length) loadSerializedArtifacts(app.artifacts, parsed.artifacts);
                 mergeBranchList(parsed.branches);
                 void persist().then(() => {
                     subscribeActiveBranch();
@@ -615,6 +618,7 @@ export function useServerSync<TState>({
                     schemaFingerprintHash,
                     importedAt: new Date().toISOString(),
                     importedBy: identity.actor,
+                    artifacts: replica.artifacts,
                     branches: replica.branchList,
                     events: Object.values(replica.branches).flatMap((branch) => branch.events),
                 });
@@ -1196,6 +1200,7 @@ export function useServerSync<TState>({
             branches: branchesRef.current,
             branchList: branchListRef.current,
             staleMergeReview: persistedReviewFromRuntime(reviewRef.current),
+            artifacts: initialReplica.artifacts,
             updatedAt: new Date().toISOString(),
         };
     }

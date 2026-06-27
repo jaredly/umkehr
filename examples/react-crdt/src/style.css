@@ -46,6 +46,110 @@ button:disabled:hover {
     border-color: #d5dde7;
 }
 
+.wordsearchPanel {
+    width: min(600px, 100%);
+    margin: 12px auto;
+    padding: 12px;
+    display: grid;
+    gap: 16px;
+}
+
+.wordsearchHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.wordsearchHeader h1,
+.wordsearchHeader p {
+    margin: 0;
+}
+
+.wordsearchHeader p {
+    color: #64748b;
+    font-size: 13px;
+}
+
+.wordsearchActions {
+    display: flex;
+    gap: 8px;
+}
+
+.wordsearchBoard {
+    width: min(100%, 440px);
+    aspect-ratio: 1;
+    display: grid;
+    grid-template-columns: repeat(8, minmax(0, 1fr));
+    gap: 5px;
+    touch-action: none;
+    user-select: none;
+}
+
+.wordsearchCell {
+    --wordsearch-found: transparent;
+    --wordsearch-remote: transparent;
+    min-width: 0;
+    width: 100%;
+    height: 100%;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    padding: 0;
+    background:
+        linear-gradient(rgb(255 255 255 / 82%), rgb(255 255 255 / 82%)),
+        var(--wordsearch-found);
+    color: #0f172a;
+    font-size: 22px;
+    font-weight: 800;
+}
+
+.wordsearchCell.active {
+    border-color: #0f766e;
+    background: #ccfbf1;
+}
+
+.wordsearchCell.remoteActive {
+    box-shadow: inset 0 0 0 3px var(--wordsearch-remote);
+}
+
+.wordsearchCell.found {
+    border-color: var(--wordsearch-found);
+}
+
+.wordsearchBank {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.wordsearchWord {
+    --wordsearch-found: #94a3b8;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    padding: 6px 10px;
+    color: #334155;
+    background: #fff;
+    font-size: 13px;
+    font-weight: 800;
+}
+
+.wordsearchWord.found {
+    border-color: var(--wordsearch-found);
+    color: #0f172a;
+    background:
+        linear-gradient(rgb(255 255 255 / 74%), rgb(255 255 255 / 74%)),
+        var(--wordsearch-found);
+    text-decoration: line-through;
+}
+
+.wordsearchStatus,
+.wordsearchMissing {
+    margin: 0;
+    color: #b45309;
+    font-size: 13px;
+    font-weight: 700;
+}
+
 .demoTopBar {
     position: sticky;
     top: 0;

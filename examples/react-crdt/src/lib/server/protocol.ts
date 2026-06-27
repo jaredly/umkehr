@@ -14,6 +14,7 @@ import type {
 } from './types';
 import {parseSessionActor} from './session';
 import type {EphemeralMessage} from 'umkehr/react-crdt';
+import {validateSerializedArtifacts, type SerializedArtifact} from '../artifacts';
 
 export const SERVER_PROTOCOL_VERSION = 3;
 export const SERVER_PORT = 8787;
@@ -156,6 +157,7 @@ export type ClientServerMessage =
           importedAt: string;
           importedBy: string;
           replace?: boolean;
+          artifacts?: SerializedArtifact[];
           branches: ServerBranch[];
           events: ServerBranchEvent[];
       };
@@ -171,12 +173,14 @@ export type ServerClientMessage =
           version: 3;
           docId: string;
           branches: ServerBranch[];
+          artifacts?: SerializedArtifact[];
       }
     | {
           kind: 'branchSnapshot';
           version: 3;
           docId: string;
           branches: ServerBranch[];
+          artifacts?: SerializedArtifact[];
       }
     | {
           kind: 'branchUpdate';
@@ -314,7 +318,9 @@ export function parseServerMessage<TState>(
         if (input.docId !== docId || !Array.isArray(input.branches)) return null;
         const branches = parseBranches(input.branches);
         if (!branches) return null;
-        return {...input, branches} as ServerClientMessage;
+        const artifacts = validateSerializedArtifacts(input.artifacts);
+        if (!artifacts) return null;
+        return {...input, branches, artifacts} as ServerClientMessage;
     }
 
     if (input.kind === 'branchUpdate') {

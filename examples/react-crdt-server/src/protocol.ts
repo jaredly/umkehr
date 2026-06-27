@@ -6,6 +6,7 @@ import type {
     ServerDocumentImportUpload,
     ServerMigrationUpload,
     ServerPresenceUser,
+    SerializedArtifact,
 } from './types';
 
 export const SERVER_PROTOCOL_VERSION = 3;
@@ -215,12 +216,14 @@ export type ServerClientMessage =
           version: 3;
           docId: string;
           branches: ServerBranch[];
+          artifacts?: SerializedArtifact[];
       }
     | {
           kind: 'branchSnapshot';
           version: 3;
           docId: string;
           branches: ServerBranch[];
+          artifacts?: SerializedArtifact[];
       }
     | {
           kind: 'branchUpdate';

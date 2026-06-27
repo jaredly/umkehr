@@ -2,6 +2,7 @@ import {openDB, type DBSchema, type IDBPDatabase} from 'idb';
 import type {CrdtLocalHistory} from 'umkehr/crdt';
 import type {LocalDocumentSummary} from '../documentArchive';
 import {cloneSerializableCrdtLocalHistory} from '../crdtApp';
+import type {SerializedArtifact} from '../artifacts';
 
 const DB_NAME = 'umkehr-react-crdt-peerjs-documents';
 const DB_VERSION = 2;
@@ -13,6 +14,7 @@ export type PersistedPeerJsDocument<TState> = {
     schemaVersion: number;
     schemaFingerprintHash: string;
     history: CrdtLocalHistory<TState>;
+    artifacts?: SerializedArtifact[];
     createdAt: string;
     updatedAt: string;
 };

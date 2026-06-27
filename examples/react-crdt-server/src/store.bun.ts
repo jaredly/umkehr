@@ -229,6 +229,7 @@ describe('ServerStore', () => {
             schemaVersion: 1,
             schemaFingerprint: 'schema',
             schemaFingerprintHash: 'schema-hash',
+            artifacts: [],
         });
         expect(store.summarizeDocuments()).toEqual([
             {
@@ -244,6 +245,7 @@ describe('ServerStore', () => {
                 lastAccessedAt: '2026-01-02T00:00:00.000Z',
                 branchCount: 2,
                 eventCount: 3,
+                artifacts: [],
             },
         ]);
         expect(store.listBranches('seed-doc').map((branch) => branch.branchId)).toEqual([

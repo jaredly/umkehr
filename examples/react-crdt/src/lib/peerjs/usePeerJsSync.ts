@@ -12,6 +12,7 @@ import {
 } from './protocol';
 import {peerOptions} from './peerOptions';
 import type {PeerConnectionInfo, PeerJsSync, PeerRole, PeerSyncState} from './types';
+import type {SerializedArtifact} from '../artifacts';
 
 type ConnectionRecord<TState> = {
     conn: DataConnection;
@@ -26,11 +27,15 @@ export function usePeerJsSync<TState>({
     role,
     actor,
     initialDocument,
+    initialArtifacts = [],
+    onArtifacts,
     protocol,
 }: {
     role: PeerRole;
     actor: string;
     initialDocument?: CrdtDocument<TState>;
+    initialArtifacts?: SerializedArtifact[];
+    onArtifacts?: (artifacts: SerializedArtifact[]) => void;
     protocol: PeerProtocolConfig<TState>;
 }): PeerJsSync<TState> {
     const peerRef = useRef<Peer | null>(null);
@@ -39,6 +44,8 @@ export function usePeerJsSync<TState>({
     const protocolRef = useRef(protocol);
     const clockRef = useRef(hlc.init(actor, Date.now()));
     const snapshotRef = useRef<CrdtDocument<TState> | undefined>(initialDocument);
+    const artifactsRef = useRef<SerializedArtifact[]>(initialArtifacts);
+    const onArtifactsRef = useRef(onArtifacts);
     const listenersRef = useRef(new Set<(update: CrdtUpdate) => void>());
     const ephemeralListenersRef = useRef(new Set<(message: EphemeralMessage<unknown>) => void>());
     const connectionsRef = useRef(new Map<string, ConnectionRecord<TState>>());
@@ -55,6 +62,8 @@ export function usePeerJsSync<TState>({
     actorRef.current = actor;
     protocolRef.current = protocol;
     snapshotRef.current = initialDocument ?? snapshotRef.current;
+    artifactsRef.current = initialArtifacts;
+    onArtifactsRef.current = onArtifacts;
 
     const publishConnections = useCallback(() => {
         connectionsStore.setSnapshot(
@@ -134,6 +143,7 @@ export function usePeerJsSync<TState>({
                 actor: actorRef.current,
                 docId: protocolRef.current.docId,
                 document: snapshotRef.current,
+                artifacts: artifactsRef.current,
             });
         },
         [sendOrQueue],
@@ -208,6 +218,7 @@ export function usePeerJsSync<TState>({
                 if (roleRef.current !== 'client') return;
                 const current = snapshotStore.getSnapshot();
                 if (!current) {
+                    if (message.artifacts?.length) onArtifactsRef.current?.(message.artifacts);
                     snapshotStore.setSnapshot(message.document);
                     if (record) record.gotSnapshot = true;
                     stateStore.setSnapshot({

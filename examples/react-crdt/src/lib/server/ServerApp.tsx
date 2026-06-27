@@ -47,6 +47,10 @@ import type {
     ServerSync,
     ServerUser,
 } from './types';
+import {
+    loadSerializedArtifacts,
+    serializedArtifactsForStore,
+} from '../artifacts';
 
 type Loaded<TState> = {
     identity: ServerSessionIdentity;
@@ -342,12 +346,21 @@ function ServerReadyApp<TState, EphemeralData>({
                     schemaFingerprint,
                     schemaFingerprintHash,
                     exportedBy: {actor: loaded.identity.actor},
-                    payload: {kind: 'server', replica: sync.exportReplica() as any},
+                    payload: {
+                        kind: 'server',
+                        replica: sync.exportReplica() as any,
+                        artifacts: sync.exportReplica().artifacts ?? serializedArtifactsForStore(app.artifacts),
+                    },
                 };
             },
             async importArchive(archive: DocumentArchive) {
                 assertArchiveForApp(archive, app as any, 'server');
                 const replica = archive.payload.replica as PersistedServerReplica<TState>;
+                const artifacts =
+                    archive.payload.artifacts ??
+                    replica.artifacts ??
+                    serializedArtifactsForStore(app.artifacts);
+                loadSerializedArtifacts(app.artifacts, artifacts);
                 if (replica.appId && replica.appId !== app.id) {
                     throw new Error('Archive server replica belongs to another app.');
                 }
@@ -360,7 +373,7 @@ function ServerReadyApp<TState, EphemeralData>({
                     }
                 }
                 const normalized = hydrateServerReplica(
-                    {...replica, appId: app.id, storageVersion: 4 as const},
+                    {...replica, appId: app.id, storageVersion: 4 as const, artifacts},
                     app,
                 );
                 await saveServerReplica(normalized);
@@ -428,6 +441,7 @@ function ServerReadyApp<TState, EphemeralData>({
                         mirrored: true,
                     },
                 },
+                artifacts: serializedArtifactsForStore(app.artifacts),
                 updatedAt: now,
             });
             await refreshDocuments();
@@ -441,6 +455,7 @@ function ServerReadyApp<TState, EphemeralData>({
             await saveServerReplica({
                 ...createServerClientSeedReplica({fixture, scenario: 'cached'}),
                 title: fixture.title || fixture.docId,
+                artifacts: serializedArtifactsForStore(app.artifacts),
             });
             await refreshDocuments();
         },
@@ -778,6 +793,8 @@ async function loadInitialState<TState>(
     const persisted = await loadServerReplica<TState>(docId);
     if (persisted) {
         const normalized = hydrateServerReplica(normalizeServerReplica(persisted), app);
+        normalized.artifacts ??= serializedArtifactsForStore(app.artifacts);
+        loadSerializedArtifacts(app.artifacts, normalized.artifacts);
         normalized.appId ||= app.id;
         if (normalized.schemaFingerprintHash === fingerprintHash) {
             if (normalized.appId !== app.id)
@@ -837,6 +854,7 @@ async function loadInitialState<TState>(
                 mirrored: true,
             },
         },
+        artifacts: serializedArtifactsForStore(app.artifacts),
         updatedAt: now,
     };
     await saveServerReplica(replica);
@@ -853,6 +871,7 @@ function hydrateServerReplica<TState>(
 ): PersistedServerReplica<TState> {
     return {
         ...replica,
+        artifacts: replica.artifacts ?? serializedArtifactsForStore(app.artifacts),
         branches: Object.fromEntries(
             Object.entries(replica.branches).map(([branchId, branch]) => [
                 branchId,
@@ -943,6 +962,7 @@ function summaryForServerReplica(replica: PersistedServerReplica<unknown>): Serv
             (count, branch) => count + branch.events.length,
             0,
         ),
+        artifacts: replica.artifacts,
     };
 }
 

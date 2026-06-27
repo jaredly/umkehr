@@ -29,6 +29,12 @@ import {
 } from '../apps/block-notes/BlockNotesApp';
 import type {BlockNotesBuilderExtensions, BlockNotesState} from '../apps/block-notes/model';
 import {
+    wordsearchApp,
+    wordsearchCrdtRuntime,
+    wordsearchHistoryRuntime,
+} from '../apps/wordsearch/WordsearchApp';
+import type {WordsearchEphemeralData, WordsearchState} from '../apps/wordsearch/model';
+import {
     todoFixtureMigration,
     todoFixtureMigrationConfig,
     todoFixtureV3MigrationConfig,
@@ -132,6 +138,12 @@ export const registeredApps = [
         history: blockNotesHistoryRuntime,
         serverSchemaConfig: undefined,
     },
+    {
+        app: wordsearchApp,
+        crdt: wordsearchCrdtRuntime,
+        history: wordsearchHistoryRuntime,
+        serverSchemaConfig: undefined,
+    },
 ] satisfies [
     RegisteredApp<TodoState>,
     RegisteredApp<TodoFixtureStateV1>,
@@ -139,6 +151,7 @@ export const registeredApps = [
     RegisteredEphemeralApp<WhiteboardState, WhiteboardEphemeralData>,
     RegisteredApp<RichNotesState, RichNotesBuilderExtensions>,
     RegisteredApp<BlockNotesState, BlockNotesBuilderExtensions>,
+    RegisteredEphemeralApp<WordsearchState, WordsearchEphemeralData>,
 ];
 export type AppOption = {
     id: string;
