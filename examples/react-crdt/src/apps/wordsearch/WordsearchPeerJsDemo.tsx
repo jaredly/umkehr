@@ -119,7 +119,12 @@ export function WordsearchPeerJsDemo() {
                     <h1>Loading game</h1>
                 </section>
             ) : (
-                <WordsearchClientDocument actor={actor} sync={sync} />
+                <WordsearchClientDocument
+                    actor={actor}
+                    sync={sync}
+                    setRole={setRole}
+                    initialHostPeerId={initialHostPeerId}
+                />
             )}
         </main>
     );
@@ -149,12 +154,17 @@ function WordsearchHostPanel({
 function WordsearchClientDocument({
     actor,
     sync,
+    setRole,
+    initialHostPeerId,
 }: {
     actor: string;
     sync: PeerJsSync<WordsearchState>;
+    setRole: (role: PeerRole) => void;
+    initialHostPeerId: string;
 }) {
     const snapshot = useStore(sync.snapshotStore);
     const state = useStore(sync.stateStore);
+    const [hostPeerId, setHostPeerId] = useState(initialHostPeerId);
     const [snapshotKey, setSnapshotKey] = useState(0);
     const initial = useMemo(() => (snapshot ? createCrdtLocalHistory(snapshot) : null), [snapshot]);
 
@@ -163,6 +173,37 @@ function WordsearchClientDocument({
     }, [snapshot]);
 
     if (!initial) {
+        if (state.kind === 'error') {
+            return (
+                <section className="waitingPanel peerErrorPanel">
+                    <h1>Unable to contact host</h1>
+                    <p>{friendlyPeerError(state.message)}</p>
+                    <div className="peerRecoveryActions">
+                        <button type="button" onClick={() => setRole('host')}>
+                            Switch to host mode
+                        </button>
+                        <form
+                            className="peerConnect"
+                            onSubmit={(event) => {
+                                event.preventDefault();
+                                sync.connect(hostPeerId);
+                            }}
+                        >
+                            <input
+                                value={hostPeerId}
+                                placeholder="Host Peer ID"
+                                aria-label="Host Peer ID"
+                                onChange={(event) => setHostPeerId(event.target.value)}
+                            />
+                            <button type="submit" disabled={!hostPeerId.trim()}>
+                                Connect
+                            </button>
+                        </form>
+                    </div>
+                </section>
+            );
+        }
+
         return (
             <section className="waitingPanel">
                 <h1>Waiting for host snapshot</h1>
@@ -184,6 +225,12 @@ function WordsearchClientDocument({
             <WordsearchClientPanel actor={actor} />
         </wordsearchCrdtRuntime.Provider>
     );
+}
+
+function friendlyPeerError(message: string) {
+    const trimmed = message.trim();
+    if (!trimmed) return 'Enter a different host Peer ID, or start a new host on this device.';
+    return `${trimmed}. Enter a different host Peer ID, or start a new host on this device.`;
 }
 
 function WordsearchClientPanel({actor}: {actor: string}) {

@@ -1785,6 +1785,23 @@ p {
     padding: 24px;
 }
 
+.peerErrorPanel {
+    display: grid;
+    gap: 12px;
+    align-content: start;
+}
+
+.peerRecoveryActions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.peerRecoveryActions .peerConnect {
+    flex: 1 1 280px;
+}
+
 .historyView {
     display: grid;
     gap: 12px;
@@ -2397,6 +2414,19 @@ p {
     .waitingPanel {
         min-height: 0;
         padding: 12px;
+    }
+
+    .peerErrorPanel {
+        gap: 10px;
+    }
+
+    .peerRecoveryActions {
+        align-items: stretch;
+    }
+
+    .peerRecoveryActions > button,
+    .peerRecoveryActions .peerConnect {
+        flex-basis: 100%;
     }
 }
 
