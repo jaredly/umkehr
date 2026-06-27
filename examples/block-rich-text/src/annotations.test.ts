@@ -2,6 +2,7 @@ import {describe, expect, it} from 'vitest';
 import {
     applyMany,
     blockContents,
+    isDeleted,
     markRangeOp,
     materializedBlockParent,
     materializeFormattedBlocks,
@@ -473,7 +474,7 @@ describe('block rich text annotations', () => {
         let active = annotationsFor(result.state);
         expect(active).toHaveLength(1);
         expect(active[0].bodyBlocks.map((block) => block.id)).toEqual([secondBodyId]);
-        expect(result.state.state.blocks[firstBodyId].deleted).toBe(true);
+        expect(isDeleted(result.state.state.blocks[firstBodyId])).toBe(true);
 
         result = deleteAnnotationBodyBackward(result.state, caret(secondBodyId, 0), ctx(), {
             annotationId: annotation.id,
@@ -482,7 +483,7 @@ describe('block rich text annotations', () => {
 
         active = annotationsFor(result.state);
         expect(active).toEqual([]);
-        expect(result.state.state.blocks[secondBodyId].deleted).toBe(false);
+        expect(isDeleted(result.state.state.blocks[secondBodyId])).toBe(false);
     });
 
     it('returns null annotation ids when a selection cannot create an annotation', () => {

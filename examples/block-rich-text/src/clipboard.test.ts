@@ -173,18 +173,18 @@ describe('block rich text clipboard payload parser', () => {
         ).toBeNull();
     });
 
-    it('parses kanban block metadata', () => {
-        const kanbanPayload = payload({
+    it('parses columns block metadata', () => {
+        const columnsPayload = payload({
             fragments: [
                 {
                     text: 'Project board',
-                    meta: {type: 'kanban', ts: 'kanban-ts'},
+                    meta: {type: 'columns', display: 'cards', ts: 'columns-ts'},
                     marks: [],
                 },
             ],
         });
 
-        expect(parseBlockRichTextClipboardPayload(JSON.stringify(kanbanPayload))).toEqual(kanbanPayload);
+        expect(parseBlockRichTextClipboardPayload(JSON.stringify(columnsPayload))).toEqual(columnsPayload);
     });
 
     it('returns null for invalid annotation entries', () => {

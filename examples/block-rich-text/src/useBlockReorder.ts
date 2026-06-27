@@ -79,12 +79,12 @@ export function useBlockReorder({
         });
         if (cellTarget) return cellTarget;
 
-        const kanbanTarget = resolveKanbanDropTarget(currentBlocks, clientX, clientY, {
+        const columnsTarget = resolveColumnsDropTarget(currentBlocks, clientX, clientY, {
             dragged,
             draggedIds,
         });
-        if (kanbanTarget === NO_DROP_TARGET) return null;
-        if (kanbanTarget) return kanbanTarget;
+        if (columnsTarget === NO_DROP_TARGET) return null;
+        if (columnsTarget) return columnsTarget;
 
         const horizontalRows = rows.filter(({rect}) => rectContainsX(rect, clientX));
         if (!horizontalRows.length) return null;
@@ -254,7 +254,7 @@ const resolveDropTarget = (
     return normalizeDropTarget(blocks, hovered, {...afterSubtree, dragged, draggedIds});
 };
 
-const resolveKanbanDropTarget = (
+const resolveColumnsDropTarget = (
     blocks: BlockOutlineItem[],
     clientX: number,
     clientY: number,
@@ -269,14 +269,34 @@ const resolveKanbanDropTarget = (
     if (typeof document.elementsFromPoint !== 'function') return null;
     const elements = document.elementsFromPoint(clientX, clientY);
     const column = elements
-        .map((element) => element.closest<HTMLElement>('[data-kanban-column-id]'))
-        .find((element): element is HTMLElement => !!element?.dataset.kanbanColumnId);
+        .map((element) => element.closest<HTMLElement>('[data-columns-column-id]'))
+        .find((element): element is HTMLElement => !!element?.dataset.columnsColumnId);
     const draggedRootIds = draggedIds.length ? draggedIds : dragged ? [dragged] : [];
     const draggingColumn =
-        draggedRootIds.length === 1 && isRenderedKanbanColumn(draggedRootIds[0]);
+        draggedRootIds.length === 1 && isRenderedColumnsColumn(draggedRootIds[0]);
 
-    if (draggingColumn && column) {
-        const columnId = column.dataset.kanbanColumnId;
+    if (column?.dataset.columnsColumnDisplay === 'blocks') {
+        if (!draggingColumn && !isColumnBackgroundHit(elements, column)) return null;
+        const columnId = column.dataset.columnsColumnId;
+        const hovered = columnId ? blocks.find((block) => block.id === columnId) : null;
+        if (!columnId || !hovered) return null;
+        const rect = column.getBoundingClientRect();
+        const placement = rect.width > 0 && clientX > rect.left + rect.width / 2 ? 'after' : 'before';
+        return normalizeDropTarget(blocks, hovered, {
+            command:
+                placement === 'after'
+                    ? {type: 'after', targetBlockId: columnId}
+                    : {type: 'before', targetBlockId: columnId},
+            indicatorBlockId: columnId,
+            indicatorPlacement: placement,
+            indicatorDepth: hovered.depth,
+            dragged,
+            draggedIds,
+        }) ?? NO_DROP_TARGET;
+    }
+
+    if (draggingColumn && column?.dataset.columnsColumnDisplay === 'cards') {
+        const columnId = column.dataset.columnsColumnId;
         const hovered = columnId ? blocks.find((block) => block.id === columnId) : null;
         if (!columnId || !hovered) return null;
         const rect = column.getBoundingClientRect();
@@ -295,13 +315,13 @@ const resolveKanbanDropTarget = (
     }
 
     const card = elements
-        .map((element) => element.closest<HTMLElement>('[data-kanban-card-id]'))
-        .find((element): element is HTMLElement => !!element?.dataset.kanbanCardId);
+        .map((element) => element.closest<HTMLElement>('[data-columns-card-id]'))
+        .find((element): element is HTMLElement => !!element?.dataset.columnsCardId);
     if (card) {
-        const cardId = card.dataset.kanbanCardId;
+        const cardId = card.dataset.columnsCardId;
         const hovered = cardId ? blocks.find((block) => block.id === cardId) : null;
         if (!cardId || !hovered) return null;
-        return resolveKanbanCardDropTarget(blocks, hovered, {
+        return resolveColumnsCardDropTarget(blocks, hovered, {
             clientX,
             clientY,
             rect: card.getBoundingClientRect(),
@@ -310,11 +330,11 @@ const resolveKanbanDropTarget = (
         }) ?? NO_DROP_TARGET;
     }
 
-    if (column) {
-        const columnId = column.dataset.kanbanColumnId;
+    if (column?.dataset.columnsColumnDisplay === 'cards') {
+        const columnId = column.dataset.columnsColumnId;
         const hovered = columnId ? blocks.find((block) => block.id === columnId) : null;
         if (!columnId || !hovered) return null;
-        const cardSlotTarget = resolveKanbanColumnCardSlot(blocks, column, clientY, {
+        const cardSlotTarget = resolveColumnsColumnCardSlot(blocks, column, clientY, {
             dragged,
             draggedIds,
         });
@@ -328,14 +348,17 @@ const resolveKanbanDropTarget = (
     }
 
     const columnsContainer = elements
-        .map((element) => element.closest<HTMLElement>('.kanbanColumns[data-kanban-board-id]'))
-        .find((element): element is HTMLElement => !!element?.dataset.kanbanBoardId);
-    if (!columnsContainer || !draggingColumn) return null;
-    const boardId = columnsContainer.dataset.kanbanBoardId;
+        .map((element) => element.closest<HTMLElement>('.columnsColumns[data-columns-board-id]'))
+        .find((element): element is HTMLElement => !!element?.dataset.columnsBoardId);
+    if (!columnsContainer) return null;
+    const display = columnsContainer.dataset.columnsDisplay;
+    if (display === 'cards' && !draggingColumn) return null;
+    if (display !== 'cards' && display !== 'blocks') return null;
+    const boardId = columnsContainer.dataset.columnsBoardId;
     const columns = Array.from(
-        columnsContainer.querySelectorAll<HTMLElement>(':scope > [data-kanban-column-id]'),
+        columnsContainer.querySelectorAll<HTMLElement>(':scope > [data-columns-column-id]'),
     );
-    const lastColumnId = columns[columns.length - 1]?.dataset.kanbanColumnId;
+    const lastColumnId = columns[columns.length - 1]?.dataset.columnsColumnId;
     const lastColumn = lastColumnId ? blocks.find((block) => block.id === lastColumnId) : null;
     const board = boardId ? blocks.find((block) => block.id === boardId) : null;
     if (lastColumnId && lastColumn) {
@@ -359,7 +382,7 @@ const resolveKanbanDropTarget = (
     return null;
 };
 
-const resolveKanbanColumnCardSlot = (
+const resolveColumnsColumnCardSlot = (
     blocks: BlockOutlineItem[],
     column: HTMLElement,
     clientY: number,
@@ -372,10 +395,10 @@ const resolveKanbanColumnCardSlot = (
     },
 ): DropTarget | null => {
     const cards = Array.from(
-        column.querySelectorAll<HTMLElement>(':scope > .kanbanCards > [data-kanban-card-id]'),
+        column.querySelectorAll<HTMLElement>(':scope > .columnsCards > [data-columns-card-id]'),
     )
         .map((element) => {
-            const cardId = element.dataset.kanbanCardId;
+            const cardId = element.dataset.columnsCardId;
             const block = cardId ? blocks.find((candidate) => candidate.id === cardId) : null;
             return cardId && block ? {id: cardId, block, rect: element.getBoundingClientRect()} : null;
         })
@@ -424,7 +447,7 @@ const resolveKanbanColumnCardSlot = (
     return null;
 };
 
-const resolveKanbanCardDropTarget = (
+const resolveColumnsCardDropTarget = (
     blocks: BlockOutlineItem[],
     hovered: BlockOutlineItem,
     {
@@ -475,10 +498,13 @@ const resolveKanbanCardDropTarget = (
     });
 };
 
-const isRenderedKanbanColumn = (blockId: string): boolean =>
-    Array.from(document.querySelectorAll<HTMLElement>('[data-kanban-column-id]')).some(
-        (element) => element.dataset.kanbanColumnId === blockId,
+const isRenderedColumnsColumn = (blockId: string): boolean =>
+    Array.from(document.querySelectorAll<HTMLElement>('[data-columns-column-id]')).some(
+        (element) => element.dataset.columnsColumnId === blockId,
     );
+
+const isColumnBackgroundHit = (elements: Element[], column: HTMLElement): boolean =>
+    elements.some((element) => element === column || element.classList.contains('columnsColumns'));
 
 const resolveCellDropTarget = (
     blocks: BlockOutlineItem[],

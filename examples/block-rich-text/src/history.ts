@@ -1,4 +1,4 @@
-import {applyMany, materializeFormattedBlocks, type Op} from 'umkehr/block-crdt';
+import {applyMany, isDeleted, materializeFormattedBlocks, type Op} from 'umkehr/block-crdt';
 import * as hlc from '../../../src/crdt/hlc';
 import {
     applyLocalChange,
@@ -261,7 +261,7 @@ const snapshotReplica = (replica: DemoState[EditorId]): ReplicaSnapshot => ({
         depth: block.depth,
         text: block.runs.map((run) => run.text).join(''),
     })),
-    deletedBlockCount: Object.values(replica.state.state.blocks).filter((block) => block.deleted).length,
+    deletedBlockCount: Object.values(replica.state.state.blocks).filter((block) => isDeleted(block)).length,
     joinCount: Object.keys(replica.state.state.joins).length,
 });
 
@@ -419,7 +419,9 @@ const validateOp = (value: unknown): string | null => {
     }
     if (value.type === 'block') {
         if (!isRecord(value.block)) return 'has invalid block record.';
-        if (typeof value.block.deleted !== 'boolean') return 'block must use deleted boolean.';
+        if (value.block.deleted !== undefined && !isSerializedDeletedState(value.block.deleted)) {
+            return 'block must use deleted state.';
+        }
         if (!isBlockOrder(value.block.order)) return 'block has invalid order.';
         if (value.block.style !== undefined && !isBlockStyle(value.block.style)) {
             return 'block has invalid style.';
@@ -466,6 +468,9 @@ const isBlockStyle = (value: unknown): boolean =>
         (item) => isRecord(item) && isJsonValue(item.value) && typeof item.ts === 'string',
     );
 
+const isSerializedDeletedState = (value: unknown): boolean =>
+    isRecord(value) && typeof value.value === 'boolean' && typeof value.ts === 'string';
+
 const isJsonValue = (value: unknown): boolean => {
     if (
         value === null ||
@@ -487,8 +492,9 @@ const isRichBlockMeta = (value: unknown): value is RichBlockMeta => {
         case 'paragraph':
         case 'blockquote':
         case 'table':
-        case 'kanban':
             return true;
+        case 'columns':
+            return value.display === 'blocks' || value.display === 'cards';
         case 'slide_deck':
             return (
                 Number.isInteger(value.width) &&

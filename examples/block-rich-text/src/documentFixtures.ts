@@ -45,7 +45,7 @@ export const documentFixtures: DocumentFixture[] = [
     {id: 'large-table', label: 'Large table', document: largeTable},
     {id: 'sparse-table', label: 'Sparse table', document: sparseTable},
     {id: 'complex-table', label: 'Complex table', document: complexTable},
-    {id: 'kanban-board', label: 'Kanban board', document: kanbanBoard},
+    {id: 'card-columns', label: 'Card columns', document: cardColumns},
     {id: 'slide-deck', label: 'Slide deck', document: slideDeck},
     {id: 'block-crdt-slide-deck', label: 'Block CRDT intro deck', document: blockCrdtSlideDeck},
     {
@@ -411,7 +411,7 @@ end`,
                             type: 'list_item',
                             meta: {kind: 'unordered'},
                             content:
-                                'Headings, todos, tables, kanban boards, polls, previews, images, and slides',
+                                'Headings, todos, tables, card columns, polls, previews, images, and slides',
                         },
                         {
                             type: 'callout',
@@ -694,8 +694,9 @@ function simpleEverythingSlideDeck(): ImportDocument {
                     content: 'Structured blocks 2',
                     children: [
                         {
-                            type: 'kanban',
-                            content: 'Kanban board',
+                            type: 'columns',
+                            meta: {display: 'cards'},
+                            content: 'Card columns',
                             children: [
                                 {
                                     content: 'todo',
@@ -1085,10 +1086,11 @@ function complexTable(): ImportDocument {
     ];
 }
 
-function kanbanBoard(): ImportDocument {
+function cardColumns(): ImportDocument {
     return [
         {
-            type: 'kanban',
+            type: 'columns',
+            meta: {display: 'cards'},
             content: 'Launch board',
             children: [
                 {

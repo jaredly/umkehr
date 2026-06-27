@@ -9,6 +9,7 @@ import {
     charOp,
     formattedMarkValues,
     hasJoinStyleParent,
+    isDeleted,
     join,
     markBoundaryOp,
     markOp,
@@ -341,7 +342,7 @@ it('deleted chars do not render but still preserve mark anchors', () => {
         state,
         markRange(state, [0, 'self'], 0, 3, 'bold', undefined, false, [10, 'self']),
     ) as CachedState;
-    state = apply(state, {type: 'char:delete', id: [2, 'self']}) as CachedState;
+    state = apply(state, {type: 'char:delete', id: [2, 'self'], deleted: {value: true, ts: '00010'}}) as CachedState;
 
     expect(formattedRuns(state)[0]).toEqual([{text: 'ac', marks: {bold: true}}]);
 });
@@ -548,6 +549,7 @@ it('traverses deleted blocks while omitting them from formatted output', () => {
     state = apply(state, {
         type: 'block:delete',
         id: state.state.blocks[rightBlock].id,
+        deleted: {value: true, ts: '00020'},
     }) as CachedState;
 
     expect(formattedRuns(state)).toEqual([
@@ -592,7 +594,7 @@ it('preserves visible text when materializing generated marked documents', () =>
                     .map((block) => block.runs.map((run) => run.text).join(''))
                     .join('\n');
                 const visibleText = state.cache.blockChildren['0000-root']
-                    .filter((id) => !state.state.blocks[id].deleted)
+                    .filter((id) => !isDeleted(state.state.blocks[id]))
                     .map((id) => blockContents(state, id))
                     .join('\n');
                 expect(formattedText).toBe(visibleText);

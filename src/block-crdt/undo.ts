@@ -1,4 +1,5 @@
 import {compareLamports, lamportToString} from './ids.js';
+import {isDeleted} from './deletion.js';
 import {findTail, orderedCharIdsForBlock, charRecord} from './traversal.js';
 import {
     Block,
@@ -49,13 +50,13 @@ export const planUndoOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
             case 'char': {
                 const id = lamportToString(op.char.id);
                 const currentChar = current.state.chars[id];
-                if (currentChar && !currentChar.deleted) {
-                    ops.push({type: 'char:delete', id: op.char.id});
+                if (currentChar && !isDeleted(currentChar)) {
+                    ops.push({type: 'char:delete', id: op.char.id, deleted: {value: true, ts: nextTs()}});
                     break;
                 }
                 const replacement = replacementCharForInsertedChar(before, current, op.char);
                 if (replacement) {
-                    ops.push({type: 'char:delete', id: replacement.id});
+                    ops.push({type: 'char:delete', id: replacement.id, deleted: {value: true, ts: nextTs()}});
                 }
                 break;
             }
@@ -75,10 +76,19 @@ export const planUndoOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
                 });
                 break;
             }
-            case 'char:delete':
-                restoreDeletedChar(before, op.id, nextId, replacements, ops) ||
-                    reject(op, 'char delete undo requires the deleted char in the previous state');
+            case 'char:delete': {
+                const beforeChar = before.state.chars[lamportToString(op.id)];
+                if (!beforeChar) {
+                    reject(op, 'char delete undo requires the char in the previous state');
+                    break;
+                }
+                ops.push({
+                    type: 'char:delete',
+                    id: op.id,
+                    deleted: {value: isDeleted(beforeChar), ts: nextTs()},
+                });
                 break;
+            }
             case 'block': {
                 const id = lamportToString(op.block.id);
                 if (before.state.blocks[id]) {
@@ -86,8 +96,8 @@ export const planUndoOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
                     break;
                 }
                 const currentBlock = current.state.blocks[id];
-                if (currentBlock && !currentBlock.deleted) {
-                    ops.push({type: 'block:delete', id: op.block.id});
+                if (currentBlock && !isDeleted(currentBlock)) {
+                    ops.push({type: 'block:delete', id: op.block.id, deleted: {value: true, ts: nextTs()}});
                 }
                 break;
             }
@@ -104,10 +114,19 @@ export const planUndoOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
                 });
                 break;
             }
-            case 'block:delete':
-                restoreDeletedBlock(before, op.id, nextId, ops) ||
-                    reject(op, 'block delete undo requires the deleted block in the previous state');
+            case 'block:delete': {
+                const beforeBlock = before.state.blocks[lamportToString(op.id)];
+                if (!beforeBlock) {
+                    reject(op, 'block delete undo requires the block in the previous state');
+                    break;
+                }
+                ops.push({
+                    type: 'block:delete',
+                    id: op.id,
+                    deleted: {value: isDeleted(beforeBlock), ts: nextTs()},
+                });
                 break;
+            }
             case 'block:meta': {
                 const beforeBlock = before.state.blocks[lamportToString(op.id)];
                 if (!beforeBlock) {
@@ -190,7 +209,7 @@ const replacementCharForInsertedChar = <M extends TimestampedBlockMeta>(
 ): Char | null => {
     for (const candidate of Object.values(current.state.chars)) {
         const candidateId = lamportToString(candidate.id);
-        if (candidate.deleted || candidateId === lamportToString(inserted.id)) continue;
+        if (isDeleted(candidate) || candidateId === lamportToString(inserted.id)) continue;
         if (before.state.chars[candidateId]) continue;
         if (candidate.text !== inserted.text) continue;
         if (!sameLamport(candidate.parent.id, inserted.parent.id)) continue;
@@ -268,7 +287,7 @@ const restoreBlockWithVisibleText = <M extends TimestampedBlockMeta>(
     let parent = id;
     for (const charId of orderedCharIdsForBlock(before, lamportToString(beforeBlock.id), {visibleOnly: true})) {
         const char = charRecord(before, charId);
-        if (!char || char.deleted) continue;
+        if (!char || isDeleted(char)) continue;
         const replacement = nextId();
         ops.push(charInsertOp(char.text, replacement, parent));
         parent = replacement;
@@ -290,7 +309,7 @@ const freshBlockOp = <M extends TimestampedBlockMeta>(
             path: [...beforeBlock.order.path.slice(0, -1), id],
             ...(ts ? {ts} : {}),
         },
-        deleted: false,
+        deleted: undefined,
     },
 });
 
@@ -303,7 +322,7 @@ const charInsertOp = <M extends TimestampedBlockMeta>(
     char: {
         id,
         text,
-        deleted: false,
+        deleted: undefined,
         parent: {id: parent, ts: ''},
     },
 });

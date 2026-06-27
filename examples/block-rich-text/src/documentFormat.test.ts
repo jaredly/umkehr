@@ -132,11 +132,11 @@ describe('block rich text document format import', () => {
         expect(cellIds.map((id) => blockContents(result.state, id))).toEqual(['A1', 'B1']);
     });
 
-    it('represents kanban boards as normal nested blocks', () => {
+    it('represents columns as normal nested blocks', () => {
         const result = importDocument(
             [
                 {
-                    type: 'kanban',
+                    type: 'columns',
                     content: 'Project board',
                     children: [
                         {
@@ -160,7 +160,8 @@ describe('block rich text document format import', () => {
             columnIds[0],
             annotationVirtualParents(result.state),
         );
-        expect(result.state.state.blocks[boardId].meta.type).toBe('kanban');
+        expect(result.state.state.blocks[boardId].meta.type).toBe('columns');
+        expect(result.state.state.blocks[boardId].meta).toMatchObject({display: 'blocks'});
         expect(blockContents(result.state, boardId)).toBe('Project board');
         expect(columnIds.map((id) => blockContents(result.state, id))).toEqual(['todo', 'done']);
         expect(firstColumnCardIds.map((id) => blockContents(result.state, id))).toEqual(['Draft proposal']);
@@ -429,10 +430,10 @@ describe('block rich text document format export', () => {
         ).toThrow('$[0].meta.ratingPresentation: must be "numbers" or "stars"');
     });
 
-    it('round-trips kanban boards', () => {
+    it('round-trips block columns', () => {
         const input: DocumentBlock[] = [
             {
-                type: 'kanban',
+                type: 'columns',
                 content: 'Project board',
                 children: [
                     {content: 'todo', children: [{content: 'Draft proposal'}]},
@@ -446,7 +447,7 @@ describe('block rich text document format export', () => {
 
         expect(exportDocument(imported.state)).toEqual([
             {
-                type: 'kanban',
+                type: 'columns',
                 content: 'Project board',
                 children: [
                     {type: 'paragraph', content: 'todo', children: [{type: 'paragraph', content: 'Draft proposal'}]},

@@ -23,7 +23,7 @@ describe('block rich text public api', () => {
         expect(value.state.blocks[blockRichTextRootBlockId()]).toMatchObject({
             id: [0, 'seed'],
             meta: {type: 'paragraph'},
-            deleted: false,
+            deleted: undefined,
         });
         expect(isBlockRichTextValue(value)).toBe(true);
     });

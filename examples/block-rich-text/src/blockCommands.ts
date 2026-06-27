@@ -6,6 +6,7 @@ import {
     deleteRangeOps,
     insertBlockOps,
     insertTextOps,
+    isDeleted,
     joinBlocksOps,
     markBoundaryOp,
     markRangeOp,
@@ -34,6 +35,7 @@ import {
     paragraphMeta,
     richBlockStyleValue,
     sameTypeWithTs,
+    type ColumnsDisplayMode,
     type ImagePresentationSize,
     type PreviewMetadata,
     type RichBlockStyleAttribute,
@@ -112,7 +114,7 @@ export type TableCellSlotTarget = {
 
 const ROOT: Lamport = [0, 'root'];
 const ROOT_ID = lamportToString(ROOT);
-const DEFAULT_KANBAN_COLUMNS = ['todo', 'in progress', 'done'];
+const DEFAULT_COLUMNS = ['todo', 'in progress', 'done'];
 
 const insertedBlockFromOps = (ops: Array<Op<RichBlockMeta>>) => {
     const op = ops[0];
@@ -196,6 +198,7 @@ export const insertTextWithMarkdownShortcuts = (
         block: parseLamportString(point.blockId),
         startOffset: 0,
         endOffset: shortcut.length,
+            ts: context.nextTs,
     });
     working = applyMany(working, deleteOps, annotationVirtualParents(working));
     ops.push(...deleteOps);
@@ -227,6 +230,7 @@ const applyMathMarkdownShortcut = (
         block: parseLamportString(point.blockId),
         startOffset: inline.closingStart,
         endOffset: inline.closingStart + inline.delimiterLength,
+            ts: context.nextTs,
     });
     working = applyMany(working, deleteClosing, annotationVirtualParents(working));
     ops.push(...deleteClosing);
@@ -235,6 +239,7 @@ const applyMathMarkdownShortcut = (
         block: parseLamportString(point.blockId),
         startOffset: inline.openingStart,
         endOffset: inline.openingStart + inline.delimiterLength,
+            ts: context.nextTs,
     });
     working = applyMany(working, deleteOpening, annotationVirtualParents(working));
     ops.push(...deleteOpening);
@@ -332,6 +337,7 @@ const applyInlineCodeMarkdownShortcut = (
         block: parseLamportString(point.blockId),
         startOffset: closingOffset,
         endOffset: closingOffset + 1,
+            ts: context.nextTs,
     });
     working = applyMany(working, deleteClosing, annotationVirtualParents(working));
     ops.push(...deleteClosing);
@@ -340,6 +346,7 @@ const applyInlineCodeMarkdownShortcut = (
         block: parseLamportString(point.blockId),
         startOffset: openingOffset,
         endOffset: openingOffset + 1,
+            ts: context.nextTs,
     });
     working = applyMany(working, deleteOpening, annotationVirtualParents(working));
     ops.push(...deleteOpening);
@@ -582,6 +589,7 @@ export const deleteBackward = (
             block: parseLamportString(point.blockId),
             startOffset: point.offset - 1,
             endOffset: point.offset,
+            ts: context.nextTs,
         });
         const next = applyMany(state, ops, annotationVirtualParents(state));
         return {state: next, ops, selection: caret(point.blockId, point.offset - 1)};
@@ -606,6 +614,7 @@ export const deleteForward = (
             block: parseLamportString(point.blockId),
             startOffset: point.offset,
             endOffset: point.offset + 1,
+            ts: context.nextTs,
         });
         const next = applyMany(state, ops, annotationVirtualParents(state));
         return {state: next, ops, selection: caret(point.blockId, point.offset)};
@@ -782,6 +791,7 @@ export const deleteTableRowHeaderBackward = (
             block: parseLamportString(point.blockId),
             mode: 'subtree',
             virtualParents: annotationVirtualParents(working),
+            ts: context.nextTs,
         });
         working = applyMany(working, deleteOps, annotationVirtualParents(working));
         ops.push(...deleteOps);
@@ -798,6 +808,7 @@ export const deleteTableRowHeaderBackward = (
         block: parseLamportString(point.blockId),
         mode: 'subtree',
         virtualParents: annotationVirtualParents(state),
+            ts: context.nextTs,
     });
     const next = applyMany(state, ops, annotationVirtualParents(state));
     return {state: next, ops, selection: fallbackSelection};
@@ -831,7 +842,7 @@ export const deleteEmptyTableRowBackward = (
         const rehomed = rehomeVisibleSubtreeToRealParents(state, cell.rowId, table.id, context);
         let working = rehomed.state;
         const ops: Array<Op<RichBlockMeta>> = [...rehomed.ops];
-        const deleteOps = deleteVisibleSubtreeOps(working, cell.rowId);
+        const deleteOps = deleteVisibleSubtreeOps(working, cell.rowId, context);
         working = applyMany(working, deleteOps, annotationVirtualParents(working));
         ops.push(...deleteOps);
         const metaOps = setBlockMetaOps(working, {
@@ -847,7 +858,7 @@ export const deleteEmptyTableRowBackward = (
     if (!previousRowId) return noCommand();
     const previousCells = visibleBlockChildren(state, previousRowId, annotationVirtualParents(state));
     const previousCellId = previousCells[previousCells.length - 1] ?? null;
-    const ops = deleteVisibleSubtreeOps(state, cell.rowId);
+    const ops = deleteVisibleSubtreeOps(state, cell.rowId, context);
     const next = applyMany(state, ops, annotationVirtualParents(state));
     return {
         state: next,
@@ -872,7 +883,7 @@ export const exitEmptyLastTableRow = (
 
     let working = state;
     const ops: Array<Op<RichBlockMeta>> = [];
-    const deleteOps = deleteVisibleSubtreeOps(working, cell.rowId);
+    const deleteOps = deleteVisibleSubtreeOps(working, cell.rowId, context);
     working = applyMany(working, deleteOps, annotationVirtualParents(working));
     ops.push(...deleteOps);
 
@@ -910,6 +921,7 @@ export const splitTableTitleToParagraph = (
                 block: current.id,
                 startOffset: 0,
                 endOffset: pointTextLength(working, point.blockId),
+            ts: context.nextTs,
             });
             working = applyMany(working, deleteOps, annotationVirtualParents(working));
             ops.push(...deleteOps);
@@ -1085,7 +1097,7 @@ const pastePlainTextAtBlockEnd = (
             const id: Lamport = [++maxSeenCount, context.actor];
             const op: Op<RichBlockMeta> = {
                 type: 'char',
-                char: {text: segment, id, deleted: false, parent: {id: after, ts: ''}},
+                char: {text: segment, id, deleted: undefined, parent: {id: after, ts: ''}},
             };
             const charId = lamportToString(id);
             chars[charId] = op.char;
@@ -1172,6 +1184,7 @@ const applyMarkdownShortcutsToPastedLines = (
             block: block.id,
             startOffset: 0,
             endOffset: lineShortcut.deleteLength,
+            ts: context.nextTs,
         });
         working = applyMany(working, deleteOps, annotationVirtualParents(working));
         ops.push(...deleteOps);
@@ -1342,7 +1355,7 @@ const appendRootBlockAfterOp = (
                 }),
                 ts,
             },
-            deleted: false,
+            deleted: undefined,
         },
     };
 };
@@ -1796,32 +1809,35 @@ export const convertBlockToTable = (
     return {state: working, ops, selection: caret(firstCellId ?? focus.blockId, 0)};
 };
 
-export const convertBlockToKanban = (
+export const convertBlockToColumns = (
     state: CachedState<RichBlockMeta>,
     selection: EditorSelection,
     context: CommandContext,
+    display: ColumnsDisplayMode = 'blocks',
 ): CommandResult => {
     const focus = firstPointForSelection(state, selection);
     const focusBlock = state.state.blocks[focus.blockId];
     if (!focusBlock) return {state, ops: [], selection};
-    if (focusBlock.meta.type === 'kanban') return {state, ops: [], selection: caret(focus.blockId, focus.offset)};
+    if (focusBlock.meta.type === 'columns' && focusBlock.meta.display === display) {
+        return {state, ops: [], selection: caret(focus.blockId, focus.offset)};
+    }
 
     const ops: Array<Op<RichBlockMeta>> = [];
     let working = state;
-    const kanbanOps = setBlockMetaOps(working, {
+    const columnsOps = setBlockMetaOps(working, {
         block: focusBlock.id,
-        meta: {type: 'kanban', ts: context.nextTs()},
+        meta: {type: 'columns', display, ts: context.nextTs()},
     });
-    working = applyMany(working, kanbanOps, annotationVirtualParents(working));
-    ops.push(...kanbanOps);
+    working = applyMany(working, columnsOps, annotationVirtualParents(working));
+    ops.push(...columnsOps);
 
-    if (kanbanColumns(working, focus.blockId).length > 0) {
+    if (columnsColumns(working, focus.blockId).length > 0) {
         return {state: working, ops, selection: caret(focus.blockId, focus.offset)};
     }
 
     let firstColumnId: string | null = null;
-    for (const title of DEFAULT_KANBAN_COLUMNS) {
-        const existingColumns = kanbanColumns(working, focus.blockId);
+    for (const title of DEFAULT_COLUMNS) {
+        const existingColumns = columnsColumns(working, focus.blockId);
         const previousColumnId = existingColumns[existingColumns.length - 1] ?? null;
         const columnOps = insertBlockOps(working, {
             actor: context.actor,
@@ -2239,7 +2255,7 @@ export const moveTableCellsToNewRow = (
     let previousCellId: string | null = null;
     for (const cellId of orderedCellIds) {
         const cell = working.state.blocks[cellId];
-        if (!cell || cell.deleted) continue;
+        if (!cell || isDeleted(cell)) continue;
         const moveOps = moveBlockOps(working, {
             actor: context.actor,
             block: cell.id,
@@ -2335,7 +2351,7 @@ export const moveCellRectangleOutToNewTable = (
         );
         for (const cellId of sourceCells) {
             const cell = working.state.blocks[cellId];
-            if (!cell || cell.deleted) continue;
+            if (!cell || isDeleted(cell)) continue;
             const moveOps = moveBlockOps(working, {
                 actor: context.actor,
                 block: cell.id,
@@ -2384,7 +2400,7 @@ export const moveBlockToTableCellSlot = (
     const beforeId = insertIndex > 0 ? targetCells[insertIndex - 1] : null;
     const afterId = targetCells[insertIndex] ?? null;
     const current = working.state.blocks[blockId];
-    if (!current || current.deleted) return {state: working, ops, selection: caret(blockId, 0)};
+    if (!current || isDeleted(current)) return {state: working, ops, selection: caret(blockId, 0)};
 
     const moveOps = moveBlockOps(working, {
         actor: context.actor,
@@ -2463,7 +2479,7 @@ export const moveTableCellRectangleContents = (
     }
 
     for (const cellId of cellsToClear) {
-        const cleared = clearCellContents(working, cellId);
+        const cleared = clearCellContents(working, cellId, context);
         working = cleared.state;
         ops.push(...cleared.ops);
     }
@@ -2499,6 +2515,7 @@ export const moveTableCellRectangleContents = (
 export const deleteTableCellSelection = (
     state: CachedState<RichBlockMeta>,
     selection: EditorSelection,
+    context: CommandContext,
 ): CommandResult | null => {
     if (selection.type !== 'table-cells') return null;
     const rectangle = tableCellRectangleForSelection(state, selection);
@@ -2515,12 +2532,12 @@ export const deleteTableCellSelection = (
         rectangle.startColumnIndex === rectangle.endColumnIndex;
 
     if (isFullRows) {
-        return deleteTableRows(state, selection.tableId, rows.slice(rectangle.startRowIndex, rectangle.endRowIndex + 1));
+        return deleteTableRows(state, selection.tableId, rows.slice(rectangle.startRowIndex, rectangle.endRowIndex + 1), context);
     }
     if (isFullColumn) {
-        return deleteTableColumn(state, selection.tableId, rectangle.startColumnIndex);
+        return deleteTableColumn(state, selection.tableId, rectangle.startColumnIndex, context);
     }
-    return clearTableCells(state, rectangle.cellIds, selection.focusCellId);
+    return clearTableCells(state, rectangle.cellIds, selection.focusCellId, context);
 };
 
 export const advanceFromTableCellEnd = (
@@ -2627,14 +2644,14 @@ const tableColumnCount = (state: CachedState<RichBlockMeta>, tableId: string): n
     );
 };
 
-export const kanbanColumns = (state: CachedState<RichBlockMeta>, boardId: string): string[] => {
+export const columnsColumns = (state: CachedState<RichBlockMeta>, boardId: string): string[] => {
     const board = state.state.blocks[boardId];
-    if (!board || board.meta.type !== 'kanban') return [];
+    if (!board || board.meta.type !== 'columns') return [];
     return visibleBlockChildren(state, boardId, annotationVirtualParents(state));
 };
 
-export const kanbanCards = (state: CachedState<RichBlockMeta>, columnId: string): string[] => {
-    if (!kanbanColumnContext(state, columnId)) return [];
+export const columnsCards = (state: CachedState<RichBlockMeta>, columnId: string): string[] => {
+    if (!columnsColumnContext(state, columnId)) return [];
     return visibleBlockChildren(state, columnId, annotationVirtualParents(state));
 };
 
@@ -2656,27 +2673,28 @@ export const slideDeckForSlide = (state: CachedState<RichBlockMeta>, slideId: st
 export const isSlideChildOfDeck = (state: CachedState<RichBlockMeta>, slideId: string): boolean =>
     slideDeckForSlide(state, slideId) !== null;
 
-export type KanbanColumnContext = {
+export type ColumnsColumnContext = {
     boardId: string;
     columnId: string;
     columnIndex: number;
     columns: string[];
 };
 
-export const kanbanColumnContext = (
+export const columnsColumnContext = (
     state: CachedState<RichBlockMeta>,
     columnId: string,
-): KanbanColumnContext | null => {
+): ColumnsColumnContext | null => {
     if (!state.state.blocks[columnId]) return null;
     const boardId = lamportToString(materializedBlockParent(state, columnId, annotationVirtualParents(state)));
-    if (state.state.blocks[boardId]?.meta.type !== 'kanban') return null;
-    const columns = kanbanColumns(state, boardId);
+    const board = state.state.blocks[boardId];
+    if (board?.meta.type !== 'columns' || board.meta.display !== 'cards') return null;
+    const columns = columnsColumns(state, boardId);
     const columnIndex = columns.indexOf(columnId);
     if (columnIndex < 0) return null;
     return {boardId, columnId, columnIndex, columns};
 };
 
-export type KanbanCardContext = {
+export type ColumnsCardContext = {
     boardId: string;
     columnId: string;
     cardId: string;
@@ -2685,15 +2703,15 @@ export type KanbanCardContext = {
     cards: string[];
 };
 
-export const kanbanCardContext = (
+export const columnsCardContext = (
     state: CachedState<RichBlockMeta>,
     cardId: string,
-): KanbanCardContext | null => {
+): ColumnsCardContext | null => {
     if (!state.state.blocks[cardId]) return null;
     const columnId = lamportToString(materializedBlockParent(state, cardId, annotationVirtualParents(state)));
-    const column = kanbanColumnContext(state, columnId);
+    const column = columnsColumnContext(state, columnId);
     if (!column) return null;
-    const cards = kanbanCards(state, columnId);
+    const cards = columnsCards(state, columnId);
     const cardIndex = cards.indexOf(cardId);
     if (cardIndex < 0) return null;
     return {
@@ -2706,22 +2724,23 @@ export const kanbanCardContext = (
     };
 };
 
-export const isKanbanColumn = (state: CachedState<RichBlockMeta>, blockId: string): boolean =>
-    kanbanColumnContext(state, blockId) !== null;
+export const isColumnsColumn = (state: CachedState<RichBlockMeta>, blockId: string): boolean =>
+    columnsColumnContext(state, blockId) !== null;
 
-export const isKanbanCard = (state: CachedState<RichBlockMeta>, blockId: string): boolean =>
-    kanbanCardContext(state, blockId) !== null;
+export const isColumnsCard = (state: CachedState<RichBlockMeta>, blockId: string): boolean =>
+    columnsCardContext(state, blockId) !== null;
 
 const deleteTableRows = (
     state: CachedState<RichBlockMeta>,
     tableId: string,
     rowIds: string[],
+    context: CommandContext,
 ): CommandResult => {
     let working = state;
     const ops: Array<Op<RichBlockMeta>> = [];
     for (const rowId of rowIds) {
-        if (!working.state.blocks[rowId] || working.state.blocks[rowId].deleted) continue;
-        const deleted = deleteVisibleSubtreeOps(working, rowId);
+        if (!working.state.blocks[rowId] || isDeleted(working.state.blocks[rowId])) continue;
+        const deleted = deleteVisibleSubtreeOps(working, rowId, context);
         working = applyMany(working, deleted, annotationVirtualParents(working));
         ops.push(...deleted);
     }
@@ -2732,13 +2751,14 @@ const deleteTableColumn = (
     state: CachedState<RichBlockMeta>,
     tableId: string,
     columnIndex: number,
+    context: CommandContext,
 ): CommandResult => {
     let working = state;
     const ops: Array<Op<RichBlockMeta>> = [];
     for (const rowId of tableRows(state, tableId)) {
         const cellId = tableCells(working, rowId)[columnIndex];
-        if (!cellId || !working.state.blocks[cellId] || working.state.blocks[cellId].deleted) continue;
-        const deleted = deleteVisibleSubtreeOps(working, cellId);
+        if (!cellId || !working.state.blocks[cellId] || isDeleted(working.state.blocks[cellId])) continue;
+        const deleted = deleteVisibleSubtreeOps(working, cellId, context);
         working = applyMany(working, deleted, annotationVirtualParents(working));
         ops.push(...deleted);
     }
@@ -2749,15 +2769,16 @@ const clearTableCells = (
     state: CachedState<RichBlockMeta>,
     cellIds: string[],
     focusCellId: string,
+    context: CommandContext,
 ): CommandResult => {
     let working = state;
     const ops: Array<Op<RichBlockMeta>> = [];
     for (const cellId of cellIds) {
-        if (!working.state.blocks[cellId] || working.state.blocks[cellId].deleted) continue;
+        if (!working.state.blocks[cellId] || isDeleted(working.state.blocks[cellId])) continue;
         const childIds = visibleBlockChildren(working, cellId, annotationVirtualParents(working));
         for (const childId of childIds) {
-            if (!working.state.blocks[childId] || working.state.blocks[childId].deleted) continue;
-            const deleted = deleteVisibleSubtreeOps(working, childId);
+            if (!working.state.blocks[childId] || isDeleted(working.state.blocks[childId])) continue;
+            const deleted = deleteVisibleSubtreeOps(working, childId, context);
             working = applyMany(working, deleted, annotationVirtualParents(working));
             ops.push(...deleted);
         }
@@ -2767,15 +2788,16 @@ const clearTableCells = (
                 block: parseLamportString(cellId),
                 startOffset: 0,
                 endOffset: length,
+            ts: context.nextTs,
             });
             working = applyMany(working, deletedText, annotationVirtualParents(working));
             ops.push(...deletedText);
         }
     }
     const fallbackCellId =
-        working.state.blocks[focusCellId] && !working.state.blocks[focusCellId].deleted
+        working.state.blocks[focusCellId] && !isDeleted(working.state.blocks[focusCellId])
             ? focusCellId
-            : cellIds.find((cellId) => working.state.blocks[cellId] && !working.state.blocks[cellId].deleted);
+            : cellIds.find((cellId) => working.state.blocks[cellId] && !isDeleted(working.state.blocks[cellId]));
     const fallbackBlockId = fallbackCellId ?? editableBlockIds(working)[0] ?? focusCellId;
     const fallback = caret(fallbackBlockId, fallbackCellId ? 0 : pointTextLength(working, fallbackBlockId));
     return {state: working, ops, selection: fallback};
@@ -2784,14 +2806,15 @@ const clearTableCells = (
 const clearCellContents = (
     state: CachedState<RichBlockMeta>,
     cellId: string,
+    context: CommandContext,
 ): {state: CachedState<RichBlockMeta>; ops: Array<Op<RichBlockMeta>>} => {
     let working = state;
     const ops: Array<Op<RichBlockMeta>> = [];
-    if (!working.state.blocks[cellId] || working.state.blocks[cellId].deleted) return {state: working, ops};
+    if (!working.state.blocks[cellId] || isDeleted(working.state.blocks[cellId])) return {state: working, ops};
     const childIds = visibleBlockChildren(working, cellId, annotationVirtualParents(working));
     for (const childId of childIds) {
-        if (!working.state.blocks[childId] || working.state.blocks[childId].deleted) continue;
-        const deleted = deleteVisibleSubtreeOps(working, childId);
+        if (!working.state.blocks[childId] || isDeleted(working.state.blocks[childId])) continue;
+        const deleted = deleteVisibleSubtreeOps(working, childId, context);
         working = applyMany(working, deleted, annotationVirtualParents(working));
         ops.push(...deleted);
     }
@@ -2801,6 +2824,7 @@ const clearCellContents = (
             block: parseLamportString(cellId),
             startOffset: 0,
             endOffset: length,
+            ts: context.nextTs,
         });
         working = applyMany(working, deletedText, annotationVirtualParents(working));
         ops.push(...deletedText);
@@ -2815,7 +2839,7 @@ const fallbackTableSelection = (
     const firstRowId = tableRows(state, tableId)[0];
     const firstCellId = firstRowId ? tableCells(state, firstRowId)[0] : null;
     if (firstCellId) return caret(firstCellId, 0);
-    if (state.state.blocks[tableId] && !state.state.blocks[tableId].deleted) {
+    if (state.state.blocks[tableId] && !isDeleted(state.state.blocks[tableId])) {
         return caret(tableId, pointTextLength(state, tableId));
     }
     const fallbackBlockId = editableBlockIds(state)[0] ?? tableId;
@@ -3070,11 +3094,13 @@ const createEmptyCellsForRow = (
 const deleteVisibleSubtreeOps = (
     state: CachedState<RichBlockMeta>,
     blockId: string,
+    context: CommandContext,
 ): Array<Op<RichBlockMeta>> => {
     return deleteBlockOps(state, {
         block: parseLamportString(blockId),
         mode: 'subtree',
         virtualParents: annotationVirtualParents(state),
+        ts: context.nextTs,
     });
 };
 
@@ -3554,6 +3580,7 @@ const exitCodeBlock = (
             block: parseLamportString(blockId),
             startOffset: length - 1,
             endOffset: length,
+            ts: context.nextTs,
         });
         working = applyMany(working, deleteOps, annotationVirtualParents(working));
         ops.push(...deleteOps);
@@ -3620,6 +3647,7 @@ const insertSortedRev = (array: string[], item: string): string[] => {
 const deleteSelection = (
     state: CachedState<RichBlockMeta>,
     selection: EditorSelection,
+    context: CommandContext,
 ): {state: CachedState<RichBlockMeta>; ops: Array<Op<RichBlockMeta>>; point: BlockPoint} => {
     const point = firstPointForSelection(state, selection);
     const ops: Array<Op<RichBlockMeta>> = [];
@@ -3629,6 +3657,7 @@ const deleteSelection = (
                 block: parseLamportString(segment.blockId),
                 startOffset: segment.startOffset,
                 endOffset: segment.endOffset,
+            ts: context.nextTs,
             }),
         );
     }
@@ -3641,14 +3670,14 @@ const deleteSelectionAndJoinBoundaries = (
     context: CommandContext,
 ): {state: CachedState<RichBlockMeta>; ops: Array<Op<RichBlockMeta>>; point: BlockPoint} => {
     const span = normalizedSelectionSpan(state, selection);
-    if (!span) return deleteSelection(state, selection);
+    if (!span) return deleteSelection(state, selection, context);
 
     const blocks = editableBlockIds(state);
     const startIndex = blocks.indexOf(span.start.blockId);
     const endIndex = blocks.indexOf(span.end.blockId);
     const blockRun = startIndex >= 0 && endIndex >= startIndex ? blocks.slice(startIndex, endIndex + 1) : [];
 
-    const deleted = deleteSelection(state, selection);
+    const deleted = deleteSelection(state, selection, context);
     let working = deleted.state;
     const ops = [...deleted.ops];
 

@@ -825,8 +825,9 @@ const isRichBlockMeta = (value: unknown): value is RichBlockMeta => {
         case 'blockquote':
         case 'recipe_ingredient':
         case 'table':
-        case 'kanban':
             return true;
+        case 'columns':
+            return value.display === 'blocks' || value.display === 'cards';
         case 'slide_deck':
             return (
                 Number.isInteger(value.width) &&

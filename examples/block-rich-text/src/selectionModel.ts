@@ -1,5 +1,5 @@
 import type {CachedState} from 'umkehr/block-crdt/types';
-import {orderedCharIdsForBlock, visibleBlockOutline} from 'umkehr/block-crdt';
+import {isDeleted, orderedCharIdsForBlock, visibleBlockOutline} from 'umkehr/block-crdt';
 import {isEditableBlock} from './blockMeta';
 import type {RichBlockMeta} from './blockMeta';
 import {richTextVirtualParents} from './virtualParents';
@@ -83,7 +83,7 @@ export const clampPoint = (state: CachedState<RichBlockMeta>, point: BlockPoint)
     const currentBlock = state.state.blocks[point.blockId];
     if (
         currentBlock &&
-        !currentBlock.deleted &&
+        !isDeleted(currentBlock) &&
         !state.cache.joinedBlocks[point.blockId] &&
         isEditableBlock(currentBlock.meta)
     ) {
@@ -396,7 +396,7 @@ export const visibleSubtreeBlockIds = (
 
 const clampBlockId = (state: CachedState<RichBlockMeta>, blockId: string): string => {
     const block = state.state.blocks[blockId];
-    if (block && !block.deleted && !state.cache.joinedBlocks[blockId]) return blockId;
+    if (block && !isDeleted(block) && !state.cache.joinedBlocks[blockId]) return blockId;
     return visibleBlockIds(state)[0] ?? blockId;
 };
 

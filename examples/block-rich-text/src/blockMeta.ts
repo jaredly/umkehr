@@ -31,6 +31,8 @@ export type PollRatingPresentation = 'numbers' | 'stars';
 
 export type PollKind = 'rating' | 'children' | 'matrix' | 'long';
 
+export type ColumnsDisplayMode = 'cards' | 'blocks';
+
 export type PollVote =
     | {type: 'single'; optionId: string; ts: HLC; deleted?: boolean}
     | {type: 'multiple'; optionIds: string[]; ts: HLC; deleted?: boolean}
@@ -79,7 +81,7 @@ export type RichBlockMeta =
     | {type: 'callout'; kind: 'info' | 'warning' | 'error'; ts: HLC}
     | {type: 'recipe_ingredient'; ts: HLC}
     | {type: 'table'; ts: HLC}
-    | {type: 'kanban'; ts: HLC}
+    | {type: 'columns'; display: ColumnsDisplayMode; ts: HLC}
     | SlideDeckMeta
     | SlideMeta
     | PollMeta
@@ -158,8 +160,8 @@ export const sameTypeWithTs = (meta: RichBlockMeta, ts: HLC): RichBlockMeta => {
             return {type: 'recipe_ingredient', ts};
         case 'table':
             return {type: 'table', ts};
-        case 'kanban':
-            return {type: 'kanban', ts};
+        case 'columns':
+            return {type: 'columns', display: meta.display, ts};
         case 'slide_deck':
             return {...meta, ts};
         case 'slide':
@@ -199,7 +201,13 @@ export const defaultSlideMeta = (ts: HLC): SlideMeta => ({
 
 export const isTableBlock = (meta: RichBlockMeta): boolean => meta.type === 'table';
 
-export const isKanbanBlock = (meta: RichBlockMeta): boolean => meta.type === 'kanban';
+export const isColumnsBlock = (meta: RichBlockMeta): boolean => meta.type === 'columns';
+
+export const columnsMeta = (display: ColumnsDisplayMode, ts: HLC): RichBlockMeta => ({
+    type: 'columns',
+    display,
+    ts,
+});
 
 export const isSlideDeckBlock = (meta: RichBlockMeta): meta is SlideDeckMeta =>
     meta.type === 'slide_deck';

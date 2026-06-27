@@ -3,6 +3,7 @@ import {
     applyMany,
     blockContents,
     deleteRangeOps,
+    isDeleted,
     orderedCharIdsForBlock,
 } from 'umkehr/block-crdt';
 import type {CachedState, Op} from 'umkehr/block-crdt/types';
@@ -57,7 +58,8 @@ const SLASH_COMMANDS: SlashCommand[] = [
     {type: 'block', value: 'callout-error', label: 'Error callout', group: 'Block type', keywords: ['error']},
     {type: 'block', value: 'recipe-ingredient', label: 'Ingredient', group: 'Block type', keywords: ['ingredient', 'recipe', 'food', 'line']},
     {type: 'block', value: 'table', label: 'Table', group: 'Block type', keywords: ['grid']},
-    {type: 'block', value: 'kanban', label: 'Kanban board', group: 'Block type', keywords: ['board', 'trello', 'cards', 'columns']},
+    {type: 'block', value: 'columns', label: 'Columns', group: 'Block type', keywords: ['columns', 'layout']},
+    {type: 'block', value: 'card-columns', label: 'Card columns', group: 'Block type', keywords: ['board', 'cards', 'columns']},
     {type: 'block', value: 'slide-deck', label: 'Slide deck', group: 'Block type', keywords: ['presentation', 'deck', 'slides']},
     {type: 'block', value: 'slide', label: 'Slide', group: 'Block type', keywords: ['presentation', 'deck']},
     {type: 'block', value: 'preview', label: 'Preview', group: 'Block type', keywords: ['link', 'card', 'url']},
@@ -118,7 +120,7 @@ const visibleCharLocation = (
     charId: string,
 ): {blockId: string; offset: number} | null => {
     const char = state.state.chars[charId];
-    if (!char || char.deleted) return null;
+    if (!char || isDeleted(char)) return null;
     const parentId = lamportToString(char.parent.id);
     const parentIds = [parentId, ...Object.keys(state.state.blocks).filter((id) => id !== parentId)];
     for (const blockId of parentIds) {
@@ -143,6 +145,7 @@ const fallbackSlashLocation = (
 export const deleteSlashTriggers = (
     state: CachedState<RichBlockMeta>,
     menu: SlashMenuState,
+    context: {nextTs(): string},
 ): {state: CachedState<RichBlockMeta>; ops: Array<Op<RichBlockMeta>>; selection: RetainedSelectionSet} => {
     let working = state;
     const ops: Array<Op<RichBlockMeta>> = [];
@@ -169,6 +172,7 @@ export const deleteSlashTriggers = (
             block: parseLamportString(location.blockId),
             startOffset: location.offset,
             endOffset: location.offset + 1,
+            ts: context.nextTs,
         });
         if (!deleteOps.length) continue;
         working = applyMany(working, deleteOps, annotationVirtualParents(working));

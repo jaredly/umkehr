@@ -203,7 +203,8 @@ export function Toolbar({
                 <option value="callout-error">Error callout</option>
                 <option value="recipe-ingredient">Ingredient line</option>
                 <option value="table">Table</option>
-                <option value="kanban">Kanban board</option>
+                <option value="columns">Columns</option>
+                <option value="card-columns">Card columns</option>
                 <option value="slide-deck">Slide deck</option>
                 <option value="slide">Slide</option>
                 <option value="preview">Preview</option>

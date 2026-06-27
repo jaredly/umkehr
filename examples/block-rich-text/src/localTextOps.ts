@@ -37,7 +37,7 @@ export const localInsertTextOps = (
         const id: Lamport = [next++, actor];
         ops.push({
             type: 'char',
-            char: {text: segment, id, deleted: false, parent: {id: after, ts: ''}},
+            char: {text: segment, id, deleted: undefined, parent: {id: after, ts: ''}},
         });
         after = id;
     }

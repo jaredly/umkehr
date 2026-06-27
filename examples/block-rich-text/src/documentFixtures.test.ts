@@ -76,10 +76,11 @@ describe('document fixtures', () => {
         expect(countBlocksOfType([table], 'table')).toBeGreaterThan(1);
     });
 
-    it('includes a kanban board fixture with mixed cards', () => {
-        const [board] = documentFixture('kanban-board');
+    it('includes a card columns fixture with mixed cards', () => {
+        const [board] = documentFixture('card-columns');
 
-        expect(board.type).toBe('kanban');
+        expect(board.type).toBe('columns');
+        expect(board.meta).toMatchObject({display: 'cards'});
         expect(board.children?.map((column) => column.content)).toEqual(['todo', 'in progress', 'done']);
         expect(countBlocksOfType([board], 'todo')).toBeGreaterThan(1);
         expect(countBlocksOfType([board], 'table')).toBe(1);
@@ -121,7 +122,7 @@ describe('document fixtures', () => {
             'callout',
             'recipe_ingredient',
             'table',
-            'kanban',
+            'columns',
             'slide_deck',
             'slide',
             'poll',

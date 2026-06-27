@@ -275,6 +275,7 @@ function createBlockRichTextOperations(
                 block: lamportRef(change.block),
                 startOffset: change.startOffset,
                 endOffset: change.endOffset,
+                ts: () => ts,
             });
         case 'splitBlock':
             return splitBlockOps(cached, {

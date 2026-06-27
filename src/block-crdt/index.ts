@@ -9,6 +9,7 @@ export type {
     CachedState,
     Char,
     CharParentTs,
+    DeletedState,
     DefaultBlockMeta,
     HLC,
     IncidentalBlockOrderTs,
@@ -69,6 +70,12 @@ export {
     virtualParentOwners,
 } from './blocks.js';
 export type {VirtualBlockParentConfig} from './blocks.js';
+
+export {
+    deletedStateWins,
+    isDeleted,
+    mergeDeletedState,
+} from './deletion.js';
 
 export {
     cachedState,

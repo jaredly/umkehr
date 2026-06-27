@@ -1,5 +1,6 @@
 import {CachedState, Lamport} from './types.js';
 import {lamportToString} from './ids.js';
+import {isDeleted} from './deletion.js';
 
 export {assertActorId, lamportToString, parseLamportString, validateLamport} from './ids.js';
 
@@ -24,7 +25,7 @@ export const selPos = (
                 stack.push(children[i]);
             }
         }
-        if (!char || char.deleted) {
+        if (!char || isDeleted(char)) {
             continue;
         }
         selection--;

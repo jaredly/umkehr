@@ -20,6 +20,7 @@ import {
     deleteBlockOps,
     deleteRangeOps,
     formattedMarkValues,
+    isDeleted,
     materializeFormattedBlocks,
     materializedBlockParent,
     materializedBlockPath,
@@ -38,7 +39,7 @@ import {
     clearCodeLanguage,
     closeRetainedInlineMarkSessions,
     commandApplied,
-    convertBlockToKanban,
+    convertBlockToColumns,
     convertBlockToSlide,
     convertBlockToSlideDeck,
     convertBlockToTable,
@@ -118,6 +119,7 @@ import {
     type PollMeta,
     type PollRatingPresentation,
     type PollVote,
+    type ColumnsDisplayMode,
     type ImagePresentationSize,
     type PreviewMetadata,
     type RichBlockStyleAttribute,
@@ -2094,7 +2096,7 @@ function BlockEditor({
             submitCommand((current) => {
                 resetVerticalCaretIntent();
                 const context = makeCommandContext(current);
-                const deleted = deleteSlashTriggers(current.state, menu);
+                const deleted = deleteSlashTriggers(current.state, menu, context);
                 let result: MultiCommandResult;
                 if (command.type === 'date-embed') {
                     result = runSelectionCommandEverywhere(
@@ -2119,15 +2121,16 @@ function BlockEditor({
                                 context,
                             ),
                     );
-                } else if (command.value === 'kanban') {
+                } else if (command.value === 'columns' || command.value === 'card-columns') {
                     result = runSelectionCommandEverywhere(
                         deleted.state,
                         deleted.selection,
                         (working, entry) =>
-                            convertBlockToKanban(
+                            convertBlockToColumns(
                                 working,
                                 resolveSelection(working, entry.selection),
                                 context,
+                                command.value === 'card-columns' ? 'cards' : 'blocks',
                             ),
                     );
                 } else if (command.value === 'slide-deck') {
@@ -2379,8 +2382,9 @@ function BlockEditor({
             const activeSelection = primarySelection(
                 resolveSelectionSet(current.state, current.selection),
             );
+            const context = makeCommandContext(current);
             if (activeSelection.type === 'table-cells') {
-                const result = deleteTableCellSelection(current.state, activeSelection);
+                const result = deleteTableCellSelection(current.state, activeSelection, context);
                 if (!result) return {state: current.state, ops: [], selection: current.selection};
                 scheduleSelectionRestore(result.selection);
                 return {
@@ -2401,11 +2405,12 @@ function BlockEditor({
             let working = current.state;
             const ops: Array<Op<RichBlockMeta>> = [];
             for (const blockId of blockIds) {
-                if (!working.state.blocks[blockId] || working.state.blocks[blockId].deleted) continue;
+                if (!working.state.blocks[blockId] || isDeleted(working.state.blocks[blockId])) continue;
                 const deleted = deleteBlockOps(working, {
                     block: parseLamportString(blockId),
                     mode: 'subtree',
                     virtualParents: annotationVirtualParents(working),
+                    ts: context.nextTs,
                 });
                 working = applyMany(working, deleted, annotationVirtualParents(working));
                 ops.push(...deleted);
@@ -3322,11 +3327,12 @@ function BlockEditor({
                                 ),
                             };
                         }
-                        if (kind === 'kanban') {
-                            const result = convertBlockToKanban(
+                        if (kind === 'columns' || kind === 'card-columns') {
+                            const result = convertBlockToColumns(
                                 current.state,
                                 primarySelection(resolveSelectionSet(current.state, selection)),
                                 makeCommandContext(current),
+                                kind === 'card-columns' ? 'cards' : 'blocks',
                             );
                             return {
                                 state: result.state,
@@ -3898,8 +3904,8 @@ const renderBlockNode = (node: RenderTreeNode, context: RenderBlockContext): Rea
     if (meta.type === 'table') {
         return <TableBlock key={node.block.id} node={node} context={context} />;
     }
-    if (meta.type === 'kanban') {
-        return <KanbanBlock key={node.block.id} node={node} context={context} />;
+    if (meta.type === 'columns') {
+        return <ColumnsBlock key={node.block.id} node={node} context={context} />;
     }
     if (meta.type === 'slide_deck') {
         return <SlideDeckBlock key={node.block.id} node={node} context={context} />;
@@ -4490,6 +4496,7 @@ function SlideBlockOptions({
             onSetImageSize={noop}
             onSetPollChoiceMode={noop}
             onSetPollDisplayMode={noop}
+            onSetColumnsDisplay={noop}
             onSetPollAllowChange={noop}
             onSetRatingPollMax={noop}
             onSetRatingPollPresentation={noop}
@@ -4564,33 +4571,53 @@ const eventFromEditableSurface = (target: EventTarget | null): boolean => {
     return Boolean(target.closest('[contenteditable="true"], input, textarea, select, button'));
 };
 
-function KanbanBlock({node, context}: {node: RenderTreeNode; context: RenderBlockContext}) {
+function ColumnsBlock({node, context}: {node: RenderTreeNode; context: RenderBlockContext}) {
+    const display = node.block.block.meta.type === 'columns' ? node.block.block.meta.display : 'blocks';
     return (
         <section
-            className="kanbanBlock"
-            data-kanban-board-id={node.block.id}
+            className={['columnsBlock', display === 'cards' ? 'columnsBlockCards' : 'columnsBlockBlocks'].join(' ')}
+            data-columns-board-id={node.block.id}
+            data-columns-display={display}
             style={{'--block-depth': node.block.depth} as CSSProperties}
         >
-            <div className="kanbanTitle">
+            <div className="columnsTitle">
                 {renderEditableBlock(node.block, context, {
-                    surfaceClassName: 'kanbanTitleText',
+                    surfaceClassName: 'columnsTitleText',
                 })}
             </div>
-            <div className="kanbanColumns" data-kanban-board-id={node.block.id}>
-                {node.children.map((column) => (
-                    <KanbanColumn key={column.block.id} node={column} context={context} />
-                ))}
+            <div className="columnsColumns" data-columns-board-id={node.block.id} data-columns-display={display}>
+                {display === 'cards'
+                    ? node.children.map((column) => (
+                          <ColumnsCardModeColumn key={column.block.id} node={column} context={context} />
+                      ))
+                    : node.children.map((column) => (
+                          <ColumnsBlockModeColumn
+                              key={column.block.id}
+                              node={column}
+                              context={context}
+                              baseDepth={node.block.depth + 1}
+                          />
+                      ))}
             </div>
         </section>
     );
 }
 
-function KanbanColumn({node, context}: {node: RenderTreeNode; context: RenderBlockContext}) {
+function ColumnsBlockModeColumn({
+    node,
+    context,
+    baseDepth,
+}: {
+    node: RenderTreeNode;
+    context: RenderBlockContext;
+    baseDepth: number;
+}) {
     return (
-        <section
+        <div
             ref={(element) => context.registerRow(node.block.id, element)}
             className={[
-                'kanbanColumn',
+                'columnsColumn',
+                'columnsColumnBlocks',
                 context.draggingSubtreeIds.has(node.block.id) ? 'dragging' : '',
                 context.draggingId === node.block.id ? 'draggingRoot' : '',
                 context.dropTarget?.indicatorBlockId === node.block.id
@@ -4599,33 +4626,57 @@ function KanbanColumn({node, context}: {node: RenderTreeNode; context: RenderBlo
             ]
                 .filter(Boolean)
                 .join(' ')}
-            data-kanban-column-id={node.block.id}
+            data-columns-column-id={node.block.id}
+            data-columns-column-display="blocks"
         >
-            <div className="kanbanColumnHeader">
+            {renderBlockNodeAtRelativeDepth(node, context, baseDepth)}
+        </div>
+    );
+}
+
+function ColumnsCardModeColumn({node, context}: {node: RenderTreeNode; context: RenderBlockContext}) {
+    return (
+        <section
+            ref={(element) => context.registerRow(node.block.id, element)}
+            className={[
+                'columnsColumn',
+                'columnsColumnCards',
+                context.draggingSubtreeIds.has(node.block.id) ? 'dragging' : '',
+                context.draggingId === node.block.id ? 'draggingRoot' : '',
+                context.dropTarget?.indicatorBlockId === node.block.id
+                    ? `drop${capitalize(context.dropTarget.indicatorPlacement)}`
+                    : '',
+            ]
+                .filter(Boolean)
+                .join(' ')}
+            data-columns-column-id={node.block.id}
+            data-columns-column-display="cards"
+        >
+            <div className="columnsColumnHeader">
                 <button
                     type="button"
-                    className="kanbanColumnHandle"
+                    className="columnsColumnHandle"
                     aria-label="Move column"
                     onPointerDown={(event) => context.startBlockDragFromHandle(node.block.id, event)}
                 >
                     ::
                 </button>
                 {renderEditableBlock({...node.block, depth: 0}, context, {
-                    surfaceClassName: 'kanbanColumnTitle',
+                    surfaceClassName: 'columnsColumnTitle',
                     hideBlockAffordance: true,
                     registerBlockRow: false,
                 })}
             </div>
-            <div className="kanbanCards" data-kanban-column-cards={node.block.id}>
+            <div className="columnsCards" data-columns-column-cards={node.block.id}>
                 {node.children.map((card) => (
-                    <KanbanCard key={card.block.id} node={card} context={context} baseDepth={node.block.depth + 1} />
+                    <ColumnsCard key={card.block.id} node={card} context={context} baseDepth={node.block.depth + 1} />
                 ))}
             </div>
         </section>
     );
 }
 
-function KanbanCard({
+function ColumnsCard({
     node,
     context,
     baseDepth,
@@ -4638,7 +4689,7 @@ function KanbanCard({
         <article
             ref={(element) => context.registerRow(node.block.id, element)}
             className={[
-                'kanbanCard',
+                'columnsCard',
                 context.blockLevelDecorationsByBlock.get(node.block.id)?.selected ? 'blockSelected' : '',
                 context.blockLevelDecorationsByBlock.get(node.block.id)?.focus ? 'blockSelectionFocus' : '',
                 context.draggingSubtreeIds.has(node.block.id) ? 'dragging' : '',
@@ -4646,24 +4697,24 @@ function KanbanCard({
             ]
                 .filter(Boolean)
                 .join(' ')}
-            data-kanban-card-id={node.block.id}
+            data-columns-card-id={node.block.id}
         >
             <button
                 type="button"
-                className="kanbanCardHandle"
+                className="columnsCardHandle"
                 aria-label="Move card"
                 onPointerDown={(event) => context.startBlockDragFromHandle(node.block.id, event)}
             >
                 ::
             </button>
-            <div className="kanbanCardBody">
+            <div className="columnsCardBody">
                 {renderEditableBlock({...node.block, depth: 0}, context, {
-                    surfaceClassName: 'kanbanCardTitle',
+                    surfaceClassName: 'columnsCardTitle',
                     hideBlockAffordance: true,
                     registerBlockRow: false,
                 })}
                 {node.children.length > 0 ? (
-                    <div className="kanbanCardChildren">
+                    <div className="columnsCardChildren">
                         {node.children.map((child) => renderBlockNodeAtRelativeDepth(child, context, baseDepth + 1))}
                     </div>
                 ) : null}
@@ -5999,6 +6050,20 @@ const renderEditableBlock = (
                     return {state: result.state, ops: result.ops, selection: current.selection};
                 })
             }
+            onSetColumnsDisplay={(display) =>
+                context.runBlockControlCommand((current) => {
+                    const currentBlock = current.state.state.blocks[block.id];
+                    if (!currentBlock || currentBlock.meta.type !== 'columns') {
+                        return {state: current.state, ops: [], selection: current.selection};
+                    }
+                    const result = setBlockMeta(current.state, block.id, {
+                        ...currentBlock.meta,
+                        display,
+                        ts: nextReplicaTs(current),
+                    });
+                    return {state: result.state, ops: result.ops, selection: current.selection};
+                })
+            }
             onSetPollAllowChange={(allowChange) =>
                 context.runBlockControlCommand((current) => {
                     const currentBlock = current.state.state.blocks[block.id];
@@ -7133,6 +7198,7 @@ function EditableBlock({
     onSetImageSize,
     onSetPollChoiceMode,
     onSetPollDisplayMode,
+    onSetColumnsDisplay,
     onSetPollAllowChange,
     onSetRatingPollMax,
     onSetRatingPollPresentation,
@@ -7228,6 +7294,7 @@ function EditableBlock({
     onSetImageSize(size: ImagePresentationSize): void;
     onSetPollChoiceMode(mode: PollChoiceMode): void;
     onSetPollDisplayMode(mode: PollDisplayMode): void;
+    onSetColumnsDisplay(display: ColumnsDisplayMode): void;
     onSetPollAllowChange(allowChange: boolean): void;
     onSetRatingPollMax(max: number): void;
     onSetRatingPollPresentation(presentation: PollRatingPresentation): void;
@@ -7666,6 +7733,7 @@ function EditableBlock({
                     onSetImageSize={onSetImageSize}
                     onSetPollChoiceMode={onSetPollChoiceMode}
                     onSetPollDisplayMode={onSetPollDisplayMode}
+                    onSetColumnsDisplay={onSetColumnsDisplay}
                     onSetPollAllowChange={onSetPollAllowChange}
                     onSetRatingPollMax={onSetRatingPollMax}
                     onSetRatingPollPresentation={onSetRatingPollPresentation}
@@ -8740,6 +8808,7 @@ function BlockOptions({
     onSetImageSize,
     onSetPollChoiceMode,
     onSetPollDisplayMode,
+    onSetColumnsDisplay,
     onSetPollAllowChange,
     onSetRatingPollMax,
     onSetRatingPollPresentation,
@@ -8758,6 +8827,7 @@ function BlockOptions({
     onSetImageSize(size: ImagePresentationSize): void;
     onSetPollChoiceMode(mode: PollChoiceMode): void;
     onSetPollDisplayMode(mode: PollDisplayMode): void;
+    onSetColumnsDisplay(display: ColumnsDisplayMode): void;
     onSetPollAllowChange(allowChange: boolean): void;
     onSetRatingPollMax(max: number): void;
     onSetRatingPollPresentation(presentation: PollRatingPresentation): void;
@@ -8959,6 +9029,24 @@ function BlockOptions({
                     </label>
                 ) : null}
             </>
+        );
+    } else if (meta.type === 'columns') {
+        label = 'Columns block options';
+        controls = (
+            <label className="blockOptionsField">
+                <span>Display</span>
+                <select
+                    className="blockOptionsSelect"
+                    value={meta.display}
+                    aria-label="Columns display"
+                    onChange={(event) =>
+                        onSetColumnsDisplay(event.currentTarget.value as ColumnsDisplayMode)
+                    }
+                >
+                    <option value="blocks">Blocks</option>
+                    <option value="cards">Cards</option>
+                </select>
+            </label>
         );
     } else if (meta.type === 'slide_deck') {
         label = 'Slide deck options';

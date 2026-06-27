@@ -65,7 +65,8 @@ export const blockTypeMeta = (
             return {type: 'recipe_ingredient', ts};
         case 'table':
             return current;
-        case 'kanban':
+        case 'columns':
+        case 'card-columns':
             return current;
         case 'slide-deck':
             return defaultSlideDeckMeta(ts);
@@ -118,8 +119,8 @@ export const blockTypeMenuValue = (meta: RichBlockMeta | undefined): BlockTypeMe
             return 'recipe-ingredient';
         case 'table':
             return 'table';
-        case 'kanban':
-            return 'kanban';
+        case 'columns':
+            return meta.display === 'cards' ? 'card-columns' : 'columns';
         case 'slide_deck':
             return 'slide-deck';
         case 'slide':

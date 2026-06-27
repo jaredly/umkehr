@@ -32,6 +32,7 @@ import {
     blockStyleHasDocumentValues,
     documentStyleFromBlockStyle,
     normalizeRichBlockStyleValue,
+    type ColumnsDisplayMode,
     type CodePreviewKind,
     type ImagePresentationSize,
     type PollKind,
@@ -95,6 +96,7 @@ export type DocumentBlockMeta = {
     showTitle?: boolean;
     backgroundColor?: string;
     transition?: SlideTransition;
+    display?: ColumnsDisplayMode;
 };
 
 export type DocumentMark =
@@ -144,7 +146,7 @@ const BLOCK_TYPES = new Set<DocumentBlockType>([
     'callout',
     'recipe_ingredient',
     'table',
-    'kanban',
+    'columns',
     'slide_deck',
     'slide',
     'poll',
@@ -424,8 +426,14 @@ const parseMeta = (type: DocumentBlockType, value: unknown, path: string): Docum
         case 'blockquote':
         case 'recipe_ingredient':
         case 'table':
-        case 'kanban':
             return {};
+        case 'columns': {
+            const display = meta.display ?? 'blocks';
+            if (display !== 'blocks' && display !== 'cards') {
+                throw new DocumentFormatError(`${path}.display`, 'must be "blocks" or "cards"');
+            }
+            return display === 'blocks' ? {} : {display};
+        }
         case 'slide_deck': {
             const width = meta.width ?? 1920;
             if (typeof width !== 'number' || !Number.isInteger(width) || width <= 0) {
@@ -598,8 +606,8 @@ const richMetaForDocumentBlock = (block: ParsedDocumentBlock, ts: string): RichB
             return {type: 'recipe_ingredient', ts};
         case 'table':
             return {type: 'table', ts};
-        case 'kanban':
-            return {type: 'kanban', ts};
+        case 'columns':
+            return {type: 'columns', display: block.meta.display ?? 'blocks', ts};
         case 'slide_deck':
             return {
                 ...defaultSlideDeckMeta(ts),
@@ -747,8 +755,10 @@ const documentBlockForMeta = (meta: RichBlockMeta): DocumentBlock => {
             return {type: 'recipe_ingredient'};
         case 'table':
             return {type: 'table'};
-        case 'kanban':
-            return {type: 'kanban'};
+        case 'columns':
+            return meta.display === 'blocks'
+                ? {type: 'columns'}
+                : {type: 'columns', meta: {display: meta.display}};
         case 'slide_deck':
             return {type: 'slide_deck', meta: {width: meta.width, height: meta.height, footer: meta.footer}};
         case 'slide':

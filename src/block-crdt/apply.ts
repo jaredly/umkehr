@@ -1,6 +1,7 @@
 import equal from 'fast-deep-equal';
 import {validateBlockOrderPath, virtualParentOwners, type VirtualBlockParentConfig} from './blocks.js';
 import {organizeState} from './cache.js';
+import {deletedStateWins, mergeDeletedState} from './deletion.js';
 import {compareLamports, compareLamportStrings, lamportToString} from './ids.js';
 import {maxLamportCounterForOp} from './ops.js';
 import {Block, BlockStyle, BlockStylePatch, CachedState, DefaultBlockMeta, Lamport, Op, TimestampedBlockMeta} from './types.js';
@@ -19,7 +20,7 @@ export const charOp = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
     ts: string,
 ): Op<M> => ({
     type: 'char',
-    char: {text, id, deleted: false, parent: {id: after, ts: ''}},
+    char: {text, id, parent: {id: after, ts: ''}},
 });
 
 export const applyRemote = <M extends TimestampedBlockMeta>(
@@ -212,10 +213,10 @@ const applyCharDelete = <M extends TimestampedBlockMeta>(
     if (!current) {
         return false;
     }
-    if (current.deleted) {
+    if (!deletedStateWins(op.deleted, current.deleted)) {
         return {state, cache};
     }
-    current = {...current, deleted: true};
+    current = {...current, deleted: op.deleted};
     return {
         state: {
             blocks,
@@ -276,10 +277,10 @@ const applyBlockDelete = <M extends TimestampedBlockMeta>(
     if (!current) {
         return false;
     }
-    if (current.deleted) {
+    if (!deletedStateWins(op.deleted, current.deleted)) {
         return state;
     }
-    current = {...current, deleted: true};
+    current = {...current, deleted: op.deleted};
     return {
         state: {
             ...state.state,
@@ -389,7 +390,7 @@ const applyBlock = <M extends TimestampedBlockMeta>(
         if (!blockOrderWins(block.order, current.order)) {
             block = {...block, order: current.order};
         }
-        block = {...block, deleted: current.deleted || block.deleted};
+        block = {...block, deleted: mergeDeletedState(current.deleted, block.deleted)};
     }
 
     const blocks = {...state.blocks, [id]: block};
@@ -422,7 +423,7 @@ const applyChar = <M extends TimestampedBlockMeta>(
         if (charParentVersionWins(current.parent.ts, char.parent.ts)) {
             char = {...char, parent: current.parent};
         }
-        char = {...char, deleted: current.deleted};
+        char = {...char, deleted: mergeDeletedState(current.deleted, char.deleted)};
     }
     const parentId = lamportToString(char.parent.id);
     if (!parentExists({state, cache}, char.parent.id)) {

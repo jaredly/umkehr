@@ -47,6 +47,7 @@ import {
     nextBlockIdForActor,
     visibleSiblingAnchorsForBlock,
     visibleSiblingAnchorsForPath,
+    isDeleted,
     type VirtualBlockParentConfig,
 } from './index';
 import {Block, CachedState, Lamport} from './types';
@@ -70,6 +71,8 @@ const mts = (init = 0) => {
     let i = init;
     return () => (i++).toString().padStart(5, '0');
 };
+
+const deleted = (ts: string, value = true) => ({value, ts});
 
 const addAfter = (state: CachedState, text: string, at: number, ts: () => string) => {
     const atPos = selPos(state, [0, 'self'], at);
@@ -123,7 +126,7 @@ const block = (id: Lamport, index: number, ts: string, parent: Lamport | Lamport
         meta: {type: 'paragraph', ts},
         style: {},
         order: {id, index: lseq(index), ts, path: [...parentPath, id]},
-        deleted: false,
+        deleted: undefined,
     };
 };
 
@@ -339,20 +342,21 @@ it('deletes visible subtrees under a configured virtual parent', () => {
     if (cellOp.type !== 'block') throw new Error('expected cell block op');
     const cellId = lamportToString(cellOp.block.id);
 
-    expect(() => deleteBlockOps(state, {block: parseLamportString(rowId), mode: 'subtree'})).toThrow('not found');
+    expect(() => deleteBlockOps(state, {block: parseLamportString(rowId), mode: 'subtree', ts: mts(30)})).toThrow('not found');
 
     const next = applyMany(
         state,
         deleteBlockOps(state, {
             block: parseLamportString(rowId),
             mode: 'subtree',
+            ts: mts(30),
             virtualParents: tableVirtualConfig,
         }),
         tableVirtualConfig,
     );
 
-    expect(next.state.blocks[rowId].deleted).toBe(true);
-    expect(next.state.blocks[cellId].deleted).toBe(true);
+    expect(isDeleted(next.state.blocks[rowId])).toBe(true);
+    expect(isDeleted(next.state.blocks[cellId])).toBe(true);
     expect(visibleBlockChildren(next, lamportToString(rowParent), tableVirtualConfig)).toEqual([]);
 });
 
@@ -580,7 +584,7 @@ class EditorHarness {
         const bid = parseLamportString(this.blockIds()[blockIndex]);
         const ops: Op[] = [];
         for (let offset = start + 1; offset <= end; offset++) {
-            ops.push({type: 'char:delete', id: selPos(this.state, bid, offset)!});
+            ops.push({type: 'char:delete', id: selPos(this.state, bid, offset)!, deleted: deleted(this.ts())});
         }
         return this.apply(ops);
     }
@@ -800,10 +804,12 @@ it('split, move, and join', () => {
         {
             type: 'block:delete',
             id: parseLamportString(blocks[1]),
+            deleted: deleted(ts()),
         },
         {
             type: 'block:delete',
             id: parseLamportString(blocks[2]),
+            deleted: deleted(ts()),
         },
     ]);
 
@@ -1202,7 +1208,7 @@ it('returns visible block outline with nested depths and splices hidden parent c
         {id: '0003-self', depth: 0, parentId: '0000-root'},
     ]);
 
-    state = apply(state, {type: 'block:delete', id: [1, 'self']}) as CachedState;
+    state = apply(state, {type: 'block:delete', id: [1, 'self'], deleted: deleted('00003')}) as CachedState;
 
     expect(visibleBlockOutline(state)).toEqual([
         {id: '0000-self', depth: 0, parentId: '0000-root'},
@@ -1303,7 +1309,7 @@ it('validates block order paths', () => {
             id: [2, 'self'],
             meta: {type: 'paragraph', ts: '00003'},
             order: {id: [2, 'self'], index: lseq(2), ts: '00003', path: [[9, 'self'], [2, 'self']]},
-            deleted: false,
+            deleted: undefined,
         },
     });
     expect(missingAncestorBlock).toBe(false);
@@ -1605,7 +1611,7 @@ it('keeps concurrent move-to-root and nested reparenting traversal-safe', () => 
 it('returns false for ops that reference missing records', () => {
     let state = cachedState(init);
 
-    expect(apply(state, {type: 'char:delete', id: [9, 'self']})).toBe(false);
+    expect(apply(state, {type: 'char:delete', id: [9, 'self'], deleted: deleted('00002')})).toBe(false);
     expect(
         apply(state, {
             type: 'char:move',
@@ -1625,6 +1631,7 @@ it('returns false for ops that reference missing records', () => {
         apply(state, {
             type: 'block:delete',
             id: [9, 'self'],
+            deleted: deleted('00002'),
         }),
     ).toBe(false);
     expect(
@@ -1689,7 +1696,7 @@ it('validates op shape separately from dependency readiness', () => {
         char: {
             id: [1, 'self'],
             text: 'a',
-            deleted: false,
+            deleted: undefined,
             parent: {id: [99, 'missing'], ts: ''},
         },
     } satisfies Op;
@@ -1772,14 +1779,14 @@ it('rejects actor ids that contain the lamport separator', () => {
 it('deletes chars idempotently and preserves cache consistency', () => {
     let state = addChars(cachedState(init), 'ab', [0, 'self'], mts());
 
-    state = apply(state, {type: 'char:delete', id: [2, 'self']}) as CachedState;
-    expect(state.state.chars['0002-self'].deleted).toBe(true);
+    state = apply(state, {type: 'char:delete', id: [2, 'self'], deleted: deleted('00003')}) as CachedState;
+    expect(state.state.chars['0002-self'].deleted).toEqual(deleted('00003'));
     expect(state.cache.charContents['0001-self']).toEqual(['0002-self']);
     expect(stateToString(state)).toBe('0000-self: a');
     expectCache(state);
 
-    state = apply(state, {type: 'char:delete', id: [2, 'self']}) as CachedState;
-    expect(state.state.chars['0002-self'].deleted).toBe(true);
+    state = apply(state, {type: 'char:delete', id: [2, 'self'], deleted: deleted('00003')}) as CachedState;
+    expect(state.state.chars['0002-self'].deleted).toEqual(deleted('00003'));
     expect(state.cache.charContents['0001-self']).toEqual(['0002-self']);
     expect(stateToString(state)).toBe('0000-self: a');
     expectCache(state);
@@ -1828,7 +1835,7 @@ it('merges duplicate block inserts by field timestamps', () => {
             id: [1, 'self'],
             meta: {type: 'blockquote', ts: '00004'},
             order: {id: [9, 'self'], index: lseq(9), path: [[1, 'self']], ts: '00002'},
-            deleted: true,
+            deleted: deleted('00005'),
         },
     }) as CachedState;
 
@@ -1837,7 +1844,7 @@ it('merges duplicate block inserts by field timestamps', () => {
         meta: {type: 'blockquote', ts: '00004'},
         style: {},
         order: {id: [1, 'self'], index: lseq(1), path: [[1, 'self']], ts: '00003'},
-        deleted: true,
+        deleted: deleted('00005'),
     });
     expect(state.cache.blockChildren['0000-root'].filter((id) => id === '0001-self')).toHaveLength(
         1,
@@ -1854,8 +1861,9 @@ it('deletes blocks irreversibly and preserves cache consistency', () => {
     state = apply(state, {
         type: 'block:delete',
         id: [1, 'self'],
+        deleted: deleted('00003'),
     }) as CachedState;
-    expect(state.state.blocks['0001-self'].deleted).toBe(true);
+    expect(state.state.blocks['0001-self'].deleted).toEqual(deleted('00003'));
     expect(state.cache.blockChildren['0000-root']).toContain('0001-self');
     expect(stateToString(state)).not.toContain('0001-self');
     expectCache(state);
@@ -1863,8 +1871,9 @@ it('deletes blocks irreversibly and preserves cache consistency', () => {
     state = apply(state, {
         type: 'block:delete',
         id: [1, 'self'],
+        deleted: deleted('00003'),
     }) as CachedState;
-    expect(state.state.blocks['0001-self'].deleted).toBe(true);
+    expect(state.state.blocks['0001-self'].deleted).toEqual(deleted('00003'));
     expect(state.cache.blockChildren['0000-root']).toContain('0001-self');
     expect(stateToString(state)).not.toContain('0001-self');
     expectCache(state);
@@ -1873,7 +1882,7 @@ it('deletes blocks irreversibly and preserves cache consistency', () => {
         type: 'block',
         block: block([1, 'self'], 9, '00004'),
     }) as CachedState;
-    expect(state.state.blocks['0001-self'].deleted).toBe(true);
+    expect(state.state.blocks['0001-self'].deleted).toEqual(deleted('00003'));
     expect(state.cache.blockChildren['0000-root']).toContain('0001-self');
     expect(stateToString(state)).not.toContain('0001-self');
     expectCache(state);
@@ -1912,7 +1921,7 @@ it('creates public text/block change op batches from visible offsets', () => {
     state = applyMany(state, ops);
     expect(blockLines(state)).toEqual(['abcd']);
 
-    ops = deleteRangeOps(state, {block: left, startOffset: 1, endOffset: 3});
+    ops = deleteRangeOps(state, {block: left, startOffset: 1, endOffset: 3, ts});
     expect(ops.map((op) => op.type)).toEqual(['char:delete', 'char:delete']);
     state = applyMany(state, ops);
     expect(blockLines(state)).toEqual(['ad']);
@@ -2106,19 +2115,22 @@ it('plans undo for additive marks with normal mark ops', () => {
     expect(materializeFormattedBlocks(state)[0].runs).toEqual([{text: 'abc', marks: {}}]);
 });
 
-it('plans undo for deleted chars by inserting fresh replacement chars', () => {
+it('plans undo for deleted chars by restoring original char ids', () => {
     const ts = mts(2);
     let state = cachedState(initialState('self', '00001'));
     state = applyMany(state, insertTextOps(state, {actor: 'alice', block: [0, 'self'], offset: 0, text: 'abc', ts}));
     const before = state;
-    const deletion = deleteRangeOps(state, {block: [0, 'self'], startOffset: 1, endOffset: 3});
+    const deletion = deleteRangeOps(state, {block: [0, 'self'], startOffset: 1, endOffset: 3, ts});
     state = applyMany(state, deletion);
     expect(blockLines(state)).toEqual(['a']);
 
     const undo = planUndoOps(before, state, deletion, {actor: 'alice', ts: mts(20)});
 
     expect(undo.complete).toBe(true);
-    expect(undo.ops.map((op) => op.type)).toEqual(['char', 'char']);
+    expect(undo.ops).toEqual([
+        {type: 'char:delete', id: [3, 'alice'], deleted: {value: false, ts: '00020'}},
+        {type: 'char:delete', id: [2, 'alice'], deleted: {value: false, ts: '00021'}},
+    ]);
     state = applyMany(state, undo.ops);
     expect(blockLines(state)).toEqual(['abc']);
 });
@@ -2141,17 +2153,18 @@ it('plans redo for inserted chars after undo tombstones them', () => {
     expect(blockLines(state)).toEqual(['ab']);
 });
 
-it('plans undo for block delete by creating a fresh visible block with copied text', () => {
+it('plans undo for block delete by restoring original block id', () => {
     const ts = mts(2);
     let state = cachedState(initialState('self', '00001'));
     state = applyMany(state, insertTextOps(state, {actor: 'alice', block: [0, 'self'], offset: 0, text: 'abc', ts}));
     const before = state;
-    const deletion: Op[] = [{type: 'block:delete', id: [0, 'self']}];
+    const deletion: Op[] = [{type: 'block:delete', id: [0, 'self'], deleted: deleted(ts())}];
     state = applyMany(state, deletion);
     expect(blockLines(state)).toEqual([]);
 
     const undo = planUndoOps(before, state, deletion, {actor: 'alice', ts: mts(20)});
     expect(undo.complete).toBe(true);
+    expect(undo.ops).toEqual([{type: 'block:delete', id: [0, 'self'], deleted: {value: false, ts: '00020'}}]);
     state = applyMany(state, undo.ops);
     expect(blockLines(state)).toEqual(['abc']);
 });
@@ -2433,7 +2446,7 @@ it('derives join sentinel chars from join records', () => {
 
     state = applyMany(state, join(state, leftBlock, rightBlock, ts(), 'alice'));
 
-    expect(state.state.blocks[rightId].deleted).toBe(false);
+    expect(isDeleted(state.state.blocks[rightId])).toBe(false);
     expect(state.state.chars[rightId]).toBeUndefined();
     expect(state.state.joins['0006-alice']).toEqual({
         id: [6, 'alice'],
@@ -2650,8 +2663,8 @@ it('resolves reciprocal concurrent joins by lower join id without tombstoning bo
     expect(blockLines(two)).toEqual(['abcd']);
     expect(rootBlockIds(one)).toEqual([leftId]);
     expect(rootBlockIds(two)).toEqual([leftId]);
-    expect(one.state.blocks[leftId].deleted).toBe(false);
-    expect(one.state.blocks[rightId].deleted).toBe(false);
+    expect(isDeleted(one.state.blocks[leftId])).toBe(false);
+    expect(isDeleted(one.state.blocks[rightId])).toBe(false);
     expect(Object.keys(one.cache.joinedBlocks)).toEqual([rightId]);
     expect(one.cache.joinSentinels[rightId]).toEqual(one.state.joins['0006-alice']);
     expect(one.cache.joinSentinels[leftId]).toBeUndefined();

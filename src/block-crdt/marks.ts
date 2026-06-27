@@ -1,4 +1,5 @@
 import equal from 'fast-deep-equal';
+import {isDeleted} from './deletion.js';
 import {compareLamports, lamportToString} from './ids.js';
 import {
     charAtVisibleOffset,
@@ -306,7 +307,7 @@ const createMarkTraversalContext = <M extends TimestampedBlockMeta>(
             id,
             ids.filter((charId) => {
                 const char = charRecord(state, charId);
-                return Boolean(char && !char.deleted);
+                return Boolean(char && !isDeleted(char));
             }),
         );
         allIds.push(...ids);

@@ -1543,7 +1543,7 @@ select {
 .slideBody > .renderTreeBranch,
 .slideBody > .groupedSubtree,
 .slideBody > .tableBlock,
-.slideBody > .kanbanBlock {
+.slideBody > .columnsBlock {
     max-width: 100%;
 }
 
@@ -1635,24 +1635,24 @@ select {
     }
 }
 
-.kanbanBlock {
+.columnsBlock {
     margin-left: calc(var(--block-depth, 0) * 24px);
     padding: 8px 0 10px;
 }
 
-.kanbanTitle {
+.columnsTitle {
     border: 1px solid #c9d4de;
     border-bottom: 0;
     border-radius: 6px 6px 0 0;
     background: #f7fafc;
 }
 
-.kanbanTitle .blockRow {
+.columnsTitle .blockRow {
     margin-left: 0;
     padding: 6px 8px;
 }
 
-.kanbanTitleText {
+.columnsTitleText {
     min-height: 30px;
     padding-left: 6px;
     font-size: 13px;
@@ -1662,7 +1662,7 @@ select {
     color: #33414d;
 }
 
-.kanbanColumns {
+.columnsColumns {
     display: flex;
     gap: 10px;
     overflow-x: auto;
@@ -1672,7 +1672,12 @@ select {
     background: #eef3f7;
 }
 
-.kanbanColumn {
+.columnsBlockBlocks .columnsColumns {
+    align-items: stretch;
+    background: #f8fafb;
+}
+
+.columnsColumn {
     position: relative;
     display: flex;
     flex: 0 0 260px;
@@ -1684,18 +1689,31 @@ select {
     background: #f8fafc;
 }
 
-.kanbanColumn.dragging,
-.kanbanCard.dragging {
+.columnsColumnBlocks {
+    min-height: 120px;
+    padding: 4px;
+    background: #fff;
+}
+
+.columnsColumnBlocks > .renderTreeBranch,
+.columnsColumnBlocks > .groupedSubtree,
+.columnsColumnBlocks > .tableBlock,
+.columnsColumnBlocks > .columnsBlock {
+    margin-left: 0;
+}
+
+.columnsColumn.dragging,
+.columnsCard.dragging {
     opacity: 0.58;
 }
 
-.kanbanColumn.draggingRoot,
-.kanbanCard.draggingRoot {
+.columnsColumn.draggingRoot,
+.columnsCard.draggingRoot {
     opacity: 0.46;
 }
 
-.kanbanColumn.dropBefore::before,
-.kanbanColumn.dropAfter::after {
+.columnsColumn.dropBefore::before,
+.columnsColumn.dropAfter::after {
     content: '';
     position: absolute;
     top: 8px;
@@ -1706,15 +1724,15 @@ select {
     background: #1b75bb;
 }
 
-.kanbanColumn.dropBefore::before {
+.columnsColumn.dropBefore::before {
     left: -7px;
 }
 
-.kanbanColumn.dropAfter::after {
+.columnsColumn.dropAfter::after {
     right: -7px;
 }
 
-.kanbanColumnHeader {
+.columnsColumnHeader {
     display: grid;
     grid-template-columns: 28px minmax(0, 1fr);
     gap: 4px;
@@ -1723,14 +1741,14 @@ select {
     border-bottom: 1px solid #dce4eb;
 }
 
-.kanbanColumnHeader .blockRow {
+.columnsColumnHeader .blockRow {
     grid-template-columns: minmax(0, 1fr) minmax(0, auto);
     gap: 4px;
     margin-left: 0;
     padding: 0;
 }
 
-.kanbanColumnTitle {
+.columnsColumnTitle {
     min-height: 30px;
     padding: 5px 6px;
     font-size: 13px;
@@ -1738,8 +1756,8 @@ select {
     color: #23313d;
 }
 
-.kanbanColumnHandle,
-.kanbanCardHandle {
+.columnsColumnHandle,
+.columnsCardHandle {
     width: 26px;
     min-width: 26px;
     height: 26px;
@@ -1750,15 +1768,15 @@ select {
     cursor: grab;
 }
 
-.kanbanColumnHandle:hover,
-.kanbanColumnHandle:focus-visible,
-.kanbanCardHandle:hover,
-.kanbanCardHandle:focus-visible {
+.columnsColumnHandle:hover,
+.columnsColumnHandle:focus-visible,
+.columnsCardHandle:hover,
+.columnsCardHandle:focus-visible {
     border-color: #cbd5df;
     background: #fff;
 }
 
-.kanbanCards {
+.columnsCards {
     display: grid;
     align-content: start;
     gap: 8px;
@@ -1767,7 +1785,7 @@ select {
     padding: 8px;
 }
 
-.kanbanCard {
+.columnsCard {
     position: relative;
     display: grid;
     grid-template-columns: 26px minmax(0, 1fr);
@@ -1779,56 +1797,56 @@ select {
     box-shadow: 0 1px 2px rgba(20, 35, 50, 0.06);
 }
 
-.kanbanCard.blockSelected {
+.columnsCard.blockSelected {
     outline: 1px solid #6aa7d8;
     outline-offset: 1px;
     background: #f7fbff;
 }
 
-.kanbanCard.blockSelectionFocus {
+.columnsCard.blockSelectionFocus {
     outline-color: #2f76b7;
 }
 
-.kanbanCardBody {
+.columnsCardBody {
     min-width: 0;
 }
 
-.kanbanCard .blockRow {
+.columnsCard .blockRow {
     grid-template-columns: minmax(0, 1fr) minmax(0, auto);
     gap: 4px;
     margin-left: 0;
     padding: 0;
 }
 
-.kanbanCard .blockRow.dropBefore::before,
-.kanbanCard .blockRow.dropAfter::after {
+.columnsCard .blockRow.dropBefore::before,
+.columnsCard .blockRow.dropAfter::after {
     left: -36px;
     right: -6px;
     z-index: 3;
     height: 3px;
 }
 
-.kanbanCard .blockRow.dropChildTarget::before,
-.kanbanCard .blockRow.dropChildTarget::after {
+.columnsCard .blockRow.dropChildTarget::before,
+.columnsCard .blockRow.dropChildTarget::after {
     left: calc(18px + var(--drop-offset, 0px));
     right: 10px;
     background: #2c8a57;
 }
 
-.kanbanCard .blockRow.dropBefore::before {
+.columnsCard .blockRow.dropBefore::before {
     top: -7px;
 }
 
-.kanbanCard .blockRow.dropAfter::after {
+.columnsCard .blockRow.dropAfter::after {
     bottom: -7px;
 }
 
-.kanbanCardTitle {
+.columnsCardTitle {
     min-height: 30px;
     padding: 4px 6px;
 }
 
-.kanbanCardChildren {
+.columnsCardChildren {
     display: grid;
     gap: 4px;
     margin-top: 6px;
@@ -1836,9 +1854,9 @@ select {
     border-top: 1px solid #edf1f5;
 }
 
-.kanbanCard .previewCardLink,
-.kanbanCard .codePreview,
-.kanbanCard .tableBlock {
+.columnsCard .previewCardLink,
+.columnsCard .codePreview,
+.columnsCard .tableBlock {
     max-width: 100%;
     overflow-x: auto;
 }

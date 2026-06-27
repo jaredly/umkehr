@@ -76,33 +76,33 @@ const tableTitleBlock = (panel: HTMLElement): HTMLElement => {
     return title;
 };
 
-const kanbanBoards = (panel: HTMLElement): HTMLElement[] =>
-    Array.from(panel.querySelectorAll<HTMLElement>('.kanbanBlock'));
+const columnsBoards = (panel: HTMLElement): HTMLElement[] =>
+    Array.from(panel.querySelectorAll<HTMLElement>('.columnsBlock'));
 
-const kanbanColumns = (panel: HTMLElement): HTMLElement[] =>
-    Array.from(panel.querySelectorAll<HTMLElement>('.kanbanColumn'));
+const columnsColumns = (panel: HTMLElement): HTMLElement[] =>
+    Array.from(panel.querySelectorAll<HTMLElement>('.columnsColumn'));
 
-const kanbanCards = (panel: HTMLElement): HTMLElement[] =>
-    Array.from(panel.querySelectorAll<HTMLElement>('.kanbanCard'));
+const columnsCards = (panel: HTMLElement): HTMLElement[] =>
+    Array.from(panel.querySelectorAll<HTMLElement>('.columnsCard'));
 
-const kanbanColumnTitle = (column: HTMLElement): string => {
-    const title = column.querySelector<HTMLElement>('.kanbanColumnTitle[role="textbox"]');
-    if (!title) throw new Error('missing kanban column title');
+const columnsColumnTitle = (column: HTMLElement): string => {
+    const title = column.querySelector<HTMLElement>('.columnsColumnTitle[role="textbox"]');
+    if (!title) throw new Error('missing columns column title');
     return blockText(title);
 };
 
-const kanbanCardTitle = (card: HTMLElement): string => {
-    const title = card.querySelector<HTMLElement>('.kanbanCardTitle[role="textbox"]');
-    if (!title) throw new Error('missing kanban card title');
+const columnsCardTitle = (card: HTMLElement): string => {
+    const title = card.querySelector<HTMLElement>('.columnsCardTitle[role="textbox"]');
+    if (!title) throw new Error('missing column card title');
     return blockText(title);
 };
 
-const kanbanColumnCardTexts = (column: HTMLElement): string[] => {
-    const cards = column.querySelector<HTMLElement>('.kanbanCards');
-    if (!cards) throw new Error('missing kanban cards container');
+const columnsColumnCardTexts = (column: HTMLElement): string[] => {
+    const cards = column.querySelector<HTMLElement>('.columnsCards');
+    if (!cards) throw new Error('missing column cards container');
     return Array.from(cards.children)
-        .filter((child): child is HTMLElement => child instanceof HTMLElement && child.classList.contains('kanbanCard'))
-        .map(kanbanCardTitle);
+        .filter((child): child is HTMLElement => child instanceof HTMLElement && child.classList.contains('columnsCard'))
+        .map(columnsCardTitle);
 };
 
 const tableRowHeaders = (panel: HTMLElement): HTMLElement[] =>
@@ -779,36 +779,36 @@ describe('Block rich text example UI', () => {
         expect(tableBlocks(right)).toHaveLength(35);
     });
 
-    it('renders the kanban board fixture', async () => {
+    it('renders the card columns fixture', async () => {
         const view = render(<App />);
         const {left, right} = panels(view);
 
         fireEvent.change(view.getByLabelText('Replace document from fixture'), {
-            target: {value: 'kanban-board'},
+            target: {value: 'card-columns'},
         });
 
-        await waitFor(() => expect(view.getByText('Loaded fixture: Kanban board.')).toBeTruthy());
-        expect(kanbanBoards(left)).toHaveLength(1);
-        expect(kanbanBoards(right)).toHaveLength(1);
-        expect(kanbanColumns(left)).toHaveLength(3);
-        expect(kanbanCards(left).length).toBeGreaterThanOrEqual(6);
+        await waitFor(() => expect(view.getByText('Loaded fixture: Card columns.')).toBeTruthy());
+        expect(columnsBoards(left)).toHaveLength(1);
+        expect(columnsBoards(right)).toHaveLength(1);
+        expect(columnsColumns(left)).toHaveLength(3);
+        expect(columnsCards(left).length).toBeGreaterThanOrEqual(6);
         expect(blockTexts(left)).toContain('Launch board');
         expect(blockTexts(left)).toContain('Draft release notes');
         expect(within(left).getAllByRole('button', {name: 'Move card'}).length).toBeGreaterThan(0);
     });
 
-    it('drags a kanban card between columns through normal block movement', async () => {
+    it('drags a column card between columns through normal block movement', async () => {
         const view = render(<App />);
         const {left} = panels(view);
 
         fireEvent.change(view.getByLabelText('Replace document from fixture'), {
-            target: {value: 'kanban-board'},
+            target: {value: 'card-columns'},
         });
-        await waitFor(() => expect(view.getByText('Loaded fixture: Kanban board.')).toBeTruthy());
+        await waitFor(() => expect(view.getByText('Loaded fixture: Card columns.')).toBeTruthy());
 
-        const columns = kanbanColumns(left);
-        const sourceCard = columns[0].querySelector<HTMLElement>('.kanbanCard')!;
-        const targetCard = columns[1].querySelector<HTMLElement>('.kanbanCard')!;
+        const columns = columnsColumns(left);
+        const sourceCard = columns[0].querySelector<HTMLElement>('.columnsCard')!;
+        const targetCard = columns[1].querySelector<HTMLElement>('.columnsCard')!;
         targetCard.getBoundingClientRect = () =>
             ({
                 left: 0,
@@ -827,26 +827,26 @@ describe('Block rich text example UI', () => {
         document.elementsFromPoint = originalElementsFromPoint;
 
         await waitFor(() =>
-            expect(kanbanColumnCardTexts(kanbanColumns(left)[1]).slice(0, 2)).toEqual([
+            expect(columnsColumnCardTexts(columnsColumns(left)[1]).slice(0, 2)).toEqual([
                 'QA import/export',
                 'Draft release notes',
             ]),
         );
-        expect(kanbanColumnCardTexts(kanbanColumns(left)[0])).not.toContain('Draft release notes');
+        expect(columnsColumnCardTexts(columnsColumns(left)[0])).not.toContain('Draft release notes');
     });
 
-    it('shows only the child drop target when hovering a kanban card child zone', async () => {
+    it('shows only the child drop target when hovering a column card child zone', async () => {
         const view = render(<App />);
         const {left} = panels(view);
 
         fireEvent.change(view.getByLabelText('Replace document from fixture'), {
-            target: {value: 'kanban-board'},
+            target: {value: 'card-columns'},
         });
-        await waitFor(() => expect(view.getByText('Loaded fixture: Kanban board.')).toBeTruthy());
+        await waitFor(() => expect(view.getByText('Loaded fixture: Card columns.')).toBeTruthy());
 
-        const columns = kanbanColumns(left);
-        const sourceCard = columns[0].querySelector<HTMLElement>('.kanbanCard')!;
-        const targetCard = columns[1].querySelector<HTMLElement>('.kanbanCard')!;
+        const columns = columnsColumns(left);
+        const sourceCard = columns[0].querySelector<HTMLElement>('.columnsCard')!;
+        const targetCard = columns[1].querySelector<HTMLElement>('.columnsCard')!;
         targetCard.getBoundingClientRect = () =>
             ({
                 left: 0,
@@ -901,18 +901,18 @@ describe('Block rich text example UI', () => {
         }
     });
 
-    it('shows only the block-row drop target when hovering before a kanban card', async () => {
+    it('shows only the block-row drop target when hovering before a column card', async () => {
         const view = render(<App />);
         const {left} = panels(view);
 
         fireEvent.change(view.getByLabelText('Replace document from fixture'), {
-            target: {value: 'kanban-board'},
+            target: {value: 'card-columns'},
         });
-        await waitFor(() => expect(view.getByText('Loaded fixture: Kanban board.')).toBeTruthy());
+        await waitFor(() => expect(view.getByText('Loaded fixture: Card columns.')).toBeTruthy());
 
-        const columns = kanbanColumns(left);
-        const sourceCard = columns[0].querySelector<HTMLElement>('.kanbanCard')!;
-        const targetCard = columns[1].querySelector<HTMLElement>('.kanbanCard')!;
+        const columns = columnsColumns(left);
+        const sourceCard = columns[0].querySelector<HTMLElement>('.columnsCard')!;
+        const targetCard = columns[1].querySelector<HTMLElement>('.columnsCard')!;
         targetCard.getBoundingClientRect = () =>
             ({
                 left: 0,
@@ -967,19 +967,19 @@ describe('Block rich text example UI', () => {
         }
     });
 
-    it('does not style appending to a kanban column as a card child drop', async () => {
+    it('does not style appending to a columns column as a card child drop', async () => {
         const view = render(<App />);
         const {left} = panels(view);
 
         fireEvent.change(view.getByLabelText('Replace document from fixture'), {
-            target: {value: 'kanban-board'},
+            target: {value: 'card-columns'},
         });
-        await waitFor(() => expect(view.getByText('Loaded fixture: Kanban board.')).toBeTruthy());
+        await waitFor(() => expect(view.getByText('Loaded fixture: Card columns.')).toBeTruthy());
 
-        const columns = kanbanColumns(left);
-        const sourceCard = columns[0].querySelector<HTMLElement>('.kanbanCard')!;
+        const columns = columnsColumns(left);
+        const sourceCard = columns[0].querySelector<HTMLElement>('.columnsCard')!;
         const targetColumn = columns[1];
-        const targetCards = Array.from(targetColumn.querySelectorAll<HTMLElement>('.kanbanCard'));
+        const targetCards = Array.from(targetColumn.querySelectorAll<HTMLElement>('.columnsCard'));
         targetColumn.getBoundingClientRect = () =>
             ({
                 left: 0,
@@ -1005,7 +1005,7 @@ describe('Block rich text example UI', () => {
                 toJSON: () => ({}),
             }) as DOMRect;
         const originalElementsFromPoint = document.elementsFromPoint;
-        document.elementsFromPoint = () => [targetColumn.querySelector<HTMLElement>('.kanbanCards')!];
+        document.elementsFromPoint = () => [targetColumn.querySelector<HTMLElement>('.columnsCards')!];
         try {
             const handle = within(sourceCard).getByRole('button', {name: 'Move card'}) as HTMLElement & {
                 setPointerCapture?: (pointerId: number) => void;
@@ -1047,20 +1047,20 @@ describe('Block rich text example UI', () => {
         }
     });
 
-    it('uses after-card target for the bottom-left of the last card in a kanban column', async () => {
+    it('uses after-card target for the bottom-left of the last card in a columns column', async () => {
         const view = render(<App />);
         const {left} = panels(view);
 
         fireEvent.change(view.getByLabelText('Replace document from fixture'), {
-            target: {value: 'kanban-board'},
+            target: {value: 'card-columns'},
         });
-        await waitFor(() => expect(view.getByText('Loaded fixture: Kanban board.')).toBeTruthy());
+        await waitFor(() => expect(view.getByText('Loaded fixture: Card columns.')).toBeTruthy());
 
-        const columns = kanbanColumns(left);
-        const sourceCard = columns[0].querySelector<HTMLElement>('.kanbanCard')!;
+        const columns = columnsColumns(left);
+        const sourceCard = columns[0].querySelector<HTMLElement>('.columnsCard')!;
         const targetColumn = columns[1];
         const nextColumn = columns[2];
-        const targetCards = Array.from(targetColumn.querySelectorAll<HTMLElement>('.kanbanCard'));
+        const targetCards = Array.from(targetColumn.querySelectorAll<HTMLElement>('.columnsCard'));
         const lastCard = targetCards[targetCards.length - 1];
         lastCard.getBoundingClientRect = () =>
             ({
@@ -1130,19 +1130,19 @@ describe('Block rich text example UI', () => {
         }
     });
 
-    it('uses card geometry for margin space between kanban cards', async () => {
+    it('uses card geometry for margin space between column cards', async () => {
         const view = render(<App />);
         const {left} = panels(view);
 
         fireEvent.change(view.getByLabelText('Replace document from fixture'), {
-            target: {value: 'kanban-board'},
+            target: {value: 'card-columns'},
         });
-        await waitFor(() => expect(view.getByText('Loaded fixture: Kanban board.')).toBeTruthy());
+        await waitFor(() => expect(view.getByText('Loaded fixture: Card columns.')).toBeTruthy());
 
-        const columns = kanbanColumns(left);
-        const sourceCard = columns[0].querySelector<HTMLElement>('.kanbanCard')!;
+        const columns = columnsColumns(left);
+        const sourceCard = columns[0].querySelector<HTMLElement>('.columnsCard')!;
         const targetColumn = columns[1];
-        const targetCards = Array.from(targetColumn.querySelectorAll<HTMLElement>('.kanbanCard'));
+        const targetCards = Array.from(targetColumn.querySelectorAll<HTMLElement>('.columnsCard'));
         targetCards[0].getBoundingClientRect = () =>
             ({
                 left: 8,
@@ -1168,7 +1168,7 @@ describe('Block rich text example UI', () => {
                 toJSON: () => ({}),
             }) as DOMRect;
         const originalElementsFromPoint = document.elementsFromPoint;
-        document.elementsFromPoint = () => [targetColumn.querySelector<HTMLElement>('.kanbanCards')!];
+        document.elementsFromPoint = () => [targetColumn.querySelector<HTMLElement>('.columnsCards')!];
         try {
             const handle = within(sourceCard).getByRole('button', {name: 'Move card'}) as HTMLElement & {
                 setPointerCapture?: (pointerId: number) => void;
@@ -1211,20 +1211,20 @@ describe('Block rich text example UI', () => {
         }
     });
 
-    it('does not fallback to a horizontally unrelated kanban column', async () => {
+    it('does not fallback to a horizontally unrelated columns column', async () => {
         const view = render(<App />);
         const {left} = panels(view);
 
         fireEvent.change(view.getByLabelText('Replace document from fixture'), {
-            target: {value: 'kanban-board'},
+            target: {value: 'card-columns'},
         });
-        await waitFor(() => expect(view.getByText('Loaded fixture: Kanban board.')).toBeTruthy());
+        await waitFor(() => expect(view.getByText('Loaded fixture: Card columns.')).toBeTruthy());
 
-        const columns = kanbanColumns(left);
+        const columns = columnsColumns(left);
         const leftColumn = columns[0];
         const sourceColumn = columns[1];
-        const sourceCard = sourceColumn.querySelector<HTMLElement>('.kanbanCard')!;
-        const leftCard = leftColumn.querySelector<HTMLElement>('.kanbanCard')!;
+        const sourceCard = sourceColumn.querySelector<HTMLElement>('.columnsCard')!;
+        const leftCard = leftColumn.querySelector<HTMLElement>('.columnsCard')!;
         leftColumn.getBoundingClientRect = () =>
             ({
                 left: 0,
@@ -1299,8 +1299,8 @@ describe('Block rich text example UI', () => {
             });
 
             await waitFor(() => expect(sourceCard.classList.contains('draggingRoot')).toBe(true));
-            expect(left.querySelector('.kanbanColumn.dropBefore, .kanbanColumn.dropAfter')).toBeNull();
-            expect(left.querySelector('.kanbanCard .blockRow.dropBefore, .kanbanCard .blockRow.dropAfter')).toBeNull();
+            expect(left.querySelector('.columnsColumn.dropBefore, .columnsColumn.dropAfter')).toBeNull();
+            expect(left.querySelector('.columnsCard .blockRow.dropBefore, .columnsCard .blockRow.dropAfter')).toBeNull();
 
             fireEvent.pointerUp(window, {
                 button: 0,
@@ -1315,17 +1315,17 @@ describe('Block rich text example UI', () => {
         }
     });
 
-    it('shows no target for an adjacent kanban card no-op placement', async () => {
+    it('shows no target for an adjacent column card no-op placement', async () => {
         const view = render(<App />);
         const {left} = panels(view);
 
         fireEvent.change(view.getByLabelText('Replace document from fixture'), {
-            target: {value: 'kanban-board'},
+            target: {value: 'card-columns'},
         });
-        await waitFor(() => expect(view.getByText('Loaded fixture: Kanban board.')).toBeTruthy());
+        await waitFor(() => expect(view.getByText('Loaded fixture: Card columns.')).toBeTruthy());
 
-        const columns = kanbanColumns(left);
-        const [firstCard, secondCard] = Array.from(columns[0].querySelectorAll<HTMLElement>('.kanbanCard'));
+        const columns = columnsColumns(left);
+        const [firstCard, secondCard] = Array.from(columns[0].querySelectorAll<HTMLElement>('.columnsCard'));
         firstCard.getBoundingClientRect = () =>
             ({
                 left: 0,
@@ -1375,8 +1375,8 @@ describe('Block rich text example UI', () => {
             });
 
             await waitFor(() => expect(firstCard.classList.contains('draggingRoot')).toBe(true));
-            expect(left.querySelector('.kanbanColumn.dropBefore, .kanbanColumn.dropAfter')).toBeNull();
-            expect(left.querySelector('.kanbanCard .blockRow.dropBefore, .kanbanCard .blockRow.dropAfter')).toBeNull();
+            expect(left.querySelector('.columnsColumn.dropBefore, .columnsColumn.dropAfter')).toBeNull();
+            expect(left.querySelector('.columnsCard .blockRow.dropBefore, .columnsCard .blockRow.dropAfter')).toBeNull();
 
             fireEvent.pointerUp(window, {
                 button: 0,
@@ -1391,16 +1391,16 @@ describe('Block rich text example UI', () => {
         }
     });
 
-    it('drags a kanban column before another column through normal block movement', async () => {
+    it('drags a columns column before another column through normal block movement', async () => {
         const view = render(<App />);
         const {left} = panels(view);
 
         fireEvent.change(view.getByLabelText('Replace document from fixture'), {
-            target: {value: 'kanban-board'},
+            target: {value: 'card-columns'},
         });
-        await waitFor(() => expect(view.getByText('Loaded fixture: Kanban board.')).toBeTruthy());
+        await waitFor(() => expect(view.getByText('Loaded fixture: Card columns.')).toBeTruthy());
 
-        const columns = kanbanColumns(left);
+        const columns = columnsColumns(left);
         const doneColumn = columns[2];
         const todoColumn = columns[0];
         todoColumn.getBoundingClientRect = () =>
@@ -1421,7 +1421,7 @@ describe('Block rich text example UI', () => {
         document.elementsFromPoint = originalElementsFromPoint;
 
         await waitFor(() =>
-            expect(kanbanColumns(left).map(kanbanColumnTitle)).toEqual(['done', 'todo', 'in progress']),
+            expect(columnsColumns(left).map(columnsColumnTitle)).toEqual(['done', 'todo', 'in progress']),
         );
     });
 
@@ -1629,19 +1629,46 @@ describe('Block rich text example UI', () => {
         await waitFor(() => expect(tableBlocks(right)).toHaveLength(9));
     });
 
-    it('converts a block to a kanban board from the block type menu', async () => {
+    it('converts a block to columns from the block type menu and switches display', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+        selectCaret(blocks(left)[0], 0);
+        typeText(blocks(left)[0], 'Columns');
+
+        setBlockType(left, 'columns');
+
+        await waitFor(() => {
+            expect(columnsBoards(left)).toHaveLength(1);
+            expect(columnsBoards(right)).toHaveLength(1);
+        });
+        expect(columnsColumns(left)).toHaveLength(3);
+        expect(columnsCards(left)).toHaveLength(0);
+        expect(blockTexts(left).slice(0, 4)).toEqual(['Columns', 'todo', 'in progress', 'done']);
+
+        const menu = openBlockOptions(left, 'Columns block options');
+        fireEvent.change(within(menu).getByRole('combobox', {name: 'Columns display'}), {
+            target: {value: 'cards'},
+        });
+
+        await waitFor(() => {
+            expect(within(left).getAllByRole('button', {name: 'Move column'})).toHaveLength(3);
+            expect(within(right).getAllByRole('button', {name: 'Move column'})).toHaveLength(3);
+        });
+    });
+
+    it('converts a block to card columns from the block type menu', async () => {
         const view = render(<App />);
         const {left, right} = panels(view);
         selectCaret(blocks(left)[0], 0);
         typeText(blocks(left)[0], 'Board');
 
-        setBlockType(left, 'kanban');
+        setBlockType(left, 'card-columns');
 
         await waitFor(() => {
-            expect(kanbanBoards(left)).toHaveLength(1);
-            expect(kanbanBoards(right)).toHaveLength(1);
+            expect(columnsBoards(left)).toHaveLength(1);
+            expect(columnsBoards(right)).toHaveLength(1);
         });
-        expect(kanbanColumns(left)).toHaveLength(3);
+        expect(columnsColumns(left)).toHaveLength(3);
         expect(blockTexts(left).slice(0, 4)).toEqual(['Board', 'todo', 'in progress', 'done']);
         expect(within(left).getAllByRole('button', {name: 'Move column'})).toHaveLength(3);
     });
@@ -2752,7 +2779,7 @@ describe('Block rich text example UI', () => {
         expect(within(right).getByRole('textbox', {name: 'Preview URL'})).toBeTruthy();
     });
 
-    it('runs a slash kanban command and creates default columns', async () => {
+    it('runs a slash columns command and creates default columns', async () => {
         const view = render(<App />);
         const {left, right} = panels(view);
 
@@ -2761,16 +2788,16 @@ describe('Block rich text example UI', () => {
 
         const dialog = await waitFor(() => within(left).getByRole('dialog', {name: 'Slash commands'}));
         fireEvent.change(within(dialog).getByRole('textbox', {name: 'Search slash commands'}), {
-            target: {value: 'kanban'},
+            target: {value: 'columns'},
         });
-        fireEvent.click(within(dialog).getByRole('option', {name: /Kanban board/}));
+        fireEvent.click(within(dialog).getByRole('option', {name: /Card columns/}));
 
         await waitFor(() => {
-            expect(kanbanBoards(left)).toHaveLength(1);
-            expect(kanbanBoards(right)).toHaveLength(1);
+            expect(columnsBoards(left)).toHaveLength(1);
+            expect(columnsBoards(right)).toHaveLength(1);
         });
         expect(blockTexts(left).slice(0, 4)).toEqual(['', 'todo', 'in progress', 'done']);
-        expect(kanbanColumns(left)).toHaveLength(3);
+        expect(columnsColumns(left)).toHaveLength(3);
     });
 
     it('converts a block to preview from the toolbar and rejects invalid URLs', async () => {

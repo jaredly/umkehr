@@ -1,4 +1,5 @@
 import {
+    isDeleted,
     resolvePoint as resolveBlockPoint,
     retainPoint as retainBlockPoint,
 } from 'umkehr/block-crdt';
@@ -118,7 +119,7 @@ const allBlockIds = (state: CachedState<RichBlockMeta>): string[] => Object.keys
 
 const resolveBlockId = (state: CachedState<RichBlockMeta>, blockId: string): string => {
     const block = state.state.blocks[blockId];
-    if (block && !block.deleted && !state.cache.joinedBlocks[blockId]) return blockId;
+    if (block && !isDeleted(block) && !state.cache.joinedBlocks[blockId]) return blockId;
     return editableBlockIds(state)[0] ?? allBlockIds(state)[0] ?? blockId;
 };
 

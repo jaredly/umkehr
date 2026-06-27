@@ -4,6 +4,7 @@ import {
     deleteBlockOps,
     deleteRangeOps,
     formattedMarkValues,
+    isDeleted,
     insertBlockOpsWithId,
     materializeFormattedBlocks,
     orderedCharIdsForBlock,
@@ -131,6 +132,7 @@ export const setAnnotationBodyText = (
             block: parseLamportString(bodyBlockId),
             startOffset: 0,
             endOffset: existingLength,
+            ts: context.nextTs,
         });
         working = applyMany(working, deleteOps, annotationVirtualParents(working));
         ops.push(...deleteOps);
@@ -207,6 +209,7 @@ export const removeAnnotationBodyBlock = (
         block: parseLamportString(bodyBlockId),
         mode: 'subtree',
         virtualParents: annotationVirtualParents(state),
+            ts: context.nextTs,
     });
     const next = applyMany(state, ops, annotationVirtualParents(state));
     return {
@@ -232,6 +235,7 @@ export const replaceAnnotationBodySelection = (
             block: parseLamportString(range.blockId),
             startOffset: range.startOffset,
             endOffset: range.endOffset,
+            ts: context.nextTs,
         });
         working = applyMany(working, deleteOps, annotationVirtualParents(working));
         ops.push(...deleteOps);
@@ -299,6 +303,7 @@ export const pasteAnnotationBodyTextWithMarkdownShortcuts = (
             block: block.id,
             startOffset: 0,
             endOffset: shortcut.length,
+            ts: context.nextTs,
         });
         working = applyMany(working, deleteOps, annotationVirtualParents(working));
         ops.push(...deleteOps);
@@ -699,7 +704,7 @@ const exactAnnotationForSegments = (
         const mark = representativeAnnotationMark(state, data);
         if (!mark) continue;
         const covered = coveredCharIdsForMark(state, mark, annotationVirtualParents(state))
-            .filter((id) => !state.state.chars[id]?.deleted);
+            .filter((id) => !isDeleted(state.state.chars[id]));
         if (covered.join('\0') === selectedKey) {
             return data.id;
         }
@@ -741,6 +746,6 @@ const annotationMarkRangeOp = (
     );
 
 const fallbackAnnotationSelection = (state: CachedState<RichBlockMeta>): EditorSelection => {
-    const blockId = Object.keys(state.state.blocks).find((id) => !state.state.blocks[id].deleted);
+    const blockId = Object.keys(state.state.blocks).find((id) => !isDeleted(state.state.blocks[id]));
     return caret(blockId ?? lamportToString([0, 'root']), 0);
 };

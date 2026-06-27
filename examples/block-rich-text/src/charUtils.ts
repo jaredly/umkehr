@@ -1,4 +1,5 @@
 import type {CachedState} from 'umkehr/block-crdt/types';
+import {isDeleted} from 'umkehr/block-crdt';
 import type {RichBlockMeta} from './blockMeta';
 import {segmentText} from './selectionModel';
 
@@ -19,7 +20,7 @@ export const visibleCharIdBeforeOffset = (
     const visit = (charId: string): boolean => {
         const char = state.state.chars[charId];
         if (!char) return false;
-        if (!char.deleted) {
+        if (!isDeleted(char)) {
             seen++;
             if (seen === offset) {
                 found = charId;

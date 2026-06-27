@@ -382,13 +382,13 @@ describe('block rich text history', () => {
         });
     });
 
-    it('serializes and imports replace-document histories with kanban blocks', () => {
+    it('serializes and imports replace-document histories with columns blocks', () => {
         const history = appendHistoryAction(initialHistoryState(), {
             type: 'replace-document',
-            fixtureId: 'kanban-fixture',
+            fixtureId: 'columns-fixture',
             document: [
                 {
-                    type: 'kanban',
+                    type: 'columns',
                     content: 'Project board',
                     children: [
                         {content: 'todo', children: [{content: 'Draft proposal'}]},
@@ -404,7 +404,7 @@ describe('block rich text history', () => {
         if (!('history' in parsed)) return;
         expect(parsed.history.actions[0]).toMatchObject({
             type: 'replace-document',
-            fixtureId: 'kanban-fixture',
+            fixtureId: 'columns-fixture',
         });
         expect(visibleOutline(replayHistory(parsed.history.actions, parsed.history.cursor).left)).toEqual([
             {text: 'Project board', depth: 0},
