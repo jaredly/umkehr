@@ -9,9 +9,11 @@ import {
     type PendingUpdate,
 } from 'umkehr/crdt';
 import type {PeerRole} from './types';
+import {validateSerializedArtifacts, type SerializedArtifact} from '../artifacts';
 
 export const PEER_PROTOCOL_VERSION = 1;
 export const MAX_PEER_EPHEMERAL_BYTES = 16_384;
+export const MAX_PEER_ARTIFACT_BYTES = 128_000;
 
 export type PeerProtocolConfig<TState> = {
     docId: string;
@@ -35,6 +37,7 @@ export type PeerMessage<TState> =
           actor: string;
           docId: string;
           document: CrdtDocument<TState>;
+          artifacts?: SerializedArtifact[];
       }
     | {
           kind: 'updates';
@@ -69,7 +72,9 @@ export function parsePeerMessage<TState>(
     if (input.kind === 'snapshot') {
         const document = validatePeerSnapshot(input.document, config);
         if (!document) return null;
-        return {...input, document} as PeerMessage<TState>;
+        const artifacts = validatePeerArtifacts(input.artifacts);
+        if (!artifacts) return null;
+        return {...input, document, artifacts} as PeerMessage<TState>;
     }
 
     if (input.kind === 'updates') {
@@ -99,6 +104,12 @@ export function parsePeerMessage<TState>(
     }
 
     return null;
+}
+
+function validatePeerArtifacts(input: unknown): SerializedArtifact[] | undefined | null {
+    if (input === undefined) return undefined;
+    if (encodedSize(input) > MAX_PEER_ARTIFACT_BYTES) return null;
+    return validateSerializedArtifacts(input);
 }
 
 export function validatePeerSnapshot<TState>(

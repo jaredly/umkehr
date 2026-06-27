@@ -1,0 +1,1 @@
+examples/block-rich-text: for the "answer polls" and "matrix polls" block types, we've currently got some duplicate display which I don't love. Let's have an `edit/view` mode toggle (ui only state). In view mode, the child blocks are hidden and the poll is rendered, in edit mode, the child blocks are shown and the poll is hidden.

@@ -139,12 +139,12 @@ it('deletes one block or a visible subtree with documented descendant behavior',
     );
     const nested = parseLamportString(visibleBlockChildren(state, lamportToString(parent))[0]);
 
-    const blockOnly = applyMany(state, deleteBlockOps(state, {block: parent}));
+    const blockOnly = applyMany(state, deleteBlockOps(state, {block: parent, ts: mts(40)}));
     expect(new Set(rootIds(blockOnly))).toEqual(new Set([lamportToString(child), lamportToString(nested)]));
 
-    const subtree = applyMany(state, deleteBlockOps(state, {block: parent, mode: 'subtree'}));
+    const subtree = applyMany(state, deleteBlockOps(state, {block: parent, mode: 'subtree', ts: mts(50)}));
     expect(rootIds(subtree)).toEqual([lamportToString(child)]);
-    expect(applyRemote(subtree, deleteBlockOps(state, {block: parent})[0]).status).toBe('ignored');
+    expect(applyRemote(subtree, deleteBlockOps(state, {block: parent, ts: mts(40)})[0]).status).toBe('ignored');
 });
 
 it('resolves visible paths and insertion anchors', () => {
@@ -181,7 +181,7 @@ it('retains selections across inserts, deletes, splits, joins, and block moves',
     state = insertText(state, [0, 'self'], 'X', 0);
     expect(resolveSelection(state, retained)).toEqual({type: 'caret', point: {blockId, offset: 3}});
 
-    state = applyMany(state, [{type: 'char:delete', id: [2, 'alice']} as Op]);
+    state = applyMany(state, [{type: 'char:delete', id: [2, 'alice'], deleted: {value: true, ts: '00029'}} as Op]);
     expect(resolveSelection(state, retained)).toEqual({type: 'caret', point: {blockId, offset: 2}});
 
     state = insertText(init(), [0, 'self'], 'abcd');

@@ -166,6 +166,7 @@ const server = Bun.serve<ClientData>({
                             version: SERVER_PROTOCOL_VERSION,
                             docId: parsed.docId,
                             branches: store.listBranches(parsed.docId),
+                            artifacts: store.getDocument(parsed.docId)?.artifacts,
                         });
                         return;
                     }
@@ -218,6 +219,7 @@ const server = Bun.serve<ClientData>({
                             version: SERVER_PROTOCOL_VERSION,
                             docId: parsed.docId,
                             branches: store.listBranches(parsed.docId),
+                            artifacts: store.getDocument(parsed.docId)?.artifacts,
                         });
                         broadcastBranchSnapshot(parsed.docId, parsed.actor);
                         return;
@@ -507,6 +509,7 @@ function broadcastBranchUpdate(docId: string, branch: ServerBranch) {
 
 function broadcastBranchSnapshot(docId: string, originActor: string) {
     const branches = store.listBranches(docId);
+    const artifacts = store.getDocument(docId)?.artifacts;
     for (const client of clients) {
         if (client.data.docId !== docId) continue;
         if (client.data.actor === originActor) continue;
@@ -515,6 +518,7 @@ function broadcastBranchSnapshot(docId: string, originActor: string) {
             version: SERVER_PROTOCOL_VERSION,
             docId,
             branches,
+            artifacts,
         });
     }
 }

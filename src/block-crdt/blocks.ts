@@ -12,6 +12,7 @@ export type VirtualBlockParentConfig<M extends TimestampedBlockMeta = Timestampe
     virtualParents?: (block: Block<M>) => Lamport[];
     markVirtualParents?: (mark: Mark) => Lamport[];
     markBehavior?: Record<string, 'lww' | 'stacking'>;
+    mergeBlockMeta?: (current: M, incoming: M) => M | null | undefined;
 };
 
 type BlockParentDerivationWithPaths = BlockParentDerivation & {

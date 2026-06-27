@@ -1,0 +1,1 @@
+examples/block-rich-text: the drag handles are currently separate from the "block list markers" (like bullets, todo checkboxes, or numberings). Can we have them be the same? It would make the UI feel less bulky. So if the block type has a list marker, that should be draggable. Otherwise, the empty space should have a show-on-block-focus drag handle.

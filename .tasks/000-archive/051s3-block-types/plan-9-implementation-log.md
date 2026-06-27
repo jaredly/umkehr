@@ -1,0 +1,52 @@
+# Phase 9 Implementation Log
+
+## 2026-06-15
+
+- Started Phase 9 implementation from `plan-9.md`.
+- Added `highlight.js` to `examples/block-rich-text`.
+  - Issue: `pnpm add highlight.js --filter ./examples/block-rich-text` did not match because the example is not a configured pnpm workspace project.
+  - Workaround: ran `pnpm add highlight.js` from `examples/block-rich-text`.
+  - Side effect: `pnpm-lock.yaml` now has an importer entry for `examples/block-rich-text`; `package.json` dependency order was normalized by pnpm.
+- Added `examples/block-rich-text/src/syntaxHighlight.ts` and `syntaxHighlight.test.ts`.
+  - Uses `highlight.js/lib/core` with a small registered language set.
+  - Uses highlight.js token tree data instead of injecting highlighted HTML.
+  - Unknown or plain languages fall back to one unstyled token.
+- Threaded syntax tokens into `RichTextEditableSurface` in `App.tsx`.
+  - Code block rendering now splits chunks on CRDT run, retained-selection, caret, and syntax-token boundaries.
+  - Added CSS classes for common syntax scopes in `style.css`.
+- Verification:
+  - `npm exec vitest -- run examples/block-rich-text/src/syntaxHighlight.test.ts` passed.
+  - `npm exec tsc -- -p examples/block-rich-text/tsconfig.json --noEmit` passed.
+- Added UI regression coverage in `App.test.tsx` for:
+  - syntax highlighting in code blocks
+  - highlighted code plus bold marks
+  - retained selections over highlighted code
+  - unsupported-language fallback preserving rich-text marks
+- Compact-control pass:
+  - Grouped toolbar controls into history, inline mark, annotation, and block groups.
+  - Shortened visible annotation/table labels while keeping full `aria-label`s (`Comment`, `Footnote`, `Popover`, `Table`) for accessibility and tests.
+  - Shortened table row/column/missing-cell controls while preserving accessible names.
+- Responsive polish:
+  - Added stronger narrow-width rules for stacked editors, wrapping toolbars, table scrolling, table cell controls, annotation panels, footnotes, and fixed popovers.
+- Keyboard consistency:
+  - Changed `Enter` precedence so code blocks inside table cells use code-block behavior before table-cell advancement.
+  - Added a regression test for `Enter` and `Tab` in a code block inside a table cell.
+  - Issue: the table UI fixture renders five text-editable surfaces after creating a 2x2 table because the table block itself remains editable in addition to four cells.
+  - Workaround: the regression test asserts that actual fixture shape explicitly.
+- Verification:
+  - `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx` passed.
+- Dependency cleanup:
+  - Added `highlight.js` to root `devDependencies` as well as the example package. Root tests import the example source, so root dependency resolution needs the package too.
+  - Issue: failed `pnpm exec playwright ...` attempts introduced unrelated optional `lightningcss` lockfile churn.
+  - Workaround: removed the unrelated lockfile churn and kept only the intended root `highlight.js` lock entries.
+- Browser/manual smoke:
+  - Started `examples/block-rich-text` with `npm run dev -- --host 127.0.0.1 --port 5175`; Vite selected `http://127.0.0.1:5176/` because 5175 was occupied.
+  - Confirmed the local dev server returned `HTTP/1.1 200 OK`.
+  - Issue: the in-app Browser plugin reported `Browser is not available: iab`.
+  - Issue: Playwright CLI fallback failed because `playwright` is not installed.
+  - Stopped the Vite process started for the smoke check.
+- Final verification:
+  - `npm exec vitest -- run src/block-crdt/index.test.ts src/block-crdt/formatting.test.ts src/block-crdt/adapter-additions.test.ts examples/block-rich-text/src` passed.
+  - `npm run typecheck` passed.
+  - `npm run build` passed.
+  - `npm exec tsc -- -p examples/block-rich-text/tsconfig.json --noEmit` passed.

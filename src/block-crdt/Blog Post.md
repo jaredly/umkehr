@@ -1,19 +1,46 @@
-Rich Causal Blocks: a CRDT for block-based text editing
-
+# Rich Causal Blocks: a CRDT for block-based text editing
 Notion-like blocks are all the rage in document editors.
 I like them too.
 but I also want local-first/collaborative editing goodness.
-
 Introducing, the first (to my knowledge) CRDT for text editing that allows for multiple "blocks" of text, that can be split, moved, and joined together, all while preserving concurrent edits.
-
 This improves dramatically on the state of the art. Some algorithms allow the designation of blocks via in-text markers (i.e. automerge), but none to my knowledge allow reordering of those blocks without resorting to destructive cut & paste.
-
 How does it work? We start with an RGA/Causal-Tree data structure where each character has a lamport ID and a reference to a parent character. Concurrent edits are prevented from interleaving by virtue of the parent references establishing a causal ordering between characters.
+
+
+
+
+
+I was just pointed to a video by someone at notion talking about a crdt for block-based editing; not sure if it supports "move" though.
+https://www.youtube.com/watch?v=AKDcWRkbjYs
+
+There's also this blog post by Martin Kleppman, which does split/join but not move
+https://martinkl.notion.site/Block-elements-in-rich-text-CRDT-for-Peritext-2-a3b69f886dbc4ad1abe81cea0b3e6623
+
+This is the implementation described by Kleppman. Docs here.
+https://automerge.org/docs/reference/documents/rich-text/#block-markers
+
+
 
 ```text
 Every inserted character has a stable Lamport ID and a parent pointer.
 Children of the same parent are sorted by ID, so concurrent inserts do not
 interleave unpredictably.
+
+graph LR
+subgraph Block B
+direction RL
+A2(h 2:A)   --> A1(t 1:A)
+A3(e 3:A)   --> A2
+A4(_ 4:A)   --> A3
+B5(r 5:B)   -- concurrent --> A4
+B6(e 6:B)   --> B5
+B7(d 7:B)   --> B6
+B8(_ 8:B)   --> B7
+A5(d 5:A)   -- inserts --> A4
+A6(o 6:A)   --> A5
+A7(g 7:A)   --> A6
+end
+
 
 block B
   |

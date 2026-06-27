@@ -7,11 +7,16 @@ import {
     isCollapsed,
     clampPoint,
     editableBlockIds,
+    focusBlockId,
     normalizeSelectionSegments,
     pointTextLength,
+    selectedBlockIdsForSelection,
+    selectedTopLevelBlockIdsForSelection,
+    visibleSubtreeBlockIds,
     type BlockPoint,
     type EditorSelection,
     type SelectionSegment,
+    type TextSelection,
 } from './selectionModel';
 import {
     initialRetainedSelection,
@@ -50,6 +55,12 @@ export type BlockSelectionDecorations = {
         endOffset: number;
         primary: boolean;
     }>;
+};
+
+export type BlockLevelSelectionDecorations = {
+    selected: boolean;
+    primary: boolean;
+    focus: boolean;
 };
 
 const DEFAULT_SELECTION_ID = 'sel-0';
@@ -138,7 +149,7 @@ export const dedupeSelectionSet = (
 
     for (const entry of set.entries) {
         const resolved = resolveSelection(state, entry.selection);
-        if (!isCollapsed(resolved)) {
+        if (resolved.type !== 'caret') {
             ranges.push(entry);
             continue;
         }
@@ -182,11 +193,18 @@ export const mergeOverlappingRanges = (
     const deduped = dedupeSelectionSet(state, set);
     const resolved = resolveSelectionSet(state, deduped);
     const ranges = resolved.entries
-        .filter((entry) => !isCollapsed(entry.selection))
+        .filter((entry): entry is EditorSelectionEntry & {selection: TextSelection} => entry.selection.type === 'range')
         .map((entry) => ({entry, span: normalizedSpan(state, entry.selection)}))
-        .filter((item): item is {entry: EditorSelectionEntry; span: SelectionSpan} => item.span !== null)
+        .filter(
+            (
+                item,
+            ): item is {
+                entry: EditorSelectionEntry & {selection: TextSelection};
+                span: SelectionSpan;
+            } => item.span !== null,
+        )
         .sort((a, b) => comparePoints(state, a.span.start, b.span.start));
-    const carets = resolved.entries.filter((entry) => isCollapsed(entry.selection));
+    const carets = resolved.entries.filter((entry) => entry.selection.type === 'caret');
     const merged: Array<{id: string; span: SelectionSpan}> = [];
 
     for (const item of ranges) {
@@ -244,6 +262,8 @@ export const decorationsForSelectionSet = (
             continue;
         }
 
+        if (entry.selection.type !== 'range') continue;
+
         const segments = normalizeSelectionSegments(state, entry.selection);
         if (primary && !options.includePrimary) {
             if (options.includePrimaryBoundaryCaret) {
@@ -276,6 +296,50 @@ export const decorationsForSelectionSet = (
     return result;
 };
 
+export const blockLevelDecorationsForSelectionSet = (
+    state: CachedState<RichBlockMeta>,
+    set: EditorSelectionSet,
+): Map<string, BlockLevelSelectionDecorations> => {
+    const result = new Map<string, BlockLevelSelectionDecorations>();
+    for (const entry of set.entries) {
+        if (entry.selection.type !== 'block' && entry.selection.type !== 'table-cells') continue;
+        const primary = entry.id === set.primaryId;
+        const focusId = focusBlockId(entry.selection);
+        const blockIds =
+            entry.selection.type === 'block'
+                ? selectedTopLevelBlockIdsForSelection(state, entry.selection)
+                : selectedBlockIdsForSelection(state, entry.selection);
+        for (const blockId of blockIds) {
+            const current = result.get(blockId);
+            result.set(blockId, {
+                selected: true,
+                primary: Boolean(current?.primary || primary),
+                focus: Boolean(
+                    current?.focus ||
+                        blockId === focusId ||
+                        (entry.selection.type === 'block' &&
+                            visibleSubtreeBlockIds(state, blockId).includes(focusId)),
+                ),
+            });
+        }
+    }
+    return result;
+};
+
+export const selectedTopLevelBlockIdsForSelectionSet = (
+    state: CachedState<RichBlockMeta>,
+    set: EditorSelectionSet,
+): string[] => {
+    const selected = new Set<string>();
+    for (const entry of set.entries) {
+        for (const blockId of selectedTopLevelBlockIdsForSelection(state, entry.selection)) {
+            selected.add(blockId);
+        }
+    }
+    const order = editableBlockIds(state);
+    return [...selected].sort((a, b) => order.indexOf(a) - order.indexOf(b));
+};
+
 type SelectionSpan = {
     start: BlockPoint;
     end: BlockPoint;
@@ -284,7 +348,7 @@ type SelectionSpan = {
 const normalizedSpan = (state: CachedState<RichBlockMeta>, selection: EditorSelection): SelectionSpan | null => {
     const segments = normalizeSelectionSegments(state, selection);
     if (!segments.length) {
-        if (selection.type === 'caret') return null;
+        if (selection.type !== 'range') return null;
         const anchor = clampPoint(state, selection.anchor);
         const focus = clampPoint(state, selection.focus);
         const comparison = comparePoints(state, anchor, focus);
@@ -319,7 +383,11 @@ const compareRetainedSelections = (
 ): number => compareRetainedPoints(state, retainedStart(one), retainedStart(two));
 
 const retainedStart = (selection: RetainedSelection): RetainedPoint =>
-    selection.type === 'caret' ? selection.point : selection.anchor;
+    selection.type === 'caret'
+        ? selection.point
+        : selection.type === 'range'
+          ? selection.anchor
+          : {blockId: focusBlockId(selection), affinity: 'after', charId: null};
 
 const compareRetainedPoints = (
     state: CachedState<RichBlockMeta>,
@@ -382,7 +450,7 @@ const addRangeEdgeCarets = (
     selection: EditorSelection,
     primary: boolean,
 ) => {
-    if (selection.type === 'caret') return;
+    if (selection.type !== 'range') return;
     const anchor = clampPoint(state, selection.anchor);
     const focus = clampPoint(state, selection.focus);
     if (anchor.blockId === focus.blockId) return;

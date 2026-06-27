@@ -1,5 +1,7 @@
 import {describe, expect, it} from 'vitest';
 import type {IJsonSchemaCollection, IValidation} from 'typia';
+import type {ArtifactStore, SerializedArtifact} from '../artifacts';
+import {artifactsForPeerJsHistorySave} from './PeerJsApp';
 import {MAX_PEER_EPHEMERAL_BYTES, parsePeerMessage, type PeerProtocolConfig} from './protocol';
 
 type State = {title: string};
@@ -119,5 +121,44 @@ describe('parsePeerMessage', () => {
                 config,
             ),
         ).toBeNull();
+    });
+});
+
+describe('artifactsForPeerJsHistorySave', () => {
+    it('serializes the current artifact without creating a new initial artifact', () => {
+        const current: SerializedArtifact = {
+            id: 'puzzle',
+            kind: 'wordsearch-puzzle',
+            version: 1,
+            fingerprintHash: 'current',
+            data: {board: 'current'},
+        };
+        const regenerated: SerializedArtifact = {
+            id: 'puzzle',
+            kind: 'wordsearch-puzzle',
+            version: 1,
+            fingerprintHash: 'regenerated',
+            data: {board: 'regenerated'},
+        };
+        let createInitialCalls = 0;
+        const store: ArtifactStore = {
+            get() {
+                return null;
+            },
+            manifest() {
+                return [current];
+            },
+            serialize(id) {
+                return id === current.id ? current : null;
+            },
+            load() {},
+            createInitial() {
+                createInitialCalls += 1;
+                return [regenerated];
+            },
+        };
+
+        expect(artifactsForPeerJsHistorySave(store)).toEqual([current]);
+        expect(createInitialCalls).toBe(0);
     });
 });

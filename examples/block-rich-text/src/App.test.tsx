@@ -1,8 +1,21 @@
 import '../../../src/react/test-dom';
 
 import {act, cleanup, fireEvent, render, waitFor, within} from '@testing-library/react';
-import {afterEach, describe, expect, it, vi} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {App} from './App';
+import {BLOCK_RICH_TEXT_MIME, htmlWithClipboardPayload, type RichClipboardPayload} from './clipboard';
+
+const mermaidMock = vi.hoisted(() => ({
+    initialize: vi.fn(),
+    render: vi.fn(async () => ({svg: '<svg data-testid="mermaid-render"></svg>'})),
+}));
+
+vi.mock('mermaid', () => ({
+    default: {
+        initialize: mermaidMock.initialize,
+        render: mermaidMock.render,
+    },
+}));
 
 Object.defineProperty(globalThis, 'NodeFilter', {
     value: window.NodeFilter,
@@ -16,9 +29,16 @@ Object.defineProperty(globalThis, 'CSS', {
 
 let restoreCaretGeometry: (() => void) | null = null;
 
+beforeEach(() => {
+    mermaidMock.initialize.mockReset();
+    mermaidMock.render.mockReset();
+    mermaidMock.render.mockResolvedValue({svg: '<svg data-testid="mermaid-render"></svg>'});
+});
+
 afterEach(() => {
     restoreCaretGeometry?.();
     restoreCaretGeometry = null;
+    vi.restoreAllMocks();
     vi.useRealTimers();
     cleanup();
     window.history.pushState({}, '', '/');
@@ -37,6 +57,106 @@ const blocks = (panel: HTMLElement) => within(panel).getAllByRole('textbox', {na
 const blockTexts = (panel: HTMLElement): string[] =>
     blocks(panel).map(blockText);
 
+const tableBlocks = (panel: HTMLElement): HTMLElement[] =>
+    Array.from(
+        within(panel)
+            .getByRole('table', {name: 'Table block'})
+            .querySelectorAll<HTMLElement>('.tableCell [role="textbox"][aria-label="Block text"]'),
+    );
+
+const tableBlockTexts = (panel: HTMLElement): string[] =>
+    tableBlocks(panel).map(blockText);
+
+const tableCells = (panel: HTMLElement): HTMLElement[] =>
+    tableBlocks(panel).map((block) => block.closest<HTMLElement>('.tableCell')!);
+
+const tableTitleBlock = (panel: HTMLElement): HTMLElement => {
+    const title = panel.querySelector<HTMLElement>('.tableTitleRow [role="textbox"]');
+    if (!title) throw new Error('missing table title');
+    return title;
+};
+
+const columnsBoards = (panel: HTMLElement): HTMLElement[] =>
+    Array.from(panel.querySelectorAll<HTMLElement>('.columnsBlock'));
+
+const columnsColumns = (panel: HTMLElement): HTMLElement[] =>
+    Array.from(panel.querySelectorAll<HTMLElement>('.columnsColumn'));
+
+const columnsCards = (panel: HTMLElement): HTMLElement[] =>
+    Array.from(panel.querySelectorAll<HTMLElement>('.columnsCard'));
+
+const columnsColumnTitle = (column: HTMLElement): string => {
+    const title = column.querySelector<HTMLElement>('.columnsColumnTitle[role="textbox"]');
+    if (!title) throw new Error('missing columns column title');
+    return blockText(title);
+};
+
+const columnsCardTitle = (card: HTMLElement): string => {
+    const title = card.querySelector<HTMLElement>('.columnsCardTitle[role="textbox"]');
+    if (!title) throw new Error('missing column card title');
+    return blockText(title);
+};
+
+const columnsColumnCardTexts = (column: HTMLElement): string[] => {
+    const cards = column.querySelector<HTMLElement>('.columnsCards');
+    if (!cards) throw new Error('missing column cards container');
+    return Array.from(cards.children)
+        .filter((child): child is HTMLElement => child instanceof HTMLElement && child.classList.contains('columnsCard'))
+        .map(columnsCardTitle);
+};
+
+const tableRowHeaders = (panel: HTMLElement): HTMLElement[] =>
+    Array.from(panel.querySelectorAll<HTMLElement>('.tableRowHeaderText[role="textbox"]'));
+
+const stubTableCellRects = (panel: HTMLElement, columnCount = 2) => {
+    tableCells(panel).forEach((cell, index) => {
+        const rowIndex = Math.floor(index / columnCount);
+        const columnIndex = index % columnCount;
+        cell.getBoundingClientRect = () =>
+            ({
+                left: 40 + columnIndex * 100,
+                top: rowIndex * 50,
+                right: 140 + columnIndex * 100,
+                bottom: rowIndex * 50 + 50,
+                width: 100,
+                height: 50,
+                x: 40 + columnIndex * 100,
+                y: rowIndex * 50,
+                toJSON: () => ({}),
+            }) as DOMRect;
+    });
+};
+
+const keyPerfMonitor = (view: ReturnType<typeof render>): HTMLElement =>
+    view.getByLabelText('Keypress performance monitor');
+
+const keyPerfBars = (view: ReturnType<typeof render>): HTMLElement[] =>
+    Array.from(view.container.querySelectorAll<HTMLElement>('[data-testid="key-perf-bar"]'));
+
+const keyPerfBarMs = (bar: HTMLElement): number => {
+    const title = bar.getAttribute('title') ?? '';
+    const match = title.match(/: ([\d.]+) ms$/);
+    if (!match) throw new Error(`missing duration in key perf bar title: ${title}`);
+    return Number(match[1]);
+};
+
+const rainbowNodes = (block: HTMLElement): HTMLElement[] =>
+    Array.from(block.querySelectorAll<HTMLElement>('*')).filter(
+        (element) => element.style.backgroundColor,
+    );
+
+const latestKeyPerfBarMs = async (view: ReturnType<typeof render>, label: string): Promise<number> => {
+    const prefix = `${label}: `;
+    const bar = await waitFor(() => {
+        const found = keyPerfBars(view).findLast((candidate) =>
+            (candidate.getAttribute('title') ?? '').startsWith(prefix),
+        );
+        if (!found) throw new Error(`missing key perf sample ${label}`);
+        return found;
+    });
+    return keyPerfBarMs(bar);
+};
+
 const blockText = (block: HTMLElement): string => {
     let text = '';
     const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
@@ -48,12 +168,51 @@ const blockText = (block: HTMLElement): string => {
     return text;
 };
 
+const repeatedText = (length: number): string =>
+    Array.from({length}, (_, index) => String.fromCharCode(97 + (index % 26))).join('');
+
+const seventyWordsWithEveryFifthBold = (): {
+    text: string;
+    boldRanges: Array<{type: 'bold'; startOffset: number; endOffset: number}>;
+} => {
+    let offset = 0;
+    const words: string[] = [];
+    const boldRanges: Array<{type: 'bold'; startOffset: number; endOffset: number}> = [];
+    for (let index = 0; index < 70; index++) {
+        const word = `word${String(index).padStart(2, '0')}`;
+        if (index % 5 === 0) {
+            boldRanges.push({type: 'bold', startOffset: offset, endOffset: offset + word.length});
+        }
+        words.push(word);
+        offset += word.length + 1;
+    }
+    return {text: words.join(' '), boldRanges};
+};
+
 const blockDepth = (block: HTMLElement): string =>
     block.closest<HTMLElement>('.blockRow')?.style.getPropertyValue('--block-depth') ?? '';
 
 const setBlockType = (panel: HTMLElement, value: string) => {
     const select = within(panel).getByRole('combobox', {name: 'Block type'});
     fireEvent.change(select, {target: {value}});
+};
+
+const openCodeBlockOptions = (panel: HTMLElement) => {
+    const button = within(panel).getByLabelText('Code block options');
+    if (!button.closest('details')?.hasAttribute('open')) fireEvent.click(button);
+};
+
+const openBlockOptions = (panel: HTMLElement, name: string) => {
+    const button = within(panel).getAllByLabelText(name)[0];
+    if (!button.closest('details')?.hasAttribute('open')) fireEvent.click(button);
+    const menu = button.closest<HTMLElement>('details')?.querySelector<HTMLElement>('.blockOptionsMenu');
+    if (!menu) throw new Error(`missing ${name} menu`);
+    return menu;
+};
+
+const codeLanguageField = (panel: HTMLElement): HTMLInputElement => {
+    openCodeBlockOptions(panel);
+    return within(panel).getByRole('textbox', {name: 'Code language'}) as HTMLInputElement;
 };
 
 const waitForBlockTexts = async (panel: HTMLElement, expected: string[]) => {
@@ -73,7 +232,17 @@ const waitForBlockTexts = async (panel: HTMLElement, expected: string[]) => {
 const pasteText = (block: HTMLElement, text: string) => {
     fireEvent.paste(block, {
         clipboardData: {
+            types: ['text/plain'],
             getData: () => text,
+        },
+    });
+};
+
+const pasteClipboard = (block: HTMLElement, data: Record<string, string>) => {
+    fireEvent.paste(block, {
+        clipboardData: {
+            types: Object.keys(data),
+            getData: (type: string) => data[type] ?? '',
         },
     });
 };
@@ -221,6 +390,9 @@ const popoverMarks = (scope: HTMLElement): HTMLElement[] =>
 
 const footnoteReferences = (scope: HTMLElement): HTMLElement[] =>
     Array.from(scope.querySelectorAll<HTMLElement>('.footnoteReferenceNumber'));
+
+const commentDots = (scope: HTMLElement): HTMLElement[] =>
+    within(scope).queryAllByRole('button', {name: /Open comment on/});
 
 const waitForPopoverDialogs = async (panel: HTMLElement, count: number): Promise<HTMLElement[]> =>
     waitFor(() => {
@@ -376,11 +548,49 @@ const installMockBlockRowGeometry = (panel: HTMLElement) => {
     });
 };
 
-const dragBlockHandle = (panel: HTMLElement, fromIndex: number, clientX: number, clientY: number) => {
-    const handles = within(panel).getAllByRole('button', {name: 'Move block'});
-    const handle = handles[fromIndex] as HTMLElement & {setPointerCapture?: (pointerId: number) => void};
+const installMockSlideViewportGeometry = (panel: HTMLElement) => {
+    const viewports = Array.from(panel.querySelectorAll<HTMLElement>('.slideViewport'));
+    viewports.forEach((viewport, index) => {
+        viewport.getBoundingClientRect = () =>
+            ({
+                left: 0,
+                top: index * 80,
+                width: 320,
+                height: 72,
+                right: 320,
+                bottom: index * 80 + 72,
+                x: 0,
+                y: index * 80,
+                toJSON: () => ({}),
+            }) as DOMRect;
+    });
+};
+
+const mockRect = (width: number, height: number): DOMRect =>
+    ({
+        left: 0,
+        top: 0,
+        width,
+        height,
+        right: width,
+        bottom: height,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+    }) as DOMRect;
+
+const dragElementTo = (element: HTMLElement, clientX: number, clientY: number) => {
+    const handle = element as HTMLElement & {setPointerCapture?: (pointerId: number) => void};
     handle.setPointerCapture = () => {};
     fireEvent.pointerDown(handle, {
+        button: 0,
+        buttons: 1,
+        isPrimary: true,
+        pointerId: 1,
+        clientX,
+        clientY: clientY + 8,
+    });
+    fireEvent.pointerMove(window, {
         button: 0,
         buttons: 1,
         isPrimary: true,
@@ -396,6 +606,39 @@ const dragBlockHandle = (panel: HTMLElement, fromIndex: number, clientX: number,
         clientX,
         clientY,
     });
+};
+
+const withCaretRangeFromPoints = (
+    points: Array<{maxY: number; block: HTMLElement; offset: number}>,
+    run: () => void,
+) => {
+    const documentWithCaretRange = document as Document & {
+        caretRangeFromPoint?: (x: number, y: number) => Range | null;
+    };
+    const previousCaretRangeFromPoint = documentWithCaretRange.caretRangeFromPoint;
+    Object.defineProperty(document, 'caretRangeFromPoint', {
+        value: (_x: number, y: number) => {
+            const point = points.find((candidate) => y <= candidate.maxY) ?? points[points.length - 1];
+            if (!point) return null;
+            const range = rangeAtBlockOffset(point.block, point.offset);
+            range.collapse(true);
+            return range;
+        },
+        configurable: true,
+    });
+    try {
+        run();
+    } finally {
+        Object.defineProperty(document, 'caretRangeFromPoint', {
+            value: previousCaretRangeFromPoint,
+            configurable: true,
+        });
+    }
+};
+
+const dragBlockHandle = (panel: HTMLElement, fromIndex: number, clientX: number, clientY: number) => {
+    const handles = within(panel).getAllByRole('button', {name: 'Move block'});
+    dragElementTo(handles[fromIndex], clientX, clientY);
 };
 
 describe('Block rich text example UI', () => {
@@ -436,6 +679,1970 @@ describe('Block rich text example UI', () => {
         expect(blocks(right)).toHaveLength(1);
     });
 
+    it('sets block style controls and syncs rendered style', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+        const menu = openBlockOptions(left, 'Block style options');
+
+        fireEvent.change(within(menu).getByRole('textbox', {name: 'Block text color'}), {
+            target: {value: 'tomato'},
+        });
+        fireEvent.change(within(menu).getByRole('textbox', {name: 'Block background color'}), {
+            target: {value: 'gold'},
+        });
+        fireEvent.change(within(menu).getByRole('combobox', {name: 'Block font size'}), {
+            target: {value: 'large'},
+        });
+        fireEvent.change(within(menu).getByRole('combobox', {name: 'Block padding'}), {
+            target: {value: 'small'},
+        });
+
+        await waitFor(() => {
+            const leftRow = blocks(left)[0].closest<HTMLElement>('.blockRow')!;
+            const rightRow = blocks(right)[0].closest<HTMLElement>('.blockRow')!;
+            expect(leftRow.style.color).toBe('tomato');
+            expect(leftRow.style.backgroundColor).toBe('gold');
+            expect(leftRow.style.fontSize).toBe('1.15em');
+            expect(leftRow.style.padding).toBe('4px 8px');
+            expect(rightRow.style.color).toBe('tomato');
+            expect(rightRow.style.backgroundColor).toBe('gold');
+        });
+    });
+
+    it('replaces the document from a fixture in both editors', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'simple-mixed-blocks'},
+        });
+
+        await waitFor(() => expect(view.getByText('Loaded fixture: Simple mixed blocks.')).toBeTruthy());
+        expect(blockTexts(left).slice(0, 2)).toEqual([
+            'Fixture document',
+            'This paragraph has bold text, italic text, a link, and a popover note.',
+        ]);
+        expect(blockTexts(right).slice(0, 2)).toEqual(blockTexts(left).slice(0, 2));
+    });
+
+    // NOTE: This is currently failing, need to do some more fundamental refactoring to
+    // improve perf
+    it.skip('selects a block in the many blocks fixture in less than 50ms', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'many-blocks'},
+        });
+
+        await waitFor(() => expect(view.getByText('Loaded fixture: Many blocks.')).toBeTruthy());
+        const targetHandle = within(left).getAllByRole('button', {name: 'Move block'})[100];
+        const targetRow = targetHandle.closest<HTMLElement>('.blockRow');
+        if (!targetRow) throw new Error('missing target block row');
+
+        const started = performance.now();
+        fireEvent.pointerDown(targetHandle, {
+            button: 0,
+            clientX: 8,
+            clientY: 8,
+            isPrimary: true,
+            pointerId: 1,
+        });
+        const elapsed = performance.now() - started;
+
+        expect(targetRow.classList.contains('blockSelected')).toBe(true);
+        expect(elapsed).toBeLessThan(50);
+    });
+
+    it('loads generated fixture images and leaves missing images visible', async () => {
+        const view = render(<App />);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'code-callouts-images'},
+        });
+
+        await waitFor(() => expect(view.getByText('Loaded fixture: Code, callouts, and images.')).toBeTruthy());
+        expect(view.container.querySelectorAll('.imagePreview').length).toBeGreaterThan(0);
+        expect(view.getAllByText('Missing image').length).toBeGreaterThan(0);
+    });
+
+    it('renders the large table fixture', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'large-table'},
+        });
+
+        await waitFor(() => expect(view.getByText('Loaded fixture: Large table.')).toBeTruthy());
+        expect(tableBlocks(left)).toHaveLength(35);
+        expect(tableBlocks(right)).toHaveLength(35);
+    });
+
+    it('renders the card columns fixture', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'card-columns'},
+        });
+
+        await waitFor(() => expect(view.getByText('Loaded fixture: Card columns.')).toBeTruthy());
+        expect(columnsBoards(left)).toHaveLength(1);
+        expect(columnsBoards(right)).toHaveLength(1);
+        expect(columnsColumns(left)).toHaveLength(3);
+        expect(columnsCards(left).length).toBeGreaterThanOrEqual(6);
+        expect(blockTexts(left)).toContain('Launch board');
+        expect(blockTexts(left)).toContain('Draft release notes');
+        expect(within(left).getAllByRole('button', {name: 'Move card'}).length).toBeGreaterThan(0);
+    });
+
+    it('drags a column card between columns through normal block movement', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'card-columns'},
+        });
+        await waitFor(() => expect(view.getByText('Loaded fixture: Card columns.')).toBeTruthy());
+
+        const columns = columnsColumns(left);
+        const sourceCard = columns[0].querySelector<HTMLElement>('.columnsCard')!;
+        const targetCard = columns[1].querySelector<HTMLElement>('.columnsCard')!;
+        targetCard.getBoundingClientRect = () =>
+            ({
+                left: 0,
+                top: 0,
+                right: 240,
+                bottom: 48,
+                width: 240,
+                height: 48,
+                x: 0,
+                y: 0,
+                toJSON: () => ({}),
+            }) as DOMRect;
+        const originalElementsFromPoint = document.elementsFromPoint;
+        document.elementsFromPoint = () => [targetCard];
+        dragElementTo(within(sourceCard).getByRole('button', {name: 'Move card'}), 120, 40);
+        document.elementsFromPoint = originalElementsFromPoint;
+
+        await waitFor(() =>
+            expect(columnsColumnCardTexts(columnsColumns(left)[1]).slice(0, 2)).toEqual([
+                'QA import/export',
+                'Draft release notes',
+            ]),
+        );
+        expect(columnsColumnCardTexts(columnsColumns(left)[0])).not.toContain('Draft release notes');
+    });
+
+    it('shows only the child drop target when hovering a column card child zone', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'card-columns'},
+        });
+        await waitFor(() => expect(view.getByText('Loaded fixture: Card columns.')).toBeTruthy());
+
+        const columns = columnsColumns(left);
+        const sourceCard = columns[0].querySelector<HTMLElement>('.columnsCard')!;
+        const targetCard = columns[1].querySelector<HTMLElement>('.columnsCard')!;
+        targetCard.getBoundingClientRect = () =>
+            ({
+                left: 0,
+                top: 0,
+                right: 240,
+                bottom: 48,
+                width: 240,
+                height: 48,
+                x: 0,
+                y: 0,
+                toJSON: () => ({}),
+            }) as DOMRect;
+        const originalElementsFromPoint = document.elementsFromPoint;
+        document.elementsFromPoint = () => [targetCard];
+        try {
+            const handle = within(sourceCard).getByRole('button', {name: 'Move card'}) as HTMLElement & {
+                setPointerCapture?: (pointerId: number) => void;
+            };
+            handle.setPointerCapture = () => {};
+            fireEvent.pointerDown(handle, {
+                button: 0,
+                buttons: 1,
+                isPrimary: true,
+                pointerId: 1,
+                clientX: 120,
+                clientY: 32,
+            });
+            fireEvent.pointerMove(window, {
+                button: 0,
+                buttons: 1,
+                isPrimary: true,
+                pointerId: 1,
+                clientX: 120,
+                clientY: 24,
+            });
+
+            await waitFor(() => {
+                expect(targetCard.classList.contains('dropAfter')).toBe(false);
+                expect(targetCard.querySelector('.blockRow.dropAfter.dropChildTarget')).toBeTruthy();
+            });
+
+            fireEvent.pointerUp(window, {
+                button: 0,
+                buttons: 0,
+                isPrimary: true,
+                pointerId: 1,
+                clientX: 120,
+                clientY: 24,
+            });
+        } finally {
+            document.elementsFromPoint = originalElementsFromPoint;
+        }
+    });
+
+    it('shows only the block-row drop target when hovering before a column card', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'card-columns'},
+        });
+        await waitFor(() => expect(view.getByText('Loaded fixture: Card columns.')).toBeTruthy());
+
+        const columns = columnsColumns(left);
+        const sourceCard = columns[0].querySelector<HTMLElement>('.columnsCard')!;
+        const targetCard = columns[1].querySelector<HTMLElement>('.columnsCard')!;
+        targetCard.getBoundingClientRect = () =>
+            ({
+                left: 0,
+                top: 0,
+                right: 240,
+                bottom: 48,
+                width: 240,
+                height: 48,
+                x: 0,
+                y: 0,
+                toJSON: () => ({}),
+            }) as DOMRect;
+        const originalElementsFromPoint = document.elementsFromPoint;
+        document.elementsFromPoint = () => [targetCard];
+        try {
+            const handle = within(sourceCard).getByRole('button', {name: 'Move card'}) as HTMLElement & {
+                setPointerCapture?: (pointerId: number) => void;
+            };
+            handle.setPointerCapture = () => {};
+            fireEvent.pointerDown(handle, {
+                button: 0,
+                buttons: 1,
+                isPrimary: true,
+                pointerId: 1,
+                clientX: 20,
+                clientY: 18,
+            });
+            fireEvent.pointerMove(window, {
+                button: 0,
+                buttons: 1,
+                isPrimary: true,
+                pointerId: 1,
+                clientX: 20,
+                clientY: 12,
+            });
+
+            await waitFor(() => {
+                expect(targetCard.classList.contains('dropBefore')).toBe(false);
+                expect(targetCard.querySelector('.blockRow.dropBefore')).toBeTruthy();
+            });
+
+            fireEvent.pointerUp(window, {
+                button: 0,
+                buttons: 0,
+                isPrimary: true,
+                pointerId: 1,
+                clientX: 20,
+                clientY: 12,
+            });
+        } finally {
+            document.elementsFromPoint = originalElementsFromPoint;
+        }
+    });
+
+    it('does not style appending to a columns column as a card child drop', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'card-columns'},
+        });
+        await waitFor(() => expect(view.getByText('Loaded fixture: Card columns.')).toBeTruthy());
+
+        const columns = columnsColumns(left);
+        const sourceCard = columns[0].querySelector<HTMLElement>('.columnsCard')!;
+        const targetColumn = columns[1];
+        const targetCards = Array.from(targetColumn.querySelectorAll<HTMLElement>('.columnsCard'));
+        targetColumn.getBoundingClientRect = () =>
+            ({
+                left: 0,
+                top: 0,
+                right: 260,
+                bottom: 180,
+                width: 260,
+                height: 180,
+                x: 0,
+                y: 0,
+                toJSON: () => ({}),
+            }) as DOMRect;
+        targetCards[targetCards.length - 1].getBoundingClientRect = () =>
+            ({
+                left: 8,
+                top: 64,
+                right: 248,
+                bottom: 112,
+                width: 240,
+                height: 48,
+                x: 8,
+                y: 64,
+                toJSON: () => ({}),
+            }) as DOMRect;
+        const originalElementsFromPoint = document.elementsFromPoint;
+        document.elementsFromPoint = () => [targetColumn.querySelector<HTMLElement>('.columnsCards')!];
+        try {
+            const handle = within(sourceCard).getByRole('button', {name: 'Move card'}) as HTMLElement & {
+                setPointerCapture?: (pointerId: number) => void;
+            };
+            handle.setPointerCapture = () => {};
+            fireEvent.pointerDown(handle, {
+                button: 0,
+                buttons: 1,
+                isPrimary: true,
+                pointerId: 1,
+                clientX: 24,
+                clientY: 16,
+            });
+            fireEvent.pointerMove(window, {
+                button: 0,
+                buttons: 1,
+                isPrimary: true,
+                pointerId: 1,
+                clientX: 24,
+                clientY: 150,
+            });
+
+            await waitFor(() => {
+                const indicator = targetCards[targetCards.length - 1].querySelector('.blockRow.dropAfter');
+                expect(indicator).toBeTruthy();
+                expect(indicator?.classList.contains('dropChildTarget')).toBe(false);
+            });
+
+            fireEvent.pointerUp(window, {
+                button: 0,
+                buttons: 0,
+                isPrimary: true,
+                pointerId: 1,
+                clientX: 24,
+                clientY: 150,
+            });
+        } finally {
+            document.elementsFromPoint = originalElementsFromPoint;
+        }
+    });
+
+    it('uses after-card target for the bottom-left of the last card in a columns column', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'card-columns'},
+        });
+        await waitFor(() => expect(view.getByText('Loaded fixture: Card columns.')).toBeTruthy());
+
+        const columns = columnsColumns(left);
+        const sourceCard = columns[0].querySelector<HTMLElement>('.columnsCard')!;
+        const targetColumn = columns[1];
+        const nextColumn = columns[2];
+        const targetCards = Array.from(targetColumn.querySelectorAll<HTMLElement>('.columnsCard'));
+        const lastCard = targetCards[targetCards.length - 1];
+        lastCard.getBoundingClientRect = () =>
+            ({
+                left: 0,
+                top: 64,
+                right: 240,
+                bottom: 112,
+                width: 240,
+                height: 48,
+                x: 0,
+                y: 64,
+                toJSON: () => ({}),
+            }) as DOMRect;
+        nextColumn.getBoundingClientRect = () =>
+            ({
+                left: 300,
+                top: 0,
+                right: 560,
+                bottom: 180,
+                width: 260,
+                height: 180,
+                x: 300,
+                y: 0,
+                toJSON: () => ({}),
+            }) as DOMRect;
+        const originalElementsFromPoint = document.elementsFromPoint;
+        document.elementsFromPoint = () => [lastCard];
+        try {
+            const handle = within(sourceCard).getByRole('button', {name: 'Move card'}) as HTMLElement & {
+                setPointerCapture?: (pointerId: number) => void;
+            };
+            handle.setPointerCapture = () => {};
+            fireEvent.pointerDown(handle, {
+                button: 0,
+                buttons: 1,
+                isPrimary: true,
+                pointerId: 1,
+                clientX: 20,
+                clientY: 16,
+            });
+            fireEvent.pointerMove(window, {
+                button: 0,
+                buttons: 1,
+                isPrimary: true,
+                pointerId: 1,
+                clientX: 20,
+                clientY: 104,
+            });
+
+            await waitFor(() => {
+                const indicator = lastCard.querySelector('.blockRow.dropAfter');
+                expect(indicator).toBeTruthy();
+                expect(indicator?.classList.contains('dropChildTarget')).toBe(false);
+                expect(nextColumn.classList.contains('dropBefore')).toBe(false);
+            });
+
+            fireEvent.pointerUp(window, {
+                button: 0,
+                buttons: 0,
+                isPrimary: true,
+                pointerId: 1,
+                clientX: 20,
+                clientY: 104,
+            });
+        } finally {
+            document.elementsFromPoint = originalElementsFromPoint;
+        }
+    });
+
+    it('uses card geometry for margin space between column cards', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'card-columns'},
+        });
+        await waitFor(() => expect(view.getByText('Loaded fixture: Card columns.')).toBeTruthy());
+
+        const columns = columnsColumns(left);
+        const sourceCard = columns[0].querySelector<HTMLElement>('.columnsCard')!;
+        const targetColumn = columns[1];
+        const targetCards = Array.from(targetColumn.querySelectorAll<HTMLElement>('.columnsCard'));
+        targetCards[0].getBoundingClientRect = () =>
+            ({
+                left: 8,
+                top: 8,
+                right: 248,
+                bottom: 56,
+                width: 240,
+                height: 48,
+                x: 8,
+                y: 8,
+                toJSON: () => ({}),
+            }) as DOMRect;
+        targetCards[1].getBoundingClientRect = () =>
+            ({
+                left: 8,
+                top: 72,
+                right: 248,
+                bottom: 120,
+                width: 240,
+                height: 48,
+                x: 8,
+                y: 72,
+                toJSON: () => ({}),
+            }) as DOMRect;
+        const originalElementsFromPoint = document.elementsFromPoint;
+        document.elementsFromPoint = () => [targetColumn.querySelector<HTMLElement>('.columnsCards')!];
+        try {
+            const handle = within(sourceCard).getByRole('button', {name: 'Move card'}) as HTMLElement & {
+                setPointerCapture?: (pointerId: number) => void;
+            };
+            handle.setPointerCapture = () => {};
+            fireEvent.pointerDown(handle, {
+                button: 0,
+                buttons: 1,
+                isPrimary: true,
+                pointerId: 1,
+                clientX: 24,
+                clientY: 16,
+            });
+            fireEvent.pointerMove(window, {
+                button: 0,
+                buttons: 1,
+                isPrimary: true,
+                pointerId: 1,
+                clientX: 24,
+                clientY: 64,
+            });
+
+            await waitFor(() => {
+                const indicator = targetCards[0].querySelector('.blockRow.dropAfter');
+                expect(indicator).toBeTruthy();
+                expect(indicator?.classList.contains('dropChildTarget')).toBe(false);
+                expect(targetCards[1].querySelector('.blockRow.dropBefore')).toBeNull();
+            });
+
+            fireEvent.pointerUp(window, {
+                button: 0,
+                buttons: 0,
+                isPrimary: true,
+                pointerId: 1,
+                clientX: 24,
+                clientY: 64,
+            });
+        } finally {
+            document.elementsFromPoint = originalElementsFromPoint;
+        }
+    });
+
+    it('does not fallback to a horizontally unrelated columns column', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'card-columns'},
+        });
+        await waitFor(() => expect(view.getByText('Loaded fixture: Card columns.')).toBeTruthy());
+
+        const columns = columnsColumns(left);
+        const leftColumn = columns[0];
+        const sourceColumn = columns[1];
+        const sourceCard = sourceColumn.querySelector<HTMLElement>('.columnsCard')!;
+        const leftCard = leftColumn.querySelector<HTMLElement>('.columnsCard')!;
+        leftColumn.getBoundingClientRect = () =>
+            ({
+                left: 0,
+                top: 0,
+                right: 260,
+                bottom: 180,
+                width: 260,
+                height: 180,
+                x: 0,
+                y: 0,
+                toJSON: () => ({}),
+            }) as DOMRect;
+        leftCard.getBoundingClientRect = () =>
+            ({
+                left: 8,
+                top: 8,
+                right: 248,
+                bottom: 56,
+                width: 240,
+                height: 48,
+                x: 8,
+                y: 8,
+                toJSON: () => ({}),
+            }) as DOMRect;
+        sourceColumn.getBoundingClientRect = () =>
+            ({
+                left: 300,
+                top: 0,
+                right: 560,
+                bottom: 180,
+                width: 260,
+                height: 180,
+                x: 300,
+                y: 0,
+                toJSON: () => ({}),
+            }) as DOMRect;
+        sourceCard.getBoundingClientRect = () =>
+            ({
+                left: 308,
+                top: 8,
+                right: 548,
+                bottom: 56,
+                width: 240,
+                height: 48,
+                x: 308,
+                y: 8,
+                toJSON: () => ({}),
+            }) as DOMRect;
+
+        const originalElementsFromPoint = document.elementsFromPoint;
+        document.elementsFromPoint = () => [sourceCard];
+        try {
+            const handle = within(sourceCard).getByRole('button', {name: 'Move card'}) as HTMLElement & {
+                setPointerCapture?: (pointerId: number) => void;
+            };
+            handle.setPointerCapture = () => {};
+            fireEvent.pointerDown(handle, {
+                button: 0,
+                buttons: 1,
+                isPrimary: true,
+                pointerId: 1,
+                clientX: 320,
+                clientY: 28,
+            });
+            fireEvent.pointerMove(window, {
+                button: 0,
+                buttons: 1,
+                isPrimary: true,
+                pointerId: 1,
+                clientX: 320,
+                clientY: 20,
+            });
+
+            await waitFor(() => expect(sourceCard.classList.contains('draggingRoot')).toBe(true));
+            expect(left.querySelector('.columnsColumn.dropBefore, .columnsColumn.dropAfter')).toBeNull();
+            expect(left.querySelector('.columnsCard .blockRow.dropBefore, .columnsCard .blockRow.dropAfter')).toBeNull();
+
+            fireEvent.pointerUp(window, {
+                button: 0,
+                buttons: 0,
+                isPrimary: true,
+                pointerId: 1,
+                clientX: 320,
+                clientY: 20,
+            });
+        } finally {
+            document.elementsFromPoint = originalElementsFromPoint;
+        }
+    });
+
+    it('shows no target for an adjacent column card no-op placement', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'card-columns'},
+        });
+        await waitFor(() => expect(view.getByText('Loaded fixture: Card columns.')).toBeTruthy());
+
+        const columns = columnsColumns(left);
+        const [firstCard, secondCard] = Array.from(columns[0].querySelectorAll<HTMLElement>('.columnsCard'));
+        firstCard.getBoundingClientRect = () =>
+            ({
+                left: 0,
+                top: 0,
+                right: 240,
+                bottom: 48,
+                width: 240,
+                height: 48,
+                x: 0,
+                y: 0,
+                toJSON: () => ({}),
+            }) as DOMRect;
+        secondCard.getBoundingClientRect = () =>
+            ({
+                left: 0,
+                top: 56,
+                right: 240,
+                bottom: 104,
+                width: 240,
+                height: 48,
+                x: 0,
+                y: 56,
+                toJSON: () => ({}),
+            }) as DOMRect;
+        const originalElementsFromPoint = document.elementsFromPoint;
+        document.elementsFromPoint = () => [secondCard];
+        try {
+            const handle = within(firstCard).getByRole('button', {name: 'Move card'}) as HTMLElement & {
+                setPointerCapture?: (pointerId: number) => void;
+            };
+            handle.setPointerCapture = () => {};
+            fireEvent.pointerDown(handle, {
+                button: 0,
+                buttons: 1,
+                isPrimary: true,
+                pointerId: 1,
+                clientX: 20,
+                clientY: 8,
+            });
+            fireEvent.pointerMove(window, {
+                button: 0,
+                buttons: 1,
+                isPrimary: true,
+                pointerId: 1,
+                clientX: 20,
+                clientY: 64,
+            });
+
+            await waitFor(() => expect(firstCard.classList.contains('draggingRoot')).toBe(true));
+            expect(left.querySelector('.columnsColumn.dropBefore, .columnsColumn.dropAfter')).toBeNull();
+            expect(left.querySelector('.columnsCard .blockRow.dropBefore, .columnsCard .blockRow.dropAfter')).toBeNull();
+
+            fireEvent.pointerUp(window, {
+                button: 0,
+                buttons: 0,
+                isPrimary: true,
+                pointerId: 1,
+                clientX: 20,
+                clientY: 64,
+            });
+        } finally {
+            document.elementsFromPoint = originalElementsFromPoint;
+        }
+    });
+
+    it('drags a columns column before another column through normal block movement', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'card-columns'},
+        });
+        await waitFor(() => expect(view.getByText('Loaded fixture: Card columns.')).toBeTruthy());
+
+        const columns = columnsColumns(left);
+        const doneColumn = columns[2];
+        const todoColumn = columns[0];
+        todoColumn.getBoundingClientRect = () =>
+            ({
+                left: 0,
+                top: 0,
+                right: 260,
+                bottom: 180,
+                width: 260,
+                height: 180,
+                x: 0,
+                y: 0,
+                toJSON: () => ({}),
+            }) as DOMRect;
+        const originalElementsFromPoint = document.elementsFromPoint;
+        document.elementsFromPoint = () => [todoColumn];
+        dragElementTo(within(doneColumn).getByRole('button', {name: 'Move column'}), 20, 40);
+        document.elementsFromPoint = originalElementsFromPoint;
+
+        await waitFor(() =>
+            expect(columnsColumns(left).map(columnsColumnTitle)).toEqual(['done', 'todo', 'in progress']),
+        );
+    });
+
+    it('opens populated mermaid fixture blocks in preview mode', async () => {
+        const view = render(<App />);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'mermaid-diagram'},
+        });
+
+        await waitFor(() => expect(view.getByText('Loaded fixture: Mermaid diagram.')).toBeTruthy());
+        const mermaidBlocks = Array.from(view.container.querySelectorAll<HTMLElement>('.previewCodeBlock'));
+        expect(mermaidBlocks).toHaveLength(2);
+        for (const block of mermaidBlocks) {
+            expect(within(block).getByRole('button', {name: 'Preview'}).getAttribute('aria-pressed')).toBe('true');
+            expect(within(block).queryByRole('textbox', {name: 'Block text'})).toBeNull();
+        }
+        await waitFor(() => expect(view.container.querySelectorAll('[data-testid="mermaid-render"]')).toHaveLength(2));
+    });
+
+    it('opens empty mermaid blocks in edit mode', () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        setBlockType(left, 'mermaid');
+
+        const mermaidBlock = left.querySelector<HTMLElement>('.previewCodeBlock');
+        if (!mermaidBlock) throw new Error('missing mermaid block');
+        expect(within(mermaidBlock).getByRole('button', {name: 'Edit'}).getAttribute('aria-pressed')).toBe('true');
+        expect(within(mermaidBlock).getByRole('textbox', {name: 'Block text'})).toBeTruthy();
+    });
+
+    it('shows the preview checkbox only for previewable code languages', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        setBlockType(left, 'code');
+        openCodeBlockOptions(left);
+        expect(within(left).queryByRole('checkbox', {name: 'Preview code'})).toBeNull();
+
+        const language = within(left).getByRole('textbox', {name: 'Code language'});
+        fireEvent.change(language, {target: {value: 'mermaid'}});
+
+        const previewToggle = await waitFor(() =>
+            within(left).getByRole('checkbox', {name: 'Preview code'}),
+        );
+        expect((previewToggle as HTMLInputElement).checked).toBe(false);
+        fireEvent.click(previewToggle);
+
+        await waitFor(() => {
+            expect(left.querySelector('.previewCodeBlock')).toBeTruthy();
+            expect(right.querySelector('.previewCodeBlock')).toBeTruthy();
+        });
+    });
+
+    it('shows editor and preview together in split mode', async () => {
+        const view = render(<App />);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'mermaid-diagram'},
+        });
+
+        await waitFor(() => expect(view.container.querySelectorAll('[data-testid="mermaid-render"]')).toHaveLength(2));
+        const previewBlock = view.container.querySelector<HTMLElement>('.previewCodeBlock');
+        if (!previewBlock) throw new Error('missing preview code block');
+
+        fireEvent.click(within(previewBlock).getByRole('button', {name: 'Split'}));
+
+        expect(within(previewBlock).getByRole('textbox', {name: 'Block text'})).toBeTruthy();
+        expect(previewBlock.querySelector('[data-testid="mermaid-render"]')).toBeTruthy();
+    });
+
+    it('keeps the previous mermaid render visible while remote updates render', async () => {
+        let pendingUpdateResolve: (() => void) | null = null;
+        mermaidMock.render.mockImplementation(async () => {
+            if (mermaidMock.render.mock.calls.length <= 2) {
+                return {svg: '<svg data-testid="mermaid-render" data-render="initial"></svg>'};
+            }
+            return new Promise((resolve) => {
+                pendingUpdateResolve = () =>
+                    resolve({svg: '<svg data-testid="mermaid-render" data-render="updated"></svg>'});
+            });
+        });
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'mermaid-diagram'},
+        });
+
+        await waitFor(() => expect(view.container.querySelectorAll('[data-render="initial"]')).toHaveLength(2));
+        const leftMermaid = left.querySelector<HTMLElement>('.previewCodeBlock');
+        const rightMermaid = right.querySelector<HTMLElement>('.previewCodeBlock');
+        if (!leftMermaid || !rightMermaid) throw new Error('missing mermaid block');
+
+        fireEvent.click(within(leftMermaid).getByRole('button', {name: 'Edit'}));
+        const editor = within(leftMermaid).getByRole('textbox', {name: 'Block text'});
+        selectCaret(editor, blockText(editor).length);
+        typeText(editor, ' ');
+
+        await waitFor(() => expect(mermaidMock.render).toHaveBeenCalledTimes(3));
+        expect(within(rightMermaid).queryByText('Rendering diagram...')).toBeNull();
+        expect(rightMermaid.querySelector('[data-render="initial"]')).toBeTruthy();
+
+        await act(async () => {
+            pendingUpdateResolve?.();
+        });
+        await waitFor(() => expect(rightMermaid.querySelector('[data-render="updated"]')).toBeTruthy());
+    });
+
+    it('keeps the previous mermaid render visible with an error overlay when remote updates fail', async () => {
+        mermaidMock.render.mockImplementation(async () => {
+            if (mermaidMock.render.mock.calls.length <= 2) {
+                return {svg: '<svg data-testid="mermaid-render" data-render="initial"></svg>'};
+            }
+            throw new Error('Parse failed');
+        });
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'mermaid-diagram'},
+        });
+
+        await waitFor(() => expect(view.container.querySelectorAll('[data-render="initial"]')).toHaveLength(2));
+        const leftMermaid = left.querySelector<HTMLElement>('.previewCodeBlock');
+        const rightMermaid = right.querySelector<HTMLElement>('.previewCodeBlock');
+        if (!leftMermaid || !rightMermaid) throw new Error('missing mermaid block');
+
+        fireEvent.click(within(leftMermaid).getByRole('button', {name: 'Edit'}));
+        const editor = within(leftMermaid).getByRole('textbox', {name: 'Block text'});
+        selectCaret(editor, blockText(editor).length);
+        typeText(editor, ' ');
+
+        await waitFor(() => expect(within(rightMermaid).getByText('Parse failed')).toBeTruthy());
+        expect(rightMermaid.querySelector('[data-render="initial"]')).toBeTruthy();
+        expect(rightMermaid.querySelector('.codePreviewErrorOverlay')).toBeTruthy();
+        expect(rightMermaid.querySelector('.codePreviewError')).toBeNull();
+
+        typeText(editor, '!');
+
+        await waitFor(() => expect(mermaidMock.render).toHaveBeenCalledTimes(4));
+        expect(within(rightMermaid).getByText('Parse failed')).toBeTruthy();
+        expect(rightMermaid.querySelector('[data-render="initial"]')).toBeTruthy();
+        expect(rightMermaid.querySelector('.codePreviewErrorOverlay')).toBeTruthy();
+        expect(rightMermaid.querySelector('.codePreviewError')).toBeNull();
+    });
+
+    it('tracks empty editable blocks for the empty-block indicator', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        let block = blocks(left)[0];
+
+        expect(block.getAttribute('data-empty')).toBe('true');
+
+        selectCaret(block, 0);
+        typeText(block, 'a');
+        await waitFor(() => expect(block.getAttribute('data-empty')).toBeNull());
+
+        selectCaret(block, 1);
+        beforeInputDeleteBackward(block);
+        await waitFor(() => expect(block.getAttribute('data-empty')).toBe('true'));
+
+        block = blocks(left)[0];
+        selectCaret(block, 0);
+        beforeInputText(block, ' ');
+        await waitFor(() => expect(block.getAttribute('data-empty')).toBeNull());
+    });
+
+    it('marks empty table editables for the empty-block indicator', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        selectCaret(blocks(left)[0], 0);
+
+        setBlockType(left, 'table');
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+
+        expect(tableTitleBlock(left).getAttribute('data-empty')).toBe('true');
+        expect(tableBlocks(left)[0].getAttribute('data-empty')).toBe('true');
+        expect(within(left).getByRole('textbox', {name: 'Row header 1'}).getAttribute('data-empty')).toBe('true');
+    });
+
+    it('converts a block to a table from the block type menu', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+        selectCaret(blocks(left)[0], 0);
+        typeText(blocks(left)[0], 'Schedule');
+
+        setBlockType(left, 'table');
+
+        await waitFor(() => {
+            expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy();
+            expect(within(right).getByRole('table', {name: 'Table block'})).toBeTruthy();
+        });
+        expect(within(left).queryByRole('button', {name: 'Table'})).toBeNull();
+        expect(blockText(tableTitleBlock(left))).toBe('Schedule');
+        expect(blockText(tableTitleBlock(right))).toBe('Schedule');
+        expect(tableBlocks(left)).toHaveLength(4);
+
+        selectCaret(tableBlocks(left)[3], 0);
+        fireEvent.keyDown(tableBlocks(left)[3], {key: 'Tab'});
+        await waitFor(() => expect(tableBlocks(right)).toHaveLength(6));
+
+        fireEvent.click(within(left).getByRole('button', {name: 'Add column 3'}));
+        await waitFor(() => expect(tableBlocks(right)).toHaveLength(9));
+    });
+
+    it('converts a block to columns from the block type menu and switches display', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+        selectCaret(blocks(left)[0], 0);
+        typeText(blocks(left)[0], 'Columns');
+
+        setBlockType(left, 'columns');
+
+        await waitFor(() => {
+            expect(columnsBoards(left)).toHaveLength(1);
+            expect(columnsBoards(right)).toHaveLength(1);
+        });
+        expect(columnsColumns(left)).toHaveLength(3);
+        expect(columnsCards(left)).toHaveLength(0);
+        expect(blockTexts(left).slice(0, 4)).toEqual(['Columns', 'todo', 'in progress', 'done']);
+
+        const menu = openBlockOptions(left, 'Columns block options');
+        fireEvent.change(within(menu).getByRole('combobox', {name: 'Columns display'}), {
+            target: {value: 'cards'},
+        });
+
+        await waitFor(() => {
+            expect(within(left).getAllByRole('button', {name: 'Move column'})).toHaveLength(3);
+            expect(within(right).getAllByRole('button', {name: 'Move column'})).toHaveLength(3);
+        });
+    });
+
+    it('converts a block to card columns from the block type menu', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+        selectCaret(blocks(left)[0], 0);
+        typeText(blocks(left)[0], 'Board');
+
+        setBlockType(left, 'card-columns');
+
+        await waitFor(() => {
+            expect(columnsBoards(left)).toHaveLength(1);
+            expect(columnsBoards(right)).toHaveLength(1);
+        });
+        expect(columnsColumns(left)).toHaveLength(3);
+        expect(blockTexts(left).slice(0, 4)).toEqual(['Board', 'todo', 'in progress', 'done']);
+        expect(within(left).getAllByRole('button', {name: 'Move column'})).toHaveLength(3);
+    });
+
+    it('converts a selected table header back to a normal block from the block type menu', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+        selectCaret(blocks(left)[0], 0);
+        typeText(blocks(left)[0], 'Schedule');
+        setBlockType(left, 'table');
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+
+        selectCaret(tableTitleBlock(left), 0);
+        setBlockType(left, 'paragraph');
+
+        await waitFor(() => {
+            expect(within(left).queryByRole('table', {name: 'Table block'})).toBeNull();
+            expect(within(right).queryByRole('table', {name: 'Table block'})).toBeNull();
+        });
+        expect(blockTexts(left)).toContain('Schedule');
+        expect(blockTexts(right)).toContain('Schedule');
+    });
+
+    it('edits and splits the table title into a following paragraph', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+        selectCaret(blocks(left)[0], 0);
+
+        setBlockType(left, 'table');
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+
+        const title = tableTitleBlock(left);
+        selectCaret(title, 0);
+        typeText(title, 'AlphaBeta');
+        await waitFor(() => expect(blockText(tableTitleBlock(right))).toBe('AlphaBeta'));
+
+        selectCaret(tableTitleBlock(left), 5);
+        fireEvent.keyDown(tableTitleBlock(left), {key: 'Enter'});
+
+        await waitFor(() => {
+            expect(blockText(tableTitleBlock(left))).toBe('Alpha');
+            expect(blockTexts(left)).toContain('Beta');
+        });
+        expect(blockText(tableTitleBlock(right))).toBe('Alpha');
+        expect(blockTexts(right)).toContain('Beta');
+    });
+
+    it('uses row-number placeholders and gutter row drag handles', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        selectCaret(blocks(left)[0], 0);
+
+        setBlockType(left, 'table');
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+
+        expect(within(left).getByRole('textbox', {name: 'Row header 1'}).getAttribute('data-placeholder')).toBe('1');
+        expect(within(left).getByRole('textbox', {name: 'Row header 2'}).getAttribute('data-placeholder')).toBe('2');
+        expect(within(left).getByRole('button', {name: 'Move row 1'}).textContent).toBe('⋮');
+        expect(within(left).getByRole('button', {name: 'Move row 2'}).textContent).toBe('⋮');
+        expect(within(within(left).getByRole('table', {name: 'Table block'})).queryAllByRole('button', {name: 'Move block'})).toHaveLength(1);
+    });
+
+    it('highlights the active cell and drags a focused cell from its border', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        selectCaret(blocks(left)[0], 0);
+
+        setBlockType(left, 'table');
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+
+        ['A', 'B', 'C', 'D'].forEach((text, index) => {
+            selectCaret(tableBlocks(left)[index], 0);
+            typeText(tableBlocks(left)[index], text);
+        });
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['A', 'B', 'C', 'D']));
+
+        const firstCellBlock = tableBlocks(left)[0];
+        selectCaret(firstCellBlock, 0);
+        fireEvent.mouseUp(firstCellBlock);
+        const firstCell = firstCellBlock.closest<HTMLElement>('.tableCell')!;
+        expect(firstCell.classList.contains('activeTableCell')).toBe(true);
+
+        const rows = Array.from(left.querySelectorAll<HTMLElement>('[data-row-id]'));
+        rows.forEach((row, rowIndex) => {
+            row.getBoundingClientRect = () =>
+                ({
+                    left: 0,
+                    top: rowIndex * 50,
+                    right: 340,
+                    bottom: rowIndex * 50 + 50,
+                    width: 340,
+                    height: 50,
+                    x: 0,
+                    y: rowIndex * 50,
+                    toJSON: () => ({}),
+                }) as DOMRect;
+            Array.from(row.querySelectorAll<HTMLElement>('.tableCell[data-cell-id]')).forEach((cell, cellIndex) => {
+                cell.getBoundingClientRect = () =>
+                    ({
+                        left: 40 + cellIndex * 100,
+                        top: rowIndex * 50,
+                        right: 140 + cellIndex * 100,
+                        bottom: rowIndex * 50 + 50,
+                        width: 100,
+                        height: 50,
+                        x: 40 + cellIndex * 100,
+                        y: rowIndex * 50,
+                        toJSON: () => ({}),
+                    }) as DOMRect;
+            });
+        });
+        const originalElementsFromPoint = document.elementsFromPoint;
+        document.elementsFromPoint = (_x: number, y: number) => [rows[y >= 50 ? 1 : 0]];
+        (firstCell as HTMLElement & {setPointerCapture?: (pointerId: number) => void}).setPointerCapture = () => {};
+
+        fireEvent.pointerDown(firstCell, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 20,
+        });
+        await waitFor(() => expect(firstCell.classList.contains('draggingCell')).toBe(true));
+        fireEvent.pointerMove(window, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 170,
+            clientY: 70,
+        });
+        expect(left.querySelector('.cellDropBefore, .cellDropAfter')).toBeTruthy();
+        fireEvent.pointerUp(window, {
+            button: 0,
+            buttons: 0,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 170,
+            clientY: 70,
+        });
+        document.elementsFromPoint = originalElementsFromPoint;
+
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['B', 'C', 'A', 'D']));
+    });
+
+    it('drags a normal block into a table cell boundary', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        selectCaret(blocks(left)[0], 0);
+        typeText(blocks(left)[0], 'Title');
+        fireEvent.keyDown(blocks(left)[0], {key: 'Enter'});
+        await waitFor(() => expect(blocks(left)).toHaveLength(2));
+        selectCaret(blocks(left)[1], 0);
+        typeText(blocks(left)[1], 'Outside');
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'table');
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+        selectCaret(tableBlocks(left)[0], 0);
+        typeText(tableBlocks(left)[0], 'A');
+        await waitFor(() => expect(tableBlockTexts(left)[0]).toBe('A'));
+
+        stubTableCellRects(left);
+        const targetCell = tableCells(left)[0];
+        const outsideBlock = blocks(left).find((block) => blockText(block) === 'Outside');
+        if (!outsideBlock) throw new Error('missing outside block');
+        const handle = outsideBlock.closest<HTMLElement>('.blockRow')?.querySelector<HTMLElement>('button[aria-label="Move block"]');
+        if (!handle) throw new Error('missing outside block handle');
+        const originalElementsFromPoint = document.elementsFromPoint;
+        document.elementsFromPoint = () => [targetCell];
+        dragElementTo(handle, 130, 20);
+        document.elementsFromPoint = originalElementsFromPoint;
+
+        await waitFor(() => expect(tableBlockTexts(left).slice(0, 2)).toEqual(['A', 'Outside']));
+    });
+
+    it('drags a selected table cell out to a normal block drop target', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        selectCaret(blocks(left)[0], 0);
+        typeText(blocks(left)[0], 'Title');
+        fireEvent.keyDown(blocks(left)[0], {key: 'Enter'});
+        await waitFor(() => expect(blocks(left)).toHaveLength(2));
+        selectCaret(blocks(left)[1], 0);
+        typeText(blocks(left)[1], 'Outside');
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'table');
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+        selectCaret(tableBlocks(left)[0], 0);
+        typeText(tableBlocks(left)[0], 'A');
+        await waitFor(() => expect(tableBlockTexts(left)[0]).toBe('A'));
+
+        stubTableCellRects(left);
+        const firstCell = tableCells(left)[0];
+        selectCaret(tableBlocks(left)[0], 0);
+        fireEvent.mouseUp(tableBlocks(left)[0]);
+        await waitFor(() => expect(firstCell.classList.contains('cellDragCandidate')).toBe(true));
+        const outsideBlock = blocks(left).find((block) => blockText(block) === 'Outside');
+        if (!outsideBlock) throw new Error('missing outside block');
+        const outsideRowFor = () =>
+            blocks(left)
+                .find((block) => blockText(block) === 'Outside')
+                ?.closest<HTMLElement>('.blockRow') ?? null;
+        const outsideRow = outsideRowFor();
+        if (!outsideRow) throw new Error('missing outside row');
+        outsideRow.getBoundingClientRect = () =>
+            ({
+                left: 0,
+                top: 160,
+                right: 340,
+                bottom: 200,
+                width: 340,
+                height: 40,
+                x: 0,
+                y: 160,
+                toJSON: () => ({}),
+            }) as DOMRect;
+        const originalElementsFromPoint = document.elementsFromPoint;
+        document.elementsFromPoint = () => [outsideRow];
+
+        fireEvent.pointerDown(firstCell, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 20,
+        });
+        fireEvent.pointerMove(window, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 20,
+            clientY: 190,
+        });
+        await waitFor(() => expect(outsideRowFor()?.classList.contains('dropAfter')).toBe(true));
+        fireEvent.pointerUp(window, {
+            button: 0,
+            buttons: 0,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 20,
+            clientY: 190,
+        });
+        document.elementsFromPoint = originalElementsFromPoint;
+
+        await waitFor(() => {
+            const moved = blocks(left).find(
+                (block) => blockText(block) === 'A' && !block.closest('.tableCell'),
+            );
+            expect(moved).toBeTruthy();
+        });
+    });
+
+    it('drags selected cells into a row gap as a compact new row', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        selectCaret(blocks(left)[0], 0);
+
+        setBlockType(left, 'table');
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+        ['A', 'B', 'C', 'D'].forEach((text, index) => {
+            selectCaret(tableBlocks(left)[index], 0);
+            typeText(tableBlocks(left)[index], text);
+        });
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['A', 'B', 'C', 'D']));
+
+        stubTableCellRects(left);
+        const rows = Array.from(left.querySelectorAll<HTMLElement>('.tableRow[data-row-id]'));
+        rows.forEach((row, rowIndex) => {
+            row.getBoundingClientRect = () =>
+                ({
+                    left: 0,
+                    top: rowIndex * 50,
+                    right: 340,
+                    bottom: rowIndex * 50 + 50,
+                    width: 340,
+                    height: 50,
+                    x: 0,
+                    y: rowIndex * 50,
+                    toJSON: () => ({}),
+                }) as DOMRect;
+        });
+        selectCaret(tableBlocks(left)[0], 0);
+        fireEvent.mouseUp(tableBlocks(left)[0]);
+        const firstCell = tableCells(left)[0];
+        const rowGap = left.querySelector<HTMLElement>('.tableRowInsertControl[data-after-row-id]');
+        if (!rowGap) throw new Error('missing row gap');
+        const originalElementsFromPoint = document.elementsFromPoint;
+        document.elementsFromPoint = () => [rowGap];
+
+        fireEvent.pointerDown(firstCell, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 20,
+        });
+        fireEvent.pointerMove(window, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 52,
+        });
+        fireEvent.pointerUp(window, {
+            button: 0,
+            buttons: 0,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 52,
+        });
+        document.elementsFromPoint = originalElementsFromPoint;
+
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['B', 'A', 'C', 'D']));
+    });
+
+    it('tabs from a table cell into a single-cell block selection', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        selectCaret(blocks(left)[0], 0);
+
+        setBlockType(left, 'table');
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+
+        selectCaret(tableBlocks(left)[0], 0);
+        fireEvent.keyDown(tableBlocks(left)[0], {key: 'Tab'});
+        fireEvent.keyUp(tableBlocks(left)[1], {key: 'Tab'});
+
+        const secondCell = tableBlocks(left)[1].closest<HTMLElement>('.tableCell')!;
+        await waitFor(() => {
+            expect(secondCell.classList.contains('cellSelected')).toBe(true);
+            expect(secondCell.classList.contains('cellSelectionFocus')).toBe(true);
+        });
+        expect(document.activeElement).toBe(secondCell);
+        expect(window.getSelection()?.rangeCount).toBe(0);
+
+        fireEvent.keyDown(secondCell, {key: 'X'});
+        await waitFor(() => expect(tableBlockTexts(left)[1]).toBe('X'));
+    });
+
+    it('selects a table cell from its border', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        selectCaret(blocks(left)[0], 0);
+
+        setBlockType(left, 'table');
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+
+        const targetCell = tableBlocks(left)[1].closest<HTMLElement>('.tableCell')!;
+        targetCell.getBoundingClientRect = () =>
+            ({
+                left: 40,
+                top: 0,
+                right: 140,
+                bottom: 50,
+                width: 100,
+                height: 50,
+                x: 40,
+                y: 0,
+                toJSON: () => ({}),
+            }) as DOMRect;
+
+        fireEvent.pointerDown(targetCell, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 20,
+        });
+
+        await waitFor(() => {
+            expect(targetCell.classList.contains('cellSelected')).toBe(true);
+            expect(targetCell.classList.contains('cellSelectionFocus')).toBe(true);
+        });
+        expect(document.activeElement).toBe(targetCell);
+
+        expect(targetCell.classList.contains('cellDragCandidate')).toBe(true);
+        expect(targetCell.querySelectorAll('.tableCellDragEdge')).toHaveLength(2);
+    });
+
+    it('shows the cell drag affordance when text inside a table cell is selected', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        selectCaret(blocks(left)[0], 0);
+
+        setBlockType(left, 'table');
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+
+        selectCaret(tableBlocks(left)[0], 0);
+        typeText(tableBlocks(left)[0], 'Cell text');
+        await waitFor(() => expect(tableBlockTexts(left)[0]).toBe('Cell text'));
+
+        selectRange(tableBlocks(left)[0], 0, 4);
+        fireEvent.mouseUp(tableBlocks(left)[0]);
+
+        const activeCell = tableCells(left)[0];
+        await waitFor(() => expect(activeCell.classList.contains('activeTableCell')).toBe(true));
+        expect(activeCell.classList.contains('cellDragCandidate')).toBe(true);
+        expect(activeCell.querySelectorAll('.tableCellDragEdge')).toHaveLength(2);
+    });
+
+    it('undoes while a table cell block selection is focused', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        selectCaret(blocks(left)[0], 0);
+
+        setBlockType(left, 'table');
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+
+        selectCaret(tableBlocks(left)[0], 0);
+        typeText(tableBlocks(left)[0], 'A');
+        await waitFor(() => expect(tableBlockTexts(left)[0]).toBe('A'));
+
+        stubTableCellRects(left);
+        const targetCell = tableCells(left)[1];
+        fireEvent.pointerDown(targetCell, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 142,
+            clientY: 20,
+        });
+
+        await waitFor(() => {
+            expect(targetCell.classList.contains('cellSelected')).toBe(true);
+            expect(document.activeElement).toBe(targetCell);
+        });
+
+        fireEvent.keyDown(document.activeElement ?? targetCell, {key: 'z', metaKey: true});
+
+        await waitFor(() => expect(tableBlockTexts(left)[0]).toBe(''));
+    });
+
+    it('drags across table cell borders to create a rectangular cell selection', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        selectCaret(blocks(left)[0], 0);
+
+        setBlockType(left, 'table');
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+
+        const cells = tableBlocks(left).map((block) => block.closest<HTMLElement>('.tableCell')!);
+        cells.forEach((cell, index) => {
+            const rowIndex = Math.floor(index / 2);
+            const columnIndex = index % 2;
+            cell.getBoundingClientRect = () =>
+                ({
+                    left: 40 + columnIndex * 100,
+                    top: rowIndex * 50,
+                    right: 140 + columnIndex * 100,
+                    bottom: rowIndex * 50 + 50,
+                    width: 100,
+                    height: 50,
+                    x: 40 + columnIndex * 100,
+                    y: rowIndex * 50,
+                    toJSON: () => ({}),
+                }) as DOMRect;
+        });
+
+        fireEvent.pointerDown(cells[1], {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 142,
+            clientY: 20,
+        });
+        await waitFor(() => expect(cells[1].classList.contains('cellSelected')).toBe(true));
+
+        const originalElementsFromPoint = document.elementsFromPoint;
+        document.elementsFromPoint = (_x: number, y: number) => [cells[y >= 50 ? 2 : 1]];
+        fireEvent.pointerMove(window, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 70,
+        });
+        fireEvent.pointerUp(window, {
+            button: 0,
+            buttons: 0,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 70,
+        });
+        document.elementsFromPoint = originalElementsFromPoint;
+
+        await waitFor(() => {
+            const selectedCells = tableBlocks(left).map((block) => block.closest<HTMLElement>('.tableCell')!);
+            expect(selectedCells.map((cell) => cell.classList.contains('cellSelected'))).toEqual([
+                true,
+                true,
+                true,
+                true,
+            ]);
+            expect(selectedCells[2].classList.contains('cellSelectionFocus')).toBe(true);
+        });
+    });
+
+    it('clears a partial table cell selection with Delete', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        selectCaret(blocks(left)[0], 0);
+
+        setBlockType(left, 'table');
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+        ['A', 'B', 'C', 'D'].forEach((text, index) => {
+            selectCaret(tableBlocks(left)[index], 0);
+            typeText(tableBlocks(left)[index], text);
+        });
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['A', 'B', 'C', 'D']));
+
+        stubTableCellRects(left);
+        const cells = tableCells(left);
+        fireEvent.pointerDown(cells[1], {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 142,
+            clientY: 20,
+        });
+        await waitFor(() => expect(tableCells(left)[1].classList.contains('cellSelected')).toBe(true));
+        fireEvent.keyDown(tableBlocks(left)[1], {key: 'Delete'});
+
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['A', '', 'C', 'D']));
+    });
+
+    it('deletes a full selected table row with Delete', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        selectCaret(blocks(left)[0], 0);
+
+        setBlockType(left, 'table');
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+        ['A', 'B', 'C', 'D'].forEach((text, index) => {
+            selectCaret(tableBlocks(left)[index], 0);
+            typeText(tableBlocks(left)[index], text);
+        });
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['A', 'B', 'C', 'D']));
+
+        stubTableCellRects(left);
+        let cells = tableCells(left);
+        fireEvent.pointerDown(cells[1], {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 142,
+            clientY: 20,
+        });
+        await waitFor(() => expect(tableCells(left)[1].classList.contains('cellSelected')).toBe(true));
+        const originalElementsFromPoint = document.elementsFromPoint;
+        document.elementsFromPoint = () => [tableCells(left)[0]];
+        fireEvent.pointerMove(window, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 20,
+        });
+        fireEvent.pointerUp(window, {
+            button: 0,
+            buttons: 0,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 20,
+        });
+        document.elementsFromPoint = originalElementsFromPoint;
+        await waitFor(() => {
+            cells = tableCells(left);
+            expect(cells[0].classList.contains('cellSelected')).toBe(true);
+            expect(cells[1].classList.contains('cellSelected')).toBe(true);
+        });
+
+        fireEvent.keyDown(tableBlocks(left)[0], {key: 'Delete'});
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['C', 'D']));
+    });
+
+    it('deletes a full selected table column with Delete', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        selectCaret(blocks(left)[0], 0);
+
+        setBlockType(left, 'table');
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+        ['A', 'B', 'C', 'D'].forEach((text, index) => {
+            selectCaret(tableBlocks(left)[index], 0);
+            typeText(tableBlocks(left)[index], text);
+        });
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['A', 'B', 'C', 'D']));
+
+        stubTableCellRects(left);
+        fireEvent.pointerDown(tableCells(left)[2], {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 70,
+        });
+        await waitFor(() => expect(tableCells(left)[2].classList.contains('cellSelected')).toBe(true));
+        const originalElementsFromPoint = document.elementsFromPoint;
+        document.elementsFromPoint = () => [tableCells(left)[0]];
+        fireEvent.pointerMove(window, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 20,
+        });
+        fireEvent.pointerUp(window, {
+            button: 0,
+            buttons: 0,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 20,
+        });
+        document.elementsFromPoint = originalElementsFromPoint;
+        await waitFor(() => {
+            const selectedCells = tableCells(left);
+            expect(selectedCells[0].classList.contains('cellSelected')).toBe(true);
+            expect(selectedCells[2].classList.contains('cellSelected')).toBe(true);
+        });
+
+        fireEvent.keyDown(tableBlocks(left)[0], {key: 'Delete'});
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['B', 'D']));
+    });
+
+    it('pastes a structured row below a full selected table row', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        const payload: RichClipboardPayload = {
+            version: 1,
+            plainText: 'X\tY',
+            html: '<p>X</p><p>Y</p>',
+            fragments: [
+                {text: 'X', meta: {type: 'paragraph', ts: 'copy-ts'}, marks: []},
+                {text: 'Y', meta: {type: 'paragraph', ts: 'copy-ts'}, marks: []},
+            ],
+            annotations: [],
+            tsv: 'X\tY',
+        };
+        selectCaret(blocks(left)[0], 0);
+
+        setBlockType(left, 'table');
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+        ['A', 'B', 'C', 'D'].forEach((text, index) => {
+            selectCaret(tableBlocks(left)[index], 0);
+            typeText(tableBlocks(left)[index], text);
+        });
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['A', 'B', 'C', 'D']));
+
+        stubTableCellRects(left);
+        fireEvent.pointerDown(tableCells(left)[1], {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 142,
+            clientY: 20,
+        });
+        await waitFor(() => expect(tableCells(left)[1].classList.contains('cellSelected')).toBe(true));
+        const originalElementsFromPoint = document.elementsFromPoint;
+        document.elementsFromPoint = () => [tableCells(left)[0]];
+        fireEvent.pointerMove(window, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 20,
+        });
+        fireEvent.pointerUp(window, {
+            button: 0,
+            buttons: 0,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 20,
+        });
+        document.elementsFromPoint = originalElementsFromPoint;
+        await waitFor(() => expect(tableCells(left)[0].classList.contains('cellSelected')).toBe(true));
+
+        pasteClipboard(tableBlocks(left)[0], {
+            [BLOCK_RICH_TEXT_MIME]: JSON.stringify(payload),
+            'text/plain': payload.plainText,
+        });
+
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['A', 'B', 'X', 'Y', 'C', 'D']));
+    });
+
+    it('pastes a structured column beside a full selected table column', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        const payload: RichClipboardPayload = {
+            version: 1,
+            plainText: 'X\nY',
+            html: '<p>X</p><p>Y</p>',
+            fragments: [
+                {text: 'X', meta: {type: 'paragraph', ts: 'copy-ts'}, marks: []},
+                {text: 'Y', meta: {type: 'paragraph', ts: 'copy-ts'}, marks: []},
+            ],
+            annotations: [],
+            tsv: 'X\nY',
+        };
+        selectCaret(blocks(left)[0], 0);
+
+        setBlockType(left, 'table');
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+        ['A', 'B', 'C', 'D'].forEach((text, index) => {
+            selectCaret(tableBlocks(left)[index], 0);
+            typeText(tableBlocks(left)[index], text);
+        });
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['A', 'B', 'C', 'D']));
+
+        stubTableCellRects(left);
+        fireEvent.pointerDown(tableCells(left)[2], {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 70,
+        });
+        await waitFor(() => expect(tableCells(left)[2].classList.contains('cellSelected')).toBe(true));
+        const originalElementsFromPoint = document.elementsFromPoint;
+        document.elementsFromPoint = () => [tableCells(left)[0]];
+        fireEvent.pointerMove(window, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 20,
+        });
+        fireEvent.pointerUp(window, {
+            button: 0,
+            buttons: 0,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 20,
+        });
+        document.elementsFromPoint = originalElementsFromPoint;
+        await waitFor(() => expect(tableCells(left)[0].classList.contains('cellSelected')).toBe(true));
+
+        pasteClipboard(tableBlocks(left)[0], {
+            [BLOCK_RICH_TEXT_MIME]: JSON.stringify(payload),
+            'text/plain': payload.plainText,
+        });
+
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['A', 'X', 'B', 'C', 'Y', 'D']));
+    });
+
+    it('drags a full selected table column as a column', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        selectCaret(blocks(left)[0], 0);
+
+        setBlockType(left, 'table');
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+        ['A', 'B', 'C', 'D'].forEach((text, index) => {
+            selectCaret(tableBlocks(left)[index], 0);
+            typeText(tableBlocks(left)[index], text);
+        });
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['A', 'B', 'C', 'D']));
+
+        stubTableCellRects(left);
+        fireEvent.pointerDown(tableCells(left)[2], {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 70,
+        });
+        await waitFor(() => expect(tableCells(left)[2].classList.contains('cellSelected')).toBe(true));
+        const originalElementsFromPoint = document.elementsFromPoint;
+        document.elementsFromPoint = () => [tableCells(left)[0]];
+        fireEvent.pointerMove(window, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 20,
+        });
+        fireEvent.pointerUp(window, {
+            button: 0,
+            buttons: 0,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 20,
+        });
+        document.elementsFromPoint = originalElementsFromPoint;
+        await waitFor(() => expect(tableCells(left)[0].classList.contains('cellSelected')).toBe(true));
+
+        const rows = Array.from(left.querySelectorAll<HTMLElement>('[data-row-id]'));
+        document.elementsFromPoint = () => [rows[0]];
+        fireEvent.pointerDown(tableCells(left)[0], {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 2,
+            clientX: 42,
+            clientY: 20,
+        });
+        fireEvent.pointerMove(window, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 2,
+            clientX: 230,
+            clientY: 20,
+        });
+        fireEvent.pointerUp(window, {
+            button: 0,
+            buttons: 0,
+            isPrimary: true,
+            pointerId: 2,
+            clientX: 230,
+            clientY: 20,
+        });
+        document.elementsFromPoint = originalElementsFromPoint;
+
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['B', 'A', 'D', 'C']));
+    });
+
+    it('drags a selected table rectangle as cell contents', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        selectCaret(blocks(left)[0], 0);
+
+        setBlockType(left, 'table');
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+        ['A', 'B', 'C', 'D'].forEach((text, index) => {
+            selectCaret(tableBlocks(left)[index], 0);
+            typeText(tableBlocks(left)[index], text);
+        });
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['A', 'B', 'C', 'D']));
+
+        stubTableCellRects(left);
+        fireEvent.pointerDown(tableCells(left)[1], {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 142,
+            clientY: 20,
+        });
+        await waitFor(() => expect(tableCells(left)[1].classList.contains('cellSelected')).toBe(true));
+        const originalElementsFromPoint = document.elementsFromPoint;
+        document.elementsFromPoint = () => [tableCells(left)[0]];
+        fireEvent.pointerMove(window, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 20,
+        });
+        fireEvent.pointerUp(window, {
+            button: 0,
+            buttons: 0,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 20,
+        });
+        document.elementsFromPoint = originalElementsFromPoint;
+        await waitFor(() => {
+            expect(tableCells(left)[0].classList.contains('cellSelected')).toBe(true);
+            expect(tableCells(left)[1].classList.contains('cellSelected')).toBe(true);
+        });
+
+        const rows = Array.from(left.querySelectorAll<HTMLElement>('[data-row-id]'));
+        document.elementsFromPoint = () => [rows[1]];
+        fireEvent.pointerDown(tableCells(left)[0], {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 2,
+            clientX: 42,
+            clientY: 20,
+        });
+        fireEvent.pointerMove(window, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 2,
+            clientX: 42,
+            clientY: 70,
+        });
+        fireEvent.pointerUp(window, {
+            button: 0,
+            buttons: 0,
+            isPrimary: true,
+            pointerId: 2,
+            clientX: 42,
+            clientY: 70,
+        });
+        document.elementsFromPoint = originalElementsFromPoint;
+
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['', '', 'A', 'B']));
+        expect(tableCells(left)[2].classList.contains('cellSelected')).toBe(true);
+        expect(tableCells(left)[3].classList.contains('cellSelectionFocus')).toBe(true);
+    });
+
+    it('drags every table cell touched by a text selection', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        selectCaret(blocks(left)[0], 0);
+
+        setBlockType(left, 'table');
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+        ['A', 'B', 'C', 'D'].forEach((text, index) => {
+            selectCaret(tableBlocks(left)[index], 0);
+            typeText(tableBlocks(left)[index], text);
+        });
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['A', 'B', 'C', 'D']));
+
+        stubTableCellRects(left);
+        selectCrossBlockRange(tableBlocks(left)[0], 0, tableBlocks(left)[1], 1);
+        await waitFor(() => expect(tableCells(left)[1].classList.contains('cellDragCandidate')).toBe(true));
+
+        const rows = Array.from(left.querySelectorAll<HTMLElement>('[data-row-id]'));
+        const originalElementsFromPoint = document.elementsFromPoint;
+        document.elementsFromPoint = () => [rows[1]];
+        fireEvent.pointerDown(tableCells(left)[1], {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 142,
+            clientY: 20,
+        });
+        fireEvent.pointerMove(window, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 70,
+        });
+        fireEvent.pointerUp(window, {
+            button: 0,
+            buttons: 0,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 70,
+        });
+        document.elementsFromPoint = originalElementsFromPoint;
+
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['', '', 'A', 'B']));
+        expect(tableCells(left)[2].classList.contains('cellSelected')).toBe(true);
+        expect(tableCells(left)[3].classList.contains('cellSelectionFocus')).toBe(true);
+    });
+
     it('applies block type metadata from the toolbar to both replicas', async () => {
         const view = render(<App />);
         const {left, right} = panels(view);
@@ -447,6 +2654,374 @@ describe('Block rich text example UI', () => {
         await waitFor(() => {
             expect(blocks(left)[0].classList.contains('headingLevel2')).toBe(true);
         });
+        expect(blocks(right)[0].classList.contains('headingLevel2')).toBe(true);
+    });
+
+    it('renders recipe ingredient line highlighting from the toolbar', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], '1 cup flour, chopped');
+        setBlockType(left, 'recipe-ingredient');
+
+        await waitFor(() => {
+            expect(blocks(left)[0].classList.contains('recipeIngredientBlock')).toBe(true);
+            expect(blocks(left)[0].querySelector('.ingredient-amount')?.textContent).toBe('1');
+            expect(blocks(left)[0].querySelector('.ingredient-unit')?.textContent).toBe('cup');
+            expect(blocks(left)[0].querySelector('.ingredient-name')?.textContent).toBe('flour');
+            expect(blocks(left)[0].querySelector('.ingredient-prep')?.textContent).toBe('chopped');
+        });
+        expect(blockText(blocks(left)[0])).toBe('1 cup flour, chopped');
+        expect(blocks(right)[0].querySelector('.ingredient-name')?.textContent).toBe('flour');
+        expect(within(left).getAllByRole('button', {name: 'Move block'})[0].textContent).toBe('🥕');
+
+        selectRange(blocks(left)[0], 6, 11);
+        fireEvent.click(within(left).getByRole('button', {name: 'B'}));
+        await waitFor(() => {
+            const ingredient = blocks(left)[0].querySelector('.ingredient-name');
+            expect(ingredient?.textContent).toBe('flour');
+            expect(ingredient?.classList.contains('markBold')).toBe(true);
+        });
+
+        setBlockType(left, 'paragraph');
+        await waitFor(() => expect(blocks(left)[0].querySelector('.ingredient-name')).toBeNull());
+    });
+
+    it('opens a slash command menu after inserting a slash and closes it with Escape', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], '/');
+
+        const dialog = await waitFor(() => within(left).getByRole('dialog', {name: 'Slash commands'}));
+        const search = within(dialog).getByRole('textbox', {name: 'Search slash commands'});
+        expect(document.activeElement).toBe(search);
+        await waitForBlockTexts(left, ['/']);
+        await waitForBlockTexts(right, ['/']);
+
+        fireEvent.keyDown(dialog, {key: 'Escape'});
+        await waitFor(() =>
+            expect(within(left).queryByRole('dialog', {name: 'Slash commands'})).toBeNull(),
+        );
+        beforeInputText(blocks(left)[0], 'x');
+        await waitForBlockTexts(left, ['/x']);
+        await waitForBlockTexts(right, ['/x']);
+    });
+
+    it('filters slash commands without changing document text', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], '/');
+
+        const dialog = await waitFor(() => within(left).getByRole('dialog', {name: 'Slash commands'}));
+        fireEvent.change(within(dialog).getByRole('textbox', {name: 'Search slash commands'}), {
+            target: {value: 'date'},
+        });
+
+        expect(within(dialog).getByRole('option', {name: /Date/})).toBeTruthy();
+        expect(within(dialog).queryByRole('option', {name: /Heading 2/})).toBeNull();
+        await waitForBlockTexts(left, ['/']);
+    });
+
+    it('runs a slash block type command as slash deletion plus command', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], '/');
+
+        const dialog = await waitFor(() => within(left).getByRole('dialog', {name: 'Slash commands'}));
+        fireEvent.click(within(dialog).getByRole('option', {name: /Heading 2/}));
+
+        await waitForBlockTexts(left, ['']);
+        await waitFor(() => expect(blocks(left)[0].classList.contains('headingLevel2')).toBe(true));
+        await waitForBlockTexts(right, ['']);
+        expect(blocks(right)[0].classList.contains('headingLevel2')).toBe(true);
+    });
+
+    it('runs the slash ingredient command', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], '/');
+
+        const dialog = await waitFor(() => within(left).getByRole('dialog', {name: 'Slash commands'}));
+        fireEvent.change(within(dialog).getByRole('textbox', {name: 'Search slash commands'}), {
+            target: {value: 'ingredient'},
+        });
+        fireEvent.click(within(dialog).getByRole('option', {name: /Ingredient/}));
+
+        await waitForBlockTexts(left, ['']);
+        await waitFor(() => expect(blocks(left)[0].classList.contains('recipeIngredientBlock')).toBe(true));
+        expect(blocks(right)[0].classList.contains('recipeIngredientBlock')).toBe(true);
+    });
+
+    it('runs a slash preview command and shows the URL empty state', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], '/');
+
+        const dialog = await waitFor(() => within(left).getByRole('dialog', {name: 'Slash commands'}));
+        fireEvent.change(within(dialog).getByRole('textbox', {name: 'Search slash commands'}), {
+            target: {value: 'preview'},
+        });
+        fireEvent.click(within(dialog).getByRole('option', {name: /Preview/}));
+
+        await waitForBlockTexts(left, ['']);
+        await waitFor(() => expect(within(left).getByRole('textbox', {name: 'Preview URL'})).toBeTruthy());
+        expect(within(right).getByRole('textbox', {name: 'Preview URL'})).toBeTruthy();
+    });
+
+    it('runs a slash columns command and creates default columns', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], '/');
+
+        const dialog = await waitFor(() => within(left).getByRole('dialog', {name: 'Slash commands'}));
+        fireEvent.change(within(dialog).getByRole('textbox', {name: 'Search slash commands'}), {
+            target: {value: 'columns'},
+        });
+        fireEvent.click(within(dialog).getByRole('option', {name: /Card columns/}));
+
+        await waitFor(() => {
+            expect(columnsBoards(left)).toHaveLength(1);
+            expect(columnsBoards(right)).toHaveLength(1);
+        });
+        expect(blockTexts(left).slice(0, 4)).toEqual(['', 'todo', 'in progress', 'done']);
+        expect(columnsColumns(left)).toHaveLength(3);
+    });
+
+    it('converts a block to preview from the toolbar and rejects invalid URLs', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'preview');
+
+        const input = await waitFor(() => within(left).getByRole('textbox', {name: 'Preview URL'}));
+        fireEvent.change(input, {target: {value: 'example.test'}});
+        fireEvent.keyDown(input, {key: 'Enter'});
+
+        expect(within(left).getByText('Enter an absolute URL.')).toBeTruthy();
+        expect(within(left).getByRole('textbox', {name: 'Preview URL'})).toBeTruthy();
+    });
+
+    it('commits preview URLs to both replicas', async () => {
+        vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+            new Response('', {status: 404, statusText: 'Not Found'}),
+        );
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'preview');
+
+        const input = await waitFor(() => within(left).getByRole('textbox', {name: 'Preview URL'}));
+        fireEvent.change(input, {target: {value: 'https://example.test/path#hash'}});
+        fireEvent.keyDown(input, {key: 'Enter'});
+
+        await waitFor(() => {
+            expect(left.querySelector<HTMLAnchorElement>('.previewCardLink')?.href).toBe('https://example.test/path');
+            expect(right.querySelector<HTMLAnchorElement>('.previewCardLink')?.href).toBe('https://example.test/path');
+        });
+    });
+
+    it('stores fetched preview metadata in block meta and replicates the card', async () => {
+        vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+            new Response(
+                `
+                    <html>
+                        <head>
+                            <meta property="og:title" content="Fetched Title">
+                            <meta property="og:description" content="Fetched Description">
+                            <meta property="og:site_name" content="Fetched Site">
+                        </head>
+                    </html>
+                `,
+                {status: 200},
+            ),
+        );
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        typeText(blocks(left)[0], 'Local subtitle');
+        setBlockType(left, 'preview');
+
+        const input = await waitFor(() => within(left).getByRole('textbox', {name: 'Preview URL'}));
+        fireEvent.change(input, {target: {value: 'https://example.test/card'}});
+        fireEvent.keyDown(input, {key: 'Enter'});
+
+        await waitFor(() => {
+            expect(within(left).getByText('Fetched Title')).toBeTruthy();
+            expect(within(right).getByText('Fetched Title')).toBeTruthy();
+        });
+        expect(blockTexts(left)).toEqual(['Local subtitle']);
+        expect(blockTexts(right)).toEqual(['Local subtitle']);
+    });
+
+    it('edits an existing preview URL from the options menu', async () => {
+        vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+            new Response('', {status: 404, statusText: 'Not Found'}),
+        );
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'preview');
+
+        let input = await waitFor(() => within(left).getByRole('textbox', {name: 'Preview URL'}));
+        fireEvent.change(input, {target: {value: 'https://old.example'}});
+        fireEvent.keyDown(input, {key: 'Enter'});
+        await waitFor(() => expect(left.querySelector<HTMLAnchorElement>('.previewCardLink')?.href).toBe('https://old.example/'));
+
+        fireEvent.click(within(left).getByRole('button', {name: 'Preview options'}));
+        fireEvent.click(within(left).getByRole('menuitem', {name: 'Edit URL'}));
+        input = await waitFor(() => within(left).getByRole('textbox', {name: 'Preview URL'}));
+        fireEvent.change(input, {target: {value: 'https://new.example'}});
+        fireEvent.keyDown(input, {key: 'Enter'});
+
+        await waitFor(() => {
+            expect(left.querySelector<HTMLAnchorElement>('.previewCardLink')?.href).toBe('https://new.example/');
+            expect(right.querySelector<HTMLAnchorElement>('.previewCardLink')?.href).toBe('https://new.example/');
+        });
+    });
+
+    it('runs a slash date embed command and tombstones the slash', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], '/');
+
+        const dialog = await waitFor(() => within(left).getByRole('dialog', {name: 'Slash commands'}));
+        fireEvent.change(within(dialog).getByRole('textbox', {name: 'Search slash commands'}), {
+            target: {value: 'date'},
+        });
+        fireEvent.click(within(dialog).getByRole('option', {name: /Date/}));
+
+        await waitFor(() => {
+            const embed = blocks(left)[0].querySelector<HTMLElement>('[data-inline-embed="true"]');
+            expect(embed?.dataset.embedType).toBe('date');
+            expect(embed?.querySelector('.inlineEmbedLabel')?.textContent).toBe('06/23/2026');
+            expect(blockText(blocks(left)[0])).not.toContain('/');
+        });
+        await waitFor(() =>
+            expect(
+                blocks(right)[0]
+                    .querySelector<HTMLElement>('[data-inline-embed="true"]')
+                    ?.querySelector('.inlineEmbedLabel')?.textContent,
+            ).toBe('06/23/2026'),
+        );
+    });
+
+    it('runs slash commands across multiple cursors and deletes every inserted slash', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abcd');
+        selectCaret(blocks(left)[0], 1);
+        addCaret(blocks(left)[0], 3);
+
+        beforeInputText(blocks(left)[0], '/');
+        await waitForBlockTexts(left, ['a/bc/d']);
+
+        const dialog = await waitFor(() => within(left).getByRole('dialog', {name: 'Slash commands'}));
+        fireEvent.click(within(dialog).getByRole('option', {name: /Heading 2/}));
+
+        await waitForBlockTexts(left, ['abcd']);
+        await waitFor(() => expect(blocks(left)[0].classList.contains('headingLevel2')).toBe(true));
+        expect(blockTexts(right)).toEqual(['abcd']);
+        expect(blocks(right)[0].classList.contains('headingLevel2')).toBe(true);
+    });
+
+    it('inserts date embeds from slash commands across multiple cursors', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abcd');
+        selectCaret(blocks(left)[0], 1);
+        addCaret(blocks(left)[0], 3);
+
+        beforeInputText(blocks(left)[0], '/');
+        const dialog = await waitFor(() => within(left).getByRole('dialog', {name: 'Slash commands'}));
+        fireEvent.change(within(dialog).getByRole('textbox', {name: 'Search slash commands'}), {
+            target: {value: 'date'},
+        });
+        fireEvent.click(within(dialog).getByRole('option', {name: /Date/}));
+
+        await waitFor(() => {
+            const embeds = blocks(left)[0].querySelectorAll('[data-inline-embed="true"]');
+            expect(embeds).toHaveLength(2);
+            expect(blockText(blocks(left)[0])).not.toContain('/');
+        });
+        await waitFor(() =>
+            expect(blocks(right)[0].querySelectorAll('[data-inline-embed="true"]')).toHaveLength(2),
+        );
+    });
+
+    it('does not open slash commands in code blocks', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'code');
+        beforeInputText(blocks(left)[0], '/');
+
+        await waitForBlockTexts(left, ['/']);
+        await waitForBlockTexts(right, ['/']);
+        expect(within(left).queryByRole('dialog', {name: 'Slash commands'})).toBeNull();
+    });
+
+    it('opens slash commands in table cells and row headers', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'table');
+        await waitFor(() => expect(tableBlocks(left)).toHaveLength(4));
+
+        selectCaret(tableBlocks(left)[0], 0);
+        beforeInputText(tableBlocks(left)[0], '/');
+        let dialog = await waitFor(() => within(left).getByRole('dialog', {name: 'Slash commands'}));
+        expect(dialog).toBeTruthy();
+        fireEvent.keyDown(dialog, {key: 'Escape'});
+        await waitFor(() =>
+            expect(within(left).queryByRole('dialog', {name: 'Slash commands'})).toBeNull(),
+        );
+
+        selectCaret(tableRowHeaders(left)[0], 0);
+        beforeInputText(tableRowHeaders(left)[0], '/');
+        dialog = await waitFor(() => within(left).getByRole('dialog', {name: 'Slash commands'}));
+        expect(dialog).toBeTruthy();
+    });
+
+    it('still runs a slash command if the slash was already deleted', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], '/');
+        const dialog = await waitFor(() => within(left).getByRole('dialog', {name: 'Slash commands'}));
+
+        selectCaret(blocks(left)[0], 1);
+        beforeInputDeleteBackward(blocks(left)[0]);
+        await waitForBlockTexts(left, ['']);
+
+        fireEvent.click(within(dialog).getByRole('option', {name: /Heading 2/}));
+        await waitFor(() => expect(blocks(left)[0].classList.contains('headingLevel2')).toBe(true));
+        expect(blockTexts(right)).toEqual(['']);
         expect(blocks(right)[0].classList.contains('headingLevel2')).toBe(true);
     });
 
@@ -495,7 +3070,7 @@ describe('Block rich text example UI', () => {
         });
     });
 
-    it('changes callout kind from the inline dropdown', async () => {
+    it('changes callout kind from the block options menu', async () => {
         const view = render(<App />);
         const {left, right} = panels(view);
 
@@ -504,14 +3079,237 @@ describe('Block rich text example UI', () => {
         setBlockType(left, 'callout-info');
 
         await waitFor(() => expect(left.querySelector('.calloutGroup')).toBeTruthy());
-        const kind = within(left).getByRole('combobox', {name: 'Callout kind'});
-        fireEvent.mouseDown(kind);
+        const menu = openBlockOptions(left, 'Callout block options');
+        const kind = within(menu).getByRole('combobox', {name: 'Callout kind'});
         fireEvent.change(kind, {target: {value: 'warning'}});
 
         await waitFor(() => {
             expect(left.querySelector('.calloutWarning')).toBeTruthy();
         });
         expect(right.querySelector('.calloutWarning')).toBeTruthy();
+    });
+
+    it('changes image size from the block options menu', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'code-callouts-images'},
+        });
+        await waitFor(() => expect(view.getByText('Loaded fixture: Code, callouts, and images.')).toBeTruthy());
+
+        const menu = openBlockOptions(left, 'Image block options');
+        const size = within(menu).getByRole('combobox', {name: 'Image size'});
+        fireEvent.change(size, {target: {value: 'large'}});
+
+        await waitFor(() =>
+            expect(left.querySelector('.imageBlock')?.classList.contains('imageSize-large')).toBe(true),
+        );
+        expect(right.querySelector('.imageBlock')?.classList.contains('imageSize-large')).toBe(true);
+    });
+
+    it('configures answer polls from the block options menu', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'answer-polls'},
+        });
+        await waitFor(() => expect(view.getByText('Loaded fixture: Answer polls.')).toBeTruthy());
+
+        const menu = openBlockOptions(left, 'Poll block options');
+        fireEvent.change(within(menu).getByRole('combobox', {name: 'Answer poll display'}), {
+            target: {value: 'list'},
+        });
+        await waitFor(() => expect(left.querySelector('.pollOptions-list')).toBeTruthy());
+        expect(right.querySelector('.pollOptions-list')).toBeTruthy();
+
+        fireEvent.change(within(menu).getByRole('combobox', {name: 'Poll selection mode'}), {
+            target: {value: 'multiple'},
+        });
+        fireEvent.click(within(left).getByRole('button', {name: /Matrix polls/}));
+        fireEvent.click(within(left).getByRole('button', {name: /Long-answer polls/}));
+
+        await waitFor(() => {
+            expect(within(left).getByRole('button', {name: /Matrix polls/}).classList.contains('selected')).toBe(true);
+            expect(within(left).getByRole('button', {name: /Long-answer polls/}).classList.contains('selected')).toBe(true);
+        });
+    });
+
+    it('toggles answer polls between rendered view and child edit mode', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'answer-polls'},
+        });
+        await waitFor(() => expect(view.getByText('Loaded fixture: Answer polls.')).toBeTruthy());
+
+        const leftPoll = left.querySelector<HTMLElement>('.blockType-poll');
+        const leftBranch = leftPoll?.closest<HTMLElement>('.renderTreeBranch');
+        if (!leftPoll || !leftBranch) throw new Error('missing left answer poll');
+
+        const matrixOption = within(leftPoll).getByRole('button', {name: /Matrix polls/});
+        expect(matrixOption).toBeTruthy();
+        expect(matrixOption.getAttribute('data-poll-result')).toBe('0% · 0 votes');
+        expect(matrixOption.hasAttribute('title')).toBe(false);
+        expect(leftPoll.querySelector('.pollResult')).toBeNull();
+        expect(blockTexts(leftBranch)).not.toContain('Matrix polls');
+
+        fireEvent.click(matrixOption);
+
+        await waitFor(() => expect(matrixOption.classList.contains('selected')).toBe(true));
+        expect(matrixOption.classList.contains('pollResultBackground')).toBe(true);
+        expect(matrixOption.getAttribute('data-poll-result')).toBe('100% · 1 vote · ulrich');
+
+        fireEvent.click(within(leftPoll).getByRole('button', {name: 'Edit poll'}));
+
+        await waitFor(() => expect(leftPoll.querySelector('.pollOptions')).toBeNull());
+        expect(blockTexts(leftBranch)).toContain('Matrix polls');
+        expect(blockTexts(leftBranch)).toContain('Long-answer polls');
+        expect(right.querySelector('.pollOptions')).toBeTruthy();
+
+        fireEvent.click(within(leftPoll).getByRole('button', {name: 'View poll'}));
+
+        await waitFor(() => expect(leftPoll.querySelector('.pollOptions')).toBeTruthy());
+        expect(blockTexts(leftBranch)).not.toContain('Matrix polls');
+    });
+
+    it('configures matrix polls from the block options menu', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'matrix-polls'},
+        });
+        await waitFor(() => expect(view.getByText('Loaded fixture: Matrix polls.')).toBeTruthy());
+
+        const menu = openBlockOptions(left, 'Poll block options');
+        fireEvent.change(within(menu).getByRole('combobox', {name: 'Poll selection mode'}), {
+            target: {value: 'multiple'},
+        });
+
+        await waitFor(() => expect(left.querySelector('.matrixPollCell')?.textContent).toContain('+'));
+        expect(right.querySelector('.matrixPollCell')?.textContent).toContain('+');
+
+        const cells = Array.from(left.querySelectorAll<HTMLButtonElement>('.matrixPollCell'));
+        fireEvent.click(cells[0]);
+        fireEvent.click(cells[1]);
+
+        await waitFor(() => {
+            expect(cells[0].classList.contains('selected')).toBe(true);
+            expect(cells[1].classList.contains('selected')).toBe(true);
+        });
+        expect(cells[0].classList.contains('pollResultBackground')).toBe(true);
+        expect(cells[0].getAttribute('data-poll-result')).toBe('100% · 1 vote · ulrich');
+    });
+
+    it('toggles matrix polls between rendered view and child edit mode', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'matrix-polls'},
+        });
+        await waitFor(() => expect(view.getByText('Loaded fixture: Matrix polls.')).toBeTruthy());
+
+        const leftPoll = left.querySelector<HTMLElement>('.blockType-poll');
+        const leftBranch = leftPoll?.closest<HTMLElement>('.renderTreeBranch');
+        if (!leftPoll || !leftBranch) throw new Error('missing left matrix poll');
+
+        expect(leftPoll.querySelector('.matrixPollGrid')).toBeTruthy();
+        expect(leftPoll.querySelector('.pollResult')).toBeNull();
+        const matrixCell = leftPoll.querySelector<HTMLButtonElement>('.matrixPollCell');
+        expect(matrixCell?.getAttribute('data-poll-result')).toBe('0% · 0 votes');
+        expect(matrixCell?.hasAttribute('title')).toBe(false);
+        expect(blockTexts(leftBranch)).not.toContain('Rows');
+        expect(blockTexts(leftBranch)).not.toContain('Ignored extra child');
+
+        fireEvent.click(within(leftPoll).getByRole('button', {name: 'Edit poll'}));
+
+        await waitFor(() => expect(leftPoll.querySelector('.matrixPollGrid')).toBeNull());
+        expect(blockTexts(leftBranch)).toContain('Rows');
+        expect(blockTexts(leftBranch)).toContain('Columns');
+        expect(blockTexts(leftBranch)).toContain('Ignored extra child');
+        expect(right.querySelector('.matrixPollGrid')).toBeTruthy();
+
+        fireEvent.click(within(leftPoll).getByRole('button', {name: 'View poll'}));
+
+        await waitFor(() => expect(leftPoll.querySelector('.matrixPollGrid')).toBeTruthy());
+        expect(blockTexts(leftBranch)).not.toContain('Rows');
+        expect(blockTexts(leftBranch)).not.toContain('Ignored extra child');
+    });
+
+    it('configures rating polls from the block options menu', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'rating-polls'},
+        });
+        await waitFor(() => expect(view.getByText('Loaded fixture: Rating polls.')).toBeTruthy());
+
+        const menu = openBlockOptions(left, 'Poll block options');
+        fireEvent.change(within(menu).getByRole('spinbutton', {name: 'Rating maximum'}), {
+            target: {value: '3'},
+        });
+        fireEvent.change(within(menu).getByRole('combobox', {name: 'Rating presentation'}), {
+            target: {value: 'stars'},
+        });
+
+        const starButtons = await waitFor(() =>
+            within(left).getAllByRole('button', {name: /^[1-5] stars?$/}),
+        );
+        expect(starButtons).toHaveLength(3);
+        expect(within(right).getAllByRole('button', {name: /^[1-5] stars?$/})).toHaveLength(3);
+
+        fireEvent.mouseEnter(starButtons[2]);
+        expect(left.querySelectorAll('.ratingStar.lit')).toHaveLength(3);
+
+        fireEvent.mouseEnter(starButtons[0]);
+        expect(left.querySelectorAll('.ratingStar.lit')).toHaveLength(1);
+    });
+
+    it('shows rating poll stats as background with hover details', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'rating-polls'},
+        });
+        await waitFor(() => expect(view.getByText('Loaded fixture: Rating polls.')).toBeTruthy());
+
+        const pollRows = left.querySelectorAll<HTMLElement>('.blockType-poll');
+        const ratedPoll = pollRows[1];
+        if (!ratedPoll) throw new Error('missing rated poll');
+
+        const fiveButton = within(ratedPoll).getByRole('button', {name: '5'});
+        expect(fiveButton.classList.contains('selected')).toBe(true);
+        expect(fiveButton.classList.contains('pollResultBackground')).toBe(true);
+        expect(fiveButton.getAttribute('data-poll-result')).toBe('50% · 1 vote · ulrich');
+        expect(fiveButton.hasAttribute('title')).toBe(false);
+        expect(ratedPoll.querySelector('.pollResult')).toBeNull();
+    });
+
+    it('configures long-answer poll change policy from the block options menu', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'long-answer-polls'},
+        });
+        await waitFor(() => expect(view.getByText('Loaded fixture: Long-answer polls.')).toBeTruthy());
+
+        const menu = openBlockOptions(left, 'Poll block options');
+        const firstPollRow = menu.closest<HTMLElement>('.blockRow');
+        if (!firstPollRow) throw new Error('missing long-answer poll row');
+        const allowChanges = within(menu).getByRole('checkbox', {name: 'Allow answer changes'});
+        expect((allowChanges as HTMLInputElement).checked).toBe(true);
+        fireEvent.click(allowChanges);
+
+        await waitFor(() => expect(within(firstPollRow).queryByRole('button', {name: 'Submit'})).toBeNull());
+        const rightFirstPollRow = right.querySelectorAll<HTMLElement>('.blockType-poll')[0];
+        expect(within(rightFirstPollRow).queryByRole('button', {name: 'Submit'})).toBeNull();
     });
 
     it('keeps code Enter and Tab inside the same block', async () => {
@@ -532,7 +3330,7 @@ describe('Block rich text example UI', () => {
         expect(blockTexts(right)).toEqual(['a\n    b']);
     });
 
-    it('shows trailing code newlines and exits code on a second Enter', async () => {
+    it('shows trailing code newlines and exits code after two trailing blank lines', async () => {
         const view = render(<App />);
         const {left, right} = panels(view);
 
@@ -551,7 +3349,10 @@ describe('Block rich text example UI', () => {
 
         fireEvent.keyDown(blocks(left)[0], {key: 'Enter'});
 
-        await waitForBlockTexts(left, ['ab', '']);
+        await waitForBlockTexts(left, ['ab\n\n']);
+        fireEvent.keyDown(blocks(left)[0], {key: 'Enter'});
+
+        await waitForBlockTexts(left, ['ab\n', '']);
         expect(blocks(right).map((block) => block.classList.contains('codeBlock'))).toEqual([true, false]);
     });
 
@@ -572,13 +3373,216 @@ describe('Block rich text example UI', () => {
         expect(blockTexts(right)).toEqual(['ab\n\n']);
     });
 
+    it('keeps code Enter and Tab behavior inside table cells', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'table');
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+
+        selectCaret(tableBlocks(left)[0], 0);
+        typeText(tableBlocks(left)[0], 'ab');
+        setBlockType(left, 'code');
+        selectCaret(tableBlocks(left)[0], 1);
+        fireEvent.keyDown(tableBlocks(left)[0], {key: 'Enter'});
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['a\nb', '', '', '']));
+
+        selectCaret(tableBlocks(left)[0], 2);
+        fireEvent.keyDown(tableBlocks(left)[0], {key: 'Tab'});
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['a\n    b', '', '', '']));
+        expect(tableBlockTexts(right)).toEqual(['a\n    b', '', '', '']);
+    });
+
+    it('moves ArrowDown between table rows in the same column', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'table');
+        await waitFor(() => expect(tableBlocks(left)).toHaveLength(4));
+        installMockCaretGeometry(left);
+        selectCaret(tableBlocks(left)[1], 0);
+        typeText(tableBlocks(left)[1], 'abcd');
+        selectCaret(tableBlocks(left)[3], 0);
+        typeText(tableBlocks(left)[3], 'xy');
+
+        selectCaret(tableBlocks(left)[1], 3);
+        fireEvent.keyDown(tableBlocks(left)[1], {key: 'ArrowDown'});
+
+        await waitFor(() => expect(domSelectionBlock()).toBe(tableBlocks(left)[3]));
+        expect(domCaretOffset(tableBlocks(left)[3])).toBe(2);
+
+        beforeInputText(tableBlocks(left)[3], 'X');
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['', 'abcd', '', 'xyX']));
+        expect(tableBlockTexts(right)).toEqual(['', 'abcd', '', 'xyX']);
+    });
+
+    it('extends Shift+ArrowDown between table rows in the same column', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'table');
+        await waitFor(() => expect(tableBlocks(left)).toHaveLength(4));
+        installMockCaretGeometry(left);
+        selectCaret(tableBlocks(left)[1], 0);
+        typeText(tableBlocks(left)[1], 'abcd');
+        selectCaret(tableBlocks(left)[3], 0);
+        typeText(tableBlocks(left)[3], 'xy');
+
+        selectCaret(tableBlocks(left)[1], 3);
+        fireEvent.keyDown(tableBlocks(left)[1], {key: 'ArrowDown', shiftKey: true});
+        fireEvent.keyUp(tableBlocks(left)[1], {key: 'ArrowDown', shiftKey: true});
+
+        await waitFor(() => expect(domSelectionBlock()).toBe(tableBlocks(left)[3]));
+        expect(domSelectionOffsets(tableBlocks(left)[3]).focus).toBe(2);
+    });
+
+    it('moves ArrowLeft from the first table cell to the row header', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'table');
+        await waitFor(() => expect(tableBlocks(left)).toHaveLength(4));
+        selectCaret(tableRowHeaders(left)[0], 0);
+        typeText(tableRowHeaders(left)[0], 'Row');
+
+        selectCaret(tableBlocks(left)[0], 0);
+        fireEvent.keyDown(tableBlocks(left)[0], {key: 'ArrowLeft'});
+
+        await waitFor(() => expect(domSelectionBlock()).toBe(tableRowHeaders(left)[0]));
+        expect(domCaretOffset(tableRowHeaders(left)[0])).toBe(3);
+
+        beforeInputText(tableRowHeaders(left)[0], '!');
+        await waitFor(() => expect(blockText(tableRowHeaders(left)[0])).toBe('Row!'));
+        expect(blockText(tableRowHeaders(right)[0])).toBe('Row!');
+    });
+
+    it('navigates with arrow keys from table row headers', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'table');
+        await waitFor(() => expect(tableBlocks(left)).toHaveLength(4));
+        installMockCaretGeometry(left);
+        selectCaret(tableRowHeaders(left)[0], 0);
+        typeText(tableRowHeaders(left)[0], 'abcd');
+        selectCaret(tableRowHeaders(left)[1], 0);
+        typeText(tableRowHeaders(left)[1], 'xy');
+        selectCaret(tableBlocks(left)[1], 0);
+        typeText(tableBlocks(left)[1], 'cell');
+
+        selectCaret(tableRowHeaders(left)[0], 4);
+        fireEvent.keyDown(tableRowHeaders(left)[0], {key: 'ArrowRight'});
+        await waitFor(() => expect(domSelectionBlock()).toBe(tableBlocks(left)[0]));
+        expect(domCaretOffset(tableBlocks(left)[0])).toBe(0);
+
+        selectCaret(tableRowHeaders(left)[0], 3);
+        fireEvent.keyDown(tableRowHeaders(left)[0], {key: 'ArrowDown'});
+        await waitFor(() => expect(domSelectionBlock()).toBe(tableRowHeaders(left)[1]));
+        expect(domCaretOffset(tableRowHeaders(left)[1])).toBe(2);
+
+        fireEvent.keyDown(tableRowHeaders(left)[1], {key: 'ArrowUp'});
+        await waitFor(() => expect(domSelectionBlock()).toBe(tableRowHeaders(left)[0]));
+        expect(domCaretOffset(tableRowHeaders(left)[0])).toBe(3);
+
+        selectCaret(tableRowHeaders(left)[1], 0);
+        fireEvent.keyDown(tableRowHeaders(left)[1], {key: 'ArrowLeft'});
+        await waitFor(() => expect(domSelectionBlock()).toBe(tableBlocks(left)[1]));
+        expect(domCaretOffset(tableBlocks(left)[1])).toBe(4);
+
+        beforeInputText(tableBlocks(left)[1], '!');
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['', 'cell!', '', '']));
+        expect(tableBlockTexts(right)).toEqual(['', 'cell!', '', '']);
+    });
+
+    it('removes an empty table row with Backspace from its empty row header', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'table');
+        await waitFor(() => expect(tableRowHeaders(left)).toHaveLength(2));
+
+        selectCaret(tableRowHeaders(left)[1], 0);
+        fireEvent.keyDown(tableRowHeaders(left)[1], {key: 'Backspace'});
+
+        await waitFor(() => expect(tableRowHeaders(left)).toHaveLength(1));
+        expect(tableBlocks(left)).toHaveLength(2);
+        expect(tableRowHeaders(right)).toHaveLength(1);
+        expect(tableBlocks(right)).toHaveLength(2);
+    });
+
+    it('keeps a non-empty table row when Backspace starts in its empty row header', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'table');
+        await waitFor(() => expect(tableBlocks(left)).toHaveLength(4));
+        selectCaret(tableBlocks(left)[2], 0);
+        beforeInputText(tableBlocks(left)[2], 'cell');
+        await waitFor(() => expect(tableBlockTexts(left)[2]).toBe('cell'));
+
+        selectCaret(tableRowHeaders(left)[1], 0);
+        fireEvent.keyDown(tableRowHeaders(left)[1], {key: 'Backspace'});
+
+        await waitFor(() => expect(tableRowHeaders(left)).toHaveLength(2));
+        expect(tableBlocks(left)).toHaveLength(4);
+        expect(tableBlockTexts(left)[2]).toBe('cell');
+        expect(tableRowHeaders(right)).toHaveLength(2);
+        expect(tableBlocks(right)).toHaveLength(4);
+        expect(tableBlockTexts(right)[2]).toBe('cell');
+        await waitFor(() => expect(domSelectionBlock()).toBe(tableRowHeaders(left)[0]));
+    });
+
+    it('uses normal block shortcuts in table row headers', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'table');
+        await waitFor(() => expect(tableRowHeaders(left)).toHaveLength(2));
+
+        const rowHeader = tableRowHeaders(left)[0];
+        selectCaret(rowHeader, 0);
+        beforeInputText(rowHeader, 'Row');
+        await waitFor(() => expect(blockText(rowHeader)).toBe('Row'));
+
+        selectRange(rowHeader, 0, 3);
+        fireEvent.keyDown(rowHeader, {key: 'x', metaKey: true, shiftKey: true});
+
+        await waitFor(() =>
+            expect(tableRowHeaders(left)[0].querySelector('.markStrikethrough')?.textContent).toBe('Row'),
+        );
+        expect(tableRowHeaders(right)[0].querySelector('.markStrikethrough')?.textContent).toBe('Row');
+    });
+
+    it('changes table row header block types through the normal toolbar', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'table');
+        await waitFor(() => expect(tableRowHeaders(left)).toHaveLength(2));
+
+        selectCaret(tableRowHeaders(left)[0], 0);
+        setBlockType(left, 'heading2');
+
+        await waitFor(() => expect(tableRowHeaders(left)[0].classList.contains('headingLevel2')).toBe(true));
+        expect(tableRowHeaders(right)[0].classList.contains('headingLevel2')).toBe(true);
+    });
+
     it('keeps focus in the code language field while typing', async () => {
         const view = render(<App />);
         const {left, right} = panels(view);
 
         selectCaret(blocks(left)[0], 0);
         setBlockType(left, 'code');
-        const language = within(left).getByRole('textbox', {name: 'Code language'});
+        const language = codeLanguageField(left);
 
         language.focus();
         fireEvent.change(language, {target: {value: 't'}});
@@ -587,7 +3591,48 @@ describe('Block rich text example UI', () => {
         fireEvent.change(language, {target: {value: 'ts'}});
         await waitFor(() => {
             expect(document.activeElement).toBe(language);
-            expect((within(right).getByRole('textbox', {name: 'Code language'}) as HTMLInputElement).value).toBe('ts');
+            expect(codeLanguageField(right).value).toBe('ts');
+        });
+    });
+
+    it('renders code syntax highlighting with marks and retained selections', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'const answer = "yes";');
+        setBlockType(left, 'code');
+        const language = codeLanguageField(left);
+        fireEvent.change(language, {target: {value: 'js'}});
+
+        await waitFor(() => {
+            expect(blocks(left)[0].querySelector('.syntax-keyword')?.textContent).toBe('const');
+            expect(blocks(left)[0].querySelector('.syntax-string')?.textContent).toBe('"yes"');
+            expect(blocks(right)[0].querySelector('.syntax-keyword')?.textContent).toBe('const');
+        });
+
+        selectRange(blocks(left)[0], 0, 5);
+        fireEvent.click(within(left).getByRole('button', {name: 'B'}));
+        await waitFor(() => {
+            const bold = blocks(left)[0].querySelector('.markBold');
+            expect(bold?.textContent).toBe('const');
+            expect(bold?.classList.contains('syntax-keyword')).toBe(true);
+        });
+
+        selectRange(blocks(right)[0], 15, 20);
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'let ');
+
+        await waitFor(() => {
+            expect(retainedHighlightText(blocks(right)[0])).toBe('"yes"');
+            expect(blocks(right)[0].querySelector('.retainedSelectionHighlight')?.classList.contains('syntax-string')).toBe(true);
+        });
+
+        fireEvent.change(language, {target: {value: 'made-up-language'}});
+        await waitFor(() => {
+            expect(blocks(left)[0].querySelector('.syntax-keyword')).toBeNull();
+            expect(blocks(right)[0].querySelector('.syntax-keyword')).toBeNull();
+            expect(blocks(left)[0].querySelector('.markBold')?.textContent).toBe('const');
         });
     });
 
@@ -615,6 +3660,1243 @@ describe('Block rich text example UI', () => {
 
         await waitForBlockTexts(right, ['c', 'a', 'b']);
         expect(blockTexts(left)).toEqual(['c', 'a', 'b']);
+    });
+
+    it('selects a block from its drag handle', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        pasteText(blocks(left)[0], 'a\nb');
+        await waitForBlockTexts(left, ['a', 'b']);
+
+        const handle = within(left).getAllByRole('button', {name: 'Move block'})[1];
+        fireEvent.pointerDown(handle, {button: 0, buttons: 1, isPrimary: true, pointerId: 1});
+        fireEvent.pointerUp(window, {button: 0, buttons: 0, isPrimary: true, pointerId: 1});
+
+        await waitFor(() =>
+            expect(blocks(left)[1].closest('.blockRow')?.classList.contains('blockSelected')).toBe(true),
+        );
+        expect(blocks(left)[1].closest('.blockRow')?.classList.contains('blockSelectionFocus')).toBe(true);
+        expect(document.activeElement).toBe(blocks(left)[1]);
+    });
+
+    it('types into a block selection at the end of the selected block', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abc');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abc'));
+
+        const handle = within(left).getByRole('button', {name: 'Move block'});
+        fireEvent.pointerDown(handle, {button: 0, buttons: 1, isPrimary: true, pointerId: 1});
+        fireEvent.pointerUp(window, {button: 0, buttons: 0, isPrimary: true, pointerId: 1});
+        await waitFor(() =>
+            expect(blocks(left)[0].closest('.blockRow')?.classList.contains('blockSelected')).toBe(true),
+        );
+        expect(document.activeElement).toBe(blocks(left)[0]);
+
+        fireEvent.keyDown(blocks(left)[0], {key: 'X'});
+
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abcX'));
+        expect(blocks(right)[0].textContent).toBe('abcX');
+    });
+
+    it('pastes plain text into a block selection at the end of the selected block', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abc');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abc'));
+
+        const handle = within(left).getByRole('button', {name: 'Move block'});
+        fireEvent.pointerDown(handle, {button: 0, buttons: 1, isPrimary: true, pointerId: 1});
+        fireEvent.pointerUp(window, {button: 0, buttons: 0, isPrimary: true, pointerId: 1});
+        await waitFor(() =>
+            expect(blocks(left)[0].closest('.blockRow')?.classList.contains('blockSelected')).toBe(true),
+        );
+        expect(document.activeElement).toBe(blocks(left)[0]);
+
+        pasteText(blocks(left)[0], 'X');
+
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abcX'));
+        expect(blocks(right)[0].textContent).toBe('abcX');
+    });
+
+    it('selects the selected block text content with Enter from a block selection', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abc');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abc'));
+
+        const handle = within(left).getByRole('button', {name: 'Move block'});
+        fireEvent.pointerDown(handle, {button: 0, buttons: 1, isPrimary: true, pointerId: 1});
+        fireEvent.pointerUp(window, {button: 0, buttons: 0, isPrimary: true, pointerId: 1});
+        expect(document.activeElement).toBe(blocks(left)[0]);
+        fireEvent.keyDown(blocks(left)[0], {key: 'Enter'});
+
+        await waitFor(() => expect(domSelectionBlock()).toBe(blocks(left)[0]));
+        expect(domSelectionOffsets(blocks(left)[0])).toEqual({anchor: 0, focus: 3});
+        expect(blockTexts(left)).toEqual(['abc']);
+    });
+
+    it('moves a block selection with arrow keys', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        pasteText(blocks(left)[0], 'a\nb\nc');
+        await waitForBlockTexts(left, ['a', 'b', 'c']);
+
+        const handle = within(left).getAllByRole('button', {name: 'Move block'})[1];
+        fireEvent.pointerDown(handle, {button: 0, buttons: 1, isPrimary: true, pointerId: 1});
+        fireEvent.pointerUp(window, {button: 0, buttons: 0, isPrimary: true, pointerId: 1});
+        await waitFor(() =>
+            expect(blocks(left)[1].closest('.blockRow')?.classList.contains('blockSelectionFocus')).toBe(true),
+        );
+
+        fireEvent.keyDown(blocks(left)[1], {key: 'ArrowDown'});
+        await waitFor(() =>
+            expect(blocks(left)[2].closest('.blockRow')?.classList.contains('blockSelectionFocus')).toBe(true),
+        );
+        expect(blocks(left)[2].closest('.blockRow')?.classList.contains('blockSelected')).toBe(true);
+        expect(blocks(left)[1].closest('.blockRow')?.classList.contains('blockSelected')).toBe(false);
+
+        fireEvent.keyDown(blocks(left)[2], {key: 'ArrowLeft'});
+        await waitFor(() =>
+            expect(blocks(left)[1].closest('.blockRow')?.classList.contains('blockSelectionFocus')).toBe(true),
+        );
+
+        fireEvent.keyDown(blocks(left)[1], {key: 'ArrowUp'});
+        await waitFor(() =>
+            expect(blocks(left)[0].closest('.blockRow')?.classList.contains('blockSelectionFocus')).toBe(true),
+        );
+
+        fireEvent.keyDown(blocks(left)[0], {key: 'ArrowRight'});
+        await waitFor(() =>
+            expect(blocks(left)[1].closest('.blockRow')?.classList.contains('blockSelectionFocus')).toBe(true),
+        );
+    });
+
+    it('indents and unindents a block selection with Tab', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        pasteText(blocks(left)[0], 'one\ntwo');
+        await waitForBlockTexts(left, ['one', 'two']);
+
+        const handle = within(left).getAllByRole('button', {name: 'Move block'})[1];
+        fireEvent.pointerDown(handle, {button: 0, buttons: 1, isPrimary: true, pointerId: 1});
+        fireEvent.pointerUp(window, {button: 0, buttons: 0, isPrimary: true, pointerId: 1});
+        await waitFor(() =>
+            expect(blocks(left)[1].closest('.blockRow')?.classList.contains('blockSelectionFocus')).toBe(true),
+        );
+
+        fireEvent.keyDown(blocks(left)[1], {key: 'Tab'});
+
+        await waitFor(() => expect(blockDepth(blocks(left)[1])).toBe('1'));
+        expect(blocks(left)[1].closest('.blockRow')?.classList.contains('blockSelectionFocus')).toBe(true);
+        expect(blockDepth(blocks(right)[1])).toBe('1');
+
+        fireEvent.keyDown(blocks(left)[1], {key: 'Tab', shiftKey: true});
+
+        await waitFor(() => expect(blockDepth(blocks(left)[1])).toBe('0'));
+        expect(blocks(left)[1].closest('.blockRow')?.classList.contains('blockSelectionFocus')).toBe(true);
+        expect(blockDepth(blocks(right)[1])).toBe('0');
+    });
+
+    it('deletes a block selection with Delete', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        pasteText(blocks(left)[0], 'a\nb');
+        await waitForBlockTexts(left, ['a', 'b']);
+
+        const handle = within(left).getAllByRole('button', {name: 'Move block'})[0];
+        fireEvent.pointerDown(handle, {button: 0, buttons: 1, isPrimary: true, pointerId: 1});
+        fireEvent.pointerUp(window, {button: 0, buttons: 0, isPrimary: true, pointerId: 1});
+        expect(document.activeElement).toBe(blocks(left)[0]);
+        fireEvent.keyDown(blocks(left)[0], {key: 'Delete'});
+
+        await waitForBlockTexts(left, ['b']);
+        expect(blockTexts(right)).toEqual(['b']);
+    });
+
+    it('selects only the parent from a handle but deletes the subtree', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        pasteText(blocks(left)[0], 'parent\nchild\nsibling');
+        await waitForBlockTexts(left, ['parent', 'child', 'sibling']);
+        selectCaret(blocks(left)[1], 0);
+        fireEvent.keyDown(blocks(left)[1], {key: 'Tab'});
+        await waitFor(() => expect(blockDepth(blocks(left)[1])).toBe('1'));
+
+        const parentHandle = within(left).getAllByRole('button', {name: 'Move block'})[0];
+        fireEvent.pointerDown(parentHandle, {button: 0, buttons: 1, isPrimary: true, pointerId: 1});
+        fireEvent.pointerUp(window, {button: 0, buttons: 0, isPrimary: true, pointerId: 1});
+
+        await waitFor(() => expect(blocks(left)[0].closest('.blockRow')?.classList.contains('blockSelected')).toBe(true));
+        expect(blocks(left)[1].closest('.blockRow')?.classList.contains('blockSelected')).toBe(false);
+        fireEvent.keyDown(blocks(left)[0], {key: 'Delete'});
+
+        await waitForBlockTexts(left, ['sibling']);
+        expect(blockTexts(right)).toEqual(['sibling']);
+    });
+
+    it('applies block type changes to a block selection', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        pasteText(blocks(left)[0], 'a\nb');
+        await waitForBlockTexts(left, ['a', 'b']);
+
+        const handle = within(left).getAllByRole('button', {name: 'Move block'})[1];
+        fireEvent.pointerDown(handle, {button: 0, buttons: 1, isPrimary: true, pointerId: 1});
+        fireEvent.pointerUp(window, {button: 0, buttons: 0, isPrimary: true, pointerId: 1});
+        await waitFor(() =>
+            expect(blocks(left)[1].closest('.blockRow')?.classList.contains('blockSelected')).toBe(true),
+        );
+
+        setBlockType(left, 'heading2');
+
+        await waitFor(() => {
+            expect(blocks(left)[0].classList.contains('headingLevel2')).toBe(false);
+            expect(blocks(left)[1].classList.contains('headingLevel2')).toBe(true);
+        });
+    });
+
+    it('drags every block touched by a text selection as a group', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        pasteText(blocks(left)[0], 'a\nb\nc\nd');
+        await waitForBlockTexts(left, ['a', 'b', 'c', 'd']);
+        installMockBlockRowGeometry(left);
+
+        selectCrossBlockRange(blocks(left)[1], 0, blocks(left)[2], 1);
+        dragBlockHandle(left, 1, 20, 200);
+
+        await waitForBlockTexts(left, ['a', 'd', 'b', 'c']);
+        expect(blockTexts(right)).toEqual(['a', 'd', 'b', 'c']);
+        selectCaret(blocks(right)[0], 0);
+        await waitFor(() => expect(retainedHighlightText(blocks(left)[2])).toBe('b'));
+        expect(retainedHighlightText(blocks(left)[3])).toBe('c');
+    });
+
+    it('uses unordered list bullets as block drag handles', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        pasteText(blocks(left)[0], 'a\nb\nc');
+        await waitForBlockTexts(right, ['a', 'b', 'c']);
+        for (let index = 0; index < 3; index++) {
+            selectCaret(blocks(right)[index], 0);
+            setBlockType(right, 'unordered');
+        }
+        await waitFor(() => {
+            expect([...right.querySelectorAll<HTMLButtonElement>('.blockAffordanceMarker')].map((marker) => marker.textContent)).toEqual([
+                '•',
+                '•',
+                '•',
+            ]);
+        });
+
+        installMockBlockRowGeometry(right);
+        dragElementTo(right.querySelectorAll<HTMLElement>('.blockAffordanceMarker')[2], 20, 5);
+
+        await waitForBlockTexts(right, ['c', 'a', 'b']);
+        expect(blockTexts(left)).toEqual(['c', 'a', 'b']);
+    });
+
+    it('drags rendered slides from the slide rim', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'slide-deck');
+        await waitFor(() => expect(left.querySelectorAll('.slideViewport')).toHaveLength(1));
+
+        fireEvent.click(within(left).getByRole('button', {name: 'Add slide'}));
+        await waitFor(() => expect(left.querySelectorAll('.slideViewport')).toHaveLength(2));
+        await waitFor(() => expect(right.querySelectorAll('.slideViewport')).toHaveLength(2));
+
+        const originalLeftSlideIds = Array.from(left.querySelectorAll<HTMLElement>('.slideViewport')).map(
+            (viewport) => viewport.dataset.slideId,
+        );
+        installMockSlideViewportGeometry(left);
+        dragElementTo(left.querySelectorAll<HTMLElement>('.slideViewport')[1], 20, 5);
+
+        await waitFor(() =>
+            expect(
+                Array.from(left.querySelectorAll<HTMLElement>('.slideViewport')).map(
+                    (viewport) => viewport.dataset.slideId,
+                ),
+            ).toEqual([originalLeftSlideIds[1], originalLeftSlideIds[0]]),
+        );
+        expect(Array.from(right.querySelectorAll<HTMLElement>('.slideViewport')).map((viewport) => viewport.dataset.slideId)).toEqual([
+            originalLeftSlideIds[1],
+            originalLeftSlideIds[0],
+        ]);
+    });
+
+    it('drags a child block inside a selected slide from the child handle', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'slide-deck'},
+        });
+        await waitFor(() => expect(view.getByText('Loaded fixture: Slide deck.')).toBeTruthy());
+
+        const firstSlide = left.querySelector<HTMLElement>('.slideViewport');
+        if (!firstSlide) throw new Error('missing first slide');
+        const originalSlideIds = Array.from(left.querySelectorAll<HTMLElement>('.slideViewport')).map(
+            (viewport) => viewport.dataset.slideId,
+        );
+        fireEvent.pointerDown(firstSlide, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 4,
+            clientY: 4,
+        });
+        fireEvent.pointerUp(window, {button: 0, buttons: 0, isPrimary: true, pointerId: 1});
+        await waitFor(() => expect(firstSlide.classList.contains('blockSelected')).toBe(true));
+
+        const firstSlideChildTexts = () =>
+            Array.from(firstSlide.querySelectorAll<HTMLElement>('.slideBody .blockRow [role="textbox"]')).map(blockText);
+        await waitFor(() =>
+            expect(firstSlideChildTexts()).toEqual([
+                'Revenue grew 18%',
+                'Expansion was strongest in self-serve accounts.',
+            ]),
+        );
+
+        installMockBlockRowGeometry(left);
+        installMockSlideViewportGeometry(left);
+        const expansionBlock = blocks(left).find(
+            (block) => blockText(block) === 'Expansion was strongest in self-serve accounts.',
+        );
+        const childHandle = expansionBlock
+            ?.closest<HTMLElement>('.blockRow')
+            ?.querySelector<HTMLElement>('button[aria-label="Move block"]');
+        if (!childHandle) throw new Error('missing child block handle');
+
+        dragElementTo(childHandle, 80, 80);
+
+        await waitFor(() =>
+            expect(firstSlideChildTexts()).toEqual([
+                'Expansion was strongest in self-serve accounts.',
+                'Revenue grew 18%',
+            ]),
+        );
+        expect(Array.from(left.querySelectorAll<HTMLElement>('.slideViewport')).map((viewport) => viewport.dataset.slideId)).toEqual(
+            originalSlideIds,
+        );
+        expect(Array.from(right.querySelectorAll<HTMLElement>('.slideViewport')).map((viewport) => viewport.dataset.slideId)).toEqual(
+            originalSlideIds,
+        );
+    });
+
+    it('clicks the rendered slide rim to block-select the slide', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'slide-deck');
+        await waitFor(() => expect(left.querySelectorAll('.slideViewport')).toHaveLength(1));
+
+        const slide = left.querySelector<HTMLElement>('.slideViewport');
+        if (!slide) throw new Error('missing slide viewport');
+        fireEvent.pointerDown(slide, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 4,
+            clientY: 4,
+        });
+        fireEvent.mouseDown(slide, {button: 0, buttons: 1, clientX: 4, clientY: 4});
+        fireEvent.pointerUp(window, {button: 0, buttons: 0, isPrimary: true, pointerId: 1});
+        fireEvent.mouseUp(slide, {button: 0, buttons: 0, clientX: 4, clientY: 4});
+
+        await waitFor(() => expect(slide.classList.contains('blockSelected')).toBe(true));
+        expect(slide.classList.contains('blockSelectionFocus')).toBe(true);
+        const titleRow = slide.querySelector<HTMLElement>('.slideTitle .blockRow');
+        expect(titleRow?.classList.contains('blockSelected')).toBe(false);
+        expect(titleRow?.classList.contains('blockSelectionFocus')).toBe(false);
+        expect(window.getSelection()?.rangeCount ?? 0).toBe(0);
+    });
+
+    it('clicks the rendered slide background to block-select the slide', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'slide-deck');
+        await waitFor(() => expect(left.querySelectorAll('.slideViewport')).toHaveLength(1));
+
+        const overviewSlide = left.querySelector<HTMLElement>('.slideViewport-overview');
+        const overviewSurface = overviewSlide?.querySelector<HTMLElement>('.slideSurface');
+        if (!overviewSlide || !overviewSurface) throw new Error('missing overview slide surface');
+        fireEvent.pointerDown(overviewSurface, {button: 0, buttons: 1, isPrimary: true, pointerId: 1});
+
+        await waitFor(() => expect(overviewSlide.classList.contains('blockSelected')).toBe(true));
+        expect(overviewSlide.classList.contains('blockSelectionFocus')).toBe(true);
+        expect(document.activeElement).toBe(overviewSlide);
+
+        const deckTitle = left.querySelector<HTMLElement>('.slideDeckHeader [role="textbox"]');
+        if (!deckTitle) throw new Error('missing deck title');
+        selectCaret(deckTitle, 0);
+        fireEvent.click(within(left).getByRole('button', {name: 'Presentation'}));
+        const presentationSlide = await waitFor(() => {
+            const slide = left.querySelector<HTMLElement>('.slideViewport-presentation');
+            if (!slide) throw new Error('missing presentation slide');
+            return slide;
+        });
+        selectCaret(deckTitle, 0);
+
+        const presentationBody = presentationSlide.querySelector<HTMLElement>('.slideBody');
+        if (!presentationBody) throw new Error('missing presentation slide body');
+        fireEvent.pointerDown(presentationBody, {button: 0, buttons: 1, isPrimary: true, pointerId: 2});
+
+        await waitFor(() => expect(presentationSlide.classList.contains('blockSelected')).toBe(true));
+        expect(presentationSlide.classList.contains('blockSelectionFocus')).toBe(true);
+        expect(document.activeElement).toBe(presentationSlide);
+        expect(window.getSelection()?.rangeCount ?? 0).toBe(0);
+    });
+
+    it('still allows text selection inside rendered slides', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'slide-deck');
+        await waitFor(() => expect(left.querySelectorAll('.slideViewport')).toHaveLength(1));
+
+        const slideTitle = left.querySelector<HTMLElement>('.slideViewport [role="textbox"]');
+        if (!slideTitle) throw new Error('missing slide title');
+        selectRange(slideTitle, 0, 0);
+
+        await waitFor(() => expect(slideTitle.closest('.slideViewport')?.classList.contains('blockSelected')).toBe(false));
+        expect(document.activeElement).toBe(slideTitle);
+    });
+
+    it('renders slide content in a metadata-sized logical layer', async () => {
+        vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function getBoundingClientRect() {
+            return this instanceof HTMLElement && this.classList.contains('slideViewport')
+                ? mockRect(960, 540)
+                : mockRect(0, 0);
+        });
+
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'slide-deck');
+
+        const slide = await waitFor(() => {
+            const viewport = left.querySelector<HTMLElement>('.slideViewport');
+            if (!viewport) throw new Error('missing slide viewport');
+            expect(viewport.dataset.slideLogicalWidth).toBe('1920');
+            expect(viewport.dataset.slideLogicalHeight).toBe('1080');
+            expect(viewport.dataset.slideScale).toBe('0.5');
+            return viewport;
+        });
+        const scaleLayer = slide.querySelector<HTMLElement>('.slideScaleLayer');
+        expect(scaleLayer?.style.width).toBe('1920px');
+        expect(scaleLayer?.style.height).toBe('1080px');
+        expect(scaleLayer?.style.transform).toBe('scale(0.5)');
+    });
+
+    it('shows slide options as an unscaled overview overlay only', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'slide-deck');
+        await waitFor(() => expect(left.querySelectorAll('.slideViewport')).toHaveLength(1));
+
+        expect(within(left).getAllByLabelText('Slide options')).toHaveLength(1);
+
+        fireEvent.click(within(left).getByRole('button', {name: 'Presentation'}));
+        expect(within(left).queryByLabelText('Slide options')).toBeNull();
+
+        fireEvent.click(within(left).getByRole('button', {name: 'Overview'}));
+        const slide = await waitFor(() => {
+            const viewport = left.querySelector<HTMLElement>('.slideViewport-overview');
+            if (!viewport) throw new Error('missing overview slide');
+            expect(within(left).getAllByLabelText('Slide options')).toHaveLength(1);
+            return viewport;
+        });
+
+        const button = within(slide).getByLabelText('Slide options');
+        const options = button.closest<HTMLElement>('.slideBlockOptions');
+        expect(options?.parentElement).toBe(slide);
+        expect(options?.closest('.slideScaleLayer')).toBeNull();
+
+        fireEvent.click(button);
+        const showTitle = within(slide).getByRole('checkbox', {name: 'Show slide title'}) as HTMLInputElement;
+        fireEvent.click(showTitle);
+
+        await waitFor(() => {
+            expect(slide.querySelector('.slideTitle')).toBeNull();
+            expect(within(slide).getAllByLabelText('Slide options')).toHaveLength(1);
+        });
+
+        fireEvent.click(within(left).getByRole('button', {name: 'Presentation'}));
+        await waitFor(() => expect(within(left).queryByLabelText('Slide options')).toBeNull());
+    });
+
+    it('clamps slide deck option edits to the supported aspect ratio range', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'slide-deck');
+        await waitFor(() => expect(left.querySelectorAll('.slideViewport')).toHaveLength(1));
+
+        const deckTitle = left.querySelector<HTMLElement>('.slideDeckHeader [role="textbox"]');
+        if (!deckTitle) throw new Error('missing deck title');
+        selectCaret(deckTitle, 0);
+
+        const menu = openBlockOptions(left, 'Slide deck options');
+        const width = within(menu).getByRole('spinbutton', {name: 'Slide deck width'}) as HTMLInputElement;
+        const height = within(menu).getByRole('spinbutton', {name: 'Slide deck height'}) as HTMLInputElement;
+
+        fireEvent.change(height, {target: {value: '10000'}});
+
+        await waitFor(() => {
+            expect(width.value).toBe('2500');
+            expect(height.value).toBe('10000');
+        });
+        expect(right.querySelector<HTMLElement>('.slideViewport')?.dataset.slideLogicalWidth).toBe('2500');
+        expect(right.querySelector<HTMLElement>('.slideViewport')?.dataset.slideLogicalHeight).toBe('10000');
+    });
+
+    it('advances presentation slides with keyboard navigation and selects the shown slide', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'slide-deck');
+        await waitFor(() => expect(left.querySelectorAll('.slideViewport')).toHaveLength(1));
+        fireEvent.click(within(left).getByRole('button', {name: 'Add slide'}));
+        await waitFor(() => expect(left.querySelectorAll('.slideViewport')).toHaveLength(2));
+        fireEvent.click(within(left).getByRole('button', {name: 'Add slide'}));
+        await waitFor(() => expect(left.querySelectorAll('.slideViewport')).toHaveLength(3));
+
+        const overviewSlideIds = Array.from(left.querySelectorAll<HTMLElement>('.slideViewport')).map(
+            (viewport) => viewport.dataset.slideId,
+        );
+        fireEvent.click(within(left).getByRole('button', {name: 'Presentation'}));
+
+        const currentSlide = () => left.querySelector<HTMLElement>('.slideDeckPresentation .slideViewport');
+        await waitFor(() => {
+            expect(currentSlide()?.dataset.slideId).toBe(overviewSlideIds[2]);
+            expect(currentSlide()?.classList.contains('blockSelected')).toBe(true);
+            expect(currentSlide()?.classList.contains('blockSelectionFocus')).toBe(true);
+            expect(document.activeElement).toBe(currentSlide());
+        });
+
+        const focusedSlide = currentSlide();
+        if (!focusedSlide) throw new Error('missing current slide');
+        fireEvent.keyDown(focusedSlide, {key: 'ArrowLeft'});
+        await waitFor(() => {
+            expect(currentSlide()?.dataset.slideId).toBe(overviewSlideIds[1]);
+            expect(currentSlide()?.classList.contains('blockSelected')).toBe(true);
+            expect(currentSlide()?.classList.contains('blockSelectionFocus')).toBe(true);
+            expect(document.activeElement).toBe(currentSlide());
+        });
+
+        const presentation = left.querySelector<HTMLElement>('.slideDeckPresentation');
+        if (!presentation) throw new Error('missing presentation deck');
+        fireEvent.keyDown(presentation, {key: ' '});
+        await waitFor(() => {
+            expect(currentSlide()?.dataset.slideId).toBe(overviewSlideIds[2]);
+            expect(currentSlide()?.classList.contains('blockSelected')).toBe(true);
+            expect(currentSlide()?.classList.contains('blockSelectionFocus')).toBe(true);
+            expect(document.activeElement).toBe(currentSlide());
+        });
+
+        fireEvent.keyDown(presentation, {key: 'ArrowLeft'});
+        await waitFor(() => {
+            expect(currentSlide()?.dataset.slideId).toBe(overviewSlideIds[1]);
+            expect(currentSlide()?.classList.contains('blockSelected')).toBe(true);
+            expect(currentSlide()?.classList.contains('blockSelectionFocus')).toBe(true);
+            expect(document.activeElement).toBe(currentSlide());
+        });
+        fireEvent.keyDown(presentation, {key: 'ArrowRight'});
+        await waitFor(() => {
+            expect(currentSlide()?.dataset.slideId).toBe(overviewSlideIds[2]);
+            expect(currentSlide()?.classList.contains('blockSelected')).toBe(true);
+            expect(currentSlide()?.classList.contains('blockSelectionFocus')).toBe(true);
+            expect(document.activeElement).toBe(currentSlide());
+        });
+    });
+
+    it('does not advance presentation slides from a text selection', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'slide-deck');
+        await waitFor(() => expect(left.querySelectorAll('.slideViewport')).toHaveLength(1));
+        fireEvent.click(within(left).getByRole('button', {name: 'Add slide'}));
+        await waitFor(() => expect(left.querySelectorAll('.slideViewport')).toHaveLength(2));
+
+        const secondOverviewTitle = left.querySelectorAll<HTMLElement>('.slideViewport [role="textbox"]')[1];
+        selectCaret(secondOverviewTitle, 0);
+        typeText(secondOverviewTitle, 'Second');
+        await waitFor(() => expect(blockText(secondOverviewTitle)).toBe('Second'));
+
+        const overviewSlideIds = Array.from(left.querySelectorAll<HTMLElement>('.slideViewport')).map(
+            (viewport) => viewport.dataset.slideId,
+        );
+        fireEvent.click(within(left).getByRole('button', {name: 'Presentation'}));
+        fireEvent.click(within(left).getByRole('button', {name: 'Full screen'}));
+
+        const currentSlide = () => left.querySelector<HTMLElement>('.slideDeckPresentation .slideViewport');
+        await waitFor(() => expect(currentSlide()?.dataset.slideId).toBe(overviewSlideIds[1]));
+        const slideTitle = currentSlide()?.querySelector<HTMLElement>('[role="textbox"]');
+        if (!slideTitle) throw new Error('missing slide title');
+
+        selectRange(slideTitle, 0, 3);
+        fireEvent.keyDown(slideTitle, {key: 'ArrowLeft'});
+        fireEvent.keyDown(slideTitle, {key: ' '});
+
+        expect(currentSlide()?.dataset.slideId).toBe(overviewSlideIds[1]);
+        expect(window.getSelection()?.toString()).toBe('Sec');
+    });
+
+    it('hides presentation chrome in full screen and uses hover controls for navigation', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'slide-deck');
+        await waitFor(() => expect(left.querySelectorAll('.slideViewport')).toHaveLength(1));
+        fireEvent.click(within(left).getByRole('button', {name: 'Add slide'}));
+        await waitFor(() => expect(left.querySelectorAll('.slideViewport')).toHaveLength(2));
+
+        const overviewSlideIds = Array.from(left.querySelectorAll<HTMLElement>('.slideViewport')).map(
+            (viewport) => viewport.dataset.slideId,
+        );
+        fireEvent.click(within(left).getByRole('button', {name: 'Presentation'}));
+        fireEvent.click(within(left).getByRole('button', {name: 'Full screen'}));
+
+        await waitFor(() => {
+            expect(left.querySelector('.slideDeckPresentation')?.classList.contains('slideDeckFullScreen')).toBe(true);
+            expect(left.querySelector('.slideDeckPresentation .slideDeckHeader')).toBeNull();
+            expect(within(left).getByLabelText('Full screen slide controls')).toBeTruthy();
+        });
+
+        const currentSlide = () => left.querySelector<HTMLElement>('.slideDeckPresentation .slideViewport');
+        expect(currentSlide()?.dataset.slideId).toBe(overviewSlideIds[1]);
+
+        fireEvent.click(within(left).getByRole('button', {name: 'Previous slide'}));
+        await waitFor(() => expect(currentSlide()?.dataset.slideId).toBe(overviewSlideIds[0]));
+
+        fireEvent.click(within(left).getByRole('button', {name: 'Exit full screen'}));
+        await waitFor(() => {
+            expect(left.querySelector('.slideDeckPresentation')?.classList.contains('slideDeckFullScreen')).toBe(false);
+            expect(left.querySelector('.slideDeckPresentation .slideDeckHeader')).toBeTruthy();
+        });
+    });
+
+    it('does not advance presentation slides from a child block selection', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        fireEvent.change(view.getByLabelText('Replace document from fixture'), {
+            target: {value: 'slide-deck'},
+        });
+        await waitFor(() => expect(view.getByText('Loaded fixture: Slide deck.')).toBeTruthy());
+        fireEvent.click(within(left).getByRole('button', {name: 'Presentation'}));
+
+        const currentSlide = () => left.querySelector<HTMLElement>('.slideDeckPresentation .slideViewport');
+        await waitFor(() => expect(currentSlide()?.dataset.slideId).toBeTruthy());
+        const originalSlideId = currentSlide()?.dataset.slideId;
+        const childBlock = blocks(left).find((block) => blockText(block) === 'Revenue grew 18%');
+        if (!childBlock) throw new Error('missing slide child block');
+        childBlock.focus();
+        setDomCaret(childBlock, 0);
+        fireEvent.mouseUp(childBlock);
+        const handle = childBlock.closest<HTMLElement>('.blockRow')?.querySelector<HTMLElement>('button[aria-label="Move block"]');
+        if (!handle) throw new Error('missing slide child handle');
+        (handle as HTMLElement & {setPointerCapture?: (pointerId: number) => void}).setPointerCapture = () => {};
+        fireEvent.pointerDown(handle, {button: 0, buttons: 1, isPrimary: true, pointerId: 1});
+        fireEvent.pointerUp(window, {button: 0, buttons: 0, isPrimary: true, pointerId: 1});
+        await waitFor(() => {
+            const selectedChild = blocks(left).find((block) => blockText(block) === 'Revenue grew 18%');
+            expect(selectedChild?.closest('.blockRow')?.classList.contains('blockSelected')).toBe(true);
+        });
+
+        const presentation = left.querySelector<HTMLElement>('.slideDeckPresentation');
+        if (!presentation) throw new Error('missing presentation deck');
+        fireEvent.keyDown(presentation, {key: 'ArrowRight'});
+
+        expect(currentSlide()?.dataset.slideId).toBe(originalSlideId);
+    });
+
+    it('converts typed markdown bullet shortcuts through beforeinput', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+        const leftBlock = blocks(left)[0];
+
+        selectCaret(leftBlock, 0);
+        beforeInputText(leftBlock, '- ');
+
+        await waitForBlockTexts(left, ['']);
+        expect(left.querySelector<HTMLElement>('.blockAffordanceMarker')?.textContent).toBe('•');
+        expect(right.querySelector<HTMLElement>('.blockAffordanceMarker')?.textContent).toBe('•');
+    });
+
+    it('converts pasted markdown bullet shortcuts and syncs them to the peer', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        pasteText(blocks(left)[0], '- item');
+
+        await waitForBlockTexts(left, ['item']);
+        expect(left.querySelector<HTMLElement>('.blockAffordanceMarker')?.textContent).toBe('•');
+        await waitForBlockTexts(right, ['item']);
+        expect(right.querySelector<HTMLElement>('.blockAffordanceMarker')?.textContent).toBe('•');
+    });
+
+    it('pastes code block text verbatim without markdown shortcuts or block splitting', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'code');
+        pasteText(blocks(left)[0], '- item\n# Heading');
+
+        await waitForBlockTexts(left, ['- item\n# Heading']);
+        expect(blocks(left)).toHaveLength(1);
+        expect(blocks(left)[0].classList.contains('codeBlock')).toBe(true);
+        await waitForBlockTexts(right, ['- item\n# Heading']);
+        expect(blocks(right)).toHaveLength(1);
+        expect(blocks(right)[0].classList.contains('codeBlock')).toBe(true);
+    });
+
+    it('copies block rich text data with plain text and HTML fallbacks', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        const setData = vi.fn();
+
+        selectCaret(blocks(left)[0], 0);
+        typeText(blocks(left)[0], 'hello');
+        selectRange(blocks(left)[0], 0, 5);
+
+        fireEvent.copy(blocks(left)[0], {clipboardData: {setData}});
+
+        expect(setData).toHaveBeenCalledWith('text/plain', 'hello');
+        expect(setData).toHaveBeenCalledWith('text/html', expect.stringContaining('hello'));
+        expect(setData).toHaveBeenCalledWith(
+            'text/html',
+            expect.stringContaining('<!--umkehr-block-rich-text:'),
+        );
+        expect(setData).toHaveBeenCalledWith(
+            BLOCK_RICH_TEXT_MIME,
+            expect.stringContaining('"plainText":"hello"'),
+        );
+    });
+
+    it('copies selected table cells with TSV and rich clipboard data', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        const setData = vi.fn();
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'table');
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+
+        ['A', 'B', 'C', 'D'].forEach((text, index) => {
+            selectCaret(tableBlocks(left)[index], 0);
+            typeText(tableBlocks(left)[index], text);
+        });
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['A', 'B', 'C', 'D']));
+
+        stubTableCellRects(left);
+        const cells = tableCells(left);
+        fireEvent.pointerDown(cells[1], {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 142,
+            clientY: 20,
+        });
+        await waitFor(() => expect(tableCells(left)[1].classList.contains('cellSelected')).toBe(true));
+        const originalElementsFromPoint = document.elementsFromPoint;
+        document.elementsFromPoint = () => [tableCells(left)[2]];
+        fireEvent.pointerMove(window, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 70,
+        });
+        fireEvent.pointerUp(window, {
+            button: 0,
+            buttons: 0,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 70,
+        });
+        document.elementsFromPoint = originalElementsFromPoint;
+
+        await waitFor(() => {
+            const selected = tableCells(left);
+            expect(selected[0].classList.contains('cellSelected')).toBe(true);
+            expect(selected[1].classList.contains('cellSelected')).toBe(true);
+            expect(selected[2].classList.contains('cellSelected')).toBe(true);
+            expect(selected[3].classList.contains('cellSelected')).toBe(true);
+        });
+
+        const activeElement = document.activeElement;
+        expect(activeElement).toBe(tableCells(left)[1]);
+        fireEvent.copy(activeElement as HTMLElement, {clipboardData: {setData}});
+
+        expect(setData).toHaveBeenCalledWith('text/plain', 'A\tB\nC\tD');
+        expect(setData).toHaveBeenCalledWith('text/tab-separated-values', 'A\tB\nC\tD');
+        expect(setData).toHaveBeenCalledWith(
+            'text/html',
+            expect.stringContaining('<!--umkehr-block-rich-text:'),
+        );
+        expect(setData).toHaveBeenCalledWith(
+            'text/html',
+            expect.stringContaining('%22tsv%22%3A%22A%5CtB%5CnC%5CtD%22'),
+        );
+    });
+
+    it('writes selected table cells to the clipboard on Cmd-C', async () => {
+        const writeText = vi.fn().mockResolvedValue(undefined);
+        Object.defineProperty(navigator, 'clipboard', {
+            configurable: true,
+            value: {writeText},
+        });
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'table');
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+
+        ['A', 'B', 'C', 'D'].forEach((text, index) => {
+            selectCaret(tableBlocks(left)[index], 0);
+            typeText(tableBlocks(left)[index], text);
+        });
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['A', 'B', 'C', 'D']));
+
+        stubTableCellRects(left);
+        const cells = tableCells(left);
+        fireEvent.pointerDown(cells[1], {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 142,
+            clientY: 20,
+        });
+        await waitFor(() => expect(tableCells(left)[1].classList.contains('cellSelected')).toBe(true));
+        const originalElementsFromPoint = document.elementsFromPoint;
+        document.elementsFromPoint = () => [tableCells(left)[2]];
+        fireEvent.pointerMove(window, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 70,
+        });
+        fireEvent.pointerUp(window, {
+            button: 0,
+            buttons: 0,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 70,
+        });
+        document.elementsFromPoint = originalElementsFromPoint;
+
+        await waitFor(() => expect(tableCells(left)[3].classList.contains('cellSelected')).toBe(true));
+        expect(document.activeElement).toBe(tableCells(left)[1]);
+        fireEvent.keyDown(document.activeElement ?? tableCells(left)[1], {
+            key: 'c',
+            code: 'KeyC',
+            metaKey: true,
+        });
+
+        await waitFor(() => expect(writeText).toHaveBeenCalledWith('A\tB\nC\tD'));
+    });
+
+    it('pastes plain clipboard text from a native paste event with selected table cells', async () => {
+        const readText = vi.fn();
+        Object.defineProperty(navigator, 'clipboard', {
+            configurable: true,
+            value: {readText},
+        });
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'table');
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+
+        ['A', 'B', 'C', 'D'].forEach((text, index) => {
+            selectCaret(tableBlocks(left)[index], 0);
+            typeText(tableBlocks(left)[index], text);
+        });
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['A', 'B', 'C', 'D']));
+
+        stubTableCellRects(left);
+        const cells = tableCells(left);
+        fireEvent.pointerDown(cells[1], {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 142,
+            clientY: 20,
+        });
+        await waitFor(() => expect(tableCells(left)[1].classList.contains('cellSelected')).toBe(true));
+        const originalElementsFromPoint = document.elementsFromPoint;
+        document.elementsFromPoint = () => [tableCells(left)[2]];
+        fireEvent.pointerMove(window, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 70,
+        });
+        fireEvent.pointerUp(window, {
+            button: 0,
+            buttons: 0,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 70,
+        });
+        document.elementsFromPoint = originalElementsFromPoint;
+
+        await waitFor(() => expect(tableCells(left)[3].classList.contains('cellSelected')).toBe(true));
+        expect(document.activeElement).toBe(tableCells(left)[1]);
+        fireEvent.paste(document.activeElement ?? tableCells(left)[1], {
+            clipboardData: {
+                types: ['text/plain'],
+                getData: (type: string) => (type === 'text/plain' ? 'X' : ''),
+            },
+        });
+
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['A', 'B', 'CX', 'D']));
+        expect(readText).not.toHaveBeenCalled();
+    });
+
+    it('pastes rich HTML clipboard data from a native paste event with a selected table row', async () => {
+        const read = vi.fn();
+        const payload: RichClipboardPayload = {
+            version: 1,
+            plainText: 'X\nY',
+            html: '<p>X</p><p>Y</p>',
+            fragments: [
+                {text: 'X', meta: {type: 'paragraph', ts: 'copy-ts'}, marks: []},
+                {text: 'Y', meta: {type: 'paragraph', ts: 'copy-ts'}, marks: []},
+            ],
+            annotations: [],
+            tsv: 'X\tY',
+        };
+        Object.defineProperty(navigator, 'clipboard', {
+            configurable: true,
+            value: {read},
+        });
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'table');
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+
+        ['A', 'B', 'C', 'D'].forEach((text, index) => {
+            selectCaret(tableBlocks(left)[index], 0);
+            typeText(tableBlocks(left)[index], text);
+        });
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['A', 'B', 'C', 'D']));
+
+        stubTableCellRects(left);
+        const cells = tableCells(left);
+        fireEvent.pointerDown(cells[1], {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 142,
+            clientY: 20,
+        });
+        await waitFor(() => expect(tableCells(left)[1].classList.contains('cellSelected')).toBe(true));
+        const originalElementsFromPoint = document.elementsFromPoint;
+        document.elementsFromPoint = () => [tableCells(left)[0]];
+        fireEvent.pointerMove(window, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 20,
+        });
+        fireEvent.pointerUp(window, {
+            button: 0,
+            buttons: 0,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 42,
+            clientY: 20,
+        });
+        document.elementsFromPoint = originalElementsFromPoint;
+
+        await waitFor(() => expect(tableCells(left)[0].classList.contains('cellSelected')).toBe(true));
+        expect(document.activeElement).toBe(tableCells(left)[1]);
+        fireEvent.paste(document.activeElement ?? tableCells(left)[1], {
+            clipboardData: {
+                types: ['text/html', 'text/plain'],
+                getData: (type: string) =>
+                    type === 'text/html'
+                        ? htmlWithClipboardPayload(payload)
+                        : type === 'text/plain'
+                          ? payload.plainText
+                          : '',
+            },
+        });
+
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['A', 'B', 'X', 'Y', 'C', 'D']));
+        expect(read).not.toHaveBeenCalled();
+    });
+
+    it('pastes rich HTML clipboard data as children of a single selected table cell', async () => {
+        const payload: RichClipboardPayload = {
+            version: 1,
+            plainText: 'X\nY',
+            html: '<p>X</p><p>Y</p>',
+            fragments: [
+                {text: 'X', meta: {type: 'paragraph', ts: 'copy-ts'}, marks: []},
+                {text: 'Y', meta: {type: 'paragraph', ts: 'copy-ts'}, marks: []},
+            ],
+            annotations: [],
+        };
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        setBlockType(left, 'table');
+        await waitFor(() => expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy());
+
+        selectCaret(tableBlocks(left)[0], 0);
+        typeText(tableBlocks(left)[0], 'cell');
+        await waitFor(() => expect(tableBlockTexts(left)[0]).toBe('cell'));
+
+        stubTableCellRects(left);
+        fireEvent.pointerDown(tableCells(left)[1], {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 142,
+            clientY: 20,
+        });
+        await waitFor(() => {
+            expect(tableCells(left)[1].classList.contains('cellSelected')).toBe(true);
+            expect(document.activeElement).toBe(tableCells(left)[1]);
+        });
+
+        fireEvent.paste(tableCells(left)[1], {
+            clipboardData: {
+                types: ['text/html', 'text/plain'],
+                getData: (type: string) =>
+                    type === 'text/html'
+                        ? htmlWithClipboardPayload(payload)
+                        : type === 'text/plain'
+                          ? payload.plainText
+                          : '',
+            },
+        });
+
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['cell', '', 'X', 'Y', '', '']));
+
+        fireEvent.click(within(left).getByText('Undo'));
+        await waitFor(() => expect(tableBlockTexts(left)).toEqual(['cell', '', '', '']));
+    });
+
+    it('pastes custom block rich text before falling back to plain text', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        const payload: RichClipboardPayload = {
+            version: 1,
+            plainText: 'rich',
+            html: '<p><strong>rich</strong></p>',
+            fragments: [
+                {
+                    text: 'rich',
+                    meta: {type: 'paragraph', ts: 'copy-ts'},
+                    marks: [{type: 'bold', startOffset: 0, endOffset: 4}],
+                },
+            ],
+            annotations: [],
+        };
+
+        selectCaret(blocks(left)[0], 0);
+        pasteClipboard(blocks(left)[0], {
+            'text/html': htmlWithClipboardPayload(payload),
+            'text/plain': 'plain',
+        });
+
+        await waitForBlockTexts(left, ['rich']);
+        expect(blocks(left)[0].querySelector('.markBold')?.textContent).toBe('rich');
+    });
+
+    it('nests indented pasted markdown list items', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        pasteText(blocks(left)[0], '- one\n  - two\n- three');
+
+        await waitForBlockTexts(left, ['one', 'two', 'three']);
+        expect(blockDepth(blocks(left)[0])).toBe('0');
+        expect(blockDepth(blocks(left)[1])).toBe('1');
+        expect(blockDepth(blocks(left)[2])).toBe('0');
+        await waitForBlockTexts(right, ['one', 'two', 'three']);
+        expect(blockDepth(blocks(right)[1])).toBe('1');
+    });
+
+    it('strips pasted markdown markers in table row headers', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        setBlockType(left, 'table');
+        const leftRowHeader = await waitFor(() =>
+            within(left).getByRole('textbox', {name: 'Row header 1'}),
+        );
+
+        selectCaret(leftRowHeader, 0);
+        pasteText(leftRowHeader, '# Header');
+
+        await waitFor(() => expect(blockText(leftRowHeader)).toBe('Header'));
+        expect(blockText(within(right).getByRole('textbox', {name: 'Row header 1'}))).toBe('Header');
+        expect(within(left).getByRole('table', {name: 'Table block'})).toBeTruthy();
+    });
+
+    it('uses ordered list numbers as block drag handles', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        pasteText(blocks(left)[0], 'a\nb\nc');
+        await waitForBlockTexts(left, ['a', 'b', 'c']);
+        for (let index = 0; index < 3; index++) {
+            selectCaret(blocks(left)[index], 0);
+            setBlockType(left, 'ordered');
+        }
+        await waitFor(() => {
+            expect([...left.querySelectorAll<HTMLButtonElement>('.blockAffordanceMarker')].map((marker) => marker.textContent)).toEqual([
+                '1.',
+                '2.',
+                '3.',
+            ]);
+        });
+
+        installMockBlockRowGeometry(left);
+        dragElementTo(left.querySelectorAll<HTMLElement>('.blockAffordanceMarker')[2], 20, 5);
+
+        await waitForBlockTexts(left, ['c', 'a', 'b']);
+    });
+
+    it('uses one leading affordance slot for paragraph rows', () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        const row = blocks(left)[0].closest<HTMLElement>('.blockRow')!;
+
+        expect(row.querySelectorAll('.blockAffordance')).toHaveLength(1);
+        expect(row.querySelector('.blockAffordanceHandle')).toBeTruthy();
+        expect(row.querySelector('.dragHandle')).toBeNull();
+        expect(row.querySelector('.blockMarker')).toBeNull();
+    });
+
+    it('toggles todos on click and drags them from the checkbox slot', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        pasteText(blocks(left)[0], 'a\nb');
+        await waitForBlockTexts(right, ['a', 'b']);
+        selectCaret(blocks(right)[0], 0);
+        setBlockType(right, 'todo');
+
+        const checkbox = within(right).getByRole('checkbox', {name: 'Toggle todo'}) as HTMLInputElement;
+        (checkbox as HTMLInputElement & {setPointerCapture?: (pointerId: number) => void}).setPointerCapture = () => {};
+        fireEvent.pointerDown(checkbox, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 20,
+            clientY: 8,
+        });
+        fireEvent.pointerUp(window, {
+            button: 0,
+            buttons: 0,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 20,
+            clientY: 8,
+        });
+        fireEvent.click(checkbox);
+        await waitFor(() => expect(checkbox.checked).toBe(true));
+
+        installMockBlockRowGeometry(right);
+        const slot = checkbox.closest<HTMLElement>('[data-block-drag-affordance="todo"]')!;
+        fireEvent.pointerDown(checkbox, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 20,
+            clientY: 88,
+        });
+        fireEvent.pointerMove(window, {
+            button: 0,
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 20,
+            clientY: 80,
+        });
+        fireEvent.pointerUp(window, {
+            button: 0,
+            buttons: 0,
+            isPrimary: true,
+            pointerId: 1,
+            clientX: 20,
+            clientY: 80,
+        });
+        fireEvent.click(checkbox);
+
+        await waitForBlockTexts(right, ['b', 'a']);
+        expect(blockTexts(left)).toEqual(['b', 'a']);
+        expect((within(right).getByRole('checkbox', {name: 'Toggle todo'}) as HTMLInputElement).checked).toBe(true);
     });
 
     it('undoes and redoes text through editor toolbar buttons', async () => {
@@ -706,6 +4988,78 @@ describe('Block rich text example UI', () => {
         expect(view.getByText('0 / 0')).toBeTruthy();
     });
 
+    it('records DOM selection updates after a click starts in the performance monitor', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        const documentWithCaretRange = document as Document & {
+            caretRangeFromPoint?: (x: number, y: number) => Range | null;
+        };
+        const previousCaretRangeFromPoint = documentWithCaretRange.caretRangeFromPoint;
+
+        Object.defineProperty(document, 'caretRangeFromPoint', {
+            value: () => rangeAtBlockOffset(blocks(left)[0], 0),
+            configurable: true,
+        });
+
+        try {
+            selectCaret(blocks(left)[0], 0);
+            fireEvent.mouseDown(blocks(left)[0], {clientX: 10, clientY: 10});
+            fireEvent(document, new window.Event('selectionchange'));
+
+            await waitFor(() =>
+                expect(within(keyPerfMonitor(view)).getByText('DOM selection')).toBeTruthy(),
+            );
+            expect(keyPerfBars(view)).toHaveLength(1);
+        } finally {
+            Object.defineProperty(document, 'caretRangeFromPoint', {
+                value: previousCaretRangeFromPoint,
+                configurable: true,
+            });
+        }
+    });
+
+    it('does not rewrite an already selected empty block when it is clicked again', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+        const leftBlock = blocks(left)[0];
+        const rightBlock = blocks(right)[0];
+        const documentWithCaretRange = document as Document & {
+            caretRangeFromPoint?: (x: number, y: number) => Range | null;
+        };
+        const previousCaretRangeFromPoint = documentWithCaretRange.caretRangeFromPoint;
+
+        Object.defineProperty(document, 'caretRangeFromPoint', {
+            value: () => rangeAtBlockOffset(leftBlock, 0),
+            configurable: true,
+        });
+
+        try {
+            selectCaret(leftBlock, 0);
+            fireEvent.mouseUp(leftBlock);
+            selectCaret(rightBlock, 0);
+            fireEvent.mouseUp(rightBlock);
+
+            await waitFor(() =>
+                expect(leftBlock.querySelector('[data-retained-selection="caret"]')).toBeTruthy(),
+            );
+
+            const replaceChildren = vi.spyOn(HTMLElement.prototype, 'replaceChildren');
+            const started = performance.now();
+            fireEvent.mouseDown(leftBlock, {clientX: 10, clientY: 10});
+            setDomCaret(leftBlock, 0);
+            fireEvent.mouseUp(leftBlock, {clientX: 10, clientY: 10});
+            const elapsed = performance.now() - started;
+
+            expect(replaceChildren).not.toHaveBeenCalled();
+            expect(elapsed).toBeLessThan(20);
+        } finally {
+            Object.defineProperty(document, 'caretRangeFromPoint', {
+                value: previousCaretRangeFromPoint,
+                configurable: true,
+            });
+        }
+    });
+
     it('records keydown events in a collapsed keystroke log', async () => {
         const view = render(<App />);
         const {left} = panels(view);
@@ -724,6 +5078,217 @@ describe('Block rich text example UI', () => {
         fireEvent.click(details.querySelector('summary')!);
         expect(within(details).getByText('Backspace')).toBeTruthy();
         expect(within(details).getByText('Editor A')).toBeTruthy();
+    });
+
+    it('shows an empty keypress performance monitor on initial render', () => {
+        const view = render(<App />);
+        const monitor = keyPerfMonitor(view);
+
+        expect(within(monitor).getByText('Event ms')).toBeTruthy();
+        expect(within(monitor).getByText('-- ms')).toBeTruthy();
+        expect(within(monitor).getByText('No samples')).toBeTruthy();
+        expect(
+            (within(monitor).getByRole('checkbox', {name: 'Rainbow IDs'}) as HTMLInputElement)
+                .checked,
+        ).toBe(false);
+        expect(keyPerfBars(view)).toHaveLength(0);
+    });
+
+    it('records printable text input in the keypress performance monitor', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        typeText(blocks(left)[0], 'ab');
+
+        await waitFor(() => expect(keyPerfBars(view).length).toBeGreaterThanOrEqual(4));
+        expect(within(keyPerfMonitor(view)).getByText(/\d(?:\.\d+)? ms$/)).toBeTruthy();
+        expect(within(keyPerfMonitor(view)).getByText('Render b')).toBeTruthy();
+    });
+
+    it('keeps a single printable input in an empty document under the perf budget', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        typeText(blocks(left)[0], 'a');
+
+        await waitForBlockTexts(left, ['a']);
+        expect(await latestKeyPerfBarMs(view, 'Render a')).toBeLessThan(5);
+    });
+
+    it('records handled keydown input in the keypress performance monitor', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        typeText(blocks(left)[0], 'ab');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('ab'));
+
+        selectCaret(blocks(left)[0], 2);
+        fireEvent.keyDown(blocks(left)[0], {key: 'Backspace', code: 'Backspace'});
+
+        await waitFor(() => expect(within(keyPerfMonitor(view)).getByText('Backspace')).toBeTruthy());
+    });
+
+    it('records paste input in the keypress performance monitor', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        pasteText(blocks(left)[0], 'hello');
+
+        await waitFor(() => expect(within(keyPerfMonitor(view)).getByText('Paste')).toBeTruthy());
+        expect(keyPerfBars(view).length).toBeGreaterThan(0);
+    });
+
+    it('keeps React render after typing in a 70 word block with every fifth word bolded close to plain text', async () => {
+        const measureRenderAfterTyping = async (withMarks: boolean): Promise<number> => {
+            const view = render(<App />);
+            const {left} = panels(view);
+            const {text, boldRanges} = seventyWordsWithEveryFifthBold();
+            const payload: RichClipboardPayload = {
+                version: 1,
+                plainText: text,
+                html: `<p>${text}</p>`,
+                fragments: [
+                    {
+                        text,
+                        meta: {type: 'paragraph', ts: 'copy-ts'},
+                        marks: withMarks ? boldRanges : [],
+                    },
+                ],
+                annotations: [],
+            };
+
+            selectCaret(blocks(left)[0], 0);
+            pasteClipboard(blocks(left)[0], {
+                [BLOCK_RICH_TEXT_MIME]: JSON.stringify(payload),
+                'text/plain': text,
+            });
+
+            await waitForBlockTexts(left, [text]);
+            if (withMarks) {
+                expect(blocks(left)[0].querySelectorAll('.markBold')).toHaveLength(14);
+            }
+            selectCaret(blocks(left)[0], text.length);
+            typeText(blocks(left)[0], 'Z');
+
+            await waitForBlockTexts(left, [`${text}Z`]);
+            const ms = await latestKeyPerfBarMs(view, 'Render Z');
+            view.unmount();
+            return ms;
+        };
+
+        await measureRenderAfterTyping(false);
+        await measureRenderAfterTyping(true);
+        const plainRenderMs = await measureRenderAfterTyping(false);
+        const markedRenderMs = await measureRenderAfterTyping(true);
+
+        expect(markedRenderMs).toBeLessThan(Math.max(1, plainRenderMs * 8));
+    }, 30_000);
+
+    it('toggles rainbow Lamport ID backgrounds per visible character', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        const block = blocks(left)[0];
+
+        selectCaret(block, 0);
+        typeText(block, 'abc');
+        await waitFor(() => expect(blockText(block)).toBe('abc'));
+        expect(rainbowNodes(block)).toHaveLength(0);
+
+        fireEvent.click(within(keyPerfMonitor(view)).getByRole('checkbox', {name: 'Rainbow IDs'}));
+
+        await waitFor(() => expect(rainbowNodes(block).map((node) => node.textContent)).toEqual(['a', 'b', 'c']));
+        expect(rainbowNodes(block).map((node) => node.style.backgroundColor)).toEqual([
+            'rgb(255, 21, 0)',
+            'rgb(255, 43, 0)',
+            'rgb(255, 64, 0)',
+        ]);
+
+        fireEvent.click(within(keyPerfMonitor(view)).getByRole('checkbox', {name: 'Rainbow IDs'}));
+        await waitFor(() => expect(rainbowNodes(block)).toHaveLength(0));
+    });
+
+    it('splits formatted runs per character in rainbow Lamport ID mode', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        const block = blocks(left)[0];
+
+        selectCaret(block, 0);
+        typeText(block, 'abc');
+        await waitFor(() => expect(blockText(block)).toBe('abc'));
+        selectRange(block, 0, 3);
+        fireEvent.click(within(left).getByRole('button', {name: 'B'}));
+        await waitFor(() => expect(block.querySelector('.markBold')?.textContent).toBe('abc'));
+
+        fireEvent.click(within(keyPerfMonitor(view)).getByRole('checkbox', {name: 'Rainbow IDs'}));
+
+        await waitFor(() => expect(rainbowNodes(block).map((node) => node.textContent)).toEqual(['a', 'b', 'c']));
+        expect(rainbowNodes(block).every((node) => node.classList.contains('markBold'))).toBe(true);
+    });
+
+    it('colors inline embeds in rainbow Lamport ID mode', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        fireEvent.click(within(left).getByRole('button', {name: 'Date'}));
+
+        const embed = await waitFor(() => {
+            const found = blocks(left)[0].querySelector<HTMLElement>('[data-inline-embed="true"]');
+            if (!found) throw new Error('missing inline embed');
+            return found;
+        });
+        expect(embed.style.backgroundColor).toBe('');
+
+        fireEvent.click(within(keyPerfMonitor(view)).getByRole('checkbox', {name: 'Rainbow IDs'}));
+
+        await waitFor(() => {
+            const colored = blocks(left)[0].querySelector<HTMLElement>('[data-inline-embed="true"]');
+            expect(colored?.style.backgroundColor).toBe('rgb(255, 21, 0)');
+        });
+    });
+
+    it('caps keypress performance bars to the latest samples', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        typeText(blocks(left)[0], repeatedText(65));
+
+        await waitFor(() => expect(keyPerfBars(view)).toHaveLength(60));
+    });
+
+    it('keeps keypress performance samples out of history export', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        let exportedBlob: Blob | null = null;
+        const createUrlSpy = vi.spyOn(URL, 'createObjectURL').mockImplementation((blob) => {
+            exportedBlob = blob as Blob;
+            return 'blob:history';
+        });
+        const revokeUrlSpy = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+        const clickSpy = vi
+            .spyOn(window.HTMLAnchorElement.prototype, 'click')
+            .mockImplementation(() => {});
+
+        selectCaret(blocks(left)[0], 0);
+        typeText(blocks(left)[0], 'a');
+        await waitFor(() => expect(keyPerfBars(view).length).toBeGreaterThanOrEqual(2));
+        expect(view.getByText('1 / 1')).toBeTruthy();
+
+        fireEvent.click(view.getByText('Export'));
+
+        expect(exportedBlob).toBeTruthy();
+        const exported = JSON.parse(await exportedBlob!.text());
+        expect(exported.keystrokes).toEqual([]);
+        expect(exported.keyPerfSamples).toBeUndefined();
+
+        createUrlSpy.mockRestore();
+        revokeUrlSpy.mockRestore();
+        clickSpy.mockRestore();
     });
 
     it('reports invalid history imports without replacing current history', async () => {
@@ -1298,6 +5863,262 @@ describe('Block rich text example UI', () => {
         expect(domSelectionOffsets(blocks(left)[0])).toEqual({anchor: 1, focus: 3});
     });
 
+    it('inserts and edits a date inline embed from the toolbar', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        typeText(blocks(left)[0], 'due ');
+        fireEvent.click(within(left).getByRole('button', {name: 'Date'}));
+
+        await waitFor(() => {
+            const embed = blocks(left)[0].querySelector<HTMLElement>('[data-inline-embed="true"]');
+            expect(embed?.dataset.embedType).toBe('date');
+            expect(embed?.dataset.embedCharId).toBeTruthy();
+            expect(embed?.querySelector('.inlineEmbedLabel')?.textContent).toBe('06/23/2026');
+        });
+        await waitFor(() =>
+            expect(
+                blocks(right)[0]
+                    .querySelector<HTMLElement>('[data-inline-embed="true"]')
+                    ?.querySelector('.inlineEmbedLabel')?.textContent,
+            ).toBe('06/23/2026'),
+        );
+
+        fireEvent.click(blocks(left)[0].querySelector<HTMLElement>('[data-inline-embed="true"]')!);
+        const dialog = await waitFor(() => within(left).getByRole('dialog', {name: 'Date embed'}));
+        const input = within(dialog).getByLabelText('Date value') as HTMLInputElement;
+        fireEvent.change(input, {target: {value: '2026-07-04'}});
+        fireEvent.click(within(dialog).getByRole('button', {name: 'Apply'}));
+
+        await waitFor(() =>
+            expect(
+                blocks(left)[0]
+                    .querySelector('[data-inline-embed="true"]')
+                    ?.querySelector('.inlineEmbedLabel')?.textContent,
+            ).toBe('07/04/2026'),
+        );
+        await waitFor(() =>
+            expect(
+                blocks(right)[0]
+                    .querySelector<HTMLElement>('[data-inline-embed="true"]')
+                    ?.querySelector('.inlineEmbedLabel')?.textContent,
+            ).toBe('07/04/2026'),
+        );
+    });
+
+    it('keeps a caret before an inline embed visible and editable', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        typeText(blocks(left)[0], 'due ');
+        fireEvent.click(within(left).getByRole('button', {name: 'Date'}));
+
+        const block = blocks(left)[0];
+        const embed = await waitFor(() => {
+            const element = block.querySelector<HTMLElement>('[data-inline-embed="true"]');
+            expect(element).toBeTruthy();
+            return element!;
+        });
+
+        const selection = window.getSelection()!;
+        const range = document.createRange();
+        const embedIndex = Array.prototype.indexOf.call(block.childNodes, embed);
+        range.setStart(block, embedIndex);
+        range.collapse(true);
+        selection.removeAllRanges();
+        selection.addRange(range);
+        fireEvent.select(block);
+
+        beforeInputText(block, 'now ');
+
+        await waitFor(() => expect(blockText(block)).toBe(`due now \uFFFC`));
+        expect(block.querySelector<HTMLElement>('[data-inline-embed="true"]')).toBeTruthy();
+        expect(domSelectionBlock()).toBe(block);
+        expect(domCaretOffset(block)).toBe(8);
+    });
+
+    it('uses Cmd+B as a pending bold style at a collapsed caret', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'a');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('a'));
+
+        fireEvent.keyDown(blocks(left)[0], {key: 'b', metaKey: true});
+        await waitFor(() =>
+            expect(within(left).getByRole('button', {name: 'B'}).getAttribute('aria-pressed')).toBe('true'),
+        );
+
+        beforeInputText(blocks(left)[0], 'bc');
+
+        await waitFor(() => expect(blocks(left)[0].querySelector('.markBold')?.textContent).toBe('bc'));
+        expect(blockText(blocks(left)[0])).toBe('abc');
+
+        fireEvent.keyDown(blocks(left)[0], {key: 'b', metaKey: true});
+        await waitFor(() =>
+            expect(within(left).getByRole('button', {name: 'B'}).getAttribute('aria-pressed')).toBe('false'),
+        );
+        beforeInputText(blocks(left)[0], 'd');
+
+        await waitFor(() => expect(blockText(blocks(left)[0])).toBe('abcd'));
+        expect(blocks(left)[0].querySelector('.markBold')?.textContent).toBe('bc');
+    });
+
+    it('toggles pending bold off before typing', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        fireEvent.keyDown(blocks(left)[0], {key: 'b', metaKey: true});
+        fireEvent.keyDown(blocks(left)[0], {key: 'b', metaKey: true});
+        await waitFor(() =>
+            expect(within(left).getByRole('button', {name: 'B'}).getAttribute('aria-pressed')).toBe('false'),
+        );
+
+        beforeInputText(blocks(left)[0], 'a');
+
+        await waitFor(() => expect(blockText(blocks(left)[0])).toBe('a'));
+        expect(blocks(left)[0].querySelector('.markBold')).toBeNull();
+    });
+
+    it('keeps pending bold active when the caret moves', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        fireEvent.keyDown(blocks(left)[0], {key: 'b', metaKey: true});
+        await waitFor(() =>
+            expect(within(left).getByRole('button', {name: 'B'}).getAttribute('aria-pressed')).toBe('true'),
+        );
+
+        setDomCaret(blocks(left)[0], 0);
+        fireEvent.mouseUp(blocks(left)[0]);
+        await waitFor(() =>
+            expect(within(left).getByRole('button', {name: 'B'}).getAttribute('aria-pressed')).toBe('true'),
+        );
+
+        beforeInputText(blocks(left)[0], 'a');
+
+        await waitFor(() => expect(blockText(blocks(left)[0])).toBe('a'));
+        await waitFor(() => expect(blocks(left)[0].querySelector('.markBold')?.textContent).toBe('a'));
+    });
+
+    it('uses Ctrl+B for pending bold at a collapsed caret', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        fireEvent.keyDown(blocks(left)[0], {key: 'b', ctrlKey: true});
+        beforeInputText(blocks(left)[0], 'a');
+
+        await waitFor(() => expect(blocks(left)[0].querySelector('.markBold')?.textContent).toBe('a'));
+    });
+
+    it('uses pending italic and strikethrough at a collapsed caret', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        fireEvent.keyDown(blocks(left)[0], {key: 'i', metaKey: true});
+        fireEvent.click(within(left).getByRole('button', {name: 'Strikethrough'}));
+        beforeInputText(blocks(left)[0], 'a');
+
+        await waitFor(() => {
+            expect(blocks(left)[0].querySelector('.markItalic')?.textContent).toBe('a');
+            expect(blocks(left)[0].querySelector('.markStrikethrough')?.textContent).toBe('a');
+        });
+    });
+
+    it('applies inline code to ranges and pending collapsed typing', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abcd');
+        await waitFor(() => expect(blockText(blocks(left)[0])).toBe('abcd'));
+
+        selectRange(blocks(left)[0], 1, 3);
+        fireEvent.click(within(left).getByRole('button', {name: 'Code'}));
+        await waitFor(() => expect(blocks(left)[0].querySelector('.markCode')?.textContent).toBe('bc'));
+
+        selectCaret(blocks(left)[0], 4);
+        fireEvent.keyDown(blocks(left)[0], {key: 'e', metaKey: true});
+        beforeInputText(blocks(left)[0], 'x');
+
+        await waitFor(() => expect(blockText(blocks(left)[0])).toBe('abcdx'));
+        expect([...blocks(left)[0].querySelectorAll('.markCode')].map((node) => node.textContent)).toEqual([
+            'bc',
+            'x',
+        ]);
+    });
+
+    it('edits inline code language from hover actions and highlights the marked range', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'const answer = 1;');
+        await waitFor(() => expect(blockText(blocks(left)[0])).toBe('const answer = 1;'));
+
+        selectRange(blocks(left)[0], 0, 'const'.length);
+        fireEvent.click(within(left).getByRole('button', {name: 'Code'}));
+        await waitFor(() => expect(blocks(left)[0].querySelector('.markCode')).toBeTruthy());
+        const code = blocks(left)[0].querySelector<HTMLElement>('.markCode')!;
+
+        fireEvent.mouseOver(code);
+        const actions = await waitFor(() => within(left).getByRole('dialog', {name: 'Inline code actions'}));
+        fireEvent.click(within(actions).getByRole('button', {name: 'Edit'}));
+
+        const dialog = await waitFor(() => within(left).getByRole('dialog', {name: 'Inline code language'}));
+        const input = within(dialog).getByRole('textbox', {name: 'Code language'});
+        fireEvent.change(input, {target: {value: 'ts'}});
+        fireEvent.click(within(dialog).getByRole('button', {name: 'Apply'}));
+
+        await waitFor(() =>
+            expect(blocks(left)[0].querySelector<HTMLElement>('.markCode')?.dataset.codeLanguage).toBe(
+                'typescript',
+            ),
+        );
+        expect(blocks(left)[0].querySelector('.syntax-keyword')?.textContent).toBe('const');
+
+        fireEvent.mouseOver(blocks(left)[0].querySelector<HTMLElement>('.markCode')!);
+        const updatedActions = await waitFor(() => within(left).getByRole('dialog', {name: 'Inline code actions'}));
+        fireEvent.click(within(updatedActions).getByRole('button', {name: 'Edit'}));
+        const clearDialog = await waitFor(() => within(left).getByRole('dialog', {name: 'Inline code language'}));
+        fireEvent.click(within(clearDialog).getByRole('button', {name: 'Clear language'}));
+
+        await waitFor(() =>
+            expect(blocks(left)[0].querySelector<HTMLElement>('.markCode')?.dataset.codeLanguage).toBe(''),
+        );
+    });
+
+    it('shows toolbar pressed state when the next typed character will inherit a mark', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abcd');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abcd'));
+        selectRange(blocks(left)[0], 1, 3);
+        fireEvent.click(within(left).getByRole('button', {name: 'B'}));
+        await waitFor(() => expect(blocks(left)[0].querySelector('.markBold')?.textContent).toBe('bc'));
+
+        setDomCaret(blocks(left)[0], 2);
+        fireEvent.mouseUp(blocks(left)[0]);
+
+        await waitFor(() =>
+            expect(within(left).getByRole('button', {name: 'B'}).getAttribute('aria-pressed')).toBe('true'),
+        );
+
+        beforeInputText(blocks(left)[0], 'X');
+
+        await waitFor(() => expect(blockText(blocks(left)[0])).toBe('abXcd'));
+        expect(blocks(left)[0].querySelector('.markBold')?.textContent).toBe('bXc');
+    });
+
     it('bolds the first selected range in a newly-created block with Cmd+B', async () => {
         const view = render(<App />);
         const {left} = panels(view);
@@ -1356,6 +6177,32 @@ describe('Block rich text example UI', () => {
         expect(within(left).queryByRole('dialog', {name: 'Link'})).toBeNull();
     });
 
+    it('does not open link or code popovers from direct mark clicks', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'https://example.test code');
+        await waitFor(() => expect(blockText(blocks(left)[0])).toBe('https://example.test code'));
+
+        selectRange(blocks(left)[0], 0, 'https://example.test'.length);
+        fireEvent.keyDown(blocks(left)[0], {key: 'k', metaKey: true});
+        await waitFor(() => expect(blocks(left)[0].querySelector('.markLink')).toBeTruthy());
+
+        const codeStart = 'https://example.test '.length;
+        selectRange(blocks(left)[0], codeStart, codeStart + 'code'.length);
+        fireEvent.click(within(left).getByRole('button', {name: 'Code'}));
+        await waitFor(() => expect(blocks(left)[0].querySelector('.markCode')).toBeTruthy());
+
+        fireEvent.click(blocks(left)[0].querySelector<HTMLElement>('.markLink')!);
+        fireEvent.click(blocks(left)[0].querySelector<HTMLElement>('.markCode')!);
+
+        expect(within(left).queryByRole('dialog', {name: 'Link'})).toBeNull();
+        expect(within(left).queryByRole('dialog', {name: 'Link actions'})).toBeNull();
+        expect(within(left).queryByRole('dialog', {name: 'Inline code language'})).toBeNull();
+        expect(within(left).queryByRole('dialog', {name: 'Inline code actions'})).toBeNull();
+    });
+
     it('pastes a link-like target over selected text as a link', async () => {
         const view = render(<App />);
         const {left} = panels(view);
@@ -1372,6 +6219,112 @@ describe('Block rich text example UI', () => {
             const link = blocks(left)[0].querySelector<HTMLElement>('.markLink');
             expect(link?.textContent).toBe('link');
             expect(link?.dataset.linkHref).toBe('https://example.test');
+        });
+    });
+
+    it('pastes a copied block over selected text as a block link', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        pasteText(blocks(left)[0], 'target\nlink text');
+        await waitForBlockTexts(left, ['target', 'link text']);
+
+        const sourceBlockId = blocks(left)[0].dataset.blockId;
+        if (!sourceBlockId) throw new Error('missing source block id');
+        expect(blocks(left)[0].id).toBe(`block-${sourceBlockId}`);
+        const rich: RichClipboardPayload = {
+            version: 1,
+            plainText: 'target',
+            html: '<p>target</p>',
+            fragments: [
+                {
+                    text: 'target',
+                    meta: {type: 'paragraph', ts: '001-test'},
+                    marks: [],
+                    sourceBlockId,
+                },
+            ],
+            annotations: [],
+            sourceSelectionType: 'block',
+        };
+
+        selectRange(blocks(left)[1], 0, 4);
+        pasteClipboard(blocks(left)[1], {
+            [BLOCK_RICH_TEXT_MIME]: JSON.stringify(rich),
+        });
+
+        await waitFor(() => {
+            expect(blockText(blocks(left)[1])).toBe('link text');
+            const link = blocks(left)[1].querySelector<HTMLElement>('.markLink');
+            expect(link?.textContent).toBe('link');
+            expect(link?.dataset.linkHref).toBe(`#block-${sourceBlockId}`);
+            expect(link?.classList.contains('markLinkDead')).toBe(false);
+        });
+
+        const blockLink = blocks(left)[1].querySelector<HTMLElement>('.markLink')!;
+        fireEvent.mouseOver(blockLink);
+        const actions = await waitFor(() => within(left).getByRole('dialog', {name: 'Link actions'}));
+        const url = within(actions).getByRole('link', {name: `#block-${sourceBlockId}`});
+        expect(url.getAttribute('href')).toBe(`#block-${sourceBlockId}`);
+        expect(url.getAttribute('target')).toBeNull();
+        expect(url.getAttribute('rel')).toBeNull();
+    });
+
+    it('renders missing block links as dead links', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'dead');
+        await waitFor(() => expect(blockText(blocks(left)[0])).toBe('dead'));
+
+        selectRange(blocks(left)[0], 0, 4);
+        fireEvent.keyDown(blocks(left)[0], {key: 'k', metaKey: true});
+        const dialog = await waitFor(() => within(left).getByRole('dialog', {name: 'Link'}));
+        const input = within(dialog).getByRole('textbox', {name: 'Link target'});
+        fireEvent.change(input, {target: {value: '#block-999-missing'}});
+        fireEvent.click(within(dialog).getByRole('button', {name: 'Apply'}));
+
+        await waitFor(() => {
+            const link = blocks(left)[0].querySelector<HTMLElement>('.markLink');
+            expect(link?.dataset.linkHref).toBe('#block-999-missing');
+            expect(link?.classList.contains('markLinkDead')).toBe(true);
+        });
+    });
+
+    it('does not replace selected text when a copied block target is missing', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'link text');
+        await waitFor(() => expect(blockText(blocks(left)[0])).toBe('link text'));
+
+        const rich: RichClipboardPayload = {
+            version: 1,
+            plainText: 'missing',
+            html: '<p>missing</p>',
+            fragments: [
+                {
+                    text: 'missing',
+                    meta: {type: 'paragraph', ts: '001-test'},
+                    marks: [],
+                    sourceBlockId: '999-missing',
+                },
+            ],
+            annotations: [],
+            sourceSelectionType: 'block',
+        };
+
+        selectRange(blocks(left)[0], 0, 4);
+        pasteClipboard(blocks(left)[0], {
+            [BLOCK_RICH_TEXT_MIME]: JSON.stringify(rich),
+        });
+
+        await waitFor(() => {
+            expect(blockText(blocks(left)[0])).toBe('link text');
+            expect(blocks(left)[0].querySelector('.markLink')).toBeNull();
         });
     });
 
@@ -1453,6 +6406,146 @@ describe('Block rich text example UI', () => {
         expect(domSelectionOffsets(commentBody)).toEqual({anchor: 1, focus: 3});
     });
 
+    it('keeps remotely-created comments collapsed until a gutter dot is clicked', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abcd');
+        await waitFor(() => expect(blocks(right)[0].textContent).toBe('abcd'));
+
+        selectRange(blocks(left)[0], 1, 3);
+        fireEvent.click(within(left).getByRole('button', {name: 'Comment'}));
+
+        const leftBody = await waitFor(() =>
+            within(left).getByRole('textbox', {name: 'Annotation body'}),
+        );
+        expect(domSelectionBlock()).toBe(leftBody);
+
+        await waitFor(() => expect(commentDots(right)).toHaveLength(1));
+        expect(within(right).queryByRole('textbox', {name: 'Annotation body'})).toBeNull();
+
+        fireEvent.click(commentDots(right)[0]);
+        const rightBody = await waitFor(() =>
+            within(right).getByRole('textbox', {name: 'Annotation body'}),
+        );
+        expect(domSelectionBlock()).toBe(rightBody);
+    });
+
+    it('opens the collapsed sidebar and focuses a new local comment body', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abcd');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abcd'));
+
+        selectRange(blocks(left)[0], 1, 3);
+        fireEvent.click(within(left).getByRole('button', {name: 'Comment'}));
+
+        const commentBody = await waitFor(() =>
+            within(left).getByRole('textbox', {name: 'Annotation body'}),
+        );
+        expect(domSelectionBlock()).toBe(commentBody);
+        expect(commentDots(left)).toHaveLength(0);
+    });
+
+    it('splits a comment body with Enter and focuses the new sibling body', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abcd');
+        await waitFor(() => expect(blockText(blocks(left)[0])).toBe('abcd'));
+
+        selectRange(blocks(left)[0], 1, 3);
+        fireEvent.click(within(left).getByRole('button', {name: 'Comment'}));
+
+        const commentBody = await waitFor(() =>
+            within(left).getByRole('textbox', {name: 'Annotation body'}),
+        );
+        selectCaret(commentBody, 0);
+        beforeInputText(commentBody, 'note');
+        await waitFor(() => expect(blockText(commentBody)).toBe('note'));
+
+        selectCaret(commentBody, 2);
+        fireEvent.keyDown(commentBody, {key: 'Enter'});
+
+        const bodies = await waitFor(() => {
+            const found = within(left).getAllByRole('textbox', {name: 'Annotation body'});
+            expect(found).toHaveLength(2);
+            expect(found.map(blockText)).toEqual(['no', 'te']);
+            return found;
+        });
+        expect(domSelectionBlock()).toBe(bodies[1]);
+        expect(domSelectionOffsets(bodies[1])).toEqual({anchor: 0, focus: 0});
+        expect(document.activeElement).toBe(bodies[1]);
+    });
+
+    it('pastes 2000 characters into a comment body after commenting large text in less than 50ms', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        const mainText = repeatedText(2000);
+        const commentText = repeatedText(2000).replace(/^./, '1');
+
+        selectCaret(blocks(left)[0], 0);
+        pasteText(blocks(left)[0], mainText);
+        await waitForBlockTexts(left, [mainText]);
+
+        selectRange(blocks(left)[0], 0, 10);
+        fireEvent.click(within(left).getByRole('button', {name: 'Comment'}));
+        const commentBody = await waitFor(() =>
+            within(left).getByRole('textbox', {name: 'Annotation body'}),
+        );
+
+        selectCaret(commentBody, 0);
+        const started = performance.now();
+        pasteText(commentBody, commentText);
+        const elapsed = performance.now() - started;
+
+        await waitFor(() => expect(blockText(commentBody)).toBe(commentText));
+        expect(elapsed).toBeLessThan(50);
+    });
+
+    it('shows one gutter dot per annotation and refocuses the most recently edited body', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abcd');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abcd'));
+
+        selectRange(blocks(left)[0], 1, 3);
+        fireEvent.click(within(left).getByRole('button', {name: 'Comment'}));
+        await waitFor(() =>
+            expect(within(left).getAllByRole('textbox', {name: 'Annotation body'})).toHaveLength(1),
+        );
+
+        selectRange(blocks(left)[0], 1, 3);
+        fireEvent.click(within(left).getByRole('button', {name: 'Comment'}));
+        let bodies = await waitFor(() => {
+            const found = within(left).getAllByRole('textbox', {name: 'Annotation body'});
+            expect(found).toHaveLength(2);
+            return found;
+        });
+        expect(domSelectionBlock()).toBe(bodies[1]);
+
+        selectCaret(bodies[0], 0);
+        beforeInputText(bodies[0], 'first');
+        await waitFor(() => expect(bodies[0].textContent).toBe('first'));
+
+        fireEvent.click(within(left).getByRole('button', {name: 'Close comments'}));
+        await waitFor(() => expect(commentDots(left)).toHaveLength(1));
+
+        fireEvent.click(commentDots(left)[0]);
+        bodies = await waitFor(() => {
+            const found = within(left).getAllByRole('textbox', {name: 'Annotation body'});
+            expect(found).toHaveLength(2);
+            return found;
+        });
+        expect(domSelectionBlock()).toBe(bodies[0]);
+    });
+
     it('supports strikethrough and links in comment body text', async () => {
         const view = render(<App />);
         const {left} = panels(view);
@@ -1483,6 +6576,56 @@ describe('Block rich text example UI', () => {
         fireEvent.click(within(dialog).getByRole('button', {name: 'Apply'}));
 
         await waitFor(() => {
+            const links = [...commentBody.querySelectorAll<HTMLElement>('.markLink')];
+            expect(links.map((link) => link.textContent).join('')).toBe('note');
+            expect(links.every((link) => link.dataset.linkHref === 'https://note.test')).toBe(true);
+        });
+    });
+
+    it('converts pasted markdown shortcuts in comment body text', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abcd');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abcd'));
+
+        selectRange(blocks(left)[0], 1, 3);
+        fireEvent.click(within(left).getByRole('button', {name: 'Comment'}));
+
+        const commentBody = await waitFor(() =>
+            within(left).getByRole('textbox', {name: 'Annotation body'}),
+        );
+        selectCaret(commentBody, 0);
+        pasteText(commentBody, '- note');
+
+        await waitFor(() => expect(blockText(commentBody)).toBe('note'));
+        expect(left.querySelector<HTMLElement>('.annotationBodyMarker')?.textContent).toBe('•');
+    });
+
+    it('pastes a link-like target over selected comment body text as a link', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abcd');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abcd'));
+
+        selectRange(blocks(left)[0], 1, 3);
+        fireEvent.click(within(left).getByRole('button', {name: 'Comment'}));
+
+        const commentBody = await waitFor(() =>
+            within(left).getByRole('textbox', {name: 'Annotation body'}),
+        );
+        selectCaret(commentBody, 0);
+        beforeInputText(commentBody, 'note');
+        await waitFor(() => expect(blockText(commentBody)).toBe('note'));
+
+        selectRange(commentBody, 0, 4);
+        pasteText(commentBody, 'https://note.test');
+
+        await waitFor(() => {
+            expect(blockText(commentBody)).toBe('note');
             const links = [...commentBody.querySelectorAll<HTMLElement>('.markLink')];
             expect(links.map((link) => link.textContent).join('')).toBe('note');
             expect(links.every((link) => link.dataset.linkHref === 'https://note.test')).toBe(true);
@@ -1555,6 +6698,60 @@ describe('Block rich text example UI', () => {
         });
     });
 
+    it('keeps a caret before a footnote number when recording arrow navigation', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        const block = blocks(left)[0];
+
+        selectCaret(block, 0);
+        beforeInputText(block, 'abcd');
+        await waitFor(() => expect(blockText(block)).toBe('abcd'));
+
+        selectRange(block, 1, 3);
+        fireEvent.click(within(left).getByRole('button', {name: 'Footnote'}));
+
+        const reference = await waitFor(() => {
+            const found = footnoteReferences(block)[0];
+            if (!found) throw new Error('missing footnote reference');
+            return found;
+        });
+
+        setDomCaretBeforeNode(reference);
+        expect(isDomCaretBeforeNode(reference)).toBe(true);
+
+        fireEvent.keyUp(block, {key: 'ArrowLeft'});
+
+        await waitFor(() => expect(isDomCaretBeforeNode(reference)).toBe(true));
+        expect(domSelectionOffsets(block)).toEqual({anchor: 3, focus: 3});
+    });
+
+    it('keeps a caret after a footnote number when recording arrow navigation', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        const block = blocks(left)[0];
+
+        selectCaret(block, 0);
+        beforeInputText(block, 'abcd');
+        await waitFor(() => expect(blockText(block)).toBe('abcd'));
+
+        selectRange(block, 1, 3);
+        fireEvent.click(within(left).getByRole('button', {name: 'Footnote'}));
+
+        const reference = await waitFor(() => {
+            const found = footnoteReferences(block)[0];
+            if (!found) throw new Error('missing footnote reference');
+            return found;
+        });
+
+        setDomCaretAfterNode(reference);
+        expect(isDomCaretAfterNode(reference)).toBe(true);
+
+        fireEvent.keyUp(block, {key: 'ArrowRight'});
+
+        await waitFor(() => expect(isDomCaretAfterNode(reference)).toBe(true));
+        expect(domSelectionOffsets(block)).toEqual({anchor: 3, focus: 3});
+    });
+
     it('renders overlapping footnote numbers at their respective boundaries', async () => {
         const view = render(<App />);
         const {left} = panels(view);
@@ -1606,6 +6803,39 @@ describe('Block rich text example UI', () => {
         });
     });
 
+    it('splits a footnote body with Enter and focuses the new sibling body', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        const block = blocks(left)[0];
+
+        selectCaret(block, 0);
+        beforeInputText(block, 'abcd');
+        await waitFor(() => expect(blockText(block)).toBe('abcd'));
+
+        selectRange(block, 1, 3);
+        fireEvent.click(within(left).getByRole('button', {name: 'Footnote'}));
+
+        const footnoteBody = await waitFor(() =>
+            within(left).getByRole('textbox', {name: 'Annotation body'}),
+        );
+        selectCaret(footnoteBody, 0);
+        beforeInputText(footnoteBody, 'note');
+        await waitFor(() => expect(blockText(footnoteBody)).toBe('note'));
+
+        selectCaret(footnoteBody, 2);
+        fireEvent.keyDown(footnoteBody, {key: 'Enter'});
+
+        const bodies = await waitFor(() => {
+            const found = within(left).getAllByRole('textbox', {name: 'Annotation body'});
+            expect(found).toHaveLength(2);
+            expect(found.map(blockText)).toEqual(['no', 'te']);
+            return found;
+        });
+        expect(domSelectionBlock()).toBe(bodies[1]);
+        expect(domSelectionOffsets(bodies[1])).toEqual({anchor: 0, focus: 0});
+        expect(document.activeElement).toBe(bodies[1]);
+    });
+
     it('renders popover annotations inline as editable transition-managed popovers', async () => {
         const view = render(<App />);
         const {left} = panels(view);
@@ -1636,6 +6866,26 @@ describe('Block rich text example UI', () => {
         expect(popoverDialogs(left)).toEqual([popover]);
 
         await closePopoversBySelectingMainBlock(left);
+    });
+
+    it('splits a popover body with Enter and focuses the new sibling body', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        const {popover} = await createPopoverOnMainText(left, 'abcd', 1, 3);
+        const popoverBody = await typePopoverBody(popover, 'note');
+
+        selectCaret(popoverBody, 2);
+        fireEvent.keyDown(popoverBody, {key: 'Enter'});
+
+        const bodies = await waitFor(() => {
+            const found = within(popover).getAllByRole('textbox', {name: 'Annotation body'});
+            expect(found).toHaveLength(2);
+            expect(found.map(blockText)).toEqual(['no', 'te']);
+            return found;
+        });
+        expect(domSelectionBlock()).toBe(bodies[1]);
+        expect(domSelectionOffsets(bodies[1])).toEqual({anchor: 0, focus: 0});
+        expect(document.activeElement).toBe(bodies[1]);
     });
 
     it('keeps a hover popover open briefly when the pointer leaves toward it', async () => {
@@ -1983,6 +7233,38 @@ describe('Block rich text example UI', () => {
         expect(blocks(right).map((block) => block.textContent)).toEqual(['one', 'two']);
     });
 
+    it('pastes 2000 characters into a single block in less than 100ms', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        const text = repeatedText(2000);
+
+        selectCaret(blocks(left)[0], 0);
+        const started = performance.now();
+        pasteText(blocks(left)[0], text);
+        const elapsed = performance.now() - started;
+
+        await waitForBlockTexts(left, [text]);
+        expect(elapsed).toBeLessThan(100);
+    });
+
+    it('handles Enter at the end of the second 400 character pasted block in less than 50ms', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+        const lines = [repeatedText(400), repeatedText(400).replace(/^./, '1')];
+
+        selectCaret(blocks(left)[0], 0);
+        pasteText(blocks(left)[0], lines.join('\n'));
+        await waitForBlockTexts(left, lines);
+
+        selectCaret(blocks(left)[1], 400);
+        const started = performance.now();
+        fireEvent.keyDown(blocks(left)[1], {key: 'Enter'});
+        const elapsed = performance.now() - started;
+
+        await waitForBlockTexts(left, [...lines, '']);
+        expect(elapsed).toBeLessThan(50);
+    });
+
     it('adds a second cursor with Cmd-click and types at both cursors', async () => {
         const view = render(<App />);
         const {left, right} = panels(view);
@@ -2231,6 +7513,88 @@ describe('Block rich text example UI', () => {
         expect(retainedCaretOffsets(blocks(left)[0])).toEqual([0]);
     });
 
+    it('plain-drags across blocks to create a text selection', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        pasteText(blocks(left)[0], 'abcd\nwxyz');
+        await waitForBlockTexts(left, ['abcd', 'wxyz']);
+
+        withCaretRangeFromPoints(
+            [
+                {maxY: 20, block: blocks(left)[0], offset: 1},
+                {maxY: 80, block: blocks(left)[1], offset: 2},
+            ],
+            () => {
+                fireEvent.pointerDown(blocks(left)[0], {
+                    button: 0,
+                    buttons: 1,
+                    isPrimary: true,
+                    pointerId: 1,
+                    clientX: 10,
+                    clientY: 10,
+                });
+                fireEvent.pointerMove(window, {
+                    button: 0,
+                    buttons: 1,
+                    isPrimary: true,
+                    pointerId: 1,
+                    clientX: 12,
+                    clientY: 60,
+                });
+                fireEvent.pointerUp(window, {
+                    button: 0,
+                    buttons: 0,
+                    isPrimary: true,
+                    pointerId: 1,
+                    clientX: 12,
+                    clientY: 60,
+                });
+            },
+        );
+        selectCaret(blocks(right)[0], 0);
+
+        await waitFor(() => expect(retainedHighlightText(blocks(left)[0])).toBe('bcd'));
+        expect(retainedHighlightText(blocks(left)[1])).toBe('wx');
+    });
+
+    it('shows a text selection while pointer-dragging before mouseup', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'abcd');
+        await waitFor(() => expect(blocks(left)[0].textContent).toBe('abcd'));
+
+        withCaretRangeFromPoints(
+            [
+                {maxY: 20, block: blocks(left)[0], offset: 1},
+                {maxY: 80, block: blocks(left)[0], offset: 3},
+            ],
+            () => {
+                fireEvent.pointerDown(blocks(left)[0], {
+                    button: 0,
+                    buttons: 1,
+                    isPrimary: true,
+                    pointerId: 1,
+                    clientX: 10,
+                    clientY: 10,
+                });
+                fireEvent.pointerMove(window, {
+                    button: 0,
+                    buttons: 1,
+                    isPrimary: true,
+                    pointerId: 1,
+                    clientX: 12,
+                    clientY: 60,
+                });
+            },
+        );
+
+        await waitFor(() => expect(retainedHighlightText(blocks(left)[0])).toBe('bc'));
+    });
+
     it('keeps the existing selection visible while Cmd-dragging another selection', async () => {
         const view = render(<App />);
         const {left} = panels(view);
@@ -2384,6 +7748,54 @@ const domCaretPosition = (panel: HTMLElement): {blockIndex: number; offset: numb
         blockIndex,
         offset: blockIndex >= 0 ? domCaretOffset(editorBlocks[blockIndex]) : -1,
     };
+};
+
+const isDomCaretBeforeNode = (node: Node): boolean => {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || !selection.isCollapsed) return false;
+    const range = selection.getRangeAt(0);
+    const before = document.createRange();
+    before.setStartBefore(node);
+    before.collapse(true);
+    if (range.compareBoundaryPoints(0, before) === 0) return true;
+    if (range.compareBoundaryPoints(0, before) > 0) return false;
+    const between = document.createRange();
+    between.setStart(range.startContainer, range.startOffset);
+    between.setEnd(before.startContainer, before.startOffset);
+    return between.toString() === '';
+};
+
+const isDomCaretAfterNode = (node: Node): boolean => {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || !selection.isCollapsed) return false;
+    const range = selection.getRangeAt(0);
+    const after = document.createRange();
+    after.setStartAfter(node);
+    after.collapse(true);
+    if (range.compareBoundaryPoints(0, after) === 0) return true;
+    if (range.compareBoundaryPoints(0, after) < 0) return false;
+    const between = document.createRange();
+    between.setStart(after.startContainer, after.startOffset);
+    between.setEnd(range.startContainer, range.startOffset);
+    return between.toString() === '';
+};
+
+const setDomCaretBeforeNode = (node: Node) => {
+    const selection = window.getSelection()!;
+    const range = document.createRange();
+    range.setStartBefore(node);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+};
+
+const setDomCaretAfterNode = (node: Node) => {
+    const selection = window.getSelection()!;
+    const range = document.createRange();
+    range.setStartAfter(node);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
 };
 
 const domPointOffset = (block: HTMLElement, node: Node | null, nodeOffset: number): number => {

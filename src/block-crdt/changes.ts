@@ -6,6 +6,7 @@ import {
     virtualParentOwner,
     type VirtualBlockParentConfig,
 } from './blocks.js';
+import {isDeleted} from './deletion.js';
 import {assertActorId, lamportToString, parseLamportString} from './ids.js';
 import {createLseqIdBetween, LseqOptions} from './lseq.js';
 import {markRange} from './marks.js';
@@ -17,10 +18,22 @@ import {
     visibleBlockOutline,
     visibleBlockChildren,
 } from './traversal.js';
-import {Block, CachedState, Char, DefaultBlockMeta, HLC, JsonValue, Lamport, Op, TimestampedBlockMeta} from './types.js';
+import {
+    Block,
+    BlockStylePatch,
+    CachedState,
+    Char,
+    DefaultBlockMeta,
+    HLC,
+    JsonValue,
+    Lamport,
+    Op,
+    TimestampedBlockMeta,
+} from './types.js';
 
 export type InsertBlockOpsOptions<M extends TimestampedBlockMeta> = {
     actor: string;
+    id?: Lamport;
     parent: Lamport;
     before?: Lamport | null;
     after?: Lamport | null;
@@ -32,9 +45,11 @@ export type InsertBlockOpsOptions<M extends TimestampedBlockMeta> = {
 
 export type DeleteBlockMode = 'block-only' | 'subtree';
 
-export type DeleteBlockOpsOptions = {
+export type DeleteBlockOpsOptions<M extends TimestampedBlockMeta = TimestampedBlockMeta> = {
     block: Lamport;
+    ts: () => HLC;
     mode?: DeleteBlockMode;
+    virtualParents?: VirtualBlockParentConfig<M>;
 };
 
 export type MarkRangePoint = {
@@ -104,7 +119,7 @@ export const insertTextOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>
 
 export const deleteRangeOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
     state: CachedState<M>,
-    {block, startOffset, endOffset}: {block: Lamport; startOffset: number; endOffset: number},
+    {block, startOffset, endOffset, ts}: {block: Lamport; startOffset: number; endOffset: number; ts: () => HLC},
 ): Op<M>[] => {
     if (startOffset > endOffset) {
         throw new Error(`delete range start must be <= end`);
@@ -115,7 +130,7 @@ export const deleteRangeOps = <M extends TimestampedBlockMeta = DefaultBlockMeta
         if (!id) {
             throw new Error(`delete range out of bounds`);
         }
-        ops.push({type: 'char:delete', id});
+        ops.push({type: 'char:delete', id, deleted: {value: true, ts: ts()}});
     }
     return ops;
 };
@@ -160,10 +175,16 @@ export const splitBlockOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>
     return split(state, {block, char, previous}, ts, actor, options, virtualParents);
 };
 
+export const nextBlockIdForActor = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
+    state: CachedState<M>,
+    actor: string,
+): Lamport => [state.state.maxSeenCount + 1, actor];
+
 export const insertBlockOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
     state: CachedState<M>,
     {
         actor,
+        id,
         parent,
         before = null,
         after = null,
@@ -180,7 +201,7 @@ export const insertBlockOps = <M extends TimestampedBlockMeta = DefaultBlockMeta
 
     if (parentId !== ROOT_ID && !virtualParentExists(state, parentId, virtualParents)) {
         const parentBlock = state.state.blocks[parentId];
-        if (!parentBlock || parentBlock.deleted || state.cache.joinedBlocks[parentId]) {
+        if (!parentBlock || isDeleted(parentBlock) || state.cache.joinedBlocks[parentId]) {
             throw new Error(`insert parent block not found or hidden`);
         }
     }
@@ -201,13 +222,13 @@ export const insertBlockOps = <M extends TimestampedBlockMeta = DefaultBlockMeta
         throw new Error(`insert before/after anchors must be adjacent siblings`);
     }
 
-    const id: Lamport = [state.state.maxSeenCount + 1, actor];
+    const blockId = id ?? nextBlockIdForActor(state, actor);
     const parentPath = parentId === ROOT_ID ? [] : materializedPathForParent(state, parentId, virtualParents);
     return [
         {
             type: 'block',
             block: blockBetween(
-                id,
+                blockId,
                 meta,
                 parentPath,
                 beforeId ? state.state.blocks[beforeId].order.index : null,
@@ -220,25 +241,37 @@ export const insertBlockOps = <M extends TimestampedBlockMeta = DefaultBlockMeta
     ];
 };
 
+export const insertBlockOpsWithId = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
+    state: CachedState<M>,
+    options: InsertBlockOpsOptions<M>,
+): {ops: Op<M>[]; id: Lamport; blockId: string} => {
+    const ops = insertBlockOps(state, options);
+    const op = ops[0];
+    if (!op || op.type !== 'block') {
+        throw new Error(`insertBlockOps did not create a block op`);
+    }
+    return {ops, id: op.block.id, blockId: lamportToString(op.block.id)};
+};
+
 export const deleteBlockOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
     state: CachedState<M>,
-    {block, mode = 'block-only'}: DeleteBlockOpsOptions,
+    {block, ts, mode = 'block-only', virtualParents = {}}: DeleteBlockOpsOptions<M>,
 ): Op<M>[] => {
     const blockId = lamportToString(block);
     const current = state.state.blocks[blockId];
     if (!current) {
         throw new Error(`delete block not found`);
     }
-    if (current.deleted || state.cache.joinedBlocks[blockId]) {
+    if (isDeleted(current) || state.cache.joinedBlocks[blockId]) {
         throw new Error(`delete block not found or hidden`);
     }
     if (mode !== 'block-only' && mode !== 'subtree') {
         throw new Error(`delete block mode must be block-only or subtree`);
     }
     if (mode === 'block-only') {
-        return [{type: 'block:delete', id: block}];
+        return [{type: 'block:delete', id: block, deleted: {value: true, ts: ts()}}];
     }
-    const visible = visibleBlockOutline(state);
+    const visible = visibleBlockOutline(state, virtualParents);
     const target = visible.find((entry) => entry.id === blockId);
     if (!target) {
         throw new Error(`delete block not found or hidden`);
@@ -246,6 +279,7 @@ export const deleteBlockOps = <M extends TimestampedBlockMeta = DefaultBlockMeta
     return [blockId, ...visibleDescendantIds(visible, blockId)].map((id) => ({
         type: 'block:delete',
         id: state.state.blocks[id].id,
+        deleted: {value: true, ts: ts()},
     }));
 };
 
@@ -258,6 +292,11 @@ export const setBlockMetaOps = <M extends TimestampedBlockMeta = DefaultBlockMet
     _state: CachedState<M>,
     {block, meta}: {block: Lamport; meta: M},
 ): Op<M>[] => [{type: 'block:meta', id: block, meta}];
+
+export const setBlockStyleOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
+    _state: CachedState<M>,
+    {block, style}: {block: Lamport; style: BlockStylePatch},
+): Op<M>[] => [{type: 'block:style', id: block, style}];
 
 export const markRangesOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
     state: CachedState<M>,
@@ -299,9 +338,10 @@ export const markSelectionOps = <M extends TimestampedBlockMeta = DefaultBlockMe
         actor: string;
         ts?: HLC;
         nextId?: () => Lamport;
+        virtualParents?: VirtualBlockParentConfig<M>;
     },
 ): Op<M>[] => {
-    const blocks = visibleBlockOutline(state).map((entry) => entry.id);
+    const blocks = visibleBlockOutline(state, options.virtualParents).map((entry) => entry.id);
     const anchorIndex = blocks.indexOf(selection.anchor.blockId);
     const focusIndex = blocks.indexOf(selection.focus.blockId);
     if (anchorIndex < 0 || focusIndex < 0) {
@@ -355,7 +395,7 @@ export const moveBlockOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
     const beforeId = before ? lamportToString(before) : null;
     const afterId = after ? lamportToString(after) : null;
     const current = state.state.blocks[blockId];
-    if (!current || current.deleted || state.cache.joinedBlocks[blockId]) {
+    if (!current || isDeleted(current) || state.cache.joinedBlocks[blockId]) {
         throw new Error(`move block not found or hidden`);
     }
     if (
@@ -475,6 +515,7 @@ export const split = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
                     ts,
                     actor,
                     options,
+                    current.style,
                 ),
             },
         ];
@@ -493,6 +534,7 @@ export const split = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
                     ts,
                     actor,
                     options,
+                    current.style,
                 ),
             },
         ];
@@ -501,6 +543,7 @@ export const split = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
     const block: Block<M> = {
         id: [maxSeenCount + 1, actor],
         meta: current.meta,
+        style: current.style,
         order: {
             id: [maxSeenCount + 1, actor],
             ts,
@@ -515,7 +558,7 @@ export const split = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
                 options,
             ),
         },
-        deleted: false,
+        deleted: undefined,
     };
     const ops: Op<M>[] = [{type: 'block', block}];
 
@@ -597,7 +640,7 @@ export const join = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
     if (!blocks[leftId] || !blocks[rightId]) {
         throw new Error(`join block not found`);
     }
-    if (blocks[leftId].deleted || blocks[rightId].deleted) {
+    if (isDeleted(blocks[leftId]) || isDeleted(blocks[rightId])) {
         throw new Error(`join block deleted`);
     }
     if (cache.joinedBlocks[leftId] || cache.joinedBlocks[rightId]) {
@@ -632,9 +675,11 @@ const blockBetween = <M extends TimestampedBlockMeta>(
     ts: string,
     actor: string,
     options?: LseqOptions,
+    style: Block['style'] = {},
 ): Block<M> => ({
     id,
     meta,
+    style,
     order: {
         id,
         ts,
@@ -649,7 +694,7 @@ const blockBetween = <M extends TimestampedBlockMeta>(
             options,
         ),
     },
-    deleted: false,
+    deleted: undefined,
 });
 
 const isBlockDescendantOf = <M extends TimestampedBlockMeta>(

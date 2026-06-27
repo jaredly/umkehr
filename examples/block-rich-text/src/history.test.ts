@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest';
 import {materializeFormattedBlocks, rootBlockIds} from 'umkehr/block-crdt';
-import {indentBlock, moveBlock} from './blockCommands';
+import {indentBlock, moveBlock, setBlockMeta} from './blockCommands';
 import {makeCommandContext, nextReplicaTs, type EditorId, type Replica} from './blockEditorRuntime';
 import * as hlc from '../../../src/crdt/hlc';
 import {
@@ -18,6 +18,7 @@ import {
     deleteBackwardEverywhere,
     insertTextEverywhere,
     pastePlainTextEverywhere,
+    pastePlainTextWithMarkdownShortcutsEverywhere,
     setBlockTypeEverywhere,
     splitBlockEverywhere,
     updateBlockMetaEverywhere,
@@ -25,6 +26,7 @@ import {
 } from './multiSelectionCommands';
 import {caret} from './selectionModel';
 import {replacePrimarySelection} from './selectionSet';
+import type {PollVote} from './blockMeta';
 
 const appendLocal = (
     history: HistoryState,
@@ -80,8 +82,24 @@ const visibleOutline = (replica: Replica): Array<{text: string; depth: number}> 
         depth: block.depth,
     }));
 
+const voteInFirstPoll = (userId: string, optionId: string) => (replica: Replica): MultiCommandResult => {
+    const blockId = rootBlockIds(replica.state)[0];
+    const block = replica.state.state.blocks[blockId];
+    if (!block || block.meta.type !== 'poll') return {state: replica.state, ops: [], selection: replica.selection};
+    const vote: PollVote = {type: 'single', optionId, ts: nextReplicaTs(replica)};
+    const result = setBlockMeta(replica.state, blockId, {
+        ...block.meta,
+        votes: {...block.meta.votes, [userId]: vote},
+        ts: nextReplicaTs(replica),
+    });
+    return {state: result.state, ops: result.ops, selection: replica.selection};
+};
+
 const paste = (text: string) => (replica: Replica) =>
     pastePlainTextEverywhere(replica.state, replica.selection, text, makeCommandContext(replica));
+
+const pasteMarkdown = (text: string) => (replica: Replica) =>
+    pastePlainTextWithMarkdownShortcutsEverywhere(replica.state, replica.selection, text, makeCommandContext(replica));
 
 const insert = (text: string) => (replica: Replica) =>
     insertTextEverywhere(replica.state, replica.selection, text, makeCommandContext(replica));
@@ -94,6 +112,27 @@ const heading = () => (replica: Replica) => {
     return setBlockTypeEverywhere(replica.state, replica.selection, (_blockId, _meta) => ({
         type: 'heading',
         level: 2,
+        ts: context.nextTs(),
+    }));
+};
+
+const slideDeck = () => (replica: Replica) => {
+    const context = makeCommandContext(replica);
+    return setBlockTypeEverywhere(replica.state, replica.selection, (_blockId, _meta) => ({
+        type: 'slide_deck',
+        width: 1600,
+        height: 900,
+        footer: 'deck-title-and-slide-number',
+        ts: context.nextTs(),
+    }));
+};
+
+const slide = () => (replica: Replica) => {
+    const context = makeCommandContext(replica);
+    return setBlockTypeEverywhere(replica.state, replica.selection, (_blockId, _meta) => ({
+        type: 'slide',
+        showTitle: false,
+        transition: 'fade',
         ts: context.nextTs(),
     }));
 };
@@ -134,6 +173,37 @@ describe('block rich text history', () => {
         expect(demo.left.queue).toHaveLength(0);
     });
 
+    it('replays concurrent offline poll votes without dropping either voter', () => {
+        let history = appendHistoryAction(initialHistoryState(), {
+            type: 'replace-document',
+            document: [
+                {
+                    type: 'poll',
+                    meta: {kind: 'rating', allowChange: true, min: 1, max: 5, votes: {}},
+                    content: 'Rate this',
+                },
+            ],
+        });
+        history = appendToggle(history, 'left');
+        history = appendLocal(history, 'left', voteInFirstPoll('ulrich', '5'));
+        history = appendLocal(history, 'right', voteInFirstPoll('uwe', '4'));
+        history = appendToggle(history, 'left');
+
+        const demo = replayHistory(history.actions, history.cursor);
+        const blockId = rootBlockIds(demo.left.state)[0];
+        const leftMeta = demo.left.state.state.blocks[blockId].meta;
+        const rightMeta = demo.right.state.state.blocks[blockId].meta;
+
+        expect(leftMeta).toMatchObject({
+            type: 'poll',
+            votes: {
+                ulrich: {type: 'single', optionId: '5'},
+                uwe: {type: 'single', optionId: '4'},
+            },
+        });
+        expect(rightMeta).toEqual(leftMeta);
+    });
+
     it('scrubs to intermediate cursors', () => {
         let history = initialHistoryState();
         history = appendLocal(history, 'left', insert('a'));
@@ -142,6 +212,45 @@ describe('block rich text history', () => {
         expect(visibleText(replayHistory(history.actions, 0).left)).toEqual(['']);
         expect(visibleText(replayHistory(history.actions, 1).left)).toEqual(['a']);
         expect(visibleText(replayHistory(history.actions, 2).left)).toEqual(['ab']);
+    });
+
+    it('replays replace-document actions as a new document base', () => {
+        const history = appendHistoryAction(initialHistoryState(), {
+            type: 'replace-document',
+            fixtureId: 'test-fixture',
+            document: [
+                {type: 'heading', meta: {level: 2}, content: 'Fixture title'},
+                {content: 'Fixture body'},
+            ],
+        });
+
+        expect(visibleText(replayHistory(history.actions, 0).left)).toEqual(['']);
+        expect(visibleText(replayHistory(history.actions, 1).left)).toEqual(['Fixture title', 'Fixture body']);
+        expect(visibleText(replayHistory(history.actions, 1).right)).toEqual(['Fixture title', 'Fixture body']);
+    });
+
+    it('applies local edits after a replace-document action', () => {
+        let history = appendHistoryAction(initialHistoryState(), {
+            type: 'replace-document',
+            document: [{content: 'Base'}],
+        });
+        history = appendLocal(history, 'left', insert('!'));
+
+        expect(visibleText(replayHistory(history.actions, history.cursor).left)).toEqual(['!Base']);
+        expect(visibleText(replayHistory(history.actions, history.cursor).right)).toEqual(['!Base']);
+    });
+
+    it('treats pasted markdown shortcut conversion as one history action', () => {
+        let history = initialHistoryState();
+        history = appendLocal(history, 'left', pasteMarkdown('- item'));
+
+        expect(history.actions).toHaveLength(1);
+        expect(visibleText(replayHistory(history.actions, 0).left)).toEqual(['']);
+
+        const replayed = replayHistory(history.actions, 1).left;
+        const block = materializeFormattedBlocks(replayed.state)[0];
+        expect(block.runs.map((run) => run.text).join('')).toBe('item');
+        expect(block.block.meta).toMatchObject({type: 'list_item', kind: 'unordered'});
     });
 
     it('branches by dropping future actions when appending from the past', () => {
@@ -210,6 +319,101 @@ describe('block rich text history', () => {
         );
     });
 
+    it('serializes and imports replace-document histories', () => {
+        const history = appendHistoryAction(initialHistoryState(), {
+            type: 'replace-document',
+            fixtureId: 'preview-fixture',
+            document: [
+                {
+                    type: 'preview',
+                    meta: {url: 'https://example.test', preview: {title: 'Example'}},
+                    content: 'Example',
+                },
+            ],
+        });
+
+        const parsed = parseHistoryExport(serializeHistory(history));
+
+        expect('history' in parsed).toBe(true);
+        if (!('history' in parsed)) return;
+        expect(parsed.history.actions[0]).toMatchObject({
+            type: 'replace-document',
+            fixtureId: 'preview-fixture',
+        });
+        expect(visibleText(replayHistory(parsed.history.actions, parsed.history.cursor).left)).toEqual(['Example']);
+    });
+
+    it('serializes, imports, and replays block style ops', () => {
+        const styleTs = hlc.pack({ts: 10, count: 0, node: 'left'});
+        const initial = replayHistory([]);
+        const history = appendHistoryAction(initialHistoryState(), {
+            type: 'local-change',
+            editorId: 'left',
+            ops: [
+                {
+                    type: 'block:style',
+                    id: [0, 'doc'],
+                    style: {
+                        color: {value: 'tomato', ts: styleTs},
+                        padding: {value: 'large', ts: styleTs},
+                    },
+                },
+            ],
+            selection: initial.left.selection,
+        });
+
+        const parsed = parseHistoryExport(serializeHistory(history));
+
+        expect('history' in parsed).toBe(true);
+        if (!('history' in parsed)) return;
+        const replayed = replayHistory(parsed.history.actions, parsed.history.cursor);
+        expect(replayed.left.state.state.blocks['0000-doc'].style).toMatchObject({
+            color: {value: 'tomato', ts: styleTs},
+            padding: {value: 'large', ts: styleTs},
+        });
+        expect(replayed.right.state.state.blocks['0000-doc'].style).toMatchObject({
+            color: {value: 'tomato', ts: styleTs},
+            padding: {value: 'large', ts: styleTs},
+        });
+        expect(hlc.tryUnpack(nextReplicaTs(replayed.right))).toMatchObject({
+            ts: 10,
+            count: 3,
+            node: 'right',
+        });
+    });
+
+    it('serializes and imports replace-document histories with columns blocks', () => {
+        const history = appendHistoryAction(initialHistoryState(), {
+            type: 'replace-document',
+            fixtureId: 'columns-fixture',
+            document: [
+                {
+                    type: 'columns',
+                    content: 'Project board',
+                    children: [
+                        {content: 'todo', children: [{content: 'Draft proposal'}]},
+                        {content: 'done'},
+                    ],
+                },
+            ],
+        });
+
+        const parsed = parseHistoryExport(serializeHistory(history));
+
+        expect('history' in parsed).toBe(true);
+        if (!('history' in parsed)) return;
+        expect(parsed.history.actions[0]).toMatchObject({
+            type: 'replace-document',
+            fixtureId: 'columns-fixture',
+        });
+        expect(visibleOutline(replayHistory(parsed.history.actions, parsed.history.cursor).left)).toEqual([
+            {text: 'Project board', depth: 0},
+            {text: 'todo', depth: 1},
+            {text: 'Draft proposal', depth: 2},
+            {text: 'done', depth: 1},
+        ]);
+    });
+
     it('keeps replayed peer clocks ahead of imported block ids before a first remote reorder', () => {
         let history = initialHistoryState();
         for (const command of [
@@ -269,6 +473,41 @@ describe('block rich text history', () => {
             level: 2,
         });
         expect(hlc.tryUnpack(materializeFormattedBlocks(replayed.left.state)[0].block.meta.ts)).not.toBeNull();
+    });
+
+    it('round-trips slide metadata through export/import', () => {
+        let history = initialHistoryState();
+        history = appendLocal(history, 'left', slideDeck());
+
+        const parsed = parseHistoryExport(serializeHistory(history));
+
+        expect('history' in parsed).toBe(true);
+        if (!('history' in parsed)) return;
+        const replayed = replayHistory(parsed.history.actions, parsed.history.cursor);
+        const blocks = materializeFormattedBlocks(replayed.left.state);
+        expect(blocks[0].block.meta).toMatchObject({
+            type: 'slide_deck',
+            width: 1600,
+            height: 900,
+            footer: 'deck-title-and-slide-number',
+        });
+    });
+
+    it('round-trips orphan slide metadata through export/import', () => {
+        let history = initialHistoryState();
+        history = appendLocal(history, 'left', slide());
+
+        const parsed = parseHistoryExport(serializeHistory(history));
+
+        expect('history' in parsed).toBe(true);
+        if (!('history' in parsed)) return;
+        const replayed = replayHistory(parsed.history.actions, parsed.history.cursor);
+        const blocks = materializeFormattedBlocks(replayed.left.state);
+        expect(blocks[0].block.meta).toMatchObject({
+            type: 'slide',
+            showTitle: false,
+            transition: 'fade',
+        });
     });
 
     it('replays todo toggle metadata through history', () => {

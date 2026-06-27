@@ -1,15 +1,24 @@
-import {applyMany, materializeFormattedBlocks, type Op} from 'umkehr/block-crdt';
-import {annotationVirtualParents} from './annotations';
+import {applyMany, isDeleted, materializeFormattedBlocks, type Op} from 'umkehr/block-crdt';
 import * as hlc from '../../../src/crdt/hlc';
 import {
     applyLocalChange,
     createDemoState,
+    createDemoStateFromDocument,
     toggleOnline,
     type DemoState,
     type EditorId,
 } from './blockEditorRuntime';
-import type {RichBlockMeta} from './blockMeta';
+import {
+    codePreviewKindForLanguage,
+    isSlideDeckFooterMode,
+    isSlideTransition,
+    type RichBlockMeta,
+} from './blockMeta';
+import {richTextCrdtConfig} from './editorCrdtConfig';
+import {isPollMeta, isPollVote, type PollVoteCommandData} from './pollBlocks';
 import type {RetainedSelectionSet} from './selectionSet';
+import {isSerializedImageAttachment, type SerializedImageAttachment} from './attachments';
+import type {ImportDocument} from './documentFormat';
 
 export type HistoryAction =
     | {
@@ -22,6 +31,11 @@ export type HistoryAction =
     | {
           type: 'toggle-online';
           editorId: EditorId;
+      }
+    | {
+          type: 'replace-document';
+          document: ImportDocument;
+          fixtureId?: string;
       };
 
 export type BlockCommandIntent = 'edit' | 'undo' | 'redo';
@@ -34,6 +48,7 @@ export type BlockCommandInfo = {
     beforeSelection: RetainedSelectionSet;
     afterSelection: RetainedSelectionSet;
     label?: string;
+    pollVote?: PollVoteCommandData;
 };
 
 export type HistoryState = {
@@ -74,6 +89,7 @@ export type ExportedHistory = {
     app: 'examples/block-rich-text';
     actions: HistoryAction[];
     keystrokes: HistoryKeystroke[];
+    attachments?: SerializedImageAttachment[];
     finalSnapshot: HistorySnapshot;
 };
 
@@ -89,6 +105,7 @@ const CURRENT_OP_TYPES = new Set([
     'block:move',
     'block:delete',
     'block:meta',
+    'block:style',
     'mark',
     'split-record',
     'join-record',
@@ -137,23 +154,33 @@ export const replayHistory = (
     const limit = clampCursor(cursor, actions.length);
 
     for (const action of actions.slice(0, limit)) {
-        if (action.type === 'toggle-online') {
-            demo = toggleOnline(demo, action.editorId);
-            continue;
-        }
-
-        const current = demo[action.editorId];
-        demo = applyLocalChange(demo, {
-            editorId: action.editorId,
-            state: action.ops.length
-                ? applyMany(current.state, action.ops, annotationVirtualParents(current.state))
-                : current.state,
-            selection: action.selection,
-            ops: action.ops,
-        });
+        demo = applyHistoryActionWithoutClockAdvance(demo, action);
     }
 
     return advanceReplicaCommandClocks(demo, actions.slice(0, limit));
+};
+
+export const applyHistoryAction = (demo: DemoState, action: HistoryAction): DemoState => {
+    return advanceReplicaCommandClocks(applyHistoryActionWithoutClockAdvance(demo, action), [action]);
+};
+
+const applyHistoryActionWithoutClockAdvance = (demo: DemoState, action: HistoryAction): DemoState => {
+    if (action.type === 'replace-document') {
+        return createDemoStateFromDocument(action.document);
+    }
+    if (action.type === 'toggle-online') {
+        return toggleOnline(demo, action.editorId);
+    }
+
+    const current = demo[action.editorId];
+    return applyLocalChange(demo, {
+        editorId: action.editorId,
+        state: action.ops.length
+            ? applyMany(current.state, action.ops, richTextCrdtConfig(current.state))
+            : current.state,
+        selection: action.selection,
+        ops: action.ops,
+    });
 };
 
 export const buildHistorySnapshot = (demo: DemoState): HistorySnapshot => ({
@@ -161,13 +188,17 @@ export const buildHistorySnapshot = (demo: DemoState): HistorySnapshot => ({
     right: snapshotReplica(demo.right),
 });
 
-export const serializeHistory = (history: HistoryState): string => {
+export const serializeHistory = (
+    history: HistoryState,
+    attachments: SerializedImageAttachment[] = [],
+): string => {
     const actions = history.actions;
     const exported: ExportedHistory = {
         version: EXPORT_VERSION,
         app: EXPORT_APP,
         actions,
         keystrokes: history.keystrokes,
+        ...(attachments.length ? {attachments} : {}),
         finalSnapshot: buildHistorySnapshot(replayHistory(actions, actions.length)),
     };
     return `${JSON.stringify(exported, null, 2)}\n`;
@@ -175,7 +206,7 @@ export const serializeHistory = (history: HistoryState): string => {
 
 export const parseHistoryExport = (
     text: string,
-): {history: HistoryState} | {error: string} => {
+): {history: HistoryState; attachments: SerializedImageAttachment[]} | {error: string} => {
     let parsed: unknown;
     try {
         parsed = JSON.parse(text);
@@ -196,6 +227,8 @@ export const parseHistoryExport = (
     }
     const keystrokes = parseKeystrokes(parsed.keystrokes);
     if ('error' in keystrokes) return {error: keystrokes.error};
+    const attachments = parseAttachments(parsed.attachments);
+    if ('error' in attachments) return {error: attachments.error};
 
     if (!isSnapshot(parsed.finalSnapshot)) {
         return {error: 'Import file has an invalid final snapshot.'};
@@ -209,7 +242,10 @@ export const parseHistoryExport = (
         };
     }
 
-    return {history: {actions, cursor: actions.length, keystrokes: keystrokes.keystrokes}};
+    return {
+        history: {actions, cursor: actions.length, keystrokes: keystrokes.keystrokes},
+        attachments: attachments.attachments,
+    };
 };
 
 const clampCursor = (cursor: number, max: number) => {
@@ -225,12 +261,27 @@ const snapshotReplica = (replica: DemoState[EditorId]): ReplicaSnapshot => ({
         depth: block.depth,
         text: block.runs.map((run) => run.text).join(''),
     })),
-    deletedBlockCount: Object.values(replica.state.state.blocks).filter((block) => block.deleted).length,
+    deletedBlockCount: Object.values(replica.state.state.blocks).filter((block) => isDeleted(block)).length,
     joinCount: Object.keys(replica.state.state.joins).length,
 });
 
 const parseAction = (value: unknown): {action: HistoryAction} | {error: string} => {
     if (!isRecord(value)) return {error: 'must be an object.'};
+
+    if (value.type === 'replace-document') {
+        if (!Array.isArray(value.document)) return {error: 'replace-document document must be an array.'};
+        if (value.fixtureId !== undefined && typeof value.fixtureId !== 'string') {
+            return {error: 'replace-document fixtureId must be a string.'};
+        }
+        return {
+            action: {
+                type: 'replace-document',
+                document: value.document as ImportDocument,
+                ...(typeof value.fixtureId === 'string' ? {fixtureId: value.fixtureId} : {}),
+            },
+        };
+    }
+
     if (!isEditorId(value.editorId)) return {error: 'has an invalid editorId.'};
 
     if (value.type === 'toggle-online') {
@@ -285,6 +336,9 @@ const parseCommandInfo = (
     if (value.label !== undefined && typeof value.label !== 'string') {
         return {error: 'label must be a string.'};
     }
+    if (value.pollVote !== undefined && !isPollVoteCommandData(value.pollVote)) {
+        return {error: 'pollVote must be a valid poll vote command.'};
+    }
     const targetCommandId = typeof value.targetCommandId === 'string' ? value.targetCommandId : undefined;
     const label = typeof value.label === 'string' ? value.label : undefined;
     return {
@@ -296,9 +350,18 @@ const parseCommandInfo = (
             beforeSelection: value.beforeSelection,
             afterSelection: value.afterSelection,
             ...(label ? {label} : {}),
+            ...(value.pollVote ? {pollVote: value.pollVote} : {}),
         },
     };
 };
+
+const isPollVoteCommandData = (value: unknown): value is PollVoteCommandData =>
+    isRecord(value) &&
+    typeof value.blockId === 'string' &&
+    typeof value.userId === 'string' &&
+    value.userId.length > 0 &&
+    (value.before === undefined || isPollVote(value.before)) &&
+    isPollVote(value.after);
 
 const parseKeystrokes = (
     value: unknown,
@@ -311,6 +374,24 @@ const parseKeystrokes = (
         keystrokes.push(entry);
     }
     return {keystrokes};
+};
+
+const parseAttachments = (
+    value: unknown,
+): {attachments: SerializedImageAttachment[]} | {error: string} => {
+    if (value === undefined) return {attachments: []};
+    if (!Array.isArray(value)) return {error: 'Import file attachments must be an array.'};
+    const attachments: SerializedImageAttachment[] = [];
+    const seen = new Set<string>();
+    for (const [index, attachment] of value.entries()) {
+        if (!isSerializedImageAttachment(attachment)) {
+            return {error: `Attachment ${index} has an invalid shape.`};
+        }
+        if (seen.has(attachment.id)) return {error: `Attachment ${index} duplicates an id.`};
+        seen.add(attachment.id);
+        attachments.push(attachment);
+    }
+    return {attachments};
 };
 
 const isKeystroke = (value: unknown): value is HistoryKeystroke =>
@@ -338,8 +419,13 @@ const validateOp = (value: unknown): string | null => {
     }
     if (value.type === 'block') {
         if (!isRecord(value.block)) return 'has invalid block record.';
-        if (typeof value.block.deleted !== 'boolean') return 'block must use deleted boolean.';
+        if (value.block.deleted !== undefined && !isSerializedDeletedState(value.block.deleted)) {
+            return 'block must use deleted state.';
+        }
         if (!isBlockOrder(value.block.order)) return 'block has invalid order.';
+        if (value.block.style !== undefined && !isBlockStyle(value.block.style)) {
+            return 'block has invalid style.';
+        }
         if ('status' in value.block) return 'block uses removed status shape.';
         if (!isRichBlockMeta(value.block.meta)) {
             return 'block has invalid rich block metadata.';
@@ -349,6 +435,9 @@ const validateOp = (value: unknown): string | null => {
         if (!isRichBlockMeta(value.meta)) {
             return 'has invalid rich block metadata.';
         }
+    }
+    if (value.type === 'block:style' && !isBlockStyle(value.style)) {
+        return 'has invalid block style.';
     }
     if (value.type === 'join-record' && !isRecord(value.join)) {
         return 'has invalid join record.';
@@ -373,6 +462,28 @@ const isBlockOrderTs = (value: unknown): boolean =>
         isRecord(value[1]) &&
         typeof value[2] === 'string');
 
+const isBlockStyle = (value: unknown): boolean =>
+    isRecord(value) &&
+    Object.values(value).every(
+        (item) => isRecord(item) && isJsonValue(item.value) && typeof item.ts === 'string',
+    );
+
+const isSerializedDeletedState = (value: unknown): boolean =>
+    isRecord(value) && typeof value.value === 'boolean' && typeof value.ts === 'string';
+
+const isJsonValue = (value: unknown): boolean => {
+    if (
+        value === null ||
+        typeof value === 'string' ||
+        typeof value === 'boolean' ||
+        (typeof value === 'number' && Number.isFinite(value))
+    ) {
+        return true;
+    }
+    if (Array.isArray(value)) return value.every(isJsonValue);
+    return isRecord(value) && Object.values(value).every(isJsonValue);
+};
+
 const isRichBlockMeta = (value: unknown): value is RichBlockMeta => {
     if (!isRecord(value) || typeof value.type !== 'string' || typeof value.ts !== 'string') {
         return false;
@@ -380,8 +491,25 @@ const isRichBlockMeta = (value: unknown): value is RichBlockMeta => {
     switch (value.type) {
         case 'paragraph':
         case 'blockquote':
-        case 'table_row':
+        case 'table':
             return true;
+        case 'columns':
+            return value.display === 'blocks' || value.display === 'cards';
+        case 'slide_deck':
+            return (
+                Number.isInteger(value.width) &&
+                (value.width as number) > 0 &&
+                Number.isInteger(value.height) &&
+                (value.height as number) > 0 &&
+                isSlideDeckFooterMode(value.footer)
+            );
+        case 'slide':
+            return (
+                typeof value.showTitle === 'boolean' &&
+                isSlideTransition(value.transition)
+            );
+        case 'poll':
+            return isPollMeta(value);
         case 'heading':
             return value.level === 1 || value.level === 2 || value.level === 3;
         case 'list_item':
@@ -389,15 +517,40 @@ const isRichBlockMeta = (value: unknown): value is RichBlockMeta => {
         case 'todo':
             return typeof value.checked === 'boolean';
         case 'code':
-            return typeof value.language === 'string';
+            return (
+                typeof value.language === 'string' &&
+                (value.preview === undefined ||
+                    ((value.preview === 'mermaid' || value.preview === 'vega-lite') &&
+                        codePreviewKindForLanguage(value.language) === value.preview))
+            );
         case 'callout':
             return value.kind === 'info' || value.kind === 'warning' || value.kind === 'error';
-        case 'table':
-            return isLamport(value.rowParent);
+        case 'image':
+            return (
+                typeof value.attachmentId === 'string' &&
+                value.attachmentId.length > 0 &&
+                isImagePresentationSize(value.size)
+            );
+        case 'preview':
+            return typeof value.url === 'string' && (value.preview === null || isPreviewMetadata(value.preview));
         default:
             return false;
     }
 };
+
+const isPreviewMetadata = (value: unknown): boolean =>
+    isRecord(value) &&
+    optionalString(value.title) &&
+    optionalString(value.description) &&
+    optionalString(value.siteName) &&
+    optionalString(value.imageUrl) &&
+    optionalString(value.resolvedUrl) &&
+    optionalString(value.fetchedAt);
+
+const optionalString = (value: unknown): boolean => value === undefined || typeof value === 'string';
+
+const isImagePresentationSize = (value: unknown): boolean =>
+    value === 'small' || value === 'medium' || value === 'large' || value === 'original';
 
 const isRetainedSelectionSet = (value: unknown): value is RetainedSelectionSet => {
     if (!isRecord(value) || typeof value.primaryId !== 'string' || !Array.isArray(value.entries)) {

@@ -27,12 +27,24 @@ export default defineConfig({
                 replacement: fileURLToPath(new URL('./src/block-crdt/index.ts', import.meta.url)),
             },
             {
+                find: 'umkehr/block-crdt/branches',
+                replacement: fileURLToPath(new URL('./src/block-crdt/branches.ts', import.meta.url)),
+            },
+            {
                 find: /^umkehr\/block-richtext\/(.+)$/,
                 replacement: fileURLToPath(new URL('./src/block-richtext/$1.ts', import.meta.url)),
             },
             {
                 find: 'umkehr/block-richtext',
                 replacement: fileURLToPath(new URL('./src/block-richtext/index.ts', import.meta.url)),
+            },
+            {
+                find: 'umkehr/branches',
+                replacement: fileURLToPath(new URL('./src/branches/index.ts', import.meta.url)),
+            },
+            {
+                find: 'umkehr/crdt/branches',
+                replacement: fileURLToPath(new URL('./src/crdt/branches.ts', import.meta.url)),
             },
             {find: 'umkehr/crdt', replacement: fileURLToPath(new URL('./src/crdt/index.ts', import.meta.url))},
             {

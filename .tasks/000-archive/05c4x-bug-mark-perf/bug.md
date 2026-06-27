@@ -1,0 +1,1 @@
+examples/block-rich-text: There's some real perf issues with marks somehow. The scenario: one block with 70 words, every fifth word is bolded (14 bold marks). Typing a character takes >9ms, when without the bolds it takes <1ms.

@@ -1,7 +1,12 @@
 import {useCallback, useEffect, useMemo, useState, type FormEvent} from 'react';
 import {hlc, type CrdtUpdate} from 'umkehr/crdt';
 import type {SyncedTransport} from 'umkehr/react-crdt';
-import {createInitialCrdtHistory, type AppDefinition, type CrdtRuntime} from '../crdtApp';
+import {
+    createInitialCrdtHistory,
+    hydrateCrdtLocalHistoryForApp,
+    type AppDefinition,
+    type CrdtRuntime,
+} from '../crdtApp';
 import {useStore} from '../store';
 import {schemaFingerprint, schemaFingerprintHash} from '../local-first/schemaFingerprint';
 import {
@@ -42,6 +47,11 @@ import type {
     ServerSync,
     ServerUser,
 } from './types';
+import {
+    initialArtifactsForStore,
+    loadSerializedArtifacts,
+    serializedArtifactsForStore,
+} from '../artifacts';
 
 type Loaded<TState> = {
     identity: ServerSessionIdentity;
@@ -337,12 +347,21 @@ function ServerReadyApp<TState, EphemeralData>({
                     schemaFingerprint,
                     schemaFingerprintHash,
                     exportedBy: {actor: loaded.identity.actor},
-                    payload: {kind: 'server', replica: sync.exportReplica() as any},
+                    payload: {
+                        kind: 'server',
+                        replica: sync.exportReplica() as any,
+                        artifacts: sync.exportReplica().artifacts ?? serializedArtifactsForStore(app.artifacts),
+                    },
                 };
             },
             async importArchive(archive: DocumentArchive) {
                 assertArchiveForApp(archive, app as any, 'server');
                 const replica = archive.payload.replica as PersistedServerReplica<TState>;
+                const artifacts =
+                    archive.payload.artifacts ??
+                    replica.artifacts ??
+                    serializedArtifactsForStore(app.artifacts);
+                loadSerializedArtifacts(app.artifacts, artifacts);
                 if (replica.appId && replica.appId !== app.id) {
                     throw new Error('Archive server replica belongs to another app.');
                 }
@@ -354,7 +373,10 @@ function ServerReadyApp<TState, EphemeralData>({
                         if (event.kind === 'update') validateCrdtUpdatesForApp([event.update], app);
                     }
                 }
-                const normalized = {...replica, appId: app.id, storageVersion: 4 as const};
+                const normalized = hydrateServerReplica(
+                    {...replica, appId: app.id, storageVersion: 4 as const, artifacts},
+                    app,
+                );
                 await saveServerReplica(normalized);
                 sync.replaceReplica(normalized);
                 onSwitchDocument(archive.docId);
@@ -420,6 +442,7 @@ function ServerReadyApp<TState, EphemeralData>({
                         mirrored: true,
                     },
                 },
+                artifacts: initialArtifactsForStore(app.artifacts),
                 updatedAt: now,
             });
             await refreshDocuments();
@@ -433,6 +456,7 @@ function ServerReadyApp<TState, EphemeralData>({
             await saveServerReplica({
                 ...createServerClientSeedReplica({fixture, scenario: 'cached'}),
                 title: fixture.title || fixture.docId,
+                artifacts: initialArtifactsForStore(app.artifacts),
             });
             await refreshDocuments();
         },
@@ -769,7 +793,9 @@ async function loadInitialState<TState>(
 ): Promise<Loaded<TState>> {
     const persisted = await loadServerReplica<TState>(docId);
     if (persisted) {
-        const normalized = normalizeServerReplica(persisted);
+        const normalized = hydrateServerReplica(normalizeServerReplica(persisted), app);
+        normalized.artifacts ??= serializedArtifactsForStore(app.artifacts);
+        loadSerializedArtifacts(app.artifacts, normalized.artifacts);
         normalized.appId ||= app.id;
         if (normalized.schemaFingerprintHash === fingerprintHash) {
             if (normalized.appId !== app.id)
@@ -829,6 +855,7 @@ async function loadInitialState<TState>(
                 mirrored: true,
             },
         },
+        artifacts: initialArtifactsForStore(app.artifacts),
         updatedAt: now,
     };
     await saveServerReplica(replica);
@@ -836,6 +863,25 @@ async function loadInitialState<TState>(
         identity,
         replica,
         source: 'created',
+    };
+}
+
+function hydrateServerReplica<TState>(
+    replica: PersistedServerReplica<TState>,
+    app: AppDefinition<TState, any>,
+): PersistedServerReplica<TState> {
+    return {
+        ...replica,
+        artifacts: replica.artifacts ?? serializedArtifactsForStore(app.artifacts),
+        branches: Object.fromEntries(
+            Object.entries(replica.branches).map(([branchId, branch]) => [
+                branchId,
+                {
+                    ...branch,
+                    history: hydrateCrdtLocalHistoryForApp(branch.history, app),
+                },
+            ]),
+        ) as PersistedServerReplica<TState>['branches'],
     };
 }
 
@@ -917,6 +963,7 @@ function summaryForServerReplica(replica: PersistedServerReplica<unknown>): Serv
             (count, branch) => count + branch.events.length,
             0,
         ),
+        artifacts: replica.artifacts,
     };
 }
 

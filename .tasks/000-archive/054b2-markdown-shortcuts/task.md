@@ -1,0 +1,1 @@
+examples/block-rich-text: let's support markdown shortcuts for making lists. so `- ` at the start of a paragraph should turn it into a bullet point and delete the `- `, same with `* `. `1. ` should make a numbered list, and `[ ] ` should make a todo.

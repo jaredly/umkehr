@@ -1,5 +1,6 @@
 import {openDB, type DBSchema, type IDBPDatabase} from 'idb';
 import type {PersistedServerReplica, PersistedServerUser, ServerBranchEvent, ServerUser} from './types';
+import {cloneSerializableCrdtLocalHistory} from '../crdtApp';
 
 const DB_NAME = 'umkehr-react-crdt-server-sync';
 const DB_VERSION = 4;
@@ -52,7 +53,7 @@ export async function loadServerReplica<TState>(
 
 export async function saveServerReplica<TState>(replica: PersistedServerReplica<TState>) {
     const db = await openServerSyncDb();
-    await db.put('replicas', replica as PersistedServerReplica<unknown>, replica.docId);
+    await db.put('replicas', serializableServerReplica(replica), replica.docId);
 }
 
 export async function deleteServerReplica(docId: string) {
@@ -110,6 +111,23 @@ function openServerSyncDb() {
         'Timed out opening server replica storage. Close other Umkehr example tabs and reload.',
     );
     return dbPromise;
+}
+
+function serializableServerReplica<TState>(
+    replica: PersistedServerReplica<TState>,
+): PersistedServerReplica<unknown> {
+    return {
+        ...replica,
+        branches: Object.fromEntries(
+            Object.entries(replica.branches).map(([branchId, branch]) => [
+                branchId,
+                {
+                    ...branch,
+                    history: cloneSerializableCrdtLocalHistory(branch.history),
+                },
+            ]),
+        ) as PersistedServerReplica<unknown>['branches'],
+    };
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {

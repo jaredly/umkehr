@@ -3,3 +3,6 @@ dist
 !.tasks
 *.sqlite
 .pnpm-store
+.env
+.env.*
+!.env.example

@@ -1,5 +1,6 @@
 import {lamportToString, parseLamportString} from './ids.js';
 import {compareLseqIds} from './lseq.js';
+import {isDeleted} from './deletion.js';
 import {Cache, CachedState, Char, Lamport, TimestampedBlockMeta} from './types.js';
 import {
     ROOT_ID,
@@ -69,7 +70,7 @@ export const charToString = <M extends TimestampedBlockMeta>(state: CachedState<
     const char = charRecord(state, id);
     if (!char) return '';
     return (
-        (char.deleted ? '' : char.text) +
+        (isDeleted(char) ? '' : char.text) +
         (state.cache.charContents[id]?.map((id) => charToString(state, id)).join('') ?? '')
     );
 };
@@ -79,7 +80,7 @@ export const stateToString = <M extends TimestampedBlockMeta>(state: CachedState
     const {blockChildren, charContents} = state.cache;
     const showBlock = (id: string): string[] => {
         const block = blocks[id];
-        if (block.deleted) {
+        if (isDeleted(block)) {
             return [];
         }
         const symbol = {paragraph: ' ', bullets: '•', checkboxes: '☐', blockquote: '|'}[
@@ -116,14 +117,14 @@ export const charRecord = <M extends TimestampedBlockMeta>(
     return {
         id: join.right,
         text: '',
-        deleted: true,
+        deleted: {value: true, ts: join.ts},
         parent: {id: join.tail, ts: join.ts},
     };
 };
 
 const visibleBlock = <M extends TimestampedBlockMeta>(state: CachedState<M>, id: string): boolean => {
     const block = state.state.blocks[id];
-    return Boolean(block && !block.deleted && !state.cache.joinedBlocks[id]);
+    return Boolean(block && !isDeleted(block) && !state.cache.joinedBlocks[id]);
 };
 
 export const visibleBlockChildren = <M extends TimestampedBlockMeta>(
@@ -138,6 +139,12 @@ export type VisibleBlockOutlineEntry = {
     id: string;
     depth: number;
     parentId: string;
+};
+
+export type VisibleSiblingAnchors = {
+    parent: Lamport;
+    before: Lamport | null;
+    after: Lamport | null;
 };
 
 export const visibleBlockOutline = <M extends TimestampedBlockMeta>(
@@ -188,7 +195,7 @@ export const visiblePathForBlockId = <M extends TimestampedBlockMeta>(
     config: VirtualBlockParentConfig<M> = {},
 ): VisibleBlockPath | null => {
     const target = state.state.blocks[blockId];
-    if (!target || target.deleted || state.cache.joinedBlocks[blockId]) {
+    if (!target || isDeleted(target) || state.cache.joinedBlocks[blockId]) {
         return null;
     }
     const visit = (parentId: string, path: number[]): VisibleBlockPath | null => {
@@ -213,7 +220,7 @@ export const visibleSiblingAnchorsForPath = <M extends TimestampedBlockMeta>(
     state: CachedState<M>,
     path: VisibleBlockPath,
     config: VirtualBlockParentConfig<M> = {},
-): {parent: Lamport; before: Lamport | null; after: Lamport | null} | null => {
+): VisibleSiblingAnchors | null => {
     validateVisiblePath(path);
     if (path.length === 0) return null;
     const parentPath = path.slice(0, -1);
@@ -233,6 +240,20 @@ export const visibleSiblingAnchorsForPath = <M extends TimestampedBlockMeta>(
         before: beforeId ? state.state.blocks[beforeId].id : null,
         after: afterId ? state.state.blocks[afterId].id : null,
     };
+};
+
+export const visibleSiblingAnchorsForBlock = <M extends TimestampedBlockMeta>(
+    state: CachedState<M>,
+    blockId: string,
+    config: VirtualBlockParentConfig<M> = {},
+): VisibleSiblingAnchors | null => {
+    const path = visiblePathForBlockId(state, blockId, config);
+    if (!path) return null;
+    return visibleSiblingAnchorsForPath(
+        state,
+        [...path.slice(0, -1), path[path.length - 1] + 1],
+        config,
+    );
 };
 
 const actualParentForSiblingSlot = <M extends TimestampedBlockMeta>(
@@ -323,7 +344,7 @@ export const orderedCharIdsForBlock = <M extends TimestampedBlockMeta>(
     const visit = (id: string) => {
         const char = charRecord(state, id);
         if (!char) return;
-        if (!options.visibleOnly || !char.deleted) {
+        if (!options.visibleOnly || !isDeleted(char)) {
             result.push(id);
         }
         for (const child of state.cache.charContents[id] ?? []) {
@@ -462,7 +483,7 @@ const resolveCharPointInBlocks = <M extends TimestampedBlockMeta>(
                 };
             }
             const char = charRecord(state, charId);
-            if (char && !char.deleted) visibleOffset++;
+            if (char && !isDeleted(char)) visibleOffset++;
         }
     }
     return null;
@@ -470,7 +491,7 @@ const resolveCharPointInBlocks = <M extends TimestampedBlockMeta>(
 
 const visibleCount = <M extends TimestampedBlockMeta>(state: CachedState<M>, charId: string) => {
     const char = charRecord(state, charId);
-    return char && !char.deleted ? 1 : 0;
+    return char && !isDeleted(char) ? 1 : 0;
 };
 
 const validateVisiblePath = (path: VisibleBlockPath) => {

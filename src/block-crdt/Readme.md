@@ -71,9 +71,9 @@ Characters form parent-linked trees rooted at block ids. Blocks carry:
 - `id`: stable Lamport id.
 - `meta`: app-defined metadata with at least a lexicographically sortable `ts`.
 - `order`: LSEQ sibling position plus a materialized block path.
-- `deleted`: tombstone flag.
+- `deleted`: optional LWW visibility state, `{value: boolean; ts: HLC}`.
 
-Deletes are tombstones. Deleted chars and blocks remain in state so concurrent and out-of-order ops can still resolve against stable ids.
+Deleted chars and blocks remain in state so concurrent and out-of-order ops can still resolve against stable ids. A missing `deleted` field means visible. A newer `deleted: {value: false, ts}` restores the same char or block id.
 
 ## Operation Format
 
@@ -98,9 +98,9 @@ The public helpers return related `Op[]` batches. They do not introduce a transa
 
 ```ts
 insertTextOps(state, {actor, block, offset, text, ts});
-deleteRangeOps(state, {block, startOffset, endOffset});
+deleteRangeOps(state, {block, startOffset, endOffset, ts});
 insertBlockOps(state, {actor, parent, before, after, meta, ts, options});
-deleteBlockOps(state, {block, mode});
+deleteBlockOps(state, {block, mode, ts});
 splitBlockOps(state, {actor, block, offset, ts, options});
 joinBlocksOps(state, {actor, left, right, ts});
 moveBlockOps(state, {actor, block, parent, before, after, ts, options});
@@ -114,7 +114,7 @@ Offsets are visible text offsets inside a visible block. Text insertion uses `In
 
 `insertBlockOps` creates a visible block under a visible parent between adjacent visible sibling anchors. Use `visibleSiblingAnchorsForPath` when an editor reports insertion positions as `number[]` paths.
 
-`deleteBlockOps` defaults to `mode: 'block-only'`: the target block is tombstoned, its own text disappears, and visible descendants are spliced into the nearest visible ancestor by traversal. Use `mode: 'subtree'` to tombstone the target and all currently visible descendants.
+`deleteRangeOps` and `deleteBlockOps` write timestamped visibility ops. `deleteBlockOps` defaults to `mode: 'block-only'`: the target block is hidden, its own text disappears, and visible descendants are spliced into the nearest visible ancestor by traversal. Use `mode: 'subtree'` to hide the target and all currently visible descendants.
 
 `moveBlockOps` takes a visible logical parent. Hidden deleted/joined parents are not public move targets. If a hidden block has visible descendants, those descendants are treated as logical children of the nearest visible ancestor for `visibleBlockChildren`, `visibleBlockOutline`, and move placement.
 
@@ -222,6 +222,8 @@ type CustomMeta = {ts: string; kind: 'task'; priority: number};
 
 `State<M>`, `CachedState<M>`, `Block<M>`, and `Op<M>` carry the metadata type. `block:meta` conflict resolution compares `meta.ts`.
 
+Blocks also carry a generic `style` object. Each style attribute is stored as `{value, ts}` and merged independently with last-writer-wins semantics, so callers can update one style key without overwriting concurrent updates to another key.
+
 The default metadata union supports the demo editor:
 
 - paragraph
@@ -238,13 +240,14 @@ The CRDT algorithms do not depend on those variants.
 Supported inverses:
 
 - inserted chars become `char:delete` ops,
+- char and block deletion become newer restore visibility ops for the original ids,
 - block moves become newer `block:move` ops to the previous order/path,
 - block metadata changes become newer `block:meta` ops with previous metadata,
 - additive marks become newer remove marks over the same anchors.
 
 The planner returns `{complete, ops, unsupported}`. Apply `ops` automatically only when `complete` is true.
 
-Unsupported cases include char/block deletion, removed-mark undo without previous winning mark data, split records, and join records. Those require either future resurrection/unjoin operations or higher-level editor-specific inverse planning.
+Unsupported cases include removed-mark undo without previous winning mark data, split records, and join records. Joins are still represented by immutable join records; undoing a join without replacement blocks needs a separate reversible join story.
 
 ## Performance Expectations
 

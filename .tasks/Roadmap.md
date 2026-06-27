@@ -1,6 +1,23 @@
 
-- strikethrough
-- links
+collaborative jigsaw puzzle!!!!!
+- could the amount of wavyness of the edges be a perlin noise function?
+- also it could be a geometri art goodness
+- or like those lizards? or turtles? or the fish -> bird thing idk
+
+trello
+whiteboard
+drawboard
+...
+the history/branch trappings I built for umkehr/crdt seem like they'd be just as applicable to block rich text.
+I wonder if I can .. separate them? so that they can work with any crdt.
+
+it would be cool to be able to have block-rich-text be the root (with maybe some umkehr/json as specialized block contents), or the other way around.
+
+
+##
+
+- [x] strikethrough
+- [x] links
 
 
 
@@ -68,3 +85,10 @@ Ok I've answered questions inline.
 Can you write up a plan.md detailing what needs to be done? Split it up into logical phases if helpful.
 
 Ok, go ahead and implement phase by phase, keeping a concise log of your progress in implementation-log.md. Be sure to call out any issues, workarounds or bugs encountered.
+
+
+Are there any other api changes to src/block-crdt that would make this implementation cleaner?
+
+
+
+        `${fullName}: can you look at [@bug.md](file://${process.cwd()}/${dir}/bug.md) and create a failing repro test? If you get stuck, stop and ask for more information, but otherwise you can proceed with a fix.`,

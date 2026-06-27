@@ -2,6 +2,8 @@ import {openDB, type DBSchema, type IDBPDatabase} from 'idb';
 import type {CrdtLocalHistory, CrdtUpdate} from 'umkehr/crdt';
 import type {LocalDocumentSummary} from '../documentArchive';
 import type {TransportState} from './useLocalDemoSync';
+import {cloneSerializableCrdtLocalHistory} from '../crdtApp';
+import type {SerializedArtifact} from '../artifacts';
 
 const DB_NAME = 'umkehr-react-crdt-local-simulator-documents-v2';
 const DB_VERSION = 2;
@@ -17,6 +19,7 @@ export type PersistedLocalSimulatorDocument<TState> = {
         syncEnabled: boolean;
         outbox: Record<string, CrdtUpdate[]>;
     };
+    artifacts?: SerializedArtifact[];
     createdAt: string;
     updatedAt: string;
 };
@@ -40,7 +43,19 @@ export async function saveLocalSimulatorDocument<TState>(
     document: PersistedLocalSimulatorDocument<TState>,
 ) {
     const db = await openLocalSimulatorDb();
-    await db.put('documents', document as PersistedLocalSimulatorDocument<unknown>, document.docId);
+    await db.put(
+        'documents',
+        {
+            ...document,
+            replicas: Object.fromEntries(
+                Object.entries(document.replicas).map(([replicaId, history]) => [
+                    replicaId,
+                    cloneSerializableCrdtLocalHistory(history as CrdtLocalHistory<unknown>),
+                ]),
+            ) as Record<string, CrdtLocalHistory<TState>>,
+        } as PersistedLocalSimulatorDocument<unknown>,
+        document.docId,
+    );
 }
 
 export async function listLocalSimulatorDocumentSummaries(): Promise<LocalDocumentSummary[]> {

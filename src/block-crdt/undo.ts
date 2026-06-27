@@ -1,7 +1,9 @@
 import {compareLamports, lamportToString} from './ids.js';
+import {isDeleted} from './deletion.js';
 import {findTail, orderedCharIdsForBlock, charRecord} from './traversal.js';
 import {
     Block,
+    BlockStylePatch,
     CachedState,
     Char,
     DefaultBlockMeta,
@@ -48,13 +50,13 @@ export const planUndoOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
             case 'char': {
                 const id = lamportToString(op.char.id);
                 const currentChar = current.state.chars[id];
-                if (currentChar && !currentChar.deleted) {
-                    ops.push({type: 'char:delete', id: op.char.id});
+                if (currentChar && !isDeleted(currentChar)) {
+                    ops.push({type: 'char:delete', id: op.char.id, deleted: {value: true, ts: nextTs()}});
                     break;
                 }
                 const replacement = replacementCharForInsertedChar(before, current, op.char);
                 if (replacement) {
-                    ops.push({type: 'char:delete', id: replacement.id});
+                    ops.push({type: 'char:delete', id: replacement.id, deleted: {value: true, ts: nextTs()}});
                 }
                 break;
             }
@@ -74,10 +76,19 @@ export const planUndoOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
                 });
                 break;
             }
-            case 'char:delete':
-                restoreDeletedChar(before, op.id, nextId, replacements, ops) ||
-                    reject(op, 'char delete undo requires the deleted char in the previous state');
+            case 'char:delete': {
+                const beforeChar = before.state.chars[lamportToString(op.id)];
+                if (!beforeChar) {
+                    reject(op, 'char delete undo requires the char in the previous state');
+                    break;
+                }
+                ops.push({
+                    type: 'char:delete',
+                    id: op.id,
+                    deleted: {value: isDeleted(beforeChar), ts: nextTs()},
+                });
                 break;
+            }
             case 'block': {
                 const id = lamportToString(op.block.id);
                 if (before.state.blocks[id]) {
@@ -85,8 +96,8 @@ export const planUndoOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
                     break;
                 }
                 const currentBlock = current.state.blocks[id];
-                if (currentBlock && !currentBlock.deleted) {
-                    ops.push({type: 'block:delete', id: op.block.id});
+                if (currentBlock && !isDeleted(currentBlock)) {
+                    ops.push({type: 'block:delete', id: op.block.id, deleted: {value: true, ts: nextTs()}});
                 }
                 break;
             }
@@ -103,10 +114,19 @@ export const planUndoOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
                 });
                 break;
             }
-            case 'block:delete':
-                restoreDeletedBlock(before, op.id, nextId, ops) ||
-                    reject(op, 'block delete undo requires the deleted block in the previous state');
+            case 'block:delete': {
+                const beforeBlock = before.state.blocks[lamportToString(op.id)];
+                if (!beforeBlock) {
+                    reject(op, 'block delete undo requires the block in the previous state');
+                    break;
+                }
+                ops.push({
+                    type: 'block:delete',
+                    id: op.id,
+                    deleted: {value: isDeleted(beforeBlock), ts: nextTs()},
+                });
                 break;
+            }
             case 'block:meta': {
                 const beforeBlock = before.state.blocks[lamportToString(op.id)];
                 if (!beforeBlock) {
@@ -118,6 +138,22 @@ export const planUndoOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
                     id: op.id,
                     meta: {...beforeBlock.meta, ts: nextTs()} as M,
                 });
+                break;
+            }
+            case 'block:style': {
+                const beforeBlock = before.state.blocks[lamportToString(op.id)];
+                if (!beforeBlock) {
+                    reject(op, 'block style undo requires the previous block style');
+                    break;
+                }
+                const style: BlockStylePatch = {};
+                for (const key of Object.keys(op.style)) {
+                    style[key] = beforeBlock.style[key] ?? {value: null, ts: nextTs()};
+                    if (beforeBlock.style[key]) {
+                        style[key] = {...beforeBlock.style[key], ts: nextTs()};
+                    }
+                }
+                ops.push({type: 'block:style', id: op.id, style});
                 break;
             }
             case 'mark':
@@ -173,7 +209,7 @@ const replacementCharForInsertedChar = <M extends TimestampedBlockMeta>(
 ): Char | null => {
     for (const candidate of Object.values(current.state.chars)) {
         const candidateId = lamportToString(candidate.id);
-        if (candidate.deleted || candidateId === lamportToString(inserted.id)) continue;
+        if (isDeleted(candidate) || candidateId === lamportToString(inserted.id)) continue;
         if (before.state.chars[candidateId]) continue;
         if (candidate.text !== inserted.text) continue;
         if (!sameLamport(candidate.parent.id, inserted.parent.id)) continue;
@@ -251,7 +287,7 @@ const restoreBlockWithVisibleText = <M extends TimestampedBlockMeta>(
     let parent = id;
     for (const charId of orderedCharIdsForBlock(before, lamportToString(beforeBlock.id), {visibleOnly: true})) {
         const char = charRecord(before, charId);
-        if (!char || char.deleted) continue;
+        if (!char || isDeleted(char)) continue;
         const replacement = nextId();
         ops.push(charInsertOp(char.text, replacement, parent));
         parent = replacement;
@@ -273,7 +309,7 @@ const freshBlockOp = <M extends TimestampedBlockMeta>(
             path: [...beforeBlock.order.path.slice(0, -1), id],
             ...(ts ? {ts} : {}),
         },
-        deleted: false,
+        deleted: undefined,
     },
 });
 
@@ -286,7 +322,7 @@ const charInsertOp = <M extends TimestampedBlockMeta>(
     char: {
         id,
         text,
-        deleted: false,
+        deleted: undefined,
         parent: {id: parent, ts: ''},
     },
 });
@@ -316,7 +352,7 @@ const remapMarksForRestoredChars = <M extends TimestampedBlockMeta>(
     for (const mark of Object.values(current.state.marks)) {
         if (mark.remove) continue;
         const start = replacements.get(lamportToString(mark.start.id));
-        const end = replacements.get(lamportToString(mark.end.id));
+        const end = mark.end ? replacements.get(lamportToString(mark.end.id)) : undefined;
         if (!start && !end) continue;
         ops.push({
             type: 'mark',
@@ -324,7 +360,7 @@ const remapMarksForRestoredChars = <M extends TimestampedBlockMeta>(
                 ...mark,
                 id: nextId(),
                 start: start ? {...mark.start, id: start} : mark.start,
-                end: end ? {...mark.end, id: end} : mark.end,
+                ...(mark.end ? {end: end ? {...mark.end, id: end} : mark.end} : {}),
             },
         });
     }
@@ -339,7 +375,8 @@ const hasMarksToRemap = <M extends TimestampedBlockMeta>(
     return Object.values(current.state.marks).some(
         (mark) =>
             !mark.remove &&
-            (replacements.has(lamportToString(mark.start.id)) || replacements.has(lamportToString(mark.end.id))),
+            (replacements.has(lamportToString(mark.start.id)) ||
+                (mark.end ? replacements.has(lamportToString(mark.end.id)) : false)),
     );
 };
 
@@ -363,7 +400,9 @@ const reparentRestoredChars = <M extends TimestampedBlockMeta>(
     return ops;
 };
 
-const sameBoundary = (one: Mark['start'], two: Mark['start']) =>
-    one.at === two.at && lamportToString(one.id) === lamportToString(two.id);
+const sameBoundary = (one: Mark['start'] | undefined, two: Mark['start'] | undefined) =>
+    one === undefined || two === undefined
+        ? one === two
+        : one.at === two.at && lamportToString(one.id) === lamportToString(two.id);
 
 const sameLamport = (one: Lamport, two: Lamport) => one[0] === two[0] && one[1] === two[1];

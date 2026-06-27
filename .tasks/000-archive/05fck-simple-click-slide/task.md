@@ -1,0 +1,1 @@
+examples/block-rich-text: in presentation mode of a slide deck, when clicking the 'background' of a slide, selection should go to the slide itself as a block selection (to allow for navigating with arrow keys)

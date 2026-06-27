@@ -1,0 +1,41 @@
+# Implementation Log
+
+## 2026-06-24
+
+- Started implementation from `plan.md`.
+- Confirmed current code has separate generic block dragging (`useBlockReorder.ts`) and table-cell dragging (`TableBlock` in `App.tsx`).
+- Beginning with command-layer helpers and focused tests so the table movement semantics are pinned before UI wiring.
+- Added command-layer target types and helpers:
+  - `moveTableCellsToNewRow`
+  - `moveTableCellsOutAsBlocks`
+  - `moveCellRectangleOutToNewTable`
+  - `moveBlockToTableCellSlot`
+- Added focused command tests for compact new rows, preserving metadata/children when moving cells out, rectangle-to-new-table movement, and missing cell slots.
+- Ran `npm exec vitest -- run examples/block-rich-text/src/blockCommands.test.ts`: passed.
+- Generalized `TableBlock` cell-drag target state to support:
+  - existing cell-slot drops
+  - row-gap drops, which create compact rows with exactly the dragged cells
+  - block-slot drops outside the table, including rectangular selections becoming a new table
+- Extended generic block dragging with table-cell-slot commands so outside blocks can target vertical cell boundaries and missing table cell slots.
+- Added UI tests for dragging a normal block into a table cell boundary and dragging a selected cell into a row gap.
+- Issue encountered: jsdom does not always provide `document.elementsFromPoint`; the first App test run showed generic block drag regressions because the new table-cell resolver threw before normal row targeting could run.
+- Workaround/fix: guard all new hit-testing paths with `typeof document.elementsFromPoint === 'function'` and fall back to existing row/block geometry when unavailable.
+- Ran `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx`: passed.
+- Re-ran `npm exec vitest -- run examples/block-rich-text/src/blockCommands.test.ts`: passed.
+- Ran `npm --prefix examples/block-rich-text run build`: passed. Vite emitted its existing-style chunk-size warning for a >500 kB bundle.
+- Follow-up bug from manual testing: dragging cells out of a table showed no normal-block drop target and did not reliably drop outside.
+- Root causes:
+  - cell-drag-out block targeting only used `elementsFromPoint` against `[data-block-id]`, so it missed normal `.blockRow` padding/containers.
+  - the outside block drop target was local to `TableBlock`, so normal blocks outside the table could not render the existing drop indicator.
+  - row-gap detection treated any pointer below the last table row as an in-table row drop, masking outside targets.
+  - the first lifted-indicator implementation cleared the target in the `useLayoutEffect` cleanup after each cell drag state update.
+- Fixes:
+  - lifted cell-drag block-slot indicators into `BlockEditor` context so outside blocks render `dropBefore/dropAfter`.
+  - added a block-row geometry fallback for cell-drag-out target resolution.
+  - constrained row-gap hit testing to a small band around row boundaries.
+  - kept explicit pointer-up/cancel cleanup, but stopped clearing the lifted target on every effect cleanup.
+  - added a regression test for dragging a selected table cell out to a normal block drop target.
+- Verification after follow-up:
+  - `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx`: passed.
+  - `npm exec vitest -- run examples/block-rich-text/src/blockCommands.test.ts`: passed.
+  - `npm --prefix examples/block-rich-text run build`: passed with the existing Vite chunk-size warning.

@@ -13,9 +13,11 @@ import {
     createCrdtDocument,
     createCrdtLocalHistory,
     hlc,
+    leafPluginDescriptor,
     type LeafCrdtPluginAny,
     type CrdtMeta,
     type CrdtLocalHistory,
+    type CrdtDocument,
     type CrdtPathSegment,
     type HlcTimestamp,
 } from 'umkehr/crdt';
@@ -28,6 +30,7 @@ import type {
 } from 'umkehr/react-crdt';
 import type {StatusStore} from 'umkehr';
 import type {ReactElement} from 'react';
+import type {ArtifactStore} from './artifacts';
 
 export type GridSlot = 'left' | 'right';
 
@@ -135,6 +138,7 @@ export type AppDefinition<
     validateState(input: unknown): IValidation<TState>;
     initialState: TState;
     initialTimestamp?: HlcTimestamp;
+    artifacts?: ArtifactStore;
     renderPanel(props: AppPanelProps<TState, EphemeralData, Extensions>): ReactElement;
 };
 
@@ -175,6 +179,56 @@ export function createInitialCrdtHistory<TState, EphemeralData = never>(
             leafPlugins: app.leafPlugins,
         }),
     );
+}
+
+export function cloneSerializableCrdtLocalHistory<TState>(
+    history: CrdtLocalHistory<TState>,
+): CrdtLocalHistory<TState> {
+    return {
+        base: cloneSerializableCrdtDocument(history.base),
+        doc: cloneSerializableCrdtDocument(history.doc),
+        updates: structuredClone(history.updates),
+    };
+}
+
+export function hydrateCrdtLocalHistoryForApp<TState, EphemeralData = never>(
+    history: CrdtLocalHistory<TState>,
+    app: AppDefinition<TState, EphemeralData, readonly LeafBuilderExtensionAny[]>,
+): CrdtLocalHistory<TState> {
+    const schema = appSchemaContext(app);
+    return {
+        base: {...history.base, schema},
+        doc: {...history.doc, schema},
+        updates: history.updates,
+    };
+}
+
+function cloneSerializableCrdtDocument<TState>(doc: CrdtDocument<TState>): CrdtDocument<TState> {
+    return {
+        state: structuredClone(doc.state),
+        meta: structuredClone(doc.meta),
+        pending: structuredClone(doc.pending),
+        schema: {
+            root: structuredClone(doc.schema.root),
+            components: structuredClone(doc.schema.components),
+            tagKey: doc.schema.tagKey,
+            leafPlugins: {},
+            requiredLeafPlugins: structuredClone(
+                doc.schema.requiredLeafPlugins.length
+                    ? doc.schema.requiredLeafPlugins
+                    : Object.values(doc.schema.leafPlugins).map(leafPluginDescriptor),
+            ),
+        },
+    };
+}
+
+function appSchemaContext<TState, EphemeralData = never>(
+    app: AppDefinition<TState, EphemeralData, readonly LeafBuilderExtensionAny[]>,
+) {
+    return createCrdtDocument(app.initialState, app.schema, {
+        timestamp: app.initialTimestamp ?? defaultInitialTimestamp,
+        leafPlugins: app.leafPlugins,
+    }).schema;
 }
 
 export function createInitialHistory<TState, TAnnotations = never>(

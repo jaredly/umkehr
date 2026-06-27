@@ -1,6 +1,7 @@
 import type {CrdtLocalHistory, CrdtUpdate, HlcTimestamp} from 'umkehr/crdt';
 import type {StatusStore, SyncedTransport} from 'umkehr/react-crdt';
 import type {ExternalStore} from '../store';
+import type {ArtifactManifestEntry, SerializedArtifact} from '../artifacts';
 
 export type ServerUser = {
     userId: string;
@@ -20,6 +21,7 @@ export type ServerDocumentSummary = {
     lastAccessedAt: string;
     branchCount: number;
     eventCount: number;
+    artifacts?: ArtifactManifestEntry[];
 };
 
 export type PersistedServerUser = ServerUser & {
@@ -165,6 +167,7 @@ export type PersistedServerReplica<TState> = {
     branches: Record<string, PersistedServerBranch<TState>>;
     branchList: ServerBranch[];
     staleMergeReview?: PersistedServerStaleReview;
+    artifacts?: SerializedArtifact[];
     updatedAt: string;
 };
 

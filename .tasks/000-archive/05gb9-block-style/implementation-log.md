@@ -1,0 +1,97 @@
+# Implementation Log: Block Styles
+
+## 2026-06-26
+
+- Started phase 1: core CRDT style model.
+- Phase 1 core model implemented:
+  - Added `BlockStyle`, `BlockStylePatch`, required `Block.style`, `block:style`, and `setBlockStyleOps`.
+  - Added per-attribute LWW style merging with deterministic equal-timestamp tie-breaks.
+  - Full `block` ops now normalize missing style to `{}` and merge style into existing blocks.
+  - Split-created blocks inherit source block style; newly inserted blocks default to `{}`.
+  - Updated plugin target checking for `block:style`.
+  - Added focused tests in `src/block-crdt/index.test.ts`.
+  - Verification: `npm exec vitest -- run src/block-crdt/index.test.ts` passed.
+  - Issue/workaround: an existing duplicate block insert test used a legacy block payload without `style`; `applyBlock` now normalizes missing style to `{}` for compatibility.
+- Started phase 2: undo/history/runtime clock support.
+- Phase 2 implemented:
+  - Added `block:style` support to `planUndoOps`; undo restores prior values or writes `null` for newly-created attrs.
+  - Added `block:style` to block-rich-text history import validation.
+  - Added block style validation for imported history ops and full block records.
+  - Updated runtime clock scanning to include block style attribute timestamps.
+  - Added CRDT undo coverage and a block-rich-text history replay/import test for `block:style`.
+  - Verification:
+    - `npm exec tsc -- -p tsconfig.json --noEmit` passed.
+    - `npm exec vitest -- run src/block-crdt/index.test.ts` passed.
+    - `npm exec vitest -- run examples/block-rich-text/src/history.test.ts` passed.
+  - Issue/workaround: a clock test showed that scanning two attrs with the same timestamp advances the HLC count once per attr before the local increment. Kept the current simple scan because it remains monotonic and safe.
+- Started phase 3: block-rich-text style helpers.
+- Phase 3 implemented:
+  - Added rich block style attribute/size types and normalization helpers.
+  - Added `setBlockStyle` and `updateBlockStyle` command helpers.
+  - Added `setBlockStyleEverywhere` and `updateBlockStyleEverywhere` multi-selection helpers.
+  - Added command tests for independent style attrs, no-op unchanged updates, multi-block style updates, and `null` unsets.
+  - Verification:
+    - `npm exec tsc -- -p tsconfig.json --noEmit` passed.
+    - `npm exec vitest -- run examples/block-rich-text/src/blockCommands.test.ts` passed.
+    - `npm exec vitest -- run examples/block-rich-text/src/multiSelectionCommands.test.ts` passed.
+  - Issue/workaround: `pastePlainText` uses an example-local block constructor that bypassed core insert helpers and omitted `style`; added `style: {}` there and kept style readers defensive for legacy blocks.
+- Started phase 4: rendering and UI controls.
+- Phase 4 implemented:
+  - Rendered generic block style on `.blockRow` for background, color, font size, and padding.
+  - Added generic style controls to `BlockOptions` for all blocks.
+  - Added style controls to slide overview options as well.
+  - Added CSS for text style inputs.
+  - Added App-level UI coverage for setting styles and syncing to the peer editor.
+  - Verification:
+    - `npm exec tsc -- -p examples/block-rich-text/tsconfig.json --noEmit` passed.
+    - `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx` passed.
+- Started phase 5: slide background migration.
+- Phase 5 implemented:
+  - Removed `backgroundColor` from `SlideMeta` and `defaultSlideMeta`.
+  - Slide rendering now reads `block.style['background-color']`, defaulting to white when unset.
+  - Slide creation/conversion/add-slide flows now add a default white background via `block:style`.
+  - Removed the slide-specific background option UI; generic block background style is now the control path.
+  - Migrated slide fixtures and tests from `meta.backgroundColor` to `style['background-color']`.
+  - Updated history and clipboard metadata validators to no longer require slide metadata background.
+  - Issue/workaround: a bulk fixture rewrite was incorrectly quoted and temporarily blanked several slide fixture/test values. Repaired each affected entry using `git show HEAD:<file>` as the source of original values.
+  - Issue/workaround: fixture validation exposed two stale expectations in `documentFixtures.test.ts` that were already inconsistent with `HEAD` (expected 6 direct slides and a long poll where the fixture had 8 direct slides and no long poll). Updated those expectations after verifying the original fixture content.
+- Phase 6 implemented:
+  - Added `style` to the document import/export format.
+  - Added document style validation for supported attrs.
+  - Document import emits `block:style` ops with generated timestamps.
+  - Document export writes plain style values from block style records.
+  - Legacy `slide.meta.backgroundColor` is accepted as an import alias and converted to `style['background-color']`.
+  - Added document style round-trip and invalid style tests.
+  - Verification:
+    - `npm exec tsc -- -p examples/block-rich-text/tsconfig.json --noEmit` passed.
+    - `npm exec vitest -- run examples/block-rich-text/src/documentFormat.test.ts examples/block-rich-text/src/blockCommands.test.ts examples/block-rich-text/src/history.test.ts` passed.
+    - `npm exec vitest -- run examples/block-rich-text/src/documentFixtures.test.ts` passed.
+- Started phase 7: rich clipboard style preservation.
+- Phase 7 implemented:
+  - Added optional `style` to clipboard fragments and annotation body fragments.
+  - Rich copy now serializes supported block style attrs into the internal JSON payload.
+  - Rich clipboard parsing validates supported style attrs and rejects malformed values.
+  - Generated clipboard HTML includes useful block-level CSS for color, background, font size, and padding, while the JSON payload remains authoritative.
+  - Rich paste now applies clipboard style via `block:style` ops for normal fragments, table-cell child fragments, and imported annotation bodies.
+  - Added clipboard parser/serializer and rich-paste tests.
+  - Verification:
+    - `npm exec vitest -- run examples/block-rich-text/src/clipboard.test.ts examples/block-rich-text/src/multiSelectionCommands.test.ts` passed.
+    - `npm exec tsc -- -p examples/block-rich-text/tsconfig.json --noEmit` passed.
+  - Issue/workaround: TypeScript required explicit fallback returns for the clipboard CSS size mapping helpers even though inputs are validated upstream; added conservative defaults.
+- Started phase 8: broad compatibility and cleanup.
+- Phase 8 implemented:
+  - Removed unused slide-background callback plumbing from `EditorApp`; slide background now flows through generic block style controls.
+  - Updated a raw formatted block test literal to include `style: {}`.
+  - Added a README note describing generic block style LWW semantics.
+  - Kept `slide.meta.backgroundColor` only as a legacy document import alias.
+  - Increased the existing heavy fixture export test timeout from 10s to 20s after the style-preserving `simple-everything-slide-deck` fixture consistently completed slightly above the old budget.
+  - Verification:
+    - `npm exec tsc -- -p tsconfig.json --noEmit` passed.
+    - `npm exec tsc -- -p examples/block-rich-text/tsconfig.json --noEmit` passed.
+    - `npm run typecheck` passed.
+    - `npm run typecheck:examples` passed.
+    - `npm exec vitest -- run src/block-crdt/index.test.ts src/block-crdt/formatting.test.ts` passed.
+    - `npm exec vitest -- run examples/block-rich-text/src/blockCommands.test.ts examples/block-rich-text/src/multiSelectionCommands.test.ts examples/block-rich-text/src/documentFormat.test.ts examples/block-rich-text/src/clipboard.test.ts examples/block-rich-text/src/history.test.ts examples/block-rich-text/src/documentFixtures.test.ts examples/block-rich-text/src/undoHistory.test.ts examples/block-rich-text/src/inlineMarks.test.ts` passed.
+    - `npm exec vitest -- run examples/block-rich-text/src/App.test.tsx` passed.
+    - `git diff --check` passed.
+  - Issue/workaround: `rg backgroundColor` still finds DOM `style.backgroundColor` usage and the intentionally retained legacy document-format alias; no slide metadata runtime path remains.

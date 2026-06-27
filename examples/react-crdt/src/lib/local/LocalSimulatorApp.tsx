@@ -1,6 +1,12 @@
 import {useCallback, useEffect, useMemo, useState} from 'react';
 import type {CrdtLocalHistory} from 'umkehr/crdt';
-import {createInitialCrdtHistory, type AppDefinition, type CrdtRuntime} from '../crdtApp';
+import {
+    cloneSerializableCrdtLocalHistory,
+    createInitialCrdtHistory,
+    hydrateCrdtLocalHistoryForApp,
+    type AppDefinition,
+    type CrdtRuntime,
+} from '../crdtApp';
 import {
     assertArchiveForApp,
     DocumentManagerModal,
@@ -27,6 +33,11 @@ import {cloneTransportState, deleteLocalSimulatorDocument, listLocalSimulatorDoc
 import {replicas} from './model';
 import {SyncControls} from './SyncControls';
 import {type DemoSync, useLocalDemoSync} from './useLocalDemoSync';
+import {
+    initialArtifactsForStore,
+    loadSerializedArtifacts,
+    serializedArtifactsForStore,
+} from '../artifacts';
 
 type ReplicaHistories<TState> = Record<string, CrdtLocalHistory<TState>>;
 
@@ -61,6 +72,7 @@ export function LocalSimulatorApp<TState, EphemeralData = never>({
         let alive = true;
         loadOrCreateLocalSimulatorDocument(app, activeDocId, fingerprintHash).then((document) => {
             if (!alive) return;
+            loadSerializedArtifacts(app.artifacts, document.artifacts);
             setHistories(document.replicas);
             sync.replaceTransportState(document.transportState as any);
             void refreshDocuments();
@@ -81,6 +93,7 @@ export function LocalSimulatorApp<TState, EphemeralData = never>({
                 schemaFingerprintHash: fingerprintHash,
                 replicas: nextHistories,
                 transportState: cloneTransportState(sync.exportTransportState()),
+                artifacts: serializedArtifactsForStore(app.artifacts),
                 createdAt: now,
                 updatedAt: now,
             }).then(refreshDocuments);
@@ -126,6 +139,7 @@ export function LocalSimulatorApp<TState, EphemeralData = never>({
                         kind: 'local-simulator',
                         replicas: (histories ?? initialReplicaHistories(app)) as any,
                         transportState: cloneTransportState(sync.exportTransportState()) as any,
+                        artifacts: serializedArtifactsForStore(app.artifacts),
                     },
                 };
             },
@@ -147,6 +161,8 @@ export function LocalSimulatorApp<TState, EphemeralData = never>({
                     schemaFingerprintHash: fingerprintHash,
                     replicas: imported,
                     transportState: archive.payload.transportState as any,
+                    artifacts:
+                        archive.payload.artifacts ?? serializedArtifactsForStore(app.artifacts),
                     createdAt: now,
                     updatedAt: now,
                 });
@@ -186,6 +202,7 @@ export function LocalSimulatorApp<TState, EphemeralData = never>({
                 schemaFingerprintHash: fingerprintHash,
                 replicas: initialReplicaHistories(app),
                 transportState: emptyTransportState(),
+                artifacts: initialArtifactsForStore(app.artifacts),
                 createdAt: now,
                 updatedAt: now,
             });
@@ -206,6 +223,7 @@ export function LocalSimulatorApp<TState, EphemeralData = never>({
                 schemaFingerprintHash: fixture.schemaFingerprintHash,
                 replicas: seededReplicaHistories(app, fixture),
                 transportState: emptyTransportState(),
+                artifacts: initialArtifactsForStore(app.artifacts),
                 createdAt: fixture.createdAt || now,
                 updatedAt: now,
             });
@@ -374,7 +392,10 @@ function seededReplicaHistories<TState, EphemeralData>(
 ): ReplicaHistories<TState> {
     const history = seedCrdtHistoryForApp(app, fixture);
     return Object.fromEntries(
-        replicas.map((replica) => [replica.id, structuredClone(history)]),
+        replicas.map((replica) => [
+            replica.id,
+            hydrateCrdtLocalHistoryForApp(cloneSerializableCrdtLocalHistory(history), app),
+        ]),
     ) as ReplicaHistories<TState>;
 }
 
@@ -392,7 +413,7 @@ async function loadOrCreateLocalSimulatorDocument<TState, EphemeralData>(
 ): Promise<PersistedLocalSimulatorDocument<TState>> {
     const existing = await loadLocalSimulatorDocument<TState>(docId);
     if (existing && existing.appId === app.id && isUsableLocalSimulatorDocument(existing)) {
-        return existing;
+        return hydrateLocalSimulatorDocument(existing, app);
     }
     const fixture = loadBranchFreeSeedFixtureForApp(app, docId);
     if (fixture) {
@@ -405,6 +426,7 @@ async function loadOrCreateLocalSimulatorDocument<TState, EphemeralData>(
             schemaFingerprintHash: fixture.schemaFingerprintHash || schemaFingerprintHash,
             replicas: seededReplicaHistories(app, fixture),
             transportState: emptyTransportState(),
+            artifacts: initialArtifactsForStore(app.artifacts),
             createdAt: fixture.createdAt || now,
             updatedAt: now,
         };
@@ -420,11 +442,30 @@ async function loadOrCreateLocalSimulatorDocument<TState, EphemeralData>(
         schemaFingerprintHash,
         replicas: initialReplicaHistories(app),
         transportState: emptyTransportState(),
+        artifacts: initialArtifactsForStore(app.artifacts),
         createdAt: now,
         updatedAt: now,
     };
     await saveLocalSimulatorDocument(document);
     return document;
+}
+
+function hydrateLocalSimulatorDocument<TState, EphemeralData>(
+    document: PersistedLocalSimulatorDocument<TState>,
+    app: AppDefinition<TState, EphemeralData>,
+): PersistedLocalSimulatorDocument<TState> {
+    const artifacts = document.artifacts ?? initialArtifactsForStore(app.artifacts);
+    loadSerializedArtifacts(app.artifacts, artifacts);
+    return {
+        ...document,
+        artifacts,
+        replicas: Object.fromEntries(
+            Object.entries(document.replicas).map(([replicaId, history]) => [
+                replicaId,
+                hydrateCrdtLocalHistoryForApp(history as CrdtLocalHistory<TState>, app),
+            ]),
+        ) as ReplicaHistories<TState>,
+    };
 }
 
 function isUsableLocalSimulatorDocument<TState>(

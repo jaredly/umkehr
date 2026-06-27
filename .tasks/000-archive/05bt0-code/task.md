@@ -1,0 +1,1 @@
+examples/block-rich-text: let's support an inline `code` mark. On hover, it should allow you to specify a `language` for the inline code, which turns on syntax highlighting for that mark. Code marks should be non-stacking.

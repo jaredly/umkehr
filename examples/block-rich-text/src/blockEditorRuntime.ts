@@ -9,8 +9,10 @@ import type {
 } from 'umkehr/block-crdt/types';
 import * as hlc from '../../../src/crdt/hlc';
 import {paragraphMeta, type RichBlockMeta} from './blockMeta';
-import {annotationVirtualParents} from './annotations';
 import {initialRetainedSelectionSet, type RetainedSelectionSet} from './selectionSet';
+import {applyCharInsertOps} from './localTextOps';
+import {importDocument, type ImportDocument} from './documentFormat';
+import {richTextCrdtConfig} from './editorCrdtConfig';
 
 export type EditorId = 'left' | 'right';
 
@@ -41,6 +43,18 @@ export const createDemoState = (): DemoState => {
     return {
         left: createReplica('left', state),
         right: createReplica('right', state),
+    };
+};
+
+export const createDemoStateFromDocument = (document: ImportDocument): DemoState => {
+    let i = 1;
+    const imported = importDocument(document, {
+        actor: 'fixture',
+        nextTs: () => hlc.pack({ts: 1, count: i++, node: 'fixture'}),
+    });
+    return {
+        left: createReplica('left', imported.state),
+        right: createReplica('right', imported.state),
     };
 };
 
@@ -111,7 +125,7 @@ const createReplica = (id: EditorId, state: CachedState<RichBlockMeta>): Replica
 });
 
 const applyRemoteOps = (replica: Replica, ops: Array<Op<RichBlockMeta>>): Replica => {
-    const state = applyMany(replica.state, ops, annotationVirtualParents(replica.state));
+    const state = applyCharInsertOps(replica.state, ops) ?? applyMany(replica.state, ops, richTextCrdtConfig(replica.state));
     return {...replica, state};
 };
 
@@ -130,6 +144,7 @@ const stateTimestamps = (state: State<RichBlockMeta>): HLC[] => {
     const timestamps: HLC[] = [];
     for (const block of Object.values(state.blocks)) {
         timestamps.push(block.meta.ts, ...blockOrderTimestamps(block.order.ts));
+        timestamps.push(...Object.values(block.style).map((style) => style.ts));
     }
     for (const char of Object.values(state.chars)) {
         timestamps.push(...charParentTimestamps(char.parent.ts));

@@ -1,6 +1,7 @@
 import type {CrdtLocalHistory, CrdtUpdate, HlcTimestamp} from 'umkehr/crdt';
 import type {SyncedTransport} from 'umkehr/react-crdt';
 import type {ExternalStore} from '../store';
+import type {ArtifactManifestEntry, SerializedArtifact} from '../artifacts';
 
 export type LocalFirstRole = 'host' | 'client';
 export type VersionVector = Record<string, HlcTimestamp>;
@@ -37,6 +38,7 @@ export type PersistedReplica<TState> = {
     vector: VersionVector;
     compactedThrough?: VersionVector;
     lineage?: DocumentLineage;
+    artifacts?: SerializedArtifact[];
     updatedAt: string;
 };
 
@@ -67,6 +69,7 @@ export type LocalFirstMember = {
     schemaVersion: number;
     schemaFingerprint: string;
     schemaFingerprintHash: string;
+    artifacts?: ArtifactManifestEntry[];
 };
 
 export type LocalFirstPersistenceState =

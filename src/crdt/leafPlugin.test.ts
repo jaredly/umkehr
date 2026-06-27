@@ -293,7 +293,11 @@ describe('leaf CRDT plugins', () => {
             op: 'leaf',
             plugin: BLOCK_RICH_TEXT_LEAF_PLUGIN_ID,
             path: applied.updates[0]?.op === 'leaf' ? applied.updates[0].path : [],
-            change: {type: 'char:delete', id: inserted} as unknown as JsonValue,
+            change: {
+                type: 'char:delete',
+                id: inserted,
+                deleted: {value: true, ts: '000000000000020:00000:remote'},
+            } as unknown as JsonValue,
             ts: '000000000000020:00000:remote',
         });
 

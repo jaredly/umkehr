@@ -31,7 +31,7 @@ const block = (id: number, path: number[], orderId = id): Block => ({
         index: lseq(id),
         ts: '00001',
     },
-    deleted: false,
+    deleted: undefined,
 });
 
 const flat = (size: number) => {

@@ -30,18 +30,24 @@ import {
     visibleBlockChildren,
     visibleBlockOutline,
     insertBlockOps,
+    deleteBlockOps,
     insertTextOps,
     deleteRangeOps,
     splitBlockOps,
     joinBlocksOps,
     moveBlockOps,
     setBlockMetaOps,
+    setBlockStyleOps,
+    markSelectionOps,
     markRangeOp,
     materializeFormattedBlocks,
     planUndoOps,
     validateOp,
     assertCacheConsistent,
+    nextBlockIdForActor,
+    visibleSiblingAnchorsForBlock,
     visibleSiblingAnchorsForPath,
+    isDeleted,
     type VirtualBlockParentConfig,
 } from './index';
 import {Block, CachedState, Lamport} from './types';
@@ -65,6 +71,8 @@ const mts = (init = 0) => {
     let i = init;
     return () => (i++).toString().padStart(5, '0');
 };
+
+const deleted = (ts: string, value = true) => ({value, ts});
 
 const addAfter = (state: CachedState, text: string, at: number, ts: () => string) => {
     const atPos = selPos(state, [0, 'self'], at);
@@ -116,8 +124,9 @@ const block = (id: Lamport, index: number, ts: string, parent: Lamport | Lamport
     return {
         id,
         meta: {type: 'paragraph', ts},
+        style: {},
         order: {id, index: lseq(index), ts, path: [...parentPath, id]},
-        deleted: false,
+        deleted: undefined,
     };
 };
 
@@ -307,6 +316,161 @@ it('moves blocks under a configured virtual parent', () => {
     expect(materializedBlockParent(state, movedId, tableVirtualConfig)).toEqual(rowParent);
 });
 
+it('deletes visible subtrees under a configured virtual parent', () => {
+    let state = initVirtualParentState();
+    const rowParent = [100, 'self'] as Lamport;
+    const rowOps = insertBlockOps(state, {
+        actor: 'alice',
+        parent: rowParent,
+        meta: {type: 'paragraph', ts: '00002'},
+        ts: '00002',
+        virtualParents: tableVirtualConfig,
+    });
+    state = applyMany(state, rowOps, tableVirtualConfig);
+    const rowOp = rowOps[0];
+    if (rowOp.type !== 'block') throw new Error('expected row block op');
+    const rowId = lamportToString(rowOp.block.id);
+    const cellOps = insertBlockOps(state, {
+        actor: 'alice',
+        parent: parseLamportString(rowId),
+        meta: {type: 'paragraph', ts: '00003'},
+        ts: '00003',
+        virtualParents: tableVirtualConfig,
+    });
+    state = applyMany(state, cellOps, tableVirtualConfig);
+    const cellOp = cellOps[0];
+    if (cellOp.type !== 'block') throw new Error('expected cell block op');
+    const cellId = lamportToString(cellOp.block.id);
+
+    expect(() => deleteBlockOps(state, {block: parseLamportString(rowId), mode: 'subtree', ts: mts(30)})).toThrow('not found');
+
+    const next = applyMany(
+        state,
+        deleteBlockOps(state, {
+            block: parseLamportString(rowId),
+            mode: 'subtree',
+            ts: mts(30),
+            virtualParents: tableVirtualConfig,
+        }),
+        tableVirtualConfig,
+    );
+
+    expect(isDeleted(next.state.blocks[rowId])).toBe(true);
+    expect(isDeleted(next.state.blocks[cellId])).toBe(true);
+    expect(visibleBlockChildren(next, lamportToString(rowParent), tableVirtualConfig)).toEqual([]);
+});
+
+it('returns sibling anchors after a visible block id', () => {
+    let state = initVirtualParentState();
+    const rowParent = [100, 'self'] as Lamport;
+    const firstRowOps = insertBlockOps(state, {
+        actor: 'alice',
+        parent: rowParent,
+        meta: {type: 'paragraph', ts: '00002'},
+        ts: '00002',
+        virtualParents: tableVirtualConfig,
+    });
+    state = applyMany(state, firstRowOps, tableVirtualConfig);
+    const firstRowOp = firstRowOps[0];
+    if (firstRowOp.type !== 'block') throw new Error('expected row block op');
+    const firstRowId = lamportToString(firstRowOp.block.id);
+    const secondRowOps = insertBlockOps(state, {
+        actor: 'bob',
+        parent: rowParent,
+        before: parseLamportString(firstRowId),
+        meta: {type: 'paragraph', ts: '00003'},
+        ts: '00003',
+        virtualParents: tableVirtualConfig,
+    });
+    state = applyMany(state, secondRowOps, tableVirtualConfig);
+    const secondRowOp = secondRowOps[0];
+    if (secondRowOp.type !== 'block') throw new Error('expected row block op');
+    const secondRowId = lamportToString(secondRowOp.block.id);
+
+    expect(visibleSiblingAnchorsForBlock(state, firstRowId, tableVirtualConfig)).toEqual({
+        parent: rowParent,
+        before: parseLamportString(firstRowId),
+        after: parseLamportString(secondRowId),
+    });
+    expect(visibleSiblingAnchorsForBlock(state, secondRowId, tableVirtualConfig)).toEqual({
+        parent: rowParent,
+        before: parseLamportString(secondRowId),
+        after: null,
+    });
+});
+
+it('predicts the next local block id for inserts and splits', () => {
+    let state = initVirtualParentState();
+    expect(nextBlockIdForActor(state, 'alice')).toEqual([1, 'alice']);
+
+    const insertOps = insertBlockOps(state, {
+        actor: 'alice',
+        parent: [0, 'root'],
+        before: [0, 'self'],
+        meta: {type: 'paragraph', ts: '00002'},
+        ts: '00002',
+    });
+    expect(insertOps[0]).toMatchObject({type: 'block', block: {id: [1, 'alice']}});
+    state = applyMany(state, insertOps);
+    expect(nextBlockIdForActor(state, 'alice')).toEqual([2, 'alice']);
+
+    state = applyMany(state, insertTextOps(state, {actor: 'alice', block: [0, 'self'], offset: 0, text: 'ab', ts: mts()}));
+    const splitOps = splitBlockOps(state, {actor: 'alice', block: [0, 'self'], offset: 1, ts: '00003'});
+    expect(splitOps[0]).toMatchObject({type: 'block', block: {id: nextBlockIdForActor(state, 'alice')}});
+});
+
+it('marks selections across virtual-parent-visible blocks', () => {
+    let state = initVirtualParentState();
+    const rowParent = [100, 'self'] as Lamport;
+    const rowOps = insertBlockOps(state, {
+        actor: 'alice',
+        parent: rowParent,
+        meta: {type: 'paragraph', ts: '00002'},
+        ts: '00002',
+        virtualParents: tableVirtualConfig,
+    });
+    state = applyMany(state, rowOps, tableVirtualConfig);
+    const rowOp = rowOps[0];
+    if (rowOp.type !== 'block') throw new Error('expected row block op');
+    const rowId = lamportToString(rowOp.block.id);
+    const cellOps = insertBlockOps(state, {
+        actor: 'alice',
+        parent: parseLamportString(rowId),
+        meta: {type: 'paragraph', ts: '00003'},
+        ts: '00003',
+        virtualParents: tableVirtualConfig,
+    });
+    state = applyMany(state, cellOps, tableVirtualConfig);
+    const cellOp = cellOps[0];
+    if (cellOp.type !== 'block') throw new Error('expected cell block op');
+    const cellId = lamportToString(cellOp.block.id);
+    state = applyMany(state, insertTextOps(state, {actor: 'alice', block: parseLamportString(rowId), offset: 0, text: 'rh', ts: mts()}), tableVirtualConfig);
+    state = applyMany(state, insertTextOps(state, {actor: 'alice', block: parseLamportString(cellId), offset: 0, text: 'cd', ts: mts()}), tableVirtualConfig);
+
+    state = applyMany(
+        state,
+        markSelectionOps(
+            state,
+            {anchor: {blockId: rowId, offset: 1}, focus: {blockId: cellId, offset: 1}},
+            'bold',
+            undefined,
+            false,
+            {actor: 'alice', virtualParents: tableVirtualConfig},
+        ),
+        tableVirtualConfig,
+    );
+
+    const formatted = materializeFormattedBlocks(state, tableVirtualConfig);
+    expect(formatted.find((block) => block.id === rowId)?.runs).toEqual([
+        {text: 'r', marks: {}},
+        {text: 'h', marks: {bold: true}},
+    ]);
+    expect(formatted.find((block) => block.id === cellId)?.runs).toEqual([
+        {text: 'c', marks: {bold: true}},
+        {text: 'd', marks: {}},
+    ]);
+});
+
 it('applies remote block ops under virtual parents after the declaring block arrives', () => {
     const rowParent = [100, 'self'] as Lamport;
     const rowOp = insertBlockOps(initVirtualParentState(), {
@@ -420,7 +584,7 @@ class EditorHarness {
         const bid = parseLamportString(this.blockIds()[blockIndex]);
         const ops: Op[] = [];
         for (let offset = start + 1; offset <= end; offset++) {
-            ops.push({type: 'char:delete', id: selPos(this.state, bid, offset)!});
+            ops.push({type: 'char:delete', id: selPos(this.state, bid, offset)!, deleted: deleted(this.ts())});
         }
         return this.apply(ops);
     }
@@ -640,10 +804,12 @@ it('split, move, and join', () => {
         {
             type: 'block:delete',
             id: parseLamportString(blocks[1]),
+            deleted: deleted(ts()),
         },
         {
             type: 'block:delete',
             id: parseLamportString(blocks[2]),
+            deleted: deleted(ts()),
         },
     ]);
 
@@ -783,6 +949,205 @@ it('applies block meta by timestamp', () => {
     expectCache(state);
 });
 
+it('supports custom block meta merge for block meta ops', () => {
+    type MergeMeta = {type: 'mergeable'; ts: string; title: string; votes: Record<string, string>};
+    const config: VirtualBlockParentConfig<MergeMeta> = {
+        mergeBlockMeta: (current, incoming) => {
+            if (current.type !== 'mergeable' || incoming.type !== 'mergeable') return null;
+            const base = incoming.ts > current.ts ? incoming : current;
+            return {
+                ...base,
+                votes: {...current.votes, ...incoming.votes},
+            };
+        },
+    };
+    let state = cachedState(
+        initialStateWithMeta<MergeMeta>('self', {
+            type: 'mergeable',
+            ts: '00003',
+            title: 'current',
+            votes: {alice: 'yes'},
+        }),
+    );
+
+    state = apply(
+        state,
+        {
+            type: 'block:meta',
+            id: [0, 'self'],
+            meta: {type: 'mergeable', ts: '00002', title: 'stale', votes: {bob: 'no'}},
+        },
+        config,
+    ) as typeof state;
+
+    expect(state.state.blocks['0000-self'].meta).toEqual({
+        type: 'mergeable',
+        ts: '00003',
+        title: 'current',
+        votes: {alice: 'yes', bob: 'no'},
+    });
+    expectCache(state);
+});
+
+it('supports custom block meta merge for duplicate block ops', () => {
+    type MergeMeta = {type: 'mergeable'; ts: string; title: string; votes: Record<string, string>};
+    const config: VirtualBlockParentConfig<MergeMeta> = {
+        mergeBlockMeta: (current, incoming) => {
+            if (current.type !== 'mergeable' || incoming.type !== 'mergeable') return null;
+            const base = incoming.ts > current.ts ? incoming : current;
+            return {
+                ...base,
+                votes: {...current.votes, ...incoming.votes},
+            };
+        },
+    };
+    let state = cachedState(
+        initialStateWithMeta<MergeMeta>('self', {
+            type: 'mergeable',
+            ts: '00003',
+            title: 'current',
+            votes: {alice: 'yes'},
+        }),
+    );
+
+    state = apply(
+        state,
+        {
+            type: 'block',
+            block: {
+                ...state.state.blocks['0000-self'],
+                meta: {type: 'mergeable', ts: '00002', title: 'stale', votes: {bob: 'no'}},
+            },
+        },
+        config,
+    ) as typeof state;
+
+    expect(state.state.blocks['0000-self'].meta).toEqual({
+        type: 'mergeable',
+        ts: '00003',
+        title: 'current',
+        votes: {alice: 'yes', bob: 'no'},
+    });
+    expectCache(state);
+});
+
+it('initializes block style for initial, inserted, and split blocks', () => {
+    let state = cachedState(init);
+    expect(state.state.blocks['0000-self'].style).toEqual({});
+
+    const insertOps = insertBlockOps(state, {
+        actor: 'self',
+        parent: [0, 'root'],
+        after: [0, 'self'],
+        meta: {type: 'paragraph', ts: '00002'},
+        ts: '00002',
+    });
+    state = applyMany(state, insertOps);
+    expect(state.state.blocks['0001-self'].style).toEqual({});
+
+    state = applyMany(state, insertTextOps(state, {
+        actor: 'self',
+        block: [0, 'self'],
+        offset: 0,
+        text: 'ab',
+        ts: mts(3),
+    }));
+    state = applyMany(state, setBlockStyleOps(state, {
+        block: [0, 'self'],
+        style: {'background-color': {value: 'red', ts: '00006'}},
+    }));
+    const splitOps = splitBlockOps(state, {actor: 'self', block: [0, 'self'], offset: 1, ts: '00007'});
+    state = applyMany(state, splitOps);
+    const splitBlock = splitOps.find((op) => op.type === 'block');
+    expect(splitBlock?.type === 'block' ? splitBlock.block.style : null).toEqual({
+        'background-color': {value: 'red', ts: '00006'},
+    });
+    expect(state.state.blocks[lamportToString(splitBlock!.type === 'block' ? splitBlock.block.id : [0, 'missing'])].style).toEqual({
+        'background-color': {value: 'red', ts: '00006'},
+    });
+});
+
+it('merges block style patches by independent attribute timestamps', () => {
+    let state = cachedState(init);
+    state = applyMany(state, setBlockStyleOps(state, {
+        block: [0, 'self'],
+        style: {
+            color: {value: 'red', ts: '00002'},
+            padding: {value: 'small', ts: '00002'},
+        },
+    }));
+
+    state = applyMany(state, setBlockStyleOps(state, {
+        block: [0, 'self'],
+        style: {
+            color: {value: 'blue', ts: '00001'},
+            'font-size': {value: 'large', ts: '00003'},
+        },
+    }));
+
+    expect(state.state.blocks['0000-self'].style).toEqual({
+        color: {value: 'red', ts: '00002'},
+        padding: {value: 'small', ts: '00002'},
+        'font-size': {value: 'large', ts: '00003'},
+    });
+    expectCache(state);
+});
+
+it('converges equal timestamp block style conflicts deterministically', () => {
+    const red = setBlockStyleOps(cachedState(init), {
+        block: [0, 'self'],
+        style: {color: {value: 'red', ts: '00002'}},
+    });
+    const blue = setBlockStyleOps(cachedState(init), {
+        block: [0, 'self'],
+        style: {color: {value: 'blue', ts: '00002'}},
+    });
+
+    const one = applyMany(cachedState(init), [...red, ...blue]);
+    const two = applyMany(cachedState(init), [...blue, ...red]);
+
+    expect(one.state.blocks['0000-self'].style).toEqual(two.state.blocks['0000-self'].style);
+    expect(one.state.blocks['0000-self'].style.color).toEqual({value: 'red', ts: '00002'});
+});
+
+it('merges full block op style with existing block style', () => {
+    const styledBlock = {
+        ...block([0, 'self'], 1, '00001'),
+        style: {
+            color: {value: 'blue', ts: '00002'},
+            padding: {value: 'small', ts: '00004'},
+        },
+    };
+    const stylePatch = setBlockStyleOps(cachedState(init), {
+        block: [0, 'self'],
+        style: {
+            color: {value: 'red', ts: '00003'},
+            'font-size': {value: 'large', ts: '00003'},
+        },
+    });
+
+    const one = applyMany(cachedState(init), [{type: 'block', block: styledBlock}, ...stylePatch]);
+    const two = applyMany(cachedState(init), [...stylePatch, {type: 'block', block: styledBlock}]);
+
+    expect(one.state.blocks['0000-self'].style).toEqual({
+        color: {value: 'red', ts: '00003'},
+        padding: {value: 'small', ts: '00004'},
+        'font-size': {value: 'large', ts: '00003'},
+    });
+    expect(two.state.blocks['0000-self'].style).toEqual(one.state.blocks['0000-self'].style);
+});
+
+it('reports missing block dependency for block style ops', () => {
+    const result = applyRemote(cachedState(init), {
+        type: 'block:style',
+        id: [42, 'other'],
+        style: {color: {value: 'red', ts: '00002'}},
+    });
+
+    expect(result.status).toBe('pending');
+    expect(result.status === 'pending' ? result.missing : []).toEqual([[42, 'other']]);
+});
+
 it('moves blocks by timestamp and updates child cache', () => {
     let state = apply(cachedState(init), {
         type: 'block',
@@ -843,7 +1208,7 @@ it('returns visible block outline with nested depths and splices hidden parent c
         {id: '0003-self', depth: 0, parentId: '0000-root'},
     ]);
 
-    state = apply(state, {type: 'block:delete', id: [1, 'self']}) as CachedState;
+    state = apply(state, {type: 'block:delete', id: [1, 'self'], deleted: deleted('00003')}) as CachedState;
 
     expect(visibleBlockOutline(state)).toEqual([
         {id: '0000-self', depth: 0, parentId: '0000-root'},
@@ -944,7 +1309,7 @@ it('validates block order paths', () => {
             id: [2, 'self'],
             meta: {type: 'paragraph', ts: '00003'},
             order: {id: [2, 'self'], index: lseq(2), ts: '00003', path: [[9, 'self'], [2, 'self']]},
-            deleted: false,
+            deleted: undefined,
         },
     });
     expect(missingAncestorBlock).toBe(false);
@@ -1246,7 +1611,7 @@ it('keeps concurrent move-to-root and nested reparenting traversal-safe', () => 
 it('returns false for ops that reference missing records', () => {
     let state = cachedState(init);
 
-    expect(apply(state, {type: 'char:delete', id: [9, 'self']})).toBe(false);
+    expect(apply(state, {type: 'char:delete', id: [9, 'self'], deleted: deleted('00002')})).toBe(false);
     expect(
         apply(state, {
             type: 'char:move',
@@ -1266,6 +1631,7 @@ it('returns false for ops that reference missing records', () => {
         apply(state, {
             type: 'block:delete',
             id: [9, 'self'],
+            deleted: deleted('00002'),
         }),
     ).toBe(false);
     expect(
@@ -1330,7 +1696,7 @@ it('validates op shape separately from dependency readiness', () => {
         char: {
             id: [1, 'self'],
             text: 'a',
-            deleted: false,
+            deleted: undefined,
             parent: {id: [99, 'missing'], ts: ''},
         },
     } satisfies Op;
@@ -1413,14 +1779,14 @@ it('rejects actor ids that contain the lamport separator', () => {
 it('deletes chars idempotently and preserves cache consistency', () => {
     let state = addChars(cachedState(init), 'ab', [0, 'self'], mts());
 
-    state = apply(state, {type: 'char:delete', id: [2, 'self']}) as CachedState;
-    expect(state.state.chars['0002-self'].deleted).toBe(true);
+    state = apply(state, {type: 'char:delete', id: [2, 'self'], deleted: deleted('00003')}) as CachedState;
+    expect(state.state.chars['0002-self'].deleted).toEqual(deleted('00003'));
     expect(state.cache.charContents['0001-self']).toEqual(['0002-self']);
     expect(stateToString(state)).toBe('0000-self: a');
     expectCache(state);
 
-    state = apply(state, {type: 'char:delete', id: [2, 'self']}) as CachedState;
-    expect(state.state.chars['0002-self'].deleted).toBe(true);
+    state = apply(state, {type: 'char:delete', id: [2, 'self'], deleted: deleted('00003')}) as CachedState;
+    expect(state.state.chars['0002-self'].deleted).toEqual(deleted('00003'));
     expect(state.cache.charContents['0001-self']).toEqual(['0002-self']);
     expect(stateToString(state)).toBe('0000-self: a');
     expectCache(state);
@@ -1469,15 +1835,16 @@ it('merges duplicate block inserts by field timestamps', () => {
             id: [1, 'self'],
             meta: {type: 'blockquote', ts: '00004'},
             order: {id: [9, 'self'], index: lseq(9), path: [[1, 'self']], ts: '00002'},
-            deleted: true,
+            deleted: deleted('00005'),
         },
     }) as CachedState;
 
     expect(state.state.blocks['0001-self']).toEqual({
         id: [1, 'self'],
         meta: {type: 'blockquote', ts: '00004'},
+        style: {},
         order: {id: [1, 'self'], index: lseq(1), path: [[1, 'self']], ts: '00003'},
-        deleted: true,
+        deleted: deleted('00005'),
     });
     expect(state.cache.blockChildren['0000-root'].filter((id) => id === '0001-self')).toHaveLength(
         1,
@@ -1494,8 +1861,9 @@ it('deletes blocks irreversibly and preserves cache consistency', () => {
     state = apply(state, {
         type: 'block:delete',
         id: [1, 'self'],
+        deleted: deleted('00003'),
     }) as CachedState;
-    expect(state.state.blocks['0001-self'].deleted).toBe(true);
+    expect(state.state.blocks['0001-self'].deleted).toEqual(deleted('00003'));
     expect(state.cache.blockChildren['0000-root']).toContain('0001-self');
     expect(stateToString(state)).not.toContain('0001-self');
     expectCache(state);
@@ -1503,8 +1871,9 @@ it('deletes blocks irreversibly and preserves cache consistency', () => {
     state = apply(state, {
         type: 'block:delete',
         id: [1, 'self'],
+        deleted: deleted('00003'),
     }) as CachedState;
-    expect(state.state.blocks['0001-self'].deleted).toBe(true);
+    expect(state.state.blocks['0001-self'].deleted).toEqual(deleted('00003'));
     expect(state.cache.blockChildren['0000-root']).toContain('0001-self');
     expect(stateToString(state)).not.toContain('0001-self');
     expectCache(state);
@@ -1513,7 +1882,7 @@ it('deletes blocks irreversibly and preserves cache consistency', () => {
         type: 'block',
         block: block([1, 'self'], 9, '00004'),
     }) as CachedState;
-    expect(state.state.blocks['0001-self'].deleted).toBe(true);
+    expect(state.state.blocks['0001-self'].deleted).toEqual(deleted('00003'));
     expect(state.cache.blockChildren['0000-root']).toContain('0001-self');
     expect(stateToString(state)).not.toContain('0001-self');
     expectCache(state);
@@ -1552,7 +1921,7 @@ it('creates public text/block change op batches from visible offsets', () => {
     state = applyMany(state, ops);
     expect(blockLines(state)).toEqual(['abcd']);
 
-    ops = deleteRangeOps(state, {block: left, startOffset: 1, endOffset: 3});
+    ops = deleteRangeOps(state, {block: left, startOffset: 1, endOffset: 3, ts});
     expect(ops.map((op) => op.type)).toEqual(['char:delete', 'char:delete']);
     state = applyMany(state, ops);
     expect(blockLines(state)).toEqual(['ad']);
@@ -1567,6 +1936,23 @@ it('creates public block metadata ops', () => {
 
     state = applyMany(state, ops);
     expect(state.state.blocks['0000-self'].meta).toEqual({type: 'blockquote', ts: '00002'});
+});
+
+it('creates public block style ops', () => {
+    let state = cachedState(initialState('self', '00001'));
+    const ops = setBlockStyleOps(state, {
+        block: [0, 'self'],
+        style: {
+            color: {value: 'red', ts: '00002'},
+            padding: {value: null, ts: '00003'},
+        },
+    });
+
+    state = applyMany(state, ops);
+    expect(state.state.blocks['0000-self'].style).toEqual({
+        color: {value: 'red', ts: '00002'},
+        padding: {value: null, ts: '00003'},
+    });
 });
 
 it('creates public block move ops', () => {
@@ -1667,7 +2053,7 @@ it('plans undo for inserted chars without removing concurrent remote chars', () 
     expect(blockLines(current)).toEqual(['X']);
 });
 
-it('plans undo for block move and metadata batches', () => {
+it('plans undo for block move, metadata, and style batches', () => {
     const ts = mts(2);
     let state = cachedState(initialState('self', '00001'));
     state = applyMany(state, insertTextOps(state, {actor: 'alice', block: [0, 'self'], offset: 0, text: 'ab', ts}));
@@ -1684,11 +2070,22 @@ it('plans undo for block move and metadata batches', () => {
             ts: ts(),
         }),
         ...setBlockMetaOps(state, {block: left, meta: {type: 'blockquote', ts: ts()}}),
+        ...setBlockStyleOps(state, {
+            block: left,
+            style: {
+                color: {value: 'red', ts: ts()},
+                padding: {value: 'small', ts: ts()},
+            },
+        }),
     ];
 
     state = applyMany(state, batch);
     expect(blockLines(state)).toEqual(['b', 'a']);
     expect(state.state.blocks[lamportToString(left)].meta.type).toBe('blockquote');
+    expect(state.state.blocks[lamportToString(left)].style).toEqual({
+        color: {value: 'red', ts: '00007'},
+        padding: {value: 'small', ts: '00008'},
+    });
 
     const undo = planUndoOps(before, state, batch, {actor: 'alice', ts: mts(40)});
 
@@ -1696,6 +2093,10 @@ it('plans undo for block move and metadata batches', () => {
     state = applyMany(state, undo.ops);
     expect(blockLines(state)).toEqual(['a', 'b']);
     expect(state.state.blocks[lamportToString(left)].meta.type).toBe('paragraph');
+    expect(state.state.blocks[lamportToString(left)].style).toEqual({
+        color: {value: null, ts: '00040'},
+        padding: {value: null, ts: '00041'},
+    });
 });
 
 it('plans undo for additive marks with normal mark ops', () => {
@@ -1714,19 +2115,22 @@ it('plans undo for additive marks with normal mark ops', () => {
     expect(materializeFormattedBlocks(state)[0].runs).toEqual([{text: 'abc', marks: {}}]);
 });
 
-it('plans undo for deleted chars by inserting fresh replacement chars', () => {
+it('plans undo for deleted chars by restoring original char ids', () => {
     const ts = mts(2);
     let state = cachedState(initialState('self', '00001'));
     state = applyMany(state, insertTextOps(state, {actor: 'alice', block: [0, 'self'], offset: 0, text: 'abc', ts}));
     const before = state;
-    const deletion = deleteRangeOps(state, {block: [0, 'self'], startOffset: 1, endOffset: 3});
+    const deletion = deleteRangeOps(state, {block: [0, 'self'], startOffset: 1, endOffset: 3, ts});
     state = applyMany(state, deletion);
     expect(blockLines(state)).toEqual(['a']);
 
     const undo = planUndoOps(before, state, deletion, {actor: 'alice', ts: mts(20)});
 
     expect(undo.complete).toBe(true);
-    expect(undo.ops.map((op) => op.type)).toEqual(['char', 'char']);
+    expect(undo.ops).toEqual([
+        {type: 'char:delete', id: [3, 'alice'], deleted: {value: false, ts: '00020'}},
+        {type: 'char:delete', id: [2, 'alice'], deleted: {value: false, ts: '00021'}},
+    ]);
     state = applyMany(state, undo.ops);
     expect(blockLines(state)).toEqual(['abc']);
 });
@@ -1749,17 +2153,18 @@ it('plans redo for inserted chars after undo tombstones them', () => {
     expect(blockLines(state)).toEqual(['ab']);
 });
 
-it('plans undo for block delete by creating a fresh visible block with copied text', () => {
+it('plans undo for block delete by restoring original block id', () => {
     const ts = mts(2);
     let state = cachedState(initialState('self', '00001'));
     state = applyMany(state, insertTextOps(state, {actor: 'alice', block: [0, 'self'], offset: 0, text: 'abc', ts}));
     const before = state;
-    const deletion: Op[] = [{type: 'block:delete', id: [0, 'self']}];
+    const deletion: Op[] = [{type: 'block:delete', id: [0, 'self'], deleted: deleted(ts())}];
     state = applyMany(state, deletion);
     expect(blockLines(state)).toEqual([]);
 
     const undo = planUndoOps(before, state, deletion, {actor: 'alice', ts: mts(20)});
     expect(undo.complete).toBe(true);
+    expect(undo.ops).toEqual([{type: 'block:delete', id: [0, 'self'], deleted: {value: false, ts: '00020'}}]);
     state = applyMany(state, undo.ops);
     expect(blockLines(state)).toEqual(['abc']);
 });
@@ -2041,7 +2446,7 @@ it('derives join sentinel chars from join records', () => {
 
     state = applyMany(state, join(state, leftBlock, rightBlock, ts(), 'alice'));
 
-    expect(state.state.blocks[rightId].deleted).toBe(false);
+    expect(isDeleted(state.state.blocks[rightId])).toBe(false);
     expect(state.state.chars[rightId]).toBeUndefined();
     expect(state.state.joins['0006-alice']).toEqual({
         id: [6, 'alice'],
@@ -2258,8 +2663,8 @@ it('resolves reciprocal concurrent joins by lower join id without tombstoning bo
     expect(blockLines(two)).toEqual(['abcd']);
     expect(rootBlockIds(one)).toEqual([leftId]);
     expect(rootBlockIds(two)).toEqual([leftId]);
-    expect(one.state.blocks[leftId].deleted).toBe(false);
-    expect(one.state.blocks[rightId].deleted).toBe(false);
+    expect(isDeleted(one.state.blocks[leftId])).toBe(false);
+    expect(isDeleted(one.state.blocks[rightId])).toBe(false);
     expect(Object.keys(one.cache.joinedBlocks)).toEqual([rightId]);
     expect(one.cache.joinSentinels[rightId]).toEqual(one.state.joins['0006-alice']);
     expect(one.cache.joinSentinels[leftId]).toBeUndefined();

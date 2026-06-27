@@ -2,6 +2,7 @@ import {describe, expect, it} from 'vitest';
 import {
     applyMany,
     blockContents,
+    isDeleted,
     markRangeOp,
     materializedBlockParent,
     materializeFormattedBlocks,
@@ -14,11 +15,15 @@ import {deleteBackward, insertText, splitBlock, type CommandContext} from './blo
 import {applyLocalChange, createDemoState, makeCommandContext} from './blockEditorRuntime';
 import {
     ANNOTATION_MARK,
+    annotationBodyBlockIds,
     annotationVirtualParents,
     createAnnotation,
+    deleteAnnotationBodyBackward,
     replaceAnnotationBodySelection,
     renderedAnnotations,
+    resolveAnnotation,
     setAnnotationBodyText,
+    splitAnnotationBodyBlock,
     toggleAnnotationBodyMark,
 } from './annotations';
 import {
@@ -87,6 +92,8 @@ describe('block rich text annotations', () => {
 
         expect(leftAnnotation.referenceText).toBe('ell');
         expect(rightAnnotation.referenceText).toBe('ell');
+        expect(annotated.annotationId).toEqual(leftAnnotation.data.id);
+        expect(annotated.bodyBlockId).toBe(bodyId);
         expect(materializedBlockParent(synced.left.state, bodyId, annotationVirtualParents(synced.left.state))).toEqual(
             leftAnnotation.data.id,
         );
@@ -185,6 +192,88 @@ describe('block rich text annotations', () => {
         result = deleteBackward(result.state, range(blockId, 1, 4), ctx());
 
         expect(annotationsFor(result.state)).toEqual([]);
+    });
+
+    it('resolves an annotation without deleting referenced text or body blocks', () => {
+        const demo = createDemoState();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = insertText(demo.left.state, caret(blockId, 0), 'hello', ctx());
+        result = createAnnotation(result.state, range(blockId, 1, 4), 'sidebar', ctx());
+        const annotation = annotationsFor(result.state)[0];
+        const bodyId = annotation.bodyBlocks[0].id;
+        result = setAnnotationBodyText(result.state, bodyId, 'note', ctx());
+
+        result = resolveAnnotation(result.state, annotation.id, ctx());
+
+        expect(annotationsFor(result.state)).toEqual([]);
+        expect(blockContents(result.state, blockId)).toBe('hello');
+        expect(annotationBodyBlockIds(result.state, annotation.data.id)).toEqual([bodyId]);
+        expect(blockContents(result.state, bodyId)).toBe('note');
+    });
+
+    it('syncs resolved annotations to the peer replica', () => {
+        const demo = createDemoState();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        const typed = insertText(demo.left.state, caret(blockId, 0), 'hello', ctx());
+        let synced = applyLocalChange(demo, {
+            editorId: 'left',
+            state: typed.state,
+            selection: demo.left.selection,
+            ops: typed.ops,
+        });
+        const annotated = createAnnotation(
+            synced.left.state,
+            range(rootBlockIds(synced.left.state)[0], 1, 4),
+            'sidebar',
+            makeCommandContext(synced.left),
+        );
+        synced = applyLocalChange(synced, {
+            editorId: 'left',
+            state: annotated.state,
+            selection: synced.left.selection,
+            ops: annotated.ops,
+        });
+
+        const resolved = resolveAnnotation(synced.left.state, annotationsFor(synced.left.state)[0].id, makeCommandContext(synced.left));
+        synced = applyLocalChange(synced, {
+            editorId: 'left',
+            state: resolved.state,
+            selection: synced.left.selection,
+            ops: resolved.ops,
+        });
+
+        expect(annotationsFor(synced.left.state)).toEqual([]);
+        expect(annotationsFor(synced.right.state)).toEqual([]);
+        expect(blockContents(synced.right.state, rootBlockIds(synced.right.state)[0])).toBe('hello');
+    });
+
+    it('resolves one overlapping annotation without hiding the other', () => {
+        const demo = createDemoState();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = insertText(demo.left.state, caret(blockId, 0), 'abcdef', ctx());
+        result = createAnnotation(result.state, range(blockId, 1, 4), 'sidebar', ctx());
+        result = createAnnotation(result.state, range(blockId, 2, 5), 'sidebar', ctx());
+        const firstId = annotationsFor(result.state)[0].id;
+
+        result = resolveAnnotation(result.state, firstId, ctx());
+
+        expect(annotationsFor(result.state).map((annotation) => annotation.referenceText)).toEqual(['cde']);
+    });
+
+    it('does not reuse a resolved annotation for exact-overlap comments', () => {
+        const demo = createDemoState();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = insertText(demo.left.state, caret(blockId, 0), 'abcdef', ctx());
+        result = createAnnotation(result.state, range(blockId, 1, 4), 'sidebar', ctx());
+        const resolvedId = annotationsFor(result.state)[0].id;
+        result = resolveAnnotation(result.state, resolvedId, ctx());
+
+        result = createAnnotation(result.state, range(blockId, 1, 4), 'sidebar', ctx());
+
+        const active = annotationsFor(result.state);
+        expect(active).toHaveLength(1);
+        expect(active[0].id).not.toBe(resolvedId);
+        expect(active[0].referenceText).toBe('bcd');
     });
 
     it('uses one annotation mark type for sidebar comments, footnotes, and popovers', () => {
@@ -292,12 +381,119 @@ describe('block rich text annotations', () => {
         let result = insertText(demo.left.state, caret(blockId, 0), 'abcdef', ctx());
 
         result = createAnnotation(result.state, range(blockId, 1, 4), 'sidebar', ctx());
-        result = createAnnotation(result.state, range(blockId, 1, 4), 'sidebar', ctx());
+        const firstAnnotationId = result.annotationId;
+        const exact = createAnnotation(result.state, range(blockId, 1, 4), 'sidebar', ctx());
+        result = exact;
 
         const annotations = annotationsFor(result.state);
         expect(annotations).toHaveLength(1);
         expect(annotations[0].referenceText).toBe('bcd');
         expect(annotations[0].bodyBlocks).toHaveLength(2);
+        expect(exact.annotationId).toEqual(firstAnnotationId);
+        expect(exact.bodyBlockId).toBe(annotations[0].bodyBlocks[1].id);
         expect(Object.values(result.state.state.marks).filter((mark) => mark.type === ANNOTATION_MARK)).toHaveLength(1);
+    });
+
+    it('splits an annotation body into a sibling block tied to the same annotation', () => {
+        const demo = createDemoState();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = insertText(demo.left.state, caret(blockId, 0), 'hello', ctx());
+        result = createAnnotation(result.state, range(blockId, 0, 5), 'sidebar', ctx());
+        const annotation = annotationsFor(result.state)[0];
+        const bodyId = annotation.bodyBlocks[0].id;
+        result = setAnnotationBodyText(result.state, bodyId, 'note', ctx());
+
+        result = splitAnnotationBodyBlock(result.state, caret(bodyId, 2), ctx());
+
+        const active = annotationsFor(result.state);
+        expect(active).toHaveLength(1);
+        expect(active[0].id).toBe(annotation.id);
+        expect(active[0].bodyBlocks.map((block) => block.text)).toEqual(['no', 'te']);
+        expect(annotationBodyBlockIds(result.state, annotation.data.id)).toEqual(
+            active[0].bodyBlocks.map((block) => block.id),
+        );
+        expect(result.selection).toEqual(caret(active[0].bodyBlocks[1].id, 0));
+    });
+
+    it('resolves a single-body annotation from empty body backspace', () => {
+        const demo = createDemoState();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = insertText(demo.left.state, caret(blockId, 0), 'hello', ctx());
+        result = createAnnotation(result.state, range(blockId, 0, 5), 'sidebar', ctx());
+        const annotation = annotationsFor(result.state)[0];
+        const bodyId = annotation.bodyBlocks[0].id;
+
+        result = deleteAnnotationBodyBackward(result.state, caret(bodyId, 0), ctx(), {
+            annotationId: annotation.id,
+            bodyBlockId: bodyId,
+        });
+
+        expect(annotationsFor(result.state)).toEqual([]);
+        expect(blockContents(result.state, blockId)).toBe('hello');
+        expect(annotationBodyBlockIds(result.state, annotation.data.id)).toEqual([bodyId]);
+    });
+
+    it('deletes the final body character before resolving on the next backspace', () => {
+        const demo = createDemoState();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = insertText(demo.left.state, caret(blockId, 0), 'hello', ctx());
+        result = createAnnotation(result.state, range(blockId, 0, 5), 'sidebar', ctx());
+        const annotation = annotationsFor(result.state)[0];
+        const bodyId = annotation.bodyBlocks[0].id;
+        result = setAnnotationBodyText(result.state, bodyId, 'x', ctx());
+
+        result = deleteAnnotationBodyBackward(result.state, caret(bodyId, 1), ctx(), {
+            annotationId: annotation.id,
+            bodyBlockId: bodyId,
+        });
+
+        expect(annotationsFor(result.state)[0].bodyBlocks[0].text).toBe('');
+
+        result = deleteAnnotationBodyBackward(result.state, caret(bodyId, 0), ctx(), {
+            annotationId: annotation.id,
+            bodyBlockId: bodyId,
+        });
+
+        expect(annotationsFor(result.state)).toEqual([]);
+    });
+
+    it('removes only the active body block from a multi-body annotation', () => {
+        const demo = createDemoState();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = insertText(demo.left.state, caret(blockId, 0), 'abcdef', ctx());
+        result = createAnnotation(result.state, range(blockId, 1, 4), 'sidebar', ctx());
+        result = createAnnotation(result.state, range(blockId, 1, 4), 'sidebar', ctx());
+        const annotation = annotationsFor(result.state)[0];
+        const [firstBodyId, secondBodyId] = annotation.bodyBlocks.map((block) => block.id);
+
+        result = deleteAnnotationBodyBackward(result.state, caret(firstBodyId, 0), ctx(), {
+            annotationId: annotation.id,
+            bodyBlockId: firstBodyId,
+        });
+
+        let active = annotationsFor(result.state);
+        expect(active).toHaveLength(1);
+        expect(active[0].bodyBlocks.map((block) => block.id)).toEqual([secondBodyId]);
+        expect(isDeleted(result.state.state.blocks[firstBodyId])).toBe(true);
+
+        result = deleteAnnotationBodyBackward(result.state, caret(secondBodyId, 0), ctx(), {
+            annotationId: annotation.id,
+            bodyBlockId: secondBodyId,
+        });
+
+        active = annotationsFor(result.state);
+        expect(active).toEqual([]);
+        expect(isDeleted(result.state.state.blocks[secondBodyId])).toBe(false);
+    });
+
+    it('returns null annotation ids when a selection cannot create an annotation', () => {
+        const demo = createDemoState();
+        const blockId = rootBlockIds(demo.left.state)[0];
+
+        const result = createAnnotation(demo.left.state, caret(blockId, 0), 'sidebar', ctx());
+
+        expect(result.ops).toEqual([]);
+        expect(result.annotationId).toBeNull();
+        expect(result.bodyBlockId).toBeNull();
     });
 });

@@ -16,6 +16,15 @@ pnpm install
 pnpm dev
 ```
 
+To build the standalone static PeerJS Wordsearch demo:
+
+```sh
+pnpm build:wordsearch-peerjs
+```
+
+The output is written to `dist-wordsearch-peerjs`. The build uses PeerJS public
+defaults unless `VITE_UMKEHR_PEERJS_*` environment variables are supplied.
+
 The server-backed offline-first mode also needs the Bun server in a second
 terminal:
 

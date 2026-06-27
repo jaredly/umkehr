@@ -6,6 +6,7 @@ import type {
     ReplicaIdentity,
 } from './types';
 import {batchKey} from './recentBatchCache';
+import {cloneSerializableCrdtLocalHistory} from '../crdtApp';
 
 const DB_NAME = 'umkehr-react-crdt-local-first';
 const DB_VERSION = 1;
@@ -69,7 +70,7 @@ export async function hasReplica(docId: string) {
 
 export async function saveReplica<TState>(replica: PersistedReplica<TState>) {
     const db = await openLocalFirstDb();
-    await db.put('replicas', replica as PersistedReplica<unknown>, replica.docId);
+    await db.put('replicas', serializableReplica(replica), replica.docId);
 }
 
 export async function replaceReplicaState<TState>(
@@ -82,7 +83,7 @@ export async function replaceReplicaState<TState>(
         db.getAllKeysFromIndex('receivedBatches', 'docId', replica.docId),
     ]);
     const tx = db.transaction(['replicas', 'batches', 'receivedBatches'], 'readwrite');
-    await tx.objectStore('replicas').put(replica as PersistedReplica<unknown>, replica.docId);
+    await tx.objectStore('replicas').put(serializableReplica(replica), replica.docId);
     await Promise.all([
         ...batchKeys.map((key) => tx.objectStore('batches').delete(key)),
         ...receivedKeys.map((key) => tx.objectStore('receivedBatches').delete(key)),
@@ -102,6 +103,13 @@ export async function replaceReplicaState<TState>(
         }),
     ]);
     await tx.done;
+}
+
+function serializableReplica<TState>(replica: PersistedReplica<TState>): PersistedReplica<unknown> {
+    return {
+        ...replica,
+        history: cloneSerializableCrdtLocalHistory(replica.history),
+    };
 }
 
 export async function clearReplica(docId: string) {

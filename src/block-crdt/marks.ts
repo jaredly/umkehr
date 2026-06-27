@@ -1,4 +1,5 @@
 import equal from 'fast-deep-equal';
+import {isDeleted} from './deletion.js';
 import {compareLamports, lamportToString} from './ids.js';
 import {
     charAtVisibleOffset,
@@ -8,7 +9,7 @@ import {
     visibleBlockOutline,
 } from './traversal.js';
 import {type VirtualBlockParentConfig} from './blocks.js';
-import {Block, CachedState, JsonValue, Lamport, Mark, Op, SplitRecord, TimestampedBlockMeta} from './types.js';
+import {Block, Boundary, CachedState, JsonValue, Lamport, Mark, Op, SplitRecord, TimestampedBlockMeta} from './types.js';
 
 export const splitRecordsByLeft = <M extends TimestampedBlockMeta>(
     state: CachedState<M>,
@@ -33,12 +34,33 @@ export type FormattedRun = {
     stackedMarks?: Record<string, FormattedMarkValue[]>;
 };
 
+export type VisibleMarkRange = {
+    blockId: string;
+    startOffset: number;
+    endOffset: number;
+};
+
 export type FormattedBlock<M extends TimestampedBlockMeta = TimestampedBlockMeta> = {
     id: string;
     block: Block<M>;
     runs: FormattedRun[];
     depth: number;
     parentId: string;
+};
+
+type VisibleOutlineEntry = {
+    id: string;
+    depth: number;
+    parentId: string;
+};
+
+type MarkTraversalContext = {
+    outline: VisibleOutlineEntry[];
+    blockCharIds: Map<string, string[]>;
+    blockVisibleCharIds: Map<string, string[]>;
+    allCharIds: string[];
+    nextById: Record<string, string>;
+    splitRecords: Record<string, SplitRecord[]>;
 };
 
 export const markOp = <M extends TimestampedBlockMeta = TimestampedBlockMeta>(
@@ -55,6 +77,27 @@ export const markOp = <M extends TimestampedBlockMeta = TimestampedBlockMeta>(
         id,
         start: {id: start, at: 'before'},
         end: {id: end, at: 'after'},
+        remove,
+        type,
+        data,
+        crossedSplits,
+    },
+});
+
+export const markBoundaryOp = <M extends TimestampedBlockMeta = TimestampedBlockMeta>(
+    id: Lamport,
+    start: Boundary,
+    end: Boundary | undefined,
+    type: string,
+    data?: JsonValue,
+    remove = false,
+    crossedSplits: Lamport[] = [],
+): Op<M> => ({
+    type: 'mark',
+    mark: {
+        id,
+        start,
+        ...(end ? {end} : {}),
         remove,
         type,
         data,
@@ -87,18 +130,35 @@ export const materializeFormattedBlocks = <M extends TimestampedBlockMeta>(
     state: CachedState<M>,
     config: VirtualBlockParentConfig<M> = {},
 ): FormattedBlock<M>[] => {
+    const marks = Object.values(state.state.marks);
+    if (marks.length === 0) {
+        return visibleBlockOutline(state, config).map(({id, depth, parentId}) => {
+            let text = '';
+            for (const charId of orderedCharIdsForBlock(state, id, {visibleOnly: true})) {
+                text += charRecord(state, charId)?.text ?? '';
+            }
+            return {
+                id,
+                block: state.state.blocks[id],
+                runs: text ? [{text, marks: {}}] : [],
+                depth,
+                parentId,
+            };
+        });
+    }
+
+    const context = createMarkTraversalContext(state, config);
     const coveredByMark: Record<string, Mark[]> = {};
-    const marks = Object.values(state.state.marks).sort((a, b) => compareLamports(a.id, b.id));
-    for (const mark of marks) {
-        for (const charId of coveredCharIdsForMark(state, mark, config)) {
+    for (const mark of marks.sort((a, b) => compareLamports(a.id, b.id))) {
+        for (const charId of coveredCharIdsForMarkWithContext(state, mark, context)) {
             coveredByMark[charId] = coveredByMark[charId] ?? [];
             coveredByMark[charId].push(mark);
         }
     }
 
-    return visibleBlockOutline(state, config).map(({id, depth, parentId}) => {
+    return context.outline.map(({id, depth, parentId}) => {
         const runs: FormattedRun[] = [];
-        for (const charId of orderedCharIdsForBlock(state, id, {visibleOnly: true})) {
+        for (const charId of context.blockVisibleCharIds.get(id) ?? []) {
             const char = charRecord(state, charId);
             if (!char) continue;
             const {marks, stackedMarks} = resolveMarks(coveredByMark[charId] ?? [], config);
@@ -112,6 +172,36 @@ export const materializeFormattedBlocks = <M extends TimestampedBlockMeta>(
         }
         return {id, block: state.state.blocks[id], runs, depth, parentId};
     });
+};
+
+export const formattedMarkValues = (run: FormattedRun, type: string): FormattedMarkValue[] => [
+    ...(run.stackedMarks?.[type] ?? []),
+    ...(run.marks[type] === undefined ? [] : [run.marks[type]]),
+];
+
+export const visibleRangesForMark = <M extends TimestampedBlockMeta>(
+    state: CachedState<M>,
+    mark: Mark,
+    config: VirtualBlockParentConfig<M> = {},
+): VisibleMarkRange[] => {
+    const covered = new Set(coveredCharIdsForMark(state, mark, config));
+    const ranges: VisibleMarkRange[] = [];
+    for (const {id: blockId} of visibleBlockOutline(state, config)) {
+        let startOffset: number | null = null;
+        const chars = orderedCharIdsForBlock(state, blockId, {visibleOnly: true});
+        for (let offset = 0; offset <= chars.length; offset++) {
+            const charId = chars[offset];
+            if (charId && covered.has(charId)) {
+                startOffset ??= offset;
+                continue;
+            }
+            if (startOffset !== null) {
+                ranges.push({blockId, startOffset, endOffset: offset});
+                startOffset = null;
+            }
+        }
+    }
+    return ranges;
 };
 
 const crossedSplitsBetween = <M extends TimestampedBlockMeta>(
@@ -148,9 +238,17 @@ export const coveredCharIdsForMark = <M extends TimestampedBlockMeta>(
     mark: Mark,
     config: VirtualBlockParentConfig<M>,
 ): string[] => {
-    const sequence = allCharIds(state, config);
-    const nextById = nextIdMap(sequence);
-    const splitRecords = splitRecordsByLeft(state);
+    const context = createMarkTraversalContext(state, config);
+    return coveredCharIdsForMarkWithContext(state, mark, context);
+};
+
+const coveredCharIdsForMarkWithContext = <M extends TimestampedBlockMeta>(
+    state: CachedState<M>,
+    mark: Mark,
+    context: MarkTraversalContext,
+): string[] => {
+    const sequence = mark.end ? context.allCharIds : charIdsForOpenEndedMarkWithContext(mark, context);
+    const nextById = mark.end ? context.nextById : nextIdMap(sequence);
     const crossed = new Set(mark.crossedSplits.map(lamportToString));
     const covered: string[] = [];
     const forcedNext: Record<string, string> = {};
@@ -159,25 +257,27 @@ export const coveredCharIdsForMark = <M extends TimestampedBlockMeta>(
         mark.start.at === 'before'
             ? lamportToString(mark.start.id)
             : nextById[lamportToString(mark.start.id)];
-    const end = lamportToString(mark.end.id);
+    const end = mark.end ? lamportToString(mark.end.id) : null;
 
     while (current) {
         if (seen.has(current)) {
             throw new Error(`mark traversal cycle at ${current}`);
         }
         seen.add(current);
-        if (mark.end.at === 'before' && current === end) {
+        if (mark.end?.at === 'before' && current === end) {
             break;
         }
         covered.push(current);
-        if (mark.end.at === 'after' && current === end) {
+        if (mark.end?.at === 'after' && current === end) {
             break;
         }
         if (forcedNext[current]) {
             current = forcedNext[current];
             continue;
         }
-        const split = splitRecords[current]?.find((split) => !crossed.has(lamportToString(split.id)));
+        const split = mark.end
+            ? context.splitRecords[current]?.find((split) => !crossed.has(lamportToString(split.id)))
+            : undefined;
         if (split) {
             const path = pathForFollowedSplit(state, split);
             for (let i = 0; i < path.length - 1; i++) {
@@ -191,10 +291,66 @@ export const coveredCharIdsForMark = <M extends TimestampedBlockMeta>(
     return covered;
 };
 
+const createMarkTraversalContext = <M extends TimestampedBlockMeta>(
+    state: CachedState<M>,
+    config: VirtualBlockParentConfig<M> = {},
+): MarkTraversalContext => {
+    const outline = visibleBlockOutline(state, config);
+    const blockCharIds = new Map<string, string[]>();
+    const blockVisibleCharIds = new Map<string, string[]>();
+    const allIds: string[] = [];
+
+    for (const {id} of outline) {
+        const ids = orderedCharIdsForBlock(state, id);
+        blockCharIds.set(id, ids);
+        blockVisibleCharIds.set(
+            id,
+            ids.filter((charId) => {
+                const char = charRecord(state, charId);
+                return Boolean(char && !isDeleted(char));
+            }),
+        );
+        allIds.push(...ids);
+    }
+
+    return {
+        outline,
+        blockCharIds,
+        blockVisibleCharIds,
+        allCharIds: allIds,
+        nextById: nextIdMap(allIds),
+        splitRecords: splitRecordsByLeft(state),
+    };
+};
+
 const allCharIds = <M extends TimestampedBlockMeta>(
     state: CachedState<M>,
     config: VirtualBlockParentConfig<M> = {},
 ): string[] => visibleBlockOutline(state, config).flatMap(({id}) => orderedCharIdsForBlock(state, id));
+
+const charIdsForOpenEndedMark = <M extends TimestampedBlockMeta>(
+    state: CachedState<M>,
+    mark: Mark,
+    config: VirtualBlockParentConfig<M> = {},
+): string[] => {
+    const startId = lamportToString(mark.start.id);
+    const block = visibleBlockOutline(state, config).find(({id}) =>
+        orderedCharIdsForBlock(state, id).includes(startId),
+    );
+    return block ? orderedCharIdsForBlock(state, block.id) : allCharIds(state, config);
+};
+
+const charIdsForOpenEndedMarkWithContext = (
+    mark: Mark,
+    context: MarkTraversalContext,
+): string[] => {
+    const startId = lamportToString(mark.start.id);
+    for (const {id} of context.outline) {
+        const ids = context.blockCharIds.get(id) ?? [];
+        if (ids.includes(startId)) return ids;
+    }
+    return context.allCharIds;
+};
 
 const nextIdMap = (sequence: string[]): Record<string, string> => {
     const result: Record<string, string> = {};

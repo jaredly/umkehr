@@ -1,0 +1,1 @@
+examples/block-rich-text: while in presentation mode, we should ensure the focus stays within the slide, to prevent confusion. If an operation results in the selection leaving the current slide, it should jump back to the slide, maybe as a block selection of the slide itself.

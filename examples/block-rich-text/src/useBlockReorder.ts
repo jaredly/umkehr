@@ -1,5 +1,7 @@
 import {useCallback, useEffect, useMemo, useRef, useState, type PointerEvent} from 'react';
-import type {MoveTarget} from './blockCommands';
+import type {MoveTarget, TableCellSlotTarget} from './blockCommands';
+
+const DRAG_START_THRESHOLD_PX = 4;
 
 export type BlockOutlineItem = {
     id: string;
@@ -8,10 +10,27 @@ export type BlockOutlineItem = {
 };
 
 export type DropTarget = {
-    command: MoveTarget;
+    command: BlockReorderCommand;
     indicatorBlockId: string;
     indicatorPlacement: 'before' | 'after';
     indicatorDepth: number;
+};
+
+export type BlockReorderCommand =
+    | MoveTarget
+    | {type: 'table-cell-slot'; target: TableCellSlotTarget};
+
+const NO_DROP_TARGET = Symbol('no-drop-target');
+
+type DropTargetResolution = DropTarget | null | typeof NO_DROP_TARGET;
+
+type PendingDrag = {
+    id: string;
+    ids: string[];
+    pointerId: number;
+    startX: number;
+    startY: number;
+    source: HTMLElement;
 };
 
 export function useBlockReorder({
@@ -19,18 +38,21 @@ export function useBlockReorder({
     onMove,
 }: {
     blocks: BlockOutlineItem[];
-    onMove(blockId: string, target: MoveTarget): void;
+    onMove(blockIds: string[], target: BlockReorderCommand): void;
 }) {
     const [draggingId, setDraggingId] = useState<string | null>(null);
     const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
     const rowRefs = useRef(new Map<string, HTMLElement>());
     const blocksRef = useRef(blocks);
     const draggingRef = useRef<string | null>(null);
+    const draggingIdsRef = useRef<string[]>([]);
+    const pendingDragRef = useRef<PendingDrag | null>(null);
+    const [hasPointerGesture, setHasPointerGesture] = useState(false);
 
     blocksRef.current = blocks;
 
     const draggingSubtreeIds = useMemo(
-        () => (draggingId ? subtreeIds(blocks, draggingId) : new Set<string>()),
+        () => (draggingId ? subtreeIdsForRoots(blocks, draggingIdsRef.current) : new Set<string>()),
         [blocks, draggingId],
     );
 
@@ -41,6 +63,7 @@ export function useBlockReorder({
 
     const findDropTarget = useCallback((clientX: number, clientY: number): DropTarget | null => {
         const dragged = draggingRef.current;
+        const draggedIds = draggingIdsRef.current;
         const currentBlocks = blocksRef.current;
         const rows = currentBlocks
             .map((block) => {
@@ -50,17 +73,34 @@ export function useBlockReorder({
             .filter((row) => row !== null);
         if (!rows.length) return null;
 
-        const containing = rows.find(({rect}) => clientY >= rect.top && clientY <= rect.bottom);
+        const cellTarget = resolveCellDropTarget(currentBlocks, clientX, clientY, {
+            dragged,
+            draggedIds,
+        });
+        if (cellTarget) return cellTarget;
+
+        const columnsTarget = resolveColumnsDropTarget(currentBlocks, clientX, clientY, {
+            dragged,
+            draggedIds,
+        });
+        if (columnsTarget === NO_DROP_TARGET) return null;
+        if (columnsTarget) return columnsTarget;
+
+        const horizontalRows = rows.filter(({rect}) => rectContainsX(rect, clientX));
+        if (!horizontalRows.length) return null;
+
+        const containing = horizontalRows.find(({rect}) => clientY >= rect.top && clientY <= rect.bottom);
         if (containing) {
             return resolveDropTarget(currentBlocks, containing.block, {
                 clientX,
                 clientY,
                 rect: containing.rect,
                 dragged,
+                draggedIds,
             });
         }
 
-        const before = rows.find(({rect}) => clientY < rect.top);
+        const before = horizontalRows.find(({rect}) => clientY < rect.top);
         if (before) {
             return normalizeDropTarget(currentBlocks, before.block, {
                 command: {type: 'before', targetBlockId: before.block.id},
@@ -68,39 +108,69 @@ export function useBlockReorder({
                 indicatorPlacement: 'before',
                 indicatorDepth: before.block.depth,
                 dragged,
+                draggedIds,
             });
         }
-        const last = rows[rows.length - 1].block;
+        const last = horizontalRows[horizontalRows.length - 1].block;
         return normalizeDropTarget(currentBlocks, last, {
             command: {type: 'after', targetBlockId: last.id},
             indicatorBlockId: last.id,
             indicatorPlacement: 'after',
             indicatorDepth: last.depth,
             dragged,
+            draggedIds,
         });
     }, []);
 
     useEffect(() => {
-        if (!draggingId) return;
+        if (!hasPointerGesture) return;
 
         const onPointerMove = (event: globalThis.PointerEvent) => {
+            const pending = pendingDragRef.current;
+            if (pending) {
+                if (event.pointerId !== pending.pointerId) return;
+                const deltaX = event.clientX - pending.startX;
+                const deltaY = event.clientY - pending.startY;
+                if (Math.hypot(deltaX, deltaY) < DRAG_START_THRESHOLD_PX) return;
+                pendingDragRef.current = null;
+                draggingRef.current = pending.id;
+                draggingIdsRef.current = pending.ids;
+                pending.source.dataset.blockDragSuppressClick = 'true';
+                window.setTimeout(() => {
+                    if (pending.source.dataset.blockDragSuppressClick === 'true') {
+                        delete pending.source.dataset.blockDragSuppressClick;
+                    }
+                }, 0);
+                setDraggingId(pending.id);
+            }
+            if (!draggingRef.current) return;
             event.preventDefault();
             setDropTarget(findDropTarget(event.clientX, event.clientY));
         };
         const onPointerUp = (event: globalThis.PointerEvent) => {
-            event.preventDefault();
-            const target = findDropTarget(event.clientX, event.clientY) ?? dropTarget;
+            const wasDragging = draggingRef.current !== null;
+            if (wasDragging) event.preventDefault();
+            const target = wasDragging
+                ? findDropTarget(event.clientX, event.clientY) ?? dropTarget
+                : null;
             const dragged = draggingRef.current;
+            const draggedIds = draggingIdsRef.current;
+            pendingDragRef.current = null;
             setDraggingId(null);
             setDropTarget(null);
+            setHasPointerGesture(false);
             draggingRef.current = null;
+            draggingIdsRef.current = [];
             if (!dragged || !target) return;
-            onMove(dragged, target.command);
+            onMove(draggedIds.length ? draggedIds : [dragged], target.command);
         };
         const onPointerCancel = () => {
+            pendingDragRef.current = null;
             setDraggingId(null);
             setDropTarget(null);
+            setHasPointerGesture(false);
             draggingRef.current = null;
+            draggingIdsRef.current = [];
         };
         window.addEventListener('pointermove', onPointerMove, {passive: false});
         window.addEventListener('pointerup', onPointerUp, {passive: false});
@@ -110,20 +180,34 @@ export function useBlockReorder({
             window.removeEventListener('pointerup', onPointerUp);
             window.removeEventListener('pointercancel', onPointerCancel);
         };
-    }, [draggingId, dropTarget, findDropTarget, onMove]);
+    }, [dropTarget, findDropTarget, hasPointerGesture, onMove]);
 
-    const startDrag = useCallback((id: string, event: PointerEvent<HTMLElement>) => {
+    const startDrag = useCallback((id: string, event: PointerEvent<HTMLElement>, ids: string[] = [id]) => {
         if (!event.isPrimary || event.button !== 0) return;
-        event.preventDefault();
         event.stopPropagation();
-        event.currentTarget.setPointerCapture(event.pointerId);
-        draggingRef.current = id;
-        setDraggingId(id);
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+        pendingDragRef.current = {
+            id,
+            ids: ids.length ? ids : [id],
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            startY: event.clientY,
+            source: event.currentTarget,
+        };
+        draggingRef.current = null;
+        draggingIdsRef.current = [];
+        setDraggingId(null);
         setDropTarget(null);
+        setHasPointerGesture(true);
     }, []);
 
     return {draggingId, draggingSubtreeIds, dropTarget, registerRow, startDrag};
 }
+
+const rectContainsX = (rect: DOMRect, clientX: number): boolean => {
+    if (rect.width <= 0) return false;
+    return clientX >= rect.left && clientX <= rect.right;
+};
 
 const resolveDropTarget = (
     blocks: BlockOutlineItem[],
@@ -133,11 +217,13 @@ const resolveDropTarget = (
         clientY,
         rect,
         dragged,
+        draggedIds,
     }: {
         clientX: number;
         clientY: number;
         rect: DOMRect;
         dragged: string | null;
+        draggedIds: string[];
     },
 ): DropTarget | null => {
     const ratio = rect.height > 0 ? (clientY - rect.top) / rect.height : 0.5;
@@ -149,6 +235,7 @@ const resolveDropTarget = (
             command: {type: 'child', parentBlockId: hovered.id, at},
             ...targetChildIndicator(blocks, hovered, at),
             dragged,
+            draggedIds,
         });
     }
 
@@ -159,11 +246,318 @@ const resolveDropTarget = (
             indicatorPlacement: 'before',
             indicatorDepth: hovered.depth,
             dragged,
+            draggedIds,
         });
     }
 
     const afterSubtree = targetAfterSubtree(blocks, hovered);
-    return normalizeDropTarget(blocks, hovered, {...afterSubtree, dragged});
+    return normalizeDropTarget(blocks, hovered, {...afterSubtree, dragged, draggedIds});
+};
+
+const resolveColumnsDropTarget = (
+    blocks: BlockOutlineItem[],
+    clientX: number,
+    clientY: number,
+    {
+        dragged,
+        draggedIds,
+    }: {
+        dragged: string | null;
+        draggedIds: string[];
+    },
+): DropTargetResolution => {
+    if (typeof document.elementsFromPoint !== 'function') return null;
+    const elements = document.elementsFromPoint(clientX, clientY);
+    const column = elements
+        .map((element) => element.closest<HTMLElement>('[data-columns-column-id]'))
+        .find((element): element is HTMLElement => !!element?.dataset.columnsColumnId);
+    const draggedRootIds = draggedIds.length ? draggedIds : dragged ? [dragged] : [];
+    const draggingColumn =
+        draggedRootIds.length === 1 && isRenderedColumnsColumn(draggedRootIds[0]);
+
+    if (column?.dataset.columnsColumnDisplay === 'blocks') {
+        if (!draggingColumn && !isColumnBackgroundHit(elements, column)) return null;
+        const columnId = column.dataset.columnsColumnId;
+        const hovered = columnId ? blocks.find((block) => block.id === columnId) : null;
+        if (!columnId || !hovered) return null;
+        const rect = column.getBoundingClientRect();
+        const placement = rect.width > 0 && clientX > rect.left + rect.width / 2 ? 'after' : 'before';
+        return normalizeDropTarget(blocks, hovered, {
+            command:
+                placement === 'after'
+                    ? {type: 'after', targetBlockId: columnId}
+                    : {type: 'before', targetBlockId: columnId},
+            indicatorBlockId: columnId,
+            indicatorPlacement: placement,
+            indicatorDepth: hovered.depth,
+            dragged,
+            draggedIds,
+        }) ?? NO_DROP_TARGET;
+    }
+
+    if (draggingColumn && column?.dataset.columnsColumnDisplay === 'cards') {
+        const columnId = column.dataset.columnsColumnId;
+        const hovered = columnId ? blocks.find((block) => block.id === columnId) : null;
+        if (!columnId || !hovered) return null;
+        const rect = column.getBoundingClientRect();
+        const placement = rect.width > 0 && clientX > rect.left + rect.width / 2 ? 'after' : 'before';
+        return normalizeDropTarget(blocks, hovered, {
+            command:
+                placement === 'after'
+                    ? {type: 'after', targetBlockId: columnId}
+                    : {type: 'before', targetBlockId: columnId},
+            indicatorBlockId: columnId,
+            indicatorPlacement: placement,
+            indicatorDepth: hovered.depth,
+            dragged,
+            draggedIds,
+        }) ?? NO_DROP_TARGET;
+    }
+
+    const card = elements
+        .map((element) => element.closest<HTMLElement>('[data-columns-card-id]'))
+        .find((element): element is HTMLElement => !!element?.dataset.columnsCardId);
+    if (card) {
+        const cardId = card.dataset.columnsCardId;
+        const hovered = cardId ? blocks.find((block) => block.id === cardId) : null;
+        if (!cardId || !hovered) return null;
+        return resolveColumnsCardDropTarget(blocks, hovered, {
+            clientX,
+            clientY,
+            rect: card.getBoundingClientRect(),
+            dragged,
+            draggedIds,
+        }) ?? NO_DROP_TARGET;
+    }
+
+    if (column?.dataset.columnsColumnDisplay === 'cards') {
+        const columnId = column.dataset.columnsColumnId;
+        const hovered = columnId ? blocks.find((block) => block.id === columnId) : null;
+        if (!columnId || !hovered) return null;
+        const cardSlotTarget = resolveColumnsColumnCardSlot(blocks, column, clientY, {
+            dragged,
+            draggedIds,
+        });
+        if (cardSlotTarget) return cardSlotTarget;
+        return normalizeDropTarget(blocks, hovered, {
+            command: {type: 'child', parentBlockId: columnId, at: 'end'},
+            ...targetChildIndicator(blocks, hovered, 'end'),
+            dragged,
+            draggedIds,
+        }) ?? NO_DROP_TARGET;
+    }
+
+    const columnsContainer = elements
+        .map((element) => element.closest<HTMLElement>('.columnsColumns[data-columns-board-id]'))
+        .find((element): element is HTMLElement => !!element?.dataset.columnsBoardId);
+    if (!columnsContainer) return null;
+    const display = columnsContainer.dataset.columnsDisplay;
+    if (display === 'cards' && !draggingColumn) return null;
+    if (display !== 'cards' && display !== 'blocks') return null;
+    const boardId = columnsContainer.dataset.columnsBoardId;
+    const columns = Array.from(
+        columnsContainer.querySelectorAll<HTMLElement>(':scope > [data-columns-column-id]'),
+    );
+    const lastColumnId = columns[columns.length - 1]?.dataset.columnsColumnId;
+    const lastColumn = lastColumnId ? blocks.find((block) => block.id === lastColumnId) : null;
+    const board = boardId ? blocks.find((block) => block.id === boardId) : null;
+    if (lastColumnId && lastColumn) {
+        return normalizeDropTarget(blocks, lastColumn, {
+            command: {type: 'after', targetBlockId: lastColumnId},
+            indicatorBlockId: lastColumnId,
+            indicatorPlacement: 'after',
+            indicatorDepth: lastColumn.depth,
+            dragged,
+            draggedIds,
+        });
+    }
+    if (boardId && board) {
+        return normalizeDropTarget(blocks, board, {
+            command: {type: 'child', parentBlockId: boardId, at: 'end'},
+            ...targetChildIndicator(blocks, board, 'end'),
+            dragged,
+            draggedIds,
+        });
+    }
+    return null;
+};
+
+const resolveColumnsColumnCardSlot = (
+    blocks: BlockOutlineItem[],
+    column: HTMLElement,
+    clientY: number,
+    {
+        dragged,
+        draggedIds,
+    }: {
+        dragged: string | null;
+        draggedIds: string[];
+    },
+): DropTarget | null => {
+    const cards = Array.from(
+        column.querySelectorAll<HTMLElement>(':scope > .columnsCards > [data-columns-card-id]'),
+    )
+        .map((element) => {
+            const cardId = element.dataset.columnsCardId;
+            const block = cardId ? blocks.find((candidate) => candidate.id === cardId) : null;
+            return cardId && block ? {id: cardId, block, rect: element.getBoundingClientRect()} : null;
+        })
+        .filter((entry): entry is {id: string; block: BlockOutlineItem; rect: DOMRect} => entry !== null);
+    if (!cards.length) return null;
+
+    const first = cards[0];
+    if (clientY < first.rect.top) {
+        return normalizeDropTarget(blocks, first.block, {
+            command: {type: 'before', targetBlockId: first.id},
+            indicatorBlockId: first.id,
+            indicatorPlacement: 'before',
+            indicatorDepth: first.block.depth,
+            dragged,
+            draggedIds,
+        });
+    }
+
+    for (let index = 0; index < cards.length - 1; index++) {
+        const previous = cards[index];
+        const next = cards[index + 1];
+        if (clientY >= previous.rect.bottom && clientY <= next.rect.top) {
+            return normalizeDropTarget(blocks, previous.block, {
+                command: {type: 'after', targetBlockId: previous.id},
+                indicatorBlockId: previous.id,
+                indicatorPlacement: 'after',
+                indicatorDepth: previous.block.depth,
+                dragged,
+                draggedIds,
+            });
+        }
+    }
+
+    const last = cards[cards.length - 1];
+    if (clientY > last.rect.bottom) {
+        return normalizeDropTarget(blocks, last.block, {
+            command: {type: 'after', targetBlockId: last.id},
+            indicatorBlockId: last.id,
+            indicatorPlacement: 'after',
+            indicatorDepth: last.block.depth,
+            dragged,
+            draggedIds,
+        });
+    }
+
+    return null;
+};
+
+const resolveColumnsCardDropTarget = (
+    blocks: BlockOutlineItem[],
+    hovered: BlockOutlineItem,
+    {
+        clientX,
+        clientY,
+        rect,
+        dragged,
+        draggedIds,
+    }: {
+        clientX: number;
+        clientY: number;
+        rect: DOMRect;
+        dragged: string | null;
+        draggedIds: string[];
+    },
+): DropTarget | null => {
+    const ratio = rect.height > 0 ? (clientY - rect.top) / rect.height : 0.5;
+    const childIntent = clientX >= rect.left + 64;
+
+    if (childIntent && ratio >= 0.25 && ratio <= 0.75) {
+        const at = ratio < 0.5 ? 'start' : 'end';
+        return normalizeDropTarget(blocks, hovered, {
+            command: {type: 'child', parentBlockId: hovered.id, at},
+            ...targetChildIndicator(blocks, hovered, at),
+            dragged,
+            draggedIds,
+        });
+    }
+
+    if (ratio < 0.5) {
+        return normalizeDropTarget(blocks, hovered, {
+            command: {type: 'before', targetBlockId: hovered.id},
+            indicatorBlockId: hovered.id,
+            indicatorPlacement: 'before',
+            indicatorDepth: hovered.depth,
+            dragged,
+            draggedIds,
+        });
+    }
+
+    return normalizeDropTarget(blocks, hovered, {
+        command: {type: 'after', targetBlockId: hovered.id},
+        indicatorBlockId: hovered.id,
+        indicatorPlacement: 'after',
+        indicatorDepth: hovered.depth,
+        dragged,
+        draggedIds,
+    });
+};
+
+const isRenderedColumnsColumn = (blockId: string): boolean =>
+    Array.from(document.querySelectorAll<HTMLElement>('[data-columns-column-id]')).some(
+        (element) => element.dataset.columnsColumnId === blockId,
+    );
+
+const isColumnBackgroundHit = (elements: Element[], column: HTMLElement): boolean =>
+    elements.some((element) => element === column || element.classList.contains('columnsColumns'));
+
+const resolveCellDropTarget = (
+    blocks: BlockOutlineItem[],
+    clientX: number,
+    clientY: number,
+    {
+        dragged,
+        draggedIds,
+    }: {
+        dragged: string | null;
+        draggedIds: string[];
+    },
+): DropTarget | null => {
+    if (typeof document.elementsFromPoint !== 'function') return null;
+    const cell = document
+        .elementsFromPoint(clientX, clientY)
+        .map((element) => element.closest<HTMLElement>('.tableCell'))
+        .find((element): element is HTMLElement => !!element);
+    if (!cell) return null;
+    const row = cell.closest<HTMLElement>('[data-row-id]');
+    const rowId = row?.dataset.rowId;
+    const cells = row
+        ? Array.from(row.children).filter(
+              (child): child is HTMLElement =>
+                  child instanceof HTMLElement && child.matches('.tableCell'),
+          )
+        : [];
+    const cellIndex = cells.indexOf(cell);
+    if (!rowId || cellIndex < 0) return null;
+    const cellId = cell.dataset.cellId;
+    const hovered = blocks.find((block) => block.id === cellId);
+    const rect = cell.getBoundingClientRect();
+    const placement = rect.width > 0 && clientX > rect.left + rect.width / 2 ? 'after' : 'before';
+    if (!cellId || !hovered) {
+        const targetIndex = placement === 'after' ? cellIndex + 1 : cellIndex;
+        return {
+            command: {type: 'table-cell-slot', target: {rowId, index: targetIndex}},
+            indicatorBlockId: `${rowId}:${targetIndex}`,
+            indicatorPlacement: placement,
+            indicatorDepth: blocks.find((block) => block.id === rowId)?.depth ?? 0,
+        };
+    }
+    return normalizeDropTarget(blocks, hovered, {
+        command:
+            placement === 'after'
+                ? {type: 'after', targetBlockId: cellId}
+                : {type: 'before', targetBlockId: cellId},
+        indicatorBlockId: cellId,
+        indicatorPlacement: placement,
+        indicatorDepth: hovered.depth,
+        dragged,
+        draggedIds,
+    });
 };
 
 const targetAfterSubtree = (
@@ -240,23 +634,24 @@ const lastSubtreeItem = (blocks: BlockOutlineItem[], root: BlockOutlineItem): Bl
 const normalizeDropTarget = (
     blocks: BlockOutlineItem[],
     hovered: BlockOutlineItem,
-    target: DropTarget & {dragged: string | null},
+    target: DropTarget & {dragged: string | null; draggedIds: string[]},
 ): DropTarget | null => {
-    const {dragged, ...dropTarget} = target;
+    const {dragged, draggedIds, ...dropTarget} = target;
     if (!dragged) return dropTarget;
-    const draggedSubtree = subtreeIds(blocks, dragged);
-    if (draggedSubtree.has(hovered.id)) return null;
+    const draggedSubtree = subtreeIdsForRoots(blocks, draggedIds.length ? draggedIds : [dragged]);
+    if ((draggedIds.length <= 1) && isNoop(blocks, dragged, dropTarget.command)) return null;
     if (moveTargetTouchesSubtree(dropTarget.command, draggedSubtree)) return null;
-    if (isNoop(blocks, dragged, dropTarget.command)) return null;
     return dropTarget;
 };
 
-const moveTargetTouchesSubtree = (target: MoveTarget, subtree: Set<string>): boolean => {
+const moveTargetTouchesSubtree = (target: BlockReorderCommand, subtree: Set<string>): boolean => {
+    if (target.type === 'table-cell-slot') return subtree.has(target.target.rowId);
     if (target.type === 'child') return subtree.has(target.parentBlockId);
     return subtree.has(target.targetBlockId);
 };
 
-const isNoop = (blocks: BlockOutlineItem[], dragged: string, target: MoveTarget): boolean => {
+const isNoop = (blocks: BlockOutlineItem[], dragged: string, target: BlockReorderCommand): boolean => {
+    if (target.type === 'table-cell-slot') return false;
     const current = blocks.find((block) => block.id === dragged);
     if (!current) return true;
     if (target.type === 'child') {
@@ -284,6 +679,14 @@ const subtreeIds = (blocks: BlockOutlineItem[], rootId: string): Set<string> => 
     const ids = new Set<string>([rootId]);
     for (let i = rootIndex + 1; i < blocks.length && blocks[i].depth > rootDepth; i++) {
         ids.add(blocks[i].id);
+    }
+    return ids;
+};
+
+const subtreeIdsForRoots = (blocks: BlockOutlineItem[], rootIds: string[]): Set<string> => {
+    const ids = new Set<string>();
+    for (const rootId of rootIds) {
+        for (const id of subtreeIds(blocks, rootId)) ids.add(id);
     }
     return ids;
 };

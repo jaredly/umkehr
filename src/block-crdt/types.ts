@@ -18,7 +18,7 @@ export type Boundary = {
 export type Mark = {
     id: Lamport;
     start: Boundary;
-    end: Boundary;
+    end?: Boundary;
     remove: boolean;
     type: string;
     data?: JsonValue;
@@ -43,6 +43,11 @@ export type CharParentTs = HLC | [HLC, Lamport[], HLC];
 export type IncidentalBlockOrderTs = [HLC, LseqId, HLC];
 export type BlockOrderTs = HLC | IncidentalBlockOrderTs;
 
+export type DeletedState = {
+    value: boolean;
+    ts: HLC;
+};
+
 export type BlockOrder = {
     id: Lamport;
     path: Lamport[];
@@ -53,7 +58,7 @@ export type BlockOrder = {
 export type Char = {
     id: Lamport;
     text: string;
-    deleted: boolean;
+    deleted?: DeletedState;
     parent: {
         ts: CharParentTs;
         id: Lamport;
@@ -63,6 +68,8 @@ export type Char = {
 };
 
 export type TimestampedBlockMeta = {ts: HLC};
+export type BlockStyle = Record<string, {value: JsonValue; ts: HLC}>;
+export type BlockStylePatch = Record<string, {value: JsonValue; ts: HLC}>;
 
 export type DefaultBlockMeta =
     | {type: 'paragraph'; ts: HLC}
@@ -73,8 +80,9 @@ export type DefaultBlockMeta =
 export type Block<M extends TimestampedBlockMeta = DefaultBlockMeta> = {
     id: Lamport;
     meta: M;
+    style: BlockStyle;
     order: BlockOrder;
-    deleted: boolean;
+    deleted?: DeletedState;
 };
 
 export type State<M extends TimestampedBlockMeta = DefaultBlockMeta> = {
@@ -99,10 +107,11 @@ export type Op<M extends TimestampedBlockMeta = DefaultBlockMeta> =
     | {type: 'char'; char: Char}
     | {type: 'block'; block: Block<M>}
     | {type: 'char:move'; id: Lamport; parent: Char['parent']}
-    | {type: 'char:delete'; id: Lamport}
+    | {type: 'char:delete'; id: Lamport; deleted: DeletedState}
     | {type: 'block:move'; id: Lamport; order: Block['order']}
-    | {type: 'block:delete'; id: Lamport}
+    | {type: 'block:delete'; id: Lamport; deleted: DeletedState}
     | {type: 'block:meta'; id: Lamport; meta: M}
+    | {type: 'block:style'; id: Lamport; style: BlockStylePatch}
     | {type: 'mark'; mark: Mark}
     | {type: 'split-record'; split: SplitRecord}
     | {type: 'join-record'; join: JoinRecord};

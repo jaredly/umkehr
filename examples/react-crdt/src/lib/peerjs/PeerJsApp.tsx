@@ -1,6 +1,11 @@
 import {useCallback, useEffect, useMemo, useState} from 'react';
 import {createCrdtLocalHistory, type CrdtLocalHistory} from 'umkehr/crdt';
-import {createInitialCrdtHistory, type AppDefinition, type CrdtRuntime} from '../crdtApp';
+import {
+    createInitialCrdtHistory,
+    hydrateCrdtLocalHistoryForApp,
+    type AppDefinition,
+    type CrdtRuntime,
+} from '../crdtApp';
 import {
     assertArchiveForApp,
     DocumentManagerModal,
@@ -32,6 +37,13 @@ import {
 import type {PeerProtocolConfig} from './protocol';
 import type {PeerJsSync, PeerRole} from './types';
 import {usePeerJsSync} from './usePeerJsSync';
+import {
+    initialArtifactsForStore,
+    loadSerializedArtifacts,
+    serializedArtifactsForStore,
+    type ArtifactStore,
+    type SerializedArtifact,
+} from '../artifacts';
 
 export function PeerJsApp<TState, EphemeralData = never>({
     app,
@@ -52,6 +64,9 @@ export function PeerJsApp<TState, EphemeralData = never>({
     const fingerprintHash = useMemo(() => schemaFingerprintHash(app), [app]);
     const [documents, setDocuments] = useState<LocalDocumentSummary[]>([]);
     const [hostHistory, setHostHistory] = useState(() => createInitialCrdtHistory(app));
+    const [hostArtifacts, setHostArtifacts] = useState<SerializedArtifact[]>(() =>
+        serializedArtifactsForStore(app.artifacts),
+    );
     const activeTitle = documents.find((document) => document.docId === activeDocId)?.title ?? activeDocId;
     const actor = useMemo(() => `${role}-${crypto.randomUUID().slice(0, 8)}`, [role]);
     const protocol = useMemo(
@@ -68,6 +83,8 @@ export function PeerJsApp<TState, EphemeralData = never>({
         role,
         actor,
         initialDocument: role === 'host' ? hostHistory.doc : undefined,
+        initialArtifacts: role === 'host' ? hostArtifacts : [],
+        onArtifacts: (artifacts) => loadSerializedArtifacts(app.artifacts, artifacts),
         protocol,
     });
     const {Provider} = runtime;
@@ -82,6 +99,8 @@ export function PeerJsApp<TState, EphemeralData = never>({
         loadOrCreatePeerJsDocument(app, activeDocId, fingerprintHash).then((document) => {
             if (!alive) return;
             setHostHistory(document.history);
+            setHostArtifacts(document.artifacts ?? serializedArtifactsForStore(app.artifacts));
+            loadSerializedArtifacts(app.artifacts, document.artifacts);
             sync.setSnapshotDocument(document.history.doc);
             refreshDocuments();
         });
@@ -101,7 +120,9 @@ export function PeerJsApp<TState, EphemeralData = never>({
 
     const saveHostHistory = useCallback(
         (history: CrdtLocalHistory<TState>) => {
+            const artifacts = artifactsForPeerJsHistorySave(app.artifacts);
             setHostHistory(history);
+            setHostArtifacts(artifacts);
             sync.setSnapshotDocument(history.doc);
             const now = new Date().toISOString();
             void savePeerJsDocument({
@@ -111,11 +132,12 @@ export function PeerJsApp<TState, EphemeralData = never>({
                 schemaVersion: app.schemaVersion,
                 schemaFingerprintHash: fingerprintHash,
                 history,
+                artifacts,
                 createdAt: now,
                 updatedAt: now,
             }).then(refreshDocuments);
         },
-        [activeDocId, activeTitle, app.id, app.schemaVersion, fingerprintHash, refreshDocuments, sync],
+        [activeDocId, activeTitle, app, fingerprintHash, refreshDocuments, sync],
     );
 
     const archiveAdapter = useMemo(
@@ -130,13 +152,18 @@ export function PeerJsApp<TState, EphemeralData = never>({
                     schemaFingerprint: fingerprint,
                     schemaFingerprintHash: fingerprintHash,
                     exportedBy: {actor},
-                    payload: {kind: 'peerjs', history: hostHistory as any},
+                    payload: {
+                        kind: 'peerjs',
+                        history: hostHistory as any,
+                        artifacts: hostArtifacts,
+                    },
                 };
             },
             async importArchive(archive: DocumentArchive) {
                 if (role !== 'host') throw new Error('Only a PeerJS host can import a document.');
                 assertArchiveForApp(archive, app as any, 'peerjs');
                 const imported = validateCrdtLocalHistoryForApp(archive.payload.history, app);
+                const artifacts = archive.payload.artifacts ?? serializedArtifactsForStore(app.artifacts);
                 const now = new Date().toISOString();
                 await savePeerJsDocument({
                     docId: archive.docId,
@@ -145,10 +172,13 @@ export function PeerJsApp<TState, EphemeralData = never>({
                     schemaVersion: app.schemaVersion,
                     schemaFingerprintHash: fingerprintHash,
                     history: imported,
+                    artifacts,
                     createdAt: now,
                     updatedAt: now,
                 });
                 setHostHistory(imported);
+                setHostArtifacts(artifacts);
+                loadSerializedArtifacts(app.artifacts, artifacts);
                 sync.setSnapshotDocument(imported.doc);
                 switchDocument(archive.docId);
                 refreshDocuments();
@@ -179,6 +209,7 @@ export function PeerJsApp<TState, EphemeralData = never>({
         async ({docId, title}: {docId: string; title: string}) => {
             const now = new Date().toISOString();
             await savePeerJsDocument({
+                artifacts: initialArtifactsForStore(app.artifacts),
                 docId,
                 appId: app.id,
                 title,
@@ -204,6 +235,7 @@ export function PeerJsApp<TState, EphemeralData = never>({
                 schemaVersion: fixture.schemaVersion,
                 schemaFingerprintHash: fixture.schemaFingerprintHash,
                 history: seedCrdtHistoryForApp(app, fixture),
+                artifacts: serializedArtifactsForStore(app.artifacts),
                 createdAt: fixture.createdAt || now,
                 updatedAt: now,
             });
@@ -390,23 +422,28 @@ function readInvitePeerId() {
     return new URLSearchParams(window.location.search).get('peer')?.trim() ?? '';
 }
 
+export function artifactsForPeerJsHistorySave(store?: ArtifactStore): SerializedArtifact[] {
+    return serializedArtifactsForStore(store);
+}
+
 async function loadOrCreatePeerJsDocument<TState, EphemeralData>(
     app: AppDefinition<TState, EphemeralData>,
     docId: string,
     schemaFingerprintHash: string,
 ): Promise<PersistedPeerJsDocument<TState>> {
     const existing = await loadPeerJsDocument<TState>(docId);
-    if (existing && existing.appId === app.id) return existing;
+    if (existing && existing.appId === app.id) return hydratePeerJsDocument(existing, app);
     const fixture = loadBranchFreeSeedFixtureForApp(app, docId);
     if (fixture) {
         const now = new Date().toISOString();
-        const document: PersistedPeerJsDocument<TState> = {
-            docId,
-            appId: app.id,
+            const document: PersistedPeerJsDocument<TState> = {
+                docId,
+                appId: app.id,
             title: fixture.title || fixture.docId,
             schemaVersion: fixture.schemaVersion,
             schemaFingerprintHash: fixture.schemaFingerprintHash || schemaFingerprintHash,
             history: seedCrdtHistoryForApp(app, fixture),
+            artifacts: initialArtifactsForStore(app.artifacts),
             createdAt: fixture.createdAt || now,
             updatedAt: now,
         };
@@ -421,9 +458,21 @@ async function loadOrCreatePeerJsDocument<TState, EphemeralData>(
         schemaVersion: app.schemaVersion,
         schemaFingerprintHash,
         history: createInitialCrdtHistory(app),
+        artifacts: initialArtifactsForStore(app.artifacts),
         createdAt: now,
         updatedAt: now,
     };
     await savePeerJsDocument(document);
     return document;
+}
+
+function hydratePeerJsDocument<TState, EphemeralData>(
+    document: PersistedPeerJsDocument<TState>,
+    app: AppDefinition<TState, EphemeralData>,
+): PersistedPeerJsDocument<TState> {
+    return {
+        ...document,
+        artifacts: document.artifacts ?? serializedArtifactsForStore(app.artifacts),
+        history: hydrateCrdtLocalHistoryForApp(document.history, app),
+    };
 }

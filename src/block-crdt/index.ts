@@ -3,10 +3,13 @@ export type {
     Block,
     BlockOrder,
     BlockOrderTs,
+    BlockStyle,
+    BlockStylePatch,
     Cache,
     CachedState,
     Char,
     CharParentTs,
+    DeletedState,
     DefaultBlockMeta,
     HLC,
     IncidentalBlockOrderTs,
@@ -26,12 +29,15 @@ export {
     deleteBlockOps,
     insertTextOps,
     insertBlockOps,
+    insertBlockOpsWithId,
     join,
     joinBlocksOps,
     markRangesOps,
     markSelectionOps,
     moveBlockOps,
+    nextBlockIdForActor,
     setBlockMetaOps,
+    setBlockStyleOps,
     split,
     splitBlockOps,
 } from './changes.js';
@@ -60,8 +66,16 @@ export {
     materializedBlockParent,
     materializedBlockPath,
     materializedBlockPaths,
+    virtualParentOwner,
+    virtualParentOwners,
 } from './blocks.js';
 export type {VirtualBlockParentConfig} from './blocks.js';
+
+export {
+    deletedStateWins,
+    isDeleted,
+    mergeDeletedState,
+} from './deletion.js';
 
 export {
     cachedState,
@@ -83,13 +97,16 @@ export {
 
 export {
     markOp,
+    markBoundaryOp,
     markRange,
     markRange as markRangeOp,
     materializeFormattedBlocks,
     coveredCharIdsForMark,
+    formattedMarkValues,
+    visibleRangesForMark,
     splitRecordsByLeft,
 } from './marks.js';
-export type {FormattedBlock, FormattedRun} from './marks.js';
+export type {FormattedBlock, FormattedMarkValue, FormattedRun, VisibleMarkRange} from './marks.js';
 
 export {
     maxLamportCounterForOp,
@@ -125,10 +142,18 @@ export {
     visibleGraphemeIdsForBlock,
     visibleLengthForBlock,
     visiblePathForBlockId,
+    visibleSiblingAnchorsForBlock,
     visibleSiblingAnchorsForPath,
     visibleTextForBlock,
 } from './traversal.js';
-export type {BlockPoint, RetainedPoint, RetainedSelection, VisibleBlockOutlineEntry, VisibleBlockPath} from './traversal.js';
+export type {
+    BlockPoint,
+    RetainedPoint,
+    RetainedSelection,
+    VisibleBlockOutlineEntry,
+    VisibleBlockPath,
+    VisibleSiblingAnchors,
+} from './traversal.js';
 
 export {
     blockOrderVersionWins,

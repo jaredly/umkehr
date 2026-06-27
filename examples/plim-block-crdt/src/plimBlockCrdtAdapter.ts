@@ -19,6 +19,7 @@ import {
     graphemeOffsetToUtf16Offset,
     insertBlockOps,
     insertTextOps,
+    isDeleted,
     joinBlocksOps,
     lamportToString,
     markSelectionOps,
@@ -166,7 +167,7 @@ export const translateTransaction = (
                 const from = utf16OffsetToGraphemeOffset(text, op.from);
                 const to = utf16OffsetToGraphemeOffset(text, op.to);
                 if (from < to) {
-                    append(deleteRangeOps(state, {block, startOffset: from, endOffset: to}));
+                    append(deleteRangeOps(state, {block, startOffset: from, endOffset: to, ts: options.ts}));
                 }
                 appendInsertSpans(() => state, block, from, op.insert, options, append);
                 break;
@@ -270,7 +271,7 @@ export const translateTransaction = (
                     break;
                 }
                 const existing = state.state.blocks[op.block.id];
-                if (existing && !existing.deleted && !state.cache.joinedBlocks[op.block.id]) {
+                if (existing && !isDeleted(existing) && !state.cache.joinedBlocks[op.block.id]) {
                     append(
                         moveBlockOps(state, {
                             actor: options.actor,
@@ -313,7 +314,7 @@ export const translateTransaction = (
                 if (nextOp?.kind === 'insertBlock' && nextOp.block.id === blockId) {
                     break;
                 }
-                append(deleteBlockOps(state, {block: parseLamportString(blockId), mode: 'block-only'}));
+                append(deleteBlockOps(state, {block: parseLamportString(blockId), mode: 'block-only', ts: options.ts}));
                 break;
             }
             case 'moveBlock': {
