@@ -64,9 +64,11 @@ describe('wordsearch selection helpers', () => {
 
     it('matches configured words forward and backward', () => {
         const puzzle = currentWordsearchPuzzle();
-        expect(matchingWordIndex(puzzle, {start: {x: 0, y: 0}, end: {x: 4, y: 0}})).toBe(0);
-        expect(matchingWordIndex(puzzle, {start: {x: 4, y: 0}, end: {x: 0, y: 0}})).toBe(0);
-        expect(matchingWordIndex(puzzle, {start: {x: 0, y: 0}, end: {x: 3, y: 0}})).toBe(-1);
+        const word = puzzle.words[0];
+        const beforeEnd = cellsForSelection({start: word.start, end: word.end}).at(-2) ?? word.start;
+        expect(matchingWordIndex(puzzle, {start: word.start, end: word.end})).toBe(0);
+        expect(matchingWordIndex(puzzle, {start: word.end, end: word.start})).toBe(0);
+        expect(matchingWordIndex(puzzle, {start: word.start, end: beforeEnd})).toBe(-1);
     });
 
     it('chooses first finder by HLC timestamp and actor tie-break', () => {

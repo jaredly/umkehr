@@ -18,6 +18,7 @@ export type ArtifactStore<TArtifact extends Artifact = Artifact> = {
     serialize(id: string): SerializedArtifact | null;
     load(artifact: SerializedArtifact): void;
     manifest(): ArtifactManifestEntry[];
+    createInitial?(): SerializedArtifact[];
 };
 
 export function emptyArtifactStore(): ArtifactStore {
@@ -45,6 +46,10 @@ export function serializedArtifactsForStore(store?: ArtifactStore): SerializedAr
         .manifest()
         .map((entry) => store.serialize(entry.id))
         .filter((artifact): artifact is SerializedArtifact => artifact !== null);
+}
+
+export function initialArtifactsForStore(store?: ArtifactStore): SerializedArtifact[] {
+    return store?.createInitial?.() ?? serializedArtifactsForStore(store);
 }
 
 export function loadSerializedArtifacts(

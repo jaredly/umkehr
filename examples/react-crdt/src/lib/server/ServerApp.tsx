@@ -48,6 +48,7 @@ import type {
     ServerUser,
 } from './types';
 import {
+    initialArtifactsForStore,
     loadSerializedArtifacts,
     serializedArtifactsForStore,
 } from '../artifacts';
@@ -441,7 +442,7 @@ function ServerReadyApp<TState, EphemeralData>({
                         mirrored: true,
                     },
                 },
-                artifacts: serializedArtifactsForStore(app.artifacts),
+                artifacts: initialArtifactsForStore(app.artifacts),
                 updatedAt: now,
             });
             await refreshDocuments();
@@ -455,7 +456,7 @@ function ServerReadyApp<TState, EphemeralData>({
             await saveServerReplica({
                 ...createServerClientSeedReplica({fixture, scenario: 'cached'}),
                 title: fixture.title || fixture.docId,
-                artifacts: serializedArtifactsForStore(app.artifacts),
+                artifacts: initialArtifactsForStore(app.artifacts),
             });
             await refreshDocuments();
         },
@@ -854,7 +855,7 @@ async function loadInitialState<TState>(
                 mirrored: true,
             },
         },
-        artifacts: serializedArtifactsForStore(app.artifacts),
+        artifacts: initialArtifactsForStore(app.artifacts),
         updatedAt: now,
     };
     await saveServerReplica(replica);

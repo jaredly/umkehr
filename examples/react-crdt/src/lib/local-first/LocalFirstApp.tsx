@@ -33,6 +33,11 @@ import {
     seedModalItemsForApp,
 } from '../seed/documents';
 import {readActiveDocIdFromSearch, urlWithActiveDocId} from '../useUrlSelection';
+import {
+    initialArtifactsForStore,
+    loadSerializedArtifacts,
+    serializedArtifactsForStore,
+} from '../artifacts';
 import {createLocalFirstSeedReplica} from '../seed/localFirst';
 import {schemaFingerprint, schemaFingerprintHash} from './schemaFingerprint';
 import {acquireReplicaTabLock, type TabLock} from './tabLock';
@@ -257,6 +262,7 @@ function LocalFirstReadyApp<TState, EphemeralData>({
                         kind: 'local-first',
                         replica: state.replica as any,
                         batches: state.batches as any,
+                        artifacts: serializedArtifactsForStore(app.artifacts),
                     },
                 };
             },
@@ -264,6 +270,7 @@ function LocalFirstReadyApp<TState, EphemeralData>({
                 if (archive.appId !== app.id || archive.payload.kind !== 'local-first') {
                     throw new Error('Archive cannot be imported into local-first mode.');
                 }
+                loadSerializedArtifacts(app.artifacts, archive.payload.artifacts);
                 await sync.importLocalState(
                     JSON.stringify({
                         replica: archive.payload.replica,
@@ -296,6 +303,7 @@ function LocalFirstReadyApp<TState, EphemeralData>({
                 replicaId: loaded.identity.replicaId,
                 history: createInitialCrdtHistory(app),
                 vector: {},
+                artifacts: initialArtifactsForStore(app.artifacts),
                 updatedAt: now,
             });
             refreshDocuments();
@@ -434,6 +442,7 @@ async function loadInitialState<TState>(
     const persisted = await loadReplica<TState>(docId);
     if (persisted) {
         const normalized = hydrateLocalFirstReplica(normalizePersistedReplica(persisted), app);
+        loadSerializedArtifacts(app.artifacts, normalized.artifacts);
         const batches = await listBatches(docId);
         if (normalized.schemaFingerprintHash !== schemaFingerprintHash) {
             const candidate = findMigrationCandidate({
@@ -469,8 +478,9 @@ async function loadInitialState<TState>(
     }
 
     if (seeded) {
+        const artifacts = initialArtifactsForStore(app.artifacts);
         await replaceReplicaState(
-            {...seeded.replica, title: seedFixture?.title || seeded.replica.docId},
+            {...seeded.replica, title: seedFixture?.title || seeded.replica.docId, artifacts},
             seeded.batches,
         );
         return {
@@ -505,6 +515,7 @@ async function loadInitialState<TState>(
         replicaId: identity.replicaId,
         history,
         vector,
+        artifacts: initialArtifactsForStore(app.artifacts),
         updatedAt: new Date().toISOString(),
     });
     return {
@@ -529,8 +540,11 @@ function hydrateLocalFirstReplica<TState, EphemeralData>(
     replica: PersistedReplica<TState>,
     app: AppDefinition<TState, EphemeralData>,
 ): PersistedReplica<TState> {
+    const artifacts = replica.artifacts ?? initialArtifactsForStore(app.artifacts);
+    loadSerializedArtifacts(app.artifacts, artifacts);
     return {
         ...replica,
+        artifacts,
         history: hydrateCrdtLocalHistoryForApp(replica.history, app),
     };
 }

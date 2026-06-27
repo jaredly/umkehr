@@ -23,6 +23,8 @@
 - Added wordsearch synced/history contexts and typed ephemeral selection messages.
 - Added selection/matching/first-finder helpers.
 - Added `WordsearchPanel`, app registration, and scoped CSS.
+- Correction: the first implementation used a fixed puzzle artifact. This missed the original requirement that the puzzle be generated when a document is created. Added `ArtifactStore.createInitial()` and changed wordsearch to generate a fresh puzzle artifact for new documents.
+- New document creation paths now use generated initial artifacts in local simulator, PeerJS, server, and local-first local persistence.
 - Ran `pnpm build` in `examples/react-crdt`; TypeScript and Vite build passed. The command emitted `Error connecting to agent: Operation not permitted` before the build output, but the build itself completed successfully.
 - Issue found by tests: the first hand-authored puzzle board did not actually spell `MERGE` or `SYNC` at the configured coordinates. Fixed the board and word placements, then added a test that verifies every word placement matches board letters.
 
@@ -41,4 +43,4 @@
   - `pnpm test` in `examples/react-crdt-server` passed.
   - `pnpm typecheck` in `examples/react-crdt-server` passed.
 - Issue noted: `pnpm` commands in the server package print a registry metadata fetch warning in this restricted network environment before running the requested script; the scripts themselves completed successfully after the warning.
-- Remaining issue: local-first has artifact fields added to types, but full local-first artifact payload persistence/snapshot exchange is not wired yet. Server mode and PeerJS mode now transfer artifact payloads; local simulator uses bundled/app-local artifacts.
+- Remaining issue: local-first now persists generated artifacts locally, but full local-first peer snapshot exchange for artifact payloads is not wired yet. Server mode and PeerJS mode transfer artifact payloads; local simulator saves artifacts with local documents.

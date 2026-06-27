@@ -38,6 +38,7 @@ import type {PeerProtocolConfig} from './protocol';
 import type {PeerJsSync, PeerRole} from './types';
 import {usePeerJsSync} from './usePeerJsSync';
 import {
+    initialArtifactsForStore,
     loadSerializedArtifacts,
     serializedArtifactsForStore,
     type SerializedArtifact,
@@ -128,7 +129,7 @@ export function PeerJsApp<TState, EphemeralData = never>({
                 schemaVersion: app.schemaVersion,
                 schemaFingerprintHash: fingerprintHash,
                 history,
-                artifacts: serializedArtifactsForStore(app.artifacts),
+                artifacts: initialArtifactsForStore(app.artifacts),
                 createdAt: now,
                 updatedAt: now,
             }).then(refreshDocuments);
@@ -205,13 +206,13 @@ export function PeerJsApp<TState, EphemeralData = never>({
         async ({docId, title}: {docId: string; title: string}) => {
             const now = new Date().toISOString();
             await savePeerJsDocument({
+                artifacts: initialArtifactsForStore(app.artifacts),
                 docId,
                 appId: app.id,
                 title,
                 schemaVersion: app.schemaVersion,
                 schemaFingerprintHash: fingerprintHash,
                 history: createInitialCrdtHistory(app),
-                artifacts: serializedArtifactsForStore(app.artifacts),
                 createdAt: now,
                 updatedAt: now,
             });
@@ -428,14 +429,14 @@ async function loadOrCreatePeerJsDocument<TState, EphemeralData>(
     const fixture = loadBranchFreeSeedFixtureForApp(app, docId);
     if (fixture) {
         const now = new Date().toISOString();
-        const document: PersistedPeerJsDocument<TState> = {
-            docId,
-            appId: app.id,
+            const document: PersistedPeerJsDocument<TState> = {
+                docId,
+                appId: app.id,
             title: fixture.title || fixture.docId,
             schemaVersion: fixture.schemaVersion,
             schemaFingerprintHash: fixture.schemaFingerprintHash || schemaFingerprintHash,
             history: seedCrdtHistoryForApp(app, fixture),
-            artifacts: serializedArtifactsForStore(app.artifacts),
+            artifacts: initialArtifactsForStore(app.artifacts),
             createdAt: fixture.createdAt || now,
             updatedAt: now,
         };
@@ -450,7 +451,7 @@ async function loadOrCreatePeerJsDocument<TState, EphemeralData>(
         schemaVersion: app.schemaVersion,
         schemaFingerprintHash,
         history: createInitialCrdtHistory(app),
-        artifacts: serializedArtifactsForStore(app.artifacts),
+        artifacts: initialArtifactsForStore(app.artifacts),
         createdAt: now,
         updatedAt: now,
     };

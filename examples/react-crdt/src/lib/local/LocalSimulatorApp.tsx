@@ -33,6 +33,11 @@ import {cloneTransportState, deleteLocalSimulatorDocument, listLocalSimulatorDoc
 import {replicas} from './model';
 import {SyncControls} from './SyncControls';
 import {type DemoSync, useLocalDemoSync} from './useLocalDemoSync';
+import {
+    initialArtifactsForStore,
+    loadSerializedArtifacts,
+    serializedArtifactsForStore,
+} from '../artifacts';
 
 type ReplicaHistories<TState> = Record<string, CrdtLocalHistory<TState>>;
 
@@ -67,6 +72,7 @@ export function LocalSimulatorApp<TState, EphemeralData = never>({
         let alive = true;
         loadOrCreateLocalSimulatorDocument(app, activeDocId, fingerprintHash).then((document) => {
             if (!alive) return;
+            loadSerializedArtifacts(app.artifacts, document.artifacts);
             setHistories(document.replicas);
             sync.replaceTransportState(document.transportState as any);
             void refreshDocuments();
@@ -87,6 +93,7 @@ export function LocalSimulatorApp<TState, EphemeralData = never>({
                 schemaFingerprintHash: fingerprintHash,
                 replicas: nextHistories,
                 transportState: cloneTransportState(sync.exportTransportState()),
+                artifacts: serializedArtifactsForStore(app.artifacts),
                 createdAt: now,
                 updatedAt: now,
             }).then(refreshDocuments);
@@ -132,6 +139,7 @@ export function LocalSimulatorApp<TState, EphemeralData = never>({
                         kind: 'local-simulator',
                         replicas: (histories ?? initialReplicaHistories(app)) as any,
                         transportState: cloneTransportState(sync.exportTransportState()) as any,
+                        artifacts: serializedArtifactsForStore(app.artifacts),
                     },
                 };
             },
@@ -153,6 +161,8 @@ export function LocalSimulatorApp<TState, EphemeralData = never>({
                     schemaFingerprintHash: fingerprintHash,
                     replicas: imported,
                     transportState: archive.payload.transportState as any,
+                    artifacts:
+                        archive.payload.artifacts ?? serializedArtifactsForStore(app.artifacts),
                     createdAt: now,
                     updatedAt: now,
                 });
@@ -192,6 +202,7 @@ export function LocalSimulatorApp<TState, EphemeralData = never>({
                 schemaFingerprintHash: fingerprintHash,
                 replicas: initialReplicaHistories(app),
                 transportState: emptyTransportState(),
+                artifacts: initialArtifactsForStore(app.artifacts),
                 createdAt: now,
                 updatedAt: now,
             });
@@ -212,6 +223,7 @@ export function LocalSimulatorApp<TState, EphemeralData = never>({
                 schemaFingerprintHash: fixture.schemaFingerprintHash,
                 replicas: seededReplicaHistories(app, fixture),
                 transportState: emptyTransportState(),
+                artifacts: initialArtifactsForStore(app.artifacts),
                 createdAt: fixture.createdAt || now,
                 updatedAt: now,
             });
@@ -414,6 +426,7 @@ async function loadOrCreateLocalSimulatorDocument<TState, EphemeralData>(
             schemaFingerprintHash: fixture.schemaFingerprintHash || schemaFingerprintHash,
             replicas: seededReplicaHistories(app, fixture),
             transportState: emptyTransportState(),
+            artifacts: initialArtifactsForStore(app.artifacts),
             createdAt: fixture.createdAt || now,
             updatedAt: now,
         };
@@ -429,6 +442,7 @@ async function loadOrCreateLocalSimulatorDocument<TState, EphemeralData>(
         schemaFingerprintHash,
         replicas: initialReplicaHistories(app),
         transportState: emptyTransportState(),
+        artifacts: initialArtifactsForStore(app.artifacts),
         createdAt: now,
         updatedAt: now,
     };
@@ -440,8 +454,11 @@ function hydrateLocalSimulatorDocument<TState, EphemeralData>(
     document: PersistedLocalSimulatorDocument<TState>,
     app: AppDefinition<TState, EphemeralData>,
 ): PersistedLocalSimulatorDocument<TState> {
+    const artifacts = document.artifacts ?? initialArtifactsForStore(app.artifacts);
+    loadSerializedArtifacts(app.artifacts, artifacts);
     return {
         ...document,
+        artifacts,
         replicas: Object.fromEntries(
             Object.entries(document.replicas).map(([replicaId, history]) => [
                 replicaId,
