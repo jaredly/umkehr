@@ -1,7 +1,6 @@
 import {
     applyCrdtUpdate,
     applyRemoteHistoryUpdate,
-    createCrdtLocalHistory,
     getMetaAtPath,
     hlc,
     materialize,
@@ -12,6 +11,8 @@ import {
     type HlcTimestamp,
     type JsonValue,
 } from 'umkehr/crdt';
+import {createJsonCrdtBranchAdapter} from 'umkehr/crdt/branches';
+import {materializeBranch, type BranchEvent, type PersistedBranch as GenericBranch} from 'umkehr/branches';
 import {createInitialCrdtHistory, type AppDefinition} from '../crdtApp';
 import type {PersistedServerBranch, ServerBranchEvent} from './types';
 
@@ -28,43 +29,15 @@ export function materializeServerBranch<TState>({
     throughEventIndex?: number;
     undoCheckpointEventIndex?: number;
 }): CrdtLocalHistory<TState> {
-    const context: MaterializeContext<TState> = {
-        app,
-        branches,
-        applied: new Set(),
-        stack: new Set(),
-    };
-    const checkpoint =
-        undoCheckpointEventIndex ?? branches[branchId]?.undoCheckpointEventIndex ?? 0;
-    const baseDoc = applyBranchToDocument(
-        createInitialCrdtHistory(app).doc,
+    return materializeBranch({
+        adapter: createJsonCrdtBranchAdapter({
+            createInitialHistory: () => createInitialCrdtHistory(app),
+        }),
+        branches: genericBranches(branches),
         branchId,
-        Math.min(throughEventIndex ?? Number.MAX_SAFE_INTEGER, checkpoint),
-        context,
-    );
-    let history = createCrdtLocalHistory(baseDoc);
-    const branch = branches[branchId];
-    if (!branch) return history;
-    for (const event of sortedEvents(branch.events)) {
-        if (event.eventIndex <= checkpoint) continue;
-        if (throughEventIndex !== undefined && event.eventIndex > throughEventIndex) break;
-        if (event.kind === 'update') {
-            if (context.applied.has(event.hlcTimestamp)) continue;
-            history = applyRemoteHistoryUpdate(history, event.update);
-            context.applied.add(event.hlcTimestamp);
-        } else {
-            history = {
-                ...history,
-                doc: applyBranchToDocument(
-                    history.doc,
-                    event.sourceBranchId,
-                    event.sourceThroughEventIndex,
-                    context,
-                ),
-            };
-        }
-    }
-    return history;
+        throughEventIndex,
+        undoCheckpointEventIndex,
+    });
 }
 
 export function applyEventsToDocument<TState>(
@@ -182,51 +155,6 @@ export function pathLabel(path: CrdtPathSegment[]) {
             }
         })
         .join('.');
-}
-
-type MaterializeContext<TState> = {
-    app: AppDefinition<TState>;
-    branches: Record<string, PersistedServerBranch<TState>>;
-    applied: Set<string>;
-    stack: Set<string>;
-};
-
-function applyBranchToDocument<TState>(
-    doc: CrdtDocument<TState>,
-    branchId: string,
-    throughEventIndex: number,
-    context: MaterializeContext<TState>,
-): CrdtDocument<TState> {
-    const branch = context.branches[branchId];
-    if (!branch) return doc;
-    if (context.stack.has(branchId)) return doc;
-    context.stack.add(branchId);
-    let current = applyBranchBase(doc, branchId, context);
-    for (const event of sortedEvents(branch.events)) {
-        if (event.eventIndex > throughEventIndex) break;
-        if (event.kind === 'update') {
-            current = applyUpdateOnce(current, event.update, context.applied);
-        } else {
-            current = applyBranchToDocument(
-                current,
-                event.sourceBranchId,
-                event.sourceThroughEventIndex,
-                context,
-            );
-        }
-    }
-    context.stack.delete(branchId);
-    return current;
-}
-
-function applyBranchBase<TState>(
-    doc: CrdtDocument<TState>,
-    branchId: string,
-    context: MaterializeContext<TState>,
-): CrdtDocument<TState> {
-    const branch = context.branches[branchId];
-    if (!branch?.sourceBranchId) return doc;
-    return applyBranchToDocument(doc, branch.sourceBranchId, branch.forkEventIndex ?? 0, context);
 }
 
 function withPreviewMerge<TState>(
@@ -501,4 +429,48 @@ function latestTimestamp(update: CrdtUpdate) {
 
 function sortedEvents(events: ServerBranchEvent[]) {
     return [...events].sort((a, b) => a.eventIndex - b.eventIndex);
+}
+
+function genericBranches<TState>(
+    branches: Record<string, PersistedServerBranch<TState>>,
+): Record<string, GenericBranch<CrdtLocalHistory<TState>, CrdtUpdate>> {
+    return Object.fromEntries(
+        Object.entries(branches).map(([branchId, branch]) => [
+            branchId,
+            {
+                branchId: branch.branchId,
+                sourceBranchId: branch.sourceBranchId,
+                forkEventIndex: branch.forkEventIndex,
+                history: branch.history,
+                lastSeenEventIndex: branch.lastSeenEventIndex,
+                undoCheckpointEventIndex: branch.undoCheckpointEventIndex,
+                events: branch.events.map(genericEvent),
+            },
+        ]),
+    );
+}
+
+function genericEvent(event: ServerBranchEvent): BranchEvent<CrdtUpdate> {
+    if (event.kind === 'update') {
+        return {
+            kind: 'update',
+            branchId: event.branchId,
+            eventIndex: event.eventIndex,
+            eventId: event.hlcTimestamp,
+            update: event.update,
+            recorded: event.recorded,
+            receivedAt: event.receivedAt,
+        };
+    }
+    return {
+        kind: 'merge',
+        branchId: event.branchId,
+        eventIndex: event.eventIndex,
+        mergeId: event.mergeId,
+        sourceBranchId: event.sourceBranchId,
+        sourceThroughEventIndex: event.sourceThroughEventIndex,
+        actor: event.actor,
+        createdAt: event.createdAt,
+        recorded: event.recorded,
+    };
 }

@@ -8,11 +8,12 @@ import {
     blockRichTextRootBlockId,
     blockRichTextToString,
 } from 'umkehr/block-richtext';
-import {createInitialCrdtHistory} from './crdtApp';
+import {cloneSerializableCrdtLocalHistory, createInitialCrdtHistory} from './crdtApp';
 import {validateCrdtUpdatesForApp} from './documentArchive';
 import {schemaFingerprint} from './local-first/schemaFingerprint';
 import {blockNotesApp} from '../apps/block-notes/BlockNotesApp';
 import type {BlockNotesState} from '../apps/block-notes/model';
+import {richNotesApp} from '../apps/rich-notes/RichNotesApp';
 
 describe('app registry', () => {
     it('allows @ versions in URL app ids without changing AppDefinition.id', () => {
@@ -47,6 +48,12 @@ describe('app registry', () => {
 
         const doc = updates.reduce(applyCrdtUpdate, history.doc);
         expect(blockRichTextToString(doc.state.body)).toContain('hi');
+    });
+
+    it('serializes the rich notes initial CRDT history for IndexedDB', () => {
+        const history = createInitialCrdtHistory(richNotesApp);
+
+        expect(() => structuredClone(cloneSerializableCrdtLocalHistory(history))).not.toThrow();
     });
 
     it('fails initial block notes document creation without the required plugin', () => {

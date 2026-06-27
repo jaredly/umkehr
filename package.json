@@ -41,6 +41,14 @@
             "types": "./dist/src/crdt/index.d.ts",
             "import": "./dist/src/crdt/index.js"
         },
+        "./crdt/branches": {
+            "types": "./dist/src/crdt/branches.d.ts",
+            "import": "./dist/src/crdt/branches.js"
+        },
+        "./branches": {
+            "types": "./dist/src/branches/index.d.ts",
+            "import": "./dist/src/branches/index.js"
+        },
         "./richtext": {
             "types": "./dist/src/richtext/index.d.ts",
             "import": "./dist/src/richtext/index.js"
@@ -68,6 +76,10 @@
         "./block-crdt": {
             "types": "./dist/src/block-crdt/index.d.ts",
             "import": "./dist/src/block-crdt/index.js"
+        },
+        "./block-crdt/branches": {
+            "types": "./dist/src/block-crdt/branches.d.ts",
+            "import": "./dist/src/block-crdt/branches.js"
         },
         "./block-crdt/*": {
             "types": "./dist/src/block-crdt/*.d.ts",

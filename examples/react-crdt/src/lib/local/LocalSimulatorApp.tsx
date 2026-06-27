@@ -1,6 +1,12 @@
 import {useCallback, useEffect, useMemo, useState} from 'react';
 import type {CrdtLocalHistory} from 'umkehr/crdt';
-import {createInitialCrdtHistory, type AppDefinition, type CrdtRuntime} from '../crdtApp';
+import {
+    cloneSerializableCrdtLocalHistory,
+    createInitialCrdtHistory,
+    hydrateCrdtLocalHistoryForApp,
+    type AppDefinition,
+    type CrdtRuntime,
+} from '../crdtApp';
 import {
     assertArchiveForApp,
     DocumentManagerModal,
@@ -374,7 +380,10 @@ function seededReplicaHistories<TState, EphemeralData>(
 ): ReplicaHistories<TState> {
     const history = seedCrdtHistoryForApp(app, fixture);
     return Object.fromEntries(
-        replicas.map((replica) => [replica.id, structuredClone(history)]),
+        replicas.map((replica) => [
+            replica.id,
+            hydrateCrdtLocalHistoryForApp(cloneSerializableCrdtLocalHistory(history), app),
+        ]),
     ) as ReplicaHistories<TState>;
 }
 
@@ -392,7 +401,7 @@ async function loadOrCreateLocalSimulatorDocument<TState, EphemeralData>(
 ): Promise<PersistedLocalSimulatorDocument<TState>> {
     const existing = await loadLocalSimulatorDocument<TState>(docId);
     if (existing && existing.appId === app.id && isUsableLocalSimulatorDocument(existing)) {
-        return existing;
+        return hydrateLocalSimulatorDocument(existing, app);
     }
     const fixture = loadBranchFreeSeedFixtureForApp(app, docId);
     if (fixture) {
@@ -425,6 +434,21 @@ async function loadOrCreateLocalSimulatorDocument<TState, EphemeralData>(
     };
     await saveLocalSimulatorDocument(document);
     return document;
+}
+
+function hydrateLocalSimulatorDocument<TState, EphemeralData>(
+    document: PersistedLocalSimulatorDocument<TState>,
+    app: AppDefinition<TState, EphemeralData>,
+): PersistedLocalSimulatorDocument<TState> {
+    return {
+        ...document,
+        replicas: Object.fromEntries(
+            Object.entries(document.replicas).map(([replicaId, history]) => [
+                replicaId,
+                hydrateCrdtLocalHistoryForApp(history as CrdtLocalHistory<TState>, app),
+            ]),
+        ) as ReplicaHistories<TState>,
+    };
 }
 
 function isUsableLocalSimulatorDocument<TState>(

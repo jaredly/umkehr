@@ -2,6 +2,7 @@ import {useCallback, useEffect, useMemo, useState} from 'react';
 import type {CrdtLocalHistory} from 'umkehr/crdt';
 import {
     createInitialCrdtHistory,
+    hydrateCrdtLocalHistoryForApp,
     type AppDefinition,
     type CrdtRuntime,
 } from '../crdtApp';
@@ -432,7 +433,7 @@ async function loadInitialState<TState>(
 
     const persisted = await loadReplica<TState>(docId);
     if (persisted) {
-        const normalized = normalizePersistedReplica(persisted);
+        const normalized = hydrateLocalFirstReplica(normalizePersistedReplica(persisted), app);
         const batches = await listBatches(docId);
         if (normalized.schemaFingerprintHash !== schemaFingerprintHash) {
             const candidate = findMigrationCandidate({
@@ -521,6 +522,16 @@ async function loadInitialState<TState>(
             source: 'created',
             lock,
         },
+    };
+}
+
+function hydrateLocalFirstReplica<TState, EphemeralData>(
+    replica: PersistedReplica<TState>,
+    app: AppDefinition<TState, EphemeralData>,
+): PersistedReplica<TState> {
+    return {
+        ...replica,
+        history: hydrateCrdtLocalHistoryForApp(replica.history, app),
     };
 }
 

@@ -1,7 +1,12 @@
 import {useCallback, useEffect, useMemo, useState, type FormEvent} from 'react';
 import {hlc, type CrdtUpdate} from 'umkehr/crdt';
 import type {SyncedTransport} from 'umkehr/react-crdt';
-import {createInitialCrdtHistory, type AppDefinition, type CrdtRuntime} from '../crdtApp';
+import {
+    createInitialCrdtHistory,
+    hydrateCrdtLocalHistoryForApp,
+    type AppDefinition,
+    type CrdtRuntime,
+} from '../crdtApp';
 import {useStore} from '../store';
 import {schemaFingerprint, schemaFingerprintHash} from '../local-first/schemaFingerprint';
 import {
@@ -354,7 +359,10 @@ function ServerReadyApp<TState, EphemeralData>({
                         if (event.kind === 'update') validateCrdtUpdatesForApp([event.update], app);
                     }
                 }
-                const normalized = {...replica, appId: app.id, storageVersion: 4 as const};
+                const normalized = hydrateServerReplica(
+                    {...replica, appId: app.id, storageVersion: 4 as const},
+                    app,
+                );
                 await saveServerReplica(normalized);
                 sync.replaceReplica(normalized);
                 onSwitchDocument(archive.docId);
@@ -769,7 +777,7 @@ async function loadInitialState<TState>(
 ): Promise<Loaded<TState>> {
     const persisted = await loadServerReplica<TState>(docId);
     if (persisted) {
-        const normalized = normalizeServerReplica(persisted);
+        const normalized = hydrateServerReplica(normalizeServerReplica(persisted), app);
         normalized.appId ||= app.id;
         if (normalized.schemaFingerprintHash === fingerprintHash) {
             if (normalized.appId !== app.id)
@@ -836,6 +844,24 @@ async function loadInitialState<TState>(
         identity,
         replica,
         source: 'created',
+    };
+}
+
+function hydrateServerReplica<TState>(
+    replica: PersistedServerReplica<TState>,
+    app: AppDefinition<TState, any>,
+): PersistedServerReplica<TState> {
+    return {
+        ...replica,
+        branches: Object.fromEntries(
+            Object.entries(replica.branches).map(([branchId, branch]) => [
+                branchId,
+                {
+                    ...branch,
+                    history: hydrateCrdtLocalHistoryForApp(branch.history, app),
+                },
+            ]),
+        ) as PersistedServerReplica<TState>['branches'],
     };
 }
 

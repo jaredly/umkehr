@@ -7,7 +7,7 @@ import {
     type CrdtUpdate,
 } from 'umkehr/crdt';
 import type {History} from 'umkehr';
-import type {AppDefinition} from '../crdtApp';
+import {hydrateCrdtLocalHistoryForApp, type AppDefinition} from '../crdtApp';
 import type {TransportState} from '../local/useLocalDemoSync';
 import type {PersistedReplica, PersistedBatch} from '../local-first/types';
 import type {PersistedServerReplica} from '../server/types';
@@ -558,7 +558,7 @@ export function validateCrdtLocalHistoryForApp<TState>(
         throw new Error('Imported CRDT history update log is invalid.');
     }
     validateCrdtUpdatesForApp(history.updates, app);
-    return input as CrdtLocalHistory<TState>;
+    return hydrateCrdtLocalHistoryForApp(input as CrdtLocalHistory<TState>, app);
 }
 
 export function validateCrdtUpdatesForApp<TState>(

@@ -1,6 +1,7 @@
 import {openDB, type DBSchema, type IDBPDatabase} from 'idb';
 import type {CrdtLocalHistory} from 'umkehr/crdt';
 import type {LocalDocumentSummary} from '../documentArchive';
+import {cloneSerializableCrdtLocalHistory} from '../crdtApp';
 
 const DB_NAME = 'umkehr-react-crdt-peerjs-documents';
 const DB_VERSION = 2;
@@ -33,7 +34,14 @@ export async function loadPeerJsDocument<TState>(docId: string) {
 
 export async function savePeerJsDocument<TState>(document: PersistedPeerJsDocument<TState>) {
     const db = await openPeerJsDocumentsDb();
-    await db.put('documents', document as PersistedPeerJsDocument<unknown>, document.docId);
+    await db.put(
+        'documents',
+        {
+            ...document,
+            history: cloneSerializableCrdtLocalHistory(document.history),
+        } as PersistedPeerJsDocument<unknown>,
+        document.docId,
+    );
 }
 
 export async function listPeerJsDocumentSummaries(): Promise<LocalDocumentSummary[]> {

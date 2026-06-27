@@ -1,6 +1,11 @@
 import {useCallback, useEffect, useMemo, useState} from 'react';
 import {createCrdtLocalHistory, type CrdtLocalHistory} from 'umkehr/crdt';
-import {createInitialCrdtHistory, type AppDefinition, type CrdtRuntime} from '../crdtApp';
+import {
+    createInitialCrdtHistory,
+    hydrateCrdtLocalHistoryForApp,
+    type AppDefinition,
+    type CrdtRuntime,
+} from '../crdtApp';
 import {
     assertArchiveForApp,
     DocumentManagerModal,
@@ -396,7 +401,7 @@ async function loadOrCreatePeerJsDocument<TState, EphemeralData>(
     schemaFingerprintHash: string,
 ): Promise<PersistedPeerJsDocument<TState>> {
     const existing = await loadPeerJsDocument<TState>(docId);
-    if (existing && existing.appId === app.id) return existing;
+    if (existing && existing.appId === app.id) return hydratePeerJsDocument(existing, app);
     const fixture = loadBranchFreeSeedFixtureForApp(app, docId);
     if (fixture) {
         const now = new Date().toISOString();
@@ -426,4 +431,14 @@ async function loadOrCreatePeerJsDocument<TState, EphemeralData>(
     };
     await savePeerJsDocument(document);
     return document;
+}
+
+function hydratePeerJsDocument<TState, EphemeralData>(
+    document: PersistedPeerJsDocument<TState>,
+    app: AppDefinition<TState, EphemeralData>,
+): PersistedPeerJsDocument<TState> {
+    return {
+        ...document,
+        history: hydrateCrdtLocalHistoryForApp(document.history, app),
+    };
 }
