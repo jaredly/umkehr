@@ -1,6 +1,7 @@
 import {
     blockContents,
     formattedMarkValues,
+    isDeleted,
     materializeFormattedBlocks,
     orderedCharIdsForBlock,
     type FormattedBlock,
@@ -79,6 +80,7 @@ export type ClipboardFragment = {
     meta: RichBlockMeta;
     style?: RichBlockDocumentStyle;
     marks: ClipboardMarkRange[];
+    sourceBlockId?: string;
 };
 
 export type ClipboardAnnotation = {
@@ -96,6 +98,7 @@ export type RichClipboardPayload = {
     annotations: ClipboardAnnotation[];
     attachments?: SerializedImageAttachment[];
     tsv?: string;
+    sourceSelectionType?: 'block' | 'table-cells';
 };
 
 type FragmentBuildResult = {
@@ -132,6 +135,13 @@ export const parseBlockRichTextClipboardPayload = (value: string): RichClipboard
     if (!Array.isArray(parsed.annotations)) return null;
     if (parsed.attachments !== undefined && !Array.isArray(parsed.attachments)) return null;
     if (parsed.tsv !== undefined && typeof parsed.tsv !== 'string') return null;
+    if (
+        parsed.sourceSelectionType !== undefined &&
+        parsed.sourceSelectionType !== 'block' &&
+        parsed.sourceSelectionType !== 'table-cells'
+    ) {
+        return null;
+    }
 
     const fragments = parseFragments(parsed.fragments);
     if (!fragments) return null;
@@ -148,6 +158,7 @@ export const parseBlockRichTextClipboardPayload = (value: string): RichClipboard
         annotations,
         ...(attachments.length ? {attachments} : {}),
         ...(parsed.tsv ? {tsv: parsed.tsv} : {}),
+        ...(parsed.sourceSelectionType ? {sourceSelectionType: parsed.sourceSelectionType} : {}),
     };
 };
 
@@ -179,6 +190,7 @@ export const serializeSelectionToClipboardPayload = (
     const hasBlockLevelSelection = initialResolved.entries.some(
         (entry) => entry.selection.type === 'block' || entry.selection.type === 'table-cells',
     );
+    const sourceSelectionType = clipboardSourceSelectionType(initialResolved.entries);
     const merged = hasBlockLevelSelection ? selection.entries : mergeOverlappingRanges(state, selection);
     const resolved = resolveSelectionSet(state, {primaryId: selection.primaryId, entries: merged});
     const fragments: ClipboardFragment[] = [];
@@ -193,6 +205,7 @@ export const serializeSelectionToClipboardPayload = (
                 const block = formattedById.get(blockId);
                 if (!block) continue;
                 const built = fragmentForRange(block, 0, formattedRunsTextLength(block.runs));
+                built.fragment.sourceBlockId = block.id;
                 fragments.push(built.fragment);
                 refs.push(...built.annotationRefs);
                 includedBlockIds.add(block.id);
@@ -243,7 +256,41 @@ export const serializeSelectionToClipboardPayload = (
         annotations,
         ...(copiedAttachments.length ? {attachments: copiedAttachments} : {}),
         ...(tsv ? {tsv} : {}),
+        ...(sourceSelectionType ? {sourceSelectionType} : {}),
     };
+};
+
+const clipboardSourceSelectionType = (
+    entries: ReturnType<typeof resolveSelectionSet>['entries'],
+): RichClipboardPayload['sourceSelectionType'] | undefined => {
+    if (entries.some((entry) => entry.selection.type === 'block')) return 'block';
+    if (entries.some((entry) => entry.selection.type === 'table-cells')) return 'table-cells';
+    return undefined;
+};
+
+export const blockLinkHrefForClipboardPayload = (
+    state: CachedState<RichBlockMeta>,
+    payload: RichClipboardPayload,
+): string | null => {
+    if (payload.sourceSelectionType !== 'block' && payload.sourceSelectionType !== 'table-cells') {
+        return null;
+    }
+    const sourceBlockId = payload.fragments.find((fragment) => fragment.sourceBlockId)?.sourceBlockId;
+    if (!sourceBlockId) return null;
+    const block = state.state.blocks[sourceBlockId];
+    if (!block || isDeleted(block)) return null;
+    return blockLinkHrefForBlockId(sourceBlockId);
+};
+
+export const blockDomIdForBlockId = (blockId: string): string => `block-${blockId}`;
+
+export const blockLinkHrefForBlockId = (blockId: string): string => `#${blockDomIdForBlockId(blockId)}`;
+
+export const blockIdFromBlockLinkHref = (href: string): string | null => {
+    const prefix = `#${blockDomIdForBlockId('')}`;
+    if (!href.startsWith(prefix)) return null;
+    const blockId = href.slice(prefix.length);
+    return blockId ? blockId : null;
 };
 
 const clipboardBlockIdsForBlockLevelSelection = (
@@ -736,11 +783,15 @@ const parseFragments = (value: unknown[]): ClipboardFragment[] | null => {
         if (!Array.isArray(item.marks)) return null;
         const marks = parseMarks(item.marks, segmentText(item.text).length);
         if (!marks) return null;
+        if (item.sourceBlockId !== undefined && (typeof item.sourceBlockId !== 'string' || !item.sourceBlockId)) {
+            return null;
+        }
         result.push({
             text: item.text,
             meta: item.meta,
             ...(blockStyleHasDocumentValues(style) ? {style} : {}),
             marks,
+            ...(typeof item.sourceBlockId === 'string' && item.sourceBlockId ? {sourceBlockId: item.sourceBlockId} : {}),
         });
     }
     return result;

@@ -1640,7 +1640,7 @@ select {
     padding: 8px 0 10px;
 }
 
-.columnsTitle {
+.columnsBlockCards .columnsTitle {
     border: 1px solid #c9d4de;
     border-bottom: 0;
     border-radius: 6px 6px 0 0;
@@ -1652,7 +1652,7 @@ select {
     padding: 6px 8px;
 }
 
-.columnsTitleText {
+.columnsBlockCards .columnsTitleText {
     min-height: 30px;
     padding-left: 6px;
     font-size: 13px;
@@ -1673,12 +1673,23 @@ select {
 }
 
 .columnsBlockBlocks .columnsColumns {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
     align-items: stretch;
-    background: #f8fafb;
+    gap: 12px;
+    overflow: visible;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
 }
 
 .columnsColumn {
     position: relative;
+    min-width: 0;
+}
+
+.columnsColumnCards {
     display: flex;
     flex: 0 0 260px;
     flex-direction: column;
@@ -1690,9 +1701,7 @@ select {
 }
 
 .columnsColumnBlocks {
-    min-height: 120px;
-    padding: 4px;
-    background: #fff;
+    min-height: 0;
 }
 
 .columnsColumnBlocks > .renderTreeBranch,
@@ -2378,6 +2387,11 @@ select {
     text-decoration-line: underline;
     text-underline-offset: 0.16em;
     cursor: pointer;
+}
+
+.markLinkDead {
+    color: #9a4b00;
+    text-decoration-style: wavy;
 }
 
 .markStrikethrough.markLink {

@@ -8,6 +8,7 @@ import type {
     LinkHoverPopoverState,
     LinkPopoverState,
 } from './blockEditorTypes';
+import {blockIdFromBlockLinkHref} from './clipboard';
 
 export function LinkFloatingPopover({
     state,
@@ -118,6 +119,7 @@ export function LinkHoverPopover({
 }) {
     if (!state) return null;
     const targetHref = state.href.trim();
+    const isBlockLink = blockIdFromBlockLinkHref(targetHref) !== null;
 
     return (
         <div
@@ -129,7 +131,12 @@ export function LinkHoverPopover({
             onMouseEnter={onMouseEnter}
             onMouseLeave={onMouseLeave}
         >
-            <a className="linkHoverUrl" href={targetHref} target="_blank" rel="noreferrer">
+            <a
+                className="linkHoverUrl"
+                href={targetHref}
+                target={isBlockLink ? undefined : '_blank'}
+                rel={isBlockLink ? undefined : 'noreferrer'}
+            >
                 {state.href}
             </a>
             <button type="button" onClick={() => onEdit(state)}>

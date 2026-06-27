@@ -16,3 +16,7 @@
   - Focused non-DOM tests passed: `documentFormat`, `documentFixtures`, `clipboard`, `history`, and `blockCommands` (302 tests).
   - `App.test.tsx` passed (248 passed, 1 skipped).
   - Full `vitest --run` initially hit a timing-sensitive existing perf threshold in `typingPerf.test.ts` (140.8ms vs 120ms), then `typingPerf.test.ts` passed when rerun in isolation.
+- Follow-up styling change: block-mode columns no longer use board chrome. Card mode keeps the bordered/tinted board styling; block mode now uses a plain wrapping grid with no background, border, or horizontal scrolling.
+- Follow-up verification:
+  - `npm exec vitest -- --run src/App.test.tsx` passed (248 passed, 1 skipped).
+  - `npm run build` passed with the same non-fatal agent message before the npm script.

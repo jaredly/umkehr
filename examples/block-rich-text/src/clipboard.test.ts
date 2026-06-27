@@ -3,6 +3,7 @@ import {blockContents, materializeFormattedBlocks, rootBlockIds} from 'umkehr/bl
 import {lamportToString} from 'umkehr/block-crdt/utils';
 import {
     BLOCK_RICH_TEXT_MIME,
+    blockLinkHrefForClipboardPayload,
     fragmentsToHtml,
     htmlWithClipboardPayload,
     parseBlockRichTextClipboardHtml,
@@ -185,6 +186,33 @@ describe('block rich text clipboard payload parser', () => {
         });
 
         expect(parseBlockRichTextClipboardPayload(JSON.stringify(columnsPayload))).toEqual(columnsPayload);
+    });
+
+    it('parses source block metadata', () => {
+        const sourcePayload = payload({
+            sourceSelectionType: 'block',
+            fragments: [
+                {
+                    text: 'hello',
+                    meta: {type: 'paragraph', ts: '001-test'},
+                    marks: [],
+                    sourceBlockId: '001-left',
+                },
+            ],
+        });
+
+        expect(parseBlockRichTextClipboardPayload(JSON.stringify(sourcePayload))).toEqual(sourcePayload);
+        expect(
+            parseBlockRichTextClipboardPayload(JSON.stringify({...sourcePayload, sourceSelectionType: 'range'})),
+        ).toBeNull();
+        expect(
+            parseBlockRichTextClipboardPayload(
+                JSON.stringify({
+                    ...sourcePayload,
+                    fragments: [{...sourcePayload.fragments[0], sourceBlockId: ''}],
+                }),
+            ),
+        ).toBeNull();
     });
 
     it('returns null for invalid annotation entries', () => {
@@ -521,8 +549,10 @@ describe('block rich text clipboard serialization', () => {
         );
 
         expect(payload?.plainText).toBe('two');
+        expect(payload?.sourceSelectionType).toBe('block');
         expect(payload?.fragments).toHaveLength(1);
         expect(payload?.fragments[0]?.text).toBe('two');
+        expect(payload?.fragments[0]?.sourceBlockId).toBe(secondBlock);
     });
 
     it('serializes the subtree for a selected parent block', () => {
@@ -549,6 +579,10 @@ describe('block rich text clipboard serialization', () => {
 
         expect(payload?.plainText).toBe('parent\nchild');
         expect(payload?.fragments.map((fragment) => fragment.text)).toEqual(['parent', 'child']);
+        expect(payload?.fragments.map((fragment) => fragment.sourceBlockId)).toEqual([
+            parentBlock,
+            childBlock,
+        ]);
     });
 
     it('serializes a table-cell rectangle with TSV fallback', () => {
@@ -580,8 +614,52 @@ describe('block rich text clipboard serialization', () => {
 
         expect(cells.map((cellId) => blockContents(result.state, cellId))).toEqual(['A', 'B', 'C', 'D']);
         expect(payload?.plainText).toBe('A\nB\nC\nD');
+        expect(payload?.sourceSelectionType).toBe('table-cells');
         expect(payload?.tsv).toBe('A\tB\nC\tD');
         expect(payload?.fragments.map((fragment) => fragment.text)).toEqual(['A', 'B', 'C', 'D']);
+        expect(payload?.fragments.map((fragment) => fragment.sourceBlockId)).toEqual(cells);
+    });
+
+    it('returns a block-link href for copied block payloads', () => {
+        const demo = createDemoState();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        const copiedBlock = payload({
+            sourceSelectionType: 'block',
+            fragments: [
+                {
+                    text: 'hello',
+                    meta: {type: 'paragraph', ts: '001-test'},
+                    marks: [],
+                    sourceBlockId: blockId,
+                },
+            ],
+        });
+
+        expect(blockLinkHrefForClipboardPayload(demo.left.state, copiedBlock)).toBe(`#block-${blockId}`);
+        expect(
+            blockLinkHrefForClipboardPayload(
+                demo.left.state,
+                payload({
+                    fragments: [{text: 'hello', meta: {type: 'paragraph', ts: '001-test'}, marks: []}],
+                }),
+            ),
+        ).toBeNull();
+        expect(
+            blockLinkHrefForClipboardPayload(
+                demo.left.state,
+                payload({
+                    sourceSelectionType: 'block',
+                    fragments: [
+                        {
+                            text: 'missing',
+                            meta: {type: 'paragraph', ts: '001-test'},
+                            marks: [],
+                            sourceBlockId: '999-missing',
+                        },
+                    ],
+                }),
+            ),
+        ).toBeNull();
     });
 
     it('escapes generated HTML', () => {

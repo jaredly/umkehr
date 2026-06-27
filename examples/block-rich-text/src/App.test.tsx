@@ -6222,6 +6222,112 @@ describe('Block rich text example UI', () => {
         });
     });
 
+    it('pastes a copied block over selected text as a block link', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        pasteText(blocks(left)[0], 'target\nlink text');
+        await waitForBlockTexts(left, ['target', 'link text']);
+
+        const sourceBlockId = blocks(left)[0].dataset.blockId;
+        if (!sourceBlockId) throw new Error('missing source block id');
+        expect(blocks(left)[0].id).toBe(`block-${sourceBlockId}`);
+        const rich: RichClipboardPayload = {
+            version: 1,
+            plainText: 'target',
+            html: '<p>target</p>',
+            fragments: [
+                {
+                    text: 'target',
+                    meta: {type: 'paragraph', ts: '001-test'},
+                    marks: [],
+                    sourceBlockId,
+                },
+            ],
+            annotations: [],
+            sourceSelectionType: 'block',
+        };
+
+        selectRange(blocks(left)[1], 0, 4);
+        pasteClipboard(blocks(left)[1], {
+            [BLOCK_RICH_TEXT_MIME]: JSON.stringify(rich),
+        });
+
+        await waitFor(() => {
+            expect(blockText(blocks(left)[1])).toBe('link text');
+            const link = blocks(left)[1].querySelector<HTMLElement>('.markLink');
+            expect(link?.textContent).toBe('link');
+            expect(link?.dataset.linkHref).toBe(`#block-${sourceBlockId}`);
+            expect(link?.classList.contains('markLinkDead')).toBe(false);
+        });
+
+        const blockLink = blocks(left)[1].querySelector<HTMLElement>('.markLink')!;
+        fireEvent.mouseOver(blockLink);
+        const actions = await waitFor(() => within(left).getByRole('dialog', {name: 'Link actions'}));
+        const url = within(actions).getByRole('link', {name: `#block-${sourceBlockId}`});
+        expect(url.getAttribute('href')).toBe(`#block-${sourceBlockId}`);
+        expect(url.getAttribute('target')).toBeNull();
+        expect(url.getAttribute('rel')).toBeNull();
+    });
+
+    it('renders missing block links as dead links', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'dead');
+        await waitFor(() => expect(blockText(blocks(left)[0])).toBe('dead'));
+
+        selectRange(blocks(left)[0], 0, 4);
+        fireEvent.keyDown(blocks(left)[0], {key: 'k', metaKey: true});
+        const dialog = await waitFor(() => within(left).getByRole('dialog', {name: 'Link'}));
+        const input = within(dialog).getByRole('textbox', {name: 'Link target'});
+        fireEvent.change(input, {target: {value: '#block-999-missing'}});
+        fireEvent.click(within(dialog).getByRole('button', {name: 'Apply'}));
+
+        await waitFor(() => {
+            const link = blocks(left)[0].querySelector<HTMLElement>('.markLink');
+            expect(link?.dataset.linkHref).toBe('#block-999-missing');
+            expect(link?.classList.contains('markLinkDead')).toBe(true);
+        });
+    });
+
+    it('does not replace selected text when a copied block target is missing', async () => {
+        const view = render(<App />);
+        const {left} = panels(view);
+
+        selectCaret(blocks(left)[0], 0);
+        beforeInputText(blocks(left)[0], 'link text');
+        await waitFor(() => expect(blockText(blocks(left)[0])).toBe('link text'));
+
+        const rich: RichClipboardPayload = {
+            version: 1,
+            plainText: 'missing',
+            html: '<p>missing</p>',
+            fragments: [
+                {
+                    text: 'missing',
+                    meta: {type: 'paragraph', ts: '001-test'},
+                    marks: [],
+                    sourceBlockId: '999-missing',
+                },
+            ],
+            annotations: [],
+            sourceSelectionType: 'block',
+        };
+
+        selectRange(blocks(left)[0], 0, 4);
+        pasteClipboard(blocks(left)[0], {
+            [BLOCK_RICH_TEXT_MIME]: JSON.stringify(rich),
+        });
+
+        await waitFor(() => {
+            expect(blockText(blocks(left)[0])).toBe('link text');
+            expect(blocks(left)[0].querySelector('.markLink')).toBeNull();
+        });
+    });
+
     it('shows link hover actions and edits/removes an existing link', async () => {
         const view = render(<App />);
         const {left} = panels(view);

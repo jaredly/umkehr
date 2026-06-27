@@ -146,6 +146,7 @@ import {
     firstPointForSelection,
     focusPoint,
     isBlockLevelSelection,
+    isCollapsed,
     normalizeSelectionSegments,
     pointTextLength,
     selectedBlockIdsForSelection,
@@ -188,6 +189,9 @@ import {
 } from './multiSelectionCommands';
 import {
     BLOCK_RICH_TEXT_MIME,
+    blockIdFromBlockLinkHref,
+    blockDomIdForBlockId,
+    blockLinkHrefForClipboardPayload,
     htmlWithClipboardPayload,
     parseBlockRichTextClipboardHtml,
     parseBlockRichTextClipboardPayload,
@@ -958,6 +962,10 @@ function BlockEditor({
         }
         return result;
     }, [blocksWithAnnotationBodies, replica.state]);
+    const visibleBlockIdSet = useMemo(
+        () => new Set(blocksWithAnnotationBodies.map((block) => block.id)),
+        [blocksWithAnnotationBodies],
+    );
     const orderedListNumbers = useMemo(() => deriveOrderedListNumbers(blocks), [blocks]);
     const retainedResolvedSelectionSet = resolveSelectionSet(replica.state, replica.selection);
     const resolvedSelectionSet: EditorSelectionSet = dragSelection
@@ -1787,6 +1795,27 @@ function BlockEditor({
                 const selection = isBlockLevelSelection(currentPrimary)
                     ? retainedSelection
                     : liveSelectionSet(current);
+                const pastePrimary = primarySelection(resolveSelectionSet(current.state, selection));
+                const isBlockLinkPaste =
+                    pastePrimary.type === 'range' &&
+                    !isCollapsed(pastePrimary) &&
+                    (rich.sourceSelectionType === 'block' || rich.sourceSelectionType === 'table-cells');
+                if (isBlockLinkPaste) {
+                    const blockLinkHref = blockLinkHrefForClipboardPayload(current.state, rich);
+                    const result = blockLinkHref
+                        ? setLinkMarkEverywhere(
+                              current.state,
+                              selection,
+                              blockLinkHref,
+                              makeCommandContext(current),
+                          )
+                        : {state: current.state, ops: [], selection};
+                    const primaryResultSelection = primarySelection(
+                        resolveSelectionSet(result.state, result.selection),
+                    );
+                    scheduleSelectionRestore(primaryResultSelection);
+                    return result;
+                }
                 const result = pasteRichClipboardEverywhere(
                     current.state,
                     selection,
@@ -3447,6 +3476,7 @@ function BlockEditor({
                                 attachments,
                                 userId,
                                 charIdsByBlock,
+                                visibleBlockIdSet,
                                 rainbowLamportIds,
                                 selection: primaryResolvedSelection,
                                 hasMultipleSelections: resolvedSelectionSet.entries.length > 1,
@@ -3778,6 +3808,7 @@ type RenderBlockContext = {
     attachments: AttachmentStore;
     userId: string;
     charIdsByBlock: Map<string, string[]>;
+    visibleBlockIdSet: Set<string>;
     rainbowLamportIds: boolean;
     selection: EditorSelection;
     hasMultipleSelections: boolean;
@@ -5616,6 +5647,7 @@ const renderEditableBlock = (
             }
             blockLength={pointTextLength(context.state, block.id)}
             charIdsByOffset={context.charIdsByBlock.get(block.id) ?? []}
+            visibleBlockIdSet={context.visibleBlockIdSet}
             rainbowLamportIds={context.rainbowLamportIds}
             nextBlockId={nextBlock?.id ?? null}
             selection={context.selection}
@@ -6591,6 +6623,10 @@ function AnnotationBodyBlock({
     const [codeHoverPopover, setCodeHoverPopover] = useState<CodeHoverPopoverState | null>(null);
     const [pendingCodeMark, setPendingCodeMark] = useState(false);
     const [retainedCodeMarks, setRetainedCodeMarks] = useState<RetainedInlineMarkSession[]>([]);
+    const visibleBlockIdSet = useMemo(
+        () => new Set(materializeFormattedBlocks(state, annotationVirtualParents(state)).map((item) => item.id)),
+        [state],
+    );
 
     const restoreAfter = useCallback(
         (selection: EditorSelection) => {
@@ -6837,6 +6873,7 @@ function AnnotationBodyBlock({
                 blockId={block.id}
                 runs={block.runs}
                 charIdsByOffset={orderedCharIdsForBlock(state, block.id, {visibleOnly: true})}
+                visibleBlockIdSet={visibleBlockIdSet}
                 rainbowLamportIds={rainbowLamportIds}
                 decorations={null}
                 pendingCaretRestoreBlockIdRef={pendingCaretRestoreBlockIdRef}
@@ -7151,6 +7188,7 @@ function EditableBlock({
     previousBlockLength,
     blockLength,
     charIdsByOffset,
+    visibleBlockIdSet,
     rainbowLamportIds,
     nextBlockId,
     selection,
@@ -7247,6 +7285,7 @@ function EditableBlock({
     previousBlockLength: number;
     blockLength: number;
     charIdsByOffset: string[];
+    visibleBlockIdSet: Set<string>;
     rainbowLamportIds: boolean;
     nextBlockId: string | null;
     selection: EditorSelection;
@@ -7363,6 +7402,7 @@ function EditableBlock({
             blockId={block.id}
             runs={block.runs}
             charIdsByOffset={charIdsByOffset}
+            visibleBlockIdSet={visibleBlockIdSet}
             rainbowLamportIds={rainbowLamportIds}
             decorations={decorations}
             pendingCaretRestoreBlockIdRef={pendingCaretRestoreBlockIdRef}
@@ -8245,6 +8285,7 @@ function RichTextEditableSurfaceInner({
     blockId,
     runs,
     charIdsByOffset,
+    visibleBlockIdSet = new Set(),
     rainbowLamportIds,
     decorations,
     pendingCaretRestoreBlockIdRef,
@@ -8285,6 +8326,7 @@ function RichTextEditableSurfaceInner({
     blockId: string;
     runs: RichFormattedBlock['runs'];
     charIdsByOffset: string[];
+    visibleBlockIdSet?: Set<string>;
     rainbowLamportIds: boolean;
     decorations: BlockSelectionDecorations | null;
     pendingCaretRestoreBlockIdRef: MutableRefObject<string | null>;
@@ -8380,6 +8422,7 @@ function RichTextEditableSurfaceInner({
             footnoteNumberById,
             syntaxTokens,
             ingredientTokens,
+            visibleBlockIdSet,
             selection,
             activeMathSourceKey,
             mathRenderVersion,
@@ -8394,6 +8437,7 @@ function RichTextEditableSurfaceInner({
                     trailingCodeNewline,
                     syntaxTokens,
                     ingredientTokens,
+                    visibleBlockIdSet,
                     popoverTextById,
                     footnoteNumberById,
                     selection,
@@ -8441,6 +8485,7 @@ function RichTextEditableSurfaceInner({
         selection,
         syntaxTokens,
         trailingCodeNewline,
+        visibleBlockIdSet,
     ]);
 
     useEffect(() => {
@@ -8468,6 +8513,7 @@ function RichTextEditableSurfaceInner({
             aria-label={ariaLabel}
             suppressContentEditableWarning
             spellCheck
+            id={blockDomIdForBlockId(blockId)}
             data-block-id={blockId}
             data-empty={runs.length === 0 ? 'true' : undefined}
             data-placeholder={placeholder ?? '...'}
@@ -8488,6 +8534,7 @@ function RichTextEditableSurfaceInner({
                         trailingCodeNewline,
                         syntaxTokens,
                         ingredientTokens,
+                        visibleBlockIdSet,
                         popoverTextById,
                         footnoteNumberById,
                         selection,
@@ -8504,6 +8551,7 @@ function RichTextEditableSurfaceInner({
                     footnoteNumberById,
                     syntaxTokens,
                     ingredientTokens,
+                    visibleBlockIdSet,
                     selection,
                     activeMathSourceKey,
                     mathRenderVersion,
@@ -8626,6 +8674,7 @@ function RichTextEditableSurfaceInner({
                             trailingCodeNewline,
                             syntaxTokens,
                             ingredientTokens,
+                            visibleBlockIdSet,
                             popoverTextById,
                             footnoteNumberById,
                             selection,
@@ -9581,6 +9630,7 @@ const serializeRuns = (
     footnoteNumberById: Map<string, number> = new Map(),
     syntaxTokens?: SyntaxToken[],
     ingredientTokens?: IngredientHighlightToken[],
+    visibleBlockIdSet: Set<string> = new Set(),
     selection?: EditorSelection,
     activeMathSourceKey?: string | null,
     mathRenderVersion = 0,
@@ -9604,6 +9654,7 @@ const serializeRuns = (
         trailingCodeNewline,
         syntaxTokens,
         ingredientTokens,
+        visibleBlockIds: [...visibleBlockIdSet].sort(),
         mathRendering: hasMath
             ? {
                   selection,
@@ -9628,6 +9679,7 @@ const renderRunNodes = (
         trailingCodeNewline?: boolean;
         syntaxTokens?: SyntaxToken[];
         ingredientTokens?: IngredientHighlightToken[];
+        visibleBlockIdSet?: Set<string>;
         popoverTextById?: Map<string, string>;
         footnoteNumberById?: Map<string, number>;
         selection?: EditorSelection;
@@ -9689,6 +9741,7 @@ const renderRunChunkNode = (
         charIdsByOffset?: string[];
         rainbowLamportIds?: boolean;
         popoverTextById?: Map<string, string>;
+        visibleBlockIdSet?: Set<string>;
         selection?: EditorSelection;
         activeMathSourceKey?: string | null;
         mathRenderer?: MathRenderer | null;
@@ -9735,7 +9788,7 @@ const renderRunChunkNode = (
     }
     const span = document.createElement('span');
     span.textContent = chunk.text;
-    applyRunClasses(span, chunk, options.popoverTextById);
+    applyRunClasses(span, chunk, options.popoverTextById, options.visibleBlockIdSet);
     if (rainbowColor) span.style.backgroundColor = rainbowColor;
     return span;
 };
@@ -10066,6 +10119,7 @@ const applyRunClasses = (
     span: HTMLElement,
     chunk: RunRenderChunk,
     popoverTextById?: Map<string, string>,
+    visibleBlockIdSet?: Set<string>,
 ) => {
     const run = chunk.run;
     if (chunk.decoratorClassNames.length) span.classList.add(...chunk.decoratorClassNames);
@@ -10086,6 +10140,10 @@ const applyRunClasses = (
     }
     if (typeof run.marks[LINK_MARK] === 'string') {
         span.classList.add('markLink');
+        const targetBlockId = blockIdFromBlockLinkHref(run.marks[LINK_MARK]);
+        if (targetBlockId && !visibleBlockIdSet?.has(targetBlockId)) {
+            span.classList.add('markLinkDead');
+        }
         span.dataset.linkHref = run.marks[LINK_MARK];
         span.dataset.linkStartOffset = String(chunk.blockStartOffset);
         span.dataset.linkEndOffset = String(chunk.blockEndOffset);
