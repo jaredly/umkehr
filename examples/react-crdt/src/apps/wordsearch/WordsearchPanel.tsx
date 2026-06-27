@@ -1,4 +1,4 @@
-import {useEffect, useMemo, useState, type CSSProperties} from 'react';
+import {useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent} from 'react';
 import {useValue} from 'umkehr/react';
 import type {AppEditorContext, GridSlot} from '../../lib/crdtApp';
 import {colorForUserId} from '../../lib/server/presence';
@@ -46,7 +46,9 @@ export function WordsearchPanel({
     const puzzle = currentWordsearchPuzzle();
     const found = useValue(editor.$.found);
     const [selection, setSelection] = useState<WordsearchSelection | null>(null);
-    const [dragging, setDragging] = useState(false);
+    const selectionRef = useRef<WordsearchSelection | null>(null);
+    const boardRef = useRef<HTMLDivElement | null>(null);
+    const draggingRef = useRef(false);
     const [message, setMessage] = useState('');
     const activeCells = useMemo(() => (selection ? cellsForSelection(selection) : []), [selection]);
     const remoteSelections = editor.useEphemeral({
@@ -104,21 +106,24 @@ export function WordsearchPanel({
     const startSelection = (point: GridPoint) => {
         if (readOnly) return;
         setMessage('');
-        setDragging(true);
-        setSelection({start: point, end: point});
+        draggingRef.current = true;
+        setLocalSelection({start: point, end: point});
     };
 
     const updateSelection = (point: GridPoint) => {
-        if (!dragging || readOnly) return;
-        setSelection((current) => (current ? {...current, end: point} : current));
+        if (!draggingRef.current || readOnly) return;
+        const current = selectionRef.current;
+        if (!current || sameGridPoint(current.end, point)) return;
+        setLocalSelection({...current, end: point});
     };
 
     const finishSelection = () => {
-        if (readOnly || !selection) {
+        const currentSelection = selectionRef.current;
+        if (readOnly || !currentSelection) {
             clearLocalSelection();
             return;
         }
-        const wordIndex = matchingWordIndex(puzzle, selection);
+        const wordIndex = matchingWordIndex(puzzle, currentSelection);
         if (wordIndex === null || wordIndex < 0) {
             clearLocalSelection();
             return;
@@ -134,10 +139,38 @@ export function WordsearchPanel({
         clearLocalSelection();
     };
 
+    const setLocalSelection = (next: WordsearchSelection | null) => {
+        selectionRef.current = next;
+        setSelection(next);
+    };
+
     const clearLocalSelection = () => {
-        setDragging(false);
-        setSelection(null);
+        draggingRef.current = false;
+        setLocalSelection(null);
         editor.publishEphemeral([clearSelectionMessage(actor)]);
+    };
+
+    const startSelectionFromPointer = (event: PointerEvent<HTMLDivElement>) => {
+        const point = pointFromBoardEvent(event);
+        if (!point) return;
+        event.currentTarget.setPointerCapture(event.pointerId);
+        startSelection(point);
+    };
+
+    const updateSelectionFromPointer = (event: PointerEvent<HTMLDivElement>) => {
+        const point = pointFromBoardEvent(event);
+        if (!point) return;
+        updateSelection(point);
+    };
+
+    const finishSelectionFromPointer = (event: PointerEvent<HTMLDivElement>) => {
+        releasePointerCapture(event);
+        finishSelection();
+    };
+
+    const cancelSelectionFromPointer = (event: PointerEvent<HTMLDivElement>) => {
+        releasePointerCapture(event);
+        clearLocalSelection();
     };
 
     return (
@@ -165,10 +198,12 @@ export function WordsearchPanel({
             </header>
 
             <div
+                ref={boardRef}
                 className="wordsearchBoard"
-                onPointerLeave={() => {
-                    if (dragging) clearLocalSelection();
-                }}
+                onPointerDown={startSelectionFromPointer}
+                onPointerMove={updateSelectionFromPointer}
+                onPointerUp={finishSelectionFromPointer}
+                onPointerCancel={cancelSelectionFromPointer}
             >
                 <div className="wordsearchHighlights" aria-hidden="true">
                     {highlights.map((highlight) => (
@@ -177,18 +212,13 @@ export function WordsearchPanel({
                 </div>
                 {puzzle.board.map((row, y) =>
                     row.map((letter, x) => {
-                        const point = {x, y};
-                        const key = cellKey(point);
+                        const key = cellKey({x, y});
                         return (
                             <button
                                 key={key}
                                 type="button"
                                 className="wordsearchCell"
                                 disabled={readOnly}
-                                onPointerDown={() => startSelection(point)}
-                                onPointerEnter={() => updateSelection(point)}
-                                onPointerUp={finishSelection}
-                                onPointerCancel={clearLocalSelection}
                             >
                                 {letter}
                             </button>
@@ -216,6 +246,31 @@ export function WordsearchPanel({
             {message ? <p className="wordsearchStatus">{message}</p> : null}
         </section>
     );
+
+    function pointFromBoardEvent(event: PointerEvent<HTMLDivElement>): GridPoint | null {
+        if (readOnly) return null;
+        const board = boardRef.current ?? event.currentTarget;
+        const rect = board.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return null;
+        return {
+            x: clampGridIndex(Math.floor(((event.clientX - rect.left) / rect.width) * 8)),
+            y: clampGridIndex(Math.floor(((event.clientY - rect.top) / rect.height) * 8)),
+        };
+    }
+}
+
+function clampGridIndex(index: number) {
+    return Math.max(0, Math.min(7, index));
+}
+
+function releasePointerCapture(event: PointerEvent<HTMLElement>) {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+}
+
+function sameGridPoint(a: GridPoint, b: GridPoint) {
+    return a.x === b.x && a.y === b.y;
 }
 
 function WordHighlight({highlight}: {highlight: Highlight}) {

@@ -66,6 +66,16 @@ export function PeerJsControls<TState>({
                     </button>
                 </div>
 
+                <select
+                    className="mobileRoleSelect"
+                    aria-label="Peer role"
+                    value={role}
+                    onChange={(event) => setRole(event.target.value as PeerRole)}
+                >
+                    <option value="host">Host</option>
+                    <option value="client">Client</option>
+                </select>
+
                 <div className="peerStatusLight" title={statusText} aria-label={statusText}>
                     <span className={`statusDot ${statusKind}`} />
                     <span>{statusLabel(statusKind, connections.length)}</span>

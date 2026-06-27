@@ -79,6 +79,7 @@ button:disabled:hover {
 .wordsearchBoard {
     width: min(100%, 440px);
     aspect-ratio: 1;
+    justify-self: center;
     position: relative;
     display: grid;
     grid-template-columns: repeat(8, minmax(0, 1fr));
@@ -1010,6 +1011,7 @@ p {
     grid-template-columns: 1fr;
     gap: 18px;
     align-items: start;
+    align-content: start;
 }
 
 .wordsearchPeerControls {
@@ -1628,6 +1630,10 @@ p {
     gap: 8px;
 }
 
+.mobileRoleSelect {
+    display: none;
+}
+
 .peerStatusLight {
     min-width: 0;
     display: inline-flex;
@@ -2238,5 +2244,223 @@ p {
     .serverControls {
         position: static;
         flex-wrap: wrap;
+    }
+}
+
+@media (max-width: 480px) {
+    .wordsearchPeerDemo {
+        width: min(100%, calc(100vw - 12px));
+        height: 100vh;
+        height: 100dvh;
+        min-height: 0;
+        padding: 6px 0;
+        gap: 8px;
+        grid-template-rows: auto minmax(0, 1fr);
+        align-items: stretch;
+        overflow: hidden;
+    }
+
+    .wordsearchPeerControls {
+        gap: 8px;
+        padding: 8px;
+        flex-direction: row;
+        flex-wrap: wrap;
+    }
+
+    .wordsearchPeerControls .peerControls {
+        width: 100%;
+    }
+
+    .peerControlsBar {
+        gap: 8px;
+        align-items: center;
+    }
+
+    .peerControlsBar .rolePicker {
+        display: none;
+    }
+
+    .peerControlsBar .mobileRoleSelect {
+        display: block;
+        flex: 0 0 82px;
+        min-width: 0;
+        height: 34px;
+        border: 1px solid #9aa8b8;
+        border-radius: 6px;
+        padding: 0 24px 0 8px;
+        color: #17202a;
+        background: #fff;
+    }
+
+    .peerStatusLight {
+        flex: 0 1 auto;
+        min-width: 78px;
+        gap: 7px;
+    }
+
+    .copyInviteButton {
+        flex: 0 1 auto;
+        min-width: 0;
+        padding: 7px 9px;
+        white-space: nowrap;
+    }
+
+    .newGameButton {
+        flex: 1 1 auto;
+        min-width: 0;
+        padding: 7px 9px;
+    }
+
+    .peerConnectBar {
+        flex-basis: 100%;
+    }
+
+    .peerConnect {
+        gap: 6px;
+    }
+
+    .peerConnect input {
+        width: 100%;
+    }
+
+    .wordsearchPanel {
+        width: 100%;
+        min-height: 0;
+        height: 100%;
+        margin: 0 auto;
+        padding: 6px;
+        gap: 6px;
+        grid-template-rows: auto minmax(0, auto) auto auto;
+        align-content: start;
+    }
+
+    .wordsearchHeader {
+        gap: 8px;
+    }
+
+    .wordsearchHeader h1 {
+        font-size: 17px;
+        line-height: 1.1;
+    }
+
+    .wordsearchHeader p {
+        margin-top: 2px;
+        font-size: 11px;
+        line-height: 1.2;
+    }
+
+    .wordsearchActions {
+        gap: 5px;
+    }
+
+    .wordsearchActions button {
+        padding: 5px 7px;
+        font-size: 12px;
+    }
+
+    .wordsearchBoard {
+        width: min(100%, 440px, 48vh);
+        width: min(100%, 440px, 48dvh);
+        gap: 3px;
+    }
+
+    .wordsearchHighlight {
+        height: calc(12.5% - 5px);
+        min-height: 0;
+        border-width: 2px;
+        box-shadow: 0 1px 6px color-mix(in srgb, var(--wordsearch-highlight-color) 18%, transparent);
+    }
+
+    .wordsearchCell {
+        border-radius: 5px;
+        font-size: 18px;
+    }
+
+    .wordsearchBank {
+        justify-content: center;
+        gap: 5px;
+    }
+
+    .wordsearchWord {
+        border-radius: 5px;
+        padding: 4px 7px;
+        font-size: 11px;
+        line-height: 1.1;
+    }
+
+    .wordsearchStatus,
+    .wordsearchMissing {
+        font-size: 12px;
+        line-height: 1.2;
+    }
+
+    .waitingPanel {
+        min-height: 0;
+        padding: 12px;
+    }
+}
+
+@media (max-width: 340px) {
+    .wordsearchPeerDemo {
+        width: min(100%, calc(100vw - 8px));
+        padding: 4px 0;
+        gap: 6px;
+    }
+
+    .wordsearchPeerControls {
+        padding: 6px;
+    }
+
+    .peerControlsBar {
+        gap: 6px;
+    }
+
+    .peerControlsBar .mobileRoleSelect {
+        flex-basis: 76px;
+        height: 32px;
+        padding-left: 7px;
+    }
+
+    .peerStatusLight {
+        font-size: 12px;
+        min-width: 70px;
+    }
+
+    .copyInviteButton,
+    .newGameButton {
+        padding: 6px 7px;
+        font-size: 13px;
+    }
+
+    .wordsearchPanel {
+        padding: 4px;
+        gap: 5px;
+    }
+
+    .wordsearchHeader h1 {
+        font-size: 16px;
+    }
+
+    .wordsearchActions button {
+        padding: 4px 6px;
+    }
+
+    .wordsearchBoard {
+        width: min(100%, 440px, 47vh);
+        width: min(100%, 440px, 47dvh);
+        gap: 2px;
+    }
+
+    .wordsearchCell {
+        font-size: 16px;
+    }
+
+    .wordsearchBank {
+        gap: 4px;
+    }
+
+    .wordsearchWord {
+        padding: 3px 6px;
+        font-size: 10px;
     }
 }
