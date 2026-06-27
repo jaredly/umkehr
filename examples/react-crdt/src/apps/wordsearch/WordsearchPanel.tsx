@@ -20,9 +20,15 @@ import {
     foundWordIndexes,
     isWordFound,
     matchingWordIndex,
-    samePoint,
     type WordsearchSelection,
 } from './wordsearch';
+
+type Highlight = {
+    id: string;
+    cells: GridPoint[];
+    color: string;
+    kind: 'found' | 'active' | 'remote';
+};
 
 export function WordsearchPanel({
     editor,
@@ -48,8 +54,23 @@ export function WordsearchPanel({
         kinds: [wordsearchSelectionKind],
     });
     const foundIndexes = foundWordIndexes({found});
-    const foundCellColors = useMemo(() => foundCellColorMap(puzzle, found), [found, puzzle]);
-    const activeCellKeys = new Set(activeCells.map(cellKey));
+    const highlights = useMemo(
+        () => [
+            ...foundHighlights(puzzle, found),
+            ...(activeCells.length
+                ? [{id: 'active', cells: activeCells, color: '#0f766e', kind: 'active' as const}]
+                : []),
+            ...remoteSelections
+                .filter((record) => record.message.actor !== actor)
+                .map((record) => ({
+                    id: record.message.id,
+                    cells: record.message.data.cells,
+                    color: colorForUserId(record.message.actor),
+                    kind: 'remote' as const,
+                })),
+        ],
+        [activeCells, actor, found, puzzle, remoteSelections],
+    );
 
     useEffect(() => {
         if (!selection || readOnly || !activeCells.length) {
@@ -149,29 +170,20 @@ export function WordsearchPanel({
                     if (dragging) clearLocalSelection();
                 }}
             >
+                <div className="wordsearchHighlights" aria-hidden="true">
+                    {highlights.map((highlight) => (
+                        <WordHighlight key={highlight.id} highlight={highlight} />
+                    ))}
+                </div>
                 {puzzle.board.map((row, y) =>
                     row.map((letter, x) => {
                         const point = {x, y};
                         const key = cellKey(point);
-                        const remote = remoteSelections.find(
-                            (record) =>
-                                record.message.actor !== actor &&
-                                record.message.data.cells.some((cell) => samePoint(cell, point)),
-                        );
-                        const remoteColor = remote ? colorForUserId(remote.message.actor) : undefined;
                         return (
                             <button
                                 key={key}
                                 type="button"
-                                className={`wordsearchCell ${
-                                    activeCellKeys.has(key) ? 'active' : ''
-                                } ${remote ? 'remoteActive' : ''} ${
-                                    foundCellColors.has(key) ? 'found' : ''
-                                }`}
-                                style={{
-                                    '--wordsearch-found': foundCellColors.get(key),
-                                    '--wordsearch-remote': remoteColor,
-                                } as CSSProperties}
+                                className="wordsearchCell"
                                 disabled={readOnly}
                                 onPointerDown={() => startSelection(point)}
                                 onPointerEnter={() => updateSelection(point)}
@@ -206,20 +218,44 @@ export function WordsearchPanel({
     );
 }
 
-function foundCellColorMap(
-    puzzle: WordsearchPuzzleArtifact,
-    found: WordsearchState['found'],
-): Map<string, string> {
-    const colors = new Map<string, string>();
+function WordHighlight({highlight}: {highlight: Highlight}) {
+    const first = highlight.cells[0];
+    const last = highlight.cells.at(-1);
+    if (!first || !last) return null;
+    const dx = last.x - first.x;
+    const dy = last.y - first.y;
+    const length = Math.hypot(dx, dy) + 1;
+    const angle = Math.atan2(dy, dx) * (180 / Math.PI);
+    const centerX = (first.x + last.x + 1) / 2;
+    const centerY = (first.y + last.y + 1) / 2;
+    return (
+        <div
+            className={`wordsearchHighlight ${highlight.kind}`}
+            style={{
+                '--wordsearch-highlight-color': highlight.color,
+                '--wordsearch-highlight-x': centerX,
+                '--wordsearch-highlight-y': centerY,
+                '--wordsearch-highlight-length': length,
+                '--wordsearch-highlight-angle': `${angle}deg`,
+            } as CSSProperties}
+        />
+    );
+}
+
+function foundHighlights(puzzle: WordsearchPuzzleArtifact, found: WordsearchState['found']): Highlight[] {
+    const highlights: Highlight[] = [];
     puzzle.words.forEach((word, index) => {
         const winner = firstFinder(found[String(index)]);
         if (!winner) return;
         const color = colorForUserId(winner[0]);
-        for (const cell of cellsForSelection({start: word.start, end: word.end})) {
-            colors.set(cellKey(cell), color);
-        }
+        highlights.push({
+            id: `found:${index}`,
+            cells: cellsForSelection({start: word.start, end: word.end}),
+            color,
+            kind: 'found',
+        });
     });
-    return colors;
+    return highlights;
 }
 
 function cellKey(point: GridPoint) {

@@ -135,18 +135,32 @@ export function usePeerJsSync<TState>({
     );
 
     const sendSnapshot = useCallback(
-        (record: ConnectionRecord<TState>) => {
-            if (roleRef.current !== 'host' || !snapshotRef.current) return;
+        (
+            record: ConnectionRecord<TState>,
+            document = snapshotRef.current,
+            artifacts = artifactsRef.current,
+        ) => {
+            if (roleRef.current !== 'host' || !document) return;
             sendOrQueue(record, {
                 kind: 'snapshot',
                 version: PEER_PROTOCOL_VERSION,
                 actor: actorRef.current,
                 docId: protocolRef.current.docId,
-                document: snapshotRef.current,
-                artifacts: artifactsRef.current,
+                document,
+                artifacts,
             });
         },
         [sendOrQueue],
+    );
+
+    const broadcastSnapshot = useCallback(
+        (document: CrdtDocument<TState>, artifacts: SerializedArtifact[] = artifactsRef.current) => {
+            if (roleRef.current !== 'host') return;
+            snapshotRef.current = document;
+            artifactsRef.current = artifacts;
+            for (const record of connectionsRef.current.values()) sendSnapshot(record, document, artifacts);
+        },
+        [sendSnapshot],
     );
 
     const deliverUpdates = useCallback((updates: readonly CrdtUpdate[]) => {
@@ -217,9 +231,9 @@ export function usePeerJsSync<TState>({
             if (message.kind === 'snapshot') {
                 if (roleRef.current !== 'client') return;
                 const current = snapshotStore.getSnapshot();
+                if (message.artifacts?.length) onArtifactsRef.current?.(message.artifacts);
+                snapshotStore.setSnapshot(message.document);
                 if (!current) {
-                    if (message.artifacts?.length) onArtifactsRef.current?.(message.artifacts);
-                    snapshotStore.setSnapshot(message.document);
                     if (record) record.gotSnapshot = true;
                     stateStore.setSnapshot({
                         kind: 'ready',
@@ -432,9 +446,11 @@ export function usePeerJsSync<TState>({
             disconnect,
             flushQueued,
             setSnapshotDocument,
+            broadcastSnapshot,
             destroy,
         }),
         [
+            broadcastSnapshot,
             connect,
             connectionsStore,
             destroy,

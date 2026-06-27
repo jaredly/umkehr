@@ -8,12 +8,16 @@ export function PeerJsControls<TState>({
     sync,
     docId,
     initialHostPeerId = '',
+    createInviteUrl = defaultCreateInviteUrl,
+    variant = 'card',
 }: {
     role: PeerRole;
     setRole: (role: PeerRole) => void;
     sync: PeerJsSync<TState>;
     docId: string;
     initialHostPeerId?: string;
+    createInviteUrl?: (peerId: string, docId: string) => string;
+    variant?: 'card' | 'bar';
 }) {
     const [hostPeerId, setHostPeerId] = useState(initialHostPeerId);
     const [copied, setCopied] = useState(false);
@@ -27,6 +31,81 @@ export function PeerJsControls<TState>({
         if (state.kind === 'waiting-for-snapshot') return `Waiting for snapshot from ${state.hostPeerId}`;
         return `Ready as ${state.peerId}`;
     }, [state]);
+    const statusKind =
+        state.kind === 'error'
+            ? 'error'
+            : state.kind === 'ready'
+              ? connections.some((connection) => connection.open)
+                  ? 'connected'
+                  : 'ready'
+              : state.kind === 'waiting-for-snapshot'
+                ? 'waiting'
+                : 'initializing';
+
+    if (variant === 'bar') {
+        return (
+            <aside
+                className="peerControls peerControlsBar"
+                data-testid="peerjs-controls"
+                aria-label="PeerJS controls"
+            >
+                <div className="rolePicker">
+                    <button
+                        type="button"
+                        className={role === 'host' ? 'active' : ''}
+                        onClick={() => setRole('host')}
+                    >
+                        Host
+                    </button>
+                    <button
+                        type="button"
+                        className={role === 'client' ? 'active' : ''}
+                        onClick={() => setRole('client')}
+                    >
+                        Client
+                    </button>
+                </div>
+
+                <div className="peerStatusLight" title={statusText} aria-label={statusText}>
+                    <span className={`statusDot ${statusKind}`} />
+                    <span>{statusLabel(statusKind, connections.length)}</span>
+                </div>
+
+                {inviteUrl ? (
+                    <button
+                        type="button"
+                        className="copyInviteButton"
+                        onClick={async () => {
+                            await navigator.clipboard.writeText(inviteUrl);
+                            setCopied(true);
+                            window.setTimeout(() => setCopied(false), 1400);
+                        }}
+                    >
+                        {copied ? 'Copied' : 'Copy invite'}
+                    </button>
+                ) : null}
+
+                {role === 'client' ? (
+                    <form
+                        className="peerConnect peerConnectBar"
+                        onSubmit={(event) => {
+                            event.preventDefault();
+                            sync.connect(hostPeerId);
+                        }}
+                    >
+                        <input
+                            value={hostPeerId}
+                            placeholder="Host Peer ID"
+                            onChange={(event) => setHostPeerId(event.target.value)}
+                        />
+                        <button type="submit" disabled={!hostPeerId.trim()}>
+                            Connect
+                        </button>
+                    </form>
+                ) : null}
+            </aside>
+        );
+    }
 
     return (
         <aside className="peerControls" data-testid="peerjs-controls" aria-label="PeerJS controls">
@@ -140,7 +219,15 @@ export function PeerJsControls<TState>({
     );
 }
 
-function createInviteUrl(peerId: string, docId: string) {
+function statusLabel(status: string, connectionCount: number) {
+    if (status === 'error') return 'Error';
+    if (status === 'connected') return `${connectionCount} connected`;
+    if (status === 'ready') return 'Ready';
+    if (status === 'waiting') return 'Waiting';
+    return 'Starting';
+}
+
+function defaultCreateInviteUrl(peerId: string, docId: string) {
     const url = new URL(window.location.href);
     url.searchParams.set('peer', peerId);
     url.searchParams.set('doc', docId);

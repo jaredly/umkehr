@@ -79,6 +79,7 @@ button:disabled:hover {
 .wordsearchBoard {
     width: min(100%, 440px);
     aspect-ratio: 1;
+    position: relative;
     display: grid;
     grid-template-columns: repeat(8, minmax(0, 1fr));
     gap: 5px;
@@ -86,34 +87,68 @@ button:disabled:hover {
     user-select: none;
 }
 
+.wordsearchHighlights {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    pointer-events: none;
+}
+
+.wordsearchHighlight {
+    --wordsearch-highlight-color: #0f766e;
+    --wordsearch-highlight-x: 0;
+    --wordsearch-highlight-y: 0;
+    --wordsearch-highlight-length: 1;
+    --wordsearch-highlight-angle: 0deg;
+    position: absolute;
+    left: calc(var(--wordsearch-highlight-x) * 12.5%);
+    top: calc(var(--wordsearch-highlight-y) * 12.5%);
+    width: calc(var(--wordsearch-highlight-length) * 12.5%);
+    height: calc(12.5% - 8px);
+    min-height: 30px;
+    border: 3px solid var(--wordsearch-highlight-color);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--wordsearch-highlight-color) 28%, transparent);
+    box-shadow: 0 2px 10px color-mix(in srgb, var(--wordsearch-highlight-color) 22%, transparent);
+    opacity: 0.8;
+    transform: translate(-50%, -50%) rotate(var(--wordsearch-highlight-angle));
+    transform-origin: center;
+}
+
+.wordsearchHighlight.found {
+    opacity: 0.68;
+}
+
+.wordsearchHighlight.active {
+    border-color: #0f766e;
+    background: rgb(20 184 166 / 26%);
+    opacity: 0.9;
+}
+
+.wordsearchHighlight.remote {
+    border-style: dashed;
+    opacity: 0.76;
+}
+
 .wordsearchCell {
-    --wordsearch-found: transparent;
-    --wordsearch-remote: transparent;
+    position: relative;
+    z-index: 1;
     min-width: 0;
     width: 100%;
     height: 100%;
     border: 1px solid #cbd5e1;
     border-radius: 6px;
     padding: 0;
-    background:
-        linear-gradient(rgb(255 255 255 / 82%), rgb(255 255 255 / 82%)),
-        var(--wordsearch-found);
+    background: rgb(255 255 255 / 78%);
     color: #0f172a;
     font-size: 22px;
     font-weight: 800;
+    backdrop-filter: saturate(1.1);
 }
 
-.wordsearchCell.active {
-    border-color: #0f766e;
-    background: #ccfbf1;
-}
-
-.wordsearchCell.remoteActive {
-    box-shadow: inset 0 0 0 3px var(--wordsearch-remote);
-}
-
-.wordsearchCell.found {
-    border-color: var(--wordsearch-found);
+.wordsearchCell:disabled {
+    color: #0f172a;
+    opacity: 1;
 }
 
 .wordsearchBank {
@@ -966,6 +1001,50 @@ p {
     align-items: start;
 }
 
+.wordsearchPeerDemo {
+    width: min(1180px, calc(100vw - 32px));
+    min-height: 100vh;
+    margin: 0 auto;
+    padding: 18px 0 32px;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 18px;
+    align-items: start;
+}
+
+.wordsearchPeerControls {
+    position: sticky;
+    top: 12px;
+    z-index: 40;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border: 1px solid #d4dde7;
+    border-radius: 8px;
+    padding: 10px;
+    background: rgb(253 254 254 / 96%);
+    box-shadow: 0 10px 24px rgb(25 42 62 / 8%);
+    backdrop-filter: blur(10px);
+}
+
+.wordsearchPeerControls .peerControls {
+    position: static;
+    flex: 1 1 auto;
+}
+
+.newGameButton {
+    width: auto;
+    border-color: #0f766e;
+    color: #0f172a;
+    background: #ccfbf1;
+    font-weight: 800;
+    white-space: nowrap;
+}
+
+.newGameButton:hover {
+    border-color: #115e59;
+}
+
 .localFirstShell,
 .serverShell {
     width: min(1180px, calc(100vw - 32px));
@@ -999,6 +1078,19 @@ p {
     display: grid;
     gap: 16px;
     padding: 18px;
+}
+
+.peerControlsBar {
+    min-width: 0;
+    border: 0;
+    border-radius: 0;
+    padding: 0;
+    background: transparent;
+    box-shadow: none;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
 }
 
 .localFirstControls h2,
@@ -1536,6 +1628,40 @@ p {
     gap: 8px;
 }
 
+.peerStatusLight {
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: #334155;
+    font-size: 13px;
+    font-weight: 800;
+    white-space: nowrap;
+}
+
+.statusDot {
+    width: 12px;
+    height: 12px;
+    border-radius: 999px;
+    background: #f59e0b;
+    box-shadow: 0 0 0 4px rgb(245 158 11 / 18%);
+}
+
+.statusDot.connected {
+    background: #16a34a;
+    box-shadow: 0 0 0 4px rgb(22 163 74 / 18%);
+}
+
+.statusDot.ready {
+    background: #65a30d;
+    box-shadow: 0 0 0 4px rgb(101 163 13 / 18%);
+}
+
+.statusDot.error {
+    background: #dc2626;
+    box-shadow: 0 0 0 4px rgb(220 38 38 / 18%);
+}
+
 .peerFacts {
     display: grid;
     gap: 10px;
@@ -1563,6 +1689,11 @@ p {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 8px;
+}
+
+.peerConnectBar {
+    flex: 1 1 260px;
+    max-width: 420px;
 }
 
 .peerConnect input,
@@ -1594,6 +1725,10 @@ p {
     width: 100%;
     color: #334155;
     background: #f8fafc;
+}
+
+.copyInviteButton {
+    white-space: nowrap;
 }
 
 .connectionList {
@@ -2059,14 +2194,29 @@ p {
     }
 
     .peerShell,
+    .wordsearchPeerDemo,
     .localFirstShell,
     .serverShell {
         grid-template-columns: 1fr;
     }
 
+    .wordsearchPeerControls,
     .peerControls,
     .localFirstControls {
         position: static;
+    }
+
+    .wordsearchPeerControls {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .peerControlsBar {
+        align-items: stretch;
+    }
+
+    .peerConnectBar {
+        max-width: none;
     }
 
     .demoTopBar {

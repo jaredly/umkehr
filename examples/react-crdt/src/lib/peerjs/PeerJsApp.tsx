@@ -41,6 +41,7 @@ import {
     initialArtifactsForStore,
     loadSerializedArtifacts,
     serializedArtifactsForStore,
+    type ArtifactStore,
     type SerializedArtifact,
 } from '../artifacts';
 
@@ -119,7 +120,9 @@ export function PeerJsApp<TState, EphemeralData = never>({
 
     const saveHostHistory = useCallback(
         (history: CrdtLocalHistory<TState>) => {
+            const artifacts = artifactsForPeerJsHistorySave(app.artifacts);
             setHostHistory(history);
+            setHostArtifacts(artifacts);
             sync.setSnapshotDocument(history.doc);
             const now = new Date().toISOString();
             void savePeerJsDocument({
@@ -129,7 +132,7 @@ export function PeerJsApp<TState, EphemeralData = never>({
                 schemaVersion: app.schemaVersion,
                 schemaFingerprintHash: fingerprintHash,
                 history,
-                artifacts: initialArtifactsForStore(app.artifacts),
+                artifacts,
                 createdAt: now,
                 updatedAt: now,
             }).then(refreshDocuments);
@@ -417,6 +420,10 @@ function PeerClientPanel<TState, EphemeralData>({
 function readInvitePeerId() {
     if (typeof window === 'undefined') return '';
     return new URLSearchParams(window.location.search).get('peer')?.trim() ?? '';
+}
+
+export function artifactsForPeerJsHistorySave(store?: ArtifactStore): SerializedArtifact[] {
+    return serializedArtifactsForStore(store);
 }
 
 async function loadOrCreatePeerJsDocument<TState, EphemeralData>(

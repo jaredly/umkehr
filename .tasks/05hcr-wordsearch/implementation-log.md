@@ -44,3 +44,11 @@
   - `pnpm typecheck` in `examples/react-crdt-server` passed.
 - Issue noted: `pnpm` commands in the server package print a registry metadata fetch warning in this restricted network environment before running the requested script; the scripts themselves completed successfully after the warning.
 - Remaining issue: local-first now persists generated artifacts locally, but full local-first peer snapshot exchange for artifact payloads is not wired yet. Server mode and PeerJS mode transfer artifact payloads; local simulator saves artifacts with local documents.
+
+## Phase 4: Word Highlight Shape
+
+- Replaced per-tile selection/found styling with a board overlay that draws each found, local selection, or remote in-process selection as a continuous rounded pill spanning the selected word.
+- Found word pills use the first finder's user color; active local selection uses teal; remote in-process selections use the remote actor color with a dashed outline.
+- Verification:
+  - `npm exec vitest -- run src/apps/wordsearch/wordsearch.test.ts` passed.
+  - `pnpm build` in `examples/react-crdt` passed. The command still emitted `Error connecting to agent: Operation not permitted` before the build output, but the build completed successfully.

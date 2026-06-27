@@ -1,5 +1,6 @@
 import type {CrdtDocument} from 'umkehr/crdt';
 import type {SyncedTransport} from 'umkehr/react-crdt';
+import type {SerializedArtifact} from '../artifacts';
 import type {ExternalStore} from '../store';
 
 export type PeerRole = 'host' | 'client';
@@ -28,5 +29,6 @@ export type PeerJsSync<TState> = {
     disconnect(peerId: string): void;
     flushQueued(peerId?: string): void;
     setSnapshotDocument(document: CrdtDocument<TState>): void;
+    broadcastSnapshot(document: CrdtDocument<TState>, artifacts?: SerializedArtifact[]): void;
     destroy(): void;
 };
