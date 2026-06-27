@@ -58,7 +58,7 @@ export function WordsearchPanel({
         () => [
             ...foundHighlights(puzzle, found),
             ...(activeCells.length
-                ? [{id: 'active', cells: activeCells, color: '#0f766e', kind: 'active' as const}]
+                ? [{id: 'active', cells: activeCells, color: colorForUserId(actor), kind: 'active' as const}]
                 : []),
             ...remoteSelections
                 .filter((record) => record.message.actor !== actor)

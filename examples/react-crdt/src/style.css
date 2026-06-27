@@ -120,8 +120,8 @@ button:disabled:hover {
 }
 
 .wordsearchHighlight.active {
-    border-color: #0f766e;
-    background: rgb(20 184 166 / 26%);
+    border-color: var(--wordsearch-highlight-color);
+    background: color-mix(in srgb, var(--wordsearch-highlight-color) 28%, transparent);
     opacity: 0.9;
 }
 

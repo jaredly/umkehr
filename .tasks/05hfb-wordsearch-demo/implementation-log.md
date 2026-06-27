@@ -15,10 +15,14 @@
 - Simplified the standalone PeerJS controls into a horizontal top bar. The compact variant hides the full local peer id and uses a traffic-light status dot with a short label.
 - Reverified `pnpm build:wordsearch-peerjs` after the top-bar control changes.
 - Rechecked the built output for unrelated demo titles after the top-bar changes; no matches.
+- Added host-only localStorage persistence for the standalone Wordsearch PeerJS demo. The saved payload includes a version marker, schema version/fingerprint hash, cloned CRDT local history, and serialized Wordsearch artifacts.
+- Reverified `pnpm build:wordsearch-peerjs` after adding localStorage persistence.
+- Rechecked the built output for unrelated demo titles after persistence; no matches.
 
 ## Issues / Notes
 
 - `New game` needs to affect already-connected clients, not just the next client connection. The current `usePeerJsSync` only sends snapshots on connection open and ignores later snapshot messages once a client already has a snapshot. I am adding a narrow snapshot broadcast path for this demo.
-- The shell currently keeps the document in memory only. Refreshing the host creates a fresh game; this matches the plan's preferred non-persistent option.
+- The shell originally kept the host document in memory only. That is now replaced with host-only localStorage persistence so refreshes restore the current game. Clients still do not persist host documents.
+- localStorage load/save failures are caught and logged with `console.warn`; the host falls back to a fresh game if the saved payload is missing, invalid, stale for the current schema, or unreadable.
 - First `pnpm build:wordsearch-peerjs` attempt passed the TypeScript step but failed loading the Vite config because `__dirname` is undefined with `--configLoader runner`. Fixed the config to derive the HTML path from `import.meta.url`.
 - The shell prints `Error connecting to agent: Operation not permitted` before local commands in this environment, but the build and `rg` verification still completed normally.
