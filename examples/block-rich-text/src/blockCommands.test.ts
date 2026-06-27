@@ -58,6 +58,7 @@ import {
     setMathMark,
     setInlineEmbedDataByCharId,
     setBlockType,
+    updateBlockStyle,
     setLinkMark,
     setPreviewBlockData,
     slideChildren,
@@ -203,6 +204,39 @@ const insertParagraphAfterBlockForTest = (
 };
 
 describe('block rich text commands', () => {
+    it('sets and unsets block style attributes independently', () => {
+        const initial = init();
+        const blockId = onlyBlock(initial);
+        let result = updateBlockStyle(initial, blockId, 'color', 'tomato', ctx());
+
+        expect(result.ops.map((op) => op.type)).toEqual(['block:style']);
+        expect(result.state.state.blocks[blockId].style).toEqual({
+            color: {value: 'tomato', ts: '0001-left'},
+        });
+
+        result = updateBlockStyle(result.state, blockId, 'padding', 'large', ctx());
+        expect(result.state.state.blocks[blockId].style).toMatchObject({
+            color: {value: 'tomato', ts: '0001-left'},
+            padding: {value: 'large', ts: '0001-left'},
+        });
+
+        result = updateBlockStyle(result.state, blockId, 'color', null, ctx());
+        expect(result.state.state.blocks[blockId].style).toMatchObject({
+            color: {value: null, ts: '0001-left'},
+            padding: {value: 'large', ts: '0001-left'},
+        });
+    });
+
+    it('does not emit a block style op when the normalized value is unchanged', () => {
+        const initial = init();
+        const blockId = onlyBlock(initial);
+        const first = updateBlockStyle(initial, blockId, 'font-size', 'large', ctx());
+        const second = updateBlockStyle(first.state, blockId, 'font-size', 'large', ctx());
+
+        expect(first.ops.map((op) => op.type)).toEqual(['block:style']);
+        expect(second.ops).toEqual([]);
+    });
+
     it.each([
         ['- ', {type: 'list_item', kind: 'unordered'}],
         ['* ', {type: 'list_item', kind: 'unordered'}],
@@ -980,8 +1014,10 @@ describe('block rich text commands', () => {
         expect(result.state.state.blocks[shape.slides[0]].meta).toMatchObject({
             type: 'slide',
             showTitle: true,
-            backgroundColor: '#ffffff',
             transition: 'none',
+        });
+        expect(result.state.state.blocks[shape.slides[0]].style['background-color']).toMatchObject({
+            value: '#ffffff',
         });
         expect(result.selection).toEqual(caret(shape.slides[0], 0));
     });
@@ -1012,8 +1048,10 @@ describe('block rich text commands', () => {
         expect(result.state.state.blocks[slideId].meta).toMatchObject({
             type: 'slide',
             showTitle: true,
-            backgroundColor: '#ffffff',
             transition: 'none',
+        });
+        expect(result.state.state.blocks[slideId].style['background-color']).toMatchObject({
+            value: '#ffffff',
         });
         expect(blockContents(result.state, slideId)).toBe('Slide title');
         expect(visibleBlockChildren(result.state, slideId, annotationVirtualParents(result.state))).toEqual([bodyId]);

@@ -222,6 +222,8 @@ type CustomMeta = {ts: string; kind: 'task'; priority: number};
 
 `State<M>`, `CachedState<M>`, `Block<M>`, and `Op<M>` carry the metadata type. `block:meta` conflict resolution compares `meta.ts`.
 
+Blocks also carry a generic `style` object. Each style attribute is stored as `{value, ts}` and merged independently with last-writer-wins semantics, so callers can update one style key without overwriting concurrent updates to another key.
+
 The default metadata union supports the demo editor:
 
 - paragraph

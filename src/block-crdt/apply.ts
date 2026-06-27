@@ -3,7 +3,7 @@ import {validateBlockOrderPath, virtualParentOwners, type VirtualBlockParentConf
 import {organizeState} from './cache.js';
 import {compareLamports, compareLamportStrings, lamportToString} from './ids.js';
 import {maxLamportCounterForOp} from './ops.js';
-import {Block, CachedState, DefaultBlockMeta, Lamport, Op, TimestampedBlockMeta} from './types.js';
+import {Block, BlockStyle, BlockStylePatch, CachedState, DefaultBlockMeta, Lamport, Op, TimestampedBlockMeta} from './types.js';
 import {blockOrderVersionWins, charParentVersionWins} from './versions.js';
 
 export type ApplyResult<M extends TimestampedBlockMeta = DefaultBlockMeta> =
@@ -110,6 +110,8 @@ export const apply = <M extends TimestampedBlockMeta>(
             return applyBlockMove(state, op, config);
         case 'block:meta':
             return applyBlockMeta(state, op, config);
+        case 'block:style':
+            return applyBlockStyle(state, op);
         case 'mark':
             return applyMark(state, op);
         case 'split-record':
@@ -345,6 +347,29 @@ const applyBlockMeta = <M extends TimestampedBlockMeta>(
     };
 };
 
+const applyBlockStyle = <M extends TimestampedBlockMeta>(
+    {state, cache}: CachedState<M>,
+    op: Op<M> & {type: 'block:style'},
+): CachedState<M> | false => {
+    const id = lamportToString(op.id);
+    const current = state.blocks[id];
+    if (!current) {
+        return false;
+    }
+    const style = mergeBlockStyle(current.style, op.style);
+    if (style === current.style) {
+        return {state, cache};
+    }
+    return {
+        state: {
+            ...state,
+            blocks: {...state.blocks, [id]: {...current, style}},
+            maxSeenCount: Math.max(state.maxSeenCount, maxLamportCounterForOp(op)),
+        },
+        cache,
+    };
+};
+
 const applyBlock = <M extends TimestampedBlockMeta>(
     {state}: CachedState<M>,
     {block}: Op<M> & {type: 'block'},
@@ -352,6 +377,7 @@ const applyBlock = <M extends TimestampedBlockMeta>(
 ): CachedState<M> | false => {
     const id = lamportToString(block.id);
     const current = state.blocks[id];
+    block = {...block, style: block.style ?? {}};
     if (current) {
         const meta = mergeBlockMeta(config, current.meta, block.meta);
         if (meta) {
@@ -359,6 +385,7 @@ const applyBlock = <M extends TimestampedBlockMeta>(
         } else {
             block = {...block, meta: current.meta};
         }
+        block = {...block, style: mergeBlockStyle(current.style, block.style)};
         if (!blockOrderWins(block.order, current.order)) {
             block = {...block, order: current.order};
         }
@@ -433,6 +460,26 @@ const mergeBlockMeta = <M extends TimestampedBlockMeta>(
     return incoming.ts > current.ts ? incoming : null;
 };
 
+export const mergeBlockStyle = (current: BlockStyle = {}, incoming: BlockStylePatch = {}): BlockStyle => {
+    let next: BlockStyle | null = null;
+    for (const [key, value] of Object.entries(incoming)) {
+        const existing = current[key];
+        if (existing && !blockStyleValueWins(value, existing)) continue;
+        next = next ?? {...current};
+        next[key] = value;
+    }
+    return next ?? current;
+};
+
+const blockStyleValueWins = (
+    incoming: BlockStyle[string],
+    current: BlockStyle[string],
+): boolean => {
+    if (incoming.ts > current.ts) return true;
+    if (incoming.ts < current.ts) return false;
+    return JSON.stringify(incoming.value) > JSON.stringify(current.value);
+};
+
 const blockOrderWins = (incoming: Block['order'], current: Block['order']) => {
     if (blockOrderVersionWins(incoming.ts, current.ts)) return true;
     if (blockOrderVersionWins(current.ts, incoming.ts)) return false;
@@ -495,6 +542,7 @@ const missingDependenciesForOp = <M extends TimestampedBlockMeta>(
         }
         case 'block:delete':
         case 'block:meta':
+        case 'block:style':
             return state.state.blocks[lamportToString(op.id)] ? [] : [op.id];
         case 'mark': {
             const missing: Lamport[] = [];

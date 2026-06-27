@@ -417,6 +417,14 @@ function blockOperationTargetIssue(state: BlockState, op: Op): BlockedEffect['re
             if (block.deleted) return 'deleted';
             return equal(block.meta, op.meta) ? null : 'superseded';
         }
+        case 'block:style': {
+            const block = state.blocks[lamportToString(op.id)];
+            if (!block) return 'missing-target';
+            if (block.deleted) return 'deleted';
+            return Object.entries(op.style).every(([key, value]) => equal(block.style[key], value))
+                ? null
+                : 'superseded';
+        }
         case 'mark': {
             const mark = state.marks[lamportToString(op.mark.id)];
             if (!mark) return 'missing-target';

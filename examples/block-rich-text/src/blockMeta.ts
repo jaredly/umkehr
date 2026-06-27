@@ -1,4 +1,5 @@
 import type {HLC, Lamport} from 'umkehr/block-crdt/types';
+import type {BlockStyle} from 'umkehr/block-crdt/types';
 import type {Block} from 'umkehr/block-crdt/types';
 
 export type ImagePresentationSize = 'small' | 'medium' | 'large' | 'original';
@@ -59,7 +60,6 @@ export type SlideDeckMeta = {
 export type SlideMeta = {
     type: 'slide';
     showTitle: boolean;
-    backgroundColor: string;
     transition: SlideTransition;
     ts: HLC;
 };
@@ -87,8 +87,56 @@ export type RichBlockMeta =
     | {type: 'preview'; url: string; preview: PreviewMetadata | null; ts: HLC};
 
 export type RichBlockType = RichBlockMeta['type'];
+export type RichBlockStyleAttribute = 'background-color' | 'color' | 'font-size' | 'padding';
+export type RichBlockStyleSize = 'xsmall' | 'small' | 'normal' | 'large' | 'xlarge';
+export type RichBlockDocumentStyle = Partial<Record<RichBlockStyleAttribute, string | null>>;
+
+const RICH_BLOCK_STYLE_SIZE_VALUES = new Set<RichBlockStyleSize>([
+    'xsmall',
+    'small',
+    'normal',
+    'large',
+    'xlarge',
+]);
 
 export const paragraphMeta = (ts: HLC): RichBlockMeta => ({type: 'paragraph', ts});
+
+export const normalizeRichBlockStyleValue = (
+    attribute: RichBlockStyleAttribute,
+    value: unknown,
+): string | null | undefined => {
+    if (value === null) return null;
+    if (attribute === 'background-color' || attribute === 'color') {
+        return typeof value === 'string' ? value : undefined;
+    }
+    if (attribute === 'font-size' || attribute === 'padding') {
+        return typeof value === 'string' && RICH_BLOCK_STYLE_SIZE_VALUES.has(value as RichBlockStyleSize)
+            ? value
+            : undefined;
+    }
+    return undefined;
+};
+
+export const richBlockStyleValue = (
+    style: BlockStyle | undefined,
+    attribute: RichBlockStyleAttribute,
+): string | null => {
+    const entry = style?.[attribute];
+    const normalized = normalizeRichBlockStyleValue(attribute, entry?.value);
+    return normalized === undefined ? null : normalized;
+};
+
+export const documentStyleFromBlockStyle = (style: BlockStyle): RichBlockDocumentStyle => {
+    const result: RichBlockDocumentStyle = {};
+    for (const attribute of ['background-color', 'color', 'font-size', 'padding'] as const) {
+        const value = normalizeRichBlockStyleValue(attribute, style[attribute]?.value);
+        if (value !== undefined && value !== null) result[attribute] = value;
+    }
+    return result;
+};
+
+export const blockStyleHasDocumentValues = (style: RichBlockDocumentStyle): boolean =>
+    Object.values(style).some((value) => value !== undefined && value !== null);
 
 export const sameTypeWithTs = (meta: RichBlockMeta, ts: HLC): RichBlockMeta => {
     switch (meta.type) {
@@ -145,7 +193,6 @@ export const defaultSlideDeckMeta = (ts: HLC): SlideDeckMeta => ({
 export const defaultSlideMeta = (ts: HLC): SlideMeta => ({
     type: 'slide',
     showTitle: true,
-    backgroundColor: '#ffffff',
     transition: 'none',
     ts,
 });

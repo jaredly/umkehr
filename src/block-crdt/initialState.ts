@@ -7,6 +7,7 @@ export const initialState = (session: string, ts: string): State => ({
         [lamportToString([0, session])]: {
             id: [0, session],
             meta: {type: 'paragraph', ts: ts},
+            style: {},
             order: {
                 id: [0, session],
                 path: [[0, session]],
@@ -31,6 +32,7 @@ export const initialStateWithMeta = <M extends TimestampedBlockMeta>(
         [lamportToString([0, session])]: {
             id: [0, session],
             meta,
+            style: {},
             order: {
                 id: [0, session],
                 path: [[0, session]],

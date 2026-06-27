@@ -3,6 +3,8 @@ export type {
     Block,
     BlockOrder,
     BlockOrderTs,
+    BlockStyle,
+    BlockStylePatch,
     Cache,
     CachedState,
     Char,
@@ -34,6 +36,7 @@ export {
     moveBlockOps,
     nextBlockIdForActor,
     setBlockMetaOps,
+    setBlockStyleOps,
     split,
     splitBlockOps,
 } from './changes.js';

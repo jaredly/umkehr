@@ -679,6 +679,36 @@ describe('Block rich text example UI', () => {
         expect(blocks(right)).toHaveLength(1);
     });
 
+    it('sets block style controls and syncs rendered style', async () => {
+        const view = render(<App />);
+        const {left, right} = panels(view);
+        const menu = openBlockOptions(left, 'Block style options');
+
+        fireEvent.change(within(menu).getByRole('textbox', {name: 'Block text color'}), {
+            target: {value: 'tomato'},
+        });
+        fireEvent.change(within(menu).getByRole('textbox', {name: 'Block background color'}), {
+            target: {value: 'gold'},
+        });
+        fireEvent.change(within(menu).getByRole('combobox', {name: 'Block font size'}), {
+            target: {value: 'large'},
+        });
+        fireEvent.change(within(menu).getByRole('combobox', {name: 'Block padding'}), {
+            target: {value: 'small'},
+        });
+
+        await waitFor(() => {
+            const leftRow = blocks(left)[0].closest<HTMLElement>('.blockRow')!;
+            const rightRow = blocks(right)[0].closest<HTMLElement>('.blockRow')!;
+            expect(leftRow.style.color).toBe('tomato');
+            expect(leftRow.style.backgroundColor).toBe('gold');
+            expect(leftRow.style.fontSize).toBe('1.15em');
+            expect(leftRow.style.padding).toBe('4px 8px');
+            expect(rightRow.style.color).toBe('tomato');
+            expect(rightRow.style.backgroundColor).toBe('gold');
+        });
+    });
+
     it('replaces the document from a fixture in both editors', async () => {
         const view = render(<App />);
         const {left, right} = panels(view);

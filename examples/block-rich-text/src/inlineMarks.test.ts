@@ -23,7 +23,7 @@ const block = (
         runs,
         depth: 0,
         parentId: '0-root',
-        block: {id: [1, 'test'], parent: [0, 'root'], order: '00000', meta: {type: 'paragraph', ts: '0'}},
+        block: {id: [1, 'test'], parent: [0, 'root'], order: '00000', meta: {type: 'paragraph', ts: '0'}, style: {}},
     }) as FormattedBlock<RichBlockMeta>;
 
 describe('block rich text inline mark helpers', () => {

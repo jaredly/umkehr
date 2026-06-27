@@ -2,6 +2,7 @@ import {compareLamports, lamportToString} from './ids.js';
 import {findTail, orderedCharIdsForBlock, charRecord} from './traversal.js';
 import {
     Block,
+    BlockStylePatch,
     CachedState,
     Char,
     DefaultBlockMeta,
@@ -118,6 +119,22 @@ export const planUndoOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
                     id: op.id,
                     meta: {...beforeBlock.meta, ts: nextTs()} as M,
                 });
+                break;
+            }
+            case 'block:style': {
+                const beforeBlock = before.state.blocks[lamportToString(op.id)];
+                if (!beforeBlock) {
+                    reject(op, 'block style undo requires the previous block style');
+                    break;
+                }
+                const style: BlockStylePatch = {};
+                for (const key of Object.keys(op.style)) {
+                    style[key] = beforeBlock.style[key] ?? {value: null, ts: nextTs()};
+                    if (beforeBlock.style[key]) {
+                        style[key] = {...beforeBlock.style[key], ts: nextTs()};
+                    }
+                }
+                ops.push({type: 'block:style', id: op.id, style});
                 break;
             }
             case 'mark':

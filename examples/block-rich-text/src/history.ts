@@ -11,7 +11,6 @@ import {
 import {
     codePreviewKindForLanguage,
     isSlideDeckFooterMode,
-    isSlideHexColor,
     isSlideTransition,
     type RichBlockMeta,
 } from './blockMeta';
@@ -106,6 +105,7 @@ const CURRENT_OP_TYPES = new Set([
     'block:move',
     'block:delete',
     'block:meta',
+    'block:style',
     'mark',
     'split-record',
     'join-record',
@@ -421,6 +421,9 @@ const validateOp = (value: unknown): string | null => {
         if (!isRecord(value.block)) return 'has invalid block record.';
         if (typeof value.block.deleted !== 'boolean') return 'block must use deleted boolean.';
         if (!isBlockOrder(value.block.order)) return 'block has invalid order.';
+        if (value.block.style !== undefined && !isBlockStyle(value.block.style)) {
+            return 'block has invalid style.';
+        }
         if ('status' in value.block) return 'block uses removed status shape.';
         if (!isRichBlockMeta(value.block.meta)) {
             return 'block has invalid rich block metadata.';
@@ -430,6 +433,9 @@ const validateOp = (value: unknown): string | null => {
         if (!isRichBlockMeta(value.meta)) {
             return 'has invalid rich block metadata.';
         }
+    }
+    if (value.type === 'block:style' && !isBlockStyle(value.style)) {
+        return 'has invalid block style.';
     }
     if (value.type === 'join-record' && !isRecord(value.join)) {
         return 'has invalid join record.';
@@ -454,6 +460,25 @@ const isBlockOrderTs = (value: unknown): boolean =>
         isRecord(value[1]) &&
         typeof value[2] === 'string');
 
+const isBlockStyle = (value: unknown): boolean =>
+    isRecord(value) &&
+    Object.values(value).every(
+        (item) => isRecord(item) && isJsonValue(item.value) && typeof item.ts === 'string',
+    );
+
+const isJsonValue = (value: unknown): boolean => {
+    if (
+        value === null ||
+        typeof value === 'string' ||
+        typeof value === 'boolean' ||
+        (typeof value === 'number' && Number.isFinite(value))
+    ) {
+        return true;
+    }
+    if (Array.isArray(value)) return value.every(isJsonValue);
+    return isRecord(value) && Object.values(value).every(isJsonValue);
+};
+
 const isRichBlockMeta = (value: unknown): value is RichBlockMeta => {
     if (!isRecord(value) || typeof value.type !== 'string' || typeof value.ts !== 'string') {
         return false;
@@ -475,7 +500,6 @@ const isRichBlockMeta = (value: unknown): value is RichBlockMeta => {
         case 'slide':
             return (
                 typeof value.showTitle === 'boolean' &&
-                isSlideHexColor(value.backgroundColor) &&
                 isSlideTransition(value.transition)
             );
         case 'poll':

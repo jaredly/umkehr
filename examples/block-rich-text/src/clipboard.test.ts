@@ -23,6 +23,7 @@ import {
     setMathMark,
     splitBlock,
     toggleMark,
+    updateBlockStyle,
     type CommandContext,
 } from './blockCommands';
 import {paragraphMeta} from './blockMeta';
@@ -134,6 +135,42 @@ describe('block rich text clipboard payload parser', () => {
         });
 
         expect(parseBlockRichTextClipboardPayload(JSON.stringify(ingredientPayload))).toEqual(ingredientPayload);
+    });
+
+    it('parses supported block styles', () => {
+        const styledPayload = payload({
+            fragments: [
+                {
+                    text: 'hello',
+                    meta: {type: 'paragraph', ts: '001-test'},
+                    style: {
+                        color: 'tomato',
+                        'background-color': '#fff3a0',
+                        'font-size': 'large',
+                        padding: 'small',
+                    },
+                    marks: [],
+                },
+            ],
+        });
+
+        expect(parseBlockRichTextClipboardPayload(JSON.stringify(styledPayload))).toEqual(styledPayload);
+        expect(
+            parseBlockRichTextClipboardPayload(
+                JSON.stringify(
+                    payload({
+                        fragments: [
+                            {
+                                text: 'hello',
+                                meta: {type: 'paragraph', ts: '001-test'},
+                                style: {'font-size': 'huge'},
+                                marks: [],
+                            },
+                        ],
+                    }),
+                ),
+            ),
+        ).toBeNull();
     });
 
     it('parses kanban block metadata', () => {
@@ -280,6 +317,31 @@ describe('block rich text clipboard serialization', () => {
 
         expect(payload?.fragments[0]?.meta).toEqual({type: 'heading', level: 2, ts: 'heading-ts'});
         expect(payload?.html).toContain('<h2 data-umkehr-block-type="heading">Title</h2>');
+    });
+
+    it('serializes block style for selected fragments', () => {
+        const demo = createDemoState();
+        const blockId = rootBlockIds(demo.left.state)[0];
+        let result = insertText(demo.left.state, caret(blockId, 0), 'styled', ctx());
+        result = updateBlockStyle(result.state, blockId, 'color', 'tomato', ctx());
+        result = updateBlockStyle(result.state, blockId, 'background-color', '#fff3a0', ctx());
+        result = updateBlockStyle(result.state, blockId, 'font-size', 'large', ctx());
+        result = updateBlockStyle(result.state, blockId, 'padding', 'small', ctx());
+
+        const payload = serializeSelectionToClipboardPayload(
+            result.state,
+            singleRetainedSelectionSet(result.state, range(blockId, 0, 6)),
+        );
+
+        expect(payload?.fragments[0]?.style).toEqual({
+            color: 'tomato',
+            'background-color': '#fff3a0',
+            'font-size': 'large',
+            padding: 'small',
+        });
+        expect(payload?.html).toContain(
+            'style="color: tomato; background-color: #fff3a0; font-size: 1.15em; padding: 4px 8px"',
+        );
     });
 
     it('serializes recipe ingredient metadata and generated HTML styling', () => {

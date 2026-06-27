@@ -28,6 +28,7 @@ import {
     pastePlainTextWithMarkdownShortcutsEverywhere,
     pasteRichClipboardEverywhere,
     setLinkMarkEverywhere,
+    updateBlockStyleEverywhere,
     splitBlockEverywhere,
     toggleMarkEverywhere,
     unindentSelections,
@@ -71,6 +72,28 @@ const annotationsFor = (state: CachedState<RichBlockMeta>) =>
     );
 
 describe('block rich text multi-selection commands', () => {
+    it('applies block style updates to selected blocks', () => {
+        const pasted = pastePlainText(init(), caret(onlyBlock(init()), 0), 'ab\ncd', ctx());
+        const [firstBlock, secondBlock] = rootBlockIds(pasted.state);
+        const set = singleRetainedSelectionSet(pasted.state, {
+            type: 'block',
+            anchorBlockId: firstBlock,
+            focusBlockId: secondBlock,
+        });
+
+        const result = updateBlockStyleEverywhere(pasted.state, set, 'background-color', 'gold', ctx());
+
+        expect(result.ops.map((op) => op.type)).toEqual(['block:style', 'block:style']);
+        expect(result.state.state.blocks[firstBlock].style['background-color']).toEqual({
+            value: 'gold',
+            ts: '0001-left',
+        });
+        expect(result.state.state.blocks[secondBlock].style['background-color']).toEqual({
+            value: 'gold',
+            ts: '0002-left',
+        });
+    });
+
     it('inserts text at two carets in one block', () => {
         const inserted = insertText(init(), caret(onlyBlock(init()), 0), 'abcd', ctx());
         const blockId = onlyBlock(inserted.state);
@@ -155,6 +178,44 @@ describe('block rich text multi-selection commands', () => {
         expect(blockContents(result.state, formatted.id)).toBe('- item');
         expect(formatted.block.meta).toEqual({type: 'heading', level: 2, ts: 'heading-ts'});
         expect(formatted.runs).toEqual([{text: '- item', marks: {bold: true}}]);
+    });
+
+    it('pastes rich clipboard block style', () => {
+        const state = init();
+        const blockId = onlyBlock(state);
+        const payload: RichClipboardPayload = {
+            version: 1,
+            plainText: 'styled',
+            html: '<p>styled</p>',
+            fragments: [
+                {
+                    text: 'styled',
+                    meta: {type: 'paragraph', ts: 'paragraph-ts'},
+                    style: {
+                        color: 'tomato',
+                        'background-color': '#fff3a0',
+                        'font-size': 'large',
+                    },
+                    marks: [],
+                },
+            ],
+            annotations: [],
+        };
+
+        const result = pasteRichClipboardEverywhere(
+            state,
+            singleRetainedSelectionSet(state, caret(blockId, 0)),
+            payload,
+            ctx(),
+        );
+
+        const formatted = materializeFormattedBlocks(result.state)[0];
+        expect(blockContents(result.state, formatted.id)).toBe('styled');
+        expect(formatted.block.style).toMatchObject({
+            color: {value: 'tomato'},
+            'background-color': {value: '#fff3a0'},
+            'font-size': {value: 'large'},
+        });
     });
 
     it('pastes rich clipboard links and multiple fragments as adjacent blocks', () => {

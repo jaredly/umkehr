@@ -28,7 +28,7 @@ import {
     visibleRangesForMark,
 } from 'umkehr/block-crdt';
 import type {FormattedBlock} from 'umkehr/block-crdt';
-import type {CachedState, Op} from 'umkehr/block-crdt/types';
+import type {BlockStyle, CachedState, Op} from 'umkehr/block-crdt/types';
 import {lamportToString, parseLamportString} from 'umkehr/block-crdt/utils';
 import {
     addTableColumn,
@@ -65,6 +65,7 @@ import {
     setInlineEmbedDataByCharId,
     setBlockMeta,
     setPreviewBlockData,
+    updateBlockStyle,
     slideChildren,
     slideDeckForSlide,
     splitTableTitleToParagraph,
@@ -110,8 +111,8 @@ import {
     codePreviewKindForLanguage,
     isPreviewableCodeMeta,
     normalizeSlideDeckSize,
-    normalizeSlideHexColor,
     paragraphMeta,
+    richBlockStyleValue,
     type PollChoiceMode,
     type PollDisplayMode,
     type PollMeta,
@@ -119,6 +120,8 @@ import {
     type PollVote,
     type ImagePresentationSize,
     type PreviewMetadata,
+    type RichBlockStyleAttribute,
+    type RichBlockStyleSize,
     type RichBlockMeta,
     type SlideDeckFooterMode,
     type SlideTransition,
@@ -4360,7 +4363,7 @@ function SlideBlockView({
     const style = {
         '--slide-width': deck.width,
         '--slide-height': deck.height,
-        backgroundColor: meta.backgroundColor,
+        backgroundColor: richBlockStyleValue(node.block.block.style, 'background-color') ?? '#ffffff',
     } as CSSProperties;
     const scaleLayerStyle = {
         width: `${deck.width}px`,
@@ -4475,10 +4478,12 @@ function SlideBlockOptions({
     context: RenderBlockContext;
 }) {
     const noop = () => undefined;
+    const style = context.state.state.blocks[blockId]?.style;
     return (
         <BlockOptions
             className="slideBlockOptions"
             meta={meta}
+            style={style}
             onSetCodeLanguage={noop}
             onSetCodePreview={noop}
             onSetCalloutKind={noop}
@@ -4504,21 +4509,6 @@ function SlideBlockOptions({
                     return {state: result.state, ops: result.ops, selection: current.selection};
                 })
             }
-            onSetSlideBackgroundColor={(backgroundColor) =>
-                context.runBlockControlCommand((current) => {
-                    const currentBlock = current.state.state.blocks[blockId];
-                    const normalized = normalizeSlideHexColor(backgroundColor);
-                    if (!currentBlock || currentBlock.meta.type !== 'slide' || !normalized) {
-                        return {state: current.state, ops: [], selection: current.selection};
-                    }
-                    const result = setBlockMeta(current.state, blockId, {
-                        ...currentBlock.meta,
-                        backgroundColor: normalized,
-                        ts: nextReplicaTs(current),
-                    });
-                    return {state: result.state, ops: result.ops, selection: current.selection};
-                })
-            }
             onSetSlideTransition={(transition) =>
                 context.runBlockControlCommand((current) => {
                     const currentBlock = current.state.state.blocks[blockId];
@@ -4531,6 +4521,23 @@ function SlideBlockOptions({
                         ts: nextReplicaTs(current),
                     });
                     return {state: result.state, ops: result.ops, selection: current.selection};
+                })
+            }
+            onSetBlockStyle={(attribute, value) =>
+                context.runBlockControlCommand((current) => {
+                    const result = updateBlockStyle(
+                        current.state,
+                        blockId,
+                        attribute,
+                        value,
+                        makeCommandContext(current),
+                    );
+                    return {
+                        state: result.state,
+                        ops: result.ops,
+                        selection: current.selection,
+                        commandLabel: `Set block ${attribute}`,
+                    };
                 })
             }
         />
@@ -6086,21 +6093,6 @@ const renderEditableBlock = (
                     return {state: result.state, ops: result.ops, selection: current.selection};
                 })
             }
-            onSetSlideBackgroundColor={(backgroundColor) =>
-                context.runBlockControlCommand((current) => {
-                    const currentBlock = current.state.state.blocks[block.id];
-                    const normalized = normalizeSlideHexColor(backgroundColor);
-                    if (!currentBlock || currentBlock.meta.type !== 'slide' || !normalized) {
-                        return {state: current.state, ops: [], selection: current.selection};
-                    }
-                    const result = setBlockMeta(current.state, block.id, {
-                        ...currentBlock.meta,
-                        backgroundColor: normalized,
-                        ts: nextReplicaTs(current),
-                    });
-                    return {state: result.state, ops: result.ops, selection: current.selection};
-                })
-            }
             onSetSlideTransition={(transition) =>
                 context.runBlockControlCommand((current) => {
                     const currentBlock = current.state.state.blocks[block.id];
@@ -6113,6 +6105,23 @@ const renderEditableBlock = (
                         ts: nextReplicaTs(current),
                     });
                     return {state: result.state, ops: result.ops, selection: current.selection};
+                })
+            }
+            onSetBlockStyle={(attribute, value) =>
+                context.runBlockControlCommand((current) => {
+                    const result = updateBlockStyle(
+                        current.state,
+                        block.id,
+                        attribute,
+                        value,
+                        makeCommandContext(current),
+                    );
+                    return {
+                        state: result.state,
+                        ops: result.ops,
+                        selection: current.selection,
+                        commandLabel: `Set block ${attribute}`,
+                    };
                 })
             }
             onSetPreviewUrl={(url) =>
@@ -7130,8 +7139,8 @@ function EditableBlock({
     onSetSlideDeckSize,
     onSetSlideDeckFooter,
     onSetSlideShowTitle,
-    onSetSlideBackgroundColor,
     onSetSlideTransition,
+    onSetBlockStyle,
     onSetPreviewUrl,
     onSetPreviewMetadata,
     onCopy,
@@ -7225,8 +7234,8 @@ function EditableBlock({
     onSetSlideDeckSize(width: number, height: number): void;
     onSetSlideDeckFooter(footer: SlideDeckFooterMode): void;
     onSetSlideShowTitle(showTitle: boolean): void;
-    onSetSlideBackgroundColor(backgroundColor: string): void;
     onSetSlideTransition(transition: SlideTransition): void;
+    onSetBlockStyle(attribute: RichBlockStyleAttribute, value: string | null): void;
     onSetPreviewUrl(url: string): void;
     onSetPreviewMetadata(url: string, metadata: PreviewMetadata | null): void;
     onCopy(event: ClipboardEvent<HTMLElement>): void;
@@ -7273,6 +7282,7 @@ function EditableBlock({
     const codeText = isCodeBlock ? block.runs.map((run) => run.text).join('') : '';
     const codeLanguage = isCodeBlock ? meta.language : '';
     const blockText = block.runs.map((run) => run.text).join('');
+    const blockStyle = blockStyleProps(block.block.style);
     const syntaxTokens = useMemo(
         () => (isCodeBlock ? highlightCode(codeText, codeLanguage) : undefined),
         [codeLanguage, codeText, isCodeBlock],
@@ -7598,6 +7608,7 @@ function EditableBlock({
                     '--block-depth': block.depth,
                     '--drop-depth': dropTarget?.indicatorDepth ?? block.depth,
                     '--drop-offset': `${((dropTarget?.indicatorDepth ?? block.depth) - block.depth) * 24}px`,
+                    ...blockStyle,
                 } as CSSProperties
             }
         >
@@ -7648,6 +7659,7 @@ function EditableBlock({
             {!hideInlineControls && (
                 <BlockOptions
                     meta={meta}
+                    style={block.block.style}
                     onSetCodeLanguage={onSetCodeLanguage}
                     onSetCodePreview={onSetCodePreview}
                     onSetCalloutKind={onSetCalloutKind}
@@ -7660,8 +7672,8 @@ function EditableBlock({
                     onSetSlideDeckSize={onSetSlideDeckSize}
                     onSetSlideDeckFooter={onSetSlideDeckFooter}
                     onSetSlideShowTitle={onSetSlideShowTitle}
-                    onSetSlideBackgroundColor={onSetSlideBackgroundColor}
                     onSetSlideTransition={onSetSlideTransition}
+                    onSetBlockStyle={onSetBlockStyle}
                 />
             )}
         </div>
@@ -8721,6 +8733,7 @@ function BlockAffordance({
 function BlockOptions({
     className,
     meta,
+    style,
     onSetCodeLanguage,
     onSetCodePreview,
     onSetCalloutKind,
@@ -8733,11 +8746,12 @@ function BlockOptions({
     onSetSlideDeckSize,
     onSetSlideDeckFooter,
     onSetSlideShowTitle,
-    onSetSlideBackgroundColor,
     onSetSlideTransition,
+    onSetBlockStyle,
 }: {
     className?: string;
     meta: RichBlockMeta;
+    style?: BlockStyle;
     onSetCodeLanguage(language: string): void;
     onSetCodePreview(enabled: boolean): void;
     onSetCalloutKind(kind: 'info' | 'warning' | 'error'): void;
@@ -8750,10 +8764,10 @@ function BlockOptions({
     onSetSlideDeckSize(width: number, height: number): void;
     onSetSlideDeckFooter(footer: SlideDeckFooterMode): void;
     onSetSlideShowTitle(showTitle: boolean): void;
-    onSetSlideBackgroundColor(backgroundColor: string): void;
     onSetSlideTransition(transition: SlideTransition): void;
+    onSetBlockStyle(attribute: RichBlockStyleAttribute, value: string | null): void;
 }) {
-    let label: string | null = null;
+    let label = 'Block style options';
     let controls: ReactElement | null = null;
 
     if (meta.type === 'code') {
@@ -9004,16 +9018,6 @@ function BlockOptions({
                     Show title
                 </label>
                 <label className="blockOptionsField">
-                    <span>Background</span>
-                    <input
-                        className="blockOptionsColor"
-                        type="color"
-                        value={normalizeSlideHexColor(meta.backgroundColor) ?? '#ffffff'}
-                        aria-label="Slide background color"
-                        onChange={(event) => onSetSlideBackgroundColor(event.currentTarget.value)}
-                    />
-                </label>
-                <label className="blockOptionsField">
                     <span>Transition</span>
                     <select
                         className="blockOptionsSelect"
@@ -9030,9 +9034,63 @@ function BlockOptions({
         );
     }
 
-    if (!label || !controls) {
-        return null;
-    }
+    const styleControls = (
+        <>
+            <label className="blockOptionsField">
+                <span>Text</span>
+                <input
+                    className="blockOptionsText"
+                    value={richBlockStyleValue(style, 'color') ?? ''}
+                    placeholder="default"
+                    aria-label="Block text color"
+                    onChange={(event) => onSetBlockStyle('color', event.currentTarget.value || null)}
+                />
+            </label>
+            <label className="blockOptionsField">
+                <span>Background</span>
+                <input
+                    className="blockOptionsText"
+                    value={richBlockStyleValue(style, 'background-color') ?? ''}
+                    placeholder="default"
+                    aria-label="Block background color"
+                    onChange={(event) => onSetBlockStyle('background-color', event.currentTarget.value || null)}
+                />
+            </label>
+            <label className="blockOptionsField">
+                <span>Size</span>
+                <select
+                    className="blockOptionsSelect"
+                    value={richBlockStyleValue(style, 'font-size') ?? ''}
+                    aria-label="Block font size"
+                    onChange={(event) => onSetBlockStyle('font-size', event.currentTarget.value || null)}
+                >
+                    <option value="">Default</option>
+                    <option value="xsmall">Extra small</option>
+                    <option value="small">Small</option>
+                    <option value="normal">Normal</option>
+                    <option value="large">Large</option>
+                    <option value="xlarge">Extra large</option>
+                </select>
+            </label>
+            <label className="blockOptionsField">
+                <span>Padding</span>
+                <select
+                    className="blockOptionsSelect"
+                    value={richBlockStyleValue(style, 'padding') ?? ''}
+                    aria-label="Block padding"
+                    onChange={(event) => onSetBlockStyle('padding', event.currentTarget.value || null)}
+                >
+                    <option value="">Default</option>
+                    <option value="xsmall">Extra small</option>
+                    <option value="small">Small</option>
+                    <option value="normal">Normal</option>
+                    <option value="large">Large</option>
+                    <option value="xlarge">Extra large</option>
+                </select>
+            </label>
+        </>
+    );
+    controls = controls ? <>{controls}{styleControls}</> : styleControls;
 
     return (
         <details
@@ -9050,6 +9108,35 @@ function BlockOptions({
         </details>
     );
 }
+
+const BLOCK_STYLE_SIZE_VALUES: Record<RichBlockStyleSize, string> = {
+    xsmall: '0.85em',
+    small: '0.93em',
+    normal: '1em',
+    large: '1.15em',
+    xlarge: '1.35em',
+};
+
+const BLOCK_STYLE_PADDING_VALUES: Record<RichBlockStyleSize, string> = {
+    xsmall: '2px 4px',
+    small: '4px 8px',
+    normal: '8px 12px',
+    large: '12px 16px',
+    xlarge: '18px 22px',
+};
+
+const blockStyleProps = (style: BlockStyle | undefined): CSSProperties => {
+    const result: CSSProperties = {};
+    const backgroundColor = richBlockStyleValue(style, 'background-color');
+    const color = richBlockStyleValue(style, 'color');
+    const fontSize = richBlockStyleValue(style, 'font-size') as RichBlockStyleSize | null;
+    const padding = richBlockStyleValue(style, 'padding') as RichBlockStyleSize | null;
+    if (backgroundColor) result.backgroundColor = backgroundColor;
+    if (color) result.color = color;
+    if (fontSize) result.fontSize = BLOCK_STYLE_SIZE_VALUES[fontSize];
+    if (padding) result.padding = BLOCK_STYLE_PADDING_VALUES[padding];
+    return result;
+};
 
 const popoverTriggerFromEvent = (
     root: HTMLElement,

@@ -17,7 +17,18 @@ import {
     visibleBlockOutline,
     visibleBlockChildren,
 } from './traversal.js';
-import {Block, CachedState, Char, DefaultBlockMeta, HLC, JsonValue, Lamport, Op, TimestampedBlockMeta} from './types.js';
+import {
+    Block,
+    BlockStylePatch,
+    CachedState,
+    Char,
+    DefaultBlockMeta,
+    HLC,
+    JsonValue,
+    Lamport,
+    Op,
+    TimestampedBlockMeta,
+} from './types.js';
 
 export type InsertBlockOpsOptions<M extends TimestampedBlockMeta> = {
     actor: string;
@@ -279,6 +290,11 @@ export const setBlockMetaOps = <M extends TimestampedBlockMeta = DefaultBlockMet
     {block, meta}: {block: Lamport; meta: M},
 ): Op<M>[] => [{type: 'block:meta', id: block, meta}];
 
+export const setBlockStyleOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
+    _state: CachedState<M>,
+    {block, style}: {block: Lamport; style: BlockStylePatch},
+): Op<M>[] => [{type: 'block:style', id: block, style}];
+
 export const markRangesOps = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
     state: CachedState<M>,
     ranges: MarkRange[],
@@ -496,6 +512,7 @@ export const split = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
                     ts,
                     actor,
                     options,
+                    current.style,
                 ),
             },
         ];
@@ -514,6 +531,7 @@ export const split = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
                     ts,
                     actor,
                     options,
+                    current.style,
                 ),
             },
         ];
@@ -522,6 +540,7 @@ export const split = <M extends TimestampedBlockMeta = DefaultBlockMeta>(
     const block: Block<M> = {
         id: [maxSeenCount + 1, actor],
         meta: current.meta,
+        style: current.style,
         order: {
             id: [maxSeenCount + 1, actor],
             ts,
@@ -653,9 +672,11 @@ const blockBetween = <M extends TimestampedBlockMeta>(
     ts: string,
     actor: string,
     options?: LseqOptions,
+    style: Block['style'] = {},
 ): Block<M> => ({
     id,
     meta,
+    style,
     order: {
         id,
         ts,

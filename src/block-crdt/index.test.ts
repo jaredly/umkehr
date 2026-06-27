@@ -37,6 +37,7 @@ import {
     joinBlocksOps,
     moveBlockOps,
     setBlockMetaOps,
+    setBlockStyleOps,
     markSelectionOps,
     markRangeOp,
     materializeFormattedBlocks,
@@ -120,6 +121,7 @@ const block = (id: Lamport, index: number, ts: string, parent: Lamport | Lamport
     return {
         id,
         meta: {type: 'paragraph', ts},
+        style: {},
         order: {id, index: lseq(index), ts, path: [...parentPath, id]},
         deleted: false,
     };
@@ -1023,6 +1025,123 @@ it('supports custom block meta merge for duplicate block ops', () => {
     expectCache(state);
 });
 
+it('initializes block style for initial, inserted, and split blocks', () => {
+    let state = cachedState(init);
+    expect(state.state.blocks['0000-self'].style).toEqual({});
+
+    const insertOps = insertBlockOps(state, {
+        actor: 'self',
+        parent: [0, 'root'],
+        after: [0, 'self'],
+        meta: {type: 'paragraph', ts: '00002'},
+        ts: '00002',
+    });
+    state = applyMany(state, insertOps);
+    expect(state.state.blocks['0001-self'].style).toEqual({});
+
+    state = applyMany(state, insertTextOps(state, {
+        actor: 'self',
+        block: [0, 'self'],
+        offset: 0,
+        text: 'ab',
+        ts: mts(3),
+    }));
+    state = applyMany(state, setBlockStyleOps(state, {
+        block: [0, 'self'],
+        style: {'background-color': {value: 'red', ts: '00006'}},
+    }));
+    const splitOps = splitBlockOps(state, {actor: 'self', block: [0, 'self'], offset: 1, ts: '00007'});
+    state = applyMany(state, splitOps);
+    const splitBlock = splitOps.find((op) => op.type === 'block');
+    expect(splitBlock?.type === 'block' ? splitBlock.block.style : null).toEqual({
+        'background-color': {value: 'red', ts: '00006'},
+    });
+    expect(state.state.blocks[lamportToString(splitBlock!.type === 'block' ? splitBlock.block.id : [0, 'missing'])].style).toEqual({
+        'background-color': {value: 'red', ts: '00006'},
+    });
+});
+
+it('merges block style patches by independent attribute timestamps', () => {
+    let state = cachedState(init);
+    state = applyMany(state, setBlockStyleOps(state, {
+        block: [0, 'self'],
+        style: {
+            color: {value: 'red', ts: '00002'},
+            padding: {value: 'small', ts: '00002'},
+        },
+    }));
+
+    state = applyMany(state, setBlockStyleOps(state, {
+        block: [0, 'self'],
+        style: {
+            color: {value: 'blue', ts: '00001'},
+            'font-size': {value: 'large', ts: '00003'},
+        },
+    }));
+
+    expect(state.state.blocks['0000-self'].style).toEqual({
+        color: {value: 'red', ts: '00002'},
+        padding: {value: 'small', ts: '00002'},
+        'font-size': {value: 'large', ts: '00003'},
+    });
+    expectCache(state);
+});
+
+it('converges equal timestamp block style conflicts deterministically', () => {
+    const red = setBlockStyleOps(cachedState(init), {
+        block: [0, 'self'],
+        style: {color: {value: 'red', ts: '00002'}},
+    });
+    const blue = setBlockStyleOps(cachedState(init), {
+        block: [0, 'self'],
+        style: {color: {value: 'blue', ts: '00002'}},
+    });
+
+    const one = applyMany(cachedState(init), [...red, ...blue]);
+    const two = applyMany(cachedState(init), [...blue, ...red]);
+
+    expect(one.state.blocks['0000-self'].style).toEqual(two.state.blocks['0000-self'].style);
+    expect(one.state.blocks['0000-self'].style.color).toEqual({value: 'red', ts: '00002'});
+});
+
+it('merges full block op style with existing block style', () => {
+    const styledBlock = {
+        ...block([0, 'self'], 1, '00001'),
+        style: {
+            color: {value: 'blue', ts: '00002'},
+            padding: {value: 'small', ts: '00004'},
+        },
+    };
+    const stylePatch = setBlockStyleOps(cachedState(init), {
+        block: [0, 'self'],
+        style: {
+            color: {value: 'red', ts: '00003'},
+            'font-size': {value: 'large', ts: '00003'},
+        },
+    });
+
+    const one = applyMany(cachedState(init), [{type: 'block', block: styledBlock}, ...stylePatch]);
+    const two = applyMany(cachedState(init), [...stylePatch, {type: 'block', block: styledBlock}]);
+
+    expect(one.state.blocks['0000-self'].style).toEqual({
+        color: {value: 'red', ts: '00003'},
+        padding: {value: 'small', ts: '00004'},
+        'font-size': {value: 'large', ts: '00003'},
+    });
+    expect(two.state.blocks['0000-self'].style).toEqual(one.state.blocks['0000-self'].style);
+});
+
+it('reports missing block dependency for block style ops', () => {
+    const result = applyRemote(cachedState(init), {
+        type: 'block:style',
+        id: [42, 'other'],
+        style: {color: {value: 'red', ts: '00002'}},
+    });
+
+    expect(result.status).toBe('pending');
+    expect(result.status === 'pending' ? result.missing : []).toEqual([[42, 'other']]);
+});
+
 it('moves blocks by timestamp and updates child cache', () => {
     let state = apply(cachedState(init), {
         type: 'block',
@@ -1716,6 +1835,7 @@ it('merges duplicate block inserts by field timestamps', () => {
     expect(state.state.blocks['0001-self']).toEqual({
         id: [1, 'self'],
         meta: {type: 'blockquote', ts: '00004'},
+        style: {},
         order: {id: [1, 'self'], index: lseq(1), path: [[1, 'self']], ts: '00003'},
         deleted: true,
     });
@@ -1807,6 +1927,23 @@ it('creates public block metadata ops', () => {
 
     state = applyMany(state, ops);
     expect(state.state.blocks['0000-self'].meta).toEqual({type: 'blockquote', ts: '00002'});
+});
+
+it('creates public block style ops', () => {
+    let state = cachedState(initialState('self', '00001'));
+    const ops = setBlockStyleOps(state, {
+        block: [0, 'self'],
+        style: {
+            color: {value: 'red', ts: '00002'},
+            padding: {value: null, ts: '00003'},
+        },
+    });
+
+    state = applyMany(state, ops);
+    expect(state.state.blocks['0000-self'].style).toEqual({
+        color: {value: 'red', ts: '00002'},
+        padding: {value: null, ts: '00003'},
+    });
 });
 
 it('creates public block move ops', () => {
@@ -1907,7 +2044,7 @@ it('plans undo for inserted chars without removing concurrent remote chars', () 
     expect(blockLines(current)).toEqual(['X']);
 });
 
-it('plans undo for block move and metadata batches', () => {
+it('plans undo for block move, metadata, and style batches', () => {
     const ts = mts(2);
     let state = cachedState(initialState('self', '00001'));
     state = applyMany(state, insertTextOps(state, {actor: 'alice', block: [0, 'self'], offset: 0, text: 'ab', ts}));
@@ -1924,11 +2061,22 @@ it('plans undo for block move and metadata batches', () => {
             ts: ts(),
         }),
         ...setBlockMetaOps(state, {block: left, meta: {type: 'blockquote', ts: ts()}}),
+        ...setBlockStyleOps(state, {
+            block: left,
+            style: {
+                color: {value: 'red', ts: ts()},
+                padding: {value: 'small', ts: ts()},
+            },
+        }),
     ];
 
     state = applyMany(state, batch);
     expect(blockLines(state)).toEqual(['b', 'a']);
     expect(state.state.blocks[lamportToString(left)].meta.type).toBe('blockquote');
+    expect(state.state.blocks[lamportToString(left)].style).toEqual({
+        color: {value: 'red', ts: '00007'},
+        padding: {value: 'small', ts: '00008'},
+    });
 
     const undo = planUndoOps(before, state, batch, {actor: 'alice', ts: mts(40)});
 
@@ -1936,6 +2084,10 @@ it('plans undo for block move and metadata batches', () => {
     state = applyMany(state, undo.ops);
     expect(blockLines(state)).toEqual(['a', 'b']);
     expect(state.state.blocks[lamportToString(left)].meta.type).toBe('paragraph');
+    expect(state.state.blocks[lamportToString(left)].style).toEqual({
+        color: {value: null, ts: '00040'},
+        padding: {value: null, ts: '00041'},
+    });
 });
 
 it('plans undo for additive marks with normal mark ops', () => {

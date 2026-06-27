@@ -132,7 +132,6 @@ const slide = () => (replica: Replica) => {
     return setBlockTypeEverywhere(replica.state, replica.selection, (_blockId, _meta) => ({
         type: 'slide',
         showTitle: false,
-        backgroundColor: '#123abc',
         transition: 'fade',
         ts: context.nextTs(),
     }));
@@ -344,6 +343,45 @@ describe('block rich text history', () => {
         expect(visibleText(replayHistory(parsed.history.actions, parsed.history.cursor).left)).toEqual(['Example']);
     });
 
+    it('serializes, imports, and replays block style ops', () => {
+        const styleTs = hlc.pack({ts: 10, count: 0, node: 'left'});
+        const initial = replayHistory([]);
+        const history = appendHistoryAction(initialHistoryState(), {
+            type: 'local-change',
+            editorId: 'left',
+            ops: [
+                {
+                    type: 'block:style',
+                    id: [0, 'doc'],
+                    style: {
+                        color: {value: 'tomato', ts: styleTs},
+                        padding: {value: 'large', ts: styleTs},
+                    },
+                },
+            ],
+            selection: initial.left.selection,
+        });
+
+        const parsed = parseHistoryExport(serializeHistory(history));
+
+        expect('history' in parsed).toBe(true);
+        if (!('history' in parsed)) return;
+        const replayed = replayHistory(parsed.history.actions, parsed.history.cursor);
+        expect(replayed.left.state.state.blocks['0000-doc'].style).toMatchObject({
+            color: {value: 'tomato', ts: styleTs},
+            padding: {value: 'large', ts: styleTs},
+        });
+        expect(replayed.right.state.state.blocks['0000-doc'].style).toMatchObject({
+            color: {value: 'tomato', ts: styleTs},
+            padding: {value: 'large', ts: styleTs},
+        });
+        expect(hlc.tryUnpack(nextReplicaTs(replayed.right))).toMatchObject({
+            ts: 10,
+            count: 3,
+            node: 'right',
+        });
+    });
+
     it('serializes and imports replace-document histories with kanban blocks', () => {
         const history = appendHistoryAction(initialHistoryState(), {
             type: 'replace-document',
@@ -468,7 +506,6 @@ describe('block rich text history', () => {
         expect(blocks[0].block.meta).toMatchObject({
             type: 'slide',
             showTitle: false,
-            backgroundColor: '#123abc',
             transition: 'fade',
         });
     });

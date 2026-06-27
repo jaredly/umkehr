@@ -1,0 +1,1 @@
+examples/block-rich-text: let's rename the `kanban` block type to `columns`, and give it a metadata object with `display: 'cards' | 'blocks'`. The 'cards' mode would operate like kanban does now, but the 'blocks' mode (the default) would be more like traditional columns, where blocks are rendered normally.

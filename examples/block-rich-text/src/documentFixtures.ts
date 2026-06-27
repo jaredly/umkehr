@@ -249,7 +249,7 @@ function slideDeck(): ImportDocument {
             children: [
                 {
                     type: 'slide',
-                    meta: {showTitle: true, backgroundColor: '#ffffff', transition: 'fade'},
+                    meta: {showTitle: true, transition: 'fade'}, style: {'background-color': '#ffffff'},
                     content: 'Highlights',
                     children: [
                         {type: 'heading', meta: {level: 2}, content: 'Revenue grew 18%'},
@@ -261,7 +261,7 @@ function slideDeck(): ImportDocument {
                 },
                 {
                     type: 'slide',
-                    meta: {showTitle: false, backgroundColor: '#f3f8ff', transition: 'slide'},
+                    meta: {showTitle: false, transition: 'slide'}, style: {'background-color': '#f3f8ff'},
                     content: 'Hidden title slide',
                     children: [
                         {type: 'blockquote', content: 'The title stays editable in outline mode.'},
@@ -286,7 +286,7 @@ function slideDeck(): ImportDocument {
         },
         {
             type: 'slide',
-            meta: {showTitle: true, backgroundColor: '#fff7ed', transition: 'none'},
+            meta: {showTitle: true, transition: 'none'}, style: {'background-color': '#fff7ed'},
             content: 'Orphan slide',
             children: [
                 {type: 'todo', meta: {checked: false}, content: 'Promote into a deck later'},
@@ -304,7 +304,7 @@ function blockCrdtSlideDeck(): ImportDocument {
             children: [
                 {
                     type: 'slide',
-                    meta: {showTitle: true, backgroundColor: '#f8fbff', transition: 'fade'},
+                    meta: {showTitle: true, transition: 'fade'}, style: {'background-color': '#f8fbff'},
                     content: 'Local-first structured editing',
                     children: [
                         {
@@ -320,7 +320,7 @@ function blockCrdtSlideDeck(): ImportDocument {
                 },
                 {
                     type: 'slide',
-                    meta: {showTitle: true, backgroundColor: '#ffffff', transition: 'slide'},
+                    meta: {showTitle: true, transition: 'slide'}, style: {'background-color': '#ffffff'},
                     content: 'Why a block CRDT?',
                     children: [
                         {content: 'Documents are more than one text buffer.'},
@@ -339,7 +339,7 @@ function blockCrdtSlideDeck(): ImportDocument {
                 },
                 {
                     type: 'slide',
-                    meta: {showTitle: true, backgroundColor: '#f4fbf7', transition: 'fade'},
+                    meta: {showTitle: true, transition: 'fade'}, style: {'background-color': '#f4fbf7'},
                     content: "Refresher on Peritext's CRDT",
                     children: [
                         {
@@ -365,7 +365,7 @@ end`,
                 },
                 {
                     type: 'slide',
-                    meta: {showTitle: true, backgroundColor: '#ffffff', transition: 'slide'},
+                    meta: {showTitle: true, transition: 'slide'}, style: {'background-color': '#ffffff'},
                     content: 'Why a block CRDT?',
                     children: [
                         {content: 'Documents are more than one text buffer.'},
@@ -384,7 +384,7 @@ end`,
                 },
                 {
                     type: 'slide',
-                    meta: {showTitle: true, backgroundColor: '#fffaf0', transition: 'slide'},
+                    meta: {showTitle: true, transition: 'slide'}, style: {'background-color': '#fffaf0'},
                     content: 'Operations',
                     children: [
                         {
@@ -400,7 +400,7 @@ end`,
                 },
                 {
                     type: 'slide',
-                    meta: {showTitle: true, backgroundColor: '#ffffff', transition: 'fade'},
+                    meta: {showTitle: true, transition: 'fade'}, style: {'background-color': '#ffffff'},
                     content: 'Rich block metadata',
                     children: [
                         {
@@ -423,7 +423,7 @@ end`,
                 },
                 {
                     type: 'slide',
-                    meta: {showTitle: true, backgroundColor: '#f7f7ff', transition: 'slide'},
+                    meta: {showTitle: true, transition: 'slide'}, style: {'background-color': '#f7f7ff'},
                     content: 'Retained selections',
                     children: [
                         {
@@ -439,7 +439,7 @@ end`,
                 },
                 {
                     type: 'slide',
-                    meta: {showTitle: true, backgroundColor: '#ffffff', transition: 'fade'},
+                    meta: {showTitle: true, transition: 'fade'}, style: {'background-color': '#ffffff'},
                     content: 'Block-rich-text UI',
                     children: [
                         {content: 'The example layers editor behavior over the CRDT model.'},
@@ -463,7 +463,7 @@ end`,
                 },
                 {
                     type: 'slide',
-                    meta: {showTitle: true, backgroundColor: '#f3f8ff', transition: 'slide'},
+                    meta: {showTitle: true, transition: 'slide'}, style: {'background-color': '#f3f8ff'},
                     content: 'Slides as blocks',
                     children: [
                         {
@@ -485,7 +485,7 @@ end`,
                 },
                 {
                     type: 'slide',
-                    meta: {showTitle: true, backgroundColor: '#ffffff', transition: 'fade'},
+                    meta: {showTitle: true, transition: 'fade'}, style: {'background-color': '#ffffff'},
                     content: 'What this unlocks',
                     children: [
                         {
@@ -502,7 +502,7 @@ end`,
                 },
                 {
                     type: 'slide',
-                    meta: {showTitle: true, backgroundColor: '#f9fbf7', transition: 'slide'},
+                    meta: {showTitle: true, transition: 'slide'}, style: {'background-color': '#f9fbf7'},
                     content: 'Next directions',
                     children: [
                         {
@@ -542,7 +542,7 @@ function simpleEverythingSlideDeck(): ImportDocument {
             children: [
                 {
                     type: 'slide',
-                    meta: {showTitle: true, backgroundColor: '#f8fbff', transition: 'fade'},
+                    meta: {showTitle: true, transition: 'fade'}, style: {'background-color': '#f8fbff'},
                     content: 'Inline and text blocks',
                     children: [
                         {type: 'heading', meta: {level: 2}, content: 'Rich inline coverage'},
@@ -576,7 +576,7 @@ function simpleEverythingSlideDeck(): ImportDocument {
                 },
                 {
                     type: 'slide',
-                    meta: {showTitle: true, backgroundColor: '#ffffff', transition: 'slide'},
+                    meta: {showTitle: true, transition: 'slide'}, style: {'background-color': '#ffffff'},
                     content: 'Diagrams and data',
                     children: [
                         {
@@ -593,7 +593,7 @@ function simpleEverythingSlideDeck(): ImportDocument {
                 },
                 {
                     type: 'slide',
-                    meta: {showTitle: true, backgroundColor: '#ffffff', transition: 'slide'},
+                    meta: {showTitle: true, transition: 'slide'}, style: {'background-color': '#ffffff'},
                     content: 'Diagrams and data 2',
                     children: [
                         {
@@ -630,7 +630,7 @@ function simpleEverythingSlideDeck(): ImportDocument {
                 },
                 {
                     type: 'slide',
-                    meta: {showTitle: true, backgroundColor: '#fffaf0', transition: 'fade'},
+                    meta: {showTitle: true, transition: 'fade'}, style: {'background-color': '#fffaf0'},
                     content: 'Callouts, notes, and popovers',
                     children: [
                         {
@@ -653,7 +653,7 @@ function simpleEverythingSlideDeck(): ImportDocument {
                 },
                 {
                     type: 'slide',
-                    meta: {showTitle: true, backgroundColor: '#f4fbf7', transition: 'slide'},
+                    meta: {showTitle: true, transition: 'slide'}, style: {'background-color': '#f4fbf7'},
                     content: 'Structured blocks',
                     children: [
                         {
@@ -690,7 +690,7 @@ function simpleEverythingSlideDeck(): ImportDocument {
                 },
                 {
                     type: 'slide',
-                    meta: {showTitle: true, backgroundColor: '#f4fbf7', transition: 'slide'},
+                    meta: {showTitle: true, transition: 'slide'}, style: {'background-color': '#f4fbf7'},
                     content: 'Structured blocks 2',
                     children: [
                         {
@@ -724,7 +724,7 @@ function simpleEverythingSlideDeck(): ImportDocument {
                 },
                 {
                     type: 'slide',
-                    meta: {showTitle: true, backgroundColor: '#ffffff', transition: 'fade'},
+                    meta: {showTitle: true, transition: 'fade'}, style: {'background-color': '#ffffff'},
                     content: 'Polls and embeds',
                     children: [
                         {
@@ -787,7 +787,7 @@ function simpleEverythingSlideDeck(): ImportDocument {
                 },
                 {
                     type: 'slide',
-                    meta: {showTitle: true, backgroundColor: '#f7f7ff', transition: 'slide'},
+                    meta: {showTitle: true, transition: 'slide'}, style: {'background-color': '#f7f7ff'},
                     content: 'Image, preview, and nested deck',
                     children: [
                         {
@@ -816,9 +816,9 @@ function simpleEverythingSlideDeck(): ImportDocument {
                                     type: 'slide',
                                     meta: {
                                         showTitle: true,
-                                        backgroundColor: '#ffffff',
                                         transition: 'none',
                                     },
+                                    style: {'background-color': '#ffffff'},
                                     content: 'Nested one',
                                     children: [
                                         {type: 'paragraph', content: 'A deck inside a slide.'},
@@ -828,9 +828,9 @@ function simpleEverythingSlideDeck(): ImportDocument {
                                     type: 'slide',
                                     meta: {
                                         showTitle: true,
-                                        backgroundColor: '#eef7f0',
                                         transition: 'fade',
                                     },
+                                    style: {'background-color': '#eef7f0'},
                                     content: 'Nested two',
                                     children: [
                                         {

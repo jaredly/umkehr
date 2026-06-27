@@ -51,6 +51,7 @@ export const maxLamportCounterForOp = <M extends TimestampedBlockMeta>(op: Op<M>
         case 'char:delete':
         case 'block:delete':
         case 'block:meta':
+        case 'block:style':
             return op.id[0];
         case 'block:move':
             return Math.max(op.id[0], op.order.id[0], ...op.order.path.map((id) => id[0]));
@@ -82,6 +83,7 @@ const lamportsForOp = <M extends TimestampedBlockMeta>(op: Op<M>): Lamport[] => 
         case 'char:delete':
         case 'block:delete':
         case 'block:meta':
+        case 'block:style':
             return [op.id];
         case 'block:move':
             return [op.id, op.order.id, ...op.order.path];

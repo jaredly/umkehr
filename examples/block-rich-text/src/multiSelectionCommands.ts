@@ -1,4 +1,4 @@
-import type {CachedState, JsonValue, Lamport} from 'umkehr/block-crdt/types';
+import type {BlockStylePatch, CachedState, JsonValue, Lamport} from 'umkehr/block-crdt/types';
 import * as hlc from '../../../src/crdt/hlc';
 import {
     applyMany,
@@ -8,11 +8,12 @@ import {
     materializeFormattedBlocks,
     materializedBlockParent,
     setBlockMetaOps,
+    setBlockStyleOps,
     visibleBlockChildren,
     type Op,
 } from 'umkehr/block-crdt';
 import {lamportToString, parseLamportString} from 'umkehr/block-crdt/utils';
-import type {ImagePresentationSize, RichBlockMeta} from './blockMeta';
+import type {ImagePresentationSize, RichBlockDocumentStyle, RichBlockMeta, RichBlockStyleAttribute} from './blockMeta';
 import {
     deleteBackward,
     deleteTableRowHeaderBackward,
@@ -29,6 +30,7 @@ import {
     removeLinkMark,
     removeCodeMark,
     setBlockMeta,
+    setBlockStyle,
     setCodeMark,
     setMathMark,
     clearCodeLanguage,
@@ -41,6 +43,7 @@ import {
     toggleMathMark,
     toggleMark,
     updateBlockMeta,
+    updateBlockStyle,
     commandApplied,
     noCommand,
     addTableColumn,
@@ -364,6 +367,10 @@ const pasteRichClipboardAsCellChildren = (
         working = applyMany(working, inserted.ops, annotationVirtualParents(working));
         ops.push(...inserted.ops);
         previousBlockId = inserted.blockId;
+
+        const styleOps = clipboardStyleOps(working, inserted.blockId, fragment.style, context);
+        working = applyMany(working, styleOps, annotationVirtualParents(working));
+        ops.push(...styleOps);
 
         const textInserted = insertText(working, caret(inserted.blockId, 0), fragment.text, context);
         working = textInserted.state;
@@ -692,6 +699,27 @@ export const updateBlockMetaEverywhere = (
 ): MultiCommandResult =>
     runBlockMetaCommand(state, selection, (working, blockId) =>
         updateBlockMeta(working, blockId, update, context),
+    );
+
+export const setBlockStyleEverywhere = (
+    state: CachedState<RichBlockMeta>,
+    selection: RetainedSelectionSet,
+    styleForBlock: (blockId: string, current: BlockStylePatch) => BlockStylePatch,
+): MultiCommandResult =>
+    runBlockMetaCommand(state, selection, (working, blockId) => {
+        const current = working.state.blocks[blockId];
+        return current ? setBlockStyle(working, blockId, styleForBlock(blockId, current.style)) : null;
+    });
+
+export const updateBlockStyleEverywhere = (
+    state: CachedState<RichBlockMeta>,
+    selection: RetainedSelectionSet,
+    attribute: RichBlockStyleAttribute,
+    value: string | null,
+    context: CommandContext,
+): MultiCommandResult =>
+    runBlockMetaCommand(state, selection, (working, blockId) =>
+        updateBlockStyle(working, blockId, attribute, value, context),
     );
 
 export const indentSelections = (
@@ -1061,6 +1089,25 @@ type InsertedFragmentTarget = {
     startOffset: number;
 };
 
+const clipboardStyleOps = (
+    state: CachedState<RichBlockMeta>,
+    blockId: string,
+    style: RichBlockDocumentStyle | undefined,
+    context: CommandContext,
+): Array<Op<RichBlockMeta>> => {
+    if (!style) return [];
+    const entries = Object.entries(style).filter((entry): entry is [RichBlockStyleAttribute, string | null] => (
+        entry[1] !== undefined
+    ));
+    if (!entries.length) return [];
+    return setBlockStyleOps(state, {
+        block: state.state.blocks[blockId].id,
+        style: Object.fromEntries(
+            entries.map(([attribute, value]) => [attribute, {value, ts: context.nextTs()}]),
+        ),
+    });
+};
+
 const pasteRichClipboardAtSelection = (
     state: CachedState<RichBlockMeta>,
     selection: EditorSelection,
@@ -1092,6 +1139,9 @@ const pasteRichClipboardAtSelection = (
         const metaOps = setBlockMetaOps(working, {block: block.id, meta: target.fragment.meta});
         working = applyMany(working, metaOps, annotationVirtualParents(working));
         ops.push(...metaOps);
+        const styleOps = clipboardStyleOps(working, target.blockId, target.fragment.style, context);
+        working = applyMany(working, styleOps, annotationVirtualParents(working));
+        ops.push(...styleOps);
     }
 
     const marked = applyClipboardMarksToTargets(working, targets, richContext);
@@ -1273,6 +1323,10 @@ const importFreshAnnotationBodies = (
             working = applyMany(working, inserted.ops, annotationVirtualParents(working));
             ops.push(...inserted.ops);
             previousBodyId = inserted.blockId;
+
+            const styleOps = clipboardStyleOps(working, inserted.blockId, fragment.style, context);
+            working = applyMany(working, styleOps, annotationVirtualParents(working));
+            ops.push(...styleOps);
 
             const textInserted = insertText(working, caret(inserted.blockId, 0), fragment.text, context);
             working = textInserted.state;

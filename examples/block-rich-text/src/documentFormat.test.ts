@@ -470,7 +470,7 @@ describe('block rich text document format export', () => {
                 children: [
                     {
                         type: 'slide',
-                        meta: {showTitle: true, backgroundColor: '#ABCDEF', transition: 'fade'},
+                        meta: {showTitle: true, transition: 'fade'}, style: {'background-color': '#ABCDEF'},
                         content: 'Highlights',
                         children: [
                             {type: 'heading', meta: {level: 2}, content: 'Growth'},
@@ -485,7 +485,7 @@ describe('block rich text document format export', () => {
             },
             {
                 type: 'slide',
-                meta: {showTitle: false, backgroundColor: '#123', transition: 'slide'},
+                meta: {showTitle: false, transition: 'slide'}, style: {'background-color': '#123'},
                 content: 'Orphan slide',
                 children: [{type: 'todo', meta: {checked: true}, content: 'Polish'}],
             },
@@ -501,7 +501,7 @@ describe('block rich text document format export', () => {
                 children: [
                     {
                         type: 'slide',
-                        meta: {showTitle: true, backgroundColor: '#abcdef', transition: 'fade'},
+                        meta: {showTitle: true, transition: 'fade'}, style: {'background-color': '#ABCDEF'},
                         content: 'Highlights',
                         children: [
                             {type: 'heading', meta: {level: 2}, content: 'Growth'},
@@ -513,9 +513,39 @@ describe('block rich text document format export', () => {
             },
             {
                 type: 'slide',
-                meta: {showTitle: false, backgroundColor: '#123', transition: 'slide'},
+                meta: {showTitle: false, transition: 'slide'}, style: {'background-color': '#123'},
                 content: 'Orphan slide',
                 children: [{type: 'todo', meta: {checked: true}, content: 'Polish'}],
+            },
+        ]);
+    });
+
+    it('round-trips generic block styles', () => {
+        const imported = importDocument(
+            [
+                {
+                    content: 'Styled paragraph',
+                    style: {
+                        color: 'tomato',
+                        'background-color': 'rgb(10 20 30)',
+                        'font-size': 'large',
+                        padding: 'small',
+                    },
+                },
+            ],
+            ctx(),
+        );
+
+        expect(exportDocument(imported.state)).toEqual([
+            {
+                type: 'paragraph',
+                content: 'Styled paragraph',
+                style: {
+                    color: 'tomato',
+                    'background-color': 'rgb(10 20 30)',
+                    'font-size': 'large',
+                    padding: 'small',
+                },
             },
         ]);
     });
@@ -540,8 +570,11 @@ describe('block rich text document format export', () => {
             importDocument([{type: 'slide', meta: {showTitle: 'yes' as never}}], ctx()),
         ).toThrow('$[0].meta.showTitle: must be a boolean');
         expect(() =>
-            importDocument([{type: 'slide', meta: {backgroundColor: 'white'}}], ctx()),
-        ).toThrow('$[0].meta.backgroundColor: must be a hex color');
+            importDocument([{type: 'slide', meta: {backgroundColor: 12}}], ctx()),
+        ).toThrow('$[0].meta.backgroundColor: must be a string');
+        expect(() =>
+            importDocument([{content: 'bad style', style: {'font-size': 'huge'}}], ctx()),
+        ).toThrow('$[0].style.font-size: must be a valid block style value');
         expect(() =>
             importDocument([{type: 'slide', meta: {transition: 'zoom' as never}}], ctx()),
         ).toThrow('$[0].meta.transition: must be a supported slide transition');

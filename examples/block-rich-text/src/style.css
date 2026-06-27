@@ -975,6 +975,17 @@ select {
     background: #fff;
 }
 
+.blockOptionsText {
+    width: 100%;
+    min-width: 0;
+    height: 30px;
+    padding: 4px 7px;
+    border: 1px solid #cbd5df;
+    border-radius: 5px;
+    color: #14212c;
+    background: #fff;
+}
+
 .previewCodeBlock {
     min-width: 0;
 }

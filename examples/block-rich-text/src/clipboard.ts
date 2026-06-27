@@ -35,10 +35,14 @@ import {
 } from './selectionModel';
 import {
     codePreviewKindForLanguage,
+    blockStyleHasDocumentValues,
+    documentStyleFromBlockStyle,
     isSlideDeckFooterMode,
-    isSlideHexColor,
     isSlideTransition,
+    normalizeRichBlockStyleValue,
     type PreviewMetadata,
+    type RichBlockDocumentStyle,
+    type RichBlockStyleAttribute,
     type RichBlockMeta,
 } from './blockMeta';
 import {isPollMeta} from './pollBlocks';
@@ -73,6 +77,7 @@ export type ClipboardMarkRange = {
 export type ClipboardFragment = {
     text: string;
     meta: RichBlockMeta;
+    style?: RichBlockDocumentStyle;
     marks: ClipboardMarkRange[];
 };
 
@@ -414,10 +419,12 @@ const fragmentForRange = (
         appendRunMarks(marks, annotationRefs, run.run, localStart, localEnd);
     }
 
+    const style = documentStyleFromBlockStyle(block.block.style);
     return {
         fragment: {
             text: chars.join(''),
             meta: block.block.meta,
+            ...(blockStyleHasDocumentValues(style) ? {style} : {}),
             marks: mergeAdjacentMarks(marks),
         },
         annotationRefs,
@@ -511,7 +518,8 @@ const fragmentToHtml = (fragment: ClipboardFragment): string => {
         inner += wrapHtmlText(chars.slice(start, end).join(''), active, activeIngredients);
     }
     const tag = htmlTagForMeta(fragment.meta);
-    const attrs = ` data-umkehr-block-type="${escapeAttribute(fragment.meta.type)}"`;
+    const style = fragment.style ? styleAttributeForDocumentStyle(fragment.style) : '';
+    const attrs = ` data-umkehr-block-type="${escapeAttribute(fragment.meta.type)}"${style ? ` style="${escapeAttribute(style)}"` : ''}`;
     if (fragment.meta.type === 'preview') {
         const title = fragment.meta.preview?.title || fragment.meta.url;
         const link = `<a href="${escapeAttribute(fragment.meta.url)}">${escapeHtml(title)}</a>`;
@@ -636,6 +644,49 @@ const htmlTagForMeta = (meta: RichBlockMeta): string => {
     return 'p';
 };
 
+const styleAttributeForDocumentStyle = (style: RichBlockDocumentStyle): string => {
+    const declarations: string[] = [];
+    if (style.color) declarations.push(`color: ${style.color}`);
+    if (style['background-color']) declarations.push(`background-color: ${style['background-color']}`);
+    if (style['font-size']) declarations.push(`font-size: ${cssFontSizeForDocumentSize(style['font-size'])}`);
+    if (style.padding) declarations.push(`padding: ${cssPaddingForDocumentSize(style.padding)}`);
+    return declarations.join('; ');
+};
+
+const cssFontSizeForDocumentSize = (size: NonNullable<RichBlockDocumentStyle['font-size']>): string => {
+    switch (size) {
+        case 'xsmall':
+            return '0.85em';
+        case 'small':
+            return '0.93em';
+        case 'normal':
+            return '1em';
+        case 'large':
+            return '1.15em';
+        case 'xlarge':
+            return '1.35em';
+        default:
+            return '1em';
+    }
+};
+
+const cssPaddingForDocumentSize = (size: NonNullable<RichBlockDocumentStyle['padding']>): string => {
+    switch (size) {
+        case 'xsmall':
+            return '2px 4px';
+        case 'small':
+            return '4px 8px';
+        case 'normal':
+            return '8px 12px';
+        case 'large':
+            return '12px 16px';
+        case 'xlarge':
+            return '18px 22px';
+        default:
+            return '8px 12px';
+    }
+};
+
 const runsWithOffsets = (runs: FormattedRun[]) => {
     let offset = 0;
     return runs.map((run) => {
@@ -680,12 +731,35 @@ const parseFragments = (value: unknown[]): ClipboardFragment[] | null => {
         if (!isRecord(item)) return null;
         if (typeof item.text !== 'string') return null;
         if (!isRichBlockMeta(item.meta)) return null;
+        const style = parseDocumentStyle(item.style);
+        if (!style) return null;
         if (!Array.isArray(item.marks)) return null;
         const marks = parseMarks(item.marks, segmentText(item.text).length);
         if (!marks) return null;
-        result.push({text: item.text, meta: item.meta, marks});
+        result.push({
+            text: item.text,
+            meta: item.meta,
+            ...(blockStyleHasDocumentValues(style) ? {style} : {}),
+            marks,
+        });
     }
     return result;
+};
+
+const CLIPBOARD_STYLE_ATTRIBUTES = new Set<RichBlockStyleAttribute>(['background-color', 'color', 'font-size', 'padding']);
+
+const parseDocumentStyle = (value: unknown): RichBlockDocumentStyle | null => {
+    if (value === undefined) return {};
+    if (!isRecord(value)) return null;
+    const style: RichBlockDocumentStyle = {};
+    for (const [key, raw] of Object.entries(value)) {
+        if (!CLIPBOARD_STYLE_ATTRIBUTES.has(key as RichBlockStyleAttribute)) return null;
+        const attribute = key as RichBlockStyleAttribute;
+        const normalized = normalizeRichBlockStyleValue(attribute, raw);
+        if (normalized === undefined) return null;
+        style[attribute] = normalized;
+    }
+    return style;
 };
 
 const parseMarks = (value: unknown[], textLength: number): ClipboardMarkRange[] | null => {
@@ -764,7 +838,6 @@ const isRichBlockMeta = (value: unknown): value is RichBlockMeta => {
         case 'slide':
             return (
                 typeof value.showTitle === 'boolean' &&
-                isSlideHexColor(value.backgroundColor) &&
                 isSlideTransition(value.transition)
             );
         case 'poll':

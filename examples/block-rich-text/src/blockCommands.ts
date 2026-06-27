@@ -16,6 +16,7 @@ import {
     nextBlockIdForActor,
     orderedCharIdsForBlock,
     setBlockMetaOps,
+    setBlockStyleOps,
     splitBlockOps,
     visibleSiblingAnchorsForBlock,
     visibleBlockChildren,
@@ -25,14 +26,17 @@ import {
 } from 'umkehr/block-crdt';
 import {compareLseqIds, createLseqIdBetween} from 'umkehr/block-crdt/lseq';
 import type {BlockOrderTs, Boundary, CachedState, JsonValue, Lamport} from 'umkehr/block-crdt/types';
+import type {BlockStylePatch} from 'umkehr/block-crdt/types';
 import {lamportToString, parseLamportString} from 'umkehr/block-crdt/utils';
 import {
     defaultSlideDeckMeta,
     defaultSlideMeta,
     paragraphMeta,
+    richBlockStyleValue,
     sameTypeWithTs,
     type ImagePresentationSize,
     type PreviewMetadata,
+    type RichBlockStyleAttribute,
     type RichBlockMeta,
 } from './blockMeta';
 import {annotationVirtualParents} from './annotations';
@@ -115,6 +119,16 @@ const insertedBlockFromOps = (ops: Array<Op<RichBlockMeta>>) => {
     if (op?.type !== 'block') throw new Error('insertBlockOps did not return a block op');
     return op.block;
 };
+
+const defaultSlideStyleOps = (
+    state: CachedState<RichBlockMeta>,
+    blockId: string,
+    context: CommandContext,
+): Array<Op<RichBlockMeta>> =>
+    setBlockStyleOps(state, {
+        block: state.state.blocks[blockId].id,
+        style: {'background-color': {value: '#ffffff', ts: context.nextTs()}},
+    });
 
 const NO_COMMAND = Symbol('no-command');
 
@@ -1318,6 +1332,7 @@ const appendRootBlockAfterOp = (
         block: {
             id,
             meta,
+            style: {},
             order: {
                 id,
                 path: [id],
@@ -1519,6 +1534,42 @@ export const refreshBlockMetaTimestamp = (
     context: CommandContext,
 ): CommandResult =>
     updateBlockMeta(state, blockId, (meta, ts) => sameTypeWithTs(meta, ts), context);
+
+export const setBlockStyle = (
+    state: CachedState<RichBlockMeta>,
+    blockId: string,
+    style: BlockStylePatch,
+): CommandResult => {
+    const current = state.state.blocks[blockId];
+    if (!current) {
+        return {state, ops: [], selection: caret(blockId, 0)};
+    }
+    const changed = Object.entries(style).some(([attribute, next]) => {
+        const currentValue = current.style?.[attribute];
+        return !currentValue || currentValue.value !== next.value;
+    });
+    if (!changed) {
+        return {state, ops: [], selection: caret(blockId, 0)};
+    }
+    const ops = setBlockStyleOps(state, {block: current.id, style});
+    const next = applyMany(state, ops, annotationVirtualParents(state));
+    return {state: next, ops, selection: caret(blockId, 0)};
+};
+
+export const updateBlockStyle = (
+    state: CachedState<RichBlockMeta>,
+    blockId: string,
+    attribute: RichBlockStyleAttribute,
+    value: string | null,
+    context: CommandContext,
+): CommandResult => {
+    const current = state.state.blocks[blockId];
+    if (!current) return {state, ops: [], selection: caret(blockId, 0)};
+    if (richBlockStyleValue(current.style, attribute) === value) {
+        return {state, ops: [], selection: caret(blockId, 0)};
+    }
+    return setBlockStyle(state, blockId, {[attribute]: {value, ts: context.nextTs()}});
+};
 
 export const insertImageBlock = (
     state: CachedState<RichBlockMeta>,
@@ -1830,6 +1881,9 @@ export const convertBlockToSlideDeck = (
     working = applyMany(working, slideOps, annotationVirtualParents(working));
     ops.push(...slideOps);
     const slideId = lamportToString(insertedBlockFromOps(slideOps).id);
+    const styleOps = defaultSlideStyleOps(working, slideId, context);
+    working = applyMany(working, styleOps, annotationVirtualParents(working));
+    ops.push(...styleOps);
 
     return {state: working, ops, selection: caret(slideId, 0)};
 };
@@ -1848,8 +1902,10 @@ export const convertBlockToSlide = (
         block: focusBlock.id,
         meta: defaultSlideMeta(context.nextTs()),
     });
-    const next = applyMany(state, ops, annotationVirtualParents(state));
-    return {state: next, ops, selection: caret(focus.blockId, focus.offset)};
+    let next = applyMany(state, ops, annotationVirtualParents(state));
+    const styleOps = defaultSlideStyleOps(next, focus.blockId, context);
+    next = applyMany(next, styleOps, annotationVirtualParents(next));
+    return {state: next, ops: [...ops, ...styleOps], selection: caret(focus.blockId, focus.offset)};
 };
 
 export type AddSlidePosition =
@@ -1895,8 +1951,11 @@ export const addSlide = (
         ts: context.nextTs(),
         virtualParents: annotationVirtualParents(state),
     });
-    const next = applyMany(state, ops, annotationVirtualParents(state));
     const slideId = lamportToString(insertedBlockFromOps(ops).id);
+    let next = applyMany(state, ops, annotationVirtualParents(state));
+    const styleOps = defaultSlideStyleOps(next, slideId, context);
+    next = applyMany(next, styleOps, annotationVirtualParents(next));
+    ops.push(...styleOps);
     return {state: next, ops, selection: caret(slideId, 0)};
 };
 

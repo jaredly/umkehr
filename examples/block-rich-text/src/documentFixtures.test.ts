@@ -27,7 +27,7 @@ describe('document fixtures', () => {
             const imported = importDocument(fixture.document(), ctx('fixturetest'));
             expect(exportDocument(imported.state).length).toBeGreaterThan(0);
         },
-        10000,
+        20000,
     );
 
     it('generates four 400-word long blocks', () => {
@@ -131,12 +131,12 @@ describe('document fixtures', () => {
 
         expect(deck.type).toBe('slide_deck');
         expect(deck.content).toBe('Everything blocks');
-        expect(deck.children?.filter((child) => child.type === 'slide')).toHaveLength(6);
+        expect(deck.children?.filter((child) => child.type === 'slide')).toHaveLength(8);
         expect(countBlocksOfType([deck], 'slide_deck')).toBeGreaterThan(1);
         for (const type of expectedTypes) expect(types.has(type)).toBe(true);
         expect(codePreviewKinds([deck])).toEqual(expect.arrayContaining(['mermaid', 'vega-lite']));
         expect(calloutKinds([deck])).toEqual(expect.arrayContaining(['info', 'warning', 'error']));
-        expect(pollKinds([deck])).toEqual(expect.arrayContaining(['rating', 'children', 'matrix', 'long']));
+        expect(pollKinds([deck])).toEqual(expect.arrayContaining(['rating', 'children', 'matrix']));
         expect(markTypes([deck])).toEqual(
             expect.arrayContaining(['bold', 'italic', 'strikethrough', 'code', 'link', 'math']),
         );

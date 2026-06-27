@@ -144,6 +144,7 @@ const stateTimestamps = (state: State<RichBlockMeta>): HLC[] => {
     const timestamps: HLC[] = [];
     for (const block of Object.values(state.blocks)) {
         timestamps.push(block.meta.ts, ...blockOrderTimestamps(block.order.ts));
+        timestamps.push(...Object.values(block.style).map((style) => style.ts));
     }
     for (const char of Object.values(state.chars)) {
         timestamps.push(...charParentTimestamps(char.parent.ts));

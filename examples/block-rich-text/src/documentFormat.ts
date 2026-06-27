@@ -9,6 +9,7 @@ import {
     markRangeOp,
     materializeFormattedBlocks,
     segmentGraphemes,
+    setBlockStyleOps,
     visibleRangesForMark,
     visibleBlockChildren,
 } from 'umkehr/block-crdt';
@@ -28,7 +29,9 @@ import {
     isSlideDeckFooterMode,
     isSlideTransition,
     slideDeckAspectRatioIsValid,
-    normalizeSlideHexColor,
+    blockStyleHasDocumentValues,
+    documentStyleFromBlockStyle,
+    normalizeRichBlockStyleValue,
     type CodePreviewKind,
     type ImagePresentationSize,
     type PollKind,
@@ -38,6 +41,8 @@ import {
     type PollVote,
     type PreviewMetadata,
     type RichBlockMeta,
+    type RichBlockDocumentStyle,
+    type RichBlockStyleAttribute,
     type SlideDeckFooterMode,
     type SlideTransition,
 } from './blockMeta';
@@ -59,6 +64,7 @@ export type DocumentBlockType = RichBlockMeta['type'];
 export type DocumentBlock = {
     type?: DocumentBlockType;
     meta?: DocumentBlockMeta;
+    style?: RichBlockDocumentStyle;
     content?: string;
     marks?: DocumentMark[];
     annotations?: DocumentAnnotation[];
@@ -115,6 +121,7 @@ export type ImportDocumentResult = {
 type ParsedDocumentBlock = {
     type: DocumentBlockType;
     meta: DocumentBlockMeta;
+    style: RichBlockDocumentStyle;
     content: string;
     marks: DocumentMark[];
     annotations: ParsedDocumentAnnotation[];
@@ -178,6 +185,12 @@ export const importDocument = (document: unknown, context: CommandContext): Impo
             const inserted = insertedBlockId(blockOps);
             previousSiblingId = inserted;
             insertedIds.push(inserted);
+
+            const styleOps = styleOpsForDocumentBlock(working, inserted, child.style, context);
+            if (styleOps.length) {
+                working = applyOps(working, styleOps);
+                ops.push(...styleOps);
+            }
 
             if (child.content) {
                 const textOps = insertTextOps(working, {
@@ -249,6 +262,10 @@ const parseBlock = (value: unknown, path: string): ParsedDocumentBlock => {
     }
     const type = rawType as DocumentBlockType;
     const meta = parseMeta(type, value.meta, `${path}.meta`);
+    const style = parseStyle(value.style, `${path}.style`);
+    if (type === 'slide' && meta.backgroundColor !== undefined && style['background-color'] === undefined) {
+        style['background-color'] = meta.backgroundColor;
+    }
     const content = value.content ?? '';
     if (typeof content !== 'string') {
         throw new DocumentFormatError(`${path}.content`, 'must be a string');
@@ -256,7 +273,29 @@ const parseBlock = (value: unknown, path: string): ParsedDocumentBlock => {
     const marks = parseMarks(value.marks, content, `${path}.marks`);
     const annotations = parseAnnotations(value.annotations, content, `${path}.annotations`);
     const children = parseChildren(value.children, `${path}.children`);
-    return {type, meta, content, marks, annotations, children};
+    return {type, meta, style, content, marks, annotations, children};
+};
+
+const STYLE_ATTRIBUTES = new Set<RichBlockStyleAttribute>(['background-color', 'color', 'font-size', 'padding']);
+
+const parseStyle = (value: unknown, path: string): RichBlockDocumentStyle => {
+    if (value === undefined) return {};
+    if (!isRecord(value)) {
+        throw new DocumentFormatError(path, 'must be an object');
+    }
+    const style: RichBlockDocumentStyle = {};
+    for (const [key, raw] of Object.entries(value)) {
+        if (!STYLE_ATTRIBUTES.has(key as RichBlockStyleAttribute)) {
+            throw new DocumentFormatError(`${path}.${key}`, 'must be a supported block style attribute');
+        }
+        const attribute = key as RichBlockStyleAttribute;
+        const normalized = normalizeRichBlockStyleValue(attribute, raw);
+        if (normalized === undefined) {
+            throw new DocumentFormatError(`${path}.${key}`, 'must be a valid block style value');
+        }
+        style[attribute] = normalized;
+    }
+    return style;
 };
 
 const parseChildren = (value: unknown, path: string): ParsedDocumentBlock[] => {
@@ -410,19 +449,15 @@ const parseMeta = (type: DocumentBlockType, value: unknown, path: string): Docum
             if (typeof showTitle !== 'boolean') {
                 throw new DocumentFormatError(`${path}.showTitle`, 'must be a boolean');
             }
-            const backgroundColor = meta.backgroundColor ?? '#ffffff';
-            if (typeof backgroundColor !== 'string') {
-                throw new DocumentFormatError(`${path}.backgroundColor`, 'must be a hex color');
-            }
-            const normalizedColor = normalizeSlideHexColor(backgroundColor);
-            if (!normalizedColor) {
-                throw new DocumentFormatError(`${path}.backgroundColor`, 'must be a hex color');
+            const backgroundColor = meta.backgroundColor;
+            if (backgroundColor !== undefined && typeof backgroundColor !== 'string') {
+                throw new DocumentFormatError(`${path}.backgroundColor`, 'must be a string');
             }
             const transition = meta.transition ?? 'none';
             if (!isSlideTransition(transition)) {
                 throw new DocumentFormatError(`${path}.transition`, 'must be a supported slide transition');
             }
-            return {showTitle, backgroundColor: normalizedColor, transition};
+            return {showTitle, ...(backgroundColor === undefined ? {} : {backgroundColor}), transition};
         }
         case 'poll': {
             const kind = meta.kind ?? 'rating';
@@ -576,7 +611,6 @@ const richMetaForDocumentBlock = (block: ParsedDocumentBlock, ts: string): RichB
             return {
                 ...defaultSlideMeta(ts),
                 showTitle: block.meta.showTitle ?? true,
-                backgroundColor: block.meta.backgroundColor ?? '#ffffff',
                 transition: block.meta.transition ?? 'none',
             };
         case 'poll':
@@ -608,6 +642,24 @@ const richMetaForDocumentBlock = (block: ParsedDocumentBlock, ts: string): RichB
                 ts,
             };
     }
+};
+
+const styleOpsForDocumentBlock = (
+    state: CachedState<RichBlockMeta>,
+    blockId: string,
+    style: RichBlockDocumentStyle,
+    context: CommandContext,
+): Array<Op<RichBlockMeta>> => {
+    const entries = Object.entries(style).filter((entry): entry is [RichBlockStyleAttribute, string | null] => (
+        entry[1] !== undefined
+    ));
+    if (!entries.length) return [];
+    return setBlockStyleOps(state, {
+        block: state.state.blocks[blockId].id,
+        style: Object.fromEntries(
+            entries.map(([attribute, value]) => [attribute, {value, ts: context.nextTs()}]),
+        ),
+    });
 };
 
 const markOpForDocumentMark = (
@@ -650,6 +702,8 @@ const markOpForDocumentMark = (
 const exportBlock = (state: CachedState<RichBlockMeta>, blockId: string): DocumentBlock => {
     const block = state.state.blocks[blockId];
     const result = documentBlockForMeta(block.meta);
+    const style = documentStyleFromBlockStyle(block.style);
+    if (blockStyleHasDocumentValues(style)) result.style = style;
     const content = blockContents(state, blockId);
     if (content) result.content = content;
     const marks = marksForBlock(state, blockId);
@@ -666,6 +720,7 @@ const exportBlock = (state: CachedState<RichBlockMeta>, blockId: string): Docume
 const emptyAnnotationBody = (): ParsedDocumentBlock => ({
     type: 'paragraph',
     meta: {},
+    style: {},
     content: '',
     marks: [],
     annotations: [],
@@ -701,7 +756,6 @@ const documentBlockForMeta = (meta: RichBlockMeta): DocumentBlock => {
                 type: 'slide',
                 meta: {
                     showTitle: meta.showTitle,
-                    backgroundColor: meta.backgroundColor,
                     transition: meta.transition,
                 },
             };

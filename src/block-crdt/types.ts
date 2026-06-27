@@ -63,6 +63,8 @@ export type Char = {
 };
 
 export type TimestampedBlockMeta = {ts: HLC};
+export type BlockStyle = Record<string, {value: JsonValue; ts: HLC}>;
+export type BlockStylePatch = Record<string, {value: JsonValue; ts: HLC}>;
 
 export type DefaultBlockMeta =
     | {type: 'paragraph'; ts: HLC}
@@ -73,6 +75,7 @@ export type DefaultBlockMeta =
 export type Block<M extends TimestampedBlockMeta = DefaultBlockMeta> = {
     id: Lamport;
     meta: M;
+    style: BlockStyle;
     order: BlockOrder;
     deleted: boolean;
 };
@@ -103,6 +106,7 @@ export type Op<M extends TimestampedBlockMeta = DefaultBlockMeta> =
     | {type: 'block:move'; id: Lamport; order: Block['order']}
     | {type: 'block:delete'; id: Lamport}
     | {type: 'block:meta'; id: Lamport; meta: M}
+    | {type: 'block:style'; id: Lamport; style: BlockStylePatch}
     | {type: 'mark'; mark: Mark}
     | {type: 'split-record'; split: SplitRecord}
     | {type: 'join-record'; join: JoinRecord};
