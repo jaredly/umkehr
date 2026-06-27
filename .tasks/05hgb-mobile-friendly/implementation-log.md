@@ -70,3 +70,17 @@
 - Kept the existing top PeerJS client controls visible, so the retry input is also available in the global control bar. This is redundant but preserves the existing control surface.
 - Verified with a `390x844` screenshot using an unreachable `?peer=missing-host-peer`; the page showed the recovery panel instead of the waiting snapshot message.
 - Ran `npm run build:wordsearch-peerjs` successfully after this change. The same environment warning still prints before normal build output.
+
+## Follow-Up: Production React Dedupe Crash
+
+- Reproduced the user's production-only crash from the built bundle:
+  - `Cannot read properties of null (reading 'useRef')`.
+  - The minified stack pointed at an internal `umkehr/react-crdt` provider helper that calls `React.useRef`.
+- Diagnosed the root cause as duplicate React copies in the production bundle:
+  - `umkehr` is linked from `../..`.
+  - Vite was resolving React once for the example app and once through the linked package.
+  - The built bundle contained two React hook export implementations before the fix.
+- Added `resolve.dedupe: ['react', 'react-dom']` to both `examples/react-crdt/vite.config.ts` and `examples/react-crdt/vite.wordsearch-peerjs.config.ts`.
+- Rebuilt `dist-wordsearch-peerjs`; the bundle now contains a single `useRef` export implementation and is smaller.
+- Served `dist-wordsearch-peerjs` directly and verified the built page loads without page errors using a temporary Playwright runtime check.
+- Removed the temporary Playwright verification files after the check.
