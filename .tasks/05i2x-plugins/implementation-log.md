@@ -70,3 +70,30 @@ Verification:
 
 - `npm exec vitest -- run src/block-editor/plugins/registry.test.ts src/block-editor/plugins/compatibility.test.ts src/block-editor/plugins/metadata.test.ts` passed.
 - `npm run typecheck` passed.
+
+### Phase 4: CRDT Hook Composition
+
+- Updated `src/block-editor/editorCrdtConfig.ts` so the exported rich-text CRDT config is backed by plugin registry declarations.
+- Added legacy CRDT plugin declarations:
+  - `legacyAnnotationsCrdtPlugin`
+  - `legacyPollsCrdtPlugin`
+  - `legacyRichTextCrdtPlugins`
+  - `legacyRichTextCrdtRegistry`
+- Added `blockEditorCrdtConfigFromRegistry`.
+- Preserved the existing `richTextCrdtConfig(state)` call shape and added an optional registry parameter for explicit callers.
+- Added `src/block-editor/editorCrdtConfig.test.ts` covering:
+  - annotation mark behavior
+  - annotation mark virtual parents
+  - poll metadata merge behavior
+  - explicit registry-backed config
+  - empty registry override
+
+Issues/workarounds:
+
+- `richTextCrdtConfig` now composes through the registry, but many command/render modules still call `annotationVirtualParents` directly. Those call sites should move behind plugin-provided CRDT/render contexts during annotations/table extraction.
+- The legacy annotations CRDT plugin still includes table virtual parent behavior because the old `annotationVirtualParents`/`richTextVirtualParents` config bundled it that way. Table extraction should move that hook to the table plugin.
+
+Verification:
+
+- `npm exec vitest -- run src/block-editor/editorCrdtConfig.test.ts src/block-editor/plugins/registry.test.ts src/block-editor/plugins/compatibility.test.ts src/block-editor/plugins/metadata.test.ts` passed.
+- `npm run typecheck` passed.
