@@ -123,7 +123,10 @@
         "node": ">=20"
     },
     "dependencies": {
-        "fast-deep-equal": "^3.1.3"
+        "@playwright/test": "^1.61.1",
+        "add": "^2.0.6",
+        "fast-deep-equal": "^3.1.3",
+        "playwright": "^1.61.1"
     },
     "devDependencies": {
         "@plim/core": "0.0.4",
@@ -146,11 +149,11 @@
         "vitest": "^4.1.6"
     },
     "peerDependencies": {
+        "mermaid": "^11.15.0",
         "react": ">=18",
         "react-dom": ">=18",
         "remix": ">=3.0.0-beta.0 <4",
         "typia": "^12.1.1",
-        "mermaid": "^11.15.0",
         "vega": "^6.2.0",
         "vega-lite": "^6.4.3",
         "yaml": "^2.9.0"
