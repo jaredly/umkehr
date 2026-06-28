@@ -315,6 +315,7 @@ import {
     canOpenSlashMenuForSelection,
     deleteSlashTriggers,
     SlashCommandPopover,
+    slashCommandsFromRegistry,
     slashTriggersFromInsertResult,
     type SlashCommand,
     type SlashMenuState,
@@ -460,6 +461,7 @@ export function BlockRichTextEditor({
     onKeyPerfSample?(sample: Omit<BlockEditorKeyPerfSampleInput, 'editorId'>): void;
 }) {
     const registry = useMemo(() => createBlockEditorRegistry(plugins), [plugins]);
+    const slashCommands = useMemo(() => slashCommandsFromRegistry(registry), [registry]);
     const rootRef = useRef<HTMLDivElement>(null);
     const editorContentRef = useRef<HTMLDivElement>(null);
     const pendingCaretRestoreBlockIdRef = useRef<string | null>(null);
@@ -3290,6 +3292,7 @@ export function BlockRichTextEditor({
             ))}
             <SlashCommandPopover
                 state={slashMenu}
+                commands={slashCommands.length ? slashCommands : undefined}
                 onQueryChange={updateSlashMenuQuery}
                 onActiveIndexChange={updateSlashMenuActiveIndex}
                 onSelect={runSlashCommand}

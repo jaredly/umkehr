@@ -13,6 +13,7 @@ import {annotationVirtualParents} from './annotations';
 import type {RichBlockMeta} from './blockMeta';
 import type {BlockTypeMenuValue} from './blockEditorTypes';
 import type {MultiCommandResult} from './multiSelectionCommands';
+import type {BlockEditorRegistry, BlockEditorSlashCommandSpec} from './plugins/index.js';
 import {caret, focusPoint, segmentText, type EditorSelection} from './selectionModel';
 import {
     dedupeSelectionSet,
@@ -41,7 +42,7 @@ export type SlashCommand =
     | {type: 'block'; value: BlockTypeMenuValue; label: string; group: string; keywords: string[]}
     | {type: 'date-embed'; label: string; group: string; keywords: string[]};
 
-const SLASH_COMMANDS: SlashCommand[] = [
+export const DEFAULT_SLASH_COMMANDS: SlashCommand[] = [
     {type: 'block', value: 'paragraph', label: 'Paragraph', group: 'Block type', keywords: ['text']},
     {type: 'block', value: 'heading1', label: 'Heading 1', group: 'Block type', keywords: ['h1', 'title']},
     {type: 'block', value: 'heading2', label: 'Heading 2', group: 'Block type', keywords: ['h2', 'subtitle']},
@@ -68,6 +69,76 @@ const SLASH_COMMANDS: SlashCommand[] = [
 
 const slashCommandId = (command: SlashCommand): string =>
     command.type === 'block' ? `block:${command.value}` : command.type;
+
+export const slashCommandsFromRegistry = (
+    registry: BlockEditorRegistry<RichBlockMeta>,
+): SlashCommand[] => slashCommandsFromSpecs(registry.slashCommands);
+
+export const slashCommandsFromSpecs = (
+    specs: readonly BlockEditorSlashCommandSpec[],
+): SlashCommand[] =>
+    specs.flatMap<SlashCommand>((spec) => {
+        const blockValue = blockTypeValueFromCommandId(spec.commandId);
+        if (blockValue) {
+            return [
+                {
+                    type: 'block' as const,
+                    value: blockValue,
+                    label: spec.label,
+                    group: spec.group ?? 'Block type',
+                    keywords: [...(spec.keywords ?? [])],
+                },
+            ];
+        }
+        if (spec.commandId === 'inline-embed:date') {
+            return [
+                {
+                    type: 'date-embed' as const,
+                    label: spec.label,
+                    group: spec.group ?? 'Inline embed',
+                    keywords: [...(spec.keywords ?? [])],
+                },
+            ];
+        }
+        return [];
+    });
+
+const blockTypeValueFromCommandId = (commandId: string | undefined): BlockTypeMenuValue | null => {
+    if (!commandId?.startsWith('block-type:')) return null;
+    const value = commandId.slice('block-type:'.length);
+    return isBlockTypeMenuValue(value) ? value : null;
+};
+
+const BLOCK_TYPE_MENU_VALUES = new Set<string>([
+    'paragraph',
+    'heading1',
+    'heading2',
+    'heading3',
+    'unordered',
+    'ordered',
+    'todo',
+    'blockquote',
+    'code',
+    'mermaid',
+    'vega-lite',
+    'callout-info',
+    'callout-warning',
+    'callout-error',
+    'recipe-ingredient',
+    'table',
+    'columns',
+    'card-columns',
+    'slide-deck',
+    'slide',
+    'preview',
+    'poll-rating',
+    'poll-children',
+    'poll-matrix',
+    'poll-long',
+]);
+
+const isBlockTypeMenuValue = (value: string): value is BlockTypeMenuValue =>
+    BLOCK_TYPE_MENU_VALUES.has(value);
 
 export const canOpenSlashMenuForSelection = (
     state: CachedState<RichBlockMeta>,
@@ -195,12 +266,14 @@ export const deleteSlashTriggers = (
 
 export function SlashCommandPopover({
     state,
+    commands: commandsProp = DEFAULT_SLASH_COMMANDS,
     onQueryChange,
     onActiveIndexChange,
     onSelect,
     onClose,
 }: {
     state: SlashMenuState | null;
+    commands?: readonly SlashCommand[];
     onQueryChange(query: string): void;
     onActiveIndexChange(index: number): void;
     onSelect(command: SlashCommand): void;
@@ -210,14 +283,14 @@ export function SlashCommandPopover({
     const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
     const commands = useMemo(() => {
         const query = state?.query.trim().toLowerCase() ?? '';
-        if (!query) return SLASH_COMMANDS;
-        return SLASH_COMMANDS.filter((command) => {
+        if (!query) return [...commandsProp];
+        return commandsProp.filter((command) => {
             const haystack = [command.label, command.group, ...command.keywords]
                 .join(' ')
                 .toLowerCase();
             return haystack.includes(query);
         });
-    }, [state?.query]);
+    }, [commandsProp, state?.query]);
     const activeIndex = commands.length
         ? Math.max(0, Math.min(state?.activeIndex ?? 0, commands.length - 1))
         : -1;

@@ -97,3 +97,35 @@ Verification:
 
 - `npm exec vitest -- run src/block-editor/editorCrdtConfig.test.ts src/block-editor/plugins/registry.test.ts src/block-editor/plugins/compatibility.test.ts src/block-editor/plugins/metadata.test.ts` passed.
 - `npm run typecheck` passed.
+
+### Phase 5: Menus, Toolbar, And Commands
+
+- Added `src/block-editor/plugins/legacyRichTextUi.ts` with registry contributions mirroring the current UI surfaces:
+  - `legacyBlockTypeMenuItems`
+  - `legacySlashCommandSpecs`
+  - `legacyToolbarItemSpecs`
+  - `legacyRichTextUiPlugin`
+- Exported the legacy UI plugin from `src/block-editor/plugins/index.ts`.
+- Updated `src/block-editor/slashCommands.tsx`:
+  - exported `DEFAULT_SLASH_COMMANDS`
+  - added `slashCommandsFromSpecs`
+  - added `slashCommandsFromRegistry`
+  - made `SlashCommandPopover` accept optional `commands`
+- Updated `BlockRichTextEditor` to derive slash commands from the configured registry and fall back to the old built-in list when no slash contributions are registered.
+- Added `src/block-editor/plugins/legacyRichTextUi.test.ts` covering:
+  - legacy slash specs match current built-in slash commands
+  - registry-derived slash commands match current built-in slash commands
+  - block type menu/slash command parity, accounting for current poll menu entries not being slash commands
+  - duplicate-free toolbar specs
+  - compatibility with legacy CRDT plugins
+
+Issues/workarounds:
+
+- This is still a transitional Phase 5 slice. Toolbar rendering and command dispatch are not registry-driven yet; only slash command display can consume registry contributions.
+- Slash command specs use the existing `commandId` convention (`block-type:*`, `inline-embed:date`) to bridge into the current `SlashCommand` union. Later command extraction should replace this with real registered command handlers.
+- The existing toolbar block type menu includes poll entries that the existing slash menu does not include. The parity test documents that mismatch instead of changing behavior.
+
+Verification:
+
+- `npm exec vitest -- run src/block-editor/editorCrdtConfig.test.ts src/block-editor/plugins/registry.test.ts src/block-editor/plugins/compatibility.test.ts src/block-editor/plugins/metadata.test.ts src/block-editor/plugins/legacyRichTextUi.test.ts` passed.
+- `npm run typecheck` passed.
