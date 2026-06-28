@@ -319,6 +319,7 @@ import {
     type SlashCommand,
     type SlashMenuState,
 } from './slashCommands.js';
+import {createBlockEditorRegistry, type BlockEditorPlugin} from './plugins/index.js';
 
 import * as hlc from '../crdt/hlc.js';
 type RichFormattedBlock = FormattedBlock<RichBlockMeta>;
@@ -332,6 +333,8 @@ type SubmitCommandOptions = {constrainFullscreenSlideSelection?: boolean};
 const BOOLEAN_INLINE_MARKS: BooleanInlineMark[] = ['bold', 'italic', 'strikethrough'];
 const BARE_INLINE_MARKS: BareInlineMark[] = [...BOOLEAN_INLINE_MARKS, CODE_MARK];
 const DEFAULT_DATE_EMBED_DATA = {type: 'date', value: '2026-06-23'} as const;
+export const coreBlockEditorPlugins: readonly BlockEditorPlugin<RichBlockMeta>[] = [];
+export const defaultBlockEditorPlugins = coreBlockEditorPlugins;
 
 const activePendingInlineMarks = (marks: PendingInlineMarks): BareInlineMark[] =>
     BARE_INLINE_MARKS.filter((mark) => marks[mark]);
@@ -422,6 +425,7 @@ const charParentTimestamps = (ts: CharParentTs): HLC[] =>
 export function BlockRichTextEditor({
     replica,
     attachments,
+    plugins = defaultBlockEditorPlugins,
     resetSignal,
     undoState,
     undoStatus,
@@ -439,6 +443,7 @@ export function BlockRichTextEditor({
 }: {
     replica: Replica;
     attachments: AttachmentStore;
+    plugins?: readonly BlockEditorPlugin<RichBlockMeta>[];
     resetSignal: number;
     undoState: BlockEditorUndoState;
     undoStatus: string;
@@ -454,6 +459,7 @@ export function BlockRichTextEditor({
     onKeystroke(blockId: string, event: KeyboardEvent<HTMLElement>): void;
     onKeyPerfSample?(sample: Omit<BlockEditorKeyPerfSampleInput, 'editorId'>): void;
 }) {
+    const registry = useMemo(() => createBlockEditorRegistry(plugins), [plugins]);
     const rootRef = useRef<HTMLDivElement>(null);
     const editorContentRef = useRef<HTMLDivElement>(null);
     const pendingCaretRestoreBlockIdRef = useRef<string | null>(null);
@@ -521,6 +527,7 @@ export function BlockRichTextEditor({
     const [retainedInlineMarks, setRetainedInlineMarks] = useState<RetainedInlineMarkSessionMap>(
         {},
     );
+    void registry;
     const blocksWithAnnotationBodies = materializeFormattedBlocks(
         replica.state,
         annotationVirtualParents(replica.state),

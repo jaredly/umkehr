@@ -1,5 +1,6 @@
 import type {ReactElement} from 'react';
 import type {CachedState, HLC, Op, TimestampedBlockMeta} from '../block-crdt/types.js';
+import type {BlockEditorPlugin} from './plugins/types.js';
 import type {RetainedSelectionSet} from './selectionSet.js';
 
 export type BlockEditorClock = {
@@ -49,6 +50,7 @@ export type BlockEditorSelectionState = RetainedSelectionSet;
 export type BlockRichTextEditorProps<Meta extends TimestampedBlockMeta> = {
     value: BlockEditorValue<Meta>;
     clock: BlockEditorClock;
+    plugins?: readonly BlockEditorPlugin<Meta>[];
     readOnly?: boolean;
     userId?: string;
     attachments?: BlockEditorAttachmentStore;
