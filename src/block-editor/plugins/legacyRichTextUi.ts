@@ -1,5 +1,6 @@
 import type {BlockTypeMenuValue} from '../blockEditorTypes.js';
 import type {RichBlockMeta} from '../blockMeta.js';
+import {legacyMarkdownShortcutSpecs} from '../markdownShortcuts.js';
 import type {
     BlockEditorPlugin,
     BlockEditorSlashCommandSpec,
@@ -126,4 +127,27 @@ export const legacyRichTextUiPlugin: BlockEditorPlugin<RichBlockMeta> = {
     id: 'legacy-rich-text-ui',
     toolbarItems: legacyToolbarItemSpecs,
     slashCommands: legacySlashCommandSpecs,
+    markdownShortcuts: legacyMarkdownShortcutSpecs,
 };
+
+export const blockTypeMenuItemsFromToolbarSpecs = (
+    specs: readonly BlockEditorToolbarItemSpec[],
+): LegacyBlockTypeMenuItem[] =>
+    specs.flatMap((spec) => {
+        const value = blockTypeValueFromCommandId(spec.commandId);
+        return value && spec.label ? [{value, label: spec.label}] : [];
+    });
+
+export const legacyBlockTypeMenuItemsFromToolbarSpecs = (): LegacyBlockTypeMenuItem[] =>
+    blockTypeMenuItemsFromToolbarSpecs(legacyToolbarItemSpecs);
+
+const blockTypeValueFromCommandId = (commandId: string | undefined): BlockTypeMenuValue | null => {
+    if (!commandId?.startsWith('block-type:')) return null;
+    const value = commandId.slice('block-type:'.length);
+    return isBlockTypeMenuValue(value) ? value : null;
+};
+
+const BLOCK_TYPE_MENU_VALUES = new Set<string>(legacyBlockTypeMenuItems.map((item) => item.value));
+
+const isBlockTypeMenuValue = (value: string): value is BlockTypeMenuValue =>
+    BLOCK_TYPE_MENU_VALUES.has(value);

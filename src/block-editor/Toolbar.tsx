@@ -2,11 +2,14 @@ import {useRef} from 'react';
 
 import type {AnnotationPresentation} from './annotations';
 import type {BlockTypeMenuValue, PendingInlineMarks} from './blockEditorTypes';
+import {legacyBlockTypeMenuItems, type LegacyBlockTypeMenuItem} from './plugins/index.js';
 
 export function Toolbar({
     canUndo,
     canRedo,
     blockType,
+    blockTypeItems = legacyBlockTypeMenuItems,
+    toolbarItemIds,
     activeMarks,
     onUndo,
     onRedo,
@@ -26,6 +29,8 @@ export function Toolbar({
     canUndo: boolean;
     canRedo: boolean;
     blockType: BlockTypeMenuValue;
+    blockTypeItems?: readonly LegacyBlockTypeMenuItem[];
+    toolbarItemIds?: ReadonlySet<string>;
     activeMarks: PendingInlineMarks;
     onUndo(): void;
     onRedo(): void;
@@ -43,176 +48,206 @@ export function Toolbar({
     onAnnotation(presentation: AnnotationPresentation): void;
 }) {
     const imageInputRef = useRef<HTMLInputElement>(null);
+    const enabled = (id: string): boolean => !toolbarItemIds || toolbarItemIds.has(id);
+    const inlineGroupEnabled = [
+        'mark:bold',
+        'mark:italic',
+        'mark:strikethrough',
+        'mark:code',
+        'mark:math',
+        'mark:display-math',
+        'link:edit',
+        'inline-embed:date',
+        'image:upload',
+    ].some(enabled);
     return (
         <div className="toolbar" aria-label="Formatting">
-            <div className="toolbarGroup" aria-label="History">
-                <button
-                    type="button"
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={onUndo}
-                    disabled={!canUndo}
-                >
-                    Undo
-                </button>
-                <button
-                    type="button"
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={onRedo}
-                    disabled={!canRedo}
-                >
-                    Redo
-                </button>
-            </div>
+            {enabled('history:undo') || enabled('history:redo') ? (
+                <div className="toolbarGroup" aria-label="History">
+                    {enabled('history:undo') ? (
+                        <button
+                            type="button"
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={onUndo}
+                            disabled={!canUndo}
+                        >
+                            Undo
+                        </button>
+                    ) : null}
+                    {enabled('history:redo') ? (
+                        <button
+                            type="button"
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={onRedo}
+                            disabled={!canRedo}
+                        >
+                            Redo
+                        </button>
+                    ) : null}
+                </div>
+            ) : null}
+            {inlineGroupEnabled ? (
             <div className="toolbarGroup" aria-label="Inline marks">
-                <button
-                    type="button"
-                    aria-pressed={!!activeMarks.bold}
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={onBold}
-                >
-                    <strong>B</strong>
-                </button>
-                <button
-                    type="button"
-                    aria-pressed={!!activeMarks.italic}
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={onItalic}
-                >
-                    <em>I</em>
-                </button>
-                <button
-                    type="button"
-                    aria-pressed={!!activeMarks.strikethrough}
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={onStrikethrough}
-                    aria-label="Strikethrough"
-                >
-                    <span className="toolbarStrike">S</span>
-                </button>
-                <button
-                    type="button"
-                    aria-pressed={!!activeMarks.code}
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={onCode}
-                >
-                    Code
-                </button>
-                <button
-                    type="button"
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={onMath}
-                >
-                    Math
-                </button>
-                <button
-                    type="button"
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={onDisplayMath}
-                >
-                    Display Math
-                </button>
-                <button
-                    type="button"
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={onLink}
-                >
-                    Link
-                </button>
-                <button
-                    type="button"
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={onDateEmbed}
-                >
-                    Date
-                </button>
-                <button
-                    type="button"
-                    onMouseDown={(event) => {
-                        event.preventDefault();
-                        onImageUploadStart();
-                    }}
-                    onClick={() => {
-                        onImageUploadStart();
-                        imageInputRef.current?.click();
-                    }}
-                >
-                    Image
-                </button>
-                <input
-                    ref={imageInputRef}
-                    className="imageUploadInput"
-                    type="file"
-                    accept="image/*"
-                    aria-label="Upload image"
+                {enabled('mark:bold') ? (
+                    <button
+                        type="button"
+                        aria-pressed={!!activeMarks.bold}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={onBold}
+                    >
+                        <strong>B</strong>
+                    </button>
+                ) : null}
+                {enabled('mark:italic') ? (
+                    <button
+                        type="button"
+                        aria-pressed={!!activeMarks.italic}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={onItalic}
+                    >
+                        <em>I</em>
+                    </button>
+                ) : null}
+                {enabled('mark:strikethrough') ? (
+                    <button
+                        type="button"
+                        aria-pressed={!!activeMarks.strikethrough}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={onStrikethrough}
+                        aria-label="Strikethrough"
+                    >
+                        <span className="toolbarStrike">S</span>
+                    </button>
+                ) : null}
+                {enabled('mark:code') ? (
+                    <button
+                        type="button"
+                        aria-pressed={!!activeMarks.code}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={onCode}
+                    >
+                        Code
+                    </button>
+                ) : null}
+                {enabled('mark:math') ? (
+                    <button
+                        type="button"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={onMath}
+                    >
+                        Math
+                    </button>
+                ) : null}
+                {enabled('mark:display-math') ? (
+                    <button
+                        type="button"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={onDisplayMath}
+                    >
+                        Display Math
+                    </button>
+                ) : null}
+                {enabled('link:edit') ? (
+                    <button
+                        type="button"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={onLink}
+                    >
+                        Link
+                    </button>
+                ) : null}
+                {enabled('inline-embed:date') ? (
+                    <button
+                        type="button"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={onDateEmbed}
+                    >
+                        Date
+                    </button>
+                ) : null}
+                {enabled('image:upload') ? (
+                    <>
+                        <button
+                            type="button"
+                            onMouseDown={(event) => {
+                                event.preventDefault();
+                                onImageUploadStart();
+                            }}
+                            onClick={() => {
+                                onImageUploadStart();
+                                imageInputRef.current?.click();
+                            }}
+                        >
+                            Image
+                        </button>
+                        <input
+                            ref={imageInputRef}
+                            className="imageUploadInput"
+                            type="file"
+                            accept="image/*"
+                            aria-label="Upload image"
+                            onChange={(event) => {
+                                const files = Array.from(event.currentTarget.files ?? []);
+                                event.currentTarget.value = '';
+                                if (files.length) onImageUpload(files);
+                            }}
+                        />
+                    </>
+                ) : null}
+            </div>
+            ) : null}
+            {enabled('annotation:sidebar') || enabled('annotation:footnote') || enabled('annotation:popover') ? (
+                <div className="toolbarGroup" aria-label="Annotations">
+                    {enabled('annotation:sidebar') ? (
+                        <button
+                            type="button"
+                            aria-label="Comment"
+                            title="Comment"
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => onAnnotation('sidebar')}
+                        >
+                            C
+                        </button>
+                    ) : null}
+                    {enabled('annotation:footnote') ? (
+                        <button
+                            type="button"
+                            aria-label="Footnote"
+                            title="Footnote"
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => onAnnotation('footnote')}
+                        >
+                            F
+                        </button>
+                    ) : null}
+                    {enabled('annotation:popover') ? (
+                        <button
+                            type="button"
+                            aria-label="Popover"
+                            title="Popover"
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => onAnnotation('popover')}
+                        >
+                            P
+                        </button>
+                    ) : null}
+                </div>
+            ) : null}
+            {blockTypeItems.length ? (
+                <select
+                    aria-label="Block type"
+                    value={blockType}
                     onChange={(event) => {
-                        const files = Array.from(event.currentTarget.files ?? []);
-                        event.currentTarget.value = '';
-                        if (files.length) onImageUpload(files);
+                        onBlockType(event.currentTarget.value as BlockTypeMenuValue);
                     }}
-                />
-            </div>
-            <div className="toolbarGroup" aria-label="Annotations">
-                <button
-                    type="button"
-                    aria-label="Comment"
-                    title="Comment"
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={() => onAnnotation('sidebar')}
                 >
-                    C
-                </button>
-                <button
-                    type="button"
-                    aria-label="Footnote"
-                    title="Footnote"
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={() => onAnnotation('footnote')}
-                >
-                    F
-                </button>
-                <button
-                    type="button"
-                    aria-label="Popover"
-                    title="Popover"
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={() => onAnnotation('popover')}
-                >
-                    P
-                </button>
-            </div>
-            <select
-                aria-label="Block type"
-                value={blockType}
-                onChange={(event) => {
-                    onBlockType(event.currentTarget.value as BlockTypeMenuValue);
-                }}
-            >
-                <option value="paragraph">Paragraph</option>
-                <option value="heading1">Heading 1</option>
-                <option value="heading2">Heading 2</option>
-                <option value="heading3">Heading 3</option>
-                <option value="unordered">Bulleted list</option>
-                <option value="ordered">Numbered list</option>
-                <option value="todo">Todo</option>
-                <option value="blockquote">Quote</option>
-                <option value="code">Code</option>
-                <option value="mermaid">Mermaid diagram</option>
-                <option value="vega-lite">Vega-Lite chart</option>
-                <option value="callout-info">Info callout</option>
-                <option value="callout-warning">Warning callout</option>
-                <option value="callout-error">Error callout</option>
-                <option value="recipe-ingredient">Ingredient line</option>
-                <option value="table">Table</option>
-                <option value="columns">Columns</option>
-                <option value="card-columns">Card columns</option>
-                <option value="slide-deck">Slide deck</option>
-                <option value="slide">Slide</option>
-                <option value="preview">Preview</option>
-                <option value="poll-rating">Rating poll</option>
-                <option value="poll-children">Answer poll</option>
-                <option value="poll-matrix">Matrix poll</option>
-                <option value="poll-long">Long-answer poll</option>
-            </select>
+                    {blockTypeItems.map((item) => (
+                        <option key={item.value} value={item.value}>
+                            {item.label}
+                        </option>
+                    ))}
+                </select>
+            ) : null}
         </div>
     );
 }

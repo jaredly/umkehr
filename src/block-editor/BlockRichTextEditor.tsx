@@ -321,6 +321,7 @@ import {
     type SlashMenuState,
 } from './slashCommands.js';
 import {createBlockEditorRegistry, type BlockEditorPlugin} from './plugins/index.js';
+import {blockTypeMenuItemsFromToolbarSpecs} from './plugins/legacyRichTextUi.js';
 
 import * as hlc from '../crdt/hlc.js';
 type RichFormattedBlock = FormattedBlock<RichBlockMeta>;
@@ -462,6 +463,14 @@ export function BlockRichTextEditor({
 }) {
     const registry = useMemo(() => createBlockEditorRegistry(plugins), [plugins]);
     const slashCommands = useMemo(() => slashCommandsFromRegistry(registry), [registry]);
+    const blockTypeItems = useMemo(() => {
+        const items = blockTypeMenuItemsFromToolbarSpecs(registry.toolbarItems);
+        return items.length ? items : undefined;
+    }, [registry]);
+    const toolbarItemIds = useMemo(
+        () => (registry.toolbarItems.length ? new Set(registry.toolbarItems.map((item) => item.id)) : undefined),
+        [registry],
+    );
     const rootRef = useRef<HTMLDivElement>(null);
     const editorContentRef = useRef<HTMLDivElement>(null);
     const pendingCaretRestoreBlockIdRef = useRef<string | null>(null);
@@ -2915,6 +2924,8 @@ export function BlockRichTextEditor({
                 canUndo={undoState.canUndo}
                 canRedo={undoState.canRedo}
                 blockType={selectedBlockType}
+                blockTypeItems={blockTypeItems}
+                toolbarItemIds={toolbarItemIds}
                 activeMarks={activeInlineMarks}
                 onUndo={onUndo}
                 onRedo={onRedo}

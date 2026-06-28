@@ -3,7 +3,9 @@ import {describe, expect, it} from 'vitest';
 import {DEFAULT_SLASH_COMMANDS, slashCommandsFromRegistry, slashCommandsFromSpecs} from '../slashCommands';
 import {createBlockEditorRegistry} from './registry';
 import {
+    blockTypeMenuItemsFromToolbarSpecs,
     legacyBlockTypeMenuItems,
+    legacyBlockTypeMenuItemsFromToolbarSpecs,
     legacyRichTextUiPlugin,
     legacySlashCommandSpecs,
     legacyToolbarItemSpecs,
@@ -36,6 +38,20 @@ describe('legacy rich text UI plugin', () => {
         const ids = legacyToolbarItemSpecs.map((item) => item.id);
 
         expect(new Set(ids).size).toBe(ids.length);
+    });
+
+    it('derives block type menu items from toolbar specs', () => {
+        expect(legacyBlockTypeMenuItemsFromToolbarSpecs()).toEqual(legacyBlockTypeMenuItems);
+    });
+
+    it('ignores non-block-type toolbar specs when deriving menu items', () => {
+        expect(
+            blockTypeMenuItemsFromToolbarSpecs([
+                {id: 'mark:bold', commandId: 'mark:bold', label: 'Bold'},
+                {id: 'block-type:paragraph', commandId: 'block-type:paragraph', label: 'Paragraph'},
+                {id: 'block-type:unknown', commandId: 'block-type:unknown', label: 'Unknown'},
+            ]),
+        ).toEqual([{value: 'paragraph', label: 'Paragraph'}]);
     });
 
     it('can be combined with existing legacy CRDT plugins without conflicts', async () => {

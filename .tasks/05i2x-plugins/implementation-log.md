@@ -129,3 +129,47 @@ Verification:
 
 - `npm exec vitest -- run src/block-editor/editorCrdtConfig.test.ts src/block-editor/plugins/registry.test.ts src/block-editor/plugins/compatibility.test.ts src/block-editor/plugins/metadata.test.ts src/block-editor/plugins/legacyRichTextUi.test.ts` passed.
 - `npm run typecheck` passed.
+
+### Phase 5 Continued: Markdown Shortcut Specs
+
+- Refactored `src/block-editor/markdownShortcuts.ts` so the current heading/list/todo shortcuts are represented as `BlockEditorMarkdownShortcutSpec<RichBlockMeta>` entries.
+- Preserved the existing `markdownShortcutPrefix(text, currentMeta, nextTs)` API by routing it through `legacyMarkdownShortcutSpecs`.
+- Added `markdownShortcutPrefixFromSpecs` for registry-style shortcut matching.
+- Added `legacyMarkdownShortcutSpecs` to `legacyRichTextUiPlugin`.
+- Added `src/block-editor/markdownShortcuts.test.ts`.
+
+Issues/workarounds:
+
+- `markdownShortcutPrefixFromSpecs` currently narrows matches to the existing legacy shortcut kind union (`list`, `heading`, `todo`) because downstream command code expects that shape. More general plugin shortcut kinds need command-handler extraction first.
+
+Verification:
+
+- `npm exec vitest -- run src/block-editor/editorCrdtConfig.test.ts src/block-editor/markdownShortcuts.test.ts src/block-editor/plugins/registry.test.ts src/block-editor/plugins/compatibility.test.ts src/block-editor/plugins/metadata.test.ts src/block-editor/plugins/legacyRichTextUi.test.ts` passed.
+- `npm run typecheck` passed.
+
+### Phase 5 Continued: Toolbar Registry Wiring
+
+- Updated `Toolbar` so the block type `<select>` is rendered from data instead of hard-coded `<option>` elements.
+- Added `blockTypeItems` and `toolbarItemIds` props to `Toolbar`.
+- Added registry-derived toolbar filtering for the existing known toolbar controls:
+  - history buttons
+  - inline mark/link/embed/image buttons
+  - annotation buttons
+  - block type menu options
+- Updated `BlockRichTextEditor` to derive:
+  - block type menu items from `registry.toolbarItems`
+  - a toolbar item id set from `registry.toolbarItems`
+- Added helpers in `legacyRichTextUi.ts`:
+  - `blockTypeMenuItemsFromToolbarSpecs`
+  - `legacyBlockTypeMenuItemsFromToolbarSpecs`
+- Extended `legacyRichTextUi.test.ts` to cover toolbar-to-block-menu derivation and filtering of unknown/non-block toolbar specs.
+
+Issues/workarounds:
+
+- The toolbar JSX is still explicit for known controls. Registry specs can now hide/show current controls, but arbitrary third-party toolbar item rendering is not implemented yet.
+- Existing callback props (`onBold`, `onLink`, `onBlockType`, etc.) remain the command dispatch mechanism. A real command dispatcher is still needed before toolbar controls can be fully plugin-owned.
+
+Verification:
+
+- `npm exec vitest -- run src/block-editor/editorCrdtConfig.test.ts src/block-editor/plugins/registry.test.ts src/block-editor/plugins/compatibility.test.ts src/block-editor/plugins/metadata.test.ts src/block-editor/plugins/legacyRichTextUi.test.ts` passed.
+- `npm run typecheck` passed.
