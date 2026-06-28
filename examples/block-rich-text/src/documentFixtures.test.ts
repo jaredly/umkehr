@@ -1,7 +1,7 @@
 import {describe, expect, it} from 'vitest';
 import {exportDocument, importDocument, type DocumentBlock, type ImportDocument} from './documentFormat';
 import {documentFixtures, MISSING_FIXTURE_IMAGE_ID} from './documentFixtures';
-import type {CommandContext} from './blockCommands';
+import type {CommandContext} from 'umkehr/block-editor';
 import {lamportToString} from 'umkehr/block-crdt/utils';
 
 const ctx = (actor = 'fixture-test'): CommandContext => {

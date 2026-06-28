@@ -13,11 +13,11 @@ import {
     isSlideDeckFooterMode,
     isSlideTransition,
     type RichBlockMeta,
-} from './blockMeta';
-import {richTextCrdtConfig} from './editorCrdtConfig';
-import {isPollMeta, isPollVote, type PollVoteCommandData} from './pollBlocks';
-import type {RetainedSelectionSet} from './selectionSet';
-import {isSerializedImageAttachment, type SerializedImageAttachment} from './attachments';
+} from 'umkehr/block-editor';
+import {richTextCrdtConfig} from 'umkehr/block-editor';
+import {isPollMeta, isPollVote, type PollVoteCommandData} from 'umkehr/block-editor';
+import type {RetainedSelectionSet} from 'umkehr/block-editor';
+import {isSerializedImageAttachment, type SerializedImageAttachment} from 'umkehr/block-editor';
 import type {ImportDocument} from './documentFormat';
 
 export type HistoryAction =

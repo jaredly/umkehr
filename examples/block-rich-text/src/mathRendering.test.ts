@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {BrowserMathJaxRenderer, FakeMathRenderer, type MathRenderResult} from './mathRendering';
+import {BrowserMathJaxRenderer, FakeMathRenderer, type MathRenderResult} from 'umkehr/block-editor';
 
 describe('math rendering adapter', () => {
     it('renders deterministic fake math html for tests', () => {

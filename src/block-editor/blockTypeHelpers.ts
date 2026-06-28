@@ -1,4 +1,4 @@
-import type {FormattedBlock} from 'umkehr/block-crdt';
+import type {FormattedBlock} from '../block-crdt/index.js';
 
 import {
     defaultRatingPollMeta,

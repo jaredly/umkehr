@@ -11,7 +11,7 @@ import {
 } from 'umkehr/block-crdt';
 import {lamportToString} from 'umkehr/block-crdt/utils';
 import {parseLamportString} from 'umkehr/block-crdt/utils';
-import {deleteBackward, insertText, splitBlock, type CommandContext} from './blockCommands';
+import {deleteBackward, insertText, splitBlock, type CommandContext} from 'umkehr/block-editor';
 import {applyLocalChange, createDemoState, makeCommandContext} from './blockEditorRuntime';
 import {
     ANNOTATION_MARK,
@@ -25,7 +25,7 @@ import {
     setAnnotationBodyText,
     splitAnnotationBodyBlock,
     toggleAnnotationBodyMark,
-} from './annotations';
+} from 'umkehr/block-editor';
 import {
     appendHistoryAction,
     initialHistoryState,
@@ -33,7 +33,7 @@ import {
     replayHistory,
     serializeHistory,
 } from './history';
-import {caret, type EditorSelection} from './selectionModel';
+import {caret, type EditorSelection} from 'umkehr/block-editor';
 
 const ctx = (actor = 'left'): CommandContext => {
     let i = 1;

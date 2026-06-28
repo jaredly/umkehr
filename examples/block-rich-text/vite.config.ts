@@ -17,6 +17,10 @@ export default {
                 replacement: fileURLToPath(new URL('../../src/block-crdt/$1.ts', import.meta.url)),
             },
             {
+                find: 'umkehr/block-editor',
+                replacement: fileURLToPath(new URL('../../src/block-editor/index.ts', import.meta.url)),
+            },
+            {
                 find: 'umkehr/block-crdt',
                 replacement: fileURLToPath(new URL('../../src/block-crdt/index.ts', import.meta.url)),
             },

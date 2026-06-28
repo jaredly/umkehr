@@ -1,4 +1,4 @@
-import type {HLC} from 'umkehr/block-crdt/types';
+import type {HLC} from '../block-crdt/types.js';
 import type {PollChoiceMode, PollMeta, PollVote, RichBlockMeta} from './blockMeta';
 
 export type PollResult = {

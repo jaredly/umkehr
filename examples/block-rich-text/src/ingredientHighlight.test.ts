@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {highlightIngredientLine} from './ingredientHighlight';
+import {highlightIngredientLine} from 'umkehr/block-editor';
 
 describe('ingredient highlighting', () => {
     it('highlights amount, unit, and ingredient', () => {

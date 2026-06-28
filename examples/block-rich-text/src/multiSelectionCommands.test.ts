@@ -10,10 +10,10 @@ import {
 import {initialState} from 'umkehr/block-crdt/initialState';
 import type {CachedState} from 'umkehr/block-crdt/types';
 import {lamportToString} from 'umkehr/block-crdt/utils';
-import {createTable, insertText, pastePlainText, type CommandContext} from './blockCommands';
-import {ANNOTATION_MARK, annotationVirtualParents, createAnnotation, renderedAnnotations, setAnnotationBodyText} from './annotations';
+import {createTable, insertText, pastePlainText, type CommandContext} from 'umkehr/block-editor';
+import {ANNOTATION_MARK, annotationVirtualParents, createAnnotation, renderedAnnotations, setAnnotationBodyText} from 'umkehr/block-editor';
 import {createDemoState, makeCommandContext} from './blockEditorRuntime';
-import {caret, type EditorSelection} from './selectionModel';
+import {caret, type EditorSelection} from 'umkehr/block-editor';
 import {
     deleteBackwardEverywhere,
     deleteForwardEverywhere,
@@ -33,10 +33,10 @@ import {
     toggleMarkEverywhere,
     unindentSelections,
     closeRetainedInlineMarkSessionsEverywhere,
-} from './multiSelectionCommands';
-import {appendSelection, resolveSelectionSet, singleRetainedSelectionSet} from './selectionSet';
-import {serializeSelectionToClipboardPayload, type RichClipboardPayload} from './clipboard';
-import type {RichBlockMeta} from './blockMeta';
+} from 'umkehr/block-editor';
+import {appendSelection, resolveSelectionSet, singleRetainedSelectionSet} from 'umkehr/block-editor';
+import {serializeSelectionToClipboardPayload, type RichClipboardPayload} from 'umkehr/block-editor';
+import type {RichBlockMeta} from 'umkehr/block-editor';
 
 const ctx = (actor = 'left'): CommandContext => {
     let i = 1;

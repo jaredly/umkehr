@@ -93,6 +93,14 @@
             "types": "./dist/src/block-richtext/*.d.ts",
             "import": "./dist/src/block-richtext/*.js"
         },
+        "./block-editor": {
+            "types": "./dist/src/block-editor/index.d.ts",
+            "import": "./dist/src/block-editor/index.js"
+        },
+        "./block-editor/*": {
+            "types": "./dist/src/block-editor/*.d.ts",
+            "import": "./dist/src/block-editor/*.js"
+        },
         "./react-rich-text": {
             "types": "./dist/src/react-rich-text/index.d.ts",
             "import": "./dist/src/react-rich-text/index.js"
@@ -141,7 +149,11 @@
         "react": ">=18",
         "react-dom": ">=18",
         "remix": ">=3.0.0-beta.0 <4",
-        "typia": "^12.1.1"
+        "typia": "^12.1.1",
+        "mermaid": "^11.15.0",
+        "vega": "^6.2.0",
+        "vega-lite": "^6.4.3",
+        "yaml": "^2.9.0"
     },
     "peerDependenciesMeta": {
         "react": {
@@ -154,6 +166,18 @@
             "optional": true
         },
         "typia": {
+            "optional": true
+        },
+        "mermaid": {
+            "optional": true
+        },
+        "vega": {
+            "optional": true
+        },
+        "vega-lite": {
+            "optional": true
+        },
+        "yaml": {
             "optional": true
         }
     }

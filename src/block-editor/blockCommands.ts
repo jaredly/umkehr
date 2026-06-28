@@ -24,11 +24,11 @@ import {
     visibleBlockOutline,
     compareLamportStrings,
     type Op,
-} from 'umkehr/block-crdt';
-import {compareLseqIds, createLseqIdBetween} from 'umkehr/block-crdt/lseq';
-import type {BlockOrderTs, Boundary, CachedState, JsonValue, Lamport} from 'umkehr/block-crdt/types';
-import type {BlockStylePatch} from 'umkehr/block-crdt/types';
-import {lamportToString, parseLamportString} from 'umkehr/block-crdt/utils';
+} from '../block-crdt/index.js';
+import {compareLseqIds, createLseqIdBetween} from '../block-crdt/lseq.js';
+import type {BlockOrderTs, Boundary, CachedState, JsonValue, Lamport} from '../block-crdt/types.js';
+import type {BlockStylePatch} from '../block-crdt/types.js';
+import {lamportToString, parseLamportString} from '../block-crdt/utils.js';
 import {
     defaultSlideDeckMeta,
     defaultSlideMeta,

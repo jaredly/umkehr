@@ -106,7 +106,7 @@ export class FakeMathRenderer implements MathRenderer {
 }
 
 let mathJaxLoadPromise: Promise<MathJaxGlobal> | null = null;
-const mathJaxComponentUrl = `${import.meta.env.BASE_URL}vendor/mathjax/tex-svg.js`;
+const mathJaxComponentUrl = `${viteEnv().BASE_URL ?? '/'}vendor/mathjax/tex-svg.js`;
 
 const loadMathJax = (): Promise<MathJaxGlobal> => {
     if (mathJaxLoadPromise) return mathJaxLoadPromise;
@@ -142,6 +142,10 @@ const loadMathJax = (): Promise<MathJaxGlobal> => {
     });
     return mathJaxLoadPromise;
 };
+
+function viteEnv(): Record<string, string | undefined> {
+    return (import.meta as ImportMeta & {env?: Record<string, string | undefined>}).env ?? {};
+}
 
 const escapeHtml = (text: string): string =>
     text.replace(/[&<>"']/g, (char) => {

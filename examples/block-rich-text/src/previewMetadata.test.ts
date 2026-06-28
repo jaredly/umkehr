@@ -7,7 +7,7 @@ import {
     parsePreviewMetadataHtml,
     previewAssetUrl,
     previewFetchUrl,
-} from './previewMetadata';
+} from 'umkehr/block-editor';
 
 Object.defineProperty(globalThis, 'DOMParser', {
     value: window.DOMParser,

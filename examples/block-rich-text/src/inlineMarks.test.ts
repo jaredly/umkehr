@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest';
 import type {FormattedBlock} from 'umkehr/block-crdt';
-import type {RichBlockMeta} from './blockMeta';
+import type {RichBlockMeta} from 'umkehr/block-editor';
 import {
     codeLanguageForSelectionSegments,
     codeRangeAroundOffset,
@@ -12,7 +12,7 @@ import {
     linkRangeAroundOffset,
     normalizeStoredCodeLanguage,
     textForSelectionSegments,
-} from './inlineMarks';
+} from 'umkehr/block-editor';
 
 const block = (
     runs: FormattedBlock<RichBlockMeta>['runs'],

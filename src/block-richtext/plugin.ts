@@ -12,12 +12,12 @@ import {
     setBlockMetaOps,
     splitBlockOps,
     validateOp,
-    type DefaultBlockMeta,
     type Lamport,
     type Op,
     type State as BlockState,
 } from '../block-crdt/index.js';
-import {initialState} from '../block-crdt/initialState.js';
+import {initialStateWithMeta} from '../block-crdt/initialState.js';
+import {paragraphMeta, richTextCrdtConfig, type RichBlockMeta} from '../block-editor/index.js';
 import {defineLeafBuilderExtension} from '../builderExtensions.js';
 import {deepEqual as equal} from '../deepEqual.js';
 import type {LeafCrdtPlugin} from '../crdt/plugins.js';
@@ -39,7 +39,7 @@ export type BlockRichTextLamportRef = string | Lamport;
 
 export type BlockRichTextOpsChange = {
     kind: 'ops';
-    ops: Op[];
+    ops: Array<Op<RichBlockMeta>>;
 };
 
 export type BlockRichTextInsertTextChange = {
@@ -82,7 +82,7 @@ export type BlockRichTextMoveBlockChange = {
 export type BlockRichTextSetBlockMetaChange = {
     kind: 'setBlockMeta';
     block: BlockRichTextLamportRef;
-    meta: DefaultBlockMeta;
+    meta: RichBlockMeta;
 };
 
 export type BlockRichTextPatchChange =
@@ -154,7 +154,7 @@ export const blockRichTextLeafPlugin: LeafCrdtPlugin<
     builder: blockRichTextBuilderExtension,
     empty() {
         return blockRichTextJson(
-            initialState(BLOCK_RICH_TEXT_INITIAL_SESSION, BLOCK_RICH_TEXT_INITIAL_TS),
+            initialBlockRichTextState(),
         );
     },
     isValue(value): value is JsonValue {
@@ -164,7 +164,7 @@ export const blockRichTextLeafPlugin: LeafCrdtPlugin<
         const nextValue = isBlockRichTextJson(value)
             ? value
             : blockRichTextJson(
-                  initialState(BLOCK_RICH_TEXT_INITIAL_SESSION, BLOCK_RICH_TEXT_INITIAL_TS),
+                  initialBlockRichTextState(),
               );
         return {
             value: nextValue,
@@ -180,8 +180,9 @@ export const blockRichTextLeafPlugin: LeafCrdtPlugin<
         ) as JsonValue[];
     },
     applyOperation({value, meta, operation}) {
-        const op = operation as unknown as Op;
-        const nextState = applyMany(cachedState(blockStateFromJson(value)), [op]).state;
+        const op = operation as unknown as Op<RichBlockMeta>;
+        const current = cachedState(blockStateFromJson(value));
+        const nextState = applyMany(current, [op], richTextCrdtConfig(current)).state;
         const previous = meta.data as BlockRichTextLeafMeta | undefined;
         const maxSeenCount = Math.max(
             previous?.maxSeenCount ?? 0,
@@ -253,11 +254,11 @@ export const blockRichTextLeafPlugin: LeafCrdtPlugin<
 };
 
 function createBlockRichTextOperations(
-    state: BlockState,
+    state: BlockState<RichBlockMeta>,
     change: BlockRichTextPatchChange,
     ts: HlcTimestamp,
     sessionId: string,
-): Op[] {
+): Array<Op<RichBlockMeta>> {
     const cached = cachedState(state);
     switch (change.kind) {
         case 'ops':
@@ -312,7 +313,7 @@ function lamportRef(ref: BlockRichTextLamportRef): Lamport {
     return typeof ref === 'string' ? parseLamportString(ref) : ref;
 }
 
-function blockRichTextJson(state: BlockState): JsonValue {
+function blockRichTextJson(state: BlockState<RichBlockMeta>): JsonValue {
     return {
         kind: 'block-rich-text',
         version: 1,
@@ -320,7 +321,7 @@ function blockRichTextJson(state: BlockState): JsonValue {
     };
 }
 
-function blockStateFromJson(value: JsonValue): BlockState {
+function blockStateFromJson(value: JsonValue): BlockState<RichBlockMeta> {
     return (value as unknown as BlockRichText).state;
 }
 
@@ -339,7 +340,7 @@ function createBlockRichTextUndoUpdates(
     const plan = planUndoOps(
         cachedState(blockStateFromJson(first.before)),
         cachedState(blockStateFromJson(current)),
-        effects.map((effect) => effect.change as unknown as Op),
+        effects.map((effect) => effect.change as unknown as Op<RichBlockMeta>),
         {actor: sessionId, ts: () => ts},
     );
     if (!plan.complete) return [];
@@ -362,7 +363,7 @@ function checkBlockRichTextEffectTarget(
     const before = effect.before;
     const target = blockRichTextAtCrdtPath(doc, effect.path);
     if (!target || !isBlockRichTextJson(before)) return {command, effect, reason: 'missing-target'};
-    const operation = effect.change as unknown as Op;
+    const operation = effect.change as unknown as Op<RichBlockMeta>;
     const targetIssue = blockOperationTargetIssue(blockStateFromJson(target), operation);
     if (targetIssue) return {command, effect, reason: targetIssue};
     try {
@@ -378,7 +379,10 @@ function checkBlockRichTextEffectTarget(
     }
 }
 
-function blockOperationTargetIssue(state: BlockState, op: Op): BlockedEffect['reason'] | null {
+function blockOperationTargetIssue(
+    state: BlockState<RichBlockMeta>,
+    op: Op<RichBlockMeta>,
+): BlockedEffect['reason'] | null {
     switch (op.type) {
         case 'char': {
             const char = state.chars[lamportToString(op.char.id)];
@@ -462,7 +466,7 @@ function isBlockRichTextJson(value: unknown): value is JsonValue {
     );
 }
 
-function valueHasBlockState(value: unknown): value is BlockState {
+function valueHasBlockState(value: unknown): value is BlockState<RichBlockMeta> {
     return Boolean(
         value &&
         typeof value === 'object' &&
@@ -473,6 +477,13 @@ function valueHasBlockState(value: unknown): value is BlockState {
         (value as {splits?: unknown}).splits &&
         (value as {joins?: unknown}).joins &&
         typeof (value as {maxSeenCount?: unknown}).maxSeenCount === 'number',
+    );
+}
+
+function initialBlockRichTextState(): BlockState<RichBlockMeta> {
+    return initialStateWithMeta(
+        BLOCK_RICH_TEXT_INITIAL_SESSION,
+        paragraphMeta(BLOCK_RICH_TEXT_INITIAL_TS),
     );
 }
 

@@ -1,6 +1,6 @@
-import {applyMany, compareLamportStrings, type Op} from 'umkehr/block-crdt';
-import type {CachedState, Lamport} from 'umkehr/block-crdt/types';
-import {lamportToString} from 'umkehr/block-crdt/utils';
+import {applyMany, compareLamportStrings, type Op} from '../block-crdt/index.js';
+import type {CachedState, Lamport} from '../block-crdt/types.js';
+import {lamportToString} from '../block-crdt/utils.js';
 import type {RichBlockMeta} from './blockMeta';
 import {richTextVirtualParents} from './virtualParents';
 import {textSegments, visibleCharIdBeforeOffset} from './charUtils';

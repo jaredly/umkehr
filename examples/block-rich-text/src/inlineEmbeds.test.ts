@@ -8,7 +8,7 @@ import {
     isInlineEmbedText,
     plainTextForInlineEmbed,
     renderInlineEmbed,
-} from './inlineEmbeds';
+} from 'umkehr/block-editor';
 
 describe('inline embed helpers', () => {
     it('uses the object replacement character as the embed text', () => {

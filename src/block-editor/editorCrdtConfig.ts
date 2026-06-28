@@ -1,5 +1,5 @@
-import type {VirtualBlockParentConfig} from 'umkehr/block-crdt';
-import type {CachedState} from 'umkehr/block-crdt/types';
+import type {VirtualBlockParentConfig} from '../block-crdt/index.js';
+import type {CachedState} from '../block-crdt/types.js';
 import type {RichBlockMeta} from './blockMeta';
 import {annotationVirtualParents} from './annotations';
 import {mergeRichBlockMeta} from './pollBlocks';

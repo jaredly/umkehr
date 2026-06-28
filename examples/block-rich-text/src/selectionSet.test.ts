@@ -2,8 +2,8 @@ import {describe, expect, it} from 'vitest';
 import {blockContents, cachedState, rootBlockIds} from 'umkehr/block-crdt';
 import {initialState} from 'umkehr/block-crdt/initialState';
 import type {CachedState} from 'umkehr/block-crdt/types';
-import {deleteBackward, insertText, moveBlock, pastePlainText, type CommandContext} from './blockCommands';
-import {caret, type EditorSelection} from './selectionModel';
+import {deleteBackward, insertText, moveBlock, pastePlainText, type CommandContext} from 'umkehr/block-editor';
+import {caret, type EditorSelection} from 'umkehr/block-editor';
 import {
     appendSelection,
     blockLevelDecorationsForSelectionSet,
@@ -13,7 +13,7 @@ import {
     primarySelection,
     resolveSelectionSet,
     singleRetainedSelectionSet,
-} from './selectionSet';
+} from 'umkehr/block-editor';
 
 const ctx = (actor = 'left'): CommandContext => {
     let i = 1;

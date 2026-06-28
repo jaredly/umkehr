@@ -8,11 +8,11 @@ import type {
     State,
 } from 'umkehr/block-crdt/types';
 import * as hlc from '../../../src/crdt/hlc';
-import {paragraphMeta, type RichBlockMeta} from './blockMeta';
-import {initialRetainedSelectionSet, type RetainedSelectionSet} from './selectionSet';
-import {applyCharInsertOps} from './localTextOps';
+import {paragraphMeta, type RichBlockMeta} from 'umkehr/block-editor';
+import {initialRetainedSelectionSet, type RetainedSelectionSet} from 'umkehr/block-editor';
+import {applyCharInsertOps} from 'umkehr/block-editor';
 import {importDocument, type ImportDocument} from './documentFormat';
-import {richTextCrdtConfig} from './editorCrdtConfig';
+import {richTextCrdtConfig} from 'umkehr/block-editor';
 
 export type EditorId = 'left' | 'right';
 

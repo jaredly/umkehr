@@ -1,5 +1,5 @@
-import type {FormattedBlock} from 'umkehr/block-crdt';
-import type {CachedState} from 'umkehr/block-crdt/types';
+import type {FormattedBlock} from '../block-crdt/index.js';
+import type {CachedState} from '../block-crdt/types.js';
 
 import type {MoveTarget} from './blockCommands';
 import type {RichBlockMeta} from './blockMeta';

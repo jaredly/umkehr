@@ -1,9 +1,9 @@
 import {describe, expect, it} from 'vitest';
 import {cachedState, rootBlockIds} from 'umkehr/block-crdt';
 import {initialState} from 'umkehr/block-crdt/initialState';
-import {insertText, pastePlainText, toggleMark, type CommandContext} from './blockCommands';
-import {caret} from './selectionModel';
-import {findWordOccurrences, wordAtPoint} from './wordOccurrences';
+import {insertText, pastePlainText, toggleMark, type CommandContext} from 'umkehr/block-editor';
+import {caret} from 'umkehr/block-editor';
+import {findWordOccurrences, wordAtPoint} from 'umkehr/block-editor';
 
 const ctx = (actor = 'left'): CommandContext => {
     let i = 1;

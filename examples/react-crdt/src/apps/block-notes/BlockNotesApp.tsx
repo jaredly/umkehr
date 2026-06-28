@@ -10,12 +10,18 @@ import {
     useBlockNotes,
     useBlockNotesHistory,
     validateBlockNotesState,
+    blockNotesArtifactStore,
     type BlockNotesBuilderExtensions,
+    type BlockNotesEphemeralData,
     type BlockNotesState,
 } from './model';
 import {BlockNotesPanel} from './BlockNotesPanel';
 
-export const blockNotesApp: AppDefinition<BlockNotesState, never, BlockNotesBuilderExtensions> = {
+export const blockNotesApp: AppDefinition<
+    BlockNotesState,
+    BlockNotesEphemeralData,
+    BlockNotesBuilderExtensions
+> = {
     id: 'block-notes',
     title: 'Block Notes',
     schemaVersion: 1,
@@ -26,6 +32,7 @@ export const blockNotesApp: AppDefinition<BlockNotesState, never, BlockNotesBuil
     validateState: validateBlockNotesState,
     initialState: initialBlockNotesState,
     initialTimestamp: initialBlockNotesTimestamp,
+    artifacts: blockNotesArtifactStore,
     renderPanel({editor, actor, title, gridSlot, readOnly}) {
         return (
             <BlockNotesPanel
@@ -41,7 +48,7 @@ export const blockNotesApp: AppDefinition<BlockNotesState, never, BlockNotesBuil
 
 export const blockNotesCrdtRuntime: CrdtRuntime<
     BlockNotesState,
-    never,
+    BlockNotesEphemeralData,
     BlockNotesBuilderExtensions
 > = {
     docId: BLOCK_NOTES_DOC_ID,

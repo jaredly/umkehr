@@ -70,20 +70,20 @@ import {
     unindentBlock,
     closeRetainedInlineMarkSessions,
     type CommandContext,
-} from './blockCommands';
+} from 'umkehr/block-editor';
 import {applyLocalChange, createDemoState, makeCommandContext, toggleOnline} from './blockEditorRuntime';
 import {
     annotationBodyBlockIds,
     annotationVirtualParents,
     createAnnotation,
     pasteAnnotationBodyTextWithMarkdownShortcuts,
-} from './annotations';
-import {paragraphMeta, type RichBlockMeta} from './blockMeta';
-import {toggleMarkEverywhere} from './multiSelectionCommands';
-import {retainSelection} from './retainedSelection';
-import {caret, focusPoint, pointTextLength, type EditorSelection} from './selectionModel';
-import {INLINE_EMBED_MARK, INLINE_EMBED_TEXT} from './inlineEmbeds';
-import {MATH_MARK} from './inlineMarks';
+} from 'umkehr/block-editor';
+import {paragraphMeta, type RichBlockMeta} from 'umkehr/block-editor';
+import {toggleMarkEverywhere} from 'umkehr/block-editor';
+import {retainSelection} from 'umkehr/block-editor';
+import {caret, focusPoint, pointTextLength, type EditorSelection} from 'umkehr/block-editor';
+import {INLINE_EMBED_MARK, INLINE_EMBED_TEXT} from 'umkehr/block-editor';
+import {MATH_MARK} from 'umkehr/block-editor';
 
 const ctx = (actor = 'left'): CommandContext => {
     let i = 1;

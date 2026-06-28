@@ -13,15 +13,15 @@ import {
     type EditorId,
     type Replica,
 } from './blockEditorRuntime';
-import type {RichBlockMeta} from './blockMeta';
-import {richTextCrdtConfig} from './editorCrdtConfig';
+import type {RichBlockMeta} from 'umkehr/block-editor';
+import {richTextCrdtConfig} from 'umkehr/block-editor';
 import {
     type BlockCommandInfo,
     type HistoryAction,
     type HistoryState,
 } from './history';
-import type {RetainedSelectionSet} from './selectionSet';
-import {deletedPollVote, type PollVoteCommandData} from './pollBlocks';
+import type {RetainedSelectionSet} from 'umkehr/block-editor';
+import {deletedPollVote, type PollVoteCommandData} from 'umkehr/block-editor';
 
 type DerivedBlockCommand = {
     id: string;

@@ -20,7 +20,7 @@ import {
     annotationVirtualParents,
     isActiveAnnotationData,
     type AnnotationPresentation,
-} from './annotations';
+} from 'umkehr/block-editor';
 import {
     CODE_PREVIEW_LANGUAGES,
     codePreviewKindForLanguage,
@@ -46,9 +46,9 @@ import {
     type RichBlockStyleAttribute,
     type SlideDeckFooterMode,
     type SlideTransition,
-} from './blockMeta';
-import {isPollVote} from './pollBlocks';
-import type {CommandContext} from './blockCommands';
+} from 'umkehr/block-editor';
+import {isPollVote} from 'umkehr/block-editor';
+import type {CommandContext} from 'umkehr/block-editor';
 import {
     CODE_MARK,
     MATH_MARK,
@@ -57,8 +57,8 @@ import {
     mathMarkValueForMode,
     LINK_MARK,
     normalizeStoredCodeLanguage,
-} from './inlineMarks';
-import {applyCharInsertOps} from './localTextOps';
+} from 'umkehr/block-editor';
+import {applyCharInsertOps} from 'umkehr/block-editor';
 
 export type DocumentBlockType = RichBlockMeta['type'];
 

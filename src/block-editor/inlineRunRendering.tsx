@@ -1,4 +1,4 @@
-import type {CachedState, FormattedBlock} from 'umkehr/block-crdt';
+import type {CachedState, FormattedBlock} from '../block-crdt/index.js';
 
 import type {RichBlockMeta} from './blockMeta';
 import type {PendingInlineMarks} from './blockEditorTypes';

@@ -1,4 +1,4 @@
-import type {CachedState} from 'umkehr/block-crdt/types';
+import type {CachedState} from '../block-crdt/types.js';
 import {slideChildren} from './blockCommands';
 import type {RichBlockMeta} from './blockMeta';
 import {primarySelection, replacePrimarySelection, resolveSelectionSet, type RetainedSelectionSet} from './selectionSet';

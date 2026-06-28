@@ -1,5 +1,5 @@
-import type {CachedState} from 'umkehr/block-crdt/types';
-import {isDeleted} from 'umkehr/block-crdt';
+import type {CachedState} from '../block-crdt/types.js';
+import {isDeleted} from '../block-crdt/index.js';
 import type {RichBlockMeta} from './blockMeta';
 import {segmentText} from './selectionModel';
 

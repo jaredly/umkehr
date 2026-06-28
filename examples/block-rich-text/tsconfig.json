@@ -6,7 +6,9 @@
         "jsx": "react-jsx",
         "paths": {
             "umkehr/block-crdt": ["../../src/block-crdt/index.ts"],
-            "umkehr/block-crdt/*": ["../../src/block-crdt/*"]
+            "umkehr/block-crdt/*": ["../../src/block-crdt/*"],
+            "umkehr/block-editor": ["../../src/block-editor/index.ts"],
+            "umkehr/block-editor/*": ["../../src/block-editor/*"]
         }
     },
     "include": ["src/**/*.ts", "src/**/*.tsx"]

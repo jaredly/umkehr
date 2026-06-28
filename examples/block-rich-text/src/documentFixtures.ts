@@ -1,4 +1,4 @@
-import type {AttachmentStore, ImageAttachment} from './attachments';
+import type {AttachmentStore, ImageAttachment} from 'umkehr/block-editor';
 import type {
     DocumentAnnotation,
     DocumentBlock,

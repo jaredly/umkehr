@@ -27,7 +27,11 @@ import {
     blockNotesCrdtRuntime,
     blockNotesHistoryRuntime,
 } from '../apps/block-notes/BlockNotesApp';
-import type {BlockNotesBuilderExtensions, BlockNotesState} from '../apps/block-notes/model';
+import type {
+    BlockNotesBuilderExtensions,
+    BlockNotesEphemeralData,
+    BlockNotesState,
+} from '../apps/block-notes/model';
 import {
     wordsearchApp,
     wordsearchCrdtRuntime,
@@ -150,7 +154,7 @@ export const registeredApps = [
     RegisteredApp<TodoFixtureStateV3>,
     RegisteredEphemeralApp<WhiteboardState, WhiteboardEphemeralData>,
     RegisteredApp<RichNotesState, RichNotesBuilderExtensions>,
-    RegisteredApp<BlockNotesState, BlockNotesBuilderExtensions>,
+    RegisteredEphemeralApp<BlockNotesState, BlockNotesEphemeralData, BlockNotesBuilderExtensions>,
     RegisteredEphemeralApp<WordsearchState, WordsearchEphemeralData>,
 ];
 export type AppOption = {

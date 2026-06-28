@@ -39,6 +39,14 @@ export default defineConfig({
                 replacement: fileURLToPath(new URL('./src/block-richtext/index.ts', import.meta.url)),
             },
             {
+                find: /^umkehr\/block-editor\/(.+)$/,
+                replacement: fileURLToPath(new URL('./src/block-editor/$1.ts', import.meta.url)),
+            },
+            {
+                find: 'umkehr/block-editor',
+                replacement: fileURLToPath(new URL('./src/block-editor/index.ts', import.meta.url)),
+            },
+            {
                 find: 'umkehr/branches',
                 replacement: fileURLToPath(new URL('./src/branches/index.ts', import.meta.url)),
             },

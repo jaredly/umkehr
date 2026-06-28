@@ -10,9 +10,9 @@ import {
     parseBlockRichTextClipboardPayload,
     serializeSelectionToClipboardPayload,
     type RichClipboardPayload,
-} from './clipboard';
+} from 'umkehr/block-editor';
 import {createDemoState, makeCommandContext} from './blockEditorRuntime';
-import {createAnnotation, setAnnotationBodyText} from './annotations';
+import {createAnnotation, setAnnotationBodyText} from 'umkehr/block-editor';
 import {
     convertBlockToTable,
     insertInlineEmbed,
@@ -26,16 +26,16 @@ import {
     toggleMark,
     updateBlockStyle,
     type CommandContext,
-} from './blockCommands';
-import {paragraphMeta} from './blockMeta';
-import {singleRetainedSelectionSet} from './selectionSet';
+} from 'umkehr/block-editor';
+import {paragraphMeta} from 'umkehr/block-editor';
+import {singleRetainedSelectionSet} from 'umkehr/block-editor';
 import {
     caret,
     tableCellsForSelection,
     tableRowsForSelection,
     type EditorSelection,
-} from './selectionModel';
-import {INLINE_EMBED_TEXT} from './inlineEmbeds';
+} from 'umkehr/block-editor';
+import {INLINE_EMBED_TEXT} from 'umkehr/block-editor';
 
 const ctx = (actor = 'left'): CommandContext => {
     let i = 1;

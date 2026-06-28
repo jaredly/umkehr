@@ -11,6 +11,7 @@ import {
     cachedBlockRichTextValue,
     type BlockRichText,
 } from '../block-richtext/index.js';
+import type {PollMeta, RichBlockMeta} from '../block-editor/index.js';
 import {schemaFingerprintInput} from '../migration/index.js';
 import {
     applyCrdtUpdate,
@@ -132,6 +133,76 @@ describe('leaf CRDT plugins', () => {
 
         expect(blockRichTextToString(doc.state.body)).toContain('h');
         expect(doc.state.body.state.maxSeenCount).toBeGreaterThan(0);
+    });
+
+    it('applies rich block metadata through block-richtext changes', () => {
+        let doc = createDoc('seed');
+        const heading: RichBlockMeta = {type: 'heading', level: 2, ts: aliceTs};
+        const [update] = createCrdtUpdates(
+            doc,
+            leafPatch({
+                kind: 'setBlockMeta',
+                block: blockRichTextRootBlockId(),
+                meta: heading,
+            } as unknown as JsonValue),
+            aliceTs,
+            {sessionId: 'alice'},
+        );
+
+        doc = applyCrdtUpdate(doc, update);
+
+        expect(doc.state.body.state.blocks[blockRichTextRootBlockId()]?.meta).toEqual(heading);
+    });
+
+    it('merges rich poll metadata when raw ops arrive through the leaf plugin', () => {
+        let doc = createDoc('seed');
+        const firstPoll: PollMeta = {
+            type: 'poll',
+            kind: 'rating',
+            allowChange: true,
+            max: 5,
+            votes: {
+                ada: {type: 'single', optionId: '5', ts: aliceTs},
+            },
+            ts: aliceTs,
+        };
+        const secondPoll: PollMeta = {
+            ...firstPoll,
+            votes: {
+                ben: {type: 'single', optionId: '4', ts: bobTs},
+            },
+            ts: bobTs,
+        };
+        const blockId = blockRichTextRootBlockId();
+        const [firstUpdate] = createCrdtUpdates(
+            doc,
+            leafPatch({
+                kind: 'ops',
+                ops: [{type: 'block:meta', id: [0, 'seed'], meta: firstPoll}],
+            } as unknown as JsonValue),
+            aliceTs,
+            {sessionId: 'alice'},
+        );
+        doc = applyCrdtUpdate(doc, firstUpdate);
+
+        const [secondUpdate] = createCrdtUpdates(
+            doc,
+            leafPatch({
+                kind: 'ops',
+                ops: [{type: 'block:meta', id: [0, 'seed'], meta: secondPoll}],
+            } as unknown as JsonValue),
+            bobTs,
+            {sessionId: 'bob'},
+        );
+        doc = applyCrdtUpdate(doc, secondUpdate);
+
+        expect(doc.state.body.state.blocks[blockId]?.meta).toMatchObject({
+            type: 'poll',
+            votes: {
+                ada: {optionId: '5'},
+                ben: {optionId: '4'},
+            },
+        });
     });
 
     it('converges block-crdt leaf operations from different sessions', () => {

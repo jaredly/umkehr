@@ -9,7 +9,8 @@ import {
     type FormattedBlock,
     type State as BlockRichTextState,
 } from '../block-crdt/index.js';
-import {initialState} from '../block-crdt/initialState.js';
+import {initialStateWithMeta} from '../block-crdt/initialState.js';
+import {paragraphMeta, type RichBlockMeta} from '../block-editor/index.js';
 import type {CrdtDocument} from '../crdt/types.js';
 import type {Path} from '../types.js';
 import {BLOCK_RICH_TEXT_LEAF_PLUGIN_ID} from './plugin.js';
@@ -44,7 +45,7 @@ declare const blockRichTextBrand: unique symbol;
 export type BlockRichText = {
     kind: 'block-rich-text';
     version: 1;
-    state: BlockRichTextState;
+    state: BlockRichTextState<RichBlockMeta>;
 } & tags.JsonSchemaPlugin<{
     'x-umkehr-leaf-crdt': 'umkehr.block-rich-text';
     'x-umkehr-leaf-crdt-version': 1;
@@ -52,16 +53,16 @@ export type BlockRichText = {
         readonly [blockRichTextBrand]?: never;
     };
 
-export type {BlockRichTextState, CachedState, FormattedBlock};
+export type {BlockRichTextState, CachedState, FormattedBlock, RichBlockMeta};
 
 export function blockRichText(
     sessionId = 'seed',
     ts = '000000000000000:00000:seed',
 ): BlockRichText {
-    return blockRichTextWithState(initialState(sessionId, ts));
+    return blockRichTextWithState(initialStateWithMeta(sessionId, paragraphMeta(ts)));
 }
 
-export function blockRichTextWithState(state: BlockRichTextState): BlockRichText {
+export function blockRichTextWithState(state: BlockRichTextState<RichBlockMeta>): BlockRichText {
     return {
         kind: 'block-rich-text',
         version: 1,
@@ -73,12 +74,15 @@ export function blockRichTextRootBlockId(sessionId = 'seed') {
     return lamportToString([0, sessionId]);
 }
 
-export function cachedBlockRichTextValue(value: BlockRichText): CachedState {
+export function cachedBlockRichTextValue(value: BlockRichText): CachedState<RichBlockMeta> {
     assertBlockRichTextValue(value);
     return cachedState(value.state);
 }
 
-export function materializeBlockRichText<T>(doc: CrdtDocument<T>, path: Path): FormattedBlock[] {
+export function materializeBlockRichText<T>(
+    doc: CrdtDocument<T>,
+    path: Path,
+): Array<FormattedBlock<RichBlockMeta>> {
     const crdtPath = crdtPathForExisting(doc, path);
     const meta = getMetaAtPath(doc.meta, crdtPath);
     if (
@@ -95,7 +99,7 @@ export function materializeBlockRichText<T>(doc: CrdtDocument<T>, path: Path): F
     return materializeBlockRichTextValue(value);
 }
 
-export function materializeBlockRichTextValue(value: BlockRichText): FormattedBlock[] {
+export function materializeBlockRichTextValue(value: BlockRichText): Array<FormattedBlock<RichBlockMeta>> {
     return materializeFormattedBlocks(cachedBlockRichTextValue(value));
 }
 
@@ -119,7 +123,7 @@ export function isBlockRichTextValue(value: unknown): value is BlockRichText {
     );
 }
 
-function valueHasBlockState(value: unknown): value is BlockRichTextState {
+function valueHasBlockState(value: unknown): value is BlockRichTextState<RichBlockMeta> {
     return Boolean(
         value &&
         typeof value === 'object' &&

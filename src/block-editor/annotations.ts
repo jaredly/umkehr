@@ -17,14 +17,14 @@ import {
     type FormattedRun,
     type Op,
     type VisibleMarkRange,
-} from 'umkehr/block-crdt';
-import type {CachedState, JsonValue, Lamport, Mark} from 'umkehr/block-crdt/types';
-import {lamportToString, parseLamportString} from 'umkehr/block-crdt/utils';
+} from '../block-crdt/index.js';
+import type {CachedState, JsonValue, Lamport, Mark} from '../block-crdt/types.js';
+import {lamportToString, parseLamportString} from '../block-crdt/utils.js';
 import {paragraphMeta, type RichBlockMeta} from './blockMeta';
 import {caret, focusPoint, normalizeSelectionSegments, segmentText, type EditorSelection} from './selectionModel';
 import type {CommandContext, CommandResult} from './blockCommands';
 import {markdownShortcutPrefix} from './markdownShortcuts';
-import {markRangeOp} from 'umkehr/block-crdt';
+import {markRangeOp} from '../block-crdt/index.js';
 import {
     ANNOTATION_MARK,
     annotationMarkBehavior,

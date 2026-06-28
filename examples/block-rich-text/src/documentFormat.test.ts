@@ -6,8 +6,8 @@ import {
     visibleBlockChildren,
 } from 'umkehr/block-crdt';
 import {lamportToString} from 'umkehr/block-crdt/utils';
-import type {CommandContext} from './blockCommands';
-import {annotationVirtualParents} from './annotations';
+import type {CommandContext} from 'umkehr/block-editor';
+import {annotationVirtualParents} from 'umkehr/block-editor';
 import {
     DocumentFormatError,
     exportDocument,

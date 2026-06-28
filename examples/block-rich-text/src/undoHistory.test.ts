@@ -1,7 +1,7 @@
 import {describe, expect, it} from 'vitest';
 import {blockContents, materializeFormattedBlocks, rootBlockIds, visibleBlockChildren} from 'umkehr/block-crdt';
 import {makeCommandContext, nextReplicaTs, type EditorId, type Replica} from './blockEditorRuntime';
-import {createTable} from './blockCommands';
+import {createTable} from 'umkehr/block-editor';
 import {
     appendHistoryAction,
     initialHistoryState,
@@ -16,12 +16,12 @@ import {
     setBlockTypeEverywhere,
     splitBlockEverywhere,
     type MultiCommandResult,
-} from './multiSelectionCommands';
+} from 'umkehr/block-editor';
 import {deriveUndoState, createRedoAction, createUndoAction} from './undoHistory';
-import {annotationVirtualParents, createAnnotation, renderedAnnotations} from './annotations';
-import {primarySelection, replacePrimarySelection, resolveSelectionSet, singleRetainedSelectionSet} from './selectionSet';
-import {caret} from './selectionModel';
-import type {RichClipboardPayload} from './clipboard';
+import {annotationVirtualParents, createAnnotation, renderedAnnotations} from 'umkehr/block-editor';
+import {primarySelection, replacePrimarySelection, resolveSelectionSet, singleRetainedSelectionSet} from 'umkehr/block-editor';
+import {caret} from 'umkehr/block-editor';
+import type {RichClipboardPayload} from 'umkehr/block-editor';
 
 const appendEdit = (
     history: HistoryState,

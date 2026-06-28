@@ -8,9 +8,9 @@ import {
     pastePlainText,
     splitBlock,
     type CommandContext,
-} from './blockCommands';
-import {caret} from './selectionModel';
-import {resolveSelection, retainSelection} from './retainedSelection';
+} from 'umkehr/block-editor';
+import {caret} from 'umkehr/block-editor';
+import {resolveSelection, retainSelection} from 'umkehr/block-editor';
 
 const ctx = (actor = 'left'): CommandContext => {
     let i = 1;

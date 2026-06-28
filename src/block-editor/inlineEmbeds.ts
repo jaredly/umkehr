@@ -1,5 +1,5 @@
-import type {FormattedRun, FormattedMarkValue} from 'umkehr/block-crdt';
-import type {JsonValue} from 'umkehr/block-crdt/types';
+import type {FormattedRun, FormattedMarkValue} from '../block-crdt/index.js';
+import type {JsonValue} from '../block-crdt/types.js';
 
 export const INLINE_EMBED_MARK = 'embed';
 export const INLINE_EMBED_TEXT = '\uFFFC';

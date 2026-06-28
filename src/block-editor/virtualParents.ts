@@ -1,5 +1,5 @@
-import type {VirtualBlockParentConfig} from 'umkehr/block-crdt';
-import type {CachedState, Lamport} from 'umkehr/block-crdt/types';
+import type {VirtualBlockParentConfig} from '../block-crdt/index.js';
+import type {CachedState, Lamport} from '../block-crdt/types.js';
 import {tableVirtualParentsForBlock, type RichBlockMeta} from './blockMeta';
 
 export const ANNOTATION_MARK = 'annotation';

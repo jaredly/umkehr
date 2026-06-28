@@ -1,6 +1,6 @@
-import type {HLC, Lamport} from 'umkehr/block-crdt/types';
-import type {BlockStyle} from 'umkehr/block-crdt/types';
-import type {Block} from 'umkehr/block-crdt/types';
+import type {HLC, Lamport} from '../block-crdt/types.js';
+import type {BlockStyle} from '../block-crdt/types.js';
+import type {Block} from '../block-crdt/types.js';
 
 export type ImagePresentationSize = 'small' | 'medium' | 'large' | 'original';
 

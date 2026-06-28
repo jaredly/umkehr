@@ -5,9 +5,9 @@ import {
     deleteRangeOps,
     isDeleted,
     orderedCharIdsForBlock,
-} from 'umkehr/block-crdt';
-import type {CachedState, Op} from 'umkehr/block-crdt/types';
-import {lamportToString, parseLamportString} from 'umkehr/block-crdt/utils';
+} from '../block-crdt/index.js';
+import type {CachedState, Op} from '../block-crdt/types.js';
+import {lamportToString, parseLamportString} from '../block-crdt/utils.js';
 
 import {annotationVirtualParents} from './annotations';
 import type {RichBlockMeta} from './blockMeta';

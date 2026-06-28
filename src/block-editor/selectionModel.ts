@@ -1,5 +1,5 @@
-import type {CachedState} from 'umkehr/block-crdt/types';
-import {isDeleted, orderedCharIdsForBlock, visibleBlockOutline} from 'umkehr/block-crdt';
+import type {CachedState} from '../block-crdt/types.js';
+import {isDeleted, orderedCharIdsForBlock, visibleBlockOutline} from '../block-crdt/index.js';
 import {isEditableBlock} from './blockMeta';
 import type {RichBlockMeta} from './blockMeta';
 import {richTextVirtualParents} from './virtualParents';

@@ -1,5 +1,5 @@
-import type {BlockStylePatch, CachedState, JsonValue, Lamport} from 'umkehr/block-crdt/types';
-import * as hlc from '../../../src/crdt/hlc';
+import type {BlockStylePatch, CachedState, JsonValue, Lamport} from '../block-crdt/types.js';
+import * as hlc from '../crdt/hlc.js';
 import {
     applyMany,
     blockContents,
@@ -11,8 +11,8 @@ import {
     setBlockStyleOps,
     visibleBlockChildren,
     type Op,
-} from 'umkehr/block-crdt';
-import {lamportToString, parseLamportString} from 'umkehr/block-crdt/utils';
+} from '../block-crdt/index.js';
+import {lamportToString, parseLamportString} from '../block-crdt/utils.js';
 import type {ImagePresentationSize, RichBlockDocumentStyle, RichBlockMeta, RichBlockStyleAttribute} from './blockMeta';
 import {
     deleteBackward,

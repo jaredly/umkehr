@@ -2,8 +2,8 @@ import {
     isDeleted,
     resolvePoint as resolveBlockPoint,
     retainPoint as retainBlockPoint,
-} from 'umkehr/block-crdt';
-import type {CachedState} from 'umkehr/block-crdt/types';
+} from '../block-crdt/index.js';
+import type {CachedState} from '../block-crdt/types.js';
 import type {RichBlockMeta} from './blockMeta';
 import {
     caret,

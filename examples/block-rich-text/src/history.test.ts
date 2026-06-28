@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest';
 import {materializeFormattedBlocks, rootBlockIds} from 'umkehr/block-crdt';
-import {indentBlock, moveBlock, setBlockMeta} from './blockCommands';
+import {indentBlock, moveBlock, setBlockMeta} from 'umkehr/block-editor';
 import {makeCommandContext, nextReplicaTs, type EditorId, type Replica} from './blockEditorRuntime';
 import * as hlc from '../../../src/crdt/hlc';
 import {
@@ -23,10 +23,10 @@ import {
     splitBlockEverywhere,
     updateBlockMetaEverywhere,
     type MultiCommandResult,
-} from './multiSelectionCommands';
-import {caret} from './selectionModel';
-import {replacePrimarySelection} from './selectionSet';
-import type {PollVote} from './blockMeta';
+} from 'umkehr/block-editor';
+import {caret} from 'umkehr/block-editor';
+import {replacePrimarySelection} from 'umkehr/block-editor';
+import type {PollVote} from 'umkehr/block-editor';
 
 const appendLocal = (
     history: HistoryState,

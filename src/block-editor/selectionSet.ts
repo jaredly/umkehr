@@ -1,5 +1,5 @@
-import {orderedCharIdsForBlock} from 'umkehr/block-crdt';
-import type {CachedState} from 'umkehr/block-crdt/types';
+import {orderedCharIdsForBlock} from '../block-crdt/index.js';
+import type {CachedState} from '../block-crdt/types.js';
 import type {RichBlockMeta} from './blockMeta';
 import {
     firstPointForSelection,

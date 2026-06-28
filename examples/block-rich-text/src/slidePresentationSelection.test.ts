@@ -1,10 +1,10 @@
 import {describe, expect, it} from 'vitest';
 import {rootBlockIds} from 'umkehr/block-crdt';
-import {addSlide, convertBlockToSlideDeck, slideChildren, type CommandContext} from './blockCommands';
+import {addSlide, convertBlockToSlideDeck, slideChildren, type CommandContext} from 'umkehr/block-editor';
 import {createDemoState} from './blockEditorRuntime';
-import {caret} from './selectionModel';
-import {primarySelection, resolveSelectionSet, singleRetainedSelectionSet} from './selectionSet';
-import {constrainSelectionToFullscreenSlide, type SlidePresentationSelectionUi} from './slidePresentationSelection';
+import {caret} from 'umkehr/block-editor';
+import {primarySelection, resolveSelectionSet, singleRetainedSelectionSet} from 'umkehr/block-editor';
+import {constrainSelectionToFullscreenSlide, type SlidePresentationSelectionUi} from 'umkehr/block-editor';
 
 const ctx = (actor = 'left'): CommandContext => {
     let i = 1;

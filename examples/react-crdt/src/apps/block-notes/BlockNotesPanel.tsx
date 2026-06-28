@@ -1,7 +1,30 @@
+import {useLayoutEffect, useMemo, useRef, useState} from 'react';
 import {useValue} from 'umkehr/react';
-import {blockRichTextRootBlockId, materializeBlockRichTextValue} from 'umkehr/block-richtext';
+import {hlc} from 'umkehr/crdt';
+import {cachedBlockRichTextValue} from 'umkehr/block-richtext';
+import {
+    BlockRichTextEditor,
+    createAttachmentFromFile,
+    deserializeAttachments,
+    initialRetainedSelectionSet,
+    revokeAttachments,
+    type AttachmentStore,
+    type BlockEditorReplica,
+    type ImageAttachment,
+    type MultiCommandResult,
+    type RetainedSelectionSet,
+    type SerializedImageAttachment,
+} from 'umkehr/block-editor';
 import type {AppEditorContext, GridSlot} from '../../lib/crdtApp';
-import type {BlockNotesBuilderExtensions, BlockNotesState} from './model';
+import {
+    attachmentStoreFromBlockNotesArtifacts,
+    clearSelectionMessage,
+    saveBlockNotesAttachments,
+    selectionMessage,
+    type BlockNotesBuilderExtensions,
+    type BlockNotesEphemeralData,
+    type BlockNotesState,
+} from './model';
 
 export function BlockNotesPanel({
     editor,
@@ -10,18 +33,83 @@ export function BlockNotesPanel({
     gridSlot = 'full',
     readOnly = false,
 }: {
-    editor: AppEditorContext<BlockNotesState, 'type', never, BlockNotesBuilderExtensions>;
+    editor: AppEditorContext<
+        BlockNotesState,
+        'type',
+        BlockNotesEphemeralData,
+        BlockNotesBuilderExtensions
+    >;
     actor: string;
     title: string;
     gridSlot?: GridSlot | 'full';
     readOnly?: boolean;
 }) {
     const body = useValue(editor.$.body);
-    const blocks = materializeBlockRichTextValue(body);
-    const firstBlock = blocks[0];
-    const rootBlockId = firstBlock?.id ?? blockRichTextRootBlockId();
-    const firstText = firstBlock?.runs.map((run) => run.text).join('') ?? '';
-    const text = blocks.map((block) => block.runs.map((run) => run.text).join('')).join('\n');
+    const state = useMemo(() => cachedBlockRichTextValue(body), [body]);
+    const [selection, setSelection] = useState<RetainedSelectionSet>(() =>
+        initialRetainedSelectionSet(state),
+    );
+    const [attachments, setAttachments] = useState<AttachmentStore>(() =>
+        attachmentStoreFromBlockNotesArtifacts(),
+    );
+    const attachmentsRef = useRef(attachments);
+    const clockRef = useRef(hlc.init(actor, 0));
+    const editorId = gridSlot === 'right' ? 'right' : 'left';
+
+    useLayoutEffect(() => {
+        attachmentsRef.current = attachments;
+    }, [attachments]);
+
+    useLayoutEffect(
+        () => () => {
+            revokeAttachments(attachmentsRef.current);
+            editor.publishEphemeral([clearSelectionMessage(actor)]);
+        },
+        [actor, editor],
+    );
+
+    const createImageAttachment = async (file: File): Promise<ImageAttachment> => {
+        const attachment = await createAttachmentFromFile(file);
+        setAttachments((current) => {
+            const next = new Map(current);
+            next.set(attachment.id, attachment);
+            saveBlockNotesAttachments(next);
+            return next;
+        });
+        return attachment;
+    };
+
+    const mergeSerializedAttachments = (serialized: SerializedImageAttachment[]) => {
+        const pastedAttachments = deserializeAttachments(serialized);
+        setAttachments((current) => {
+            const next = new Map(current);
+            for (const [id, attachment] of pastedAttachments) next.set(id, attachment);
+            saveBlockNotesAttachments(next);
+            return next;
+        });
+    };
+
+    const replicaForCommand = (): BlockEditorReplica => ({
+        id: editorId,
+        actor,
+        state,
+        selection,
+        online: !readOnly,
+        queue: [],
+        clock: clockRef.current,
+    });
+
+    const runCommand = (command: (replica: BlockEditorReplica) => MultiCommandResult) => {
+        if (readOnly) return;
+        const replica = replicaForCommand();
+        const result = command(replica);
+        clockRef.current = replica.clock;
+        setSelection(result.selection);
+        editor.publishEphemeral([selectionMessage({actor, selection: result.selection})]);
+        if (!result.ops.length) return;
+        editor.$.body.$block.ops({ops: result.ops});
+        editor.$.updatedAt(new Date().toISOString());
+    };
 
     return (
         <section
@@ -32,31 +120,27 @@ export function BlockNotesPanel({
         >
             <header>
                 <h1>{title}</h1>
-                <p>{blocks.length} blocks</p>
             </header>
-            <pre data-testid="block-notes-text">{text}</pre>
-            <div>
-                <button
-                    type="button"
-                    disabled={readOnly}
-                    onClick={() => {
-                        editor.$.body.$block.insertText({
-                            block: rootBlockId,
-                            offset: Array.from(firstText).length,
-                            text: firstText ? ` ${actor}` : actor,
-                        });
-                        editor.$.updatedAt(new Date().toISOString());
-                    }}
-                >
-                    Insert actor
-                </button>
-                <button type="button" disabled={!editor.canUndo()} onClick={() => editor.undo()}>
-                    Undo
-                </button>
-                <button type="button" disabled={!editor.canRedo()} onClick={() => editor.redo()}>
-                    Redo
-                </button>
-            </div>
+            <BlockRichTextEditor
+                replica={replicaForCommand()}
+                attachments={attachments}
+                resetSignal={0}
+                undoState={{
+                    canUndo: editor.canUndo(),
+                    canRedo: editor.canRedo(),
+                }}
+                undoStatus=""
+                rainbowLamportIds={false}
+                userId={actor}
+                onUserIdChange={() => {}}
+                onCommand={runCommand}
+                onUndo={() => editor.undo()}
+                onRedo={() => editor.redo()}
+                onToggleOnline={() => {}}
+                onCreateImageAttachment={createImageAttachment}
+                onMergeSerializedAttachments={mergeSerializedAttachments}
+                onKeystroke={() => {}}
+            />
         </section>
     );
 }

@@ -1,5 +1,5 @@
 import type {DemoState, EditorId} from './blockEditorRuntime';
-import type {RetainedSelectionSet} from './selectionSet';
+import type {RetainedSelectionSet} from 'umkehr/block-editor';
 import type {HistoryAction, HistoryKeystroke, HistoryState} from './history';
 import {deriveUndoState} from './undoHistory';
 

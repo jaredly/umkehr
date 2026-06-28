@@ -1,14 +1,14 @@
 import {describe, expect, it} from 'vitest';
 import {applyMany, blockContents, insertBlockOps, materializeFormattedBlocks, rootBlockIds, type Op} from 'umkehr/block-crdt';
-import {insertText, pastePlainText, splitBlock, toggleMark} from './blockCommands';
-import {deriveActiveInlineMarks} from './inlineRunRendering';
+import {insertText, pastePlainText, splitBlock, toggleMark} from 'umkehr/block-editor';
+import {deriveActiveInlineMarks} from 'umkehr/block-editor';
 import {applyLocalChange, createDemoState, makeCommandContext, type DemoState} from './blockEditorRuntime';
-import {annotationVirtualParents} from './annotations';
-import {paragraphMeta, type RichBlockMeta} from './blockMeta';
+import {annotationVirtualParents} from 'umkehr/block-editor';
+import {paragraphMeta, type RichBlockMeta} from 'umkehr/block-editor';
 import {lamportToString} from 'umkehr/block-crdt/utils';
-import {replacePrimarySelection} from './selectionSet';
-import {caret, type EditorSelection} from './selectionModel';
-import {insertTextWithMarkdownShortcutsEverywhere, splitBlockEverywhere} from './multiSelectionCommands';
+import {replacePrimarySelection} from 'umkehr/block-editor';
+import {caret, type EditorSelection} from 'umkehr/block-editor';
+import {insertTextWithMarkdownShortcutsEverywhere, splitBlockEverywhere} from 'umkehr/block-editor';
 
 const typedText = (length: number): string =>
     Array.from({length}, (_, index) => String.fromCharCode(97 + (index % 26))).join('');

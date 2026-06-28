@@ -1,5 +1,6 @@
+/// <reference path="./optionalPreviewModules.d.ts" />
+
 import {useEffect, useRef, useState, type ReactElement} from 'react';
-import mermaid from 'mermaid';
 
 import type {
     CodePreviewKind,
@@ -32,11 +33,19 @@ type CodePreviewRenderer = {
 };
 
 let mermaidInitialized = false;
+let mermaidLoadPromise: Promise<typeof import('mermaid')> | null = null;
 
-const ensureMermaidInitialized = () => {
-    if (mermaidInitialized) return;
-    mermaid.initialize({startOnLoad: false, securityLevel: 'strict'});
+const loadMermaid = () => {
+    mermaidLoadPromise ??= import('mermaid');
+    return mermaidLoadPromise;
+};
+
+const ensureMermaidInitialized = async () => {
+    const mermaid = await loadMermaid();
+    if (mermaidInitialized) return mermaid.default;
+    mermaid.default.initialize({startOnLoad: false, securityLevel: 'strict'});
     mermaidInitialized = true;
+    return mermaid.default;
 };
 
 const codePreviewRenderers: Record<CodePreviewKind, CodePreviewRenderer> = {
@@ -46,7 +55,7 @@ const codePreviewRenderers: Record<CodePreviewKind, CodePreviewRenderer> = {
         loadingLabel: 'Rendering diagram...',
         errorLabel: 'Unable to render Mermaid diagram.',
         async render(source, renderId) {
-            ensureMermaidInitialized();
+            const mermaid = await ensureMermaidInitialized();
             const result = await mermaid.render(renderId, source);
             return {html: result.svg};
         },
@@ -235,7 +244,11 @@ type PreviewFetchStatus =
     | {type: 'loading'; url: string}
     | {type: 'failed'; url: string; reason: string};
 
-const PREVIEW_CORS_PROXY = import.meta.env.VITE_PREVIEW_CORS_PROXY?.trim() || undefined;
+const PREVIEW_CORS_PROXY = viteEnv().VITE_PREVIEW_CORS_PROXY?.trim() || undefined;
+
+function viteEnv(): Record<string, string | undefined> {
+    return (import.meta as ImportMeta & {env?: Record<string, string | undefined>}).env ?? {};
+}
 
 export function PreviewBlockCard({
     meta,

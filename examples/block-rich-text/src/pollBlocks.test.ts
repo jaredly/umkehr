@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import type {PollMeta} from './blockMeta';
+import type {PollMeta} from 'umkehr/block-editor';
 import {
     choiceResults,
     isPollMeta,
@@ -8,7 +8,7 @@ import {
     pollMetaWithChoiceMode,
     singleChoiceResults,
     votedOptionIds,
-} from './pollBlocks';
+} from 'umkehr/block-editor';
 
 describe('pollBlocks', () => {
     it('merges votes by user timestamp even when incoming poll meta is stale', () => {

@@ -6,9 +6,9 @@ import {
     orderedCharIdsForBlock,
     type FormattedBlock,
     type FormattedRun,
-} from 'umkehr/block-crdt';
-import {lamportToString} from 'umkehr/block-crdt/utils';
-import type {Lamport} from 'umkehr/block-crdt/types';
+} from '../block-crdt/index.js';
+import {lamportToString} from '../block-crdt/utils.js';
+import type {Lamport} from '../block-crdt/types.js';
 import {annotationBodyBlockIds} from './annotations';
 import {LINK_MARK, MATH_MARK, mathDisplayModeFromMarkValue} from './inlineMarks';
 import {
@@ -60,7 +60,7 @@ import {
     resolveSelectionSet,
     type RetainedSelectionSet,
 } from './selectionSet';
-import type {CachedState} from 'umkehr/block-crdt/types';
+import type {CachedState} from '../block-crdt/types.js';
 
 export const BLOCK_RICH_TEXT_MIME = 'application/x-umkehr-block-rich-text+json';
 const HTML_PAYLOAD_PREFIX = 'umkehr-block-rich-text:';

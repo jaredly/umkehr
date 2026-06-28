@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {highlightCode, normalizeCodeLanguage} from './syntaxHighlight';
+import {highlightCode, normalizeCodeLanguage} from 'umkehr/block-editor';
 
 describe('syntax highlighting', () => {
     it('normalizes common language aliases', () => {

@@ -1,4 +1,4 @@
-import type {FormattedBlock} from 'umkehr/block-crdt';
+import type {FormattedBlock} from '../block-crdt/index.js';
 import type {RichBlockMeta} from './blockMeta';
 import {segmentText, type SelectionSegment} from './selectionModel';
 import {normalizeCodeLanguage} from './syntaxHighlight';
