@@ -10,6 +10,7 @@ import {
     selectionMessage,
     wordsearchSelectionKind,
     type WordsearchEphemeralData,
+    type WordsearchSelectionEvent,
 } from './model';
 import type {WordsearchState} from './schema';
 import {
@@ -64,12 +65,18 @@ export function WordsearchPanel({
                 : []),
             ...remoteSelections
                 .filter((record) => record.message.actor !== actor)
-                .map((record) => ({
-                    id: record.message.id,
-                    cells: record.message.data.cells,
-                    color: colorForUserId(record.message.actor),
-                    kind: 'remote' as const,
-                })),
+                .flatMap((record) => {
+                    const data = record.message.data;
+                    if (!isSelectionEvent(data)) return [];
+                    return [
+                        {
+                            id: record.message.id,
+                            cells: data.cells,
+                            color: colorForUserId(record.message.actor),
+                            kind: 'remote' as const,
+                        },
+                    ];
+                }),
         ],
         [activeCells, actor, found, puzzle, remoteSelections],
     );
@@ -271,6 +278,10 @@ function releasePointerCapture(event: PointerEvent<HTMLElement>) {
 
 function sameGridPoint(a: GridPoint, b: GridPoint) {
     return a.x === b.x && a.y === b.y;
+}
+
+function isSelectionEvent(data: WordsearchEphemeralData): data is WordsearchSelectionEvent {
+    return data.type === 'selection';
 }
 
 function WordHighlight({highlight}: {highlight: Highlight}) {

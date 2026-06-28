@@ -186,6 +186,129 @@ button:disabled:hover {
     font-weight: 700;
 }
 
+.wordsearchChat {
+    width: min(600px, 100%);
+    margin: -2px auto 12px;
+    border: 1px solid #d4dde7;
+    border-radius: 8px;
+    padding: 10px;
+    background: rgb(253 254 254 / 96%);
+    box-shadow: 0 10px 24px rgb(25 42 62 / 7%);
+    display: grid;
+    gap: 10px;
+}
+
+.wordsearchChat.disabled {
+    background: rgb(248 250 252 / 92%);
+}
+
+.wordsearchChatLog {
+    max-height: 150px;
+    overflow: auto;
+    display: grid;
+    gap: 8px;
+    overscroll-behavior: contain;
+}
+
+.wordsearchChatMessage {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: 20px minmax(0, 1fr);
+    gap: 8px;
+    align-items: start;
+}
+
+.wordsearchChatMessage.local {
+    opacity: 0.96;
+}
+
+.wordsearchChatAvatar {
+    --wordsearch-chat-color: #0f766e;
+    width: 20px;
+    height: 20px;
+    border: 2px solid color-mix(in srgb, var(--wordsearch-chat-color) 72%, #fff);
+    border-radius: 999px;
+    background: var(--wordsearch-chat-color);
+    box-shadow: 0 1px 6px color-mix(in srgb, var(--wordsearch-chat-color) 26%, transparent);
+}
+
+.wordsearchChatMessage strong {
+    display: block;
+    color: #334155;
+    font-size: 12px;
+    line-height: 1.2;
+}
+
+.wordsearchChatMessage p,
+.wordsearchChatSystem p,
+.wordsearchChatEmpty {
+    margin: 2px 0 0;
+    color: #17202a;
+    font-size: 13px;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+
+.wordsearchChatSystem {
+    border-left: 3px solid #cbd5e1;
+    padding-left: 8px;
+}
+
+.wordsearchChatSystem p {
+    margin: 0;
+    color: #64748b;
+    font-weight: 700;
+}
+
+.wordsearchChatEmpty {
+    margin: 0;
+    color: #64748b;
+}
+
+.wordsearchChatComposer {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: center;
+}
+
+.wordsearchChatSelf {
+    max-width: 120px;
+    min-width: 0;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    padding: 7px 9px;
+    color: #334155;
+    background: #f8fafc;
+    font-size: 12px;
+    font-weight: 800;
+    line-height: 1.2;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.wordsearchChatComposer input {
+    min-width: 0;
+    height: 38px;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    padding: 0 10px;
+    color: #17202a;
+    background: #fff;
+}
+
+.wordsearchChatComposer input:disabled {
+    color: #64748b;
+    background: #edf2f7;
+    cursor: not-allowed;
+}
+
+.wordsearchChatComposer button {
+    height: 38px;
+    white-space: nowrap;
+}
+
 .demoTopBar {
     position: sticky;
     top: 0;
@@ -2272,7 +2395,7 @@ p {
         min-height: 0;
         padding: 6px 0;
         gap: 8px;
-        grid-template-rows: auto minmax(0, 1fr);
+        grid-template-rows: auto minmax(0, 1fr) auto;
         align-items: stretch;
         overflow: hidden;
     }
@@ -2376,8 +2499,8 @@ p {
     }
 
     .wordsearchBoard {
-        width: min(100%, 440px, 48vh);
-        width: min(100%, 440px, 48dvh);
+        width: min(100%, 440px, 38vh);
+        width: min(100%, 440px, 38dvh);
         gap: 3px;
     }
 
@@ -2409,6 +2532,21 @@ p {
     .wordsearchMissing {
         font-size: 12px;
         line-height: 1.2;
+    }
+
+    .wordsearchChat {
+        margin: 0 auto;
+        padding: 8px;
+        gap: 8px;
+    }
+
+    .wordsearchChatLog {
+        max-height: 58px;
+    }
+
+    .wordsearchChatSelf {
+        max-width: 96px;
+        padding: 7px 8px;
     }
 
     .waitingPanel {
@@ -2467,6 +2605,15 @@ p {
         gap: 5px;
     }
 
+    .wordsearchChat {
+        padding: 6px;
+    }
+
+    .wordsearchChatSelf {
+        max-width: 82px;
+        padding: 7px 6px;
+    }
+
     .wordsearchHeader h1 {
         font-size: 16px;
     }
@@ -2476,8 +2623,8 @@ p {
     }
 
     .wordsearchBoard {
-        width: min(100%, 440px, 47vh);
-        width: min(100%, 440px, 47dvh);
+        width: min(100%, 440px, 35vh);
+        width: min(100%, 440px, 35dvh);
         gap: 2px;
     }
 

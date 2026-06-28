@@ -27,9 +27,17 @@ export type WordsearchSelectionEvent = {
     cells: GridPoint[];
 };
 
-export type WordsearchEphemeralData = WordsearchSelectionEvent;
+export type WordsearchChatEvent = {
+    type: 'chat';
+    text: string;
+    sentAt: string;
+};
+
+export type WordsearchEphemeralData = WordsearchSelectionEvent | WordsearchChatEvent;
 
 export const wordsearchSelectionKind = 'wordsearch:selection';
+export const wordsearchChatKind = 'wordsearch:chat';
+export const WORDSEARCH_CHAT_MAX_LENGTH = 280;
 
 export const [ProvideWordsearchHistory, useWordsearchHistory] = createHistoryContext<
     WordsearchState,
@@ -81,11 +89,40 @@ export function selectionMessageId(actor: string) {
     return `${wordsearchSelectionKind}:${actor}`;
 }
 
+export function chatMessage({
+    actor,
+    id,
+    text,
+    sentAt,
+}: {
+    actor: string;
+    id: string;
+    text: string;
+    sentAt: string;
+}) {
+    return {
+        kind: wordsearchChatKind,
+        id,
+        actor,
+        path: chatRootPath(),
+        data: {type: 'chat' as const, text, sentAt},
+    };
+}
+
 export function foundRootPath() {
     return [{type: 'key' as const, key: 'found'}];
 }
 
-function isWordsearchEphemeralData(input: unknown): input is WordsearchEphemeralData {
+export function chatRootPath() {
+    return [{type: 'key' as const, key: 'chat'}];
+}
+
+export function isWordsearchEphemeralData(input: unknown): input is WordsearchEphemeralData {
+    if (isWordsearchChatEvent(input)) return true;
+    return isWordsearchSelectionEvent(input);
+}
+
+function isWordsearchSelectionEvent(input: unknown): input is WordsearchSelectionEvent {
     if (!isRecord(input)) return false;
     return (
         input.type === 'selection' &&
@@ -93,6 +130,18 @@ function isWordsearchEphemeralData(input: unknown): input is WordsearchEphemeral
         isGridPoint(input.end) &&
         Array.isArray(input.cells) &&
         input.cells.every(isGridPoint)
+    );
+}
+
+function isWordsearchChatEvent(input: unknown): input is WordsearchChatEvent {
+    return (
+        isRecord(input) &&
+        input.type === 'chat' &&
+        typeof input.text === 'string' &&
+        input.text.trim().length > 0 &&
+        input.text.length <= WORDSEARCH_CHAT_MAX_LENGTH &&
+        typeof input.sentAt === 'string' &&
+        input.sentAt.length > 0
     );
 }
 

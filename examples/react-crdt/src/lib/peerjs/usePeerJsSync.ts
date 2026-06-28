@@ -18,6 +18,7 @@ type ConnectionRecord<TState> = {
     conn: DataConnection;
     actor?: string;
     role?: PeerRole;
+    open: boolean;
     queued: PeerMessage<TState>[];
     gotSnapshot: boolean;
     error?: string;
@@ -67,11 +68,11 @@ export function usePeerJsSync<TState>({
 
     const publishConnections = useCallback(() => {
         connectionsStore.setSnapshot(
-            [...connectionsRef.current.values()].map(({conn, actor, role, queued, error}) => ({
+            [...connectionsRef.current.values()].map(({conn, actor, role, open, queued, error}) => ({
                 peerId: conn.peer,
                 actor,
                 role,
-                open: conn.open,
+                open: open && conn.open,
                 queuedOutgoing: queued.length,
                 error,
             })),
@@ -99,7 +100,7 @@ export function usePeerJsSync<TState>({
                 : [...connectionsRef.current.values()];
 
             for (const record of records) {
-                if (!record.conn.open || !record.queued.length) continue;
+                if (!record.open || !record.conn.open || !record.queued.length) continue;
                 const queued = record.queued;
                 record.queued = [];
                 for (const message of queued) record.conn.send(message);
@@ -111,7 +112,7 @@ export function usePeerJsSync<TState>({
 
     const sendOrQueue = useCallback(
         (record: ConnectionRecord<TState>, message: PeerMessage<TState>) => {
-            if (record.conn.open) {
+            if (record.open && record.conn.open) {
                 record.conn.send(message);
             } else {
                 record.queued.push(message);
@@ -278,22 +279,39 @@ export function usePeerJsSync<TState>({
                 existing ??
                 ({
                     conn,
+                    open: conn.open,
                     queued: [],
                     gotSnapshot: roleRef.current === 'host',
                 } satisfies ConnectionRecord<TState>);
 
             record.conn = conn;
+            record.open = conn.open;
             record.error = undefined;
             connectionsRef.current.set(conn.peer, record);
 
             conn.on('open', () => {
+                record.open = true;
                 sendHello(record);
                 if (roleRef.current === 'host') sendSnapshot(record);
                 if (record.gotSnapshot || roleRef.current === 'host') flushQueued(conn.peer);
                 publishConnections();
             });
             conn.on('data', (data) => handleMessage(conn, data));
-            conn.on('close', () => publishConnections());
+            conn.on('close', () => {
+                record.open = false;
+                publishConnections();
+            });
+            conn.on('iceStateChanged', (state) => {
+                if (state === 'disconnected' || state === 'failed' || state === 'closed') {
+                    record.open = false;
+                    publishConnections();
+                    return;
+                }
+                if (state === 'connected' || state === 'completed') {
+                    record.open = conn.open;
+                    publishConnections();
+                }
+            });
             conn.on('error', (error) => {
                 record.error = error instanceof Error ? error.message : String(error);
                 publishConnections();
@@ -391,7 +409,11 @@ export function usePeerJsSync<TState>({
 
     const disconnect = useCallback(
         (peerId: string) => {
-            connectionsRef.current.get(peerId)?.conn.close();
+            const record = connectionsRef.current.get(peerId);
+            if (record) {
+                record.open = false;
+                record.conn.close();
+            }
             publishConnections();
         },
         [publishConnections],

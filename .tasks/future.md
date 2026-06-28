@@ -9,6 +9,8 @@
 - could do the jigsaw puzzle too
 
 - make the peerjs wordsearch exportable independently.
+- yayyy
+- the playable wordsearch ... needs realtime chat probably. ephemeral tho
 
 
 - look at examples/block-rich-text. Are there ways we should change block-crdt to make the editor implementation simpler/more straightforward? Are there any utilities that should be moved into (or out of) the library?

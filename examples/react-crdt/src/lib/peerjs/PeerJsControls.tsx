@@ -23,6 +23,7 @@ export function PeerJsControls<TState>({
     const [copied, setCopied] = useState(false);
     const state = useStore(sync.stateStore);
     const connections = useStore(sync.connectionsStore);
+    const openConnectionCount = connections.filter((connection) => connection.open).length;
     const localPeerId = state.kind === 'ready' || state.kind === 'waiting-for-snapshot' ? state.peerId : '';
     const inviteUrl = role === 'host' && localPeerId ? createInviteUrl(localPeerId, docId) : '';
     const statusText = useMemo(() => {
@@ -35,7 +36,7 @@ export function PeerJsControls<TState>({
         state.kind === 'error'
             ? 'error'
             : state.kind === 'ready'
-              ? connections.some((connection) => connection.open)
+              ? openConnectionCount > 0
                   ? 'connected'
                   : 'ready'
               : state.kind === 'waiting-for-snapshot'
@@ -78,7 +79,7 @@ export function PeerJsControls<TState>({
 
                 <div className="peerStatusLight" title={statusText} aria-label={statusText}>
                     <span className={`statusDot ${statusKind}`} />
-                    <span>{statusLabel(statusKind, connections.length)}</span>
+                    <span>{statusLabel(statusKind, openConnectionCount)}</span>
                 </div>
 
                 {inviteUrl ? (

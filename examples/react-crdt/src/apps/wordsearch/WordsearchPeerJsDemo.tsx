@@ -15,10 +15,11 @@ import {schemaFingerprintHash} from '../../lib/local-first/schemaFingerprint';
 import {PeerJsControls} from '../../lib/peerjs/PeerJsControls';
 import {usePeerJsSync} from '../../lib/peerjs/usePeerJsSync';
 import type {PeerProtocolConfig} from '../../lib/peerjs/protocol';
-import type {PeerJsSync, PeerRole} from '../../lib/peerjs/types';
+import type {PeerConnectionInfo, PeerJsSync, PeerRole} from '../../lib/peerjs/types';
 import {useStore} from '../../lib/store';
 import {wordsearchApp, wordsearchCrdtRuntime} from './WordsearchApp';
 import type {WordsearchState} from './model';
+import {WordsearchChat} from './WordsearchChat';
 
 type HostSession = {
     id: string;
@@ -63,6 +64,10 @@ export function WordsearchPeerJsDemo() {
         onArtifacts: (artifacts) => loadSerializedArtifacts(wordsearchApp.artifacts, artifacts),
         protocol,
     });
+    const syncState = useStore(sync.stateStore);
+    const connections = useStore(sync.connectionsStore);
+    const chatDisabled =
+        syncState.kind !== 'ready' || !connections.some((connection) => connection.open);
 
     useEffect(() => {
         if (role !== 'host' || hostSession) return;
@@ -112,7 +117,12 @@ export function WordsearchPeerJsDemo() {
                     transport={sync.transport}
                     save={saveHostHistory}
                 >
-                    <WordsearchHostPanel actor={actor} sync={sync} />
+                    <WordsearchHostPanel
+                        actor={actor}
+                        sync={sync}
+                        chatDisabled={chatDisabled}
+                        connections={connections}
+                    />
                 </wordsearchCrdtRuntime.Provider>
             ) : role === 'host' ? (
                 <section className="waitingPanel">
@@ -124,6 +134,8 @@ export function WordsearchPeerJsDemo() {
                     sync={sync}
                     setRole={setRole}
                     initialHostPeerId={initialHostPeerId}
+                    chatDisabled={chatDisabled}
+                    connections={connections}
                 />
             )}
         </main>
@@ -133,9 +145,13 @@ export function WordsearchPeerJsDemo() {
 function WordsearchHostPanel({
     actor,
     sync,
+    chatDisabled,
+    connections,
 }: {
     actor: string;
     sync: PeerJsSync<WordsearchState>;
+    chatDisabled: boolean;
+    connections: PeerConnectionInfo[];
 }) {
     const editor = wordsearchCrdtRuntime.useEditorContext();
     const history = editor.useLocalHistory();
@@ -144,11 +160,21 @@ function WordsearchHostPanel({
         sync.setSnapshotDocument(history.doc);
     }, [history.doc, sync]);
 
-    return wordsearchApp.renderPanel({
-        actor,
-        editor,
-        title: `Host ${wordsearchApp.title}`,
-    });
+    return (
+        <>
+            {wordsearchApp.renderPanel({
+                actor,
+                editor,
+                title: `Host ${wordsearchApp.title}`,
+            })}
+            <WordsearchChat
+                editor={editor}
+                actor={actor}
+                disabled={chatDisabled}
+                connections={connections}
+            />
+        </>
+    );
 }
 
 function WordsearchClientDocument({
@@ -156,11 +182,15 @@ function WordsearchClientDocument({
     sync,
     setRole,
     initialHostPeerId,
+    chatDisabled,
+    connections,
 }: {
     actor: string;
     sync: PeerJsSync<WordsearchState>;
     setRole: (role: PeerRole) => void;
     initialHostPeerId: string;
+    chatDisabled: boolean;
+    connections: PeerConnectionInfo[];
 }) {
     const snapshot = useStore(sync.snapshotStore);
     const state = useStore(sync.stateStore);
@@ -222,7 +252,11 @@ function WordsearchClientDocument({
             initial={initial}
             transport={sync.transport}
         >
-            <WordsearchClientPanel actor={actor} />
+            <WordsearchClientPanel
+                actor={actor}
+                chatDisabled={chatDisabled}
+                connections={connections}
+            />
         </wordsearchCrdtRuntime.Provider>
     );
 }
@@ -233,14 +267,32 @@ function friendlyPeerError(message: string) {
     return `${trimmed}. Enter a different host Peer ID, or start a new host on this device.`;
 }
 
-function WordsearchClientPanel({actor}: {actor: string}) {
+function WordsearchClientPanel({
+    actor,
+    chatDisabled,
+    connections,
+}: {
+    actor: string;
+    chatDisabled: boolean;
+    connections: PeerConnectionInfo[];
+}) {
     const editor = wordsearchCrdtRuntime.useEditorContext();
 
-    return wordsearchApp.renderPanel({
-        actor,
-        editor,
-        title: `Client ${wordsearchApp.title}`,
-    });
+    return (
+        <>
+            {wordsearchApp.renderPanel({
+                actor,
+                editor,
+                title: `Client ${wordsearchApp.title}`,
+            })}
+            <WordsearchChat
+                editor={editor}
+                actor={actor}
+                disabled={chatDisabled}
+                connections={connections}
+            />
+        </>
+    );
 }
 
 function PeerInviteConnector({
