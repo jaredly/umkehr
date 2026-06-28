@@ -74,7 +74,7 @@ import {
     type MoveTarget,
     type RetainedInlineMarkSession,
     type TableCellSlotTarget,
-} from './index.js';
+} from './blockCommands.js';
 import {
     annotationVirtualParents,
     ANNOTATION_MARK,
@@ -97,7 +97,7 @@ import {
     toggleAnnotationBodyCodeMark,
     toggleAnnotationBodyMark,
     type AnnotationMarkData,
-} from './index.js';
+} from './annotations.js';
 import {
     codeMetaWithPreviewForLanguage,
     codePreviewKindForLanguage,
@@ -118,7 +118,7 @@ import {
     type RichBlockMeta,
     type SlideDeckFooterMode,
     type SlideTransition,
-} from './index.js';
+} from './blockMeta.js';
 import {
     closestCaretOffsetForHorizontalIntent,
     caretRectForBlockOffset,
@@ -130,7 +130,7 @@ import {
     readSelectionFromDom,
     restoreCaretToDom,
     restoreSelectionToDom,
-} from './index.js';
+} from './domSelection.js';
 import {
     caret,
     editableBlockIds,
@@ -148,8 +148,8 @@ import {
     visibleBlockIds,
     visibleSubtreeBlockIds,
     type EditorSelection,
-} from './index.js';
-import {constrainSelectionToFullscreenSlide} from './index.js';
+} from './selectionModel.js';
+import {constrainSelectionToFullscreenSlide} from './slidePresentationSelection.js';
 import {
     deleteBackwardEverywhere,
     deleteForwardEverywhere,
@@ -177,7 +177,7 @@ import {
     type HorizontalMovementUnit,
     type MultiCommandResult,
     type RetainedInlineMarkSessionMap,
-} from './index.js';
+} from './multiSelectionCommands.js';
 import {
     BLOCK_RICH_TEXT_MIME,
     blockIdFromBlockLinkHref,
@@ -188,8 +188,8 @@ import {
     parseBlockRichTextClipboardPayload,
     serializeSelectionToClipboardPayload,
     type RichClipboardPayload,
-} from './index.js';
-import {useBlockReorder, type DropTarget} from './index.js';
+} from './clipboard.js';
+import {useBlockReorder, type DropTarget} from './useBlockReorder.js';
 import {
     appendSelection,
     blockLevelDecorationsForSelectionSet,
@@ -209,15 +209,15 @@ import {
     type EditorSelectionSet,
     type RetainedSelectionEntry,
     type RetainedSelectionSet,
-} from './index.js';
-import {resolveSelection, retainSelection} from './index.js';
-import {findWordOccurrences, wordAtPoint} from './index.js';
+} from './selectionSet.js';
+import {resolveSelection, retainSelection} from './retainedSelection.js';
+import {findWordOccurrences, wordAtPoint} from './wordOccurrences.js';
 import {
     popoverIdsForTrigger,
     useAnnotationPopoverController,
     type ActivePopover,
     type PopoverPointerTransition,
-} from './index.js';
+} from './useAnnotationPopoverController.js';
 import {
     isLinkLikeText,
     linkHrefForSelectionSegments,
@@ -235,7 +235,7 @@ import {
     textForSelectionSegments,
     type BooleanInlineMark,
     type LinkTargetRange,
-} from './index.js';
+} from './inlineMarks.js';
 import {
     INLINE_EMBED_MARK,
     INLINE_EMBED_TEXT,
@@ -244,10 +244,10 @@ import {
     isInlineEmbedData,
     plainTextForInlineEmbed,
     renderInlineEmbed,
-} from './index.js';
-import {BrowserMathJaxRenderer, type MathRenderer} from './index.js';
-import {highlightIngredientLine, type IngredientHighlightToken} from './index.js';
-import {highlightCode, type SyntaxToken} from './index.js';
+} from './inlineEmbeds.js';
+import {BrowserMathJaxRenderer, type MathRenderer} from './mathRendering.js';
+import {highlightIngredientLine, type IngredientHighlightToken} from './ingredientHighlight.js';
+import {highlightCode, type SyntaxToken} from './syntaxHighlight.js';
 import {
     createAttachmentFromFile,
     deserializeAttachments,
@@ -256,7 +256,7 @@ import {
     type AttachmentStore,
     type ImageAttachment,
     type SerializedImageAttachment,
-} from './index.js';
+} from './attachments.js';
 import type {
     BlockTypeMenuValue,
     CodeHoverPopoverState,
@@ -265,21 +265,21 @@ import type {
     LinkHoverPopoverState,
     LinkPopoverState,
     PendingInlineMarks,
-} from './index.js';
-import {Toolbar} from './index.js';
+} from './blockEditorTypes.js';
+import {Toolbar} from './Toolbar.js';
 import {
     CodeFloatingPopover,
     CodeHoverPopover,
     DateEmbedFloatingPopover,
     LinkFloatingPopover,
     LinkHoverPopover,
-} from './index.js';
-import {deriveActiveInlineMarks} from './index.js';
+} from './floatingPopovers.js';
+import {deriveActiveInlineMarks} from './inlineRunRendering.js';
 import {
     blockDropTargetFromPoint,
     orderDraggedBlockIds,
     orderDraggedBlockIdsForCellSlot,
-} from './index.js';
+} from './blockDropTargets.js';
 import {
     activePollVotes,
     choiceResults,
@@ -292,7 +292,7 @@ import {
     votedOptionIds,
     type PollResult,
     type PollVoteCommandData,
-} from './index.js';
+} from './pollBlocks.js';
 import {
     beforeInputLabel,
     editorSelectionKey,
@@ -308,9 +308,9 @@ import {
     removePrimaryDecorations,
     sameSelectionRange,
     stopEditorControlEvent,
-} from './index.js';
-import {ImagePreview, PreviewableCodeBlock, PreviewBlockCard} from './index.js';
-import {blockTypeMenuValue, blockTypeMeta, deriveOrderedListNumbers} from './index.js';
+} from './editorUiUtils.js';
+import {ImagePreview, PreviewableCodeBlock, PreviewBlockCard} from './mediaBlocks.js';
+import {blockTypeMenuValue, blockTypeMeta, deriveOrderedListNumbers} from './blockTypeHelpers.js';
 import {
     canOpenSlashMenuForSelection,
     deleteSlashTriggers,
@@ -318,7 +318,7 @@ import {
     slashTriggersFromInsertResult,
     type SlashCommand,
     type SlashMenuState,
-} from './index.js';
+} from './slashCommands.js';
 
 import * as hlc from '../crdt/hlc.js';
 type RichFormattedBlock = FormattedBlock<RichBlockMeta>;
