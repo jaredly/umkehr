@@ -57,33 +57,45 @@
     background: #f2f4f7;
 }
 
-.jigsawStage {
+.jigsawViewport {
     position: relative;
-    width: min(100%, calc((100vh - 180px) * var(--jigsaw-width) / var(--jigsaw-height)));
-    width: min(100%, calc((100dvh - 180px) * var(--jigsaw-width) / var(--jigsaw-height)));
-    aspect-ratio: var(--jigsaw-width) / var(--jigsaw-height);
-    margin: 44px auto;
-    overflow: visible;
+    width: 100%;
+    height: min(56vh, 620px);
+    height: min(56dvh, 620px);
+    min-height: 360px;
+    overflow: hidden;
+    border: 1px solid #c8d2df;
+    border-radius: 8px;
+    background:
+        linear-gradient(#d8e0ea 1px, transparent 1px),
+        linear-gradient(90deg, #d8e0ea 1px, transparent 1px), #edf2f7;
+    background-size: 32px 32px;
     touch-action: none;
+    user-select: none;
+}
+
+.jigsawCanvas {
+    position: absolute;
+    left: 0;
+    top: 0;
+    transform-origin: 0 0;
     user-select: none;
 }
 
 .jigsawSolvedImage {
     position: absolute;
-    inset: 0;
     display: block;
-    width: 100%;
-    height: 100%;
     outline: 1px solid #c8d2df;
     opacity: 0.22;
+    pointer-events: none;
 }
 
 .jigsawPiece {
     position: absolute;
-    left: calc(var(--piece-left) / var(--jigsaw-width) * 100%);
-    top: calc(var(--piece-top) / var(--jigsaw-height) * 100%);
-    width: calc(var(--piece-width) / var(--jigsaw-width) * 100%);
-    height: calc(var(--piece-height) / var(--jigsaw-height) * 100%);
+    left: var(--piece-left);
+    top: var(--piece-top);
+    width: var(--piece-width);
+    height: var(--piece-height);
     z-index: var(--piece-z);
     border: 0;
     border-radius: 2px;
@@ -116,6 +128,29 @@
     box-shadow: 0 14px 30px rgb(15 23 42 / 0.26);
 }
 
+.jigsawMinimap {
+    position: absolute;
+    right: 14px;
+    bottom: 14px;
+    z-index: 7000;
+    width: 132px;
+    height: 92px;
+    border: 1px solid #9aa8b8;
+    border-radius: 6px;
+    padding: 0;
+    background: #fff;
+    box-shadow: 0 8px 18px rgb(15 23 42 / 16%);
+    touch-action: none;
+    user-select: none;
+    cursor: pointer;
+}
+
+.jigsawMinimap svg {
+    display: block;
+    width: 132px;
+    height: 92px;
+}
+
 @media (max-width: 620px) {
     .jigsawPanel {
         padding: 8px;
@@ -144,9 +179,14 @@
         font-size: 12px;
     }
 
-    .jigsawStage {
-        width: min(100%, calc((100dvh - 150px) * var(--jigsaw-width) / var(--jigsaw-height)));
-        margin: 34px auto;
+    .jigsawViewport {
+        height: min(58dvh, 520px);
+        min-height: 320px;
+    }
+
+    .jigsawMinimap {
+        right: 8px;
+        bottom: 8px;
     }
 }
 

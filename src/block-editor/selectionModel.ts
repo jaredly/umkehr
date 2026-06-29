@@ -1,8 +1,20 @@
-import type {CachedState} from '../block-crdt/types.js';
+import type {CachedState, JsonValue} from '../block-crdt/types.js';
 import {isDeleted, orderedCharIdsForBlock, visibleBlockOutline} from '../block-crdt/index.js';
 import {isEditableBlock} from './blockMeta';
 import type {RichBlockMeta} from './blockMeta';
 import {richTextVirtualParents} from './virtualParents';
+import {
+    selectedCellIdsForSelection as selectedTableCellIdsForSelection,
+    tableCellPosition as tableSelectionCellPosition,
+    tableCellRectangleForSelection as tableSelectionCellRectangleForSelection,
+    tableCellsForSelection as tableSelectionCellsForSelection,
+    tableRowsForSelection as tableSelectionRowsForSelection,
+    tableSelectionPlugin,
+    isTableCellSelection,
+    type TableCellPosition,
+    type TableCellRectangle,
+    type TableCellSelection,
+} from './tableSelectionPlugin';
 
 export type DecorationAffinity = 'beforeDecorations' | 'afterDecorations';
 
@@ -16,38 +28,21 @@ export type TextSelection =
     | {type: 'caret'; point: BlockPoint}
     | {type: 'range'; anchor: BlockPoint; focus: BlockPoint};
 
-export type BlockLevelSelection =
-    | {type: 'block'; anchorBlockId: string; focusBlockId: string}
-    | {
-          type: 'table-cells';
-          tableId: string;
-          anchorCellId: string;
-          focusCellId: string;
-      };
+export type CoreBlockSelection = {type: 'block'; anchorBlockId: string; focusBlockId: string};
 
-export type EditorSelection = TextSelection | BlockLevelSelection;
+export type CoreEditorSelection = TextSelection | CoreBlockSelection;
+
+export type PluginEditorSelection = {type: string} & Record<string, JsonValue>;
+export type PluginRetainedSelection = {type: string} & Record<string, JsonValue>;
+
+export type BlockLevelSelection = CoreBlockSelection | TableCellSelection;
+
+export type EditorSelection = CoreEditorSelection | TableCellSelection;
 
 export type SelectionSegment = {
     blockId: string;
     startOffset: number;
     endOffset: number;
-};
-
-export type TableCellPosition = {
-    tableId: string;
-    rowId: string;
-    cellId: string;
-    rowIndex: number;
-    columnIndex: number;
-};
-
-export type TableCellRectangle = {
-    tableId: string;
-    startRowIndex: number;
-    endRowIndex: number;
-    startColumnIndex: number;
-    endColumnIndex: number;
-    cellIds: string[];
 };
 
 export const caret = (blockId: string, offset: number): EditorSelection => ({
@@ -61,7 +56,7 @@ export const blockSelection = (blockId: string): EditorSelection => ({
     focusBlockId: blockId,
 });
 
-export const tableCellSelection = (tableId: string, cellId: string): EditorSelection => ({
+export const tableCellSelection = (tableId: string, cellId: string): TableCellSelection => ({
     type: 'table-cells',
     tableId,
     anchorCellId: cellId,
@@ -116,12 +111,7 @@ export const clampSelection = (state: CachedState<RichBlockMeta>, selection: Edi
         };
     }
     if (selection.type === 'table-cells') {
-        return {
-            type: 'table-cells',
-            tableId: clampBlockId(state, selection.tableId),
-            anchorCellId: clampBlockId(state, selection.anchorCellId),
-            focusCellId: clampBlockId(state, selection.focusCellId),
-        };
+        return (tableSelectionPlugin.clamp?.({state, selection}) ?? selection) as EditorSelection;
     }
     return {
         type: 'range',
@@ -134,7 +124,7 @@ export const isTextSelection = (selection: EditorSelection): selection is TextSe
     selection.type === 'caret' || selection.type === 'range';
 
 export const isBlockLevelSelection = (selection: EditorSelection): selection is BlockLevelSelection =>
-    selection.type === 'block' || selection.type === 'table-cells';
+    selection.type !== 'caret' && selection.type !== 'range';
 
 export const isCollapsed = (selection: EditorSelection): selection is {type: 'caret'; point: BlockPoint} =>
     selection.type === 'caret' ||
@@ -146,7 +136,8 @@ export const focusPoint = (selection: EditorSelection): BlockPoint => {
     if (selection.type === 'caret') return selection.point;
     if (selection.type === 'range') return selection.focus;
     if (selection.type === 'block') return {blockId: selection.focusBlockId, offset: 0};
-    return {blockId: selection.focusCellId, offset: 0};
+    if (isTableCellSelection(selection)) return {blockId: selection.focusCellId, offset: 0};
+    return {blockId: '', offset: 0};
 };
 
 export const textFocusPoint = (selection: TextSelection): BlockPoint =>
@@ -156,7 +147,8 @@ export const focusBlockId = (selection: EditorSelection): string => {
     if (selection.type === 'caret') return selection.point.blockId;
     if (selection.type === 'range') return selection.focus.blockId;
     if (selection.type === 'block') return selection.focusBlockId;
-    return selection.focusCellId;
+    if (isTableCellSelection(selection)) return selection.focusCellId;
+    return '';
 };
 
 export const normalizeSelectionSegments = (
@@ -198,7 +190,7 @@ export const normalizeSelectionSegments = (
 export const firstPointForSelection = (state: CachedState<RichBlockMeta>, selection: EditorSelection): BlockPoint => {
     if (selection.type === 'caret') return clampPoint(state, selection.point);
     if (selection.type === 'block') return {blockId: clampBlockId(state, selection.anchorBlockId), offset: 0};
-    if (selection.type === 'table-cells') return {blockId: clampBlockId(state, selection.anchorCellId), offset: 0};
+    if (isTableCellSelection(selection)) return {blockId: clampBlockId(state, selection.anchorCellId), offset: 0};
     const segments = normalizeSelectionSegments(state, selection);
     if (!segments.length) return clampPoint(state, selection.focus);
     return {blockId: segments[0].blockId, offset: segments[0].startOffset};
@@ -221,124 +213,43 @@ export const selectedBlockIdsForSelection = (
     if (selection.type === 'block') {
         return selectedBlockRange(state, selection.anchorBlockId, selection.focusBlockId);
     }
-    return selectedCellIdsForSelection(state, selection);
+    return isTableCellSelection(selection) ? selectedCellIdsForSelection(state, selection) : [];
 };
 
 export const selectedCellIdsForSelection = (
     state: CachedState<RichBlockMeta>,
     selection: EditorSelection,
 ): string[] => {
-    if (selection.type !== 'table-cells') return [];
-    return tableCellRectangleForSelection(state, selection)?.cellIds ?? [
-        clampBlockId(state, selection.focusCellId),
-    ];
+    if (!isTableCellSelection(selection)) return [];
+    return selectedTableCellIdsForSelection(state, selection);
 };
 
 export const tableCellRectangleForSelection = (
     state: CachedState<RichBlockMeta>,
     selection: EditorSelection,
 ): TableCellRectangle | null => {
-    if (selection.type !== 'table-cells') return null;
-    const anchor = tableCellPosition(state, selection.anchorCellId);
-    const focus = tableCellPosition(state, selection.focusCellId);
-    if (!anchor || !focus || anchor.tableId !== focus.tableId || anchor.tableId !== selection.tableId) {
-        return null;
-    }
-
-    const startRowIndex = Math.min(anchor.rowIndex, focus.rowIndex);
-    const endRowIndex = Math.max(anchor.rowIndex, focus.rowIndex);
-    const startColumnIndex = Math.min(anchor.columnIndex, focus.columnIndex);
-    const endColumnIndex = Math.max(anchor.columnIndex, focus.columnIndex);
-    const rows = tableRowsForSelection(state, anchor.tableId);
-    const cellIds: string[] = [];
-    for (let rowIndex = startRowIndex; rowIndex <= endRowIndex; rowIndex++) {
-        const rowId = rows[rowIndex];
-        if (!rowId) continue;
-        const cells = tableCellsForSelection(state, rowId);
-        for (let columnIndex = startColumnIndex; columnIndex <= endColumnIndex; columnIndex++) {
-            const cellId = cells[columnIndex];
-            if (cellId) cellIds.push(cellId);
-        }
-    }
-
-    return {
-        tableId: anchor.tableId,
-        startRowIndex,
-        endRowIndex,
-        startColumnIndex,
-        endColumnIndex,
-        cellIds,
-    };
+    return isTableCellSelection(selection) ? tableSelectionCellRectangleForSelection(state, selection) : null;
 };
 
 export const tableCellPosition = (
     state: CachedState<RichBlockMeta>,
     cellId: string,
 ): TableCellPosition | null => {
-    const outline = visibleBlockOutline(state, richTextVirtualParents(state));
-    const stack: typeof outline = [];
-    const rowsByTable = new Map<string, string[]>();
-    for (const block of outline) {
-        while (stack.length && stack[stack.length - 1].depth >= block.depth) {
-            stack.pop();
-        }
-        const parent = stack[stack.length - 1];
-        const grandparent = stack[stack.length - 2];
-        if (parent && grandparent && state.state.blocks[grandparent.id]?.meta.type === 'table') {
-            const rowId = parent.id;
-            const tableId = grandparent.id;
-            const rows = rowsByTable.get(tableId) ?? tableRowsForSelection(state, tableId);
-            rowsByTable.set(tableId, rows);
-            const cells = tableCellsForSelection(state, rowId);
-            if (block.id === cellId) {
-                return {
-                    tableId,
-                    rowId,
-                    cellId,
-                    rowIndex: rows.indexOf(rowId),
-                    columnIndex: cells.indexOf(cellId),
-                };
-            }
-        }
-        stack.push(block);
-    }
-    return null;
+    return tableSelectionCellPosition(state, cellId);
 };
 
 export const tableRowsForSelection = (
     state: CachedState<RichBlockMeta>,
     tableId: string,
 ): string[] => {
-    const outline = visibleBlockOutline(state, richTextVirtualParents(state));
-    const tableIndex = outline.findIndex((block) => block.id === tableId);
-    if (tableIndex < 0 || state.state.blocks[tableId]?.meta.type !== 'table') return [];
-    const tableDepth = outline[tableIndex].depth;
-    const rows: string[] = [];
-    for (let index = tableIndex + 1; index < outline.length; index++) {
-        const block = outline[index];
-        if (block.depth <= tableDepth) break;
-        if (block.depth === tableDepth + 1 && state.state.blocks[block.id]?.meta.type !== 'table') {
-            rows.push(block.id);
-        }
-    }
-    return rows;
+    return tableSelectionRowsForSelection(state, tableId);
 };
 
 export const tableCellsForSelection = (
     state: CachedState<RichBlockMeta>,
     rowId: string,
 ): string[] => {
-    const outline = visibleBlockOutline(state, richTextVirtualParents(state));
-    const rowIndex = outline.findIndex((block) => block.id === rowId);
-    if (rowIndex < 0 || state.state.blocks[rowId]?.meta.type === 'table') return [];
-    const rowDepth = outline[rowIndex].depth;
-    const cells: string[] = [];
-    for (let index = rowIndex + 1; index < outline.length; index++) {
-        const block = outline[index];
-        if (block.depth <= rowDepth) break;
-        if (block.depth === rowDepth + 1) cells.push(block.id);
-    }
-    return cells;
+    return tableSelectionCellsForSelection(state, rowId);
 };
 
 const selectedBlockRange = (

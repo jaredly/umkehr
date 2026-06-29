@@ -1,5 +1,6 @@
 import type {RichBlockMeta} from './blockMeta.js';
 import {legacyRichTextCrdtPlugins} from './editorCrdtConfig.js';
+import {tableSelectionPluginBundle} from './tableSelectionPlugin.js';
 import {
     basicMarksPlugin,
     codeMermaidPlugin,
@@ -40,4 +41,5 @@ export const legacyRichTextPlugins: readonly BlockEditorPlugin<RichBlockMeta>[] 
     quotePlugin,
     todosPlugin,
     ...legacyRichTextCrdtPlugins,
+    tableSelectionPluginBundle,
 ];

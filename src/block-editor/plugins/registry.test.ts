@@ -72,6 +72,55 @@ describe('createBlockEditorRegistry', () => {
         ).toThrow(/Duplicate mark "bold"/);
     });
 
+    it('indexes selection plugins by selection type', () => {
+        const registry = createBlockEditorRegistry<TestMeta>([
+            plugin({
+                id: 'table',
+                selectionTypes: [{id: 'table-cells'}],
+                selectionPlugins: [
+                    {
+                        id: 'table-cells',
+                        retain: ({selection}) => selection,
+                        resolve: ({selection}) => selection,
+                    },
+                ],
+            }),
+        ]);
+
+        expect(registry.selectionPlugins.get('table-cells')?.pluginId).toBe('table');
+        expect(registry.selectionTypes.get('table-cells')?.pluginId).toBe('table');
+    });
+
+    it('rejects duplicate selection plugin ownership', () => {
+        expect(() =>
+            createBlockEditorRegistry<TestMeta>([
+                plugin({
+                    id: 'a',
+                    selectionTypes: [{id: 'cells'}],
+                    selectionPlugins: [{id: 'cells', retain: ({selection}) => selection, resolve: ({selection}) => selection}],
+                }),
+                plugin({
+                    id: 'b',
+                    selectionTypes: [{id: 'other'}],
+                    selectionPlugins: [{id: 'cells', retain: ({selection}) => selection, resolve: ({selection}) => selection}],
+                }),
+            ]),
+        ).toThrow(/Duplicate selection plugin "cells"/);
+    });
+
+    it('rejects selection plugins without a public selection type declaration', () => {
+        expect(() =>
+            createBlockEditorRegistry<TestMeta>([
+                plugin({
+                    id: 'table',
+                    selectionPlugins: [
+                        {id: 'table-cells', retain: ({selection}) => selection, resolve: ({selection}) => selection},
+                    ],
+                }),
+            ]),
+        ).toThrow(/must declare a matching selection type/);
+    });
+
     it('stores command handlers that can return editor command results', () => {
         const state = {
             state: {chars: {}, blocks: {}, marks: {}, splits: {}, joins: {}, maxSeenCount: 0},

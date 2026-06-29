@@ -9,7 +9,7 @@ import {
 import {useValue} from 'umkehr/react';
 import {compareTimestamps, type HlcTimestamp} from 'umkehr/crdt';
 import type {AppEditorContext, CrdtEditorContext, GridSlot} from '../../lib/crdtApp';
-import {currentJigsawBoard} from './artifacts';
+import {currentJigsawBoard, type JigsawBoardArtifact} from './artifacts';
 import type {Coord, JigsawEphemeralData, JigsawState, PathSegment} from './model';
 import {
     add,
@@ -25,6 +25,7 @@ import {
     unplacedPieces,
     validConnections,
 } from './jigsaw';
+import {JigsawMinimap, type JigsawBoardSpace, type JigsawViewport} from './JigsawMinimap';
 
 type DragState = {
     pointerId: number;
@@ -35,10 +36,23 @@ type DragState = {
     delta: Coord;
 };
 
+type PanState = {
+    pointerId: number;
+    startX: number;
+    startY: number;
+    panX: number;
+    panY: number;
+};
+
 type LocalLayoutState = {
     seed: number;
     positions: Map<number, Coord>;
 };
+
+const minZoom = 0.35;
+const maxZoom = 2.5;
+const wheelZoomInFactor = 1.08;
+const wheelZoomOutFactor = 0.92;
 
 export function JigsawPanel({
     editor,
@@ -59,16 +73,83 @@ export function JigsawPanel({
     const state = useMemo(() => ({positions, connections}), [connections, positions]);
     const layout = useMemo(() => buildPuzzleLayout(board, state), [board, state]);
     const pieceSize = useMemo(() => estimatedPieceSize(board), [board]);
+    const boardGeometry = useMemo(() => boardSpaceFor(board.imageSize, pieceSize), [board.imageSize, pieceSize]);
     const threshold = useMemo(() => snapThreshold(board), [board]);
-    const stageRef = useRef<HTMLDivElement | null>(null);
+    const viewportRef = useRef<HTMLDivElement | null>(null);
+    const [viewportSize, setViewportSize] = useState({width: 1, height: 1});
+    const [viewport, setViewport] = useState<JigsawViewport>({panX: 0, panY: 0, zoom: 1});
+    const [viewportInitialized, setViewportInitialized] = useState(false);
     const [localLayout, setLocalLayout] = useState<LocalLayoutState>(() => ({
         seed: 1,
         positions: new Map(),
     }));
     const [drag, setDrag] = useState<DragState | null>(null);
+    const [pan, setPan] = useState<PanState | null>(null);
+    const [draggingMinimap, setDraggingMinimap] = useState(false);
     const anchorVersions = useAnchorVersions(editor, board.pieces.length);
     const unplaced = useMemo(() => unplacedPieces(board, layout), [board, layout]);
     const localPositions = localLayout.positions;
+
+    useEffect(() => {
+        const element = viewportRef.current;
+        if (!element) return;
+        const observer = new ResizeObserver(([entry]) => {
+            setViewportSize({
+                width: entry.contentRect.width,
+                height: entry.contentRect.height,
+            });
+        });
+        observer.observe(element);
+        return () => observer.disconnect();
+    }, []);
+
+    useEffect(() => {
+        if (viewportInitialized || viewportSize.width <= 1 || viewportSize.height <= 1) return;
+        const fitZoom = clamp(
+            Math.min(
+                viewportSize.width / boardGeometry.boardSpace.width,
+                viewportSize.height / boardGeometry.boardSpace.height,
+            ) * 0.96,
+            minZoom,
+            1,
+        );
+        setViewport({
+            zoom: fitZoom,
+            panX: (viewportSize.width - boardGeometry.boardSpace.width * fitZoom) / 2,
+            panY: (viewportSize.height - boardGeometry.boardSpace.height * fitZoom) / 2,
+        });
+        setViewportInitialized(true);
+    }, [boardGeometry.boardSpace.height, boardGeometry.boardSpace.width, viewportInitialized, viewportSize]);
+
+    useEffect(() => {
+        const element = viewportRef.current;
+        if (!element) return;
+        const onWheel = (event: WheelEvent) => {
+            event.preventDefault();
+            if (event.ctrlKey || event.metaKey) {
+                const rect = element.getBoundingClientRect();
+                const before = screenToCanvas(event.clientX, event.clientY, rect, viewport);
+                const nextZoom = clamp(
+                    viewport.zoom * (event.deltaY > 0 ? wheelZoomOutFactor : wheelZoomInFactor),
+                    minZoom,
+                    maxZoom,
+                );
+                setViewport({
+                    zoom: nextZoom,
+                    panX: event.clientX - rect.left - before.x * nextZoom,
+                    panY: event.clientY - rect.top - before.y * nextZoom,
+                });
+                return;
+            }
+            setViewport((current) => ({
+                ...current,
+                panX: current.panX - event.deltaX,
+                panY: current.panY - event.deltaY,
+            }));
+        };
+        element.addEventListener('wheel', onWheel, {passive: false});
+        return () => element.removeEventListener('wheel', onWheel);
+    }, [viewport]);
 
     useEffect(() => {
         setLocalLayout((current) => {
@@ -84,7 +165,13 @@ export function JigsawPanel({
 
             const missing = unplaced.filter((piece) => !nextPositions.has(piece));
             if (missing.length) {
-                const generated = arrangeUnplacedPieces(board, unplaced, board.imageSize, current.seed);
+                const generated = arrangeLocalUnplacedPieces(
+                    board,
+                    unplaced,
+                    boardGeometry.boardSpace,
+                    boardGeometry.imageOffset,
+                    current.seed,
+                );
                 for (const piece of missing) {
                     const position = generated.get(piece);
                     if (position) nextPositions.set(piece, position);
@@ -98,7 +185,7 @@ export function JigsawPanel({
 
             return changed ? {...current, positions: nextPositions} : current;
         });
-    }, [board, unplaced]);
+    }, [board, boardGeometry.boardSpace, boardGeometry.imageOffset, unplaced]);
     const renderedPositions = useMemo(() => {
         const result = new Map<number, Coord>(localPositions);
         for (const [piece, position] of layout.positions) result.set(piece, position);
@@ -115,6 +202,8 @@ export function JigsawPanel({
 
     const startDrag = (piece: number, event: PointerEvent<HTMLButtonElement>) => {
         if (readOnly) return;
+        event.preventDefault();
+        event.stopPropagation();
         const pointer = pointerToBoard(event);
         if (!pointer) return;
         const componentIndex = layout.pieceToComponent.get(piece);
@@ -129,7 +218,7 @@ export function JigsawPanel({
             const fallback = renderedPositions.get(piece);
             if (fallback) initialPositions.set(anchor, fallback);
         }
-        stageRef.current?.setPointerCapture(event.pointerId);
+        viewportRef.current?.setPointerCapture(event.pointerId);
         setDrag({
             pointerId: event.pointerId,
             component,
@@ -140,15 +229,45 @@ export function JigsawPanel({
         });
     };
 
+    const startPan = (event: PointerEvent<HTMLDivElement>) => {
+        if (event.button !== 0 || !event.isPrimary || drag) return;
+        event.preventDefault();
+        event.currentTarget.setPointerCapture(event.pointerId);
+        setPan({
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            startY: event.clientY,
+            panX: viewport.panX,
+            panY: viewport.panY,
+        });
+    };
+
     const updateDrag = (event: PointerEvent<HTMLDivElement>) => {
+        if (pan && event.pointerId === pan.pointerId) {
+            event.preventDefault();
+            setViewport((current) => ({
+                ...current,
+                panX: pan.panX + event.clientX - pan.startX,
+                panY: pan.panY + event.clientY - pan.startY,
+            }));
+            return;
+        }
         if (!drag || event.pointerId !== drag.pointerId) return;
+        event.preventDefault();
         const pointer = pointerToBoard(event);
         if (!pointer) return;
         setDrag({...drag, delta: subtract(pointer, drag.startPointer)});
     };
 
     const finishDrag = (event: PointerEvent<HTMLDivElement>) => {
+        if (pan && event.pointerId === pan.pointerId) {
+            event.preventDefault();
+            releasePointerCapture(event);
+            setPan(null);
+            return;
+        }
         if (!drag || event.pointerId !== drag.pointerId) return;
+        event.preventDefault();
         releasePointerCapture(event);
         const latest = editor.latest();
         const latestLayout = buildPuzzleLayout(board, latest);
@@ -187,6 +306,15 @@ export function JigsawPanel({
     const cancelDrag = (event: PointerEvent<HTMLDivElement>) => {
         releasePointerCapture(event);
         setDrag(null);
+        setPan(null);
+    };
+
+    const recenterFromMinimap = (point: Coord) => {
+        setViewport((current) => ({
+            ...current,
+            panX: viewportSize.width / 2 - point.x * current.zoom,
+            panY: viewportSize.height / 2 - point.y * current.zoom,
+        }));
     };
 
     return (
@@ -211,7 +339,13 @@ export function JigsawPanel({
                                 const seed = current.seed + 1;
                                 return {
                                     seed,
-                                    positions: arrangeUnplacedPieces(board, unplaced, board.imageSize, seed),
+                                    positions: arrangeLocalUnplacedPieces(
+                                        board,
+                                        unplaced,
+                                        boardGeometry.boardSpace,
+                                        boardGeometry.imageOffset,
+                                        seed,
+                                    ),
                                 };
                             })
                         }
@@ -228,74 +362,98 @@ export function JigsawPanel({
             </header>
 
             <div
-                ref={stageRef}
-                className="jigsawStage"
-                style={
-                    {
-                        '--jigsaw-width': board.imageSize.width,
-                        '--jigsaw-height': board.imageSize.height,
-                    } as CSSProperties
-                }
+                ref={viewportRef}
+                className="jigsawViewport"
+                data-testid="jigsaw-viewport"
+                onPointerDown={startPan}
                 onPointerMove={updateDrag}
                 onPointerUp={finishDrag}
                 onPointerCancel={cancelDrag}
             >
-                <SolvedImageCanvas source={sourceImage} />
-                {board.pieces.map((piece, index) => {
-                    const position = renderedPositions.get(index);
-                    if (!position) return null;
-                    const componentIndex = layout.pieceToComponent.get(index);
-                    const component = componentIndex === undefined ? [index] : layout.components[componentIndex] ?? [index];
-                    const anchor =
-                        componentIndex === undefined ? undefined : layout.anchors.get(componentIndex);
-                    const placed = layout.positions.has(index);
-                    const active = activeComponent.has(index);
-                    return (
-                        <button
-                            key={index}
-                            type="button"
-                            className={`jigsawPiece ${placed ? 'placed' : 'unplaced'} ${active ? 'dragging' : ''}`}
-                            disabled={readOnly}
-                            onPointerDown={(event) => startDrag(index, event)}
-                            style={
-                                {
-                                    '--piece-left': position.x - pieceSize.width / 2,
-                                    '--piece-top': position.y - pieceSize.height / 2,
-                                    '--piece-width': pieceSize.width,
-                                    '--piece-height': pieceSize.height,
-                                    '--piece-z': pieceZIndex({
-                                        piece: index,
-                                        component,
-                                        anchor,
-                                        placed,
-                                        active,
-                                    }),
-                                } as CSSProperties
-                            }
-                            aria-label={`Piece ${index + 1}`}
-                        >
-                            <PieceCanvas
-                                source={sourceImage}
-                                pieceCenter={piece.center}
-                                mask={piece.mask}
-                                pieceSize={pieceSize}
-                            />
-                        </button>
-                    );
-                })}
+                <div
+                    className="jigsawCanvas"
+                    data-testid="jigsaw-canvas"
+                    style={{
+                        width: boardGeometry.boardSpace.width,
+                        height: boardGeometry.boardSpace.height,
+                        transform: `translate(${viewport.panX}px, ${viewport.panY}px) scale(${viewport.zoom})`,
+                    }}
+                >
+                    <SolvedImageCanvas source={sourceImage} offset={boardGeometry.imageOffset} />
+                    {board.pieces.map((piece, index) => {
+                        const position = renderedPositions.get(index);
+                        if (!position) return null;
+                        const canvasPosition = imageToCanvas(position, boardGeometry.imageOffset);
+                        const componentIndex = layout.pieceToComponent.get(index);
+                        const component =
+                            componentIndex === undefined
+                                ? [index]
+                                : layout.components[componentIndex] ?? [index];
+                        const anchor =
+                            componentIndex === undefined ? undefined : layout.anchors.get(componentIndex);
+                        const placed = layout.positions.has(index);
+                        const active = activeComponent.has(index);
+                        return (
+                            <button
+                                key={index}
+                                type="button"
+                                className={`jigsawPiece ${placed ? 'placed' : 'unplaced'} ${
+                                    active ? 'dragging' : ''
+                                }`}
+                                disabled={readOnly}
+                                onPointerDown={(event) => startDrag(index, event)}
+                                style={
+                                    {
+                                        '--piece-left': `${canvasPosition.x - pieceSize.width / 2}px`,
+                                        '--piece-top': `${canvasPosition.y - pieceSize.height / 2}px`,
+                                        '--piece-width': `${pieceSize.width}px`,
+                                        '--piece-height': `${pieceSize.height}px`,
+                                        '--piece-z': pieceZIndex({
+                                            piece: index,
+                                            component,
+                                            anchor,
+                                            placed,
+                                            active,
+                                        }),
+                                    } as CSSProperties
+                                }
+                                aria-label={`Piece ${index + 1}`}
+                            >
+                                <PieceCanvas
+                                    source={sourceImage}
+                                    pieceCenter={piece.center}
+                                    mask={piece.mask}
+                                    pieceSize={pieceSize}
+                                />
+                            </button>
+                        );
+                    })}
+                </div>
+                <JigsawMinimap
+                    boardSpace={boardGeometry.boardSpace}
+                    imageOffset={boardGeometry.imageOffset}
+                    imageSize={board.imageSize}
+                    pieceSize={pieceSize}
+                    authoritativePositions={layout.positions}
+                    viewport={viewport}
+                    viewportSize={viewportSize}
+                    dragging={draggingMinimap}
+                    setDragging={setDraggingMinimap}
+                    recenter={recenterFromMinimap}
+                />
             </div>
         </section>
     );
 
     function pointerToBoard(event: PointerEvent<HTMLElement>): Coord | null {
-        const stage = stageRef.current;
-        if (!stage) return null;
-        const rect = stage.getBoundingClientRect();
+        const viewportElement = viewportRef.current;
+        if (!viewportElement) return null;
+        const rect = viewportElement.getBoundingClientRect();
         if (rect.width <= 0 || rect.height <= 0) return null;
-        return {
-            x: ((event.clientX - rect.left) / rect.width) * board.imageSize.width,
-            y: ((event.clientY - rect.top) / rect.height) * board.imageSize.height,
-        };
+        return canvasToImage(
+            screenToCanvas(event.clientX, event.clientY, rect, viewport),
+            boardGeometry.imageOffset,
+        );
     }
 
     function pieceZIndex({
@@ -319,7 +477,7 @@ export function JigsawPanel({
     }
 }
 
-function SolvedImageCanvas({source}: {source: HTMLCanvasElement}) {
+function SolvedImageCanvas({source, offset}: {source: HTMLCanvasElement; offset: Coord}) {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     useEffect(() => {
         const canvas = canvasRef.current;
@@ -337,6 +495,7 @@ function SolvedImageCanvas({source}: {source: HTMLCanvasElement}) {
             className="jigsawSolvedImage"
             width={source.width}
             height={source.height}
+            style={{left: offset.x, top: offset.y, width: source.width, height: source.height}}
             aria-hidden="true"
         />
     );
@@ -481,6 +640,58 @@ function releasePointerCapture(event: PointerEvent<HTMLElement>) {
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
         event.currentTarget.releasePointerCapture(event.pointerId);
     }
+}
+
+function boardSpaceFor(
+    imageSize: {width: number; height: number},
+    pieceSize: {width: number; height: number},
+) {
+    const padding = Math.max(pieceSize.width, pieceSize.height) * 1.45;
+    const imageOffset = {x: padding, y: padding};
+    const boardSpace: JigsawBoardSpace = {
+        width: imageSize.width + padding * 2,
+        height: imageSize.height + padding * 2,
+    };
+    return {boardSpace, imageOffset};
+}
+
+function arrangeLocalUnplacedPieces(
+    board: JigsawBoardArtifact,
+    pieces: number[],
+    boardSpace: JigsawBoardSpace,
+    imageOffset: Coord,
+    seed: number,
+) {
+    const arranged = arrangeUnplacedPieces(board, pieces, boardSpace, seed);
+    const result = new Map<number, Coord>();
+    for (const [piece, position] of arranged) {
+        result.set(piece, canvasToImage(position, imageOffset));
+    }
+    return result;
+}
+
+function imageToCanvas(point: Coord, imageOffset: Coord) {
+    return add(point, imageOffset);
+}
+
+function canvasToImage(point: Coord, imageOffset: Coord) {
+    return subtract(point, imageOffset);
+}
+
+function screenToCanvas(
+    clientX: number,
+    clientY: number,
+    rect: DOMRect,
+    viewport: JigsawViewport,
+) {
+    return {
+        x: (clientX - rect.left - viewport.panX) / viewport.zoom,
+        y: (clientY - rect.top - viewport.panY) / viewport.zoom,
+    };
+}
+
+function clamp(value: number, min: number, max: number) {
+    return Math.max(min, Math.min(max, value));
 }
 
 function useAnchorVersions(

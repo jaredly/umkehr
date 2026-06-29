@@ -34,6 +34,8 @@ import {
     visibleSubtreeBlockIds,
     type EditorSelection,
 } from './selectionModel';
+import type {BlockEditorRegistry} from './plugins/types.js';
+import {selectedBlockIdsFromRegistry} from './selectionPlugins.js';
 import {
     codePreviewKindForLanguage,
     blockStyleHasDocumentValues,
@@ -278,6 +280,7 @@ export const serializeSelectionToClipboardPayload = (
     attachments: SerializedImageAttachment[] = [],
     inlineFeatures?: ClipboardInlineFeatureSet,
     blockFeatures?: ClipboardBlockFeatureSet,
+    registry?: Pick<BlockEditorRegistry<RichBlockMeta>, 'selectionPlugins'>,
 ): RichClipboardPayload | null => {
     const normalizedInlineFeatures = normalizeClipboardInlineFeatures(inlineFeatures);
     const formatted = materializeFormattedBlocks(state, annotationMarkBehavior);
@@ -296,7 +299,7 @@ export const serializeSelectionToClipboardPayload = (
 
     for (const entry of resolved.entries) {
         if (entry.selection.type === 'block' || entry.selection.type === 'table-cells') {
-            for (const blockId of clipboardBlockIdsForBlockLevelSelection(state, entry.selection)) {
+            for (const blockId of clipboardBlockIdsForBlockLevelSelection(state, entry.selection, registry)) {
                 if (includedBlockIds.has(blockId)) continue;
                 const block = formattedById.get(blockId);
                 if (!block) continue;
@@ -443,8 +446,13 @@ export const blockIdFromBlockLinkHref = (href: string): string | null => {
 const clipboardBlockIdsForBlockLevelSelection = (
     state: CachedState<RichBlockMeta>,
     selection: EditorSelection,
+    registry?: Pick<BlockEditorRegistry<RichBlockMeta>, 'selectionPlugins'>,
 ): string[] => {
-    if (selection.type !== 'block') return selectedBlockIdsForSelection(state, selection);
+    if (selection.type !== 'block') {
+        return registry
+            ? selectedBlockIdsFromRegistry(registry, state, selection)
+            : selectedBlockIdsForSelection(state, selection);
+    }
     return selectedTopLevelBlockIdsForSelection(state, selection).flatMap((blockId) =>
         visibleSubtreeBlockIds(state, blockId),
     );

@@ -10,6 +10,8 @@ import type {
     TimestampedBlockMeta,
 } from '../../block-crdt/types.js';
 import type {RetainedSelectionSet} from '../selectionSet.js';
+import type {BlockPoint, PluginEditorSelection, PluginRetainedSelection} from '../selectionModel.js';
+import type {BlockLevelSelectionDecorations} from '../selectionSet.js';
 import type {CodePreviewKind} from '../blockMeta.js';
 
 export type BlockEditorPluginId = string;
@@ -45,6 +47,31 @@ export type BlockEditorSelectionTypeSpec = {
     id: string;
     pluginId?: BlockEditorPluginId;
     label?: string;
+};
+
+export type BlockEditorSelectionPlugin<Meta extends TimestampedBlockMeta = TimestampedBlockMeta> = {
+    id: string;
+    pluginId?: BlockEditorPluginId;
+    label?: string;
+    retain(context: {state: CachedState<Meta>; selection: PluginEditorSelection}): PluginRetainedSelection;
+    resolve(context: {state: CachedState<Meta>; selection: PluginRetainedSelection}): PluginEditorSelection;
+    clamp?(context: {state: CachedState<Meta>; selection: PluginEditorSelection}): PluginEditorSelection;
+    focusPoint?(context: {state: CachedState<Meta>; selection: PluginEditorSelection}): BlockPoint;
+    focusBlockId?(context: {state: CachedState<Meta>; selection: PluginEditorSelection}): string;
+    firstPoint?(context: {state: CachedState<Meta>; selection: PluginEditorSelection}): BlockPoint;
+    selectedBlockIds?(context: {state: CachedState<Meta>; selection: PluginEditorSelection}): readonly string[];
+    selectedTopLevelBlockIds?(context: {state: CachedState<Meta>; selection: PluginEditorSelection}): readonly string[];
+    blockLevelDecorations?(context: {
+        state: CachedState<Meta>;
+        selection: PluginEditorSelection;
+        entryId: string;
+        primary: boolean;
+    }): ReadonlyMap<string, BlockLevelSelectionDecorations>;
+    compare?(context: {
+        state: CachedState<Meta>;
+        one: PluginEditorSelection | PluginRetainedSelection;
+        two: PluginEditorSelection | PluginRetainedSelection;
+    }): number;
 };
 
 export type BlockEditorToolbarItemSpec = {
@@ -171,6 +198,7 @@ export type BlockEditorPlugin<Meta extends TimestampedBlockMeta = TimestampedBlo
     marks?: readonly BlockEditorInlineMarkSpec[];
     inlineEmbeds?: readonly BlockEditorInlineEmbedSpec[];
     selectionTypes?: readonly BlockEditorSelectionTypeSpec[];
+    selectionPlugins?: readonly BlockEditorSelectionPlugin<Meta>[];
     toolbarItems?: readonly BlockEditorToolbarItemSpec[];
     slashCommands?: readonly BlockEditorSlashCommandSpec[];
     markdownShortcuts?: readonly BlockEditorMarkdownShortcutSpec<Meta>[];
@@ -191,6 +219,7 @@ export type BlockEditorRegistry<Meta extends TimestampedBlockMeta = TimestampedB
     marks: ReadonlyMap<string, BlockEditorInlineMarkSpec>;
     inlineEmbeds: ReadonlyMap<string, BlockEditorInlineEmbedSpec>;
     selectionTypes: ReadonlyMap<string, BlockEditorSelectionTypeSpec>;
+    selectionPlugins: ReadonlyMap<string, BlockEditorSelectionPlugin<Meta>>;
     toolbarItems: readonly BlockEditorToolbarItemSpec[];
     slashCommands: readonly BlockEditorSlashCommandSpec[];
     markdownShortcuts: readonly BlockEditorMarkdownShortcutSpec<Meta>[];

@@ -17,6 +17,7 @@ import {
     type BlockEditorPlugin,
     type BlockEditorPluginStyle,
     type BlockEditorRegistry,
+    type BlockEditorSelectionPlugin,
     type BlockEditorSelectionTypeSpec,
     type BlockEditorSlashCommandSpec,
     type BlockEditorToolbarItemSpec,
@@ -31,6 +32,12 @@ export const createBlockEditorRegistry = <Meta extends TimestampedBlockMeta>(
     const marks = mapById<Meta, BlockEditorInlineMarkSpec>('mark', orderedPlugins, 'marks');
     const inlineEmbeds = mapById<Meta, BlockEditorInlineEmbedSpec>('inline embed', orderedPlugins, 'inlineEmbeds');
     const selectionTypes = mapById<Meta, BlockEditorSelectionTypeSpec>('selection type', orderedPlugins, 'selectionTypes');
+    const selectionPlugins = mapById<Meta, BlockEditorSelectionPlugin<Meta>>(
+        'selection plugin',
+        orderedPlugins,
+        'selectionPlugins',
+    );
+    validateSelectionPluginDeclarations(selectionTypes, selectionPlugins);
     const commands = mapById<Meta, BlockEditorCommandSpec<Meta>>('command', orderedPlugins, 'commands');
     const clipboard = mapById<Meta, BlockEditorClipboardHooks<Meta>>('clipboard hook', orderedPlugins, 'clipboard');
 
@@ -74,6 +81,7 @@ export const createBlockEditorRegistry = <Meta extends TimestampedBlockMeta>(
         marks,
         inlineEmbeds,
         selectionTypes,
+        selectionPlugins,
         toolbarItems,
         slashCommands,
         markdownShortcuts,
@@ -88,6 +96,20 @@ export const createBlockEditorRegistry = <Meta extends TimestampedBlockMeta>(
         styles,
         crdtConfig: () => composedCrdtConfig,
     };
+};
+
+const validateSelectionPluginDeclarations = <Meta extends TimestampedBlockMeta>(
+    selectionTypes: ReadonlyMap<string, BlockEditorSelectionTypeSpec>,
+    selectionPlugins: ReadonlyMap<string, BlockEditorSelectionPlugin<Meta>>,
+): void => {
+    for (const plugin of selectionPlugins.values()) {
+        if (!selectionTypes.has(plugin.id)) {
+            throw registryError(
+                'missing-selection-type',
+                `Selection plugin "${plugin.id}" must declare a matching selection type.`,
+            );
+        }
+    }
 };
 
 const orderPlugins = <Meta extends TimestampedBlockMeta>(

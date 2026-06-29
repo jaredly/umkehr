@@ -202,7 +202,7 @@ import {
 import {useBlockReorder, type DropTarget} from './useBlockReorder.js';
 import {
     appendSelection,
-    blockLevelDecorationsForSelectionSet,
+    blockLevelDecorationsForSelectionSetFromRegistry,
     dedupeSelectionSet,
     decorationsForSelectionSet,
     mergeOverlappingRanges,
@@ -212,7 +212,7 @@ import {
     resolveSelectionSet,
     reverseSortedRetainedEntries,
     retainSelectionSet,
-    selectedTopLevelBlockIdsForSelectionSet,
+    selectedTopLevelBlockIdsForSelectionSetFromRegistry,
     singleRetainedSelectionSet,
     type BlockLevelSelectionDecorations,
     type BlockSelectionDecorations,
@@ -783,8 +783,8 @@ export function BlockRichTextEditor({
         [dragSelection, hasFocus, isExtendingSelection, replica.state, resolvedSelectionSet],
     );
     const blockLevelDecorationsByBlock = useMemo(
-        () => blockLevelDecorationsForSelectionSet(replica.state, resolvedSelectionSet),
-        [replica.state, resolvedSelectionSet],
+        () => blockLevelDecorationsForSelectionSetFromRegistry(registry, replica.state, resolvedSelectionSet),
+        [registry, replica.state, resolvedSelectionSet],
     );
     const [cellDragBlockDropTarget, setCellDragBlockDropTarget] = useState<DropTarget | null>(null);
 
@@ -1481,9 +1481,10 @@ export function BlockRichTextEditor({
                 serializeAttachments(attachments),
                 inlineRenderFeatures,
                 {blockTypes: blockRenderFeatures},
+                registry,
             );
         },
-        [attachments, blockRenderFeatures, inlineRenderFeatures, liveSelectionSet, replica, resolvedSelectionSet],
+        [attachments, blockRenderFeatures, inlineRenderFeatures, liveSelectionSet, registry, replica, resolvedSelectionSet],
     );
 
     const writeCurrentSelectionToClipboard = useCallback(async () => {
@@ -2174,7 +2175,7 @@ export function BlockRichTextEditor({
             const selectedTopLevelBlockIds =
                 primary.type === 'caret'
                     ? []
-                    : selectedTopLevelBlockIdsForSelectionSet(replica.state, resolvedSelectionSet);
+                    : selectedTopLevelBlockIdsForSelectionSetFromRegistry(registry, replica.state, resolvedSelectionSet);
             if (selectedTopLevelBlockIds.includes(blockId)) {
                 startDrag(blockId, event, selectedTopLevelBlockIds);
                 return;
@@ -2182,7 +2183,7 @@ export function BlockRichTextEditor({
             selectBlockFromHandle(blockId);
             startDrag(blockId, event, [blockId]);
         },
-        [replica.state, resolvedSelectionSet, selectBlockFromHandle, startDrag],
+        [registry, replica.state, resolvedSelectionSet, selectBlockFromHandle, startDrag],
     );
 
     const textCaretForBlockSelection = useCallback(
@@ -2218,7 +2219,7 @@ export function BlockRichTextEditor({
                 };
             }
             const resolved = resolveSelectionSet(current.state, current.selection);
-            const blockIds = selectedTopLevelBlockIdsForSelectionSet(current.state, resolved);
+            const blockIds = selectedTopLevelBlockIdsForSelectionSetFromRegistry(registry, current.state, resolved);
             if (!blockIds.length) {
                 return {state: current.state, ops: [], selection: current.selection};
             }
@@ -2244,7 +2245,7 @@ export function BlockRichTextEditor({
                 selection: replaceSelectionSet(working, fallback, current.selection.primaryId),
             };
         },
-        [scheduleSelectionRestore],
+        [registry, scheduleSelectionRestore],
     );
 
     const cutRichSelection = useCallback(

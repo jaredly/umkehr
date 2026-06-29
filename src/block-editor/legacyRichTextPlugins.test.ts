@@ -47,6 +47,7 @@ describe('legacyRichTextPlugins', () => {
             'math',
             'polls',
             'quote',
+            'table-selection',
             'todos',
         ]);
         expect(registry.marks.has('bold')).toBe(true);
@@ -57,6 +58,8 @@ describe('legacyRichTextPlugins', () => {
         expect(registry.blockTypes.has('preview')).toBe(true);
         expect(registry.blockTypes.has('poll')).toBe(true);
         expect(registry.slashCommands.length).toBeGreaterThan(0);
+        expect(registry.selectionTypes.has('table-cells')).toBe(true);
+        expect(registry.selectionPlugins.has('table-cells')).toBe(true);
         expect(registry.crdtConfig().markBehavior).toEqual({annotation: 'stacking'});
     });
 

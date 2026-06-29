@@ -40,6 +40,16 @@ export * from './pollBlocks.js';
 export * from './previewMetadata.js';
 export * from './retainedSelection.js';
 export * from './selectionModel.js';
+export {
+    isTableCellSelection,
+    tableSelectionPlugin,
+    tableSelectionPluginBundle,
+    type RetainedTableCellSelection,
+    type TableCellPosition,
+    type TableCellRectangle,
+    type TableCellSelection,
+} from './tableSelectionPlugin.js';
+export * from './selectionPlugins.js';
 export * from './selectionSet.js';
 export * from './slashCommands.js';
 export * from './slidePresentationSelection.js';
