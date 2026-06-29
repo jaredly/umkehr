@@ -366,6 +366,7 @@ const hasPendingInlineMarks = (marks: PendingInlineMarks): boolean =>
 const hasRetainedInlineMarkSessions = (marks: RetainedInlineMarkSessionMap): boolean =>
     Object.values(marks).some((sessions) => sessions.length > 0);
 
+const inlineMarkToolbarCommandId = (markType: BooleanInlineMark): string => `mark:${markType}`;
 
 export type BlockEditorId = 'left' | 'right' | string;
 
@@ -488,6 +489,10 @@ export function BlockRichTextEditor({
     const toolbarItemIds = useMemo(
         () => new Set(registry.toolbarItems.map((item) => item.id)),
         [registry],
+    );
+    const isToolbarCommandAvailable = useCallback(
+        (commandId: string): boolean => toolbarItemIds.has(commandId),
+        [toolbarItemIds],
     );
     const activeInlineMarkTypes = useMemo(() => activeInlineMarkTypesFromRegistry(registry), [registry]);
     const rootRef = useRef<HTMLDivElement>(null);
@@ -3018,8 +3023,7 @@ export function BlockRichTextEditor({
     };
 
     const runToolbarCommand = (commandId: string) => {
-        const isRegisteredLegacyToolbarCommand =
-            commandId.startsWith('block-type:') ? toolbarItemIds.has(commandId) : toolbarItemIds.has(commandId);
+        const isRegisteredLegacyToolbarCommand = isToolbarCommandAvailable(commandId);
         if (LEGACY_TOOLBAR_COMMAND_IDS.has(commandId) && !isRegisteredLegacyToolbarCommand) return;
         if (commandId.startsWith('block-type:')) {
             if (!isRegisteredLegacyToolbarCommand) return;
@@ -3348,15 +3352,24 @@ export function BlockRichTextEditor({
                                 footnoteNumberById,
                                 onPopoverTriggerEnter: showPopover,
                                 onPopoverTriggerLeave: schedulePopoverHideFromPointer,
-                                openLinkFromCurrentSelection,
+                                openLinkFromCurrentSelection: () => {
+                                    if (!isToolbarCommandAvailable('link:edit')) return;
+                                    openLinkFromCurrentSelection();
+                                },
                                 showLinkHoverFromRange,
                                 hideLinkHover: scheduleLinkHoverHide,
                                 showCodeHoverFromRange,
                                 hideCodeHover: scheduleCodeHoverHide,
                                 openInlineEmbed: openEmbedPopover,
                                 insertText: insertTextWithPendingMarks,
-                                runInlineMarkToggle,
-                                runCodeToggle,
+                                runInlineMarkToggle: (markType) => {
+                                    if (!isToolbarCommandAvailable(inlineMarkToolbarCommandId(markType))) return;
+                                    runInlineMarkToggle(markType);
+                                },
+                                runCodeToggle: () => {
+                                    if (!isToolbarCommandAvailable('mark:code')) return;
+                                    runCodeToggle();
+                                },
                                 createMissingTableCell: (tableId, rowId, columnIndex) =>
                                     runBlockControlCommand((current) => {
                                         const result = createMissingTableCell(
@@ -3440,6 +3453,7 @@ export function BlockRichTextEditor({
                         onBodyCommand={runAnnotationBodyCommand}
                         onBodyFocusRequest={requestCommentFocus}
                         onBodySelectionChange={setActiveAnnotationBodySelection}
+                        isToolbarCommandAvailable={isToolbarCommandAvailable}
                         popoverTextById={popoverTextById}
                         footnoteNumberById={footnoteNumberById}
                         rainbowLamportIds={rainbowLamportIds}
@@ -3465,6 +3479,7 @@ export function BlockRichTextEditor({
                     onBodyCommand={runAnnotationBodyCommand}
                     onBodyFocusRequest={requestCommentFocus}
                     onBodySelectionChange={setActiveAnnotationBodySelection}
+                    isToolbarCommandAvailable={isToolbarCommandAvailable}
                     onResolveAnnotation={(annotation) => {
                         runAnnotationBodyCommand((current, context) =>
                             resolveAnnotation(current.state, annotation.id, context),
@@ -3501,6 +3516,7 @@ export function BlockRichTextEditor({
                     onBodyCommand={runAnnotationBodyCommand}
                     onBodyFocusRequest={requestCommentFocus}
                     onBodySelectionChange={setActiveAnnotationBodySelection}
+                    isToolbarCommandAvailable={isToolbarCommandAvailable}
                     popoverTextById={popoverTextById}
                     footnoteNumberById={footnoteNumberById}
                     rainbowLamportIds={rainbowLamportIds}
@@ -6145,6 +6161,7 @@ function AnnotationSidebar({
     onBodyCommand,
     onBodyFocusRequest,
     onBodySelectionChange,
+    isToolbarCommandAvailable,
     onResolveAnnotation,
     popoverTextById,
     footnoteNumberById,
@@ -6171,6 +6188,7 @@ function AnnotationSidebar({
     ): void;
     onBodyFocusRequest(blockId: string, selection: EditorSelection): void;
     onBodySelectionChange(selection: EditorSelection | null): void;
+    isToolbarCommandAvailable(commandId: string): boolean;
     onResolveAnnotation(annotation: RenderedAnnotation): void;
     popoverTextById: Map<string, string>;
     footnoteNumberById: Map<string, number>;
@@ -6227,6 +6245,7 @@ function AnnotationSidebar({
                                         onBodyCommand={onBodyCommand}
                                         onBodyFocusRequest={onBodyFocusRequest}
                                         onBodySelectionChange={onBodySelectionChange}
+                                        isToolbarCommandAvailable={isToolbarCommandAvailable}
                                         popoverTextById={popoverTextById}
                                         footnoteNumberById={footnoteNumberById}
                                         rainbowLamportIds={rainbowLamportIds}
@@ -6268,6 +6287,7 @@ function Footnotes({
     onBodyCommand,
     onBodyFocusRequest,
     onBodySelectionChange,
+    isToolbarCommandAvailable,
     popoverTextById,
     footnoteNumberById,
     rainbowLamportIds,
@@ -6288,6 +6308,7 @@ function Footnotes({
     ): void;
     onBodyFocusRequest(blockId: string, selection: EditorSelection): void;
     onBodySelectionChange(selection: EditorSelection | null): void;
+    isToolbarCommandAvailable(commandId: string): boolean;
     popoverTextById: Map<string, string>;
     footnoteNumberById: Map<string, number>;
     rainbowLamportIds: boolean;
@@ -6313,6 +6334,7 @@ function Footnotes({
                                   onBodyCommand={onBodyCommand}
                                   onBodyFocusRequest={onBodyFocusRequest}
                                   onBodySelectionChange={onBodySelectionChange}
+                                  isToolbarCommandAvailable={isToolbarCommandAvailable}
                                   popoverTextById={popoverTextById}
                                   footnoteNumberById={footnoteNumberById}
                                   rainbowLamportIds={rainbowLamportIds}
@@ -6342,6 +6364,7 @@ function FloatingAnnotationPopover({
     onBodyCommand,
     onBodyFocusRequest,
     onBodySelectionChange,
+    isToolbarCommandAvailable,
     popoverTextById,
     footnoteNumberById,
     rainbowLamportIds,
@@ -6367,6 +6390,7 @@ function FloatingAnnotationPopover({
     ): void;
     onBodyFocusRequest(blockId: string, selection: EditorSelection): void;
     onBodySelectionChange(selection: EditorSelection | null): void;
+    isToolbarCommandAvailable(commandId: string): boolean;
     popoverTextById: Map<string, string>;
     footnoteNumberById: Map<string, number>;
     rainbowLamportIds: boolean;
@@ -6407,6 +6431,7 @@ function FloatingAnnotationPopover({
                     onBodyCommand={onBodyCommand}
                     onBodyFocusRequest={onBodyFocusRequest}
                     onBodySelectionChange={onBodySelectionChange}
+                    isToolbarCommandAvailable={isToolbarCommandAvailable}
                     popoverTextById={popoverTextById}
                     footnoteNumberById={footnoteNumberById}
                     rainbowLamportIds={rainbowLamportIds}
@@ -6431,6 +6456,7 @@ function AnnotationBodyBlock({
     onBodyCommand,
     onBodyFocusRequest,
     onBodySelectionChange,
+    isToolbarCommandAvailable,
     popoverTextById,
     footnoteNumberById,
     rainbowLamportIds,
@@ -6454,6 +6480,7 @@ function AnnotationBodyBlock({
     ): void;
     onBodyFocusRequest?(blockId: string, selection: EditorSelection): void;
     onBodySelectionChange(selection: EditorSelection | null): void;
+    isToolbarCommandAvailable(commandId: string): boolean;
     popoverTextById: Map<string, string>;
     footnoteNumberById: Map<string, number>;
     rainbowLamportIds: boolean;
@@ -6800,7 +6827,7 @@ function AnnotationBodyBlock({
 
                     event.preventDefault();
                     const text = event.clipboardData.getData('text/plain');
-                    if (isLinkLikeText(text) && selected.type === 'range') {
+                    if (isToolbarCommandAvailable('link:edit') && isLinkLikeText(text) && selected.type === 'range') {
                         run(selected, (state, activeSelection, context) =>
                             setAnnotationBodyLink(state, activeSelection, text.trim(), context),
                         );
@@ -6825,6 +6852,8 @@ function AnnotationBodyBlock({
                     }
                     if (modifierPressed && (key === 'b' || key === 'i')) {
                         event.preventDefault();
+                        const commandId = key === 'b' ? 'mark:bold' : 'mark:italic';
+                        if (!isToolbarCommandAvailable(commandId)) return;
                         run(selected, (state, activeSelection, context) =>
                             toggleAnnotationBodyMark(
                                 state,
@@ -6835,6 +6864,7 @@ function AnnotationBodyBlock({
                         );
                     } else if (modifierPressed && event.shiftKey && key === 'x') {
                         event.preventDefault();
+                        if (!isToolbarCommandAvailable('mark:strikethrough')) return;
                         run(selected, (state, activeSelection, context) =>
                             toggleAnnotationBodyMark(
                                 state,
@@ -6845,6 +6875,7 @@ function AnnotationBodyBlock({
                         );
                     } else if (modifierPressed && key === 'e') {
                         event.preventDefault();
+                        if (!isToolbarCommandAvailable('mark:code')) return;
                         if (selected.type === 'caret') {
                             if (pendingCodeMark) {
                                 run(selected, (state, _activeSelection, context) => {
@@ -6872,6 +6903,7 @@ function AnnotationBodyBlock({
                         }
                     } else if (modifierPressed && key === 'k') {
                         event.preventDefault();
+                        if (!isToolbarCommandAvailable('link:edit')) return;
                         if (selected.type === 'range') {
                             const ranges = [
                                 {

@@ -389,3 +389,47 @@ Verification:
 
 - `npm run typecheck` passed.
 - `npm exec vitest -- run src/block-editor/editorCrdtConfig.test.ts src/block-editor/legacyRichTextPlugins.test.ts src/block-editor/markdownShortcuts.test.ts src/block-editor/inlineRunRendering.test.ts src/block-editor/plugins/registry.test.ts src/block-editor/plugins/compatibility.test.ts src/block-editor/plugins/metadata.test.ts src/block-editor/plugins/legacyRichTextUi.test.ts src/block-editor/plugins/legacyRichTextBlocks.test.ts src/block-editor/plugins/basicMarks.test.ts src/block-editor/plugins/inlinePlugins.test.ts src/block-editor/plugins/code.test.ts` passed.
+
+### Phase 6 Continued: Main Editor Shortcut Gating
+
+- Added a shared toolbar command availability helper inside `BlockRichTextEditor`.
+- Routed `runToolbarCommand` through that helper instead of reading `toolbarItemIds` directly.
+- Wrapped the main render-context inline shortcut callbacks so plugin-owned shortcuts no-op unless their command id is registered:
+  - basic mark toggles use `mark:*`
+  - inline code uses `mark:code`
+  - link editing uses `link:edit`
+- This makes the main editable block keyboard paths line up with the registry-filtered toolbar behavior.
+
+Issues/workarounds:
+
+- Annotation body keyboard shortcuts still have a separate editing path. They remain to be gated in a follow-up slice because the availability predicate has to be threaded through annotation sidebar/footer/popover rendering.
+- The shortcut wrappers intentionally no-op after the key handler prevents default behavior, so unavailable plugin commands do not fall through to browser-native rich-text mutations.
+
+Verification:
+
+- `npm run typecheck` passed.
+- `npm exec vitest -- run src/block-editor/editorCrdtConfig.test.ts src/block-editor/legacyRichTextPlugins.test.ts src/block-editor/markdownShortcuts.test.ts src/block-editor/inlineRunRendering.test.ts src/block-editor/plugins/registry.test.ts src/block-editor/plugins/compatibility.test.ts src/block-editor/plugins/metadata.test.ts src/block-editor/plugins/legacyRichTextUi.test.ts src/block-editor/plugins/legacyRichTextBlocks.test.ts src/block-editor/plugins/basicMarks.test.ts src/block-editor/plugins/inlinePlugins.test.ts src/block-editor/plugins/code.test.ts` passed.
+
+### Phase 6 Continued: Annotation Body Shortcut Gating
+
+- Threaded the toolbar command availability predicate through annotation body render destinations:
+  - sidebar comments
+  - footer footnotes
+  - floating popovers
+- Gated annotation body inline shortcuts through registered command ids:
+  - `mark:bold`
+  - `mark:italic`
+  - `mark:strikethrough`
+  - `mark:code`
+  - `link:edit`
+- Gated annotation body plain-text paste auto-linking on `link:edit` availability.
+
+Issues/workarounds:
+
+- Annotation body command implementations still live in the legacy annotation editor path. This only makes those commands honor plugin availability before they run.
+- Pending annotation-body code state is not proactively cleared if plugins change while editing; unavailable code shortcuts no-op after this slice.
+
+Verification:
+
+- `npm run typecheck` passed.
+- `npm exec vitest -- run src/block-editor/editorCrdtConfig.test.ts src/block-editor/legacyRichTextPlugins.test.ts src/block-editor/markdownShortcuts.test.ts src/block-editor/inlineRunRendering.test.ts src/block-editor/plugins/registry.test.ts src/block-editor/plugins/compatibility.test.ts src/block-editor/plugins/metadata.test.ts src/block-editor/plugins/legacyRichTextUi.test.ts src/block-editor/plugins/legacyRichTextBlocks.test.ts src/block-editor/plugins/basicMarks.test.ts src/block-editor/plugins/inlinePlugins.test.ts src/block-editor/plugins/code.test.ts` passed.
