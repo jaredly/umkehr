@@ -1830,11 +1830,21 @@ export function BlockRichTextEditor({
                     );
                 } else {
                     const handler = registry.commands.get(command.commandId);
-                    handler?.handle(
+                    const handled = handler?.handle(
                         {id: command.commandId},
-                        {state: deleted.state, dispatch: (next) => runToolbarCommand(next.id)},
+                        {
+                            state: deleted.state,
+                            selection: deleted.selection,
+                            dispatch: (next) => runToolbarCommand(next.id),
+                        },
                     );
-                    result = {state: deleted.state, ops: [], selection: deleted.selection};
+                    result = handled
+                        ? {
+                              state: handled.state,
+                              ops: handled.ops,
+                              selection: handled.selection ?? deleted.selection,
+                          }
+                        : {state: deleted.state, ops: [], selection: deleted.selection};
                 }
                 const primary = primarySelection(resolveSelectionSet(result.state, result.selection));
                 scheduleSelectionRestore(primary);
@@ -3044,10 +3054,25 @@ export function BlockRichTextEditor({
                 runToolbarAnnotationCommand('popover');
                 return;
             default:
-                registry.commands.get(commandId)?.handle(
-                    {id: commandId},
-                    {state: replica.state, dispatch: (command) => runToolbarCommand(command.id)},
-                );
+                const handler = registry.commands.get(commandId);
+                if (!handler) return;
+                runBlockControlCommand((current) => {
+                    const handled = handler.handle(
+                        {id: commandId},
+                        {
+                            state: current.state,
+                            selection: current.selection,
+                            dispatch: (command) => runToolbarCommand(command.id),
+                        },
+                    );
+                    return handled
+                        ? {
+                              state: handled.state,
+                              ops: handled.ops,
+                              selection: handled.selection ?? current.selection,
+                          }
+                        : {state: current.state, ops: [], selection: current.selection};
+                });
         }
     };
 

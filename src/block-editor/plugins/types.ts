@@ -9,6 +9,7 @@ import type {
     Op,
     TimestampedBlockMeta,
 } from '../../block-crdt/types.js';
+import type {RetainedSelectionSet} from '../selectionSet.js';
 
 export type BlockEditorPluginId = string;
 export type BlockEditorContributionId = string;
@@ -76,6 +77,7 @@ export type BlockEditorMarkdownShortcutSpec<Meta extends TimestampedBlockMeta = 
 
 export type BlockEditorCommandContext<Meta extends TimestampedBlockMeta = TimestampedBlockMeta> = {
     state: CachedState<Meta>;
+    selection: RetainedSelectionSet;
     dispatch(command: BlockEditorCommand): void;
 };
 
@@ -84,10 +86,19 @@ export type BlockEditorCommand = {
     payload?: JsonValue;
 };
 
+export type BlockEditorCommandResult<Meta extends TimestampedBlockMeta = TimestampedBlockMeta> = {
+    state: CachedState<Meta>;
+    ops: Array<Op<Meta>>;
+    selection?: RetainedSelectionSet;
+};
+
 export type BlockEditorCommandSpec<Meta extends TimestampedBlockMeta = TimestampedBlockMeta> = {
     id: string;
     pluginId?: BlockEditorPluginId;
-    handle(command: BlockEditorCommand, context: BlockEditorCommandContext<Meta>): void;
+    handle(
+        command: BlockEditorCommand,
+        context: BlockEditorCommandContext<Meta>,
+    ): BlockEditorCommandResult<Meta> | void;
 };
 
 export type BlockEditorRenderContext<Meta extends TimestampedBlockMeta = TimestampedBlockMeta> = {

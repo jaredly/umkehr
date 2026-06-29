@@ -72,6 +72,35 @@ describe('createBlockEditorRegistry', () => {
         ).toThrow(/Duplicate mark "bold"/);
     });
 
+    it('stores command handlers that can return editor command results', () => {
+        const state = {
+            state: {chars: {}, blocks: {}, marks: {}, splits: {}, joins: {}, maxSeenCount: 0},
+            cache: {blockChildren: {}, charContents: {}, joinSentinels: {}, joinedBlocks: {}},
+        };
+        const selection = {primaryId: 'sel-0', entries: []};
+        const registry = createBlockEditorRegistry<TestMeta>([
+            plugin({
+                id: 'commands',
+                commands: [
+                    {
+                        id: 'custom',
+                        handle: (_command, context) => ({
+                            state: context.state,
+                            ops: [],
+                            selection: context.selection,
+                        }),
+                    },
+                ],
+            }),
+        ]);
+
+        expect(registry.commands.get('custom')?.handle({id: 'custom'}, {
+            state,
+            selection,
+            dispatch: () => {},
+        })).toEqual({state, ops: [], selection});
+    });
+
     it('rejects duplicate block renderers for a block type', () => {
         expect(() =>
             createBlockEditorRegistry<TestMeta>([

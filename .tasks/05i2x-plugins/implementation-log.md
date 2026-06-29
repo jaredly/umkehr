@@ -147,6 +147,28 @@ Verification:
 - `npm exec vitest -- run src/block-editor/editorCrdtConfig.test.ts src/block-editor/markdownShortcuts.test.ts src/block-editor/plugins/registry.test.ts src/block-editor/plugins/compatibility.test.ts src/block-editor/plugins/metadata.test.ts src/block-editor/plugins/legacyRichTextUi.test.ts` passed.
 - `npm run typecheck` passed.
 
+### Phase 5 Continued: Command Result Contract
+
+- Updated `BlockEditorCommandContext` to include the current retained selection.
+- Added `BlockEditorCommandResult`.
+- Updated `BlockEditorCommandSpec.handle` so command handlers may return editor mutations:
+  - `state`
+  - `ops`
+  - optional `selection`
+- Updated toolbar unknown-command fallback to run registry command handlers through `runBlockControlCommand`, applying returned state/ops/selection through the normal editor command pipeline.
+- Updated slash unknown-command fallback to apply returned state/ops/selection after slash trigger deletion.
+- Added a registry unit test covering command handlers that return command results.
+
+Issues/workarounds:
+
+- The command result contract is still intentionally minimal. It does not yet include command labels, post-render DOM selection restore hints, or access to richer editor-local services such as attachments/popovers.
+- Generic command handlers can now mutate document state, but feature-specific extraction still needs narrower command contexts so plugins do not depend on broad editor internals.
+
+Verification:
+
+- `npm exec vitest -- run src/block-editor/plugins/registry.test.ts` passed.
+- `npm run typecheck` passed.
+
 ### Phase 5 Continued: Slash Command Dispatcher
 
 - Extracted `runBlockTypeCommandEverywhere` inside `BlockRichTextEditor` to share block-type command behavior for slash execution.
