@@ -1,12 +1,12 @@
 import type {RichBlockMeta} from './blockMeta.js';
 import {legacyRichTextCrdtPlugins} from './editorCrdtConfig.js';
-import {tableSelectionPluginBundle} from './tableSelectionPlugin.js';
 import {
     basicMarksPlugin,
     codeMermaidPlugin,
     calloutsPlugin,
     codePlugin,
     codeVegaPlugin,
+    columnsPlugin,
     headingsPlugin,
     imagesPlugin,
     inlineDatePlugin,
@@ -18,6 +18,7 @@ import {
     listsPlugin,
     mathPlugin,
     quotePlugin,
+    slidesPlugin,
     todosPlugin,
     type BlockEditorPlugin,
 } from './plugins/index.js';
@@ -28,6 +29,7 @@ export const legacyRichTextPlugins: readonly BlockEditorPlugin<RichBlockMeta>[] 
     codePlugin,
     codeMermaidPlugin,
     codeVegaPlugin,
+    columnsPlugin,
     headingsPlugin,
     imagesPlugin,
     inlineDatePlugin,
@@ -39,7 +41,7 @@ export const legacyRichTextPlugins: readonly BlockEditorPlugin<RichBlockMeta>[] 
     listsPlugin,
     mathPlugin,
     quotePlugin,
+    slidesPlugin,
     todosPlugin,
     ...legacyRichTextCrdtPlugins,
-    tableSelectionPluginBundle,
 ];

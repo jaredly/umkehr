@@ -2,6 +2,7 @@ import {describe, expect, it} from 'vitest';
 
 import {
     applyMany,
+    blockContents,
     cachedState,
     insertTextOps,
     markRangeOp,
@@ -12,12 +13,18 @@ import {lamportToString} from '../block-crdt/utils';
 import {INLINE_EMBED_MARK, INLINE_EMBED_TEXT} from './inlineEmbeds';
 import {LINK_MARK, MATH_MARK} from './inlineMarks';
 import {singleRetainedSelectionSet} from './selectionSet';
+import {convertBlockToTable, insertText} from './blockCommands';
+import {caret} from './selectionModel';
+import {tableCellsForSelection, tableRowsForSelection} from './selectionModel';
 import {
     filterRichClipboardPayloadBlockFeatures,
     filterRichClipboardPayloadInlineFeatures,
     serializeSelectionToClipboardPayload,
     type RichClipboardPayload,
 } from './clipboard';
+import {createBlockEditorRegistry} from './plugins/registry';
+import {tableSelectionPluginBundle} from './tableSelectionPlugin';
+import {tablePlugin} from './plugins/table';
 
 const ts = () => {
     let next = 2;
@@ -191,5 +198,58 @@ describe('clipboard block feature filtering', () => {
             {type: 'preview', url: 'https://example.com', preview: null, ts: '2'},
         ]);
         expect(filtered.attachments).toBeUndefined();
+    });
+});
+
+describe('clipboard table feature gating', () => {
+    it('serializes table TSV only when the table clipboard command is registered', () => {
+        const actor = 'alice';
+        const nextTs = ts();
+        const context = {actor, nextTs};
+        const tableBlock = lamportToString([0, 'self']);
+        let result = convertBlockToTable(
+            cachedState(initialState('self', '00001')),
+            caret(tableBlock, 0),
+            context,
+            {rows: 2, columns: 2},
+        );
+        const rows = tableRowsForSelection(result.state, tableBlock);
+        const cells = rows.flatMap((rowId) => tableCellsForSelection(result.state, rowId));
+
+        ['A', 'B', 'C', 'D'].forEach((text, index) => {
+            result = insertText(result.state, caret(cells[index], 0), text, context);
+        });
+
+        const selection = singleRetainedSelectionSet(result.state, {
+            type: 'table-cells',
+            tableId: tableBlock,
+            anchorCellId: cells[1],
+            focusCellId: cells[2],
+        });
+        const selectionOnly = createBlockEditorRegistry([tableSelectionPluginBundle]);
+        const withTable = createBlockEditorRegistry([tableSelectionPluginBundle, tablePlugin]);
+
+        const withoutTableClipboard = serializeSelectionToClipboardPayload(
+            result.state,
+            selection,
+            [],
+            undefined,
+            undefined,
+            selectionOnly,
+        );
+        const withTableClipboard = serializeSelectionToClipboardPayload(
+            result.state,
+            selection,
+            [],
+            undefined,
+            undefined,
+            withTable,
+        );
+
+        expect(cells.map((cellId) => blockContents(result.state, cellId))).toEqual(['A', 'B', 'C', 'D']);
+        expect(withoutTableClipboard).toBeNull();
+        expect(withTableClipboard?.sourceSelectionType).toBe('table-cells');
+        expect(withTableClipboard?.tsv).toBe('A\tB\nC\tD');
+        expect(withTableClipboard?.fragments.map((fragment) => fragment.text)).toEqual(['A', 'B', 'C', 'D']);
     });
 });

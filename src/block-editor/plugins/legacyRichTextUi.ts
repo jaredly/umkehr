@@ -76,24 +76,10 @@ export function withOrder<Item extends {order?: number}>(items: readonly Item[])
 
 export const legacyBlockTypeMenuItems: readonly LegacyBlockTypeMenuItem[] = [
     {value: 'paragraph', label: 'Paragraph'},
-    {value: 'table', label: 'Table'},
-    {value: 'columns', label: 'Columns'},
-    {value: 'card-columns', label: 'Card columns'},
-    {value: 'slide-deck', label: 'Slide deck'},
-    {value: 'slide', label: 'Slide'},
-    {value: 'poll-rating', label: 'Rating poll'},
-    {value: 'poll-children', label: 'Answer poll'},
-    {value: 'poll-matrix', label: 'Matrix poll'},
-    {value: 'poll-long', label: 'Long-answer poll'},
 ];
 
 export const legacySlashCommandSpecs: readonly BlockEditorSlashCommandSpec[] = withOrder([
     blockSlashCommand('paragraph', 'Paragraph', ['text']),
-    blockSlashCommand('table', 'Table', ['grid']),
-    blockSlashCommand('columns', 'Columns', ['columns', 'layout']),
-    blockSlashCommand('card-columns', 'Card columns', ['board', 'cards', 'columns']),
-    blockSlashCommand('slide-deck', 'Slide deck', ['presentation', 'deck', 'slides']),
-    blockSlashCommand('slide', 'Slide', ['presentation', 'deck']),
 ]);
 
 export const legacyToolbarItemSpecs: readonly BlockEditorToolbarItemSpec[] = withOrder([

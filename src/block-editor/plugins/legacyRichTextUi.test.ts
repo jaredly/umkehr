@@ -34,6 +34,11 @@ describe('legacy rich text UI plugin', () => {
                         'block-type:callout-warning',
                         'block-type:callout-error',
                         'block-type:recipe-ingredient',
+                        'block-type:table',
+                        'block-type:columns',
+                        'block-type:card-columns',
+                        'block-type:slide-deck',
+                        'block-type:slide',
                         'block-type:preview',
                     ].includes(command.commandId),
             ),
@@ -110,8 +115,9 @@ describe('legacy rich text UI plugin', () => {
         expect(registry.plugins.map((plugin) => plugin.id)).toEqual([
             'annotations',
             'legacy-rich-text-ui',
-            'legacy-structural-crdt',
             'polls',
+            'table-selection',
+            'table',
         ]);
     });
 });

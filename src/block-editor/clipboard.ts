@@ -280,16 +280,19 @@ export const serializeSelectionToClipboardPayload = (
     attachments: SerializedImageAttachment[] = [],
     inlineFeatures?: ClipboardInlineFeatureSet,
     blockFeatures?: ClipboardBlockFeatureSet,
-    registry?: Pick<BlockEditorRegistry<RichBlockMeta>, 'selectionPlugins'>,
+    registry?: Pick<BlockEditorRegistry<RichBlockMeta>, 'selectionPlugins' | 'commands'>,
 ): RichClipboardPayload | null => {
     const normalizedInlineFeatures = normalizeClipboardInlineFeatures(inlineFeatures);
     const formatted = materializeFormattedBlocks(state, annotationMarkBehavior);
     const formattedById = new Map(formatted.map((block) => [block.id, block]));
     const initialResolved = resolveSelectionSet(state, selection);
+    const tableClipboardAvailable = registry ? registry.commands.has('table:clipboard') : true;
     const hasBlockLevelSelection = initialResolved.entries.some(
-        (entry) => entry.selection.type === 'block' || entry.selection.type === 'table-cells',
+        (entry) =>
+            entry.selection.type === 'block' ||
+            (tableClipboardAvailable && entry.selection.type === 'table-cells'),
     );
-    const sourceSelectionType = clipboardSourceSelectionType(initialResolved.entries);
+    const sourceSelectionType = clipboardSourceSelectionType(initialResolved.entries, tableClipboardAvailable);
     const merged = hasBlockLevelSelection ? selection.entries : mergeOverlappingRanges(state, selection);
     const resolved = resolveSelectionSet(state, {primaryId: selection.primaryId, entries: merged});
     const fragments: ClipboardFragment[] = [];
@@ -298,7 +301,7 @@ export const serializeSelectionToClipboardPayload = (
     let tsv: string | null = null;
 
     for (const entry of resolved.entries) {
-        if (entry.selection.type === 'block' || entry.selection.type === 'table-cells') {
+        if (entry.selection.type === 'block' || (tableClipboardAvailable && entry.selection.type === 'table-cells')) {
             for (const blockId of clipboardBlockIdsForBlockLevelSelection(state, entry.selection, registry)) {
                 if (includedBlockIds.has(blockId)) continue;
                 const block = formattedById.get(blockId);
@@ -314,7 +317,7 @@ export const serializeSelectionToClipboardPayload = (
                 refs.push(...built.annotationRefs);
                 includedBlockIds.add(block.id);
             }
-            if (entry.selection.type === 'table-cells' && entry.id === resolved.primaryId) {
+            if (tableClipboardAvailable && entry.selection.type === 'table-cells' && entry.id === resolved.primaryId) {
                 tsv = tableSelectionToTsv(state, entry.selection);
             }
             continue;
@@ -412,9 +415,10 @@ const clipboardMarkEnabled = (
 
 const clipboardSourceSelectionType = (
     entries: ReturnType<typeof resolveSelectionSet>['entries'],
+    tableClipboardAvailable = true,
 ): RichClipboardPayload['sourceSelectionType'] | undefined => {
     if (entries.some((entry) => entry.selection.type === 'block')) return 'block';
-    if (entries.some((entry) => entry.selection.type === 'table-cells')) return 'table-cells';
+    if (tableClipboardAvailable && entries.some((entry) => entry.selection.type === 'table-cells')) return 'table-cells';
     return undefined;
 };
 

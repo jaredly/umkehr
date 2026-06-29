@@ -1,0 +1,36 @@
+import type {RichBlockMeta} from '../blockMeta.js';
+import {mergeRichBlockMeta, isPollMeta} from '../pollBlocks.js';
+import type {BlockEditorPlugin} from './types.js';
+import {
+    structuralBlockTypeSpec,
+    structuralCommands,
+    structuralOptionPanels,
+    structuralRenderers,
+    structuralToolbarItems,
+} from './structuralHelpers.js';
+
+export const pollsPlugin: BlockEditorPlugin<RichBlockMeta> = {
+    id: 'polls',
+    blockTypes: [structuralBlockTypeSpec('poll', isPollMeta)],
+    toolbarItems: structuralToolbarItems([
+        {value: 'poll-rating', label: 'Rating poll'},
+        {value: 'poll-children', label: 'Answer poll'},
+        {value: 'poll-matrix', label: 'Matrix poll'},
+        {value: 'poll-long', label: 'Long-answer poll'},
+    ]),
+    commands: structuralCommands([
+        'poll:vote',
+        'poll:clear-vote',
+        'poll:set-choice-mode',
+        'poll:set-display-mode',
+        'poll:set-allow-change',
+        'poll:set-rating-maximum',
+        'poll:set-rating-presentation',
+    ]),
+    blockRenderers: structuralRenderers([{id: 'poll', blockType: 'poll'}]),
+    optionPanels: structuralOptionPanels([{id: 'poll', blockType: 'poll'}]),
+    crdt: {
+        mergeBlockMetaTypes: ['poll'],
+        mergeBlockMeta: mergeRichBlockMeta,
+    },
+};

@@ -34,20 +34,22 @@ describe('legacyRichTextPlugins', () => {
             'code',
             'code/mermaid',
             'code/vega',
+            'columns',
             'headings',
             'images',
             'ingredients',
             'inline-date',
             'legacy-rich-text-blocks',
             'legacy-rich-text-ui',
-            'legacy-structural-crdt',
             'link-preview',
             'links',
             'lists',
             'math',
             'polls',
             'quote',
+            'slides',
             'table-selection',
+            'table',
             'todos',
         ]);
         expect(registry.marks.has('bold')).toBe(true);
@@ -57,6 +59,9 @@ describe('legacyRichTextPlugins', () => {
         expect(registry.blockTypes.has('image')).toBe(true);
         expect(registry.blockTypes.has('preview')).toBe(true);
         expect(registry.blockTypes.has('poll')).toBe(true);
+        expect(registry.blockTypes.has('columns')).toBe(true);
+        expect(registry.blockTypes.has('slide_deck')).toBe(true);
+        expect(registry.blockTypes.has('table')).toBe(true);
         expect(registry.slashCommands.length).toBeGreaterThan(0);
         expect(registry.selectionTypes.has('table-cells')).toBe(true);
         expect(registry.selectionPlugins.has('table-cells')).toBe(true);

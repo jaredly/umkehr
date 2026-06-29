@@ -1,22 +1,10 @@
 import type {RichBlockMeta, RichBlockType} from '../blockMeta.js';
-import {sameTypeWithTs} from '../blockMeta.js';
-import {isPollMeta} from '../pollBlocks.js';
 import type {BlockEditorBlockTypeSpec, BlockEditorPlugin} from './types.js';
 
-export const legacyRichTextBlockTypeIds: readonly Exclude<RichBlockType, 'paragraph'>[] = [
-    'table',
-    'columns',
-    'slide_deck',
-    'slide',
-    'poll',
-];
+export const legacyRichTextBlockTypeIds: readonly Exclude<RichBlockType, 'paragraph'>[] = [];
 
 export const legacyRichTextBlockTypeSpecs: readonly BlockEditorBlockTypeSpec<RichBlockMeta>[] =
-    legacyRichTextBlockTypeIds.map((id) => ({
-        id,
-        validate: (meta): meta is RichBlockMeta => isLegacyRichBlockMeta(meta) && meta.type === id,
-        withTs: (meta, ts) => sameTypeWithTs(meta, ts),
-    }));
+    [];
 
 export const legacyRichTextBlocksPlugin: BlockEditorPlugin<RichBlockMeta> = {
     id: 'legacy-rich-text-blocks',
@@ -45,25 +33,6 @@ export const isLegacyRichBlockMeta = (value: unknown): value is RichBlockMeta =>
             return value.kind === 'info' || value.kind === 'warning' || value.kind === 'error';
         case 'recipe_ingredient':
             return true;
-        case 'table':
-            return true;
-        case 'columns':
-            return value.display === 'cards' || value.display === 'blocks';
-        case 'slide_deck':
-            return (
-                typeof value.width === 'number' &&
-                typeof value.height === 'number' &&
-                ['none', 'deck-title', 'slide-number', 'deck-title-and-slide-number'].includes(
-                    String(value.footer),
-                )
-            );
-        case 'slide':
-            return (
-                typeof value.showTitle === 'boolean' &&
-                (value.transition === 'none' || value.transition === 'fade' || value.transition === 'slide')
-            );
-        case 'poll':
-            return isPollMeta(value);
         case 'image':
             return (
                 typeof value.attachmentId === 'string' &&

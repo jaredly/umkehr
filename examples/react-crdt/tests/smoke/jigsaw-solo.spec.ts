@@ -20,10 +20,14 @@ test('contains jigsaw pieces and supports local canvas navigation', async ({page
     await expect(panel).toBeVisible();
     await expect(viewport).toBeVisible();
     await expect(minimap).toBeVisible();
+    await expect(minimap.locator('svg path')).toHaveCount(12);
+    const initialMinimapTransforms = await minimapPieceTransforms(minimap);
     await expect(viewport).toHaveCSS('overflow', 'hidden');
     await expectNoPieceHitOutsideViewport(page);
 
     await panel.getByRole('button', {name: 'Reshuffle'}).click();
+    await expect(minimap.locator('svg path')).toHaveCount(12);
+    await expect.poll(() => minimapPieceTransforms(minimap)).not.toEqual(initialMinimapTransforms);
     await expectNoPieceHitOutsideViewport(page);
 
     const initialTransform = await canvas.evaluate((element) => getComputedStyle(element).transform);
@@ -140,6 +144,12 @@ async function expectNoPieceHitOutsideViewport(page: import('@playwright/test').
             }),
         )
         .toBe(true);
+}
+
+async function minimapPieceTransforms(minimap: import('@playwright/test').Locator) {
+    return minimap.locator('svg path').evaluateAll((paths) =>
+        paths.map((path) => path.getAttribute('transform') ?? ''),
+    );
 }
 
 async function firstHitTestablePieceLabel(page: import('@playwright/test').Page) {

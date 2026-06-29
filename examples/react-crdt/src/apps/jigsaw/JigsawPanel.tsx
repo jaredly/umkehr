@@ -192,6 +192,7 @@ export function JigsawPanel({
         return result;
     }, [drag, layout.positions, localPositions]);
     const activeComponent = useMemo(() => new Set(drag?.component ?? []), [drag]);
+    const placedPieces = useMemo(() => new Set(layout.positions.keys()), [layout.positions]);
     const totalConnections = board.pieces.reduce((sum, piece) => sum + piece.neighbors.length, 0) / 2;
     const solvedConnections = validConnections(board, connections).length;
 
@@ -423,11 +424,12 @@ export function JigsawPanel({
                     })}
                 </div>
                 <JigsawMinimap
+                    board={board}
                     boardSpace={boardGeometry.boardSpace}
                     imageOffset={boardGeometry.imageOffset}
                     imageSize={board.imageSize}
-                    pieceSize={pieceSize}
-                    authoritativePositions={layout.positions}
+                    renderedPositions={renderedPositions}
+                    placedPieces={placedPieces}
                     viewport={viewport}
                     viewportSize={viewportSize}
                     dragging={draggingMinimap}

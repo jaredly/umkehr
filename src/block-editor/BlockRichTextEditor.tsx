@@ -818,6 +818,7 @@ export function BlockRichTextEditor({
             onCommand((current) => {
                 const result = command(current);
                 if (options.constrainFullscreenSlideSelection === false) return result;
+                if (!blockRenderFeatures.has('slide_deck')) return result;
                 const constrained = constrainSelectionToFullscreenSlide(
                     result.state,
                     result.selection,
@@ -828,7 +829,7 @@ export function BlockRichTextEditor({
                 return {...result, selection: constrained.selection};
             });
         },
-        [focusBlockSelectionTarget, onCommand, slideDeckUiByBlockId],
+        [blockRenderFeatures, focusBlockSelectionTarget, onCommand, slideDeckUiByBlockId],
     );
 
     const {draggingId, draggingSubtreeIds, dropTarget, registerRow, startDrag} = useBlockReorder({
@@ -3838,7 +3839,7 @@ type RenderBlockContext = {
     footnoteNumberById: Map<string, number>;
     inlineRenderFeatures: InlineRenderFeatures;
     blockRenderFeatures: BlockRenderFeatures;
-    registry: Pick<BlockEditorRegistry<RichBlockMeta>, 'codePreviewRenderersByLanguage' | 'optionPanels'>;
+    registry: Pick<BlockEditorRegistry<RichBlockMeta>, 'codePreviewRenderersByLanguage' | 'optionPanels' | 'commands'>;
     optionPanelBlockTypes: ReadonlySet<string>;
     runEditCommand(
         command: (current: Replica, selection: RetainedSelectionSet) => MultiCommandResult,
@@ -3943,18 +3944,24 @@ const matrixPollViewForNode = (node: RenderTreeNode): MatrixPollView => {
 const renderBlockNode = (node: RenderTreeNode, context: RenderBlockContext): ReactElement => {
     const meta = node.block.block.meta;
     const isChildBackedPoll =
-        meta.type === 'poll' && (meta.kind === 'children' || meta.kind === 'matrix');
+        meta.type === 'poll' &&
+        context.blockRenderFeatures.has('poll') &&
+        (meta.kind === 'children' || meta.kind === 'matrix');
     const pollEditorMode = isChildBackedPoll ? context.pollModeForBlock(node.block.id) : undefined;
-    if (meta.type === 'table') {
+    if (meta.type === 'table' && context.blockRenderFeatures.has('table')) {
         return <TableBlock key={node.block.id} node={node} context={context} />;
     }
-    if (meta.type === 'columns') {
+    if (meta.type === 'columns' && context.blockRenderFeatures.has('columns')) {
         return <ColumnsBlock key={node.block.id} node={node} context={context} />;
     }
-    if (meta.type === 'slide_deck') {
+    if (meta.type === 'slide_deck' && context.blockRenderFeatures.has('slide_deck')) {
         return <SlideDeckBlock key={node.block.id} node={node} context={context} />;
     }
-    if (meta.type === 'slide' && !slideDeckForSlide(context.state, node.block.id)) {
+    if (
+        meta.type === 'slide' &&
+        context.blockRenderFeatures.has('slide') &&
+        !slideDeckForSlide(context.state, node.block.id)
+    ) {
         return <OrphanSlideBlock key={node.block.id} node={node} context={context} />;
     }
     if (
@@ -5889,6 +5896,7 @@ const renderEditableBlock = (
                         !context.userId ||
                         !currentBlock ||
                         currentBlock.meta.type !== 'poll' ||
+                        !context.registry.optionPanels.has('poll') ||
                         (
                             currentBlock.meta.kind !== 'rating' &&
                             currentBlock.meta.kind !== 'children' &&
@@ -5959,6 +5967,7 @@ const renderEditableBlock = (
                         !context.userId ||
                         !currentBlock ||
                         currentBlock.meta.type !== 'poll' ||
+                        !context.registry.optionPanels.has('poll') ||
                         currentBlock.meta.kind !== 'long' ||
                         !text.trim()
                     ) {
@@ -6084,6 +6093,7 @@ const renderEditableBlock = (
                     if (
                         !currentBlock ||
                         currentBlock.meta.type !== 'poll' ||
+                        !context.registry.optionPanels.has('poll') ||
                         (currentBlock.meta.kind !== 'children' && currentBlock.meta.kind !== 'matrix')
                     ) {
                         return {state: current.state, ops: [], selection: current.selection};
@@ -6102,6 +6112,7 @@ const renderEditableBlock = (
                     if (
                         !currentBlock ||
                         currentBlock.meta.type !== 'poll' ||
+                        !context.registry.optionPanels.has('poll') ||
                         currentBlock.meta.kind !== 'children'
                     ) {
                         return {state: current.state, ops: [], selection: current.selection};
@@ -6117,7 +6128,11 @@ const renderEditableBlock = (
             onSetColumnsDisplay={(display) =>
                 context.runBlockControlCommand((current) => {
                     const currentBlock = current.state.state.blocks[block.id];
-                    if (!currentBlock || currentBlock.meta.type !== 'columns') {
+                    if (
+                        !currentBlock ||
+                        currentBlock.meta.type !== 'columns' ||
+                        !context.registry.optionPanels.has('columns')
+                    ) {
                         return {state: current.state, ops: [], selection: current.selection};
                     }
                     const result = setBlockMeta(current.state, block.id, {
@@ -6131,7 +6146,11 @@ const renderEditableBlock = (
             onSetPollAllowChange={(allowChange) =>
                 context.runBlockControlCommand((current) => {
                     const currentBlock = current.state.state.blocks[block.id];
-                    if (!currentBlock || currentBlock.meta.type !== 'poll') {
+                    if (
+                        !currentBlock ||
+                        currentBlock.meta.type !== 'poll' ||
+                        !context.registry.optionPanels.has('poll')
+                    ) {
                         return {state: current.state, ops: [], selection: current.selection};
                     }
                     const result = setBlockMeta(current.state, block.id, {
@@ -6148,6 +6167,7 @@ const renderEditableBlock = (
                     if (
                         !currentBlock ||
                         currentBlock.meta.type !== 'poll' ||
+                        !context.registry.optionPanels.has('poll') ||
                         currentBlock.meta.kind !== 'rating'
                     ) {
                         return {state: current.state, ops: [], selection: current.selection};
@@ -6166,6 +6186,7 @@ const renderEditableBlock = (
                     if (
                         !currentBlock ||
                         currentBlock.meta.type !== 'poll' ||
+                        !context.registry.optionPanels.has('poll') ||
                         currentBlock.meta.kind !== 'rating'
                     ) {
                         return {state: current.state, ops: [], selection: current.selection};
@@ -6181,7 +6202,11 @@ const renderEditableBlock = (
             onSetSlideDeckSize={(width, height) =>
                 context.runBlockControlCommand((current) => {
                     const currentBlock = current.state.state.blocks[block.id];
-                    if (!currentBlock || currentBlock.meta.type !== 'slide_deck') {
+                    if (
+                        !currentBlock ||
+                        currentBlock.meta.type !== 'slide_deck' ||
+                        !context.registry.optionPanels.has('slide_deck')
+                    ) {
                         return {state: current.state, ops: [], selection: current.selection};
                     }
                     const size = normalizeSlideDeckSize(width, height);
@@ -6197,7 +6222,11 @@ const renderEditableBlock = (
             onSetSlideDeckFooter={(footer) =>
                 context.runBlockControlCommand((current) => {
                     const currentBlock = current.state.state.blocks[block.id];
-                    if (!currentBlock || currentBlock.meta.type !== 'slide_deck') {
+                    if (
+                        !currentBlock ||
+                        currentBlock.meta.type !== 'slide_deck' ||
+                        !context.registry.optionPanels.has('slide_deck')
+                    ) {
                         return {state: current.state, ops: [], selection: current.selection};
                     }
                     const result = setBlockMeta(current.state, block.id, {
@@ -6211,7 +6240,11 @@ const renderEditableBlock = (
             onSetSlideShowTitle={(showTitle) =>
                 context.runBlockControlCommand((current) => {
                     const currentBlock = current.state.state.blocks[block.id];
-                    if (!currentBlock || currentBlock.meta.type !== 'slide') {
+                    if (
+                        !currentBlock ||
+                        currentBlock.meta.type !== 'slide' ||
+                        !context.registry.optionPanels.has('slide')
+                    ) {
                         return {state: current.state, ops: [], selection: current.selection};
                     }
                     const result = setBlockMeta(current.state, block.id, {
@@ -6225,7 +6258,11 @@ const renderEditableBlock = (
             onSetSlideTransition={(transition) =>
                 context.runBlockControlCommand((current) => {
                     const currentBlock = current.state.state.blocks[block.id];
-                    if (!currentBlock || currentBlock.meta.type !== 'slide') {
+                    if (
+                        !currentBlock ||
+                        currentBlock.meta.type !== 'slide' ||
+                        !context.registry.optionPanels.has('slide')
+                    ) {
                         return {state: current.state, ops: [], selection: current.selection};
                     }
                     const result = setBlockMeta(current.state, block.id, {
@@ -7445,7 +7482,7 @@ function EditableBlock({
     footnoteNumberById: Map<string, number>;
     inlineRenderFeatures: InlineRenderFeatures;
     blockRenderFeatures: BlockRenderFeatures;
-    registry: Pick<BlockEditorRegistry<RichBlockMeta>, 'codePreviewRenderersByLanguage'>;
+    registry: Pick<BlockEditorRegistry<RichBlockMeta>, 'codePreviewRenderersByLanguage' | 'optionPanels' | 'commands'>;
     optionPanelBlockTypes: ReadonlySet<string>;
     onPopoverTriggerEnter(id: string, element: HTMLElement): void;
     onPopoverTriggerLeave(id?: string, transition?: PopoverPointerTransition): void;
@@ -7522,6 +7559,7 @@ function EditableBlock({
 }) {
     const meta = block.block.meta;
     const hasBlockRenderFeature = blockRenderFeatures.has(meta.type);
+    const tableKeyboardAvailable = registry.commands.has('table:keyboard-navigation');
     const isCodeBlock = meta.type === 'code';
     const codeBlockRenderer = codePreviewRendererForMeta(registry, meta);
     const isRenderedCodeBlock = isCodeBlock && hasBlockRenderFeature;
@@ -7626,7 +7664,7 @@ function EditableBlock({
                         onForceCodeNewline();
                     } else if (isPlainTextCodeLikeBlock) {
                         onSplit();
-                    } else if (isTableCell && !event.shiftKey && meta.type !== 'image') {
+                    } else if (tableKeyboardAvailable && isTableCell && !event.shiftKey && meta.type !== 'image') {
                         onAdvanceFromTableCellEnd(
                             readSelectionFromDom(event.currentTarget) ??
                                 caret(block.id, blockLength),
@@ -7638,7 +7676,7 @@ function EditableBlock({
                     event.preventDefault();
                     if (isPlainTextCodeLikeBlock) {
                         onInsertText('    ');
-                    } else if (isTableCell) {
+                    } else if (tableKeyboardAvailable && isTableCell) {
                         onMoveTableCellByTab(event.shiftKey ? 'backward' : 'forward');
                     } else if (event.shiftKey) {
                         onUnindent();
@@ -7684,6 +7722,7 @@ function EditableBlock({
                         if (
                             event.key === 'ArrowLeft' &&
                             focus.offset === 0 &&
+                            tableKeyboardAvailable &&
                             onExtendTableSelectionByArrowKey(currentSelection, 'left')
                         ) {
                             return;
@@ -7691,6 +7730,7 @@ function EditableBlock({
                         if (
                             event.key === 'ArrowRight' &&
                             focus.offset === blockLength &&
+                            tableKeyboardAvailable &&
                             onExtendTableSelectionByArrowKey(currentSelection, 'right')
                         ) {
                             return;
@@ -7698,6 +7738,7 @@ function EditableBlock({
                         if (
                             event.key === 'ArrowUp' &&
                             isCaretOnFirstVisualLine(event.currentTarget) &&
+                            tableKeyboardAvailable &&
                             onExtendTableSelectionByArrowKey(
                                 currentSelection,
                                 'up',
@@ -7709,6 +7750,7 @@ function EditableBlock({
                         if (
                             event.key === 'ArrowDown' &&
                             isCaretOnLastVisualLine(event.currentTarget) &&
+                            tableKeyboardAvailable &&
                             onExtendTableSelectionByArrowKey(
                                 currentSelection,
                                 'down',
@@ -7757,7 +7799,7 @@ function EditableBlock({
                         currentSelection?.type === 'caret' &&
                         currentSelection.point.offset === 0
                     ) {
-                        if (onMoveTableSelectionByArrowKey(currentSelection, 'left')) {
+                        if (tableKeyboardAvailable && onMoveTableSelectionByArrowKey(currentSelection, 'left')) {
                             event.preventDefault();
                             return;
                         }
@@ -7776,7 +7818,7 @@ function EditableBlock({
                         currentSelection?.type === 'caret' &&
                         currentSelection.point.offset === blockLength
                     ) {
-                        if (onMoveTableSelectionByArrowKey(currentSelection, 'right')) {
+                        if (tableKeyboardAvailable && onMoveTableSelectionByArrowKey(currentSelection, 'right')) {
                             event.preventDefault();
                             return;
                         }
@@ -7796,6 +7838,7 @@ function EditableBlock({
                         isCaretOnFirstVisualLine(event.currentTarget)
                     ) {
                         if (
+                            tableKeyboardAvailable &&
                             onMoveTableSelectionByArrowKey(
                                 currentSelection,
                                 'up',
@@ -7821,6 +7864,7 @@ function EditableBlock({
                         isCaretOnLastVisualLine(event.currentTarget)
                     ) {
                         if (
+                            tableKeyboardAvailable &&
                             onMoveTableSelectionByArrowKey(
                                 currentSelection,
                                 'down',
@@ -7893,7 +7937,7 @@ function EditableBlock({
                     onSetUrl={onSetPreviewUrl}
                     onSetMetadata={onSetPreviewMetadata}
                 />
-            ) : meta.type === 'poll' ? (
+            ) : meta.type === 'poll' && hasBlockRenderFeature ? (
                 <PollBlock
                     meta={meta}
                     userId={userId}
@@ -9121,7 +9165,7 @@ function BlockOptions({
                 </select>
             </label>
         );
-    } else if (meta.type === 'poll') {
+    } else if (meta.type === 'poll' && optionPanelBlockTypes.has('poll')) {
         label = 'Poll block options';
         controls = (
             <>
@@ -9247,7 +9291,7 @@ function BlockOptions({
                 ) : null}
             </>
         );
-    } else if (meta.type === 'columns') {
+    } else if (meta.type === 'columns' && optionPanelBlockTypes.has('columns')) {
         label = 'Columns block options';
         controls = (
             <label className="blockOptionsField">
@@ -9265,7 +9309,7 @@ function BlockOptions({
                 </select>
             </label>
         );
-    } else if (meta.type === 'slide_deck') {
+    } else if (meta.type === 'slide_deck' && optionPanelBlockTypes.has('slide_deck')) {
         label = 'Slide deck options';
         controls = (
             <>
@@ -9309,7 +9353,7 @@ function BlockOptions({
                 </label>
             </>
         );
-    } else if (meta.type === 'slide') {
+    } else if (meta.type === 'slide' && optionPanelBlockTypes.has('slide')) {
         label = 'Slide options';
         controls = (
             <>

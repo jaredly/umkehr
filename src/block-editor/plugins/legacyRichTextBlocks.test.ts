@@ -31,17 +31,11 @@ const emptyState = (): CachedState<RichBlockMeta> => ({
 });
 
 describe('legacy rich text block plugin', () => {
-    it('declares every non-core rich text block metadata type', () => {
-        expect(legacyRichTextBlockTypeIds).toEqual([
-            'table',
-            'columns',
-            'slide_deck',
-            'slide',
-            'poll',
-        ]);
+    it('no longer declares structural rich text block metadata types', () => {
+        expect(legacyRichTextBlockTypeIds).toEqual([]);
     });
 
-    it('allows remaining transitional rich text metadata types during compatibility checks', () => {
+    it('does not allow structural rich text metadata types during compatibility checks', () => {
         const registry = createBlockEditorRegistry([legacyRichTextBlocksPlugin]);
         const state = emptyState();
         const metas: RichBlockMeta[] = [
@@ -60,10 +54,16 @@ describe('legacy rich text block plugin', () => {
             };
         }
 
-        expect(blockEditorDocumentCompatibilityIssues(registry, {state})).toEqual([]);
+        expect(blockEditorDocumentCompatibilityIssues(registry, {state})).toEqual([
+            {type: 'block', id: 'b0', blockType: 'table'},
+            {type: 'block', id: 'b1', blockType: 'columns'},
+            {type: 'block', id: 'b2', blockType: 'slide_deck'},
+            {type: 'block', id: 'b3', blockType: 'slide'},
+            {type: 'block', id: 'b4', blockType: 'poll'},
+        ]);
     });
 
-    it('declares the transitional table cell selection type', () => {
+    it('does not declare the transitional table cell selection type', () => {
         const registry = createBlockEditorRegistry([legacyRichTextBlocksPlugin]);
         const state = emptyState();
 
@@ -72,7 +72,7 @@ describe('legacy rich text block plugin', () => {
                 state,
                 selections: [{id: 'sel-1', selection: {type: 'table-cells'}}],
             }),
-        ).toEqual([]);
+        ).toEqual([{type: 'selection', id: 'sel-1', selectionType: 'table-cells'}]);
     });
 
     it('validates rich block metadata and rejects malformed metadata', () => {
