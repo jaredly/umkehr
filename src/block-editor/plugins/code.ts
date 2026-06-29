@@ -11,6 +11,9 @@ let mermaidInitialized = false;
 let mermaidLoadPromise: Promise<typeof import('mermaid')> | null = null;
 
 const loadMermaid = () => {
+    const testMermaid = (globalThis as {__umkehrTestMermaid?: typeof import('mermaid')['default']})
+        .__umkehrTestMermaid;
+    if (testMermaid) return Promise.resolve({default: testMermaid} as typeof import('mermaid'));
     mermaidLoadPromise ??= import('mermaid');
     return mermaidLoadPromise;
 };

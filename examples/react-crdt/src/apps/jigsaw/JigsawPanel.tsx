@@ -35,6 +35,11 @@ type DragState = {
     delta: Coord;
 };
 
+type LocalLayoutState = {
+    seed: number;
+    positions: Map<number, Coord>;
+};
+
 export function JigsawPanel({
     editor,
     title,
@@ -56,14 +61,44 @@ export function JigsawPanel({
     const pieceSize = useMemo(() => estimatedPieceSize(board), [board]);
     const threshold = useMemo(() => snapThreshold(board), [board]);
     const stageRef = useRef<HTMLDivElement | null>(null);
-    const [shuffleSeed, setShuffleSeed] = useState(1);
+    const [localLayout, setLocalLayout] = useState<LocalLayoutState>(() => ({
+        seed: 1,
+        positions: new Map(),
+    }));
     const [drag, setDrag] = useState<DragState | null>(null);
     const anchorVersions = useAnchorVersions(editor, board.pieces.length);
     const unplaced = useMemo(() => unplacedPieces(board, layout), [board, layout]);
-    const localPositions = useMemo(
-        () => arrangeUnplacedPieces(board, unplaced, board.imageSize, shuffleSeed),
-        [board, shuffleSeed, unplaced],
-    );
+    const localPositions = localLayout.positions;
+
+    useEffect(() => {
+        setLocalLayout((current) => {
+            const unplacedSet = new Set(unplaced);
+            const nextPositions = new Map<number, Coord>();
+            let changed = false;
+
+            for (const piece of unplaced) {
+                const existing = current.positions.get(piece);
+                if (existing) nextPositions.set(piece, existing);
+            }
+            if (nextPositions.size !== current.positions.size) changed = true;
+
+            const missing = unplaced.filter((piece) => !nextPositions.has(piece));
+            if (missing.length) {
+                const generated = arrangeUnplacedPieces(board, unplaced, board.imageSize, current.seed);
+                for (const piece of missing) {
+                    const position = generated.get(piece);
+                    if (position) nextPositions.set(piece, position);
+                }
+                changed = true;
+            }
+
+            for (const piece of current.positions.keys()) {
+                if (!unplacedSet.has(piece)) changed = true;
+            }
+
+            return changed ? {...current, positions: nextPositions} : current;
+        });
+    }, [board, unplaced]);
     const renderedPositions = useMemo(() => {
         const result = new Map<number, Coord>(localPositions);
         for (const [piece, position] of layout.positions) result.set(piece, position);
@@ -169,7 +204,18 @@ export function JigsawPanel({
                     </p>
                 </div>
                 <div className="jigsawActions">
-                    <button type="button" onClick={() => setShuffleSeed((seed) => seed + 1)}>
+                    <button
+                        type="button"
+                        onClick={() =>
+                            setLocalLayout((current) => {
+                                const seed = current.seed + 1;
+                                return {
+                                    seed,
+                                    positions: arrangeUnplacedPieces(board, unplaced, board.imageSize, seed),
+                                };
+                            })
+                        }
+                    >
                         Reshuffle
                     </button>
                     <button type="button" onClick={() => editor.undo()} disabled={readOnly || !editor.canUndo()}>
