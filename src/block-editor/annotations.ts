@@ -23,7 +23,8 @@ import {lamportToString, parseLamportString} from '../block-crdt/utils.js';
 import {paragraphMeta, type RichBlockMeta} from './blockMeta';
 import {caret, focusPoint, normalizeSelectionSegments, segmentText, type EditorSelection} from './selectionModel';
 import type {CommandContext, CommandResult} from './blockCommands';
-import {markdownShortcutPrefix} from './markdownShortcuts';
+import {legacyMarkdownShortcutSpecs, markdownShortcutPrefixFromSpecs} from './markdownShortcuts';
+import type {BlockEditorMarkdownShortcutSpec} from './plugins/index.js';
 import {markRangeOp} from '../block-crdt/index.js';
 import {
     ANNOTATION_MARK,
@@ -260,6 +261,7 @@ export const pasteAnnotationBodyTextWithMarkdownShortcuts = (
     selection: EditorSelection,
     text: string,
     context: CommandContext,
+    shortcutSpecs: readonly BlockEditorMarkdownShortcutSpec<RichBlockMeta>[] = legacyMarkdownShortcutSpecs,
 ): CommandResult => {
     const lines = text.replace(/\r\n?/g, '\n').split('\n');
     let result = replaceAnnotationBodySelection(state, selection, lines[0] ?? '', context);
@@ -292,7 +294,7 @@ export const pasteAnnotationBodyTextWithMarkdownShortcuts = (
         if (touched.startOffset !== 0) continue;
         const block = working.state.blocks[touched.blockId];
         if (!block) continue;
-        const shortcut = markdownShortcutPrefix(touched.sourceLine, block.meta, context.nextTs);
+        const shortcut = markdownShortcutPrefixFromSpecs(shortcutSpecs, touched.sourceLine, block.meta, context.nextTs);
         if (!shortcut) continue;
         const currentPrefix = segmentText(blockContents(working, touched.blockId))
             .slice(0, shortcut.length)

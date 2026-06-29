@@ -81,6 +81,18 @@ describe('legacy rich text block plugin', () => {
         expect(blockEditorDocumentCompatibilityIssues(registry, {state})).toEqual([]);
     });
 
+    it('declares the transitional table cell selection type', () => {
+        const registry = createBlockEditorRegistry([legacyRichTextBlocksPlugin]);
+        const state = emptyState();
+
+        expect(
+            blockEditorDocumentCompatibilityIssues(registry, {
+                state,
+                selections: [{id: 'sel-1', selection: {type: 'table-cells'}}],
+            }),
+        ).toEqual([]);
+    });
+
     it('validates rich block metadata and rejects malformed metadata', () => {
         const registry = createBlockEditorRegistry([legacyRichTextBlocksPlugin]);
 

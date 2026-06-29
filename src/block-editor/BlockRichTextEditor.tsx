@@ -322,7 +322,12 @@ import {
     type SlashCommand,
     type SlashMenuState,
 } from './slashCommands.js';
-import {createBlockEditorRegistry, type BlockEditorPlugin, type BlockEditorRegistry} from './plugins/index.js';
+import {
+    assertBlockEditorDocumentPluginsAvailable,
+    createBlockEditorRegistry,
+    type BlockEditorPlugin,
+    type BlockEditorRegistry,
+} from './plugins/index.js';
 import {blockTypeMenuItemsFromToolbarSpecs} from './plugins/legacyRichTextUi.js';
 
 import * as hlc from '../crdt/hlc.js';
@@ -333,6 +338,26 @@ type PollOptionView = {id: string; label: string; archived?: boolean};
 type MatrixPollView = {rows: PollOptionView[]; columns: PollOptionView[]};
 type PollEditorMode = 'view' | 'edit';
 type SubmitCommandOptions = {constrainFullscreenSlideSelection?: boolean};
+
+export type BlockRichTextEditorProps = {
+    replica: Replica;
+    attachments: AttachmentStore;
+    plugins?: readonly BlockEditorPlugin<RichBlockMeta>[];
+    resetSignal: number;
+    undoState: BlockEditorUndoState;
+    undoStatus: string;
+    rainbowLamportIds: boolean;
+    userId: string;
+    onUserIdChange(value: string): void;
+    onCommand(command: (replica: Replica) => MultiCommandResult): void;
+    onUndo(): void;
+    onRedo(): void;
+    onToggleOnline(): void;
+    onCreateImageAttachment(file: File): Promise<ImageAttachment>;
+    onMergeSerializedAttachments(attachments: SerializedImageAttachment[]): void;
+    onKeystroke(blockId: string, event: KeyboardEvent<HTMLElement>): void;
+    onKeyPerfSample?(sample: Omit<BlockEditorKeyPerfSampleInput, 'editorId'>): void;
+};
 
 const BOOLEAN_INLINE_MARKS: BooleanInlineMark[] = ['bold', 'italic', 'strikethrough', 'underline'];
 const BARE_INLINE_MARKS: BareInlineMark[] = [...BOOLEAN_INLINE_MARKS, CODE_MARK];
@@ -508,26 +533,12 @@ export function BlockRichTextEditor({
     onMergeSerializedAttachments,
     onKeystroke,
     onKeyPerfSample,
-}: {
-    replica: Replica;
-    attachments: AttachmentStore;
-    plugins?: readonly BlockEditorPlugin<RichBlockMeta>[];
-    resetSignal: number;
-    undoState: BlockEditorUndoState;
-    undoStatus: string;
-    rainbowLamportIds: boolean;
-    userId: string;
-    onUserIdChange(value: string): void;
-    onCommand(command: (replica: Replica) => MultiCommandResult): void;
-    onUndo(): void;
-    onRedo(): void;
-    onToggleOnline(): void;
-    onCreateImageAttachment(file: File): Promise<ImageAttachment>;
-    onMergeSerializedAttachments(attachments: SerializedImageAttachment[]): void;
-    onKeystroke(blockId: string, event: KeyboardEvent<HTMLElement>): void;
-    onKeyPerfSample?(sample: Omit<BlockEditorKeyPerfSampleInput, 'editorId'>): void;
-}) {
+}: BlockRichTextEditorProps) {
     const registry = useMemo(() => createBlockEditorRegistry(plugins), [plugins]);
+    assertBlockEditorDocumentPluginsAvailable(registry, {
+        state: replica.state,
+        selections: replica.selection.entries,
+    });
     const slashCommands = useMemo(() => slashCommandsFromRegistry(registry), [registry]);
     const blockTypeItems = useMemo(() => {
         return blockTypeMenuItemsFromToolbarSpecs(registry.toolbarItems);
@@ -1597,11 +1608,13 @@ export function BlockRichTextEditor({
                     pasteSelection,
                     text,
                     makeCommandContext(current),
+                    registry.markdownShortcuts,
                 );
             });
         },
         [
             isToolbarCommandAvailable,
+            registry,
             runEditCommand,
         ],
     );
@@ -1788,11 +1801,12 @@ export function BlockRichTextEditor({
             const activeMarks = activePendingInlineMarks(pendingInlineMarks);
             const result = !activeMarks.length
                 ? insertTextWithMarkdownShortcutsEverywhere(
-                    current.state,
-                    selection,
-                    text,
-                    makeCommandContext(current),
-                )
+                      current.state,
+                      selection,
+                      text,
+                      makeCommandContext(current),
+                      registry.markdownShortcuts,
+                  )
                 : (() => {
                       const resolved = resolveSelectionSet(current.state, selection);
                       if (!resolved.entries.every((entry) => entry.selection.type === 'caret')) {
@@ -1801,6 +1815,7 @@ export function BlockRichTextEditor({
                               selection,
                               text,
                               makeCommandContext(current),
+                              registry.markdownShortcuts,
                           );
                       }
                       const marked = insertTextWithRetainedMarksEverywhere(
@@ -1830,7 +1845,7 @@ export function BlockRichTextEditor({
             }
             return result;
         },
-        [pendingInlineMarks, retainedInlineMarks],
+        [pendingInlineMarks, registry, retainedInlineMarks],
     );
 
     const closeSlashMenuAndRestoreSelection = useCallback(() => {
@@ -3523,6 +3538,7 @@ export function BlockRichTextEditor({
                         onBodySelectionChange={setActiveAnnotationBodySelection}
                         isToolbarCommandAvailable={isToolbarCommandAvailable}
                         inlineRenderFeatures={inlineRenderFeatures}
+                        registry={registry}
                         popoverTextById={popoverTextById}
                         footnoteNumberById={footnoteNumberById}
                         rainbowLamportIds={rainbowLamportIds}
@@ -3550,6 +3566,7 @@ export function BlockRichTextEditor({
                     onBodySelectionChange={setActiveAnnotationBodySelection}
                     isToolbarCommandAvailable={isToolbarCommandAvailable}
                     inlineRenderFeatures={inlineRenderFeatures}
+                    registry={registry}
                     onResolveAnnotation={(annotation) => {
                         runAnnotationBodyCommand((current, context) =>
                             resolveAnnotation(current.state, annotation.id, context),
@@ -3588,6 +3605,7 @@ export function BlockRichTextEditor({
                     onBodySelectionChange={setActiveAnnotationBodySelection}
                     isToolbarCommandAvailable={isToolbarCommandAvailable}
                     inlineRenderFeatures={inlineRenderFeatures}
+                    registry={registry}
                     popoverTextById={popoverTextById}
                     footnoteNumberById={footnoteNumberById}
                     rainbowLamportIds={rainbowLamportIds}
@@ -3599,7 +3617,7 @@ export function BlockRichTextEditor({
             ))}
             <SlashCommandPopover
                 state={slashMenu}
-                commands={slashCommands.length ? slashCommands : undefined}
+                commands={slashCommands}
                 onQueryChange={updateSlashMenuQuery}
                 onActiveIndexChange={updateSlashMenuActiveIndex}
                 onSelect={runSlashCommand}
@@ -6236,6 +6254,7 @@ function AnnotationSidebar({
     onBodySelectionChange,
     isToolbarCommandAvailable,
     inlineRenderFeatures,
+    registry,
     onResolveAnnotation,
     popoverTextById,
     footnoteNumberById,
@@ -6264,6 +6283,7 @@ function AnnotationSidebar({
     onBodySelectionChange(selection: EditorSelection | null): void;
     isToolbarCommandAvailable(commandId: string): boolean;
     inlineRenderFeatures: InlineRenderFeatures;
+    registry: BlockEditorRegistry<RichBlockMeta>;
     onResolveAnnotation(annotation: RenderedAnnotation): void;
     popoverTextById: Map<string, string>;
     footnoteNumberById: Map<string, number>;
@@ -6322,6 +6342,7 @@ function AnnotationSidebar({
                                         onBodySelectionChange={onBodySelectionChange}
                                         isToolbarCommandAvailable={isToolbarCommandAvailable}
                                         inlineRenderFeatures={inlineRenderFeatures}
+                                        registry={registry}
                                         popoverTextById={popoverTextById}
                                         footnoteNumberById={footnoteNumberById}
                                         rainbowLamportIds={rainbowLamportIds}
@@ -6365,6 +6386,7 @@ function Footnotes({
     onBodySelectionChange,
     isToolbarCommandAvailable,
     inlineRenderFeatures,
+    registry,
     popoverTextById,
     footnoteNumberById,
     rainbowLamportIds,
@@ -6387,6 +6409,7 @@ function Footnotes({
     onBodySelectionChange(selection: EditorSelection | null): void;
     isToolbarCommandAvailable(commandId: string): boolean;
     inlineRenderFeatures: InlineRenderFeatures;
+    registry: BlockEditorRegistry<RichBlockMeta>;
     popoverTextById: Map<string, string>;
     footnoteNumberById: Map<string, number>;
     rainbowLamportIds: boolean;
@@ -6414,6 +6437,7 @@ function Footnotes({
                                   onBodySelectionChange={onBodySelectionChange}
                                   isToolbarCommandAvailable={isToolbarCommandAvailable}
                                   inlineRenderFeatures={inlineRenderFeatures}
+                                  registry={registry}
                                   popoverTextById={popoverTextById}
                                   footnoteNumberById={footnoteNumberById}
                                   rainbowLamportIds={rainbowLamportIds}
@@ -6445,6 +6469,7 @@ function FloatingAnnotationPopover({
     onBodySelectionChange,
     isToolbarCommandAvailable,
     inlineRenderFeatures,
+    registry,
     popoverTextById,
     footnoteNumberById,
     rainbowLamportIds,
@@ -6472,6 +6497,7 @@ function FloatingAnnotationPopover({
     onBodySelectionChange(selection: EditorSelection | null): void;
     isToolbarCommandAvailable(commandId: string): boolean;
     inlineRenderFeatures: InlineRenderFeatures;
+    registry: BlockEditorRegistry<RichBlockMeta>;
     popoverTextById: Map<string, string>;
     footnoteNumberById: Map<string, number>;
     rainbowLamportIds: boolean;
@@ -6514,6 +6540,7 @@ function FloatingAnnotationPopover({
                     onBodySelectionChange={onBodySelectionChange}
                     isToolbarCommandAvailable={isToolbarCommandAvailable}
                     inlineRenderFeatures={inlineRenderFeatures}
+                    registry={registry}
                     popoverTextById={popoverTextById}
                     footnoteNumberById={footnoteNumberById}
                     rainbowLamportIds={rainbowLamportIds}
@@ -6540,6 +6567,7 @@ function AnnotationBodyBlock({
     onBodySelectionChange,
     isToolbarCommandAvailable,
     inlineRenderFeatures,
+    registry,
     popoverTextById,
     footnoteNumberById,
     rainbowLamportIds,
@@ -6565,6 +6593,7 @@ function AnnotationBodyBlock({
     onBodySelectionChange(selection: EditorSelection | null): void;
     isToolbarCommandAvailable(commandId: string): boolean;
     inlineRenderFeatures: InlineRenderFeatures;
+    registry: BlockEditorRegistry<RichBlockMeta>;
     popoverTextById: Map<string, string>;
     footnoteNumberById: Map<string, number>;
     rainbowLamportIds: boolean;
@@ -6876,7 +6905,13 @@ function AnnotationBodyBlock({
                             return result;
                         }
                         return text === '`'
-                            ? insertTextWithMarkdownShortcuts(state, selected, text, context)
+                            ? insertTextWithMarkdownShortcuts(
+                                      state,
+                                      selected,
+                                      text,
+                                      context,
+                                      registry.markdownShortcuts,
+                                  )
                             : replaceAnnotationBodySelection(state, selected, text, context);
                     })
                 }
@@ -6924,7 +6959,13 @@ function AnnotationBodyBlock({
                         return;
                     }
                     run(selected, (state, activeSelection, context) =>
-                        pasteAnnotationBodyTextWithMarkdownShortcuts(state, activeSelection, text, context),
+                        pasteAnnotationBodyTextWithMarkdownShortcuts(
+                            state,
+                            activeSelection,
+                            text,
+                            context,
+                            registry.markdownShortcuts,
+                        ),
                     );
                 }}
                 onKeyDown={(event) => {

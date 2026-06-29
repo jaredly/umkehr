@@ -54,7 +54,12 @@ import {
     type BooleanInlineMark,
     type MathRenderMode,
 } from './inlineMarks';
-import {markdownShortcutPrefix, type MarkdownShortcutMatch} from './markdownShortcuts';
+import {
+    legacyMarkdownShortcutSpecs,
+    markdownShortcutPrefixFromSpecs,
+    type MarkdownShortcutMatch,
+} from './markdownShortcuts';
+import type {BlockEditorMarkdownShortcutSpec} from './plugins/index.js';
 import {
     caret,
     clampPoint,
@@ -170,6 +175,7 @@ export const insertTextWithMarkdownShortcuts = (
     selection: EditorSelection,
     text: string,
     context: CommandContext,
+    shortcutSpecs: readonly BlockEditorMarkdownShortcutSpec<RichBlockMeta>[] = legacyMarkdownShortcutSpecs,
 ): CommandResult => {
     const inserted = insertText(state, selection, text, context);
     if (text === '`' && isCollapsed(inserted.selection)) {
@@ -189,7 +195,7 @@ export const insertTextWithMarkdownShortcuts = (
     const textBeforeCaret = segmentText(blockContents(inserted.state, point.blockId))
         .slice(0, point.offset)
         .join('');
-    const shortcut = markdownShortcutPrefix(textBeforeCaret, block.meta, context.nextTs);
+    const shortcut = markdownShortcutPrefixFromSpecs(shortcutSpecs, textBeforeCaret, block.meta, context.nextTs);
     if (!shortcut || shortcut.length !== point.offset) return inserted;
 
     let working = inserted.state;
@@ -1044,6 +1050,7 @@ export const pastePlainTextWithMarkdownShortcuts = (
     selection: EditorSelection,
     text: string,
     context: CommandContext,
+    shortcutSpecs: readonly BlockEditorMarkdownShortcutSpec<RichBlockMeta>[] = legacyMarkdownShortcutSpecs,
 ): CommandResult => {
     const pasted = pastePlainTextDetailed(state, selection, text, context);
     const converted = applyMarkdownShortcutsToPastedLines(
@@ -1051,6 +1058,7 @@ export const pastePlainTextWithMarkdownShortcuts = (
         pasted.touchedLines,
         pasted.result.selection,
         context,
+        shortcutSpecs,
     );
     return {
         state: converted.state,
@@ -1162,6 +1170,7 @@ const applyMarkdownShortcutsToPastedLines = (
     touchedLines: PastedLineTarget[],
     selection: EditorSelection,
     context: CommandContext,
+    shortcutSpecs: readonly BlockEditorMarkdownShortcutSpec<RichBlockMeta>[],
 ): CommandResult => {
     let working = state;
     const ops: Array<Op<RichBlockMeta>> = [];
@@ -1172,7 +1181,7 @@ const applyMarkdownShortcutsToPastedLines = (
         if (touched.startOffset !== 0) continue;
         const block = working.state.blocks[touched.blockId];
         if (!block) continue;
-        const lineShortcut = pastedLineShortcut(touched.sourceLine, block.meta, context.nextTs);
+        const lineShortcut = pastedLineShortcut(touched.sourceLine, block.meta, context.nextTs, shortcutSpecs);
         if (!lineShortcut) continue;
 
         const currentPrefix = segmentText(blockContents(working, touched.blockId))
@@ -1218,10 +1227,11 @@ const pastedLineShortcut = (
     sourceLine: string,
     currentMeta: RichBlockMeta,
     nextTs: CommandContext['nextTs'],
+    shortcutSpecs: readonly BlockEditorMarkdownShortcutSpec<RichBlockMeta>[],
 ): PastedLineShortcut | null => {
     const indentation = pastedLineIndentation(sourceLine);
     const text = indentation.indentLevel > 0 ? sourceLine.slice(indentation.length) : sourceLine;
-    const shortcut = markdownShortcutPrefix(text, currentMeta, nextTs);
+    const shortcut = markdownShortcutPrefixFromSpecs(shortcutSpecs, text, currentMeta, nextTs);
     if (!shortcut) return null;
     if (indentation.indentLevel > 0 && shortcut.kind === 'heading') return null;
     if (indentation.length > 0 && indentation.indentLevel === 0) return null;

@@ -7,13 +7,12 @@ export type {
     BlockEditorPresenceSelection,
     BlockEditorSelectionState,
     BlockEditorValue,
-    BlockRichTextEditorComponent,
-    BlockRichTextEditorProps,
 } from './types.js';
 export {
     BlockRichTextEditor,
     type BlockEditorKeyPerfSampleInput,
     type BlockEditorReplica,
+    type BlockRichTextEditorProps,
 } from './BlockRichTextEditor.js';
 export * from './annotations.js';
 export * from './attachments.js';

@@ -116,6 +116,36 @@ describe('createBlockEditorRegistry', () => {
         ).toThrow(/Block type "card" is rendered by both/);
     });
 
+    it('rejects duplicate inline renderers for a mark type', () => {
+        expect(() =>
+            createBlockEditorRegistry<TestMeta>([
+                plugin({
+                    id: 'a',
+                    inlineRenderers: [{id: 'a.link', markType: 'link', render: () => null}],
+                }),
+                plugin({
+                    id: 'b',
+                    inlineRenderers: [{id: 'b.link', markType: 'link', render: () => null}],
+                }),
+            ]),
+        ).toThrow(/Inline mark "link" is rendered by both/);
+    });
+
+    it('rejects duplicate inline renderers for an embed type', () => {
+        expect(() =>
+            createBlockEditorRegistry<TestMeta>([
+                plugin({
+                    id: 'a',
+                    inlineRenderers: [{id: 'a.date', markType: 'embed', embedType: 'date', render: () => null}],
+                }),
+                plugin({
+                    id: 'b',
+                    inlineRenderers: [{id: 'b.date', markType: 'embed', embedType: 'date', render: () => null}],
+                }),
+            ]),
+        ).toThrow(/Inline embed "date" is rendered by both/);
+    });
+
     it('groups destination renderers by destination in deterministic order', () => {
         const registry = createBlockEditorRegistry<TestMeta>([
             plugin({
@@ -223,7 +253,7 @@ describe('createBlockEditorRegistry', () => {
             createBlockEditorRegistry<TestMeta>([
                 plugin({id: 'a', crdt: {markBehavior: {annotation: 'stacking'}}}),
                 plugin({id: 'b', crdt: {markBehavior: {annotation: 'lww'}}}),
-            ]).crdtConfig(),
+            ]),
         ).toThrow(/conflicting CRDT behavior/);
     });
 
@@ -261,7 +291,7 @@ describe('createBlockEditorRegistry', () => {
             createBlockEditorRegistry<TestMeta>([
                 plugin({id: 'a', crdt: {mergeBlockMetaTypes: ['poll'], mergeBlockMeta: () => undefined}}),
                 plugin({id: 'b', crdt: {mergeBlockMetaTypes: ['poll'], mergeBlockMeta: () => undefined}}),
-            ]).crdtConfig(),
+            ]),
         ).toThrow(/more than one merge hook/i);
     });
 });

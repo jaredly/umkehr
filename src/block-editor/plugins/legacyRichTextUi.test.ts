@@ -20,6 +20,28 @@ describe('legacy rich text UI plugin', () => {
         );
     });
 
+    it('preserves custom registry slash commands', () => {
+        expect(
+            slashCommandsFromSpecs([
+                {
+                    id: 'custom.insert',
+                    label: 'Custom insert',
+                    group: 'Custom',
+                    keywords: ['bespoke'],
+                    commandId: 'custom:insert',
+                },
+            ]),
+        ).toEqual([
+            {
+                type: 'command',
+                label: 'Custom insert',
+                group: 'Custom',
+                keywords: ['bespoke'],
+                commandId: 'custom:insert',
+            },
+        ]);
+    });
+
     it('exposes the full current slash command set through the legacy aggregate preset', () => {
         const registry = createBlockEditorRegistry(legacyRichTextPlugins);
 

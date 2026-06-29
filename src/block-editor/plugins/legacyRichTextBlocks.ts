@@ -30,6 +30,7 @@ export const legacyRichTextBlockTypeSpecs: readonly BlockEditorBlockTypeSpec<Ric
 export const legacyRichTextBlocksPlugin: BlockEditorPlugin<RichBlockMeta> = {
     id: 'legacy-rich-text-blocks',
     blockTypes: legacyRichTextBlockTypeSpecs,
+    selectionTypes: [{id: 'table-cells', label: 'Table cells'}],
 };
 
 export const isLegacyRichBlockMeta = (value: unknown): value is RichBlockMeta => {

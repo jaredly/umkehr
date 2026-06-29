@@ -46,6 +46,7 @@ export const createBlockEditorRegistry = <Meta extends TimestampedBlockMeta>(
     const inlineRenderers = sortedContributions<BlockEditorInlineRenderer<Meta>>(
         mapById<Meta, BlockEditorInlineRenderer<Meta>>('inline renderer', orderedPlugins, 'inlineRenderers').values(),
     );
+    validateInlineRendererOwnership(inlineRenderers);
     const styles = sortedContributions<BlockEditorPluginStyle>(
         mapById<Meta, BlockEditorPluginStyle>('style', orderedPlugins, 'styles').values(),
     );
@@ -65,6 +66,7 @@ export const createBlockEditorRegistry = <Meta extends TimestampedBlockMeta>(
     );
     const {byId: codePreviewRenderers, byLanguage: codePreviewRenderersByLanguage} =
         codePreviewRendererMaps(orderedPlugins);
+    const composedCrdtConfig = crdtConfig(orderedPlugins);
 
     return {
         plugins: orderedPlugins,
@@ -84,7 +86,7 @@ export const createBlockEditorRegistry = <Meta extends TimestampedBlockMeta>(
         codePreviewRenderersByLanguage,
         clipboard,
         styles,
-        crdtConfig: () => crdtConfig(orderedPlugins),
+        crdtConfig: () => composedCrdtConfig,
     };
 };
 
@@ -214,6 +216,35 @@ const codePreviewRendererMaps = <Meta extends TimestampedBlockMeta>(
         }
     }
     return {byId, byLanguage};
+};
+
+const validateInlineRendererOwnership = <Meta extends TimestampedBlockMeta>(
+    renderers: readonly BlockEditorInlineRenderer<Meta>[],
+): void => {
+    const markOwner = new Map<string, BlockEditorInlineRenderer<Meta>>();
+    const embedOwner = new Map<string, BlockEditorInlineRenderer<Meta>>();
+    for (const renderer of renderers) {
+        if (renderer.markType && !renderer.embedType) {
+            const existing = markOwner.get(renderer.markType);
+            if (existing) {
+                throw registryError(
+                    'duplicate-inline-renderer-mark',
+                    `Inline mark "${renderer.markType}" is rendered by both "${existing.pluginId}" and "${renderer.pluginId}".`,
+                );
+            }
+            markOwner.set(renderer.markType, renderer);
+        }
+        if (renderer.embedType) {
+            const existing = embedOwner.get(renderer.embedType);
+            if (existing) {
+                throw registryError(
+                    'duplicate-inline-renderer-embed',
+                    `Inline embed "${renderer.embedType}" is rendered by both "${existing.pluginId}" and "${renderer.pluginId}".`,
+                );
+            }
+            embedOwner.set(renderer.embedType, renderer);
+        }
+    }
 };
 
 const crdtConfig = <Meta extends TimestampedBlockMeta>(

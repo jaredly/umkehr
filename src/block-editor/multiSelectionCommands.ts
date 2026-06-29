@@ -99,6 +99,7 @@ import {
     type RichClipboardPayload,
 } from './clipboard';
 import type {PollVoteCommandData} from './pollBlocks';
+import type {BlockEditorMarkdownShortcutSpec} from './plugins/index.js';
 
 export type MultiCommandResult = {
     state: CachedState<RichBlockMeta>;
@@ -131,9 +132,10 @@ export const insertTextWithMarkdownShortcutsEverywhere = (
     selection: RetainedSelectionSet,
     text: string,
     context: CommandContext,
+    shortcutSpecs?: readonly BlockEditorMarkdownShortcutSpec<RichBlockMeta>[],
 ): MultiCommandResult =>
     runReplacingCommand(state, selection, (working, entry) =>
-        insertTextWithMarkdownShortcuts(working, resolveSelection(working, entry.selection), text, context),
+        insertTextWithMarkdownShortcuts(working, resolveSelection(working, entry.selection), text, context, shortcutSpecs),
     );
 
 export const insertTextWithMarksEverywhere = (
@@ -237,9 +239,10 @@ export const pastePlainTextWithMarkdownShortcutsEverywhere = (
     selection: RetainedSelectionSet,
     text: string,
     context: CommandContext,
+    shortcutSpecs?: readonly BlockEditorMarkdownShortcutSpec<RichBlockMeta>[],
 ): MultiCommandResult =>
     runReplacingCommand(state, selection, (working, entry) =>
-        pastePlainTextWithMarkdownShortcuts(working, resolveSelection(working, entry.selection), text, context),
+        pastePlainTextWithMarkdownShortcuts(working, resolveSelection(working, entry.selection), text, context, shortcutSpecs),
     );
 
 export const pasteRichClipboardEverywhere = (

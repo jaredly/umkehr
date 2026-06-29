@@ -40,7 +40,8 @@ export type SlashMenuState = {
 
 export type SlashCommand =
     | {type: 'block'; value: BlockTypeMenuValue; label: string; group: string; keywords: string[]; commandId: string}
-    | {type: 'date-embed'; label: string; group: string; keywords: string[]; commandId: string};
+    | {type: 'date-embed'; label: string; group: string; keywords: string[]; commandId: string}
+    | {type: 'command'; label: string; group: string; keywords: string[]; commandId: string};
 
 export const DEFAULT_SLASH_COMMANDS: SlashCommand[] = [
     defaultBlockSlashCommand('paragraph', 'Paragraph', ['text']),
@@ -93,7 +94,8 @@ export const slashCommandsFromSpecs = (
     specs: readonly BlockEditorSlashCommandSpec[],
 ): SlashCommand[] =>
     specs.flatMap<SlashCommand>((spec) => {
-        const blockValue = blockTypeValueFromCommandId(spec.commandId);
+        const commandId = spec.commandId ?? spec.id;
+        const blockValue = blockTypeValueFromCommandId(commandId);
         if (blockValue) {
             return [
                 {
@@ -102,22 +104,30 @@ export const slashCommandsFromSpecs = (
                     label: spec.label,
                     group: spec.group ?? 'Block type',
                     keywords: [...(spec.keywords ?? [])],
-                    commandId: spec.commandId ?? `block-type:${blockValue}`,
+                    commandId,
                 },
             ];
         }
-        if (spec.commandId === 'inline-embed:date') {
+        if (commandId === 'inline-embed:date') {
             return [
                 {
                     type: 'date-embed' as const,
                     label: spec.label,
                     group: spec.group ?? 'Inline embed',
                     keywords: [...(spec.keywords ?? [])],
-                    commandId: spec.commandId,
+                    commandId,
                 },
             ];
         }
-        return [];
+        return [
+            {
+                type: 'command' as const,
+                label: spec.label,
+                group: spec.group ?? 'Commands',
+                keywords: [...(spec.keywords ?? [])],
+                commandId,
+            },
+        ];
     });
 
 const blockTypeValueFromCommandId = (commandId: string | undefined): BlockTypeMenuValue | null => {
