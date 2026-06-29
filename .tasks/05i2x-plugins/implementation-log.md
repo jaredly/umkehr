@@ -147,6 +147,25 @@ Verification:
 - `npm exec vitest -- run src/block-editor/editorCrdtConfig.test.ts src/block-editor/markdownShortcuts.test.ts src/block-editor/plugins/registry.test.ts src/block-editor/plugins/compatibility.test.ts src/block-editor/plugins/metadata.test.ts src/block-editor/plugins/legacyRichTextUi.test.ts` passed.
 - `npm run typecheck` passed.
 
+### Phase 5 Continued: Slash Command Dispatcher
+
+- Extracted `runBlockTypeCommandEverywhere` inside `BlockRichTextEditor` to share block-type command behavior for slash execution.
+- Updated slash execution to route through `command.commandId`:
+  - `inline-embed:date` keeps the existing inline embed behavior.
+  - `block-type:*` routes through the shared block-type command helper.
+  - unknown command ids fall through to `registry.commands` handlers.
+- This reduces the slash path's dependence on the legacy `SlashCommand` union branch structure while preserving slash-trigger deletion and selection restoration behavior.
+
+Issues/workarounds:
+
+- Generic registry command handlers called from slash still cannot return editor mutations. They can be invoked, but the slash path currently keeps the deleted-slash state unchanged for unknown command ids. A richer command result contract is still needed before arbitrary plugin slash commands can mutate document state.
+- Toolbar block-type execution still has its own primary-selection path to avoid changing current toolbar behavior while slash keeps multi-selection/everywhere behavior.
+
+Verification:
+
+- `npm exec vitest -- run src/block-editor/editorCrdtConfig.test.ts src/block-editor/markdownShortcuts.test.ts src/block-editor/plugins/registry.test.ts src/block-editor/plugins/compatibility.test.ts src/block-editor/plugins/metadata.test.ts src/block-editor/plugins/legacyRichTextUi.test.ts` passed.
+- `npm run typecheck` passed.
+
 ### Phase 5 Continued: Toolbar Command Dispatcher
 
 - Added `onCommand?(commandId: string)` to `Toolbar`.

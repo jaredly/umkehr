@@ -70,6 +70,7 @@ import {
     slideChildren,
     slideDeckForSlide,
     splitTableTitleToParagraph,
+    type CommandContext,
     type CommandResult,
     type MoveTarget,
     type RetainedInlineMarkSession,
@@ -1757,6 +1758,47 @@ export function BlockRichTextEditor({
         setSlashMenu((current) => (current ? {...current, activeIndex} : current));
     }, []);
 
+    const runBlockTypeCommandEverywhere = (
+        state: CachedState<RichBlockMeta>,
+        selection: RetainedSelectionSet,
+        kind: BlockTypeMenuValue,
+        context: CommandContext,
+    ): MultiCommandResult => {
+        if (kind === 'table') {
+            return runSelectionCommandEverywhere(state, selection, (working, entry) =>
+                convertBlockToTable(working, resolveSelection(working, entry.selection), context),
+            );
+        }
+        if (kind === 'columns' || kind === 'card-columns') {
+            return runSelectionCommandEverywhere(state, selection, (working, entry) =>
+                convertBlockToColumns(
+                    working,
+                    resolveSelection(working, entry.selection),
+                    context,
+                    kind === 'card-columns' ? 'cards' : 'blocks',
+                ),
+            );
+        }
+        if (kind === 'slide-deck') {
+            return runSelectionCommandEverywhere(state, selection, (working, entry) =>
+                convertBlockToSlideDeck(working, resolveSelection(working, entry.selection), context),
+            );
+        }
+        if (kind === 'slide') {
+            return runSelectionCommandEverywhere(state, selection, (working, entry) =>
+                convertBlockToSlide(working, resolveSelection(working, entry.selection), context),
+            );
+        }
+        if (kind === 'preview') {
+            return runSelectionCommandEverywhere(state, selection, (working, entry) =>
+                insertPreviewBlock(working, resolveSelection(working, entry.selection), '', context),
+            );
+        }
+        return setBlockTypeEverywhere(state, selection, (_blockId, meta) =>
+            blockTypeMeta(kind, meta, context.nextTs()),
+        );
+    };
+
     const runSlashCommand = useCallback(
         (command: SlashCommand) => {
             const menu = slashMenu;
@@ -1767,7 +1809,7 @@ export function BlockRichTextEditor({
                 const context = makeCommandContext(current);
                 const deleted = deleteSlashTriggers(current.state, menu, context);
                 let result: MultiCommandResult;
-                if (command.type === 'date-embed') {
+                if (command.commandId === 'inline-embed:date') {
                     result = runSelectionCommandEverywhere(
                         deleted.state,
                         deleted.selection,
@@ -1779,69 +1821,20 @@ export function BlockRichTextEditor({
                                 context,
                             ),
                     );
-                } else if (command.value === 'table') {
-                    result = runSelectionCommandEverywhere(
+                } else if (command.commandId.startsWith('block-type:') && command.type === 'block') {
+                    result = runBlockTypeCommandEverywhere(
                         deleted.state,
                         deleted.selection,
-                        (working, entry) =>
-                            convertBlockToTable(
-                                working,
-                                resolveSelection(working, entry.selection),
-                                context,
-                            ),
-                    );
-                } else if (command.value === 'columns' || command.value === 'card-columns') {
-                    result = runSelectionCommandEverywhere(
-                        deleted.state,
-                        deleted.selection,
-                        (working, entry) =>
-                            convertBlockToColumns(
-                                working,
-                                resolveSelection(working, entry.selection),
-                                context,
-                                command.value === 'card-columns' ? 'cards' : 'blocks',
-                            ),
-                    );
-                } else if (command.value === 'slide-deck') {
-                    result = runSelectionCommandEverywhere(
-                        deleted.state,
-                        deleted.selection,
-                        (working, entry) =>
-                            convertBlockToSlideDeck(
-                                working,
-                                resolveSelection(working, entry.selection),
-                                context,
-                            ),
-                    );
-                } else if (command.value === 'slide') {
-                    result = runSelectionCommandEverywhere(
-                        deleted.state,
-                        deleted.selection,
-                        (working, entry) =>
-                            convertBlockToSlide(
-                                working,
-                                resolveSelection(working, entry.selection),
-                                context,
-                            ),
-                    );
-                } else if (command.value === 'preview') {
-                    result = runSelectionCommandEverywhere(
-                        deleted.state,
-                        deleted.selection,
-                        (working, entry) =>
-                            insertPreviewBlock(
-                                working,
-                                resolveSelection(working, entry.selection),
-                                '',
-                                context,
-                            ),
+                        command.value,
+                        context,
                     );
                 } else {
-                    result = setBlockTypeEverywhere(
-                        deleted.state,
-                        deleted.selection,
-                        (_blockId, meta) => blockTypeMeta(command.value, meta, context.nextTs()),
+                    const handler = registry.commands.get(command.commandId);
+                    handler?.handle(
+                        {id: command.commandId},
+                        {state: deleted.state, dispatch: (next) => runToolbarCommand(next.id)},
                     );
+                    result = {state: deleted.state, ops: [], selection: deleted.selection};
                 }
                 const primary = primarySelection(resolveSelectionSet(result.state, result.selection));
                 scheduleSelectionRestore(primary);
