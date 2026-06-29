@@ -88,11 +88,13 @@ import {
 } from './virtualParents';
 import {annotationVirtualParents} from './annotations';
 import {
+    filterRichClipboardPayloadInlineFeatures,
     isClipboardAnnotationRef,
     isClipboardMathData,
     type ClipboardAnnotation,
     type ClipboardAnnotationRef,
     type ClipboardFragment,
+    type ClipboardInlineFeatureSet,
     type ClipboardMarkRange,
     type RichClipboardPayload,
 } from './clipboard';
@@ -245,13 +247,17 @@ export const pasteRichClipboardEverywhere = (
     selection: RetainedSelectionSet,
     payload: RichClipboardPayload,
     context: CommandContext,
+    inlineFeatures?: ClipboardInlineFeatureSet,
 ): MultiCommandResult => {
-    const blockLevelPaste = pasteRichClipboardIntoBlockSelection(state, selection, payload, context);
+    const pastePayload = inlineFeatures
+        ? filterRichClipboardPayloadInlineFeatures(payload, inlineFeatures)
+        : payload;
+    const blockLevelPaste = pasteRichClipboardIntoBlockSelection(state, selection, pastePayload, context);
     if (blockLevelPaste) return blockLevelPaste;
 
     const deduped = dedupeSelectionSet(state, selection);
     const commandEntries = reverseSortedRetainedEntries(state, mergeOverlappingRanges(state, deduped));
-    if (!commandEntries.length || !payload.fragments.length) return {state, ops: [], selection: deduped};
+    if (!commandEntries.length || !pastePayload.fragments.length) return {state, ops: [], selection: deduped};
 
     let working = state;
     const ops: Array<Op<RichBlockMeta>> = [];
@@ -261,7 +267,7 @@ export const pasteRichClipboardEverywhere = (
         const pasted = pasteRichClipboardAtSelection(
             working,
             resolveSelection(working, entry.selection),
-            payload,
+            pastePayload,
             context,
         );
         working = pasted.state;

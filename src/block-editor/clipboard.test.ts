@@ -12,7 +12,10 @@ import {lamportToString} from '../block-crdt/utils';
 import {INLINE_EMBED_MARK, INLINE_EMBED_TEXT} from './inlineEmbeds';
 import {LINK_MARK, MATH_MARK} from './inlineMarks';
 import {singleRetainedSelectionSet} from './selectionSet';
-import {serializeSelectionToClipboardPayload} from './clipboard';
+import {
+    filterRichClipboardPayloadInlineFeatures,
+    serializeSelectionToClipboardPayload,
+} from './clipboard';
 
 const ts = () => {
     let next = 2;
@@ -20,7 +23,7 @@ const ts = () => {
 };
 
 describe('clipboard inline feature filtering', () => {
-    it('filters inline marks and embeds by enabled features', () => {
+    const clipboardFixture = () => {
         const block = [0, 'self'] as const;
         const blockId = lamportToString(block);
         let state = cachedState(initialState('self', '00001'));
@@ -56,6 +59,11 @@ describe('clipboard inline feature filtering', () => {
             focus: {blockId, offset: 4},
         });
 
+        return {state, selection};
+    };
+
+    it('filters copied inline marks and embeds by enabled features', () => {
+        const {state, selection} = clipboardFixture();
         const full = serializeSelectionToClipboardPayload(state, selection);
         expect(new Set(full?.fragments[0]?.marks.map((mark) => mark.type))).toEqual(new Set([
             'bold',
@@ -77,5 +85,28 @@ describe('clipboard inline feature filtering', () => {
         expect(filtered?.html).not.toContain('https://example.com');
         expect(filtered?.html).not.toContain('data-umkehr-math-display');
         expect(filtered?.html).not.toContain('data-umkehr-embed-type');
+    });
+
+    it('filters pasted rich clipboard marks without mutating the source payload', () => {
+        const {state, selection} = clipboardFixture();
+        const full = serializeSelectionToClipboardPayload(state, selection);
+        expect(full).not.toBeNull();
+
+        const filtered = filterRichClipboardPayloadInlineFeatures(full!, {
+            booleanMarks: new Set(),
+            links: false,
+            math: false,
+            inlineEmbeds: new Set(),
+        });
+        expect(filtered?.fragments[0]?.marks).toEqual([]);
+        expect(filtered?.html).not.toContain('https://example.com');
+        expect(filtered?.html).not.toContain('data-umkehr-math-display');
+        expect(filtered?.html).not.toContain('data-umkehr-embed-type');
+        expect(new Set(full?.fragments[0]?.marks.map((mark) => mark.type))).toEqual(new Set([
+            'bold',
+            'link',
+            'math',
+            'embed',
+        ]));
     });
 });

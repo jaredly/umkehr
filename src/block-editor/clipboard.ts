@@ -209,6 +209,29 @@ export const parseBlockRichTextClipboardHtml = (value: string): RichClipboardPay
     }
 };
 
+export const filterRichClipboardPayloadInlineFeatures = (
+    payload: RichClipboardPayload,
+    inlineFeatures: ClipboardInlineFeatureSet,
+): RichClipboardPayload => {
+    const normalizedInlineFeatures = normalizeClipboardInlineFeatures(inlineFeatures);
+    const fragments = payload.fragments.map((fragment) =>
+        filterClipboardFragmentInlineFeatures(fragment, normalizedInlineFeatures),
+    );
+    const annotations = payload.annotations.map((annotation) => ({
+        ...annotation,
+        bodyBlocks: annotation.bodyBlocks.map((fragment) =>
+            filterClipboardFragmentInlineFeatures(fragment, normalizedInlineFeatures),
+        ),
+    }));
+    return {
+        ...payload,
+        fragments,
+        annotations,
+        plainText: fragments.map(fragmentToPlainText).join('\n'),
+        html: fragmentsToHtml(fragments),
+    };
+};
+
 export const serializeSelectionToClipboardPayload = (
     state: CachedState<RichBlockMeta>,
     selection: RetainedSelectionSet,
@@ -300,6 +323,30 @@ export const serializeSelectionToClipboardPayload = (
         ...(tsv ? {tsv} : {}),
         ...(sourceSelectionType ? {sourceSelectionType} : {}),
     };
+};
+
+const filterClipboardFragmentInlineFeatures = (
+    fragment: ClipboardFragment,
+    inlineFeatures: NormalizedClipboardInlineFeatureSet,
+): ClipboardFragment => ({
+    ...fragment,
+    marks: fragment.marks.filter((mark) => clipboardMarkEnabled(mark, inlineFeatures)),
+});
+
+const clipboardMarkEnabled = (
+    mark: ClipboardMarkRange,
+    inlineFeatures: NormalizedClipboardInlineFeatureSet,
+): boolean => {
+    if (mark.type === 'annotation') return true;
+    if (mark.type === 'link') return inlineFeatures.links;
+    if (mark.type === 'math') return inlineFeatures.math;
+    if (mark.type === 'embed') {
+        return (
+            isInlineEmbedData(mark.data) &&
+            (!inlineFeatures.inlineEmbeds || inlineFeatures.inlineEmbeds.has(mark.data.type))
+        );
+    }
+    return inlineFeatures.booleanMarks.has(mark.type);
 };
 
 const clipboardSourceSelectionType = (

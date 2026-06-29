@@ -1524,6 +1524,7 @@ export function BlockRichTextEditor({
                     selection,
                     rich,
                     makeCommandContext(current),
+                    inlineRenderFeatures,
                 );
                 const primaryResultSelection = primarySelection(
                     resolveSelectionSet(result.state, result.selection),
@@ -1538,6 +1539,7 @@ export function BlockRichTextEditor({
             onMergeSerializedAttachments,
             resetVerticalCaretIntent,
             scheduleSelectionRestore,
+            inlineRenderFeatures,
         ],
     );
 
@@ -6876,6 +6878,7 @@ function AnnotationBodyBlock({
                                 singleRetainedSelectionSet(state, activeSelection),
                                 rich,
                                 context,
+                                inlineRenderFeatures,
                             );
                             return {
                                 state: result.state,
