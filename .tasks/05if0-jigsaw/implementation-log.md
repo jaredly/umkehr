@@ -16,3 +16,5 @@
 - Added HLC-based z-order for positioned components when CRDT metadata is available, with deterministic fallback ordering for history/solo contexts.
 - Visual smoke issue: `npm exec playwright -- screenshot` failed because the Playwright browser binary is not installed. A system Chrome headless screenshot attempt hung and had to be killed by URL-specific `pkill`; no screenshot was produced.
 - Verification: dev server is running at `http://127.0.0.1:5173/?app=jigsaw`, and `curl -I` returns HTTP 200 for the jigsaw route.
+- Rendering correction: replaced CSS-generated piece fills with real HTML canvas rendering. The app now generates the fixed `stock:hue` image into a source canvas, draws the solved-image preview from that canvas, and renders each puzzle piece by clipping to `piece.mask` and sampling the matching source-image rectangle. This should make adjacent rectangular pieces visually match edge-to-edge.
+- Verification after canvas rendering: focused `jigsaw.test.ts` passes and `npm run build` passes with the same SSH agent warning and Vite large-chunk warning as before.

@@ -17,6 +17,13 @@ vi.mock('mermaid', () => ({
     },
 }));
 
+vi.mock('mermaid/dist/mermaid.core.mjs', () => ({
+    default: {
+        initialize: mermaidMock.initialize,
+        render: mermaidMock.render,
+    },
+}));
+
 Object.defineProperty(globalThis, 'NodeFilter', {
     value: window.NodeFilter,
     configurable: true,

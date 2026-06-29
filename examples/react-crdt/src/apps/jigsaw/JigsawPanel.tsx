@@ -1,4 +1,5 @@
 import {
+    useEffect,
     useMemo,
     useRef,
     useState,
@@ -9,7 +10,7 @@ import {useValue} from 'umkehr/react';
 import {compareTimestamps, type HlcTimestamp} from 'umkehr/crdt';
 import type {AppEditorContext, CrdtEditorContext, GridSlot} from '../../lib/crdtApp';
 import {currentJigsawBoard} from './artifacts';
-import type {Coord, JigsawEphemeralData, JigsawState} from './model';
+import type {Coord, JigsawEphemeralData, JigsawState, PathSegment} from './model';
 import {
     add,
     arrangeUnplacedPieces,
@@ -49,6 +50,7 @@ export function JigsawPanel({
     const board = currentJigsawBoard();
     const positions = useValue(editor.$.positions);
     const connections = useValue(editor.$.connections);
+    const sourceImage = useMemo(() => createStockHueCanvas(board.imageSize), [board.imageSize]);
     const state = useMemo(() => ({positions, connections}), [connections, positions]);
     const layout = useMemo(() => buildPuzzleLayout(board, state), [board, state]);
     const pieceSize = useMemo(() => estimatedPieceSize(board), [board]);
@@ -192,7 +194,7 @@ export function JigsawPanel({
                 onPointerUp={finishDrag}
                 onPointerCancel={cancelDrag}
             >
-                <div className="jigsawSolvedImage" aria-hidden="true" />
+                <SolvedImageCanvas source={sourceImage} />
                 {board.pieces.map((piece, index) => {
                     const position = renderedPositions.get(index);
                     if (!position) return null;
@@ -215,14 +217,6 @@ export function JigsawPanel({
                                     '--piece-top': position.y - pieceSize.height / 2,
                                     '--piece-width': pieceSize.width,
                                     '--piece-height': pieceSize.height,
-                                    '--piece-hue-start': (piece.center.x / board.imageSize.width) * 360,
-                                    '--piece-hue-end':
-                                        ((piece.center.x + pieceSize.width / 2) / board.imageSize.width) * 360,
-                                    '--piece-light-start':
-                                        30 + (piece.center.y / board.imageSize.height) * 40,
-                                    '--piece-light-end':
-                                        30 +
-                                        ((piece.center.y + pieceSize.height / 2) / board.imageSize.height) * 40,
                                     '--piece-z': pieceZIndex({
                                         piece: index,
                                         component,
@@ -233,7 +227,14 @@ export function JigsawPanel({
                                 } as CSSProperties
                             }
                             aria-label={`Piece ${index + 1}`}
-                        />
+                        >
+                            <PieceCanvas
+                                source={sourceImage}
+                                pieceCenter={piece.center}
+                                mask={piece.mask}
+                                pieceSize={pieceSize}
+                            />
+                        </button>
                     );
                 })}
             </div>
@@ -270,6 +271,164 @@ export function JigsawPanel({
         const versionRank = version ? timestampRank(version, anchorVersions) : 0;
         return base + versionRank * 10 + Math.max(...component, piece);
     }
+}
+
+function SolvedImageCanvas({source}: {source: HTMLCanvasElement}) {
+    const canvasRef = useRef<HTMLCanvasElement | null>(null);
+    useEffect(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        canvas.width = source.width;
+        canvas.height = source.height;
+        const context = canvas.getContext('2d');
+        if (!context) return;
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(source, 0, 0);
+    }, [source]);
+    return (
+        <canvas
+            ref={canvasRef}
+            className="jigsawSolvedImage"
+            width={source.width}
+            height={source.height}
+            aria-hidden="true"
+        />
+    );
+}
+
+function PieceCanvas({
+    source,
+    pieceCenter,
+    mask,
+    pieceSize,
+}: {
+    source: HTMLCanvasElement;
+    pieceCenter: Coord;
+    mask: PathSegment[];
+    pieceSize: {width: number; height: number};
+}) {
+    const canvasRef = useRef<HTMLCanvasElement | null>(null);
+    useEffect(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        canvas.width = Math.max(1, Math.round(pieceSize.width));
+        canvas.height = Math.max(1, Math.round(pieceSize.height));
+        const context = canvas.getContext('2d');
+        if (!context) return;
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        context.save();
+        drawMaskPath(context, mask, pieceSize);
+        context.clip();
+        const sourceX = pieceCenter.x - pieceSize.width / 2;
+        const sourceY = pieceCenter.y - pieceSize.height / 2;
+        context.drawImage(
+            source,
+            sourceX,
+            sourceY,
+            pieceSize.width,
+            pieceSize.height,
+            0,
+            0,
+            canvas.width,
+            canvas.height,
+        );
+        context.restore();
+    }, [mask, pieceCenter.x, pieceCenter.y, pieceSize, source]);
+
+    return (
+        <canvas
+            ref={canvasRef}
+            className="jigsawPieceCanvas"
+            width={Math.max(1, Math.round(pieceSize.width))}
+            height={Math.max(1, Math.round(pieceSize.height))}
+            aria-hidden="true"
+        />
+    );
+}
+
+function createStockHueCanvas(size: {width: number; height: number}) {
+    const canvas = document.createElement('canvas');
+    canvas.width = size.width;
+    canvas.height = size.height;
+    const context = canvas.getContext('2d');
+    if (!context) return canvas;
+    const image = context.createImageData(size.width, size.height);
+    for (let y = 0; y < size.height; y++) {
+        const lightness = 30 + (y / Math.max(1, size.height - 1)) * 40;
+        for (let x = 0; x < size.width; x++) {
+            const hue = (x / Math.max(1, size.width - 1)) * 360;
+            const [r, g, b] = hslToRgb(hue, 78, lightness);
+            const offset = (y * size.width + x) * 4;
+            image.data[offset] = r;
+            image.data[offset + 1] = g;
+            image.data[offset + 2] = b;
+            image.data[offset + 3] = 255;
+        }
+    }
+    context.putImageData(image, 0, 0);
+    return canvas;
+}
+
+function drawMaskPath(
+    context: CanvasRenderingContext2D,
+    mask: PathSegment[],
+    pieceSize: {width: number; height: number},
+) {
+    context.beginPath();
+    const [first, ...rest] = mask;
+    if (!first) {
+        context.rect(0, 0, pieceSize.width, pieceSize.height);
+        return;
+    }
+    context.moveTo(first.to.x + pieceSize.width / 2, first.to.y + pieceSize.height / 2);
+    for (const segment of rest) {
+        if (segment.type === 'Quadratic') {
+            context.quadraticCurveTo(
+                segment.control.x + pieceSize.width / 2,
+                segment.control.y + pieceSize.height / 2,
+                segment.to.x + pieceSize.width / 2,
+                segment.to.y + pieceSize.height / 2,
+            );
+        } else if (segment.type === 'Cubic') {
+            context.bezierCurveTo(
+                segment.control1.x + pieceSize.width / 2,
+                segment.control1.y + pieceSize.height / 2,
+                segment.control2.x + pieceSize.width / 2,
+                segment.control2.y + pieceSize.height / 2,
+                segment.to.x + pieceSize.width / 2,
+                segment.to.y + pieceSize.height / 2,
+            );
+        } else {
+            context.lineTo(segment.to.x + pieceSize.width / 2, segment.to.y + pieceSize.height / 2);
+        }
+    }
+    context.closePath();
+}
+
+function hslToRgb(hue: number, saturation: number, lightness: number) {
+    const h = (((hue % 360) + 360) % 360) / 360;
+    const s = saturation / 100;
+    const l = lightness / 100;
+    if (s === 0) {
+        const value = Math.round(l * 255);
+        return [value, value, value] as const;
+    }
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    return [
+        Math.round(hueToRgb(p, q, h + 1 / 3) * 255),
+        Math.round(hueToRgb(p, q, h) * 255),
+        Math.round(hueToRgb(p, q, h - 1 / 3) * 255),
+    ] as const;
+}
+
+function hueToRgb(p: number, q: number, t: number) {
+    if (t < 0) t += 1;
+    if (t > 1) t -= 1;
+    if (t < 1 / 6) return p + (q - p) * 6 * t;
+    if (t < 1 / 2) return q;
+    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+    return p;
 }
 
 function releasePointerCapture(event: PointerEvent<HTMLElement>) {
