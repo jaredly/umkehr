@@ -1,6 +1,7 @@
 import {describe, expect, it} from 'vitest';
 
 import {DEFAULT_SLASH_COMMANDS, slashCommandsFromRegistry, slashCommandsFromSpecs} from '../slashCommands';
+import {legacyRichTextPlugins} from '../legacyRichTextPlugins';
 import {createBlockEditorRegistry} from './registry';
 import {
     blockTypeMenuItemsFromToolbarSpecs,
@@ -13,12 +14,14 @@ import {
 import type {RichBlockMeta} from '../blockMeta';
 
 describe('legacy rich text UI plugin', () => {
-    it('declares slash commands matching the current built-in slash commands', () => {
-        expect(slashCommandsFromSpecs(legacySlashCommandSpecs)).toEqual(DEFAULT_SLASH_COMMANDS);
+    it('declares the legacy-owned slash command subset', () => {
+        expect(slashCommandsFromSpecs(legacySlashCommandSpecs)).toEqual(
+            DEFAULT_SLASH_COMMANDS.filter((command) => command.commandId !== 'inline-embed:date'),
+        );
     });
 
-    it('exposes slash commands through the registry', () => {
-        const registry = createBlockEditorRegistry<RichBlockMeta>([legacyRichTextUiPlugin]);
+    it('exposes the full current slash command set through the legacy aggregate preset', () => {
+        const registry = createBlockEditorRegistry(legacyRichTextPlugins);
 
         expect(slashCommandsFromRegistry(registry)).toEqual(DEFAULT_SLASH_COMMANDS);
     });

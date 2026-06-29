@@ -323,3 +323,28 @@ Verification:
 
 - `npm exec vitest -- run src/block-editor/editorCrdtConfig.test.ts src/block-editor/legacyRichTextPlugins.test.ts src/block-editor/markdownShortcuts.test.ts src/block-editor/plugins/registry.test.ts src/block-editor/plugins/compatibility.test.ts src/block-editor/plugins/metadata.test.ts src/block-editor/plugins/legacyRichTextUi.test.ts src/block-editor/plugins/legacyRichTextBlocks.test.ts src/block-editor/plugins/basicMarks.test.ts src/block-editor/plugins/inlinePlugins.test.ts` passed.
 - `npm run typecheck` passed.
+
+### Phase 6 Continued: Inline UI Declaration Ownership
+
+- Moved inline toolbar/slash declarations out of `legacyRichTextUiPlugin` and into their owning inline plugins:
+  - `basicMarksPlugin` now owns `mark:bold`, `mark:italic`, `mark:strikethrough`, and `mark:underline` toolbar items.
+  - `linksPlugin` now owns the `link:edit` toolbar item.
+  - `mathPlugin` now owns `mark:math` and `mark:display-math` toolbar items.
+  - `inlineDatePlugin` now owns the `inline-embed:date` toolbar item and slash command.
+- Kept `legacyRichTextUiPlugin` responsible for the remaining legacy UI declarations:
+  - history
+  - `mark:code`
+  - image upload
+  - annotation buttons
+  - block type menu/slash entries
+- Updated tests so full slash-command parity is asserted through `legacyRichTextPlugins`, while `legacyRichTextUiPlugin` is tested for only the subset it still owns.
+
+Issues/workarounds:
+
+- Toolbar rendering is still explicit JSX in `Toolbar`; this step changes registry ownership/filtering, not arbitrary plugin-rendered toolbar controls.
+- The hard-coded toolbar visual order is preserved by the existing JSX order. Registry `order` values are still assigned to the moved inline items so future generic toolbar rendering has the intended order available.
+
+Verification:
+
+- `npm exec vitest -- run src/block-editor/editorCrdtConfig.test.ts src/block-editor/legacyRichTextPlugins.test.ts src/block-editor/markdownShortcuts.test.ts src/block-editor/plugins/registry.test.ts src/block-editor/plugins/compatibility.test.ts src/block-editor/plugins/metadata.test.ts src/block-editor/plugins/legacyRichTextUi.test.ts src/block-editor/plugins/legacyRichTextBlocks.test.ts src/block-editor/plugins/basicMarks.test.ts src/block-editor/plugins/inlinePlugins.test.ts` passed.
+- `npm run typecheck` passed.

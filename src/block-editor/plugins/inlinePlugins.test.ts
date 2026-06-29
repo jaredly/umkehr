@@ -38,6 +38,20 @@ describe('inline feature plugins', () => {
         expect(registry.inlineEmbeds.has('date')).toBe(true);
     });
 
+    it('owns inline toolbar and slash entries for these features', () => {
+        const registry = createBlockEditorRegistry([linksPlugin, mathPlugin, inlineDatePlugin]);
+
+        expect(registry.toolbarItems.map((item) => [item.id, item.commandId])).toEqual([
+            ['mark:math', 'mark:math'],
+            ['mark:display-math', 'mark:display-math'],
+            ['link:edit', 'link:edit'],
+            ['inline-embed:date', 'inline-embed:date'],
+        ]);
+        expect(registry.slashCommands.map((command) => [command.id, command.commandId])).toEqual([
+            ['inline-embed:date', 'inline-embed:date'],
+        ]);
+    });
+
     it('covers compatibility checks for link, math, and date embed records', () => {
         const registry = createBlockEditorRegistry([linksPlugin, mathPlugin, inlineDatePlugin]);
         const state = emptyState();

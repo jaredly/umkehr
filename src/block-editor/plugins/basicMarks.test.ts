@@ -32,6 +32,17 @@ describe('basic marks plugin', () => {
         expect([...registry.marks.keys()]).toEqual(['bold', 'italic', 'strikethrough', 'underline']);
     });
 
+    it('owns the basic mark toolbar items', () => {
+        const registry = createBlockEditorRegistry([basicMarksPlugin]);
+
+        expect(registry.toolbarItems.map((item) => [item.id, item.commandId])).toEqual([
+            ['mark:bold', 'mark:bold'],
+            ['mark:italic', 'mark:italic'],
+            ['mark:strikethrough', 'mark:strikethrough'],
+            ['mark:underline', 'mark:underline'],
+        ]);
+    });
+
     it('covers compatibility checks for basic mark records', () => {
         const registry = createBlockEditorRegistry([basicMarksPlugin]);
         const state = emptyState();

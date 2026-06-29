@@ -94,27 +94,12 @@ export const legacySlashCommandSpecs: readonly BlockEditorSlashCommandSpec[] = w
     blockSlashCommand('slide-deck', 'Slide deck', ['presentation', 'deck', 'slides']),
     blockSlashCommand('slide', 'Slide', ['presentation', 'deck']),
     blockSlashCommand('preview', 'Preview', ['link', 'card', 'url']),
-    {
-        id: 'inline-embed:date',
-        label: 'Date',
-        group: 'Inline embed',
-        keywords: ['embed', 'calendar'],
-        commandId: 'inline-embed:date',
-    },
 ]);
 
 export const legacyToolbarItemSpecs: readonly BlockEditorToolbarItemSpec[] = withOrder([
     toolbarItem('history:undo', 'History', 'Undo'),
     toolbarItem('history:redo', 'History', 'Redo'),
-    toolbarItem('mark:bold', 'Inline marks', 'Bold'),
-    toolbarItem('mark:italic', 'Inline marks', 'Italic'),
-    toolbarItem('mark:strikethrough', 'Inline marks', 'Strikethrough'),
-    toolbarItem('mark:underline', 'Inline marks', 'Underline'),
     toolbarItem('mark:code', 'Inline marks', 'Code'),
-    toolbarItem('mark:math', 'Inline marks', 'Math'),
-    toolbarItem('mark:display-math', 'Inline marks', 'Display Math'),
-    toolbarItem('link:edit', 'Inline marks', 'Link'),
-    toolbarItem('inline-embed:date', 'Inline marks', 'Date'),
     toolbarItem('image:upload', 'Inline marks', 'Image'),
     toolbarItem('annotation:sidebar', 'Annotations', 'Comment'),
     toolbarItem('annotation:footnote', 'Annotations', 'Footnote'),
