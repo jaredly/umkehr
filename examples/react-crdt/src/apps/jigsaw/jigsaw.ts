@@ -374,17 +374,17 @@ function positionForLaneSlot({
     offset: number;
 }) {
     const horizontal = lane === 0 || lane === 2;
-    const laneLength = horizontal ? stage.width : stage.height;
-    const distance = ((slot + 0.5) / slots) * laneLength;
+    const laneLength = (horizontal ? stage.width : stage.height) + offset * 2;
+    const distance = slots === 1 ? laneLength / 2 : (slot / (slots - 1)) * laneLength;
     switch (lane) {
         case 0:
-            return {x: distance, y: -offset};
+            return {x: distance - offset, y: -offset};
         case 1:
-            return {x: stage.width + offset, y: distance};
+            return {x: stage.width + offset, y: distance - offset};
         case 2:
-            return {x: stage.width - distance, y: stage.height + offset};
+            return {x: stage.width + offset - distance, y: stage.height + offset};
         default:
-            return {x: -offset, y: stage.height - distance};
+            return {x: -offset, y: stage.height + offset - distance};
     }
 }
 

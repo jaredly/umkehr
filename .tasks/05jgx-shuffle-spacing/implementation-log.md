@@ -41,3 +41,19 @@
   - Workaround/fix: updated the smoke test to choose the first jigsaw piece whose bounding-box center is inside the viewport and hit-testable via `elementsFromPoint`.
 - Re-ran `pnpm test:e2e -- tests/smoke/jigsaw-solo.spec.ts`; all 4 tests passed.
 - Re-ran `npm exec vitest -- run src/apps/jigsaw/jigsaw.test.ts` after the smoke-test update; 24 tests passed.
+
+## Follow-up: Corner Gaps
+
+- Issue encountered: the first packing implementation centered slots within each lane using `(slot + 0.5) / slots`, which left the perimeter lane endpoints unused and made the shuffle look like it was intentionally keeping corners clear.
+- Fix: changed lane slot placement to include endpoints when a lane has more than one slot, while retaining center placement for single-slot lanes.
+- Added a regression test that verifies the 12-piece shuffle uses all corner bands.
+- Re-ran `npm exec vitest -- run src/apps/jigsaw/jigsaw.test.ts`; 25 tests passed.
+- Re-ran `pnpm test:e2e -- tests/smoke/jigsaw-solo.spec.ts`; all 4 tests passed.
+
+## Follow-up: Outer Ring Corner Voids
+
+- Issue encountered: even after endpoint placement, farther-out lanes were still based on the original image edges. For example, the top lane ran from `x=0..width` at `y=-offset`, while the right lane ran from `y=0..height` at `x=width+offset`, leaving open diagonal corner space between lanes.
+- Fix: changed lane geometry so each ring follows an expanded rectangle. Horizontal lanes now run from `-offset` to `width + offset`, and vertical lanes now run from `-offset` to `height + offset`.
+- Tightened the corner regression test to require pieces in the four expanded outside corner quadrants.
+- Re-ran `npm exec vitest -- run src/apps/jigsaw/jigsaw.test.ts`; 25 tests passed.
+- Re-ran `pnpm test:e2e -- tests/smoke/jigsaw-solo.spec.ts`; all 4 tests passed.

@@ -10,6 +10,7 @@ export function PeerJsControls<TState>({
     initialHostPeerId = '',
     createInviteUrl = defaultCreateInviteUrl,
     variant = 'card',
+    canInvite = true,
 }: {
     role: PeerRole;
     setRole: (role: PeerRole) => void;
@@ -18,6 +19,7 @@ export function PeerJsControls<TState>({
     initialHostPeerId?: string;
     createInviteUrl?: (peerId: string, docId: string) => string;
     variant?: 'card' | 'bar';
+    canInvite?: boolean;
 }) {
     const [hostPeerId, setHostPeerId] = useState(initialHostPeerId);
     const [copied, setCopied] = useState(false);
@@ -25,7 +27,8 @@ export function PeerJsControls<TState>({
     const connections = useStore(sync.connectionsStore);
     const openConnectionCount = connections.filter((connection) => connection.open).length;
     const localPeerId = state.kind === 'ready' || state.kind === 'waiting-for-snapshot' ? state.peerId : '';
-    const inviteUrl = role === 'host' && localPeerId ? createInviteUrl(localPeerId, docId) : '';
+    const inviteUrl =
+        canInvite && role === 'host' && localPeerId ? createInviteUrl(localPeerId, docId) : '';
     const statusText = useMemo(() => {
         if (state.kind === 'initializing') return 'Initializing PeerJS';
         if (state.kind === 'error') return state.message;

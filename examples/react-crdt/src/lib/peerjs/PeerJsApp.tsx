@@ -123,7 +123,10 @@ export function PeerJsApp<TState, EphemeralData = never>({
             setHostHistory(document.history);
             setHostArtifacts(document.artifacts ?? serializedArtifactsForStore(app.artifacts));
             loadSerializedArtifacts(app.artifacts, document.artifacts);
-            sync.setSnapshotDocument(document.history.doc);
+            sync.broadcastSnapshot(
+                document.history.doc,
+                document.artifacts ?? serializedArtifactsForStore(app.artifacts),
+            );
             refreshDocuments();
         });
         return () => {
@@ -203,7 +206,7 @@ export function PeerJsApp<TState, EphemeralData = never>({
                 setHostHistory(imported);
                 setHostArtifacts(artifacts);
                 loadSerializedArtifacts(app.artifacts, artifacts);
-                sync.setSnapshotDocument(imported.doc);
+                sync.broadcastSnapshot(imported.doc, artifacts);
                 switchDocument(archive.docId);
                 refreshDocuments();
             },
@@ -330,6 +333,7 @@ export function PeerJsApp<TState, EphemeralData = never>({
                     sync={sync}
                     docId={activeDocId}
                     initialHostPeerId={initialHostPeerId}
+                    canInvite={role !== 'host' || !needsDocument}
                 />
                 {role === 'host' && needsDocument ? (
                     <section className="waitingPanel">

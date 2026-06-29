@@ -327,6 +327,35 @@ describe('jigsaw placement logic', () => {
         },
     );
 
+    it('extends shuffle lanes into expanded corner quadrants', () => {
+        const board = generateJigsawBoard(12);
+        const positions = arrangeUnplacedPieces(
+            board,
+            board.pieces.map((_piece, index) => index),
+            board.imageSize,
+            0,
+        );
+        const cornerBand = 60;
+        const corners = [
+            (position: {x: number; y: number}) => position.x < 0 && position.y < 0,
+            (position: {x: number; y: number}) =>
+                position.x > board.imageSize.width && position.y < 0,
+            (position: {x: number; y: number}) =>
+                position.x > board.imageSize.width && position.y > board.imageSize.height,
+            (position: {x: number; y: number}) =>
+                position.x < 0 && position.y > board.imageSize.height,
+        ];
+        const arranged = Array.from(positions.values());
+        expect(corners.every((matches) => arranged.some(matches))).toBe(true);
+        expect(
+            arranged.some(
+                (position) =>
+                    position.x < cornerBand &&
+                    position.y < cornerBand,
+            ),
+        ).toBe(true);
+    });
+
     it('arranges Voronoi pieces without bounding-box overlap', () => {
         const board = generateJigsawBoard(30, {type: 'voronoi'});
         const pieces = board.pieces.map((_piece, index) => index);

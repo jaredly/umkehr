@@ -7,8 +7,7 @@ import {
     type PointerEvent,
 } from 'react';
 import {useValue} from 'umkehr/react';
-import {compareTimestamps, type HlcTimestamp} from 'umkehr/crdt';
-import type {AppEditorContext, CrdtEditorContext, GridSlot} from '../../lib/crdtApp';
+import type {AppEditorContext, GridSlot} from '../../lib/crdtApp';
 import {currentJigsawBoard, type JigsawBoardArtifact, type PieceBounds} from './artifacts';
 import type {Coord, JigsawEphemeralData, JigsawState, PathSegment} from './model';
 import {
@@ -17,7 +16,6 @@ import {
     buildPuzzleLayout,
     connectionPatch,
     estimatedPieceSize,
-    pieceKey,
     positionPatch,
     snapCandidates,
     snapThreshold,
@@ -86,7 +84,6 @@ export function JigsawPanel({
     const [drag, setDrag] = useState<DragState | null>(null);
     const [pan, setPan] = useState<PanState | null>(null);
     const [draggingMinimap, setDraggingMinimap] = useState(false);
-    const anchorVersions = useAnchorVersions(editor, board.pieces.length);
     const unplaced = useMemo(() => unplacedPieces(board, layout), [board, layout]);
     const localPositions = localLayout.positions;
 
@@ -467,9 +464,7 @@ export function JigsawPanel({
     }) {
         if (active) return 5000;
         const base = placed ? 1000 : 0;
-        const version = anchor === undefined ? undefined : anchorVersions.get(anchor);
-        const versionRank = version ? timestampRank(version, anchorVersions) : 0;
-        return base + versionRank * 10 + Math.max(...component, piece);
+        return base + Math.max(...component, anchor ?? piece);
     }
 }
 
@@ -693,37 +688,4 @@ function screenToCanvas(
 
 function clamp(value: number, min: number, max: number) {
     return Math.max(min, Math.min(max, value));
-}
-
-function useAnchorVersions(
-    editor: AppEditorContext<JigsawState, 'type', JigsawEphemeralData>,
-    pieceCount: number,
-) {
-    const versions = new Map<number, HlcTimestamp>();
-    if (!hasPathScopedCrdtMeta(editor)) return versions;
-    for (let piece = 0; piece < pieceCount; piece++) {
-        const meta = editor.useCrdtMeta(editor.$.positions[pieceKey(piece)] as any);
-        const version = versionOfMeta(meta);
-        if (version) versions.set(piece, version);
-    }
-    return versions;
-}
-
-function hasPathScopedCrdtMeta(
-    editor: AppEditorContext<JigsawState, 'type', JigsawEphemeralData>,
-): editor is CrdtEditorContext<JigsawState, 'type', JigsawEphemeralData> {
-    return 'useCrdtMeta' in editor && typeof editor.useCrdtMeta === 'function';
-}
-
-function versionOfMeta(meta: unknown): HlcTimestamp | undefined {
-    if (!meta || typeof meta !== 'object' || !('kind' in meta)) return undefined;
-    if (meta.kind === 'primitive' && 'ts' in meta && typeof meta.ts === 'string') return meta.ts;
-    if ('created' in meta && typeof meta.created === 'string') return meta.created;
-    if (meta.kind === 'tombstone' && 'deleted' in meta && typeof meta.deleted === 'string') return meta.deleted;
-    return undefined;
-}
-
-function timestampRank(version: HlcTimestamp, versions: Map<number, HlcTimestamp>) {
-    const sorted = Array.from(new Set(versions.values())).sort(compareTimestamps);
-    return sorted.findIndex((candidate) => candidate === version) + 1;
 }
