@@ -21,7 +21,11 @@ import {
     connectionKey,
     connectionPatch,
     estimatedPieceSize,
+    overlapArea,
+    pieceCollisionPadding,
     pieceDepths,
+    rectForPiece,
+    rectsOverlap,
     snapCandidates,
     snapStrength,
     validConnections,
@@ -292,7 +296,71 @@ describe('jigsaw placement logic', () => {
             arrangeUnplacedPieces(board, [0, 1, 2], {width: 720, height: 540}, 123),
         );
     });
+
+    it('detects rectangle overlap and edge-touching correctly', () => {
+        expect(
+            rectsOverlap(
+                {left: 0, top: 0, right: 10, bottom: 10},
+                {left: 9, top: 9, right: 20, bottom: 20},
+            ),
+        ).toBe(true);
+        expect(overlapArea(
+            {left: 0, top: 0, right: 10, bottom: 10},
+            {left: 9, top: 9, right: 20, bottom: 20},
+        )).toBe(1);
+        expect(
+            rectsOverlap(
+                {left: 0, top: 0, right: 10, bottom: 10},
+                {left: 10, top: 0, right: 20, bottom: 10},
+            ),
+        ).toBe(false);
+    });
+
+    it.each([12, 30, 60, 120] satisfies JigsawPieceCount[])(
+        'arranges all %s rectangular pieces without bounding-box overlap',
+        (pieceCount) => {
+            const board = generateJigsawBoard(pieceCount);
+            const pieces = board.pieces.map((_piece, index) => index);
+            const positions = arrangeUnplacedPieces(board, pieces, board.imageSize, 42);
+            expect(positions.size).toBe(pieceCount);
+            expectNoArrangedOverlap(board, positions, pieceCollisionPadding(board));
+        },
+    );
+
+    it('arranges Voronoi pieces without bounding-box overlap', () => {
+        const board = generateJigsawBoard(30, {type: 'voronoi'});
+        const pieces = board.pieces.map((_piece, index) => index);
+        const positions = arrangeUnplacedPieces(board, pieces, board.imageSize, 42);
+        expect(positions.size).toBe(30);
+        expectNoArrangedOverlap(board, positions, pieceCollisionPadding(board));
+    });
+
+    it('returns no unplaced positions for empty input or invalid stages', () => {
+        const board = generateJigsawBoard(12);
+        expect(arrangeUnplacedPieces(board, [], board.imageSize, 1).size).toBe(0);
+        expect(arrangeUnplacedPieces(board, [0, 1], {width: 0, height: 540}, 1).size).toBe(0);
+        expect(arrangeUnplacedPieces(board, [0, 1], {width: 720, height: 0}, 1).size).toBe(0);
+    });
 });
+
+function expectNoArrangedOverlap(
+    board: ReturnType<typeof generateJigsawBoard>,
+    positions: Map<number, {x: number; y: number}>,
+    padding: number,
+) {
+    const rects = Array.from(positions, ([piece, position]) => ({
+        piece,
+        rect: rectForPiece(board, piece, position, padding),
+    }));
+    for (let a = 0; a < rects.length; a++) {
+        for (let b = a + 1; b < rects.length; b++) {
+            expect(
+                rectsOverlap(rects[a].rect, rects[b].rect),
+                `expected pieces ${rects[a].piece} and ${rects[b].piece} not to overlap`,
+            ).toBe(false);
+        }
+    }
+}
 
 function maskFitsBounds(piece: {bounds: {left: number; top: number; width: number; height: number}; mask: Array<{to: {x: number; y: number}}>}) {
     const right = piece.bounds.left + piece.bounds.width;

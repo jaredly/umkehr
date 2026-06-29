@@ -57,7 +57,9 @@ test('contains jigsaw pieces and supports local canvas navigation', async ({page
         .poll(() => canvas.evaluate((element) => getComputedStyle(element).transform))
         .not.toBe(zoomedTransform);
 
-    const piece = panel.locator('.jigsawPiece').first();
+    const pieceLabel = await firstHitTestablePieceLabel(page);
+    expect(pieceLabel).toBeTruthy();
+    const piece = panel.getByRole('button', {name: pieceLabel!});
     const before = await piece.boundingBox();
     expect(before).toBeTruthy();
     await page.mouse.move(before!.x + before!.width / 2, before!.y + before!.height / 2);
@@ -138,4 +140,30 @@ async function expectNoPieceHitOutsideViewport(page: import('@playwright/test').
             }),
         )
         .toBe(true);
+}
+
+async function firstHitTestablePieceLabel(page: import('@playwright/test').Page) {
+    return page.evaluate(() => {
+        const viewport = document.querySelector('[data-testid="jigsaw-viewport"]');
+        if (!viewport) return null;
+        const viewportRect = viewport.getBoundingClientRect();
+        for (const piece of document.querySelectorAll<HTMLElement>('.jigsawPiece')) {
+            const rect = piece.getBoundingClientRect();
+            const center = {
+                x: rect.left + rect.width / 2,
+                y: rect.top + rect.height / 2,
+            };
+            if (
+                center.x < viewportRect.left ||
+                center.x > viewportRect.right ||
+                center.y < viewportRect.top ||
+                center.y > viewportRect.bottom
+            ) {
+                continue;
+            }
+            if (!document.elementsFromPoint(center.x, center.y).includes(piece)) continue;
+            return piece.getAttribute('aria-label');
+        }
+        return null;
+    });
 }

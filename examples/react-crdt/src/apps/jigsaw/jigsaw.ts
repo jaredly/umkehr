@@ -30,6 +30,13 @@ export type StageSize = {
     height: number;
 };
 
+export type PieceRect = {
+    left: number;
+    top: number;
+    right: number;
+    bottom: number;
+};
+
 export function connectionKey(from: number, to: number) {
     return `${from}:${to}`;
 }
@@ -219,20 +226,174 @@ export function arrangeUnplacedPieces(
     seed = 0,
 ) {
     if (!pieces.length || stage.width <= 0 || stage.height <= 0) return new Map<number, Coord>();
-    const pieceSize = maxPieceSize(board);
-    const margin = Math.max(pieceSize.width, pieceSize.height) * 0.65;
-    const perimeter = 2 * (stage.width + stage.height);
-    const step = perimeter / pieces.length;
-    const jitter = mulberry32(seed || 1);
     const positions = new Map<number, Coord>();
-    pieces.forEach((piece, index) => {
-        const distance = step * index + step * 0.5;
-        const point = pointOnBorder(distance % perimeter, stage, margin);
-        const jx = (jitter() - 0.5) * pieceSize.width * 0.18;
-        const jy = (jitter() - 0.5) * pieceSize.height * 0.18;
-        positions.set(piece, {x: point.x + jx, y: point.y + jy});
-    });
+    const rects: PieceRect[] = [];
+    const pieceSize = maxPieceSize(board);
+    const padding = pieceCollisionPadding(board);
+    const gap = padding * 2;
+    const baseOffset = Math.max(pieceSize.width, pieceSize.height) * 0.72 + padding;
+    const ringGap = Math.max(pieceSize.width, pieceSize.height) + gap;
+    const laneRotation = normalizedSeed(seed) % 4;
+    const slotRotation = normalizedSeed(seed) % Math.max(1, pieces.length);
+    const maxRings = Math.max(8, Math.ceil(pieces.length / 12) + 4);
+
+    for (let index = 0; index < pieces.length; index++) {
+        const piece = pieces[index];
+        const position = findNonOverlappingPiecePosition({
+            board,
+            piece,
+            stage,
+            placed: rects,
+            padding,
+            gap,
+            baseOffset,
+            ringGap,
+            maxRings,
+            laneRotation,
+            slotRotation: slotRotation + index,
+        });
+        positions.set(piece, position);
+        rects.push(rectForPiece(board, piece, position, padding));
+    }
     return positions;
+}
+
+export function rectForPiece(
+    board: JigsawBoardArtifact,
+    piece: number,
+    position: Coord,
+    padding = 0,
+): PieceRect {
+    const bounds = board.pieces[piece]?.bounds;
+    if (!bounds) {
+        return {
+            left: position.x - padding,
+            top: position.y - padding,
+            right: position.x + padding,
+            bottom: position.y + padding,
+        };
+    }
+    return {
+        left: position.x + bounds.left - padding,
+        top: position.y + bounds.top - padding,
+        right: position.x + bounds.left + bounds.width + padding,
+        bottom: position.y + bounds.top + bounds.height + padding,
+    };
+}
+
+export function rectsOverlap(a: PieceRect, b: PieceRect) {
+    return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+}
+
+export function pieceCollisionPadding(board: JigsawBoardArtifact) {
+    const size = averagePieceSize(board);
+    return Math.max(6, Math.min(size.width, size.height) * 0.08);
+}
+
+export function overlapArea(a: PieceRect, b: PieceRect) {
+    const width = Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left));
+    const height = Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
+    return width * height;
+}
+
+function findNonOverlappingPiecePosition({
+    board,
+    piece,
+    stage,
+    placed,
+    padding,
+    gap,
+    baseOffset,
+    ringGap,
+    maxRings,
+    laneRotation,
+    slotRotation,
+}: {
+    board: JigsawBoardArtifact;
+    piece: number;
+    stage: StageSize;
+    placed: PieceRect[];
+    padding: number;
+    gap: number;
+    baseOffset: number;
+    ringGap: number;
+    maxRings: number;
+    laneRotation: number;
+    slotRotation: number;
+}) {
+    let fallback: {position: Coord; score: number} | null = null;
+    for (let ring = 0; ring < maxRings; ring++) {
+        for (let laneIndex = 0; laneIndex < 4; laneIndex++) {
+            const lane = (laneIndex + laneRotation) % 4;
+            const slots = slotsForLane(board, piece, stage, lane, padding, gap);
+            for (let slotIndex = 0; slotIndex < slots; slotIndex++) {
+                const slot = (slotIndex + slotRotation) % slots;
+                const position = positionForLaneSlot({
+                    lane,
+                    slot,
+                    slots,
+                    stage,
+                    offset: baseOffset + ring * ringGap,
+                });
+                const rect = rectForPiece(board, piece, position, padding);
+                const score = totalOverlapArea(rect, placed);
+                if (score === 0) return position;
+                if (!fallback || score < fallback.score) fallback = {position, score};
+            }
+        }
+    }
+    return fallback?.position ?? {x: -baseOffset, y: -baseOffset};
+}
+
+function slotsForLane(
+    board: JigsawBoardArtifact,
+    piece: number,
+    stage: StageSize,
+    lane: number,
+    padding: number,
+    gap: number,
+) {
+    const bounds = board.pieces[piece]?.bounds;
+    const projectedSize = lane === 0 || lane === 2 ? bounds?.width ?? 1 : bounds?.height ?? 1;
+    const laneLength = lane === 0 || lane === 2 ? stage.width : stage.height;
+    const footprint = Math.max(1, projectedSize + padding * 2 + gap);
+    return Math.max(1, Math.floor(laneLength / footprint));
+}
+
+function positionForLaneSlot({
+    lane,
+    slot,
+    slots,
+    stage,
+    offset,
+}: {
+    lane: number;
+    slot: number;
+    slots: number;
+    stage: StageSize;
+    offset: number;
+}) {
+    const horizontal = lane === 0 || lane === 2;
+    const laneLength = horizontal ? stage.width : stage.height;
+    const distance = ((slot + 0.5) / slots) * laneLength;
+    switch (lane) {
+        case 0:
+            return {x: distance, y: -offset};
+        case 1:
+            return {x: stage.width + offset, y: distance};
+        case 2:
+            return {x: stage.width - distance, y: stage.height + offset};
+        default:
+            return {x: -offset, y: stage.height - distance};
+    }
+}
+
+function totalOverlapArea(rect: PieceRect, placed: PieceRect[]) {
+    return placed.reduce((total, placedRect) => total + overlapArea(rect, placedRect), 0);
+}
+
+function normalizedSeed(seed: number) {
+    return Math.abs(Math.trunc(seed || 0));
 }
 
 export function snapCandidates({
@@ -428,26 +589,6 @@ function maxDepth(pieces: Set<number>, depths: Map<number, number>) {
     let max = 0;
     for (const piece of pieces) max = Math.max(max, depths.get(piece) ?? 0);
     return max;
-}
-
-function pointOnBorder(distanceAlong: number, stage: StageSize, margin: number): Coord {
-    if (distanceAlong <= stage.width) return {x: distanceAlong, y: -margin};
-    distanceAlong -= stage.width;
-    if (distanceAlong <= stage.height) return {x: stage.width + margin, y: distanceAlong};
-    distanceAlong -= stage.height;
-    if (distanceAlong <= stage.width) return {x: stage.width - distanceAlong, y: stage.height + margin};
-    distanceAlong -= stage.width;
-    return {x: -margin, y: stage.height - distanceAlong};
-}
-
-function mulberry32(seed: number) {
-    return () => {
-        seed += 0x6d2b79f5;
-        let value = seed;
-        value = Math.imul(value ^ (value >>> 15), value | 1);
-        value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
-        return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
-    };
 }
 
 function isPieceIndex(board: JigsawBoardArtifact, piece: number) {
