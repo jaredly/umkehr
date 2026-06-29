@@ -525,3 +525,32 @@ Verification:
 
 - `npm run typecheck` passed.
 - `npm exec vitest -- run src/block-editor/clipboard.test.ts src/block-editor/editorCrdtConfig.test.ts src/block-editor/legacyRichTextPlugins.test.ts src/block-editor/markdownShortcuts.test.ts src/block-editor/inlineRunRendering.test.ts src/block-editor/plugins/registry.test.ts src/block-editor/plugins/compatibility.test.ts src/block-editor/plugins/metadata.test.ts src/block-editor/plugins/legacyRichTextUi.test.ts src/block-editor/plugins/legacyRichTextBlocks.test.ts src/block-editor/plugins/basicMarks.test.ts src/block-editor/plugins/inlinePlugins.test.ts src/block-editor/plugins/code.test.ts` passed.
+
+### Phase 6 Complete: Inline Renderer Ownership
+
+- Added inline renderer ownership declarations to the Phase 6 inline plugins:
+  - `basic-marks`
+  - `links`
+  - `math`
+  - `code`
+  - `inline-date`
+- Switched `BlockRichTextEditor` inline render feature derivation from registered mark ids to registered inline renderer declarations.
+- Kept the existing DOM run renderer as the rendering implementation while making plugin renderer registrations the source of render capability.
+- Added plugin tests covering inline renderer ownership for basic marks, code, links, math, and date embeds.
+
+Issues/workarounds:
+
+- Phase 6 still uses the legacy editor command switch for many command implementations. Availability is registry-derived now, but moving the implementations themselves into plugin command handlers needs the broader command dispatcher work from Phase 5/next phases.
+- Static annotation/body helper rendering has no active call sites in the current code path; editable and annotation body render paths use the registry-derived inline feature gating.
+- Broad `npm test` currently fails in four existing example Mermaid preview tests that expect `[data-testid="mermaid-render"]`. This is in optional code-preview rendering, not inline plugin behavior, and belongs with the later code/mermaid plugin extraction.
+
+Verification:
+
+- `npm run typecheck` passed.
+- `npm exec vitest -- run src/block-editor/clipboard.test.ts src/block-editor/editorCrdtConfig.test.ts src/block-editor/legacyRichTextPlugins.test.ts src/block-editor/markdownShortcuts.test.ts src/block-editor/inlineRunRendering.test.ts src/block-editor/plugins/registry.test.ts src/block-editor/plugins/compatibility.test.ts src/block-editor/plugins/metadata.test.ts src/block-editor/plugins/legacyRichTextUi.test.ts src/block-editor/plugins/legacyRichTextBlocks.test.ts src/block-editor/plugins/basicMarks.test.ts src/block-editor/plugins/inlinePlugins.test.ts src/block-editor/plugins/code.test.ts` passed.
+- `npm run typecheck:examples` passed.
+- `npm test` built successfully and then failed only in `examples/block-rich-text/src/App.test.tsx` Mermaid preview cases:
+  - `opens populated mermaid fixture blocks in preview mode`
+  - `shows editor and preview together in split mode`
+  - `keeps the previous mermaid render visible while remote updates render`
+  - `keeps the previous mermaid render visible with an error overlay when remote updates fail`

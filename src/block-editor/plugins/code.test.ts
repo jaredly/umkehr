@@ -33,6 +33,9 @@ describe('code plugin', () => {
         expect(registry.toolbarItems.map((item) => [item.id, item.commandId])).toEqual([
             ['mark:code', 'mark:code'],
         ]);
+        expect(registry.inlineRenderers.map((renderer) => [renderer.id, renderer.markType])).toEqual([
+            ['render:code', CODE_MARK],
+        ]);
     });
 
     it('covers compatibility checks for inline code mark records', () => {

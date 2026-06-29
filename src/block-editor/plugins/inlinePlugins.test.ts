@@ -52,6 +52,16 @@ describe('inline feature plugins', () => {
         ]);
     });
 
+    it('owns inline renderers for link, math, and date embeds', () => {
+        const registry = createBlockEditorRegistry([linksPlugin, mathPlugin, inlineDatePlugin]);
+
+        expect(registry.inlineRenderers.map((renderer) => [renderer.id, renderer.markType, renderer.embedType])).toEqual([
+            ['render:inline-date', INLINE_EMBED_MARK, 'date'],
+            ['render:link', LINK_MARK, undefined],
+            ['render:math', MATH_MARK, undefined],
+        ]);
+    });
+
     it('covers compatibility checks for link, math, and date embed records', () => {
         const registry = createBlockEditorRegistry([linksPlugin, mathPlugin, inlineDatePlugin]);
         const state = emptyState();

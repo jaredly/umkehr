@@ -6,6 +6,7 @@ import type {BlockEditorPlugin} from './types.js';
 export const mathPlugin: BlockEditorPlugin<RichBlockMeta> = {
     id: 'math',
     marks: [{id: MATH_MARK, label: 'Math'}],
+    inlineRenderers: [{id: 'render:math', markType: MATH_MARK, render: () => null}],
     toolbarItems: [
         {id: 'mark:math', group: 'Inline marks', label: 'Math', commandId: 'mark:math', order: 7},
         {

@@ -385,16 +385,25 @@ const DEFAULT_INLINE_RENDER_FEATURES: InlineRenderFeatures = {
 };
 
 const inlineRenderFeaturesFromRegistry = (
-    registry: Pick<BlockEditorRegistry<RichBlockMeta>, 'marks' | 'inlineEmbeds'>,
-): InlineRenderFeatures => ({
-    booleanMarks: new Set(BOOLEAN_INLINE_MARKS.filter((mark) => registry.marks.has(mark))),
-    code: registry.marks.has(CODE_MARK),
-    links: registry.marks.has(LINK_MARK),
-    math: registry.marks.has(MATH_MARK),
-    inlineEmbeds: registry.marks.has(INLINE_EMBED_MARK)
-        ? new Set(registry.inlineEmbeds.keys())
-        : new Set(),
-});
+    registry: Pick<BlockEditorRegistry<RichBlockMeta>, 'inlineRenderers'>,
+): InlineRenderFeatures => {
+    const renderedMarks = new Set(
+        registry.inlineRenderers
+            .map((renderer) => renderer.markType)
+            .filter((markType): markType is string => typeof markType === 'string'),
+    );
+    return {
+        booleanMarks: new Set(BOOLEAN_INLINE_MARKS.filter((mark) => renderedMarks.has(mark))),
+        code: renderedMarks.has(CODE_MARK),
+        links: renderedMarks.has(LINK_MARK),
+        math: renderedMarks.has(MATH_MARK),
+        inlineEmbeds: new Set(
+            registry.inlineRenderers
+                .map((renderer) => renderer.embedType)
+                .filter((embedType): embedType is string => typeof embedType === 'string'),
+        ),
+    };
+};
 
 const inlineRenderFeaturesKey = (features: InlineRenderFeatures): string =>
     JSON.stringify({

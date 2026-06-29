@@ -6,5 +6,6 @@ import type {BlockEditorPlugin} from './types.js';
 export const codePlugin: BlockEditorPlugin<RichBlockMeta> = {
     id: 'code',
     marks: [{id: CODE_MARK, label: 'Code'}],
+    inlineRenderers: [{id: 'render:code', markType: CODE_MARK, render: () => null}],
     toolbarItems: [{id: 'mark:code', group: 'Inline marks', label: 'Code', commandId: 'mark:code', order: 6}],
 };

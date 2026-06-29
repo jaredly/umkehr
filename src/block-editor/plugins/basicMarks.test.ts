@@ -43,6 +43,17 @@ describe('basic marks plugin', () => {
         ]);
     });
 
+    it('owns renderers for the basic inline marks', () => {
+        const registry = createBlockEditorRegistry([basicMarksPlugin]);
+
+        expect(registry.inlineRenderers.map((renderer) => [renderer.id, renderer.markType])).toEqual([
+            ['render:bold', 'bold'],
+            ['render:italic', 'italic'],
+            ['render:strikethrough', 'strikethrough'],
+            ['render:underline', 'underline'],
+        ]);
+    });
+
     it('covers compatibility checks for basic mark records', () => {
         const registry = createBlockEditorRegistry([basicMarksPlugin]);
         const state = emptyState();

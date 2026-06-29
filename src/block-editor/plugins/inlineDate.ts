@@ -7,6 +7,7 @@ export const inlineDatePlugin: BlockEditorPlugin<RichBlockMeta> = {
     id: 'inline-date',
     marks: [{id: INLINE_EMBED_MARK, label: 'Inline embed'}],
     inlineEmbeds: [{id: 'date', label: 'Date'}],
+    inlineRenderers: [{id: 'render:inline-date', markType: INLINE_EMBED_MARK, embedType: 'date', render: () => null}],
     toolbarItems: [
         {id: 'inline-embed:date', group: 'Inline marks', label: 'Date', commandId: 'inline-embed:date', order: 10},
     ],

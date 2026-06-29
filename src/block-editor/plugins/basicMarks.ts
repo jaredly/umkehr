@@ -1,6 +1,11 @@
 import type {RichBlockMeta} from '../blockMeta.js';
 
-import type {BlockEditorInlineMarkSpec, BlockEditorPlugin, BlockEditorToolbarItemSpec} from './types.js';
+import type {
+    BlockEditorInlineMarkSpec,
+    BlockEditorInlineRenderer,
+    BlockEditorPlugin,
+    BlockEditorToolbarItemSpec,
+} from './types.js';
 
 export const basicMarkIds = ['bold', 'italic', 'strikethrough', 'underline'] as const;
 
@@ -37,8 +42,15 @@ export const basicMarkToolbarItems: readonly BlockEditorToolbarItemSpec[] = [
     {id: 'mark:underline', group: 'Inline marks', label: 'Underline', commandId: 'mark:underline', order: 5},
 ];
 
+export const basicMarkRenderers: readonly BlockEditorInlineRenderer<RichBlockMeta>[] = basicMarkIds.map((id) => ({
+    id: `render:${id}`,
+    markType: id,
+    render: () => null,
+}));
+
 export const basicMarksPlugin: BlockEditorPlugin<RichBlockMeta> = {
     id: 'basic-marks',
     marks: basicMarkSpecs,
     toolbarItems: basicMarkToolbarItems,
+    inlineRenderers: basicMarkRenderers,
 };
