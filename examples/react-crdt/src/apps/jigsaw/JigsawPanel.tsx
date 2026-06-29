@@ -95,6 +95,7 @@ export function JigsawPanel({
     const [pan, setPan] = useState<PanState | null>(null);
     const [draggingMinimap, setDraggingMinimap] = useState(false);
     const [snapPulse, setSnapPulse] = useState<SnapPulse | null>(null);
+    const [localMoveAnimationNonce, setLocalMoveAnimationNonce] = useState(0);
     const unplaced = useMemo(() => unplacedPieces(board, layout), [board, layout]);
     const localPositions = localLayout.positions;
 
@@ -212,10 +213,12 @@ export function JigsawPanel({
     usePieceMoveAnimation(renderedPositions, pieceRefs, {
         disabled: Boolean(drag),
         durationMs: remoteMoveAnimationMs,
+        localMoveAnimationNonce,
     });
     usePieceMoveAnimation(renderedPositions, backdropRefs, {
         disabled: Boolean(drag),
         durationMs: remoteMoveAnimationMs,
+        localMoveAnimationNonce,
     });
     const activeComponent = useMemo(() => new Set(drag?.component ?? []), [drag]);
     const placedPieces = useMemo(() => new Set(layout.positions.keys()), [layout.positions]);
@@ -322,6 +325,7 @@ export function JigsawPanel({
             positionPatch(latest, drag.anchor, anchorPosition),
             ...newConnections.map(connectionPatch),
         ];
+        suppressLocalMoveAnimation();
         editor.dispatch(patches);
         if (newConnections.length) {
             setSnapPulse({
@@ -363,7 +367,8 @@ export function JigsawPanel({
                 <div className="jigsawActions">
                     <button
                         type="button"
-                        onClick={() =>
+                        onClick={() => {
+                            suppressLocalMoveAnimation();
                             setLocalLayout((current) => {
                                 const seed = current.seed + 1;
                                 return {
@@ -374,15 +379,29 @@ export function JigsawPanel({
                                         seed,
                                     ),
                                 };
-                            })
-                        }
+                            });
+                        }}
                     >
                         Reshuffle
                     </button>
-                    <button type="button" onClick={() => editor.undo()} disabled={readOnly || !editor.canUndo()}>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            suppressLocalMoveAnimation();
+                            editor.undo();
+                        }}
+                        disabled={readOnly || !editor.canUndo()}
+                    >
                         Undo
                     </button>
-                    <button type="button" onClick={() => editor.redo()} disabled={readOnly || !editor.canRedo()}>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            suppressLocalMoveAnimation();
+                            editor.redo();
+                        }}
+                        disabled={readOnly || !editor.canRedo()}
+                    >
                         Redo
                     </button>
                 </div>
@@ -534,6 +553,10 @@ export function JigsawPanel({
         const base = placed ? 1000 : 0;
         return base + Math.max(...component, anchor ?? piece);
     }
+
+    function suppressLocalMoveAnimation() {
+        setLocalMoveAnimationNonce((current) => current + 1);
+    }
 }
 
 function usePieceMoveAnimation(
@@ -542,17 +565,21 @@ function usePieceMoveAnimation(
     {
         disabled,
         durationMs,
+        localMoveAnimationNonce,
     }: {
         disabled: boolean;
         durationMs: number;
+        localMoveAnimationNonce: number;
     },
 ) {
     const previousPositions = useRef(new Map<number, Coord>());
+    const previousLocalMoveAnimationNonce = useRef(localMoveAnimationNonce);
 
     useLayoutEffect(() => {
+        const skipLocalMoveAnimation = previousLocalMoveAnimationNonce.current !== localMoveAnimationNonce;
         const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-        if (!disabled && !reduceMotion) {
+        if (!disabled && !skipLocalMoveAnimation && !reduceMotion) {
             for (const [piece, next] of positions) {
                 const previous = previousPositions.current.get(piece);
                 const element = refs.current?.get(piece);
@@ -574,8 +601,9 @@ function usePieceMoveAnimation(
             }
         }
 
+        previousLocalMoveAnimationNonce.current = localMoveAnimationNonce;
         previousPositions.current = new Map(positions);
-    }, [disabled, durationMs, positions, refs]);
+    }, [disabled, durationMs, localMoveAnimationNonce, positions, refs]);
 }
 
 function setPieceElement(

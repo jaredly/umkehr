@@ -57,6 +57,7 @@ export const jigsawApp: AppDefinition<JigsawState, JigsawEphemeralData> = {
                             <option value={30}>30</option>
                             <option value={60}>60</option>
                             <option value={120}>120</option>
+                            <option value={600}>600</option>
                         </select>
                     </label>
                     <label className="documentCreateField">

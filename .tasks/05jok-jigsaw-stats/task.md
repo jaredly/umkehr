@@ -1,0 +1,1 @@
+examples/react-crdt jigsaw: Puzzle stats: at the end of a puzzle, let's show "how many connections you made" vs "total connections made". Like "you made 25% of the connections". We can do it by examining the HLC metadata of the connections, compared to the current sessionid.
