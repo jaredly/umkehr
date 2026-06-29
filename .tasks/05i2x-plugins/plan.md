@@ -206,6 +206,48 @@ Tests:
 - Math inline/display rendering still works.
 - Date embeds still render and serialize.
 
+## Phase 6a: Registry Runtime Hardening
+
+Close the remaining gaps exposed by the Phase 1-6 transitional implementation before extracting block plugins.
+
+Work items:
+
+- Enforce document/plugin compatibility inside `BlockRichTextEditor` before rendering:
+  - scan the current document state with the configured registry
+  - include persisted/local selections when available
+  - throw `BlockEditorPluginLoadError` with actionable issues
+  - keep paragraph-only documents valid with the empty/default plugin set
+- Make markdown shortcut execution registry-driven:
+  - route typed text shortcuts through `registry.markdownShortcuts`
+  - route plain-text paste line conversion through `registry.markdownShortcuts`
+  - prevent heading/list/todo metadata creation when the relevant plugin shortcuts are unavailable
+  - preserve the legacy behavior when the full legacy preset is registered
+- Finish generic slash command surfacing:
+  - extend `SlashCommand`/popover plumbing so arbitrary registry slash specs can be shown
+  - dispatch arbitrary slash command ids through `registry.commands`
+  - keep the slash-trigger deletion and selection restore behavior for generic commands
+  - remove the fallback that shows legacy slash commands when the configured registry has no slash contributions
+- Tighten registry conflict validation:
+  - detect duplicate inline renderer ownership for the same mark type
+  - detect duplicate inline embed renderer ownership for the same embed type
+  - construct and validate CRDT hook composition during `createBlockEditorRegistry`, not lazily on `crdtConfig()`
+- Reconcile the exported editor prop surface:
+  - either make the public `BlockRichTextEditorProps` match the current concrete `RichBlockMeta` editor
+  - or complete the generic value/onChange component API before documenting it
+- Track toolbar registry rendering explicitly:
+  - either finish registry-rendered toolbar groups/items now
+  - or mark the current hard-coded toolbar filtering as a temporary compatibility seam for Phase 14 cleanup
+
+Tests:
+
+- Rendering a document with unsupported block metadata, marks, inline embeds, or custom selections throws `BlockEditorPluginLoadError`.
+- The empty/default plugin set can edit paragraph-only documents without producing unsupported metadata.
+- Markdown shortcuts and pasted markdown only create block types whose shortcut specs are registered.
+- Custom registry slash commands appear in the slash popover and can mutate state through command handlers.
+- Duplicate inline renderer ownership fails registry construction with clear errors.
+- Conflicting CRDT hooks fail during `createBlockEditorRegistry`.
+- The exported editor props and actual component type agree.
+
 ## Phase 7: Simple Block Plugins
 
 Extract low-structural-risk block plugins.
