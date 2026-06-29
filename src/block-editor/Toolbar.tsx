@@ -25,6 +25,7 @@ export function Toolbar({
     onImageUpload,
     onBlockType,
     onAnnotation,
+    onCommand,
 }: {
     canUndo: boolean;
     canRedo: boolean;
@@ -46,9 +47,17 @@ export function Toolbar({
     onImageUpload(files: File[]): void;
     onBlockType(kind: BlockTypeMenuValue): void;
     onAnnotation(presentation: AnnotationPresentation): void;
+    onCommand?(commandId: string): void;
 }) {
     const imageInputRef = useRef<HTMLInputElement>(null);
     const enabled = (id: string): boolean => !toolbarItemIds || toolbarItemIds.has(id);
+    const runCommand = (commandId: string, fallback: () => void) => {
+        if (onCommand) {
+            onCommand(commandId);
+        } else {
+            fallback();
+        }
+    };
     const inlineGroupEnabled = [
         'mark:bold',
         'mark:italic',
@@ -68,7 +77,7 @@ export function Toolbar({
                         <button
                             type="button"
                             onMouseDown={(event) => event.preventDefault()}
-                            onClick={onUndo}
+                            onClick={() => runCommand('history:undo', onUndo)}
                             disabled={!canUndo}
                         >
                             Undo
@@ -78,7 +87,7 @@ export function Toolbar({
                         <button
                             type="button"
                             onMouseDown={(event) => event.preventDefault()}
-                            onClick={onRedo}
+                            onClick={() => runCommand('history:redo', onRedo)}
                             disabled={!canRedo}
                         >
                             Redo
@@ -93,7 +102,7 @@ export function Toolbar({
                         type="button"
                         aria-pressed={!!activeMarks.bold}
                         onMouseDown={(event) => event.preventDefault()}
-                        onClick={onBold}
+                        onClick={() => runCommand('mark:bold', onBold)}
                     >
                         <strong>B</strong>
                     </button>
@@ -103,7 +112,7 @@ export function Toolbar({
                         type="button"
                         aria-pressed={!!activeMarks.italic}
                         onMouseDown={(event) => event.preventDefault()}
-                        onClick={onItalic}
+                        onClick={() => runCommand('mark:italic', onItalic)}
                     >
                         <em>I</em>
                     </button>
@@ -113,7 +122,7 @@ export function Toolbar({
                         type="button"
                         aria-pressed={!!activeMarks.strikethrough}
                         onMouseDown={(event) => event.preventDefault()}
-                        onClick={onStrikethrough}
+                        onClick={() => runCommand('mark:strikethrough', onStrikethrough)}
                         aria-label="Strikethrough"
                     >
                         <span className="toolbarStrike">S</span>
@@ -124,7 +133,7 @@ export function Toolbar({
                         type="button"
                         aria-pressed={!!activeMarks.code}
                         onMouseDown={(event) => event.preventDefault()}
-                        onClick={onCode}
+                        onClick={() => runCommand('mark:code', onCode)}
                     >
                         Code
                     </button>
@@ -133,7 +142,7 @@ export function Toolbar({
                     <button
                         type="button"
                         onMouseDown={(event) => event.preventDefault()}
-                        onClick={onMath}
+                        onClick={() => runCommand('mark:math', onMath)}
                     >
                         Math
                     </button>
@@ -142,7 +151,7 @@ export function Toolbar({
                     <button
                         type="button"
                         onMouseDown={(event) => event.preventDefault()}
-                        onClick={onDisplayMath}
+                        onClick={() => runCommand('mark:display-math', onDisplayMath)}
                     >
                         Display Math
                     </button>
@@ -151,7 +160,7 @@ export function Toolbar({
                     <button
                         type="button"
                         onMouseDown={(event) => event.preventDefault()}
-                        onClick={onLink}
+                        onClick={() => runCommand('link:edit', onLink)}
                     >
                         Link
                     </button>
@@ -160,7 +169,7 @@ export function Toolbar({
                     <button
                         type="button"
                         onMouseDown={(event) => event.preventDefault()}
-                        onClick={onDateEmbed}
+                        onClick={() => runCommand('inline-embed:date', onDateEmbed)}
                     >
                         Date
                     </button>
@@ -171,10 +180,10 @@ export function Toolbar({
                             type="button"
                             onMouseDown={(event) => {
                                 event.preventDefault();
-                                onImageUploadStart();
+                                runCommand('image:upload', onImageUploadStart);
                             }}
                             onClick={() => {
-                                onImageUploadStart();
+                                runCommand('image:upload', onImageUploadStart);
                                 imageInputRef.current?.click();
                             }}
                         >
@@ -204,7 +213,7 @@ export function Toolbar({
                             aria-label="Comment"
                             title="Comment"
                             onMouseDown={(event) => event.preventDefault()}
-                            onClick={() => onAnnotation('sidebar')}
+                            onClick={() => runCommand('annotation:sidebar', () => onAnnotation('sidebar'))}
                         >
                             C
                         </button>
@@ -215,7 +224,7 @@ export function Toolbar({
                             aria-label="Footnote"
                             title="Footnote"
                             onMouseDown={(event) => event.preventDefault()}
-                            onClick={() => onAnnotation('footnote')}
+                            onClick={() => runCommand('annotation:footnote', () => onAnnotation('footnote'))}
                         >
                             F
                         </button>
@@ -226,7 +235,7 @@ export function Toolbar({
                             aria-label="Popover"
                             title="Popover"
                             onMouseDown={(event) => event.preventDefault()}
-                            onClick={() => onAnnotation('popover')}
+                            onClick={() => runCommand('annotation:popover', () => onAnnotation('popover'))}
                         >
                             P
                         </button>
@@ -238,7 +247,8 @@ export function Toolbar({
                     aria-label="Block type"
                     value={blockType}
                     onChange={(event) => {
-                        onBlockType(event.currentTarget.value as BlockTypeMenuValue);
+                        const kind = event.currentTarget.value as BlockTypeMenuValue;
+                        runCommand(`block-type:${kind}`, () => onBlockType(kind));
                     }}
                 >
                     {blockTypeItems.map((item) => (

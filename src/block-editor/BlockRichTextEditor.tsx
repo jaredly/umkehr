@@ -97,6 +97,7 @@ import {
     toggleAnnotationBodyCodeMark,
     toggleAnnotationBodyMark,
     type AnnotationMarkData,
+    type AnnotationPresentation,
 } from './annotations.js';
 import {
     codeMetaWithPreviewForLanguage,
@@ -2894,6 +2895,169 @@ export function BlockRichTextEditor({
         pendingBlockSelectionFocusRef.current = null;
     }, [replica.state, replica.selection]);
 
+    const runToolbarAnnotationCommand = (presentation: AnnotationPresentation) => {
+        if (activeAnnotationBodySelection) {
+            runBlockControlCommand((current) => {
+                const result = createAnnotation(
+                    current.state,
+                    activeAnnotationBodySelection,
+                    presentation,
+                    makeCommandContext(current),
+                );
+                if (presentation === 'sidebar') handleSidebarCommentCreated(result);
+                return {
+                    state: result.state,
+                    ops: result.ops,
+                    selection: current.selection,
+                };
+            });
+            return;
+        }
+
+        runEditCommand((current, selection) => {
+            const result = createAnnotation(
+                current.state,
+                primarySelection(resolveSelectionSet(current.state, selection)),
+                presentation,
+                makeCommandContext(current),
+            );
+            if (presentation === 'sidebar') handleSidebarCommentCreated(result);
+            return {state: result.state, ops: result.ops, selection};
+        });
+    };
+
+    const runToolbarBlockTypeCommand = (kind: BlockTypeMenuValue) => {
+        runEditCommand((current, selection) => {
+            if (kind === 'table') {
+                const result = convertBlockToTable(
+                    current.state,
+                    primarySelection(resolveSelectionSet(current.state, selection)),
+                    makeCommandContext(current),
+                );
+                return {
+                    state: result.state,
+                    ops: result.ops,
+                    selection: replacePrimarySelection(result.state, current.selection, result.selection),
+                };
+            }
+            if (kind === 'columns' || kind === 'card-columns') {
+                const result = convertBlockToColumns(
+                    current.state,
+                    primarySelection(resolveSelectionSet(current.state, selection)),
+                    makeCommandContext(current),
+                    kind === 'card-columns' ? 'cards' : 'blocks',
+                );
+                return {
+                    state: result.state,
+                    ops: result.ops,
+                    selection: replacePrimarySelection(result.state, current.selection, result.selection),
+                };
+            }
+            if (kind === 'slide-deck') {
+                const result = convertBlockToSlideDeck(
+                    current.state,
+                    primarySelection(resolveSelectionSet(current.state, selection)),
+                    makeCommandContext(current),
+                );
+                return {
+                    state: result.state,
+                    ops: result.ops,
+                    selection: replacePrimarySelection(result.state, current.selection, result.selection),
+                };
+            }
+            if (kind === 'slide') {
+                const result = convertBlockToSlide(
+                    current.state,
+                    primarySelection(resolveSelectionSet(current.state, selection)),
+                    makeCommandContext(current),
+                );
+                return {
+                    state: result.state,
+                    ops: result.ops,
+                    selection: replacePrimarySelection(result.state, current.selection, result.selection),
+                };
+            }
+            if (kind === 'preview') {
+                const result = insertPreviewBlock(
+                    current.state,
+                    primarySelection(resolveSelectionSet(current.state, selection)),
+                    '',
+                    makeCommandContext(current),
+                );
+                return {
+                    state: result.state,
+                    ops: result.ops,
+                    selection: replacePrimarySelection(result.state, current.selection, result.selection),
+                };
+            }
+            return setBlockTypeEverywhere(current.state, selection, (_blockId, meta) =>
+                blockTypeMeta(kind, meta, nextReplicaTs(current)),
+            );
+        });
+    };
+
+    const runToolbarCommand = (commandId: string) => {
+        if (commandId.startsWith('block-type:')) {
+            runToolbarBlockTypeCommand(commandId.slice('block-type:'.length) as BlockTypeMenuValue);
+            return;
+        }
+        switch (commandId) {
+            case 'history:undo':
+                onUndo();
+                return;
+            case 'history:redo':
+                onRedo();
+                return;
+            case 'mark:bold':
+                runInlineMarkToggle('bold');
+                return;
+            case 'mark:italic':
+                runInlineMarkToggle('italic');
+                return;
+            case 'mark:strikethrough':
+                runInlineMarkToggle('strikethrough');
+                return;
+            case 'mark:code':
+                if (activeAnnotationBodySelection) {
+                    runAnnotationBodyCommand((current, context) =>
+                        toggleAnnotationBodyCodeMark(current.state, activeAnnotationBodySelection, context),
+                    );
+                } else {
+                    runCodeToggle();
+                }
+                return;
+            case 'mark:math':
+                if (!activeAnnotationBodySelection) runMathToggle('inline');
+                return;
+            case 'mark:display-math':
+                if (!activeAnnotationBodySelection) runMathToggle('display');
+                return;
+            case 'link:edit':
+                openLinkFromCurrentSelection();
+                return;
+            case 'inline-embed:date':
+                insertDateEmbedFromCurrentSelection();
+                return;
+            case 'image:upload':
+                captureImageUploadSelection();
+                return;
+            case 'annotation:sidebar':
+                runToolbarAnnotationCommand('sidebar');
+                return;
+            case 'annotation:footnote':
+                runToolbarAnnotationCommand('footnote');
+                return;
+            case 'annotation:popover':
+                runToolbarAnnotationCommand('popover');
+                return;
+            default:
+                registry.commands.get(commandId)?.handle(
+                    {id: commandId},
+                    {state: replica.state, dispatch: (command) => runToolbarCommand(command.id)},
+                );
+        }
+    };
+
     return (
         <article className={replica.online ? 'editorPanel' : 'editorPanel offline'}>
             <header className="editorHeader">
@@ -2927,6 +3091,7 @@ export function BlockRichTextEditor({
                 blockTypeItems={blockTypeItems}
                 toolbarItemIds={toolbarItemIds}
                 activeMarks={activeInlineMarks}
+                onCommand={runToolbarCommand}
                 onUndo={onUndo}
                 onRedo={onRedo}
                 onBold={() => runInlineMarkToggle('bold')}

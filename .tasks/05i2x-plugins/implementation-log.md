@@ -147,6 +147,41 @@ Verification:
 - `npm exec vitest -- run src/block-editor/editorCrdtConfig.test.ts src/block-editor/markdownShortcuts.test.ts src/block-editor/plugins/registry.test.ts src/block-editor/plugins/compatibility.test.ts src/block-editor/plugins/metadata.test.ts src/block-editor/plugins/legacyRichTextUi.test.ts` passed.
 - `npm run typecheck` passed.
 
+### Phase 5 Continued: Toolbar Command Dispatcher
+
+- Added `onCommand?(commandId: string)` to `Toolbar`.
+- Updated existing toolbar buttons/select events to emit command ids when `onCommand` is provided, while preserving the previous dedicated callback fallback path.
+- Added `runToolbarCommand(commandId)` inside `BlockRichTextEditor`.
+- Mapped current legacy command ids back to existing behavior:
+  - `history:undo`
+  - `history:redo`
+  - `mark:bold`
+  - `mark:italic`
+  - `mark:strikethrough`
+  - `mark:code`
+  - `mark:math`
+  - `mark:display-math`
+  - `link:edit`
+  - `inline-embed:date`
+  - `image:upload`
+  - `annotation:sidebar`
+  - `annotation:footnote`
+  - `annotation:popover`
+  - `block-type:*`
+- Unknown toolbar command ids now fall through to `registry.commands` handlers.
+- Added `commandId` to `SlashCommand` values and to the built-in slash command list.
+
+Issues/workarounds:
+
+- The dispatcher lives inside `BlockRichTextEditor` for now because it still depends heavily on editor-local state and current feature command helpers.
+- Slash command execution still uses the old `SlashCommand` union and its slash-trigger deletion flow. Command ids are now present on slash commands, but slash execution has not yet been rewritten to dispatch generic registered commands.
+- Plugin command handlers currently receive the current state and a command dispatcher, but they cannot yet return CRDT ops or selection changes through the editor command pipeline. That needs a richer command handler contract before third-party commands can mutate editor state safely.
+
+Verification:
+
+- `npm exec vitest -- run src/block-editor/editorCrdtConfig.test.ts src/block-editor/markdownShortcuts.test.ts src/block-editor/plugins/registry.test.ts src/block-editor/plugins/compatibility.test.ts src/block-editor/plugins/metadata.test.ts src/block-editor/plugins/legacyRichTextUi.test.ts` passed.
+- `npm run typecheck` passed.
+
 ### Phase 5 Continued: Toolbar Registry Wiring
 
 - Updated `Toolbar` so the block type `<select>` is rendered from data instead of hard-coded `<option>` elements.
