@@ -16,6 +16,7 @@ import {
     type FormattedBlock,
     type FormattedRun,
     type Op,
+    type VirtualBlockParentConfig,
     type VisibleMarkRange,
 } from '../block-crdt/index.js';
 import type {CachedState, JsonValue, Lamport, Mark} from '../block-crdt/types.js';
@@ -572,9 +573,10 @@ const bodySelectionRange = (
 export const annotationBodyBlockIds = (
     state: CachedState<RichBlockMeta>,
     annotationId: Lamport,
+    virtualParents: VirtualBlockParentConfig<RichBlockMeta> = annotationVirtualParents(state),
 ): string[] => {
     const parentId = lamportToString(annotationId);
-    return visibleBlockChildren(state, parentId, annotationVirtualParents(state));
+    return visibleBlockChildren(state, parentId, virtualParents);
 };
 
 export type RenderedAnnotation = {
@@ -585,10 +587,56 @@ export type RenderedAnnotation = {
     bodyBlocks: Array<{id: string; text: string; runs: FormattedRun[]; meta: RichBlockMeta}>;
 };
 
+export const renderedAnnotationsByPresentation = (
+    annotations: readonly RenderedAnnotation[],
+    presentation: AnnotationPresentation,
+): RenderedAnnotation[] => annotations.filter((annotation) => annotation.data.presentation === presentation);
+
+export const renderedAnnotationMapById = (
+    annotations: readonly RenderedAnnotation[],
+    presentation?: AnnotationPresentation,
+): Map<string, RenderedAnnotation> => {
+    const result = new Map<string, RenderedAnnotation>();
+    for (const annotation of annotations) {
+        if (presentation && annotation.data.presentation !== presentation) continue;
+        result.set(annotation.id, annotation);
+    }
+    return result;
+};
+
+export const popoverTextByAnnotationId = (
+    annotations: readonly RenderedAnnotation[],
+): Map<string, string> => {
+    const result = new Map<string, string>();
+    for (const annotation of annotations) {
+        if (annotation.data.presentation !== 'popover') continue;
+        const text = annotation.bodyBlocks
+            .map((block) => block.text)
+            .filter(Boolean)
+            .join('\n');
+        result.set(annotation.id, text || 'Empty popover');
+    }
+    return result;
+};
+
+export const footnoteNumberByAnnotationId = (
+    annotations: readonly RenderedAnnotation[],
+): Map<string, number> => {
+    const result = new Map<string, number>();
+    let nextNumber = 1;
+    for (const annotation of annotations) {
+        if (annotation.data.presentation !== 'footnote') continue;
+        result.set(annotation.id, nextNumber);
+        nextNumber++;
+    }
+    return result;
+};
+
 export const renderedAnnotations = (
     state: CachedState<RichBlockMeta>,
     blocks: Array<FormattedBlock<RichBlockMeta>>,
     blocksWithAnnotationBodies: Array<FormattedBlock<RichBlockMeta>> = blocks,
+    virtualParents: VirtualBlockParentConfig<RichBlockMeta> = annotationVirtualParents(state),
 ): RenderedAnnotation[] => {
     const formattedBodies = new Map(blocksWithAnnotationBodies.map((block) => [block.id, block]));
     const referenceBlocks = blocksWithAnnotationBodies;
@@ -598,7 +646,7 @@ export const renderedAnnotations = (
         .map((data) => {
             const id = lamportToString(data.id);
             const mark = representativeAnnotationMark(state, data);
-            const bodyIds = annotationBodyBlockIds(state, data.id);
+            const bodyIds = annotationBodyBlockIds(state, data.id, virtualParents);
             if (!mark) return null;
             return {
                 id,

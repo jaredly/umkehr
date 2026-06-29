@@ -7,6 +7,7 @@ export * from './code.js';
 export * from './links.js';
 export * from './math.js';
 export * from './inlineDate.js';
+export * from './annotations.js';
 export * from './headings.js';
 export * from './lists.js';
 export * from './todos.js';

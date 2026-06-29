@@ -107,6 +107,7 @@ describe('legacy rich text UI plugin', () => {
         expect(registry.plugins.map((plugin) => plugin.id)).toEqual([
             'annotations',
             'legacy-rich-text-ui',
+            'legacy-structural-crdt',
             'polls',
         ]);
     });

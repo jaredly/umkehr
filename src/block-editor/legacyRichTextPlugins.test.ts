@@ -38,6 +38,7 @@ describe('legacyRichTextPlugins', () => {
             'inline-date',
             'legacy-rich-text-blocks',
             'legacy-rich-text-ui',
+            'legacy-structural-crdt',
             'link-preview',
             'links',
             'lists',

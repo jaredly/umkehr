@@ -72,6 +72,7 @@ export type ClipboardInlineFeatureSet = {
     booleanMarks?: ReadonlySet<ClipboardBooleanMarkType>;
     links?: boolean;
     math?: boolean;
+    annotations?: boolean;
     inlineEmbeds?: ReadonlySet<string>;
 };
 
@@ -83,6 +84,7 @@ type NormalizedClipboardInlineFeatureSet = {
     booleanMarks: ReadonlySet<ClipboardBooleanMarkType>;
     links: boolean;
     math: boolean;
+    annotations: boolean;
     inlineEmbeds: ReadonlySet<string> | null;
 };
 
@@ -149,6 +151,7 @@ const normalizeClipboardInlineFeatures = (
     booleanMarks: features.booleanMarks ?? new Set(ALL_CLIPBOARD_BOOLEAN_MARKS),
     links: features.links ?? true,
     math: features.math ?? true,
+    annotations: features.annotations ?? true,
     inlineEmbeds: features.inlineEmbeds ?? null,
 });
 
@@ -221,12 +224,14 @@ export const filterRichClipboardPayloadInlineFeatures = (
     const fragments = payload.fragments.map((fragment) =>
         filterClipboardFragmentInlineFeatures(fragment, normalizedInlineFeatures),
     );
-    const annotations = payload.annotations.map((annotation) => ({
-        ...annotation,
-        bodyBlocks: annotation.bodyBlocks.map((fragment) =>
-            filterClipboardFragmentInlineFeatures(fragment, normalizedInlineFeatures),
-        ),
-    }));
+    const annotations = normalizedInlineFeatures.annotations
+        ? payload.annotations.map((annotation) => ({
+              ...annotation,
+              bodyBlocks: annotation.bodyBlocks.map((fragment) =>
+                  filterClipboardFragmentInlineFeatures(fragment, normalizedInlineFeatures),
+              ),
+          }))
+        : [];
     return {
         ...payload,
         fragments,
@@ -390,7 +395,7 @@ const clipboardMarkEnabled = (
     mark: ClipboardMarkRange,
     inlineFeatures: NormalizedClipboardInlineFeatureSet,
 ): boolean => {
-    if (mark.type === 'annotation') return true;
+    if (mark.type === 'annotation') return inlineFeatures.annotations;
     if (mark.type === 'link') return inlineFeatures.links;
     if (mark.type === 'math') return inlineFeatures.math;
     if (mark.type === 'embed') {
@@ -537,6 +542,7 @@ const collectAnnotations = (
     initialRefs: ClipboardAnnotationRef[],
     inlineFeatures: NormalizedClipboardInlineFeatureSet,
 ): ClipboardAnnotation[] => {
+    if (!inlineFeatures.annotations) return [];
     const formattedBodies = materializeFormattedBlocks(state, richTextVirtualParents(state));
     const formattedById = new Map(formattedBodies.map((block) => [block.id, block]));
     const byId = new Map<string, ClipboardAnnotationRef>();
@@ -650,15 +656,17 @@ const appendRunMarks = (
             ...(mathMode === 'display' ? {data: {display: true}} : {}),
         });
     }
-    for (const data of formattedMarkValues(run, ANNOTATION_MARK)) {
-        if (!isAnnotationMarkData(data)) continue;
-        const ref: ClipboardAnnotationRef = {
-            originalId: lamportToString(data.id),
-            presentation: data.presentation,
-            ...(data.resolved ? {resolved: true} : {}),
-        };
-        marks.push({type: 'annotation', startOffset, endOffset, data: ref});
-        annotationRefs.push(ref);
+    if (inlineFeatures.annotations) {
+        for (const data of formattedMarkValues(run, ANNOTATION_MARK)) {
+            if (!isAnnotationMarkData(data)) continue;
+            const ref: ClipboardAnnotationRef = {
+                originalId: lamportToString(data.id),
+                presentation: data.presentation,
+                ...(data.resolved ? {resolved: true} : {}),
+            };
+            marks.push({type: 'annotation', startOffset, endOffset, data: ref});
+            annotationRefs.push(ref);
+        }
     }
     const embed = run.marks[INLINE_EMBED_MARK];
     if (isInlineEmbedData(embed) && (!inlineFeatures.inlineEmbeds || inlineFeatures.inlineEmbeds.has(embed.type))) {

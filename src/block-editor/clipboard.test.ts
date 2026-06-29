@@ -111,6 +111,55 @@ describe('clipboard inline feature filtering', () => {
             'embed',
         ]));
     });
+
+    it('strips annotation references and body payloads when annotations are disabled', () => {
+        const payload: RichClipboardPayload = {
+            version: 1,
+            plainText: 'marked',
+            html: '',
+            fragments: [
+                {
+                    text: 'marked',
+                    meta: {type: 'paragraph', ts: '1'},
+                    marks: [
+                        {
+                            type: 'annotation',
+                            startOffset: 0,
+                            endOffset: 6,
+                            data: {originalId: '1:a', presentation: 'sidebar'},
+                        },
+                    ],
+                },
+            ],
+            annotations: [
+                {
+                    originalId: '1:a',
+                    presentation: 'sidebar',
+                    bodyBlocks: [
+                        {
+                            text: 'body',
+                            meta: {type: 'paragraph', ts: '2'},
+                            marks: [
+                                {
+                                    type: 'annotation',
+                                    startOffset: 0,
+                                    endOffset: 4,
+                                    data: {originalId: '2:a', presentation: 'popover'},
+                                },
+                            ],
+                        },
+                    ],
+                },
+            ],
+        };
+
+        const filtered = filterRichClipboardPayloadInlineFeatures(payload, {annotations: false});
+
+        expect(filtered.fragments[0].marks).toEqual([]);
+        expect(filtered.annotations).toEqual([]);
+        expect(payload.fragments[0].marks).toHaveLength(1);
+        expect(payload.annotations).toHaveLength(1);
+    });
 });
 
 describe('clipboard block feature filtering', () => {

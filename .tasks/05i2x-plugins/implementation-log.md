@@ -554,3 +554,7 @@ Verification:
   - `shows editor and preview together in split mode`
   - `keeps the previous mermaid render visible while remote updates render`
   - `keeps the previous mermaid render visible with an error overlay when remote updates fail`
+
+### Phase 7
+
+See implementation-log-7.md

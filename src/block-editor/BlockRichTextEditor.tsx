@@ -85,9 +85,13 @@ import {
     createAnnotation,
     deleteAnnotationBodyBackward,
     deleteAnnotationBodyForward,
+    footnoteNumberByAnnotationId,
     renderedAnnotations,
+    renderedAnnotationMapById,
+    renderedAnnotationsByPresentation,
     isAnnotationData,
     pasteAnnotationBodyTextWithMarkdownShortcuts,
+    popoverTextByAnnotationId,
     replaceAnnotationBodySelection,
     removeAnnotationBodyCodeMark,
     removeAnnotationBodyLink,
@@ -334,6 +338,7 @@ import {
     type BlockEditorRegistry,
 } from './plugins/index.js';
 import {blockTypeMenuItemsFromToolbarSpecs} from './plugins/legacyRichTextUi.js';
+import {richTextVirtualParentsFromRegistry} from './editorCrdtConfig.js';
 
 import * as hlc from '../crdt/hlc.js';
 type RichFormattedBlock = FormattedBlock<RichBlockMeta>;
@@ -403,22 +408,44 @@ type InlineRenderFeatures = {
     code: boolean;
     links: boolean;
     math: boolean;
+    annotations: boolean;
     inlineEmbeds: ReadonlySet<string>;
 };
 
 type BlockRenderFeatures = ReadonlySet<RichBlockMeta['type']>;
+
+type AnnotationDestinationFeatures = {
+    sidebar: boolean;
+    footer: boolean;
+    floating: boolean;
+};
 
 const DEFAULT_INLINE_RENDER_FEATURES: InlineRenderFeatures = {
     booleanMarks: new Set(BOOLEAN_INLINE_MARKS),
     code: true,
     links: true,
     math: true,
+    annotations: true,
     inlineEmbeds: new Set(['date']),
 };
 
 const blockRenderFeaturesFromRegistry = (
     registry: Pick<BlockEditorRegistry<RichBlockMeta>, 'blockRenderers'>,
 ): BlockRenderFeatures => new Set([...registry.blockRenderers.keys()] as RichBlockMeta['type'][]);
+
+const annotationDestinationFeaturesFromRegistry = (
+    registry: Pick<BlockEditorRegistry<RichBlockMeta>, 'destinationRenderers'>,
+): AnnotationDestinationFeatures => ({
+    sidebar: rendererDestinationHasId(registry, 'sidebar', 'annotations.sidebar'),
+    footer: rendererDestinationHasId(registry, 'footer', 'annotations.footer'),
+    floating: rendererDestinationHasId(registry, 'floating', 'annotations.floating'),
+});
+
+const rendererDestinationHasId = (
+    registry: Pick<BlockEditorRegistry<RichBlockMeta>, 'destinationRenderers'>,
+    destination: string,
+    id: string,
+): boolean => registry.destinationRenderers.get(destination)?.some((renderer) => renderer.id === id) ?? false;
 
 const inlineRenderFeaturesFromRegistry = (
     registry: Pick<BlockEditorRegistry<RichBlockMeta>, 'inlineRenderers'>,
@@ -433,6 +460,7 @@ const inlineRenderFeaturesFromRegistry = (
         code: renderedMarks.has(CODE_MARK),
         links: renderedMarks.has(LINK_MARK),
         math: renderedMarks.has(MATH_MARK),
+        annotations: renderedMarks.has(ANNOTATION_MARK),
         inlineEmbeds: new Set(
             registry.inlineRenderers
                 .map((renderer) => renderer.embedType)
@@ -447,6 +475,7 @@ const inlineRenderFeaturesKey = (features: InlineRenderFeatures): string =>
         code: features.code,
         links: features.links,
         math: features.math,
+        annotations: features.annotations,
         inlineEmbeds: [...features.inlineEmbeds].sort(),
     });
 
@@ -579,7 +608,15 @@ export function BlockRichTextEditor({
     const activeInlineMarkTypes = useMemo(() => activeInlineMarkTypesFromRegistry(registry), [registry]);
     const inlineRenderFeatures = useMemo(() => inlineRenderFeaturesFromRegistry(registry), [registry]);
     const blockRenderFeatures = useMemo(() => blockRenderFeaturesFromRegistry(registry), [registry]);
+    const annotationDestinationFeatures = useMemo(
+        () => annotationDestinationFeaturesFromRegistry(registry),
+        [registry],
+    );
     const optionPanelBlockTypes = useMemo(() => new Set(registry.optionPanels.keys()), [registry]);
+    const virtualParents = useMemo(
+        () => richTextVirtualParentsFromRegistry(replica.state, registry),
+        [registry, replica.state],
+    );
     const rootRef = useRef<HTMLDivElement>(null);
     const editorContentRef = useRef<HTMLDivElement>(null);
     const pendingCaretRestoreBlockIdRef = useRef<string | null>(null);
@@ -647,61 +684,37 @@ export function BlockRichTextEditor({
     const [retainedInlineMarks, setRetainedInlineMarks] = useState<RetainedInlineMarkSessionMap>(
         {},
     );
-    void registry;
     const blocksWithAnnotationBodies = materializeFormattedBlocks(
         replica.state,
-        annotationVirtualParents(replica.state),
+        virtualParents,
     );
     const annotationBodyIds = useMemo(() => {
         const result = new Set<string>();
         for (const mark of Object.values(replica.state.state.marks)) {
             if (mark.type !== ANNOTATION_MARK || mark.remove || !isAnnotationData(mark.data))
                 continue;
-            for (const bodyId of annotationBodyBlockIds(replica.state, mark.data.id)) {
+            for (const bodyId of annotationBodyBlockIds(replica.state, mark.data.id, virtualParents)) {
                 result.add(bodyId);
             }
         }
         return result;
-    }, [replica.state]);
+    }, [replica.state, virtualParents]);
     const blocks = useMemo(
         () => blocksWithAnnotationBodies.filter((block) => !annotationBodyIds.has(block.id)),
         [annotationBodyIds, blocksWithAnnotationBodies],
     );
-    const annotations = renderedAnnotations(replica.state, blocks, blocksWithAnnotationBodies);
+    const annotations = renderedAnnotations(replica.state, blocks, blocksWithAnnotationBodies, virtualParents);
     const sidebarAnnotations = useMemo(
-        () => annotations.filter((item) => item.data.presentation === 'sidebar'),
+        () => renderedAnnotationsByPresentation(annotations, 'sidebar'),
         [annotations],
     );
     const sidebarAnnotationKey = sidebarAnnotations.map((annotation) => annotation.id).join('\0');
-    const popoverAnnotationsById = useMemo(() => {
-        const result = new Map<string, RenderedAnnotation>();
-        for (const annotation of annotations) {
-            if (annotation.data.presentation === 'popover') result.set(annotation.id, annotation);
-        }
-        return result;
-    }, [annotations]);
-    const popoverTextById = useMemo(() => {
-        const result = new Map<string, string>();
-        for (const annotation of annotations) {
-            if (annotation.data.presentation !== 'popover') continue;
-            const text = annotation.bodyBlocks
-                .map((block) => block.text)
-                .filter(Boolean)
-                .join('\n');
-            result.set(annotation.id, text || 'Empty popover');
-        }
-        return result;
-    }, [annotations]);
-    const footnoteNumberById = useMemo(() => {
-        const result = new Map<string, number>();
-        let nextNumber = 1;
-        for (const annotation of annotations) {
-            if (annotation.data.presentation !== 'footnote') continue;
-            result.set(annotation.id, nextNumber);
-            nextNumber++;
-        }
-        return result;
-    }, [annotations]);
+    const popoverAnnotationsById = useMemo(
+        () => renderedAnnotationMapById(annotations, 'popover'),
+        [annotations],
+    );
+    const popoverTextById = useMemo(() => popoverTextByAnnotationId(annotations), [annotations]);
+    const footnoteNumberById = useMemo(() => footnoteNumberByAnnotationId(annotations), [annotations]);
     const renderTree = useMemo(() => buildRenderTree(blocks), [blocks]);
     const charIdsByBlock = useMemo(() => {
         const result = new Map<string, string[]>();
@@ -733,12 +746,14 @@ export function BlockRichTextEditor({
     const selectedPopoverSelectionKey = editorSelectionKey(selectedPopoverSelection);
     const selectedPopoverIds = useMemo(
         () =>
-            selectedPopoverIdsForSelection(
-                blocksWithAnnotationBodies,
-                selectedPopoverSelection,
-                popoverTextById,
-            ),
-        [blocksWithAnnotationBodies, popoverTextById, selectedPopoverSelectionKey],
+            annotationDestinationFeatures.floating
+                ? selectedPopoverIdsForSelection(
+                      blocksWithAnnotationBodies,
+                      selectedPopoverSelection,
+                      popoverTextById,
+                  )
+                : [],
+        [annotationDestinationFeatures.floating, blocksWithAnnotationBodies, popoverTextById, selectedPopoverSelectionKey],
     );
     const selectedPopoverIdsKey = selectedPopoverIds.join('\0');
     const selectedBlockType = blockTypeMenuValueFromRegistry(
@@ -872,6 +887,7 @@ export function BlockRichTextEditor({
         setPopoverFocusPinned,
         showPopover,
     } = useAnnotationPopoverController({
+        enabled: annotationDestinationFeatures.floating,
         rootRef,
         selectedPopoverIds,
         selectedPopoverIdsKey,
@@ -3028,6 +3044,7 @@ export function BlockRichTextEditor({
     }, [replica.state, replica.selection]);
 
     const runToolbarAnnotationCommand = (presentation: AnnotationPresentation) => {
+        if (!isEditorCommandAvailable(`annotation:${presentation}`)) return;
         if (activeAnnotationBodySelection) {
             runBlockControlCommand((current) => {
                 const result = createAnnotation(
@@ -3553,19 +3570,54 @@ export function BlockRichTextEditor({
                             }),
                         )}
                     </div>
-                    <Footnotes
+                    {annotationDestinationFeatures.footer ? (
+                        <Footnotes
+                            state={replica.state}
+                            annotations={renderedAnnotationsByPresentation(annotations, 'footnote')}
+                            focusRequest={commentFocusRequest}
+                            onFocusRequestHandled={() => setCommentFocusRequest(null)}
+                            onBodyCommand={runAnnotationBodyCommand}
+                            onBodyFocusRequest={requestCommentFocus}
+                            onBodySelectionChange={setActiveAnnotationBodySelection}
+                            isToolbarCommandAvailable={isToolbarCommandAvailable}
+                            inlineRenderFeatures={inlineRenderFeatures}
+                            registry={registry}
+                            popoverTextById={popoverTextById}
+                            footnoteNumberById={footnoteNumberById}
+                            rainbowLamportIds={rainbowLamportIds}
+                            onPopoverTriggerEnter={showPopover}
+                            onPopoverTriggerLeave={schedulePopoverHideFromPointer}
+                            onInputMeasured={onInputMeasured}
+                            onDisplayInputRenderStarted={onDisplayInputRenderStarted}
+                        />
+                    ) : null}
+                </div>
+                {annotationDestinationFeatures.sidebar ? (
+                    <AnnotationSidebar
                         state={replica.state}
-                        annotations={annotations.filter(
-                            (item) => item.data.presentation === 'footnote',
-                        )}
+                        annotations={sidebarAnnotations}
+                        open={commentsOpen}
+                        gutterTops={commentGutterTops}
                         focusRequest={commentFocusRequest}
+                        onToggle={setCommentsOpen}
                         onFocusRequestHandled={() => setCommentFocusRequest(null)}
+                        onFocusAnnotation={(annotation) => {
+                            setCommentsOpen(true);
+                            requestCommentFocus(focusBodyBlockForAnnotation(annotation));
+                        }}
+                        onBodyActivity={recordCommentBodyActivity}
                         onBodyCommand={runAnnotationBodyCommand}
                         onBodyFocusRequest={requestCommentFocus}
                         onBodySelectionChange={setActiveAnnotationBodySelection}
                         isToolbarCommandAvailable={isToolbarCommandAvailable}
                         inlineRenderFeatures={inlineRenderFeatures}
                         registry={registry}
+                        onResolveAnnotation={(annotation) => {
+                            if (!isEditorCommandAvailable('annotation:resolve')) return;
+                            runAnnotationBodyCommand((current, context) =>
+                                resolveAnnotation(current.state, annotation.id, context),
+                            );
+                        }}
                         popoverTextById={popoverTextById}
                         footnoteNumberById={footnoteNumberById}
                         rainbowLamportIds={rainbowLamportIds}
@@ -3574,41 +3626,9 @@ export function BlockRichTextEditor({
                         onInputMeasured={onInputMeasured}
                         onDisplayInputRenderStarted={onDisplayInputRenderStarted}
                     />
-                </div>
-                <AnnotationSidebar
-                    state={replica.state}
-                    annotations={sidebarAnnotations}
-                    open={commentsOpen}
-                    gutterTops={commentGutterTops}
-                    focusRequest={commentFocusRequest}
-                    onToggle={setCommentsOpen}
-                    onFocusRequestHandled={() => setCommentFocusRequest(null)}
-                    onFocusAnnotation={(annotation) => {
-                        setCommentsOpen(true);
-                        requestCommentFocus(focusBodyBlockForAnnotation(annotation));
-                    }}
-                    onBodyActivity={recordCommentBodyActivity}
-                    onBodyCommand={runAnnotationBodyCommand}
-                    onBodyFocusRequest={requestCommentFocus}
-                    onBodySelectionChange={setActiveAnnotationBodySelection}
-                    isToolbarCommandAvailable={isToolbarCommandAvailable}
-                    inlineRenderFeatures={inlineRenderFeatures}
-                    registry={registry}
-                    onResolveAnnotation={(annotation) => {
-                        runAnnotationBodyCommand((current, context) =>
-                            resolveAnnotation(current.state, annotation.id, context),
-                        );
-                    }}
-                    popoverTextById={popoverTextById}
-                    footnoteNumberById={footnoteNumberById}
-                    rainbowLamportIds={rainbowLamportIds}
-                    onPopoverTriggerEnter={showPopover}
-                    onPopoverTriggerLeave={schedulePopoverHideFromPointer}
-                    onInputMeasured={onInputMeasured}
-                    onDisplayInputRenderStarted={onDisplayInputRenderStarted}
-                />
+                ) : null}
             </div>
-            {activePopovers.map((popover) => (
+            {annotationDestinationFeatures.floating ? activePopovers.map((popover) => (
                 <FloatingAnnotationPopover
                     state={replica.state}
                     key={popover.id}
@@ -3641,7 +3661,7 @@ export function BlockRichTextEditor({
                     onInputMeasured={onInputMeasured}
                     onDisplayInputRenderStarted={onDisplayInputRenderStarted}
                 />
-            ))}
+            )) : null}
             <SlashCommandPopover
                 state={slashMenu}
                 commands={slashCommands}
@@ -6739,6 +6759,7 @@ function AnnotationBodyBlock({
 
     const cutBodySelection = useCallback(
         (event: ClipboardEvent<HTMLDivElement>) => {
+            if (!isToolbarCommandAvailable('annotation:body-replace-selection')) return;
             const selected = readSelectionFromDom(event.currentTarget) ?? selection;
             const payload = serializeSelectionToClipboardPayload(
                 state,
@@ -6755,7 +6776,7 @@ function AnnotationBodyBlock({
                 replaceAnnotationBodySelection(currentState, activeSelection, '', context),
             );
         },
-        [inlineRenderFeatures, run, selection, state],
+        [inlineRenderFeatures, isToolbarCommandAvailable, run, selection, state],
     );
 
     const rangeSelection = useCallback(
@@ -6779,6 +6800,10 @@ function AnnotationBodyBlock({
             const range = linkPopover?.ranges[0];
             setLinkPopover(null);
             if (!range) return;
+            if (
+                !isToolbarCommandAvailable('annotation:body-set-link') ||
+                !isToolbarCommandAvailable('link:edit')
+            ) return;
             const selected = rangeSelection(range);
             const value = href.trim();
             run(selected, (state, activeSelection, context) =>
@@ -6787,21 +6812,29 @@ function AnnotationBodyBlock({
                     : removeAnnotationBodyLink(state, activeSelection, context),
             );
         },
-        [linkPopover?.ranges, rangeSelection, run],
+        [isToolbarCommandAvailable, linkPopover?.ranges, rangeSelection, run],
     );
 
     const removeBodyLink = useCallback(() => {
         const range = linkPopover?.ranges[0];
         setLinkPopover(null);
-        if (!range) return;
+            if (!range) return;
+            if (
+                !isToolbarCommandAvailable('annotation:body-remove-link') ||
+                !isToolbarCommandAvailable('link:edit')
+            ) return;
         run(rangeSelection(range), removeAnnotationBodyLink);
-    }, [linkPopover?.ranges, rangeSelection, run]);
+    }, [isToolbarCommandAvailable, linkPopover?.ranges, rangeSelection, run]);
 
     const applyBodyCodeLanguage = useCallback(
         (language: string, ranges: CodeTargetRange[]) => {
             const range = ranges[0];
             setCodePopover(null);
             if (!range) return;
+            if (
+                !isToolbarCommandAvailable('annotation:body-set-code-language') ||
+                !isToolbarCommandAvailable('mark:code')
+            ) return;
             const selected = rangeSelection(range);
             const value = language.trim();
             run(selected, (state, activeSelection, context) =>
@@ -6810,22 +6843,30 @@ function AnnotationBodyBlock({
                     : clearAnnotationBodyCodeLanguage(state, activeSelection, context),
             );
         },
-        [rangeSelection, run],
+        [isToolbarCommandAvailable, rangeSelection, run],
     );
 
     const clearBodyCodeLanguage = useCallback((ranges: CodeTargetRange[]) => {
         const range = ranges[0];
         setCodePopover(null);
         if (!range) return;
+        if (
+            !isToolbarCommandAvailable('annotation:body-clear-code-language') ||
+            !isToolbarCommandAvailable('mark:code')
+        ) return;
         run(rangeSelection(range), clearAnnotationBodyCodeLanguage);
-    }, [rangeSelection, run]);
+    }, [isToolbarCommandAvailable, rangeSelection, run]);
 
     const removeBodyCode = useCallback((ranges: CodeTargetRange[]) => {
         const range = ranges[0];
         setCodePopover(null);
         if (!range) return;
+        if (
+            !isToolbarCommandAvailable('annotation:body-remove-code') ||
+            !isToolbarCommandAvailable('mark:code')
+        ) return;
         run(rangeSelection(range), removeAnnotationBodyCodeMark);
-    }, [rangeSelection, run]);
+    }, [isToolbarCommandAvailable, rangeSelection, run]);
 
     const cancelBodyLinkHoverHide = useCallback(() => {
         if (linkHoverHideTimerRef.current) clearTimeout(linkHoverHideTimerRef.current);
@@ -6926,7 +6967,8 @@ function AnnotationBodyBlock({
                 onInputMeasured={onInputMeasured}
                 onDisplayInputRenderStarted={onDisplayInputRenderStarted}
                 onInsertText={(text, activeSelection) =>
-                    run(activeSelection ?? selection, (state, selected, context) => {
+                    isToolbarCommandAvailable('annotation:body-replace-selection')
+                        ? run(activeSelection ?? selection, (state, selected, context) => {
                         if (pendingCodeMark && selected.type === 'caret') {
                             const result = insertTextWithRetainedMarks(
                                 state,
@@ -6949,17 +6991,22 @@ function AnnotationBodyBlock({
                                   )
                             : replaceAnnotationBodySelection(state, selected, text, context);
                     })
+                        : undefined
                 }
                 onDeleteBackward={(activeSelection) =>
-                    run(activeSelection ?? selection, (state, selected, context) =>
+                    isToolbarCommandAvailable('annotation:body-delete-backward')
+                        ? run(activeSelection ?? selection, (state, selected, context) =>
                         deleteAnnotationBodyBackward(state, selected, context, {
                             annotationId,
                             bodyBlockId: block.id,
                         }),
                     )
+                        : undefined
                 }
                 onDeleteForward={(activeSelection) =>
-                    run(activeSelection ?? selection, deleteAnnotationBodyForward)
+                    isToolbarCommandAvailable('annotation:body-delete-forward')
+                        ? run(activeSelection ?? selection, deleteAnnotationBodyForward)
+                        : undefined
                 }
                 onCopy={copyBodySelection}
                 onCut={cutBodySelection}
@@ -6968,6 +7015,7 @@ function AnnotationBodyBlock({
                     const rich = richClipboardPayloadFromDataTransfer(event.clipboardData);
                     if (rich) {
                         event.preventDefault();
+                        if (!isToolbarCommandAvailable('annotation:body-replace-selection')) return;
                         run(selected, (state, activeSelection, context) => {
                             const result = pasteRichClipboardEverywhere(
                                 state,
@@ -6987,12 +7035,18 @@ function AnnotationBodyBlock({
 
                     event.preventDefault();
                     const text = event.clipboardData.getData('text/plain');
-                    if (isToolbarCommandAvailable('link:edit') && isLinkLikeText(text) && selected.type === 'range') {
+                    if (
+                        isToolbarCommandAvailable('annotation:body-set-link') &&
+                        isToolbarCommandAvailable('link:edit') &&
+                        isLinkLikeText(text) &&
+                        selected.type === 'range'
+                    ) {
                         run(selected, (state, activeSelection, context) =>
                             setAnnotationBodyLink(state, activeSelection, text.trim(), context),
                         );
                         return;
                     }
+                    if (!isToolbarCommandAvailable('annotation:body-replace-selection')) return;
                     run(selected, (state, activeSelection, context) =>
                         pasteAnnotationBodyTextWithMarkdownShortcuts(
                             state,
@@ -7011,6 +7065,7 @@ function AnnotationBodyBlock({
                     const key = event.key.toLowerCase();
                     if (event.key === 'Enter') {
                         event.preventDefault();
+                        if (!isToolbarCommandAvailable('annotation:body-split-block')) return;
                         run(selected, (state, activeSelection, context) =>
                             splitAnnotationBodyBlock(state, activeSelection, context),
                         );
@@ -7019,7 +7074,10 @@ function AnnotationBodyBlock({
                     if (modifierPressed && (key === 'b' || key === 'i')) {
                         event.preventDefault();
                         const commandId = key === 'b' ? 'mark:bold' : 'mark:italic';
-                        if (!isToolbarCommandAvailable(commandId)) return;
+                        if (
+                            !isToolbarCommandAvailable('annotation:body-toggle-mark') ||
+                            !isToolbarCommandAvailable(commandId)
+                        ) return;
                         run(selected, (state, activeSelection, context) =>
                             toggleAnnotationBodyMark(
                                 state,
@@ -7030,7 +7088,10 @@ function AnnotationBodyBlock({
                         );
                     } else if (modifierPressed && event.shiftKey && key === 'x') {
                         event.preventDefault();
-                        if (!isToolbarCommandAvailable('mark:strikethrough')) return;
+                        if (
+                            !isToolbarCommandAvailable('annotation:body-toggle-mark') ||
+                            !isToolbarCommandAvailable('mark:strikethrough')
+                        ) return;
                         run(selected, (state, activeSelection, context) =>
                             toggleAnnotationBodyMark(
                                 state,
@@ -7041,7 +7102,10 @@ function AnnotationBodyBlock({
                         );
                     } else if (modifierPressed && key === 'e') {
                         event.preventDefault();
-                        if (!isToolbarCommandAvailable('mark:code')) return;
+                        if (
+                            !isToolbarCommandAvailable('annotation:body-toggle-code') ||
+                            !isToolbarCommandAvailable('mark:code')
+                        ) return;
                         if (selected.type === 'caret') {
                             if (pendingCodeMark) {
                                 run(selected, (state, _activeSelection, context) => {
@@ -7069,7 +7133,10 @@ function AnnotationBodyBlock({
                         }
                     } else if (modifierPressed && key === 'k') {
                         event.preventDefault();
-                        if (!isToolbarCommandAvailable('link:edit')) return;
+                        if (
+                            !isToolbarCommandAvailable('annotation:body-set-link') ||
+                            !isToolbarCommandAvailable('link:edit')
+                        ) return;
                         if (selected.type === 'range') {
                             const ranges = [
                                 {
@@ -9767,6 +9834,7 @@ const renderRunNodes = (
         inlineRenderFeatures?: InlineRenderFeatures;
     } = {},
 ): Node[] => {
+    const inlineRenderFeatures = options.inlineRenderFeatures ?? DEFAULT_INLINE_RENDER_FEATURES;
     const chunks = runRenderChunks(
         runs,
         decorations,
@@ -9803,7 +9871,7 @@ const renderRunNodes = (
             ...renderEndingFootnoteReferences(
                 chunk,
                 chunks[index + 1] ?? null,
-                options.footnoteNumberById,
+                inlineRenderFeatures.annotations ? options.footnoteNumberById : undefined,
             ),
         );
     }
@@ -10242,17 +10310,19 @@ const applyRunClasses = (
         span.dataset.linkStartOffset = String(chunk.blockStartOffset);
         span.dataset.linkEndOffset = String(chunk.blockEndOffset);
     }
-    if (hasAnnotationMark(run)) span.classList.add('markAnnotation');
-    const sidebarIds = sidebarIdsForRun(run);
-    if (sidebarIds.length) {
-        span.dataset.sidebarAnnotationIds = sidebarIds.join(' ');
-    }
-    const popoverIds = popoverIdsForRun(run, popoverTextById);
-    if (popoverIds.length) {
-        span.classList.add('markPopover');
-        span.dataset.popoverId = popoverIds[0];
-        span.dataset.popoverIds = popoverIds.join(' ');
-        span.setAttribute('aria-label', 'Popover');
+    if (inlineRenderFeatures.annotations) {
+        if (hasAnnotationMark(run)) span.classList.add('markAnnotation');
+        const sidebarIds = sidebarIdsForRun(run);
+        if (sidebarIds.length) {
+            span.dataset.sidebarAnnotationIds = sidebarIds.join(' ');
+        }
+        const popoverIds = popoverIdsForRun(run, popoverTextById);
+        if (popoverIds.length) {
+            span.classList.add('markPopover');
+            span.dataset.popoverId = popoverIds[0];
+            span.dataset.popoverIds = popoverIds.join(' ');
+            span.setAttribute('aria-label', 'Popover');
+        }
     }
 };
 

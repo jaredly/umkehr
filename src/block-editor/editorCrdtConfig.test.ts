@@ -6,10 +6,12 @@ import {
     blockEditorCrdtConfigFromRegistry,
     legacyRichTextCrdtPlugins,
     legacyRichTextCrdtRegistry,
+    legacyStructuralCrdtPlugin,
     richTextCrdtConfig,
 } from './editorCrdtConfig';
 import type {CachedState} from '../block-crdt/types';
 import type {RichBlockMeta} from './blockMeta';
+import {annotationsPlugin} from './plugins/annotations';
 
 const emptyState = (): CachedState<RichBlockMeta> => ({
     state: {
@@ -82,6 +84,21 @@ describe('richTextCrdtConfig', () => {
         expect(blockEditorCrdtConfigFromRegistry(registry).markBehavior).toEqual(
             legacyRichTextCrdtRegistry.crdtConfig().markBehavior,
         );
+    });
+
+    it('keeps annotation CRDT hooks separate from transitional structural virtual parents', () => {
+        const annotationsRegistry = createBlockEditorRegistry([annotationsPlugin]);
+        const structuralRegistry = createBlockEditorRegistry([legacyStructuralCrdtPlugin]);
+
+        expect(annotationsRegistry.crdtConfig().markBehavior).toEqual({annotation: 'stacking'});
+        expect(annotationsRegistry.crdtConfig().virtualParents).toBeUndefined();
+        expect(structuralRegistry.crdtConfig().markBehavior).toBeUndefined();
+        expect(structuralRegistry.crdtConfig().virtualParents?.({
+            id: [1, 'a'],
+            meta: {type: 'table', ts: '1'},
+            style: {},
+            order: {id: [1, 'a'], path: [], index: [], ts: '1'},
+        })).toEqual([]);
     });
 
     it('declares annotation mark compatibility through the legacy annotations plugin', () => {

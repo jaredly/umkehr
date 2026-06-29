@@ -2,20 +2,20 @@ import type {VirtualBlockParentConfig} from '../block-crdt/index.js';
 import type {CachedState} from '../block-crdt/types.js';
 import type {RichBlockMeta} from './blockMeta';
 import {tableVirtualParentsForBlock} from './blockMeta';
-import {ANNOTATION_MARK, annotationMarkBehavior, isAnnotationData} from './annotations';
 import {mergeRichBlockMeta} from './pollBlocks';
-import {createBlockEditorRegistry, type BlockEditorPlugin, type BlockEditorRegistry} from './plugins/index.js';
+import {
+    annotationsPlugin,
+    createBlockEditorRegistry,
+    type BlockEditorPlugin,
+    type BlockEditorRegistry,
+} from './plugins/index.js';
 
-export const legacyAnnotationsCrdtPlugin: BlockEditorPlugin<RichBlockMeta> = {
-    id: 'annotations',
-    marks: [{id: ANNOTATION_MARK, label: 'Annotation'}],
+export const legacyAnnotationsCrdtPlugin = annotationsPlugin;
+
+export const legacyStructuralCrdtPlugin: BlockEditorPlugin<RichBlockMeta> = {
+    id: 'legacy-structural-crdt',
     crdt: {
-        markBehavior: annotationMarkBehavior.markBehavior,
         virtualParents: tableVirtualParentsForBlock,
-        markVirtualParents: (mark) =>
-            mark.type === ANNOTATION_MARK && !mark.remove && isAnnotationData(mark.data)
-                ? [mark.data.id]
-                : [],
     },
 };
 
@@ -29,6 +29,7 @@ export const legacyPollsCrdtPlugin: BlockEditorPlugin<RichBlockMeta> = {
 
 export const legacyRichTextCrdtPlugins: readonly BlockEditorPlugin<RichBlockMeta>[] = [
     legacyAnnotationsCrdtPlugin,
+    legacyStructuralCrdtPlugin,
     legacyPollsCrdtPlugin,
 ];
 
@@ -38,6 +39,11 @@ export const legacyRichTextCrdtRegistry: BlockEditorRegistry<RichBlockMeta> =
 export const blockEditorCrdtConfigFromRegistry = <Meta extends RichBlockMeta>(
     registry: BlockEditorRegistry<Meta>,
 ): VirtualBlockParentConfig<Meta> => registry.crdtConfig();
+
+export const richTextVirtualParentsFromRegistry = (
+    _state: CachedState<RichBlockMeta>,
+    registry: BlockEditorRegistry<RichBlockMeta>,
+): VirtualBlockParentConfig<RichBlockMeta> => registry.crdtConfig();
 
 export const richTextCrdtConfig = (
     _state: CachedState<RichBlockMeta>,
