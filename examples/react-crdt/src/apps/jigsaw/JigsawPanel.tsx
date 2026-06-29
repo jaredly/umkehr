@@ -398,6 +398,35 @@ export function JigsawPanel({
                         const position = renderedPositions.get(index);
                         if (!position) return null;
                         const canvasPosition = imageToCanvas(position, boardGeometry.imageOffset);
+                        return (
+                            <div
+                                key={`backdrop-${index}`}
+                                className="jigsawPieceBackdrop"
+                                style={
+                                    {
+                                        '--piece-left': `${canvasPosition.x + piece.bounds.left}px`,
+                                        '--piece-top': `${canvasPosition.y + piece.bounds.top}px`,
+                                        '--piece-width': `${piece.bounds.width}px`,
+                                        '--piece-height': `${piece.bounds.height}px`,
+                                        '--piece-z': index,
+                                    } as CSSProperties
+                                }
+                                aria-hidden="true"
+                            >
+                                <PieceCanvas
+                                    source={sourceImage}
+                                    pieceCenter={piece.center}
+                                    bounds={piece.bounds}
+                                    mask={piece.mask}
+                                    className="jigsawPieceBackdropCanvas"
+                                />
+                            </div>
+                        );
+                    })}
+                    {board.pieces.map((piece, index) => {
+                        const position = renderedPositions.get(index);
+                        if (!position) return null;
+                        const canvasPosition = imageToCanvas(position, boardGeometry.imageOffset);
                         const componentIndex = layout.pieceToComponent.get(index);
                         const component =
                             componentIndex === undefined
@@ -521,11 +550,13 @@ function PieceCanvas({
     pieceCenter,
     bounds,
     mask,
+    className = 'jigsawPieceCanvas',
 }: {
     source: HTMLCanvasElement;
     pieceCenter: Coord;
     bounds: PieceBounds;
     mask: PathSegment[];
+    className?: string;
 }) {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     useEffect(() => {
@@ -565,7 +596,7 @@ function PieceCanvas({
     return (
         <canvas
             ref={canvasRef}
-            className="jigsawPieceCanvas"
+            className={className}
             width={Math.max(1, Math.round(bounds.width))}
             height={Math.max(1, Math.round(bounds.height))}
             aria-hidden="true"
