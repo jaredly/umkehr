@@ -1,7 +1,10 @@
 import {describe, expect, it} from 'vitest';
+import {artifactFingerprintHash} from '../../lib/artifacts';
 import {
     DEFAULT_JIGSAW_PIECE_COUNT,
     JIGSAW_BOARD_ARTIFACT_ID,
+    JIGSAW_BOARD_KIND,
+    JIGSAW_BOARD_VERSION,
     currentJigsawBoard,
     generateJigsawBoard,
     initialJigsawArtifacts,
@@ -41,8 +44,55 @@ describe('jigsaw board artifacts', () => {
                 width: board.imageSize.width / cols,
                 height: board.imageSize.height / rows,
             });
+            board.pieces.forEach((piece) => {
+                expect(piece.bounds).toEqual({
+                    left: -board.imageSize.width / cols / 2,
+                    top: -board.imageSize.height / rows / 2,
+                    width: board.imageSize.width / cols,
+                    height: board.imageSize.height / rows,
+                });
+            });
         },
     );
+
+    it('generates concrete Voronoi board geometry', () => {
+        const board = generateJigsawBoard(30, {type: 'voronoi'});
+        expect(board.id).toBe(JIGSAW_BOARD_ARTIFACT_ID);
+        expect(board.image).toBe('stock:hue');
+        expect(board.pieces).toHaveLength(30);
+        expect(board.title).toContain('Voronoi');
+        expect(totalMaskArea(board)).toBeCloseTo(board.imageSize.width * board.imageSize.height, -4);
+
+        board.pieces.forEach((piece, index) => {
+            expect(Number.isFinite(piece.center.x)).toBe(true);
+            expect(Number.isFinite(piece.center.y)).toBe(true);
+            expect(piece.bounds.width).toBeGreaterThan(0);
+            expect(piece.bounds.height).toBeGreaterThan(0);
+            expect(piece.mask.length).toBeGreaterThanOrEqual(3);
+            expect(piece.neighbors.length).toBeGreaterThanOrEqual(2);
+            expect(maskFitsBounds(piece)).toBe(true);
+            piece.neighbors.forEach((neighbor) => {
+                const reverse = board.pieces[neighbor.piece].neighbors.find((entry) => entry.piece === index);
+                expect(reverse).toBeTruthy();
+                expect(reverse?.offset.x).toBeCloseTo(-neighbor.offset.x);
+                expect(reverse?.offset.y).toBeCloseTo(-neighbor.offset.y);
+            });
+        });
+    });
+
+    it('uses Voronoi neighbor geometry for connection validation', () => {
+        const board = generateJigsawBoard(30, {type: 'voronoi'});
+        const neighbor = board.pieces[0].neighbors[0];
+        expect(validConnections(board, {[connectionKey(0, neighbor.piece)]: 1})).toEqual([
+            {key: connectionKey(0, neighbor.piece), from: 0, to: neighbor.piece, strength: 1},
+        ]);
+
+        const nonNeighbor = board.pieces.findIndex(
+            (_piece, index) => index !== 0 && !board.pieces[0].neighbors.some((entry) => entry.piece === index),
+        );
+        expect(nonNeighbor).toBeGreaterThan(0);
+        expect(validConnections(board, {[connectionKey(0, nonNeighbor)]: 1})).toEqual([]);
+    });
 
     it('generates reciprocal neighbor offsets', () => {
         const board = generateJigsawBoard(12);
@@ -74,6 +124,23 @@ describe('jigsaw board artifacts', () => {
         expect(currentJigsawBoard()).toEqual(serialized?.data);
     });
 
+    it('loads legacy rectangular artifacts without piece bounds', () => {
+        const board = generateJigsawBoard(12);
+        const legacyBoard = {
+            ...board,
+            pieces: board.pieces.map(({bounds: _bounds, ...piece}) => piece),
+        };
+        jigsawArtifactStore.load({
+            id: JIGSAW_BOARD_ARTIFACT_ID,
+            kind: JIGSAW_BOARD_KIND,
+            version: JIGSAW_BOARD_VERSION,
+            fingerprintHash: artifactFingerprintHash(legacyBoard),
+            data: legacyBoard,
+        });
+        expect(currentJigsawBoard().pieces.every((piece) => piece.bounds.width > 0)).toBe(true);
+        expect(currentJigsawBoard().pieces[0].bounds).toEqual(board.pieces[0].bounds);
+    });
+
     it('validates creation piece counts and creates matching initial artifacts', () => {
         expect(isJigsawPieceCount(12)).toBe(true);
         expect(isJigsawPieceCount(30)).toBe(true);
@@ -82,12 +149,24 @@ describe('jigsaw board artifacts', () => {
         expect(isJigsawPieceCount(24)).toBe(false);
         expect(jigsawApp.documentInit?.validate({pieceCount: 30})).toEqual({
             success: true,
-            data: {pieceCount: 30},
+            data: {pieceCount: 30, type: 'rectangular'},
+        });
+        expect(jigsawApp.documentInit?.validate({pieceCount: 30, type: 'voronoi'})).toEqual({
+            success: true,
+            data: {pieceCount: 30, type: 'voronoi'},
         });
         expect(jigsawApp.documentInit?.validate({pieceCount: 24}).success).toBe(false);
+        expect(jigsawApp.documentInit?.validate({pieceCount: 30, type: 'spiral'}).success).toBe(false);
         expect(initialJigsawArtifacts(60)[0].data).toMatchObject({pieceCount: 60});
-        const appArtifacts = jigsawApp.documentInit?.initialArtifacts?.({pieceCount: 120});
-        expect(appArtifacts?.[0].data).toMatchObject({pieceCount: 120});
+        expect(initialJigsawArtifacts(60, {type: 'voronoi'})[0].data).toMatchObject({
+            pieceCount: 60,
+            title: expect.stringContaining('Voronoi'),
+        });
+        const appArtifacts = jigsawApp.documentInit?.initialArtifacts?.({pieceCount: 120, type: 'voronoi'});
+        expect(appArtifacts?.[0].data).toMatchObject({
+            pieceCount: 120,
+            title: expect.stringContaining('Voronoi'),
+        });
     });
 });
 
@@ -214,3 +293,29 @@ describe('jigsaw placement logic', () => {
         );
     });
 });
+
+function maskFitsBounds(piece: {bounds: {left: number; top: number; width: number; height: number}; mask: Array<{to: {x: number; y: number}}>}) {
+    const right = piece.bounds.left + piece.bounds.width;
+    const bottom = piece.bounds.top + piece.bounds.height;
+    return piece.mask.every(
+        (segment) =>
+            segment.to.x >= piece.bounds.left - 1e-6 &&
+            segment.to.x <= right + 1e-6 &&
+            segment.to.y >= piece.bounds.top - 1e-6 &&
+            segment.to.y <= bottom + 1e-6,
+    );
+}
+
+function totalMaskArea(board: ReturnType<typeof generateJigsawBoard>) {
+    return board.pieces.reduce((sum, piece) => sum + polygonArea(piece.mask.map((segment) => segment.to)), 0);
+}
+
+function polygonArea(points: Array<{x: number; y: number}>) {
+    let area = 0;
+    for (let index = 0; index < points.length; index++) {
+        const current = points[index];
+        const next = points[(index + 1) % points.length];
+        area += current.x * next.y - next.x * current.y;
+    }
+    return Math.abs(area) / 2;
+}

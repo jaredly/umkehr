@@ -9,7 +9,7 @@ import {
 import {useValue} from 'umkehr/react';
 import {compareTimestamps, type HlcTimestamp} from 'umkehr/crdt';
 import type {AppEditorContext, CrdtEditorContext, GridSlot} from '../../lib/crdtApp';
-import {currentJigsawBoard, type JigsawBoardArtifact} from './artifacts';
+import {currentJigsawBoard, type JigsawBoardArtifact, type PieceBounds} from './artifacts';
 import type {Coord, JigsawEphemeralData, JigsawState, PathSegment} from './model';
 import {
     add,
@@ -49,7 +49,7 @@ type LocalLayoutState = {
     positions: Map<number, Coord>;
 };
 
-const minZoom = 0.35;
+const minZoom = 0.1;
 const maxZoom = 2.5;
 const wheelZoomInFactor = 1.08;
 const wheelZoomOutFactor = 0.92;
@@ -168,8 +168,6 @@ export function JigsawPanel({
                 const generated = arrangeLocalUnplacedPieces(
                     board,
                     unplaced,
-                    boardGeometry.boardSpace,
-                    boardGeometry.imageOffset,
                     current.seed,
                 );
                 for (const piece of missing) {
@@ -185,7 +183,7 @@ export function JigsawPanel({
 
             return changed ? {...current, positions: nextPositions} : current;
         });
-    }, [board, boardGeometry.boardSpace, boardGeometry.imageOffset, unplaced]);
+    }, [board, unplaced]);
     const renderedPositions = useMemo(() => {
         const result = new Map<number, Coord>(localPositions);
         for (const [piece, position] of layout.positions) result.set(piece, position);
@@ -342,8 +340,6 @@ export function JigsawPanel({
                                     positions: arrangeLocalUnplacedPieces(
                                         board,
                                         unplaced,
-                                        boardGeometry.boardSpace,
-                                        boardGeometry.imageOffset,
                                         seed,
                                     ),
                                 };
@@ -404,10 +400,10 @@ export function JigsawPanel({
                                 onPointerDown={(event) => startDrag(index, event)}
                                 style={
                                     {
-                                        '--piece-left': `${canvasPosition.x - pieceSize.width / 2}px`,
-                                        '--piece-top': `${canvasPosition.y - pieceSize.height / 2}px`,
-                                        '--piece-width': `${pieceSize.width}px`,
-                                        '--piece-height': `${pieceSize.height}px`,
+                                        '--piece-left': `${canvasPosition.x + piece.bounds.left}px`,
+                                        '--piece-top': `${canvasPosition.y + piece.bounds.top}px`,
+                                        '--piece-width': `${piece.bounds.width}px`,
+                                        '--piece-height': `${piece.bounds.height}px`,
                                         '--piece-z': pieceZIndex({
                                             piece: index,
                                             component,
@@ -422,8 +418,8 @@ export function JigsawPanel({
                                 <PieceCanvas
                                     source={sourceImage}
                                     pieceCenter={piece.center}
+                                    bounds={piece.bounds}
                                     mask={piece.mask}
-                                    pieceSize={pieceSize}
                                 />
                             </button>
                         );
@@ -504,48 +500,55 @@ function SolvedImageCanvas({source, offset}: {source: HTMLCanvasElement; offset:
 function PieceCanvas({
     source,
     pieceCenter,
+    bounds,
     mask,
-    pieceSize,
 }: {
     source: HTMLCanvasElement;
     pieceCenter: Coord;
+    bounds: PieceBounds;
     mask: PathSegment[];
-    pieceSize: {width: number; height: number};
 }) {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     useEffect(() => {
         const canvas = canvasRef.current;
         if (!canvas) return;
-        canvas.width = Math.max(1, Math.round(pieceSize.width));
-        canvas.height = Math.max(1, Math.round(pieceSize.height));
+        canvas.width = Math.max(1, Math.round(bounds.width));
+        canvas.height = Math.max(1, Math.round(bounds.height));
         const context = canvas.getContext('2d');
         if (!context) return;
         context.clearRect(0, 0, canvas.width, canvas.height);
         context.save();
-        drawMaskPath(context, mask, pieceSize);
+        drawMaskPath(context, mask, bounds);
         context.clip();
-        const sourceX = pieceCenter.x - pieceSize.width / 2;
-        const sourceY = pieceCenter.y - pieceSize.height / 2;
+        const sourceX = pieceCenter.x + bounds.left;
+        const sourceY = pieceCenter.y + bounds.top;
         context.drawImage(
             source,
             sourceX,
             sourceY,
-            pieceSize.width,
-            pieceSize.height,
+            bounds.width,
+            bounds.height,
             0,
             0,
             canvas.width,
             canvas.height,
         );
         context.restore();
-    }, [mask, pieceCenter.x, pieceCenter.y, pieceSize, source]);
+
+        context.save();
+        drawMaskPath(context, mask, bounds);
+        context.strokeStyle = 'rgb(31 41 55 / 0.42)';
+        context.lineWidth = 1;
+        context.stroke();
+        context.restore();
+    }, [bounds, mask, pieceCenter.x, pieceCenter.y, source]);
 
     return (
         <canvas
             ref={canvasRef}
             className="jigsawPieceCanvas"
-            width={Math.max(1, Math.round(pieceSize.width))}
-            height={Math.max(1, Math.round(pieceSize.height))}
+            width={Math.max(1, Math.round(bounds.width))}
+            height={Math.max(1, Math.round(bounds.height))}
             aria-hidden="true"
         />
     );
@@ -577,34 +580,34 @@ function createStockHueCanvas(size: {width: number; height: number}) {
 function drawMaskPath(
     context: CanvasRenderingContext2D,
     mask: PathSegment[],
-    pieceSize: {width: number; height: number},
+    bounds: PieceBounds,
 ) {
     context.beginPath();
     const [first, ...rest] = mask;
     if (!first) {
-        context.rect(0, 0, pieceSize.width, pieceSize.height);
+        context.rect(0, 0, bounds.width, bounds.height);
         return;
     }
-    context.moveTo(first.to.x + pieceSize.width / 2, first.to.y + pieceSize.height / 2);
+    context.moveTo(first.to.x - bounds.left, first.to.y - bounds.top);
     for (const segment of rest) {
         if (segment.type === 'Quadratic') {
             context.quadraticCurveTo(
-                segment.control.x + pieceSize.width / 2,
-                segment.control.y + pieceSize.height / 2,
-                segment.to.x + pieceSize.width / 2,
-                segment.to.y + pieceSize.height / 2,
+                segment.control.x - bounds.left,
+                segment.control.y - bounds.top,
+                segment.to.x - bounds.left,
+                segment.to.y - bounds.top,
             );
         } else if (segment.type === 'Cubic') {
             context.bezierCurveTo(
-                segment.control1.x + pieceSize.width / 2,
-                segment.control1.y + pieceSize.height / 2,
-                segment.control2.x + pieceSize.width / 2,
-                segment.control2.y + pieceSize.height / 2,
-                segment.to.x + pieceSize.width / 2,
-                segment.to.y + pieceSize.height / 2,
+                segment.control1.x - bounds.left,
+                segment.control1.y - bounds.top,
+                segment.control2.x - bounds.left,
+                segment.control2.y - bounds.top,
+                segment.to.x - bounds.left,
+                segment.to.y - bounds.top,
             );
         } else {
-            context.lineTo(segment.to.x + pieceSize.width / 2, segment.to.y + pieceSize.height / 2);
+            context.lineTo(segment.to.x - bounds.left, segment.to.y - bounds.top);
         }
     }
     context.closePath();
@@ -658,14 +661,12 @@ function boardSpaceFor(
 function arrangeLocalUnplacedPieces(
     board: JigsawBoardArtifact,
     pieces: number[],
-    boardSpace: JigsawBoardSpace,
-    imageOffset: Coord,
     seed: number,
 ) {
-    const arranged = arrangeUnplacedPieces(board, pieces, boardSpace, seed);
+    const arranged = arrangeUnplacedPieces(board, pieces, board.imageSize, seed);
     const result = new Map<number, Coord>();
     for (const [piece, position] of arranged) {
-        result.set(piece, canvasToImage(position, imageOffset));
+        result.set(piece, position);
     }
     return result;
 }

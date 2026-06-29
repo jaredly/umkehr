@@ -24,12 +24,15 @@ export async function closeDocumentManager(page: Page) {
 export async function createDocument(
     page: Page,
     title: string,
-    options: {pieceCount?: '12' | '30' | '60' | '120'} = {},
+    options: {pieceCount?: '12' | '30' | '60' | '120'; boardType?: 'rectangular' | 'voronoi'} = {},
 ) {
     const modal = await openDocumentManager(page);
     await modal.getByLabel('New document title').fill(title);
     if (options.pieceCount) {
         await modal.getByLabel('Number of pieces').selectOption(options.pieceCount);
+    }
+    if (options.boardType) {
+        await modal.getByLabel('Board type').selectOption(options.boardType);
     }
     await modal.getByRole('button', {name: 'New document'}).click();
     await expect(modal.getByText('Document created')).toBeVisible();

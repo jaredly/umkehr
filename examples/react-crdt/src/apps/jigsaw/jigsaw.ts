@@ -219,7 +219,7 @@ export function arrangeUnplacedPieces(
     seed = 0,
 ) {
     if (!pieces.length || stage.width <= 0 || stage.height <= 0) return new Map<number, Coord>();
-    const pieceSize = estimatedPieceSize(board);
+    const pieceSize = maxPieceSize(board);
     const margin = Math.max(pieceSize.width, pieceSize.height) * 0.65;
     const perimeter = 2 * (stage.width + stage.height);
     const step = perimeter / pieces.length;
@@ -313,16 +313,37 @@ export function connectionPatch(candidate: SnapCandidate): DraftPatch<JigsawStat
 }
 
 export function estimatedPieceSize(board: JigsawBoardArtifact) {
-    const grid = gridSizeFromPieceCount(board.pieceCount);
-    return {
-        width: board.imageSize.width / grid.cols,
-        height: board.imageSize.height / grid.rows,
-    };
+    return maxPieceSize(board);
 }
 
 export function snapThreshold(board: JigsawBoardArtifact) {
-    const size = estimatedPieceSize(board);
+    const size = averagePieceSize(board);
     return Math.max(8, Math.min(size.width, size.height) * 0.12);
+}
+
+export function maxPieceSize(board: JigsawBoardArtifact) {
+    return board.pieces.reduce(
+        (size, piece) => ({
+            width: Math.max(size.width, piece.bounds.width),
+            height: Math.max(size.height, piece.bounds.height),
+        }),
+        {width: 0, height: 0},
+    );
+}
+
+function averagePieceSize(board: JigsawBoardArtifact) {
+    if (!board.pieces.length) return {width: 0, height: 0};
+    const total = board.pieces.reduce(
+        (size, piece) => ({
+            width: size.width + piece.bounds.width,
+            height: size.height + piece.bounds.height,
+        }),
+        {width: 0, height: 0},
+    );
+    return {
+        width: total.width / board.pieces.length,
+        height: total.height / board.pieces.length,
+    };
 }
 
 export function add(a: Coord, b: Coord): Coord {
@@ -407,19 +428,6 @@ function maxDepth(pieces: Set<number>, depths: Map<number, number>) {
     let max = 0;
     for (const piece of pieces) max = Math.max(max, depths.get(piece) ?? 0);
     return max;
-}
-
-function gridSizeFromPieceCount(pieceCount: JigsawBoardArtifact['pieceCount']) {
-    switch (pieceCount) {
-        case 12:
-            return {cols: 4, rows: 3};
-        case 30:
-            return {cols: 6, rows: 5};
-        case 60:
-            return {cols: 10, rows: 6};
-        case 120:
-            return {cols: 15, rows: 8};
-    }
 }
 
 function pointOnBorder(distanceAlong: number, stage: StageSize, margin: number): Coord {

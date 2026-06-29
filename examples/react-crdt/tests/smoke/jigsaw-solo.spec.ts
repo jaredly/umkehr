@@ -91,6 +91,21 @@ test('requires creation options before opening a missing jigsaw document', async
     await expect(page.getByText('30 piece hue puzzle')).toBeVisible();
 });
 
+test('creates and opens a Voronoi jigsaw document', async ({page}, testInfo) => {
+    const title = `Jigsaw Voronoi ${Date.now()}`;
+    await openApp(page, {
+        mode: 'solo',
+        appId: 'jigsaw',
+        docId: uniqueTestDocId(testInfo, 'jigsaw-voronoi'),
+    });
+    await createDocument(page, title, {pieceCount: '30', boardType: 'voronoi'});
+    await openDocument(page, title);
+
+    await expect(page.getByText('30 piece Voronoi hue puzzle')).toBeVisible();
+    await expect(page.locator('.jigsawPiece')).toHaveCount(30);
+    await expectNoPieceHitOutsideViewport(page);
+});
+
 test('opens the document manager when jigsaw has no current document', async ({page}) => {
     await openApp(page, {
         mode: 'solo',
