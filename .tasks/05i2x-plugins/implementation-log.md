@@ -27,6 +27,33 @@ Verification:
 - `npm exec vitest -- run src/block-editor/plugins/registry.test.ts` passed.
 - `npm run typecheck` passed.
 
+### Phase 5 Continued: Legacy Block Metadata Declarations
+
+- Added `src/block-editor/plugins/legacyRichTextBlocks.ts`.
+- Added `legacyRichTextBlockTypeIds` for every non-core current `RichBlockMeta['type']`.
+- Added `legacyRichTextBlockTypeSpecs` with validation and timestamp update hooks.
+- Added `legacyRichTextBlocksPlugin`.
+- Added `isLegacyRichBlockMeta` for shallow validation of the current rich block metadata union.
+- Added `src/block-editor/legacyRichTextPlugins.ts` as a transitional aggregate preset:
+  - `legacyRichTextBlocksPlugin`
+  - `legacyRichTextUiPlugin`
+  - `legacyRichTextCrdtPlugins`
+- Exported the aggregate from `src/block-editor/index.ts`.
+- Added tests:
+  - `src/block-editor/plugins/legacyRichTextBlocks.test.ts`
+  - `src/block-editor/legacyRichTextPlugins.test.ts`
+
+Issues/workarounds:
+
+- Paragraph remains core and is intentionally not included in `legacyRichTextBlockTypeIds`.
+- The legacy block metadata plugin declares current metadata support as one aggregate plugin. Later extraction should split these declarations into per-feature plugins.
+- Validation is intentionally shallow. It catches malformed discriminants and required fields, but does not deeply validate preview metadata payloads.
+
+Verification:
+
+- `npm exec vitest -- run src/block-editor/editorCrdtConfig.test.ts src/block-editor/legacyRichTextPlugins.test.ts src/block-editor/markdownShortcuts.test.ts src/block-editor/plugins/registry.test.ts src/block-editor/plugins/compatibility.test.ts src/block-editor/plugins/metadata.test.ts src/block-editor/plugins/legacyRichTextUi.test.ts src/block-editor/plugins/legacyRichTextBlocks.test.ts` passed.
+- `npm run typecheck` passed.
+
 ### Phase 2: Plugin-Aware Editor Props
 
 - Added `plugins?: readonly BlockEditorPlugin<Meta>[]` to the public `BlockRichTextEditorProps` type.
