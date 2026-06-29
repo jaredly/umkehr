@@ -30,16 +30,27 @@ describe('legacyRichTextPlugins', () => {
         expect(registry.plugins.map((plugin) => plugin.id)).toEqual([
             'annotations',
             'basic-marks',
+            'callouts',
             'code',
+            'headings',
+            'images',
+            'ingredients',
             'inline-date',
             'legacy-rich-text-blocks',
             'legacy-rich-text-ui',
+            'link-preview',
             'links',
+            'lists',
             'math',
             'polls',
+            'quote',
+            'todos',
         ]);
         expect(registry.marks.has('bold')).toBe(true);
         expect(registry.marks.has('underline')).toBe(true);
+        expect(registry.blockTypes.has('heading')).toBe(true);
+        expect(registry.blockTypes.has('image')).toBe(true);
+        expect(registry.blockTypes.has('preview')).toBe(true);
         expect(registry.blockTypes.has('poll')).toBe(true);
         expect(registry.slashCommands.length).toBeGreaterThan(0);
         expect(registry.crdtConfig().markBehavior).toEqual({annotation: 'stacking'});

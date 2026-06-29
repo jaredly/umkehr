@@ -454,6 +454,8 @@ Work items:
 - Remove hard-coded block type branches that now live in plugins.
 - Remove hard-coded toolbar/slash/markdown lists.
 - Remove direct feature imports from `BlockRichTextEditor.tsx`.
+- Replace editor-local image upload and link-preview command bridges with plugin-owned command handlers once command context exposes the necessary attachment, focused-block, and preview-fetch services.
+- Replace registry-derived clipboard metadata filters with plugin-owned clipboard serialization/deserialization hooks once the hook shape supports block-scoped feature ownership.
 - Keep any compatibility aliases intentionally exported and documented.
 - Audit `index.ts` exports so feature APIs are exported through plugin modules.
 

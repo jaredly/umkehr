@@ -16,7 +16,24 @@ import type {RichBlockMeta} from '../blockMeta';
 describe('legacy rich text UI plugin', () => {
     it('declares the legacy-owned slash command subset', () => {
         expect(slashCommandsFromSpecs(legacySlashCommandSpecs)).toEqual(
-            DEFAULT_SLASH_COMMANDS.filter((command) => command.commandId !== 'inline-embed:date'),
+            DEFAULT_SLASH_COMMANDS.filter(
+                (command) =>
+                    command.commandId !== 'inline-embed:date' &&
+                    ![
+                        'block-type:heading1',
+                        'block-type:heading2',
+                        'block-type:heading3',
+                        'block-type:unordered',
+                        'block-type:ordered',
+                        'block-type:todo',
+                        'block-type:blockquote',
+                        'block-type:callout-info',
+                        'block-type:callout-warning',
+                        'block-type:callout-error',
+                        'block-type:recipe-ingredient',
+                        'block-type:preview',
+                    ].includes(command.commandId),
+            ),
         );
     });
 

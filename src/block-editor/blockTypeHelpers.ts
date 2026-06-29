@@ -8,6 +8,7 @@ import {
     type RichBlockMeta,
 } from './blockMeta';
 import type {BlockTypeMenuValue} from './blockEditorTypes';
+import type {BlockEditorRegistry} from './plugins/index.js';
 
 type RichFormattedBlock = FormattedBlock<RichBlockMeta>;
 
@@ -90,6 +91,17 @@ export const blockTypeMeta = (
     }
 };
 
+export const blockTypeMetaFromRegistry = (
+    registry: Pick<BlockEditorRegistry<RichBlockMeta>, 'blockTypes' | 'slashCommands' | 'toolbarItems'>,
+    kind: BlockTypeMenuValue,
+    current: RichBlockMeta,
+    ts: string,
+): RichBlockMeta | null => {
+    if (!blockTypeCommandRegistered(registry, kind)) return null;
+    const meta = blockTypeMeta(kind, current, ts);
+    return meta.type === 'paragraph' || registry.blockTypes.has(meta.type) ? meta : null;
+};
+
 export const blockTypeMenuValue = (meta: RichBlockMeta | undefined): BlockTypeMenuValue => {
     if (!meta) return 'paragraph';
     switch (meta.type) {
@@ -139,3 +151,69 @@ export const blockTypeMenuValue = (meta: RichBlockMeta | undefined): BlockTypeMe
             return 'preview';
     }
 };
+
+export const blockTypeMenuValueFromRegistry = (
+    registry: Pick<BlockEditorRegistry<RichBlockMeta>, 'blockTypes' | 'slashCommands' | 'toolbarItems'>,
+    meta: RichBlockMeta | undefined,
+): BlockTypeMenuValue => {
+    const value = blockTypeMenuValue(meta);
+    if (!meta || meta.type === 'paragraph') return value;
+    if (!registry.blockTypes.has(meta.type)) return 'paragraph';
+    return blockTypeCommandRegistered(registry, value) ? value : 'paragraph';
+};
+
+export const blockTypeMenuValuesFromRegistry = (
+    registry: Pick<BlockEditorRegistry<RichBlockMeta>, 'toolbarItems'>,
+): BlockTypeMenuValue[] =>
+    registry.toolbarItems
+        .map((item) => blockTypeMenuValueFromCommandId(item.commandId))
+        .filter((value): value is BlockTypeMenuValue => value !== null);
+
+const blockTypeCommandRegistered = (
+    registry: Pick<BlockEditorRegistry<RichBlockMeta>, 'slashCommands' | 'toolbarItems'>,
+    kind: BlockTypeMenuValue,
+): boolean => {
+    if (kind === 'paragraph') return true;
+    const commandId = `block-type:${kind}`;
+    return (
+        registry.toolbarItems.some((item) => item.commandId === commandId) ||
+        registry.slashCommands.some((command) => command.commandId === commandId)
+    );
+};
+
+const blockTypeMenuValueFromCommandId = (commandId: string | undefined): BlockTypeMenuValue | null => {
+    if (!commandId?.startsWith('block-type:')) return null;
+    const value = commandId.slice('block-type:'.length);
+    return isBlockTypeMenuValue(value) ? value : null;
+};
+
+const BLOCK_TYPE_MENU_VALUES: ReadonlySet<string> = new Set([
+    'paragraph',
+    'heading1',
+    'heading2',
+    'heading3',
+    'unordered',
+    'ordered',
+    'todo',
+    'blockquote',
+    'code',
+    'mermaid',
+    'vega-lite',
+    'callout-info',
+    'callout-warning',
+    'callout-error',
+    'recipe-ingredient',
+    'table',
+    'columns',
+    'card-columns',
+    'slide-deck',
+    'slide',
+    'preview',
+    'poll-rating',
+    'poll-children',
+    'poll-matrix',
+    'poll-long',
+]);
+
+const isBlockTypeMenuValue = (value: string): value is BlockTypeMenuValue =>
+    BLOCK_TYPE_MENU_VALUES.has(value);

@@ -185,6 +185,7 @@ import {
     blockIdFromBlockLinkHref,
     blockDomIdForBlockId,
     blockLinkHrefForClipboardPayload,
+    filterRichClipboardPayloadBlockFeatures,
     htmlWithClipboardPayload,
     parseBlockRichTextClipboardHtml,
     parseBlockRichTextClipboardPayload,
@@ -312,7 +313,11 @@ import {
     stopEditorControlEvent,
 } from './editorUiUtils.js';
 import {ImagePreview, PreviewableCodeBlock, PreviewBlockCard} from './mediaBlocks.js';
-import {blockTypeMenuValue, blockTypeMeta, deriveOrderedListNumbers} from './blockTypeHelpers.js';
+import {
+    blockTypeMenuValueFromRegistry,
+    blockTypeMetaFromRegistry,
+    deriveOrderedListNumbers,
+} from './blockTypeHelpers.js';
 import {
     canOpenSlashMenuForSelection,
     deleteSlashTriggers,
@@ -401,6 +406,8 @@ type InlineRenderFeatures = {
     inlineEmbeds: ReadonlySet<string>;
 };
 
+type BlockRenderFeatures = ReadonlySet<RichBlockMeta['type']>;
+
 const DEFAULT_INLINE_RENDER_FEATURES: InlineRenderFeatures = {
     booleanMarks: new Set(BOOLEAN_INLINE_MARKS),
     code: true,
@@ -408,6 +415,10 @@ const DEFAULT_INLINE_RENDER_FEATURES: InlineRenderFeatures = {
     math: true,
     inlineEmbeds: new Set(['date']),
 };
+
+const blockRenderFeaturesFromRegistry = (
+    registry: Pick<BlockEditorRegistry<RichBlockMeta>, 'blockRenderers'>,
+): BlockRenderFeatures => new Set([...registry.blockRenderers.keys()] as RichBlockMeta['type'][]);
 
 const inlineRenderFeaturesFromRegistry = (
     registry: Pick<BlockEditorRegistry<RichBlockMeta>, 'inlineRenderers'>,
@@ -567,6 +578,8 @@ export function BlockRichTextEditor({
     );
     const activeInlineMarkTypes = useMemo(() => activeInlineMarkTypesFromRegistry(registry), [registry]);
     const inlineRenderFeatures = useMemo(() => inlineRenderFeaturesFromRegistry(registry), [registry]);
+    const blockRenderFeatures = useMemo(() => blockRenderFeaturesFromRegistry(registry), [registry]);
+    const optionPanelBlockTypes = useMemo(() => new Set(registry.optionPanels.keys()), [registry]);
     const rootRef = useRef<HTMLDivElement>(null);
     const editorContentRef = useRef<HTMLDivElement>(null);
     const pendingCaretRestoreBlockIdRef = useRef<string | null>(null);
@@ -728,7 +741,8 @@ export function BlockRichTextEditor({
         [blocksWithAnnotationBodies, popoverTextById, selectedPopoverSelectionKey],
     );
     const selectedPopoverIdsKey = selectedPopoverIds.join('\0');
-    const selectedBlockType = blockTypeMenuValue(
+    const selectedBlockType = blockTypeMenuValueFromRegistry(
+        registry,
         replica.state.state.blocks[focusPoint(primaryResolvedSelection).blockId]?.meta,
     );
     const activeInlineMarks = useMemo(
@@ -1447,9 +1461,10 @@ export function BlockRichTextEditor({
                 selection,
                 serializeAttachments(attachments),
                 inlineRenderFeatures,
+                {blockTypes: blockRenderFeatures},
             );
         },
-        [attachments, inlineRenderFeatures, liveSelectionSet, replica, resolvedSelectionSet],
+        [attachments, blockRenderFeatures, inlineRenderFeatures, liveSelectionSet, replica, resolvedSelectionSet],
     );
 
     const writeCurrentSelectionToClipboard = useCallback(async () => {
@@ -1486,6 +1501,7 @@ export function BlockRichTextEditor({
 
     const insertImageFiles = useCallback(
         async (files: File[], selectionSnapshot?: RetainedSelectionSet | null) => {
+            if (!isEditorCommandAvailable('image:upload')) return;
             const file = files.find(isImageFile);
             if (!file) return;
             const retainedSelection =
@@ -1515,13 +1531,18 @@ export function BlockRichTextEditor({
             replica,
             resetVerticalCaretIntent,
             scheduleSelectionRestore,
+            isEditorCommandAvailable,
         ],
     );
 
     const pasteRichPayload = useCallback(
         (rich: RichClipboardPayload) => {
-            if (rich.attachments?.length) {
-                onMergeSerializedAttachments(rich.attachments);
+            const filteredRich = filterRichClipboardPayloadBlockFeatures(rich, {
+                blockTypes: blockRenderFeatures,
+            });
+            if (!filteredRich.fragments.length) return;
+            if (filteredRich.attachments?.length) {
+                onMergeSerializedAttachments(filteredRich.attachments);
             }
             submitCommand((current) => {
                 resetVerticalCaretIntent();
@@ -1537,9 +1558,10 @@ export function BlockRichTextEditor({
                     isToolbarCommandAvailable('link:edit') &&
                     pastePrimary.type === 'range' &&
                     !isCollapsed(pastePrimary) &&
-                    (rich.sourceSelectionType === 'block' || rich.sourceSelectionType === 'table-cells');
+                    (filteredRich.sourceSelectionType === 'block' ||
+                        filteredRich.sourceSelectionType === 'table-cells');
                 if (isBlockLinkPaste) {
-                    const blockLinkHref = blockLinkHrefForClipboardPayload(current.state, rich);
+                    const blockLinkHref = blockLinkHrefForClipboardPayload(current.state, filteredRich);
                     const result = blockLinkHref
                         ? setLinkMarkEverywhere(
                               current.state,
@@ -1557,7 +1579,7 @@ export function BlockRichTextEditor({
                 const result = pasteRichClipboardEverywhere(
                     current.state,
                     selection,
-                    rich,
+                    filteredRich,
                     makeCommandContext(current),
                     inlineRenderFeatures,
                 );
@@ -1575,6 +1597,7 @@ export function BlockRichTextEditor({
             resetVerticalCaretIntent,
             scheduleSelectionRestore,
             inlineRenderFeatures,
+            blockRenderFeatures,
             isToolbarCommandAvailable,
         ],
     );
@@ -1899,9 +1922,10 @@ export function BlockRichTextEditor({
                 insertPreviewBlock(working, resolveSelection(working, entry.selection), '', context),
             );
         }
-        return setBlockTypeEverywhere(state, selection, (_blockId, meta) =>
-            blockTypeMeta(kind, meta, context.nextTs()),
-        );
+        return setBlockTypeEverywhere(state, selection, (_blockId, meta) => {
+            const nextMeta = blockTypeMetaFromRegistry(registry, kind, meta, context.nextTs());
+            return nextMeta ?? meta;
+        });
     };
 
     const runSlashCommand = useCallback(
@@ -3098,9 +3122,10 @@ export function BlockRichTextEditor({
                     selection: replacePrimarySelection(result.state, current.selection, result.selection),
                 };
             }
-            return setBlockTypeEverywhere(current.state, selection, (_blockId, meta) =>
-                blockTypeMeta(kind, meta, nextReplicaTs(current)),
-            );
+            return setBlockTypeEverywhere(current.state, selection, (_blockId, meta) => {
+                const nextMeta = blockTypeMetaFromRegistry(registry, kind, meta, nextReplicaTs(current));
+                return nextMeta ?? meta;
+            });
         });
     };
 
@@ -3360,7 +3385,7 @@ export function BlockRichTextEditor({
                             };
                         }
                         return setBlockTypeEverywhere(current.state, selection, (_blockId, meta) =>
-                            blockTypeMeta(kind, meta, nextReplicaTs(current)),
+                            blockTypeMetaFromRegistry(registry, kind, meta, nextReplicaTs(current)) ?? meta,
                         );
                     })
                 }
@@ -3433,6 +3458,8 @@ export function BlockRichTextEditor({
                                 popoverTextById,
                                 footnoteNumberById,
                                 inlineRenderFeatures,
+                                blockRenderFeatures,
+                                optionPanelBlockTypes,
                                 onPopoverTriggerEnter: showPopover,
                                 onPopoverTriggerLeave: schedulePopoverHideFromPointer,
                                 openLinkFromCurrentSelection: () => {
@@ -3785,6 +3812,8 @@ type RenderBlockContext = {
     popoverTextById: Map<string, string>;
     footnoteNumberById: Map<string, number>;
     inlineRenderFeatures: InlineRenderFeatures;
+    blockRenderFeatures: BlockRenderFeatures;
+    optionPanelBlockTypes: ReadonlySet<string>;
     runEditCommand(
         command: (current: Replica, selection: RetainedSelectionSet) => MultiCommandResult,
     ): void;
@@ -3902,7 +3931,10 @@ const renderBlockNode = (node: RenderTreeNode, context: RenderBlockContext): Rea
     if (meta.type === 'slide' && !slideDeckForSlide(context.state, node.block.id)) {
         return <OrphanSlideBlock key={node.block.id} node={node} context={context} />;
     }
-    if (meta.type === 'blockquote' || meta.type === 'callout') {
+    if (
+        (meta.type === 'blockquote' && context.blockRenderFeatures.has('blockquote')) ||
+        (meta.type === 'callout' && context.blockRenderFeatures.has('callout'))
+    ) {
         return (
             <div
                 key={node.block.id}
@@ -4479,6 +4511,7 @@ function SlideBlockOptions({
             className="slideBlockOptions"
             meta={meta}
             style={style}
+            optionPanelBlockTypes={context.optionPanelBlockTypes}
             onSetCodeLanguage={noop}
             onSetCodePreview={noop}
             onSetCalloutKind={noop}
@@ -5634,6 +5667,8 @@ const renderEditableBlock = (
             popoverTextById={context.popoverTextById}
             footnoteNumberById={context.footnoteNumberById}
             inlineRenderFeatures={context.inlineRenderFeatures}
+            blockRenderFeatures={context.blockRenderFeatures}
+            optionPanelBlockTypes={context.optionPanelBlockTypes}
             onPopoverTriggerEnter={context.onPopoverTriggerEnter}
             onPopoverTriggerLeave={context.onPopoverTriggerLeave}
             onInsertText={(text, activeSelection) =>
@@ -7223,6 +7258,8 @@ function EditableBlock({
     popoverTextById,
     footnoteNumberById,
     inlineRenderFeatures,
+    blockRenderFeatures,
+    optionPanelBlockTypes,
     onPopoverTriggerEnter,
     onPopoverTriggerLeave,
     onInsertText,
@@ -7321,6 +7358,8 @@ function EditableBlock({
     popoverTextById: Map<string, string>;
     footnoteNumberById: Map<string, number>;
     inlineRenderFeatures: InlineRenderFeatures;
+    blockRenderFeatures: BlockRenderFeatures;
+    optionPanelBlockTypes: ReadonlySet<string>;
     onPopoverTriggerEnter(id: string, element: HTMLElement): void;
     onPopoverTriggerLeave(id?: string, transition?: PopoverPointerTransition): void;
     onInsertText(text: string, selection?: EditorSelection): void;
@@ -7395,6 +7434,7 @@ function EditableBlock({
     onDisplayInputRenderStarted(label: string, started: number): void;
 }) {
     const meta = block.block.meta;
+    const hasBlockRenderFeature = blockRenderFeatures.has(meta.type);
     const isCodeBlock = meta.type === 'code';
     const isPlainTextCodeLikeBlock = meta.type === 'code';
     const codeLikeHasTrailingNewline =
@@ -7412,8 +7452,11 @@ function EditableBlock({
         [codeLanguage, codeText, isCodeBlock],
     );
     const ingredientTokens = useMemo(
-        () => (meta.type === 'recipe_ingredient' ? highlightIngredientLine(blockText) : undefined),
-        [blockText, meta.type],
+        () =>
+            meta.type === 'recipe_ingredient' && hasBlockRenderFeature
+                ? highlightIngredientLine(blockText)
+                : undefined,
+        [blockText, hasBlockRenderFeature, meta.type],
     );
     const editableSurface = (
         <RichTextEditableSurface
@@ -7431,9 +7474,9 @@ function EditableBlock({
                 'editableBlock',
                 isPlainTextCodeLikeBlock ? 'codeBlock' : '',
                 isPreviewableCodeMeta(meta) ? 'previewCodeEditor' : '',
-                meta.type === 'heading' ? `headingLevel${meta.level}` : '',
-                meta.type === 'image' ? 'imageCaption' : '',
-                meta.type === 'recipe_ingredient' ? 'recipeIngredientBlock' : '',
+                meta.type === 'heading' && hasBlockRenderFeature ? `headingLevel${meta.level}` : '',
+                meta.type === 'image' && hasBlockRenderFeature ? 'imageCaption' : '',
+                meta.type === 'recipe_ingredient' && hasBlockRenderFeature ? 'recipeIngredientBlock' : '',
                 surfaceClassName ?? '',
             ]
                 .filter(Boolean)
@@ -7717,7 +7760,7 @@ function EditableBlock({
                 hideBlockAffordance ? 'blockRowNoAffordance' : '',
                 variant === 'table-row-header' ? 'tableRowHeaderBlock' : '',
                 `blockType-${meta.type}`,
-                meta.type === 'callout' ? `callout${capitalize(meta.kind)}` : '',
+                meta.type === 'callout' && hasBlockRenderFeature ? `callout${capitalize(meta.kind)}` : '',
                 blockLevelDecoration?.selected ? 'blockSelected' : '',
                 blockLevelDecoration?.focus ? 'blockSelectionFocus' : '',
                 isDragging ? 'dragging' : '',
@@ -7742,18 +7785,19 @@ function EditableBlock({
                 <BlockAffordance
                     blockId={block.id}
                     meta={meta}
-                    listNumber={listNumber}
+                    listNumber={blockRenderFeatures.has('list_item') ? listNumber : null}
+                    blockRenderFeatures={blockRenderFeatures}
                     onStartDrag={onStartDrag}
                     onStartBlockDragFromHandle={onStartBlockDragFromHandle}
                     onToggleTodo={onToggleTodo}
                 />
             )}
-            {meta.type === 'image' ? (
+            {meta.type === 'image' && hasBlockRenderFeature ? (
                 <figure className={`imageBlock imageSize-${meta.size}`}>
                     <ImagePreview attachment={attachment} attachmentId={meta.attachmentId} />
                     <figcaption>{editableSurface}</figcaption>
                 </figure>
-            ) : meta.type === 'preview' ? (
+            ) : meta.type === 'preview' && hasBlockRenderFeature ? (
                 <PreviewBlockCard
                     meta={meta}
                     subtitle={editableSurface}
@@ -7786,6 +7830,7 @@ function EditableBlock({
                 <BlockOptions
                     meta={meta}
                     style={block.block.style}
+                    optionPanelBlockTypes={optionPanelBlockTypes}
                     onSetCodeLanguage={onSetCodeLanguage}
                     onSetCodePreview={onSetCodePreview}
                     onSetCalloutKind={onSetCalloutKind}
@@ -8790,6 +8835,7 @@ function BlockAffordance({
     blockId,
     meta,
     listNumber,
+    blockRenderFeatures,
     onStartDrag,
     onStartBlockDragFromHandle,
     onToggleTodo,
@@ -8797,6 +8843,7 @@ function BlockAffordance({
     blockId: string;
     meta: RichBlockMeta;
     listNumber: number | null;
+    blockRenderFeatures: BlockRenderFeatures;
     onStartDrag: ReturnType<typeof useBlockReorder>['startDrag'];
     onStartBlockDragFromHandle(blockId: string, event: PointerEvent<HTMLElement>): void;
     onToggleTodo(): void;
@@ -8805,7 +8852,7 @@ function BlockAffordance({
         onStartBlockDragFromHandle(blockId, event);
     };
 
-    if (meta.type === 'list_item') {
+    if (meta.type === 'list_item' && blockRenderFeatures.has('list_item')) {
         return (
             <button
                 type="button"
@@ -8817,7 +8864,7 @@ function BlockAffordance({
             </button>
         );
     }
-    if (meta.type === 'todo') {
+    if (meta.type === 'todo' && blockRenderFeatures.has('todo')) {
         return (
             <span
                 className="blockAffordance blockAffordanceTodo"
@@ -8850,7 +8897,7 @@ function BlockAffordance({
             </span>
         );
     }
-    if (meta.type === 'recipe_ingredient') {
+    if (meta.type === 'recipe_ingredient' && blockRenderFeatures.has('recipe_ingredient')) {
         return (
             <button
                 type="button"
@@ -8878,6 +8925,7 @@ function BlockOptions({
     className,
     meta,
     style,
+    optionPanelBlockTypes,
     onSetCodeLanguage,
     onSetCodePreview,
     onSetCalloutKind,
@@ -8897,6 +8945,7 @@ function BlockOptions({
     className?: string;
     meta: RichBlockMeta;
     style?: BlockStyle;
+    optionPanelBlockTypes: ReadonlySet<string>;
     onSetCodeLanguage(language: string): void;
     onSetCodePreview(enabled: boolean): void;
     onSetCalloutKind(kind: 'info' | 'warning' | 'error'): void;
@@ -8941,7 +8990,7 @@ function BlockOptions({
                 ) : null}
             </>
         );
-    } else if (meta.type === 'callout') {
+    } else if (meta.type === 'callout' && optionPanelBlockTypes.has('callout')) {
         label = 'Callout block options';
         controls = (
             <label className="blockOptionsField">
@@ -8960,7 +9009,7 @@ function BlockOptions({
                 </select>
             </label>
         );
-    } else if (meta.type === 'image') {
+    } else if (meta.type === 'image' && optionPanelBlockTypes.has('image')) {
         label = 'Image block options';
         controls = (
             <label className="blockOptionsField">

@@ -4,20 +4,12 @@ import {isPollMeta} from '../pollBlocks.js';
 import type {BlockEditorBlockTypeSpec, BlockEditorPlugin} from './types.js';
 
 export const legacyRichTextBlockTypeIds: readonly Exclude<RichBlockType, 'paragraph'>[] = [
-    'heading',
-    'list_item',
-    'todo',
-    'blockquote',
     'code',
-    'callout',
-    'recipe_ingredient',
     'table',
     'columns',
     'slide_deck',
     'slide',
     'poll',
-    'image',
-    'preview',
 ];
 
 export const legacyRichTextBlockTypeSpecs: readonly BlockEditorBlockTypeSpec<RichBlockMeta>[] =

@@ -13,8 +13,10 @@ import {INLINE_EMBED_MARK, INLINE_EMBED_TEXT} from './inlineEmbeds';
 import {LINK_MARK, MATH_MARK} from './inlineMarks';
 import {singleRetainedSelectionSet} from './selectionSet';
 import {
+    filterRichClipboardPayloadBlockFeatures,
     filterRichClipboardPayloadInlineFeatures,
     serializeSelectionToClipboardPayload,
+    type RichClipboardPayload,
 } from './clipboard';
 
 const ts = () => {
@@ -108,5 +110,37 @@ describe('clipboard inline feature filtering', () => {
             'math',
             'embed',
         ]));
+    });
+});
+
+describe('clipboard block feature filtering', () => {
+    it('degrades unsupported block metadata and strips orphaned attachments', () => {
+        const payload: RichClipboardPayload = {
+            version: 1,
+            plainText: 'Caption\nExample',
+            html: '',
+            fragments: [
+                {
+                    text: 'Caption',
+                    meta: {type: 'image', attachmentId: 'image-1', size: 'medium', ts: '1'},
+                    marks: [],
+                },
+                {
+                    text: 'Example',
+                    meta: {type: 'preview', url: 'https://example.com', preview: null, ts: '2'},
+                    marks: [],
+                },
+            ],
+            annotations: [],
+            attachments: [{id: 'image-1', name: 'image.png', mimeType: 'image/png', dataUrl: 'data:image/png;base64,a'}],
+        };
+
+        const filtered = filterRichClipboardPayloadBlockFeatures(payload, {blockTypes: new Set(['preview'])});
+
+        expect(filtered.fragments.map((fragment) => fragment.meta)).toEqual([
+            {type: 'paragraph', ts: '1'},
+            {type: 'preview', url: 'https://example.com', preview: null, ts: '2'},
+        ]);
+        expect(filtered.attachments).toBeUndefined();
     });
 });

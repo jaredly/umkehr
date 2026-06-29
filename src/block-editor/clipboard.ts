@@ -75,6 +75,10 @@ export type ClipboardInlineFeatureSet = {
     inlineEmbeds?: ReadonlySet<string>;
 };
 
+export type ClipboardBlockFeatureSet = {
+    blockTypes: ReadonlySet<string> | null;
+};
+
 type NormalizedClipboardInlineFeatureSet = {
     booleanMarks: ReadonlySet<ClipboardBooleanMarkType>;
     links: boolean;
@@ -232,11 +236,43 @@ export const filterRichClipboardPayloadInlineFeatures = (
     };
 };
 
+export const filterRichClipboardPayloadBlockFeatures = (
+    payload: RichClipboardPayload,
+    blockFeatures: ClipboardBlockFeatureSet,
+): RichClipboardPayload => {
+    const fragments = payload.fragments
+        .map((fragment) => filterClipboardFragmentBlockFeatures(fragment, blockFeatures))
+        .filter((fragment) => fragment.text || fragment.marks.length || fragment.meta.type === 'image');
+    const annotations = payload.annotations.map((annotation) => ({
+        ...annotation,
+        bodyBlocks: annotation.bodyBlocks
+            .map((fragment) => filterClipboardFragmentBlockFeatures(fragment, blockFeatures))
+            .filter((fragment) => fragment.text || fragment.marks.length || fragment.meta.type === 'image'),
+    }));
+    const attachmentIds = new Set(
+        fragments
+            .map((fragment) =>
+                fragment.meta.type === 'image' ? fragment.meta.attachmentId : null,
+            )
+            .filter((id): id is string => Boolean(id)),
+    );
+    const attachments = payload.attachments?.filter((attachment) => attachmentIds.has(attachment.id));
+    return {
+        ...payload,
+        fragments,
+        annotations,
+        plainText: fragments.map(fragmentToPlainText).join('\n'),
+        html: fragmentsToHtml(fragments),
+        ...(attachments?.length ? {attachments} : {attachments: undefined}),
+    };
+};
+
 export const serializeSelectionToClipboardPayload = (
     state: CachedState<RichBlockMeta>,
     selection: RetainedSelectionSet,
     attachments: SerializedImageAttachment[] = [],
     inlineFeatures?: ClipboardInlineFeatureSet,
+    blockFeatures?: ClipboardBlockFeatureSet,
 ): RichClipboardPayload | null => {
     const normalizedInlineFeatures = normalizeClipboardInlineFeatures(inlineFeatures);
     const formatted = materializeFormattedBlocks(state, annotationMarkBehavior);
@@ -313,7 +349,7 @@ export const serializeSelectionToClipboardPayload = (
             .filter((id): id is string => Boolean(id)),
     );
     const copiedAttachments = attachments.filter((attachment) => attachmentIds.has(attachment.id));
-    return {
+    const payload: RichClipboardPayload = {
         version: 1,
         plainText,
         html,
@@ -323,6 +359,7 @@ export const serializeSelectionToClipboardPayload = (
         ...(tsv ? {tsv} : {}),
         ...(sourceSelectionType ? {sourceSelectionType} : {}),
     };
+    return blockFeatures ? filterRichClipboardPayloadBlockFeatures(payload, blockFeatures) : payload;
 };
 
 const filterClipboardFragmentInlineFeatures = (
@@ -332,6 +369,22 @@ const filterClipboardFragmentInlineFeatures = (
     ...fragment,
     marks: fragment.marks.filter((mark) => clipboardMarkEnabled(mark, inlineFeatures)),
 });
+
+const filterClipboardFragmentBlockFeatures = (
+    fragment: ClipboardFragment,
+    blockFeatures: ClipboardBlockFeatureSet,
+): ClipboardFragment => {
+    if (clipboardBlockMetaEnabled(fragment.meta, blockFeatures)) return fragment;
+    return {
+        ...fragment,
+        meta: {type: 'paragraph', ts: fragment.meta.ts},
+    };
+};
+
+const clipboardBlockMetaEnabled = (
+    meta: RichBlockMeta,
+    blockFeatures: ClipboardBlockFeatureSet,
+): boolean => meta.type === 'paragraph' || blockFeatures.blockTypes === null || blockFeatures.blockTypes.has(meta.type);
 
 const clipboardMarkEnabled = (
     mark: ClipboardMarkRange,

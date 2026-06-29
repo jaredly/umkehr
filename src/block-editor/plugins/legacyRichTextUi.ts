@@ -1,6 +1,5 @@
 import type {BlockTypeMenuValue} from '../blockEditorTypes.js';
 import type {RichBlockMeta} from '../blockMeta.js';
-import {legacyMarkdownShortcutSpecs} from '../markdownShortcuts.js';
 import type {
     BlockEditorPlugin,
     BlockEditorSlashCommandSpec,
@@ -12,7 +11,35 @@ export type LegacyBlockTypeMenuItem = {
     label: string;
 };
 
-function blockSlashCommand(
+const BLOCK_TYPE_MENU_ORDER: Record<BlockTypeMenuValue, number> = {
+    paragraph: 0,
+    heading1: 1,
+    heading2: 2,
+    heading3: 3,
+    unordered: 4,
+    ordered: 5,
+    todo: 6,
+    blockquote: 7,
+    code: 8,
+    mermaid: 9,
+    'vega-lite': 10,
+    'callout-info': 11,
+    'callout-warning': 12,
+    'callout-error': 13,
+    'recipe-ingredient': 14,
+    table: 15,
+    columns: 16,
+    'card-columns': 17,
+    'slide-deck': 18,
+    slide: 19,
+    preview: 20,
+    'poll-rating': 21,
+    'poll-children': 22,
+    'poll-matrix': 23,
+    'poll-long': 24,
+};
+
+export function blockSlashCommand(
     value: BlockTypeMenuValue,
     label: string,
     keywords: string[],
@@ -22,50 +49,41 @@ function blockSlashCommand(
         label,
         group: 'Block type',
         keywords,
+        order: BLOCK_TYPE_MENU_ORDER[value],
         commandId: `block-type:${value}`,
     };
 }
 
-function toolbarItem(
+export function toolbarItem(
     id: string,
     group: string,
     label: string,
     commandId = id,
 ): BlockEditorToolbarItemSpec {
+    const blockValue = blockTypeValueFromCommandId(commandId);
     return {
         id,
         group,
         label,
+        ...(blockValue === null ? {} : {order: BLOCK_TYPE_MENU_ORDER[blockValue]}),
         commandId,
     };
 }
 
-function withOrder<Item extends {order?: number}>(items: readonly Item[]): readonly Item[] {
-    return items.map((item, order) => ({...item, order}));
+export function withOrder<Item extends {order?: number}>(items: readonly Item[]): readonly Item[] {
+    return items.map((item, order) => ({...item, order: item.order ?? order}));
 }
 
 export const legacyBlockTypeMenuItems: readonly LegacyBlockTypeMenuItem[] = [
     {value: 'paragraph', label: 'Paragraph'},
-    {value: 'heading1', label: 'Heading 1'},
-    {value: 'heading2', label: 'Heading 2'},
-    {value: 'heading3', label: 'Heading 3'},
-    {value: 'unordered', label: 'Bulleted list'},
-    {value: 'ordered', label: 'Numbered list'},
-    {value: 'todo', label: 'Todo'},
-    {value: 'blockquote', label: 'Quote'},
     {value: 'code', label: 'Code'},
     {value: 'mermaid', label: 'Mermaid diagram'},
     {value: 'vega-lite', label: 'Vega-Lite chart'},
-    {value: 'callout-info', label: 'Info callout'},
-    {value: 'callout-warning', label: 'Warning callout'},
-    {value: 'callout-error', label: 'Error callout'},
-    {value: 'recipe-ingredient', label: 'Ingredient line'},
     {value: 'table', label: 'Table'},
     {value: 'columns', label: 'Columns'},
     {value: 'card-columns', label: 'Card columns'},
     {value: 'slide-deck', label: 'Slide deck'},
     {value: 'slide', label: 'Slide'},
-    {value: 'preview', label: 'Preview'},
     {value: 'poll-rating', label: 'Rating poll'},
     {value: 'poll-children', label: 'Answer poll'},
     {value: 'poll-matrix', label: 'Matrix poll'},
@@ -74,32 +92,19 @@ export const legacyBlockTypeMenuItems: readonly LegacyBlockTypeMenuItem[] = [
 
 export const legacySlashCommandSpecs: readonly BlockEditorSlashCommandSpec[] = withOrder([
     blockSlashCommand('paragraph', 'Paragraph', ['text']),
-    blockSlashCommand('heading1', 'Heading 1', ['h1', 'title']),
-    blockSlashCommand('heading2', 'Heading 2', ['h2', 'subtitle']),
-    blockSlashCommand('heading3', 'Heading 3', ['h3']),
-    blockSlashCommand('unordered', 'Bulleted list', ['bullet', 'unordered']),
-    blockSlashCommand('ordered', 'Numbered list', ['number', 'ordered']),
-    blockSlashCommand('todo', 'Todo', ['task', 'checkbox']),
-    blockSlashCommand('blockquote', 'Blockquote', ['quote']),
     blockSlashCommand('code', 'Code', ['pre']),
     blockSlashCommand('mermaid', 'Mermaid diagram', ['diagram', 'chart', 'flowchart', 'mermaid']),
     blockSlashCommand('vega-lite', 'Vega-Lite chart', ['chart', 'graph', 'vega', 'visualization']),
-    blockSlashCommand('callout-info', 'Info callout', ['info']),
-    blockSlashCommand('callout-warning', 'Warning callout', ['warning']),
-    blockSlashCommand('callout-error', 'Error callout', ['error']),
-    blockSlashCommand('recipe-ingredient', 'Ingredient', ['ingredient', 'recipe', 'food', 'line']),
     blockSlashCommand('table', 'Table', ['grid']),
     blockSlashCommand('columns', 'Columns', ['columns', 'layout']),
     blockSlashCommand('card-columns', 'Card columns', ['board', 'cards', 'columns']),
     blockSlashCommand('slide-deck', 'Slide deck', ['presentation', 'deck', 'slides']),
     blockSlashCommand('slide', 'Slide', ['presentation', 'deck']),
-    blockSlashCommand('preview', 'Preview', ['link', 'card', 'url']),
 ]);
 
 export const legacyToolbarItemSpecs: readonly BlockEditorToolbarItemSpec[] = withOrder([
     toolbarItem('history:undo', 'History', 'Undo'),
     toolbarItem('history:redo', 'History', 'Redo'),
-    toolbarItem('image:upload', 'Inline marks', 'Image'),
     toolbarItem('annotation:sidebar', 'Annotations', 'Comment'),
     toolbarItem('annotation:footnote', 'Annotations', 'Footnote'),
     toolbarItem('annotation:popover', 'Annotations', 'Popover'),
@@ -112,7 +117,6 @@ export const legacyRichTextUiPlugin: BlockEditorPlugin<RichBlockMeta> = {
     id: 'legacy-rich-text-ui',
     toolbarItems: legacyToolbarItemSpecs,
     slashCommands: legacySlashCommandSpecs,
-    markdownShortcuts: legacyMarkdownShortcutSpecs,
 };
 
 export const blockTypeMenuItemsFromToolbarSpecs = (
@@ -126,13 +130,12 @@ export const blockTypeMenuItemsFromToolbarSpecs = (
 export const legacyBlockTypeMenuItemsFromToolbarSpecs = (): LegacyBlockTypeMenuItem[] =>
     blockTypeMenuItemsFromToolbarSpecs(legacyToolbarItemSpecs);
 
-const blockTypeValueFromCommandId = (commandId: string | undefined): BlockTypeMenuValue | null => {
+function blockTypeValueFromCommandId(commandId: string | undefined): BlockTypeMenuValue | null {
     if (!commandId?.startsWith('block-type:')) return null;
     const value = commandId.slice('block-type:'.length);
     return isBlockTypeMenuValue(value) ? value : null;
-};
+}
 
-const BLOCK_TYPE_MENU_VALUES = new Set<string>(legacyBlockTypeMenuItems.map((item) => item.value));
-
-const isBlockTypeMenuValue = (value: string): value is BlockTypeMenuValue =>
-    BLOCK_TYPE_MENU_VALUES.has(value);
+function isBlockTypeMenuValue(value: string): value is BlockTypeMenuValue {
+    return value in BLOCK_TYPE_MENU_ORDER;
+}
