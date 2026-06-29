@@ -421,6 +421,8 @@ function PeerClientDocument<TState, EphemeralData>({
                 <p>
                     {state.kind === 'waiting-for-snapshot'
                         ? `Connected to ${state.hostPeerId}`
+                        : state.kind === 'error'
+                          ? state.message
                         : 'Enter the host Peer ID to join.'}
                 </p>
             </section>
