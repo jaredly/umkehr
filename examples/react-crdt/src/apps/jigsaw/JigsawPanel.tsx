@@ -1,9 +1,11 @@
 import {
     useEffect,
+    useLayoutEffect,
     useMemo,
     useRef,
     useState,
     type CSSProperties,
+    type RefObject,
     type PointerEvent,
 } from 'react';
 import {useValue} from 'umkehr/react';
@@ -56,6 +58,7 @@ const minZoom = 0.1;
 const maxZoom = 2.5;
 const wheelZoomInFactor = 1.08;
 const wheelZoomOutFactor = 0.92;
+const remoteMoveAnimationMs = 240;
 
 export function JigsawPanel({
     editor,
@@ -79,6 +82,8 @@ export function JigsawPanel({
     const boardGeometry = useMemo(() => boardSpaceFor(board.imageSize, pieceSize), [board.imageSize, pieceSize]);
     const threshold = useMemo(() => snapThreshold(board), [board]);
     const viewportRef = useRef<HTMLDivElement | null>(null);
+    const pieceRefs = useRef(new Map<number, HTMLElement>());
+    const backdropRefs = useRef(new Map<number, HTMLElement>());
     const [viewportSize, setViewportSize] = useState({width: 1, height: 1});
     const [viewport, setViewport] = useState<JigsawViewport>({panX: 0, panY: 0, zoom: 1});
     const [viewportInitialized, setViewportInitialized] = useState(false);
@@ -204,6 +209,14 @@ export function JigsawPanel({
         }
         return result;
     }, [drag, layout.positions, localPositions]);
+    usePieceMoveAnimation(renderedPositions, pieceRefs, {
+        disabled: Boolean(drag),
+        durationMs: remoteMoveAnimationMs,
+    });
+    usePieceMoveAnimation(renderedPositions, backdropRefs, {
+        disabled: Boolean(drag),
+        durationMs: remoteMoveAnimationMs,
+    });
     const activeComponent = useMemo(() => new Set(drag?.component ?? []), [drag]);
     const placedPieces = useMemo(() => new Set(layout.positions.keys()), [layout.positions]);
     const totalConnections = board.pieces.reduce((sum, piece) => sum + piece.neighbors.length, 0) / 2;
@@ -401,6 +414,7 @@ export function JigsawPanel({
                         return (
                             <div
                                 key={`backdrop-${index}`}
+                                ref={(element) => setPieceElement(backdropRefs.current, index, element)}
                                 className="jigsawPieceBackdrop"
                                 style={
                                     {
@@ -440,6 +454,7 @@ export function JigsawPanel({
                         return (
                             <button
                                 key={index}
+                                ref={(element) => setPieceElement(pieceRefs.current, index, element)}
                                 type="button"
                                 className={`jigsawPiece ${placed ? 'placed' : 'unplaced'} ${
                                     active ? 'dragging' : ''
@@ -519,6 +534,60 @@ export function JigsawPanel({
         const base = placed ? 1000 : 0;
         return base + Math.max(...component, anchor ?? piece);
     }
+}
+
+function usePieceMoveAnimation(
+    positions: Map<number, Coord>,
+    refs: RefObject<Map<number, HTMLElement>>,
+    {
+        disabled,
+        durationMs,
+    }: {
+        disabled: boolean;
+        durationMs: number;
+    },
+) {
+    const previousPositions = useRef(new Map<number, Coord>());
+
+    useLayoutEffect(() => {
+        const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+        if (!disabled && !reduceMotion) {
+            for (const [piece, next] of positions) {
+                const previous = previousPositions.current.get(piece);
+                const element = refs.current?.get(piece);
+                if (!previous || !element) continue;
+                const deltaX = previous.x - next.x;
+                const deltaY = previous.y - next.y;
+                if (Math.hypot(deltaX, deltaY) < 1) continue;
+                element.getAnimations().forEach((animation) => animation.cancel());
+                element.animate(
+                    [
+                        {transform: `translate(${deltaX}px, ${deltaY}px)`},
+                        {transform: 'translate(0, 0)'},
+                    ],
+                    {
+                        duration: durationMs,
+                        easing: 'cubic-bezier(0.2, 0, 0, 1)',
+                    },
+                );
+            }
+        }
+
+        previousPositions.current = new Map(positions);
+    }, [disabled, durationMs, positions, refs]);
+}
+
+function setPieceElement(
+    refs: Map<number, HTMLElement>,
+    piece: number,
+    element: HTMLElement | null,
+) {
+    if (element) {
+        refs.set(piece, element);
+        return;
+    }
+    refs.delete(piece);
 }
 
 function SolvedImageCanvas({source, offset}: {source: HTMLCanvasElement; offset: Coord}) {
