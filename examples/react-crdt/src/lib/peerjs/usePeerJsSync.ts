@@ -393,7 +393,7 @@ export function usePeerJsSync<TState>({
             const trimmed = peerId.trim();
             if (!peer || !trimmed) return;
             lastHostPeerIdRef.current = trimmed;
-            const conn = peer.connect(trimmed, {serialization: 'json'});
+            const conn = peer.connect(trimmed, {serialization: 'binary'});
             trackConnection(conn);
             if (roleRef.current === 'client') {
                 stateStore.setSnapshot({

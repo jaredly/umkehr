@@ -83,7 +83,7 @@ test('jigsaw PeerJS invite is only shown after the host opens a document', async
         await expect(hostPage.getByRole('heading', {name: 'Choose a document'})).toBeVisible();
         await expect(hostPage.locator('#peerInviteLink')).toHaveCount(0);
 
-        await createDocument(hostPage, title, {pieceCount: '12'});
+        await createDocument(hostPage, title, {pieceCount: '120', boardType: 'voronoi'});
         await expect(hostPage.locator('#peerInviteLink')).toHaveCount(0);
         await openDocument(hostPage, title);
         await expect(hostPage.getByRole('heading', {name: 'Host Jigsaw'})).toBeVisible();
@@ -100,7 +100,7 @@ test('jigsaw PeerJS invite is only shown after the host opens a document', async
             timeout: 10_000,
         });
         await expect(clientPage.getByText('Waiting for host snapshot')).toHaveCount(0);
-        await expect(clientPage.locator('.jigsawPiece')).toHaveCount(12);
+        await expect(clientPage.locator('.jigsawPiece')).toHaveCount(120);
 
         await clientContext.close();
         await hostContext.close();
