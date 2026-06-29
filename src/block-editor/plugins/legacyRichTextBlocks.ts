@@ -1,5 +1,6 @@
 import type {RichBlockMeta, RichBlockType} from '../blockMeta.js';
 import type {BlockEditorBlockTypeSpec, BlockEditorPlugin} from './types.js';
+import {bundledPluginStyle} from './pluginStyles.js';
 
 export const legacyRichTextBlockTypeIds: readonly Exclude<RichBlockType, 'paragraph'>[] = [];
 
@@ -9,6 +10,7 @@ export const legacyRichTextBlockTypeSpecs: readonly BlockEditorBlockTypeSpec<Ric
 export const legacyRichTextBlocksPlugin: BlockEditorPlugin<RichBlockMeta> = {
     id: 'legacy-rich-text-blocks',
     blockTypes: legacyRichTextBlockTypeSpecs,
+    styles: [bundledPluginStyle('legacy-rich-text-blocks', 'legacyRichTextBlocks.css', 200)],
 };
 
 export const isLegacyRichBlockMeta = (value: unknown): value is RichBlockMeta => {

@@ -1,0 +1,22 @@
+/* Styles owned by the ingredients block editor plugin. */
+.blockAffordanceIngredient {
+    color: #2f7d4d;
+    font-size: 17px;
+}
+
+.recipeIngredientBlock {
+    color: #223025;
+}
+
+.ingredient-amount,
+.ingredient-unit {
+    font-weight: 700;
+}
+
+.ingredient-name {
+    color: #1e7f4f;
+}
+
+.ingredient-prep {
+    font-style: italic;
+}

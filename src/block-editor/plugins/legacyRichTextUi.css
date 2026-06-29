@@ -1,0 +1,62 @@
+/* Styles owned by the legacy-rich-text-ui block editor plugin. */
+.slashCommandPopover {
+    position: fixed;
+    z-index: 46;
+    display: grid;
+    gap: 8px;
+    width: min(320px, calc(100vw - 24px));
+    max-height: min(360px, calc(100vh - 24px));
+    padding: 8px;
+    border: 1px solid #9ca3af;
+    border-radius: 8px;
+    background: #fff;
+    box-shadow: 0 12px 32px rgb(0 0 0 / 20%);
+}
+
+.slashCommandPopover input {
+    width: 100%;
+    min-width: 0;
+    height: 34px;
+    padding: 0 9px;
+    border: 1px solid #cbd5df;
+    border-radius: 6px;
+    color: #23313d;
+}
+
+.slashCommandList {
+    display: grid;
+    gap: 2px;
+    max-height: 278px;
+    overflow: auto;
+}
+
+.slashCommandList button {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    min-height: 34px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: 6px;
+    color: #23313d;
+    background: transparent;
+    cursor: pointer;
+    text-align: left;
+}
+
+.slashCommandList button:hover,
+.slashCommandList button.active {
+    background: #eef3f7;
+}
+
+.slashCommandList small {
+    color: #6a7784;
+    font-size: 12px;
+}
+
+.slashCommandEmpty {
+    padding: 10px 8px;
+    color: #6a7784;
+    font-size: 13px;
+}

@@ -66,6 +66,50 @@ describe('legacyRichTextPlugins', () => {
         expect(registry.selectionTypes.has('table-cells')).toBe(true);
         expect(registry.selectionPlugins.has('table-cells')).toBe(true);
         expect(registry.crdtConfig().markBehavior).toEqual({annotation: 'stacking'});
+        expect(registry.styles.map((style) => style.id)).toEqual([
+            'basic-marks:styles',
+            'links:styles',
+            'math:styles',
+            'inline-date:styles',
+            'headings:styles',
+            'lists:styles',
+            'todos:styles',
+            'quote:styles',
+            'callouts:styles',
+            'code:styles',
+            'ingredients:styles',
+            'images:styles',
+            'link-preview:styles',
+            'annotations:styles',
+            'polls:styles',
+            'columns:styles',
+            'slides:styles',
+            'table:styles',
+            'legacy-rich-text-ui:styles',
+            'legacy-rich-text-blocks:styles',
+        ]);
+        expect(registry.styles.map((style) => style.pluginId)).toEqual([
+            'basic-marks',
+            'links',
+            'math',
+            'inline-date',
+            'headings',
+            'lists',
+            'todos',
+            'quote',
+            'callouts',
+            'code',
+            'ingredients',
+            'images',
+            'link-preview',
+            'annotations',
+            'polls',
+            'columns',
+            'slides',
+            'table',
+            'legacy-rich-text-ui',
+            'legacy-rich-text-blocks',
+        ]);
     });
 
     it('declares metadata support for non-core current rich-text blocks', () => {

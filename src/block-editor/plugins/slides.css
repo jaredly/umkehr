@@ -1,0 +1,329 @@
+/* Styles owned by the slides block editor plugin. */
+.blockRow:hover .blockOptionsButton,
+.blockRow:focus-within .blockOptionsButton,
+.slideViewport:hover > .slideBlockOptions .blockOptionsButton,
+.slideViewport:focus-within > .slideBlockOptions .blockOptionsButton,
+.blockOptions[open] .blockOptionsButton {
+    opacity: 1;
+}
+
+.slideDeckBlock,
+.orphanSlideBlock {
+    margin: 8px 0 14px;
+    margin-left: calc(var(--block-depth, 0) * 24px);
+}
+
+.slideDeckHeader {
+    display: grid;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.slideDeckTitleText {
+    font-weight: 650;
+}
+
+.slideDeckToolbar,
+.orphanSlideToolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin: 0 0 6px;
+    color: #52616f;
+    font-size: 12px;
+}
+
+.slideDeckToolbar button,
+.orphanSlideToolbar button {
+    height: 26px;
+    padding: 0 8px;
+    border: 1px solid #cbd5df;
+    border-radius: 5px;
+    color: #33414d;
+    background: #fff;
+    font: inherit;
+}
+
+.slideDeckToolbar button:hover,
+.slideDeckToolbar button:focus-visible,
+.orphanSlideToolbar button:hover,
+.orphanSlideToolbar button:focus-visible {
+    border-color: #94a3b8;
+    background: #f8fafc;
+}
+
+.slideDeckToolbar button[aria-pressed='true'],
+.orphanSlideToolbar button[aria-pressed='true'] {
+    color: #102033;
+    background: #e8f1fa;
+    border-color: #9fc3e6;
+}
+
+.slideDeckToolbar button:disabled {
+    color: #9aa6b2;
+    background: #f3f6f8;
+}
+
+.slideModeTabs,
+.slideNavigation {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.slideNavigation span {
+    min-width: 42px;
+    text-align: center;
+}
+
+.slideOverviewList,
+.slideDeckOutlineChildren {
+    display: grid;
+    gap: 14px;
+}
+
+.slideDeckEmpty {
+    display: grid;
+    min-height: 140px;
+    place-items: center;
+    border: 1px dashed #cbd5df;
+    border-radius: 6px;
+    color: #657380;
+    background: #f8fafc;
+}
+
+.slideViewport {
+    position: relative;
+    width: 100%;
+    aspect-ratio: var(--slide-width, 1920) / var(--slide-height, 1080);
+    border: 1px solid #cbd5df;
+    border-radius: 6px;
+    box-shadow: 0 12px 30px rgba(15, 23, 42, 0.1);
+    cursor: grab;
+    overflow: hidden;
+}
+
+.slideViewport:active {
+    cursor: grabbing;
+}
+
+.slideViewport.dragging {
+    opacity: 0.58;
+}
+
+.slideViewport.draggingRoot {
+    opacity: 0.46;
+}
+
+.slideViewport.blockSelected {
+    outline: 1px solid #6aa7d8;
+    outline-offset: 2px;
+}
+
+.slideViewport.blockSelectionFocus {
+    outline-color: #2f76b7;
+}
+
+.slideViewport.dropBefore::before,
+.slideViewport.dropAfter::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    z-index: 3;
+    height: 2px;
+    border-radius: 999px;
+    background: #1b75bb;
+}
+
+.slideViewport.dropBefore::before {
+    top: 0;
+}
+
+.slideViewport.dropAfter::after {
+    bottom: 0;
+}
+
+.slideViewport-presentation {
+    width: 100%;
+}
+
+.slideDeckFullScreen {
+    position: relative;
+    display: grid;
+    grid-template-rows: minmax(0, 1fr);
+    width: 100vw;
+    height: 100vh;
+    margin: 0;
+    padding: 24px;
+    background: #111820;
+}
+
+.slideDeckFullScreen .slideDeckHeader {
+    display: none;
+}
+
+.slideDeckFullScreen .slideViewport-presentation {
+    align-self: center;
+    justify-self: center;
+    width: min(100%, calc((100vh - 48px) * var(--slide-width, 1920) / var(--slide-height, 1080)));
+    max-height: calc(100vh - 48px);
+}
+
+.slideScaleLayer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    transform-origin: top left;
+}
+
+.slideBlockOptions {
+    top: 10px;
+    right: 10px;
+    z-index: 5;
+}
+
+.slideSurface {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    padding: 72px;
+    color: #17212b;
+    font-size: 32px;
+    line-height: 1.35;
+    cursor: auto;
+}
+
+.slideTitle {
+    align-self: start;
+}
+
+.slideTitleText {
+    font-size: 64px;
+    font-weight: 720;
+    line-height: 1.12;
+}
+
+.slideBody {
+    display: flex;
+    min-height: 0;
+    min-width: 0;
+    flex-direction: column;
+    justify-content: center;
+    gap: 20px;
+    overflow: auto;
+}
+
+.slideBody .editableBlock {
+    font-size: inherit;
+}
+
+.slideBody .headingLevel1 {
+    font-size: 1.45em;
+}
+
+.slideBody .headingLevel2 {
+    font-size: 1.25em;
+}
+
+.slideBody .headingLevel3 {
+    font-size: 1.08em;
+}
+
+.slideBody > .renderTreeBranch,
+.slideBody > .groupedSubtree,
+.slideBody > .tableBlock,
+.slideBody > .columnsBlock {
+    max-width: 100%;
+}
+
+.slideFooter {
+    align-self: end;
+    min-height: 28px;
+    color: #52616f;
+    font-size: 22px;
+    text-align: right;
+}
+
+.slideFullScreenControls {
+    position: absolute;
+    left: 50%;
+    bottom: 18px;
+    z-index: 5;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px;
+    border: 1px solid rgba(203, 213, 223, 0.32);
+    border-radius: 8px;
+    color: #edf4fb;
+    background: rgba(17, 24, 32, 0.82);
+    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.28);
+    font-size: 12px;
+    opacity: 0;
+    transform: translateX(-50%) translateY(6px);
+    transition:
+        opacity 120ms ease,
+        transform 120ms ease;
+}
+
+.slideDeckFullScreen:hover .slideFullScreenControls,
+.slideFullScreenControls:focus-within {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+}
+
+.slideFullScreenControls button {
+    height: 28px;
+    padding: 0 10px;
+    border: 1px solid rgba(203, 213, 223, 0.46);
+    border-radius: 5px;
+    color: inherit;
+    background: rgba(255, 255, 255, 0.08);
+    font: inherit;
+}
+
+.slideFullScreenControls button:hover,
+.slideFullScreenControls button:focus-visible {
+    background: rgba(255, 255, 255, 0.16);
+}
+
+.slideFullScreenControls button:disabled {
+    color: rgba(237, 244, 251, 0.42);
+}
+
+.slideFullScreenControls span {
+    min-width: 42px;
+    text-align: center;
+}
+
+.slideTransition-fade {
+    animation: slideFadeIn 160ms ease-out;
+}
+
+.slideTransition-slide {
+    animation: slideMoveIn 180ms ease-out;
+}
+
+@keyframes slideFadeIn {
+    from {
+        opacity: 0.2;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes slideMoveIn {
+    from {
+        opacity: 0.4;
+        transform: translateX(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}

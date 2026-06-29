@@ -92,3 +92,6 @@ Are there any other api changes to src/block-crdt that would make this implement
 
 
         `${fullName}: can you look at [@bug.md](file://${process.cwd()}/${dir}/bug.md) and create a failing repro test? If you get stuck, stop and ask for more information, but otherwise you can proceed with a fix.`,
+
+
+Can you implement plan-12 slice by slice, keeping a concise log of your progress in implementation-log-11.md. Be sure to call out any issues, workarounds or bugs encountered.

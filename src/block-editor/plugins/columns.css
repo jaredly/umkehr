@@ -1,0 +1,235 @@
+/* Styles owned by the columns block editor plugin. */
+.columnsBlock {
+    margin-left: calc(var(--block-depth, 0) * 24px);
+    padding: 8px 0 10px;
+}
+
+.columnsBlockCards .columnsTitle {
+    border: 1px solid #c9d4de;
+    border-bottom: 0;
+    border-radius: 6px 6px 0 0;
+    background: #f7fafc;
+}
+
+.columnsTitle .blockRow {
+    margin-left: 0;
+    padding: 6px 8px;
+}
+
+.columnsBlockCards .columnsTitleText {
+    min-height: 30px;
+    padding-left: 6px;
+    font-size: 13px;
+    font-weight: 800;
+    font-variant: small-caps;
+    letter-spacing: 0.04em;
+    color: #33414d;
+}
+
+.columnsColumns {
+    display: flex;
+    gap: 10px;
+    overflow-x: auto;
+    padding: 10px;
+    border: 1px solid #c9d4de;
+    border-radius: 0 0 6px 6px;
+    background: #eef3f7;
+}
+
+.columnsBlockBlocks .columnsColumns {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    align-items: stretch;
+    gap: 12px;
+    overflow: visible;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+}
+
+.columnsColumn {
+    position: relative;
+    min-width: 0;
+}
+
+.columnsColumnCards {
+    display: flex;
+    flex: 0 0 260px;
+    flex-direction: column;
+    min-height: 180px;
+    max-height: 70vh;
+    border: 1px solid #cbd7e1;
+    border-radius: 6px;
+    background: #f8fafc;
+}
+
+.columnsColumnBlocks {
+    min-height: 0;
+}
+
+.columnsColumnBlocks > .renderTreeBranch,
+.columnsColumnBlocks > .groupedSubtree,
+.columnsColumnBlocks > .tableBlock,
+.columnsColumnBlocks > .columnsBlock {
+    margin-left: 0;
+}
+
+.columnsColumn.dragging,
+.columnsCard.dragging {
+    opacity: 0.58;
+}
+
+.columnsColumn.draggingRoot,
+.columnsCard.draggingRoot {
+    opacity: 0.46;
+}
+
+.columnsColumn.dropBefore::before,
+.columnsColumn.dropAfter::after {
+    content: '';
+    position: absolute;
+    top: 8px;
+    bottom: 8px;
+    z-index: 3;
+    width: 3px;
+    border-radius: 999px;
+    background: #1b75bb;
+}
+
+.columnsColumn.dropBefore::before {
+    left: -7px;
+}
+
+.columnsColumn.dropAfter::after {
+    right: -7px;
+}
+
+.columnsColumnHeader {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr);
+    gap: 4px;
+    align-items: start;
+    padding: 6px;
+    border-bottom: 1px solid #dce4eb;
+}
+
+.columnsColumnHeader .blockRow {
+    grid-template-columns: minmax(0, 1fr) minmax(0, auto);
+    gap: 4px;
+    margin-left: 0;
+    padding: 0;
+}
+
+.columnsColumnTitle {
+    min-height: 30px;
+    padding: 5px 6px;
+    font-size: 13px;
+    font-weight: 700;
+    color: #23313d;
+}
+
+.columnsColumnHandle,
+.columnsCardHandle {
+    width: 26px;
+    min-width: 26px;
+    height: 26px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    color: #7a8793;
+    background: transparent;
+    cursor: grab;
+}
+
+.columnsColumnHandle:hover,
+.columnsColumnHandle:focus-visible,
+.columnsCardHandle:hover,
+.columnsCardHandle:focus-visible {
+    border-color: #cbd5df;
+    background: #fff;
+}
+
+.columnsCards {
+    display: grid;
+    align-content: start;
+    gap: 8px;
+    min-height: 120px;
+    overflow-y: auto;
+    padding: 8px;
+}
+
+.columnsCard {
+    position: relative;
+    display: grid;
+    grid-template-columns: 26px minmax(0, 1fr);
+    gap: 4px;
+    padding: 6px;
+    border: 1px solid #d7e0e8;
+    border-radius: 6px;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(20, 35, 50, 0.06);
+}
+
+.columnsCard.blockSelected {
+    outline: 1px solid #6aa7d8;
+    outline-offset: 1px;
+    background: #f7fbff;
+}
+
+.columnsCard.blockSelectionFocus {
+    outline-color: #2f76b7;
+}
+
+.columnsCardBody {
+    min-width: 0;
+}
+
+.columnsCard .blockRow {
+    grid-template-columns: minmax(0, 1fr) minmax(0, auto);
+    gap: 4px;
+    margin-left: 0;
+    padding: 0;
+}
+
+.columnsCard .blockRow.dropBefore::before,
+.columnsCard .blockRow.dropAfter::after {
+    left: -36px;
+    right: -6px;
+    z-index: 3;
+    height: 3px;
+}
+
+.columnsCard .blockRow.dropChildTarget::before,
+.columnsCard .blockRow.dropChildTarget::after {
+    left: calc(18px + var(--drop-offset, 0px));
+    right: 10px;
+    background: #2c8a57;
+}
+
+.columnsCard .blockRow.dropBefore::before {
+    top: -7px;
+}
+
+.columnsCard .blockRow.dropAfter::after {
+    bottom: -7px;
+}
+
+.columnsCardTitle {
+    min-height: 30px;
+    padding: 4px 6px;
+}
+
+.columnsCardChildren {
+    display: grid;
+    gap: 4px;
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid #edf1f5;
+}
+
+.columnsCard .previewCardLink,
+.columnsCard .codePreview,
+.columnsCard .tableBlock {
+    max-width: 100%;
+    overflow-x: auto;
+}

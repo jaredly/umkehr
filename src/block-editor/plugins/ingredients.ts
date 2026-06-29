@@ -2,6 +2,7 @@ import type {RichBlockMeta} from '../blockMeta.js';
 import type {BlockEditorPlugin, BlockEditorToolbarItemSpec} from './types.js';
 import {declarationBlockRenderer, simpleRichBlockTypeSpec} from './blockPluginUtils.js';
 import {blockSlashCommand, toolbarItem, withOrder} from './legacyRichTextUi.js';
+import {bundledPluginStyle} from './pluginStyles.js';
 
 export const ingredientBlockTypeSpec = simpleRichBlockTypeSpec('recipe_ingredient', () => true);
 
@@ -18,4 +19,5 @@ export const ingredientsPlugin: BlockEditorPlugin<RichBlockMeta> = {
     ]),
     blockRenderers: [declarationBlockRenderer('render:recipe-ingredient', 'recipe_ingredient')],
     clipboard: [{id: 'clipboard:recipe-ingredient'}],
+    styles: [bundledPluginStyle('ingredients', 'ingredients.css', 110)],
 };

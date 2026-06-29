@@ -6,6 +6,7 @@ import {CODE_MARK} from '../inlineMarks.js';
 import type {BlockEditorPlugin} from './types.js';
 import {declarationBlockRenderer, declarationOptionPanel, simpleRichBlockTypeSpec} from './blockPluginUtils.js';
 import {blockSlashCommand, toolbarItem} from './legacyRichTextUi.js';
+import {bundledPluginStyle} from './pluginStyles.js';
 
 let mermaidInitialized = false;
 let mermaidLoadPromise: Promise<typeof import('mermaid')> | null = null;
@@ -53,6 +54,7 @@ export const codePlugin: BlockEditorPlugin<RichBlockMeta> = {
         {id: 'mark:code', group: 'Inline marks', label: 'Code', commandId: 'mark:code', order: 6},
     ],
     slashCommands: [blockSlashCommand('code', 'Code', ['pre'])],
+    styles: [bundledPluginStyle('code', 'code.css', 100)],
 };
 
 export const codeMermaidPlugin: BlockEditorPlugin<RichBlockMeta> = {

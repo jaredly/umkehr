@@ -2,6 +2,7 @@ import type {RichBlockMeta} from '../blockMeta.js';
 import {INLINE_EMBED_MARK} from '../inlineEmbeds.js';
 
 import type {BlockEditorPlugin} from './types.js';
+import {bundledPluginStyle} from './pluginStyles.js';
 
 export const inlineDatePlugin: BlockEditorPlugin<RichBlockMeta> = {
     id: 'inline-date',
@@ -21,4 +22,5 @@ export const inlineDatePlugin: BlockEditorPlugin<RichBlockMeta> = {
             order: 22,
         },
     ],
+    styles: [bundledPluginStyle('inline-date', 'inlineDate.css', 40)],
 };

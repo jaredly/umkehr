@@ -8,6 +8,7 @@ import {
     type AnnotationPresentation,
 } from '../annotations.js';
 import type {BlockEditorPlugin} from './types.js';
+import {bundledPluginStyle} from './pluginStyles.js';
 
 export const annotationMarkVirtualParents = (mark: {
     type: string;
@@ -70,6 +71,7 @@ export const annotationsPlugin: BlockEditorPlugin<RichBlockMeta> = {
         markBehavior: annotationMarkBehavior.markBehavior,
         markVirtualParents: annotationMarkVirtualParents,
     },
+    styles: [bundledPluginStyle('annotations', 'annotations.css', 140)],
 };
 
 export type {AnnotationMarkData, AnnotationPresentation};

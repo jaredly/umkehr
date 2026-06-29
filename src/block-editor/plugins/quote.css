@@ -1,0 +1,9 @@
+/* Styles owned by the quote block editor plugin. */
+.blockquoteGroup {
+    border-left: 3px solid #8a9bae;
+    background: #f8fafc;
+}
+
+.blockType-blockquote > .editableBlock {
+    color: #354452;
+}

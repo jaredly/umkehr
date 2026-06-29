@@ -2,6 +2,7 @@ import type {RichBlockMeta} from '../blockMeta.js';
 import type {BlockEditorPlugin, BlockEditorToolbarItemSpec} from './types.js';
 import {declarationBlockRenderer, declarationOptionPanel, isPreviewMetadata, simpleRichBlockTypeSpec} from './blockPluginUtils.js';
 import {blockSlashCommand, toolbarItem, withOrder} from './legacyRichTextUi.js';
+import {bundledPluginStyle} from './pluginStyles.js';
 
 export const linkPreviewBlockTypeSpec = simpleRichBlockTypeSpec(
     'preview',
@@ -24,4 +25,5 @@ export const linkPreviewPlugin: BlockEditorPlugin<RichBlockMeta> = {
     blockRenderers: [declarationBlockRenderer('render:preview', 'preview')],
     optionPanels: [declarationOptionPanel('options:preview', 'preview')],
     clipboard: [{id: 'clipboard:preview'}],
+    styles: [bundledPluginStyle('link-preview', 'linkPreview.css', 130)],
 };

@@ -1,6 +1,7 @@
 import type {RichBlockMeta} from '../blockMeta.js';
 import type {BlockEditorPlugin, BlockEditorToolbarItemSpec} from './types.js';
 import {declarationBlockRenderer, declarationOptionPanel, isImagePresentationSize, simpleRichBlockTypeSpec} from './blockPluginUtils.js';
+import {bundledPluginStyle} from './pluginStyles.js';
 
 export const imageBlockTypeSpec = simpleRichBlockTypeSpec(
     'image',
@@ -22,4 +23,5 @@ export const imagesPlugin: BlockEditorPlugin<RichBlockMeta> = {
     blockRenderers: [declarationBlockRenderer('render:image', 'image')],
     optionPanels: [declarationOptionPanel('options:image', 'image')],
     clipboard: [{id: 'clipboard:image'}],
+    styles: [bundledPluginStyle('images', 'images.css', 120)],
 };

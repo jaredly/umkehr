@@ -8,6 +8,7 @@ import {
     structuralSlashCommands,
     structuralToolbarItems,
 } from './structuralHelpers.js';
+import {bundledPluginStyle} from './pluginStyles.js';
 
 export const columnsPlugin: BlockEditorPlugin<RichBlockMeta> = {
     id: 'columns',
@@ -29,4 +30,5 @@ export const columnsPlugin: BlockEditorPlugin<RichBlockMeta> = {
     ]),
     blockRenderers: structuralRenderers([{id: 'columns', blockType: 'columns'}]),
     optionPanels: structuralOptionPanels([{id: 'columns', blockType: 'columns'}]),
+    styles: [bundledPluginStyle('columns', 'columns.css', 160)],
 };

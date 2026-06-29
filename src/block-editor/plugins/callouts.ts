@@ -2,6 +2,7 @@ import type {RichBlockMeta} from '../blockMeta.js';
 import type {BlockEditorPlugin, BlockEditorToolbarItemSpec} from './types.js';
 import {declarationBlockRenderer, declarationOptionPanel, simpleRichBlockTypeSpec} from './blockPluginUtils.js';
 import {blockSlashCommand, toolbarItem, withOrder} from './legacyRichTextUi.js';
+import {bundledPluginStyle} from './pluginStyles.js';
 
 export const calloutBlockTypeSpec = simpleRichBlockTypeSpec('callout', (meta) =>
     meta.kind === 'info' || meta.kind === 'warning' || meta.kind === 'error',
@@ -25,4 +26,5 @@ export const calloutsPlugin: BlockEditorPlugin<RichBlockMeta> = {
     commands: [{id: 'callout:set-kind', handle: () => undefined}],
     blockRenderers: [declarationBlockRenderer('render:callout', 'callout')],
     optionPanels: [declarationOptionPanel('options:callout', 'callout')],
+    styles: [bundledPluginStyle('callouts', 'callouts.css', 90)],
 };

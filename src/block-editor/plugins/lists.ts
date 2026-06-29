@@ -2,6 +2,7 @@ import type {RichBlockMeta} from '../blockMeta.js';
 import type {BlockEditorMarkdownShortcutSpec, BlockEditorPlugin, BlockEditorToolbarItemSpec} from './types.js';
 import {declarationBlockRenderer, simpleRichBlockTypeSpec} from './blockPluginUtils.js';
 import {blockSlashCommand, toolbarItem, withOrder} from './legacyRichTextUi.js';
+import {bundledPluginStyle} from './pluginStyles.js';
 
 export const listBlockTypeSpec = simpleRichBlockTypeSpec('list_item', (meta) =>
     meta.kind === 'ordered' || meta.kind === 'unordered',
@@ -51,4 +52,5 @@ export const listsPlugin: BlockEditorPlugin<RichBlockMeta> = {
     ]),
     markdownShortcuts: listMarkdownShortcuts,
     blockRenderers: [declarationBlockRenderer('render:list-item', 'list_item')],
+    styles: [bundledPluginStyle('lists', 'lists.css', 60)],
 };

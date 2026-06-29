@@ -6,6 +6,7 @@ import type {
     BlockEditorPlugin,
     BlockEditorToolbarItemSpec,
 } from './types.js';
+import {bundledPluginStyle} from './pluginStyles.js';
 
 export const basicMarkIds = ['bold', 'italic', 'strikethrough', 'underline'] as const;
 
@@ -53,4 +54,5 @@ export const basicMarksPlugin: BlockEditorPlugin<RichBlockMeta> = {
     marks: basicMarkSpecs,
     toolbarItems: basicMarkToolbarItems,
     inlineRenderers: basicMarkRenderers,
+    styles: [bundledPluginStyle('basic-marks', 'basicMarks.css', 10)],
 };

@@ -1,0 +1,42 @@
+/* Styles owned by the inline-date block editor plugin. */
+.inlineEmbed {
+    display: inline-flex;
+    align-items: center;
+    max-width: min(18rem, 100%);
+    min-height: 1.35em;
+    margin: 0 0.08em;
+    padding: 0 0.36em;
+    border: 1px solid #b9c7d3;
+    border-radius: 5px;
+    color: #1f2d38;
+    background: #eef5f8;
+    font: inherit;
+    line-height: 1.25;
+    vertical-align: baseline;
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+}
+
+.inlineEmbed:hover {
+    border-color: #7f95a8;
+    background: #e4eef4;
+}
+
+.inlineEmbedDate {
+    color: #173b4d;
+    background: #eaf4f2;
+}
+
+.inlineEmbedUnknown {
+    color: #5c3c12;
+    background: #fff4da;
+}
+
+.inlineEmbedOffsetText {
+    position: absolute;
+    width: 0;
+    overflow: hidden;
+    opacity: 0;
+    pointer-events: none;
+}

@@ -5,6 +5,7 @@ import type {
     BlockEditorSlashCommandSpec,
     BlockEditorToolbarItemSpec,
 } from './types.js';
+import {bundledPluginStyle} from './pluginStyles.js';
 
 export type LegacyBlockTypeMenuItem = {
     value: BlockTypeMenuValue;
@@ -94,6 +95,7 @@ export const legacyRichTextUiPlugin: BlockEditorPlugin<RichBlockMeta> = {
     id: 'legacy-rich-text-ui',
     toolbarItems: legacyToolbarItemSpecs,
     slashCommands: legacySlashCommandSpecs,
+    styles: [bundledPluginStyle('legacy-rich-text-ui', 'legacyRichTextUi.css', 190)],
 };
 
 export const blockTypeMenuItemsFromToolbarSpecs = (

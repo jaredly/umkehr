@@ -47,6 +47,11 @@ type LocalLayoutState = {
     positions: Map<number, Coord>;
 };
 
+type SnapPulse = {
+    id: number;
+    pieces: Set<number>;
+};
+
 const minZoom = 0.1;
 const maxZoom = 2.5;
 const wheelZoomInFactor = 1.08;
@@ -84,6 +89,7 @@ export function JigsawPanel({
     const [drag, setDrag] = useState<DragState | null>(null);
     const [pan, setPan] = useState<PanState | null>(null);
     const [draggingMinimap, setDraggingMinimap] = useState(false);
+    const [snapPulse, setSnapPulse] = useState<SnapPulse | null>(null);
     const unplaced = useMemo(() => unplacedPieces(board, layout), [board, layout]);
     const localPositions = localLayout.positions;
 
@@ -181,6 +187,13 @@ export function JigsawPanel({
             return changed ? {...current, positions: nextPositions} : current;
         });
     }, [board, unplaced]);
+
+    useEffect(() => {
+        if (!snapPulse) return;
+        const timeout = window.setTimeout(() => setSnapPulse(null), 200);
+        return () => window.clearTimeout(timeout);
+    }, [snapPulse]);
+
     const renderedPositions = useMemo(() => {
         const result = new Map<number, Coord>(localPositions);
         for (const [piece, position] of layout.positions) result.set(piece, position);
@@ -289,13 +302,20 @@ export function JigsawPanel({
             allPositions,
             snapThreshold: threshold,
         });
+        const newConnections = candidates.filter(
+            (candidate) => latest.connections[candidate.key] === undefined,
+        );
         const patches = [
             positionPatch(latest, drag.anchor, anchorPosition),
-            ...candidates
-                .filter((candidate) => latest.connections[candidate.key] === undefined)
-                .map(connectionPatch),
+            ...newConnections.map(connectionPatch),
         ];
         editor.dispatch(patches);
+        if (newConnections.length) {
+            setSnapPulse({
+                id: window.performance.now(),
+                pieces: new Set(newConnections.flatMap((connection) => [connection.from, connection.to])),
+            });
+        }
         setDrag(null);
     };
 
@@ -387,13 +407,15 @@ export function JigsawPanel({
                             componentIndex === undefined ? undefined : layout.anchors.get(componentIndex);
                         const placed = layout.positions.has(index);
                         const active = activeComponent.has(index);
+                        const snapped = snapPulse?.pieces.has(index) ?? false;
                         return (
                             <button
                                 key={index}
                                 type="button"
                                 className={`jigsawPiece ${placed ? 'placed' : 'unplaced'} ${
                                     active ? 'dragging' : ''
-                                }`}
+                                } ${snapped ? 'snapped' : ''}`}
+                                data-snap-pulse={snapped ? snapPulse?.id : undefined}
                                 disabled={readOnly}
                                 onPointerDown={(event) => startDrag(index, event)}
                                 style={

@@ -27,11 +27,13 @@ describe('createBlockEditorRegistry', () => {
             id: 'a',
             toolbarItems: [{id: 'a.item'}],
             slashCommands: [{id: 'a.slash', label: 'A'}],
+            styles: [{id: 'a.styles', type: 'import', href: 'umkehr/block-editor/plugins/a.css'}],
         });
         const b = plugin({
             id: 'b',
             toolbarItems: [{id: 'b.item'}],
             slashCommands: [{id: 'b.slash', label: 'B'}],
+            styles: [{id: 'b.styles', type: 'import', href: 'umkehr/block-editor/plugins/b.css'}],
         });
 
         const first = createBlockEditorRegistry<TestMeta>([b, a]);
@@ -39,7 +41,30 @@ describe('createBlockEditorRegistry', () => {
 
         expect(first.toolbarItems.map((item) => item.id)).toEqual(second.toolbarItems.map((item) => item.id));
         expect(first.slashCommands.map((item) => item.id)).toEqual(second.slashCommands.map((item) => item.id));
+        expect(first.styles.map((item) => item.id)).toEqual(second.styles.map((item) => item.id));
         expect(first.toolbarItems.map((item) => item.pluginId)).toEqual(['a', 'b']);
+    });
+
+    it('sorts style contributions by order, plugin id, and style id', () => {
+        const registry = createBlockEditorRegistry<TestMeta>([
+            plugin({
+                id: 'z',
+                styles: [
+                    {id: 'z.late', type: 'import', href: 'umkehr/block-editor/plugins/z.css', order: 20},
+                    {id: 'z.early', type: 'import', href: 'umkehr/block-editor/plugins/z-early.css', order: 10},
+                ],
+            }),
+            plugin({
+                id: 'a',
+                styles: [{id: 'a.middle', type: 'css', cssText: '.a{}', order: 10}],
+            }),
+        ]);
+
+        expect(registry.styles.map((style) => [style.id, style.pluginId])).toEqual([
+            ['a.middle', 'a'],
+            ['z.early', 'z'],
+            ['z.late', 'z'],
+        ]);
     });
 
     it('rejects duplicate plugin ids', () => {
@@ -70,6 +95,15 @@ describe('createBlockEditorRegistry', () => {
                 plugin({id: 'b', marks: [{id: 'bold'}]}),
             ]),
         ).toThrow(/Duplicate mark "bold"/);
+    });
+
+    it('rejects duplicate style contribution ids', () => {
+        expect(() =>
+            createBlockEditorRegistry([
+                plugin({id: 'a', styles: [{id: 'shared.styles', type: 'css', cssText: '.a{}'}]}),
+                plugin({id: 'b', styles: [{id: 'shared.styles', type: 'css', cssText: '.b{}'}]}),
+            ]),
+        ).toThrow(/Duplicate style "shared.styles"/);
     });
 
     it('indexes selection plugins by selection type', () => {

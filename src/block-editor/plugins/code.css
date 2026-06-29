@@ -1,0 +1,174 @@
+/* Styles owned by the code block editor plugin. */
+.codeBlock {
+    padding: 7px 8px;
+    border: 1px solid #d6dde5;
+    border-radius: 6px;
+    color: #1c2b36;
+    background: #f5f7f9;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+    line-height: 1.5;
+}
+
+.previewCodeBlock {
+    min-width: 0;
+}
+
+.previewCodeToolbar {
+    display: inline-flex;
+    gap: 2px;
+    margin: 0 0 4px 6px;
+    padding: 2px;
+    border: 1px solid #cbd5df;
+    border-radius: 6px;
+    background: #f8fafc;
+}
+
+.previewCodeModeToggle {
+    height: 24px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: 4px;
+    color: #4a5967;
+    background: transparent;
+    font-size: 12px;
+}
+
+.previewCodeModeToggle[aria-pressed='true'] {
+    color: #14212c;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12);
+}
+
+.previewCodeSplit {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 8px;
+    align-items: start;
+}
+
+.previewCodeSplitEditor {
+    min-width: 0;
+}
+
+.codePreview {
+    min-height: 120px;
+    padding: 12px;
+    overflow-x: auto;
+    border: 1px solid #d6dde5;
+    border-radius: 6px;
+    color: #33414d;
+    background: #fff;
+}
+
+.codePreviewVisual {
+    position: relative;
+}
+
+.codePreview svg {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    margin: 0 auto;
+}
+
+.codePreviewError {
+    min-height: 60px;
+    color: #8a2b2b;
+    background: #fff6f4;
+    white-space: pre-wrap;
+}
+
+.codePreviewErrorOverlay {
+    position: sticky;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    margin: 12px -12px -12px;
+    padding: 8px 12px;
+    border-top: 1px solid #f0b8ae;
+    color: #8a2b2b;
+    background: rgba(255, 246, 244, 0.96);
+    font-size: 12px;
+    line-height: 1.35;
+    white-space: pre-wrap;
+}
+
+.codeLanguage,
+.blockOptionsSelect,
+.blockOptionsNumber {
+    min-width: 82px;
+    height: 30px;
+    border: 1px solid #cbd5df;
+    border-radius: 6px;
+    color: #33414d;
+    background: #fff;
+    font: inherit;
+}
+
+.codeLanguage {
+    width: 100%;
+    padding: 0 8px;
+}
+
+.blockOptionsMenu .codeLanguage {
+    box-sizing: border-box;
+    margin-top: 0;
+}
+
+.markCode {
+    border: 1px solid #d7dee6;
+    border-radius: 4px;
+    padding: 0 0.18em;
+    background: #f4f7f9;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 0.94em;
+}
+
+.markCodeHighlighted {
+    border: none;
+    margin: 0;
+    padding: 0;
+}
+
+.syntax-keyword {
+    color: #8f3daf;
+    font-weight: 650;
+}
+
+.syntax-title,
+.syntax-attr,
+.syntax-attribute,
+.syntax-name {
+    color: #0f6f8f;
+}
+
+.syntax-string,
+.syntax-template-string {
+    color: #1e7f4f;
+}
+
+.syntax-number,
+.syntax-literal {
+    color: #9a5b00;
+}
+
+.syntax-comment {
+    color: #6d7882;
+    font-style: italic;
+}
+
+.syntax-built_in,
+.syntax-selector-tag,
+.syntax-meta {
+    color: #7a4bb0;
+}
+
+.codeHoverLanguage {
+    min-width: 0;
+    overflow: hidden;
+    color: #33404c;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 13px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}

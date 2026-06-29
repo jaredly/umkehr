@@ -1,0 +1,18 @@
+/* Styles owned by the headings block editor plugin. */
+.headingLevel1 {
+    font-size: 24px;
+    font-weight: 760;
+    line-height: 1.2;
+}
+
+.headingLevel2 {
+    font-size: 20px;
+    font-weight: 720;
+    line-height: 1.25;
+}
+
+.headingLevel3 {
+    font-size: 17px;
+    font-weight: 700;
+    line-height: 1.3;
+}

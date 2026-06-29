@@ -558,3 +558,23 @@ Verification:
 ### Phase 7
 
 See implementation-log-7.md
+
+### Phase 8
+
+See implementation-log-8.md
+
+### Phase 9
+
+See implementation-log-9.md
+
+### Phase 10
+
+See implementation-log-10.md
+
+### Phase 11
+
+See implementation-log-11.md
+
+### Phase 12
+
+See implementation-log-12.md

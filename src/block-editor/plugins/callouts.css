@@ -1,0 +1,19 @@
+/* Styles owned by the callouts block editor plugin. */
+.calloutGroup {
+    border-left: 3px solid #2f7ba8;
+    background: #eef7fb;
+}
+
+.calloutWarning {
+    border-left-color: #b87918;
+    background: #fff8e8;
+}
+
+.calloutError {
+    border-left-color: #b84b42;
+    background: #fff1ef;
+}
+
+.blockType-callout > .editableBlock {
+    font-weight: 520;
+}

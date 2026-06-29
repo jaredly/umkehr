@@ -1,0 +1,62 @@
+/* Styles owned by the images block editor plugin. */
+.imageBlock {
+    width: min(100%, 560px);
+    margin: 2px 0 4px;
+}
+
+.imageSize-small {
+    width: min(100%, 240px);
+}
+
+.imageSize-medium {
+    width: min(100%, 420px);
+}
+
+.imageSize-large {
+    width: min(100%, 680px);
+}
+
+.imageSize-original {
+    width: min(100%, max-content);
+}
+
+.imagePreview,
+.imageMissing {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    min-height: 140px;
+    border: 1px solid #d6dde5;
+    border-radius: 6px;
+    background: #f5f7f9;
+}
+
+.imagePreview {
+    height: auto;
+    object-fit: contain;
+}
+
+.imageMissing {
+    display: grid;
+    place-items: center;
+    gap: 6px;
+    padding: 16px;
+    color: #657380;
+    text-align: center;
+}
+
+.imageMissing code {
+    max-width: 100%;
+    overflow: hidden;
+    color: #33414d;
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.imageCaption {
+    min-height: 30px;
+    margin-top: 4px;
+    color: #33414d;
+    font-size: 13px;
+}

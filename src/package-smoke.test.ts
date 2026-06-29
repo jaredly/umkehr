@@ -1,4 +1,4 @@
-import {existsSync} from 'node:fs';
+import {existsSync, readFileSync} from 'node:fs';
 import {describe, expect, it} from 'vitest';
 
 const packageImportTimeoutMs = 15_000;
@@ -103,4 +103,24 @@ describe('package exports', () => {
         expect(typeof remixPkg.createStateContext).toBe('function');
         expect(typeof remixPkg.createHistoryContext).toBe('function');
     }, packageImportTimeoutMs);
+
+    it('publishes block editor CSS entrypoints', () => {
+        const packageJson = JSON.parse(readFileSync('package.json', 'utf8')) as {
+            exports: Record<string, unknown>;
+            sideEffects: unknown;
+        };
+
+        expect(packageJson.exports['./block-editor/style.css']).toBe('./dist/src/block-editor/style.css');
+        expect(packageJson.exports['./block-editor/legacyRichTextPlugins.css']).toBe(
+            './dist/src/block-editor/legacyRichTextPlugins.css',
+        );
+        expect(packageJson.exports['./block-editor/plugins/*.css']).toBe('./dist/src/block-editor/plugins/*.css');
+        expect(packageJson.sideEffects).toEqual(['**/*.css']);
+        expect(existsSync('dist/src/block-editor/style.css')).toBe(true);
+        expect(existsSync('dist/src/block-editor/legacyRichTextPlugins.css')).toBe(true);
+        expect(existsSync('dist/src/block-editor/plugins/annotations.css')).toBe(true);
+        expect(readFileSync('dist/src/block-editor/legacyRichTextPlugins.css', 'utf8')).toContain(
+            "@import './plugins/table.css';",
+        );
+    });
 });

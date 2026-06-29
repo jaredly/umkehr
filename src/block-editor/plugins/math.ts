@@ -2,6 +2,7 @@ import {MATH_MARK} from '../inlineMarks.js';
 import type {RichBlockMeta} from '../blockMeta.js';
 
 import type {BlockEditorPlugin} from './types.js';
+import {bundledPluginStyle} from './pluginStyles.js';
 
 export const mathPlugin: BlockEditorPlugin<RichBlockMeta> = {
     id: 'math',
@@ -17,4 +18,5 @@ export const mathPlugin: BlockEditorPlugin<RichBlockMeta> = {
             order: 8,
         },
     ],
+    styles: [bundledPluginStyle('math', 'math.css', 30)],
 };

@@ -7,6 +7,7 @@ import {
     structuralSlashCommands,
     structuralToolbarItems,
 } from './structuralHelpers.js';
+import {bundledPluginStyle} from './pluginStyles.js';
 
 export const tablePlugin: BlockEditorPlugin<RichBlockMeta> = {
     id: 'table',
@@ -34,4 +35,5 @@ export const tablePlugin: BlockEditorPlugin<RichBlockMeta> = {
     crdt: {
         virtualParents: tableVirtualParentsForBlock,
     },
+    styles: [bundledPluginStyle('table', 'table.css', 180)],
 };

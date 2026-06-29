@@ -8,6 +8,7 @@ import {
     structuralRenderers,
     structuralToolbarItems,
 } from './structuralHelpers.js';
+import {bundledPluginStyle} from './pluginStyles.js';
 
 export const pollsPlugin: BlockEditorPlugin<RichBlockMeta> = {
     id: 'polls',
@@ -33,4 +34,5 @@ export const pollsPlugin: BlockEditorPlugin<RichBlockMeta> = {
         mergeBlockMetaTypes: ['poll'],
         mergeBlockMeta: mergeRichBlockMeta,
     },
+    styles: [bundledPluginStyle('polls', 'polls.css', 150)],
 };

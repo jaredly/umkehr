@@ -2,6 +2,7 @@ import type {RichBlockMeta} from '../blockMeta.js';
 import type {BlockEditorMarkdownShortcutSpec, BlockEditorPlugin, BlockEditorToolbarItemSpec} from './types.js';
 import {declarationBlockRenderer, simpleRichBlockTypeSpec} from './blockPluginUtils.js';
 import {blockSlashCommand, toolbarItem, withOrder} from './legacyRichTextUi.js';
+import {bundledPluginStyle} from './pluginStyles.js';
 
 export const headingBlockTypeSpec = simpleRichBlockTypeSpec('heading', (meta) =>
     meta.level === 1 || meta.level === 2 || meta.level === 3,
@@ -40,4 +41,5 @@ export const headingsPlugin: BlockEditorPlugin<RichBlockMeta> = {
     ]),
     markdownShortcuts: headingMarkdownShortcuts,
     blockRenderers: [declarationBlockRenderer('render:heading', 'heading')],
+    styles: [bundledPluginStyle('headings', 'headings.css', 50)],
 };

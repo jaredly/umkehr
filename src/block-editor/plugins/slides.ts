@@ -13,6 +13,7 @@ import {
     structuralSlashCommands,
     structuralToolbarItems,
 } from './structuralHelpers.js';
+import {bundledPluginStyle} from './pluginStyles.js';
 
 export const slidesPlugin: BlockEditorPlugin<RichBlockMeta> = {
     id: 'slides',
@@ -52,4 +53,5 @@ export const slidesPlugin: BlockEditorPlugin<RichBlockMeta> = {
         {id: 'slide-deck', blockType: 'slide_deck'},
         {id: 'slide', blockType: 'slide'},
     ]),
+    styles: [bundledPluginStyle('slides', 'slides.css', 170)],
 };

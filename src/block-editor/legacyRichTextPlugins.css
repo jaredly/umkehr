@@ -1,0 +1,42 @@
+/* Full legacy rich-text editor preset styles in deterministic preset order. */
+@import './style.css';
+
+@import './plugins/basicMarks.css';
+
+@import './plugins/links.css';
+
+@import './plugins/math.css';
+
+@import './plugins/inlineDate.css';
+
+@import './plugins/headings.css';
+
+@import './plugins/lists.css';
+
+@import './plugins/todos.css';
+
+@import './plugins/quote.css';
+
+@import './plugins/callouts.css';
+
+@import './plugins/code.css';
+
+@import './plugins/ingredients.css';
+
+@import './plugins/images.css';
+
+@import './plugins/linkPreview.css';
+
+@import './plugins/annotations.css';
+
+@import './plugins/polls.css';
+
+@import './plugins/columns.css';
+
+@import './plugins/slides.css';
+
+@import './plugins/table.css';
+
+@import './plugins/legacyRichTextUi.css';
+
+@import './plugins/legacyRichTextBlocks.css';

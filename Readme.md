@@ -32,9 +32,36 @@ bun add umkehr
 | `umkehr/react` | React contexts, hooks, and updater types |
 | `umkehr/remix` | Remix 3 client component contexts and updater types |
 | `umkehr/block-crdt` | Block-structured rich text CRDT ops, materialization, and change helpers |
+| `umkehr/block-editor` | React block editor components, commands, bundled plugins, and plugin registries |
 
 React and Remix are optional peer dependencies. Non-React and non-Remix users should import from
 `umkehr`.
+
+### Block Editor Styles
+
+The bundled block editor uses static CSS entrypoints. Import core shell styles when you only need the
+base editor layout:
+
+```ts
+import 'umkehr/block-editor/style.css';
+```
+
+Import the full legacy rich-text preset when using `legacyRichTextPlugins`:
+
+```ts
+import 'umkehr/block-editor/legacyRichTextPlugins.css';
+```
+
+Individual bundled plugin styles are available under stable plugin entrypoints, for example:
+
+```ts
+import 'umkehr/block-editor/plugins/annotations.css';
+import 'umkehr/block-editor/plugins/table.css';
+```
+
+`registry.styles` is a deterministic declaration surface for style ids, package CSS hrefs, and
+future runtime injection. The bundled editor does not inject styles at runtime; applications should
+load the static CSS entrypoints they use.
 
 ## Examples
 
