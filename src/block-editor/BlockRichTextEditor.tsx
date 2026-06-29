@@ -276,7 +276,7 @@ import {
     LinkFloatingPopover,
     LinkHoverPopover,
 } from './floatingPopovers.js';
-import {deriveActiveInlineMarks} from './inlineRunRendering.js';
+import {activeInlineMarkTypesFromRegistry, deriveActiveInlineMarks} from './inlineRunRendering.js';
 import {
     blockDropTargetFromPoint,
     orderDraggedBlockIds,
@@ -473,6 +473,7 @@ export function BlockRichTextEditor({
         () => (registry.toolbarItems.length ? new Set(registry.toolbarItems.map((item) => item.id)) : undefined),
         [registry],
     );
+    const activeInlineMarkTypes = useMemo(() => activeInlineMarkTypesFromRegistry(registry), [registry]);
     const rootRef = useRef<HTMLDivElement>(null);
     const editorContentRef = useRef<HTMLDivElement>(null);
     const pendingCaretRestoreBlockIdRef = useRef<string | null>(null);
@@ -644,8 +645,9 @@ export function BlockRichTextEditor({
                 blocks,
                 primaryResolvedSelection,
                 pendingInlineMarks,
+                activeInlineMarkTypes,
             ),
-        [blocks, pendingInlineMarks, primaryResolvedSelection, replica.state],
+        [activeInlineMarkTypes, blocks, pendingInlineMarks, primaryResolvedSelection, replica.state],
     );
     const decorationsByBlock = useMemo(
         () =>

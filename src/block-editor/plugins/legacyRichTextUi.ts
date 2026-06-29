@@ -99,7 +99,6 @@ export const legacySlashCommandSpecs: readonly BlockEditorSlashCommandSpec[] = w
 export const legacyToolbarItemSpecs: readonly BlockEditorToolbarItemSpec[] = withOrder([
     toolbarItem('history:undo', 'History', 'Undo'),
     toolbarItem('history:redo', 'History', 'Redo'),
-    toolbarItem('mark:code', 'Inline marks', 'Code'),
     toolbarItem('image:upload', 'Inline marks', 'Image'),
     toolbarItem('annotation:sidebar', 'Annotations', 'Comment'),
     toolbarItem('annotation:footnote', 'Annotations', 'Footnote'),

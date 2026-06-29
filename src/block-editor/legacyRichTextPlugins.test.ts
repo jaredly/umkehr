@@ -30,6 +30,7 @@ describe('legacyRichTextPlugins', () => {
         expect(registry.plugins.map((plugin) => plugin.id)).toEqual([
             'annotations',
             'basic-marks',
+            'code',
             'inline-date',
             'legacy-rich-text-blocks',
             'legacy-rich-text-ui',
@@ -101,6 +102,15 @@ describe('legacyRichTextPlugins', () => {
             remove: false,
             type: 'embed',
             data: {type: 'date', value: '2026-06-28'},
+            crossedSplits: [],
+        };
+        state.state.marks.code = {
+            id: [6, 'a'],
+            start: {id: [8, 'a'], at: 'before'},
+            end: {id: [9, 'a'], at: 'after'},
+            remove: false,
+            type: 'code',
+            data: 'ts',
             crossedSplits: [],
         };
 

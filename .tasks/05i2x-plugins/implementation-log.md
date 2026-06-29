@@ -348,3 +348,25 @@ Verification:
 
 - `npm exec vitest -- run src/block-editor/editorCrdtConfig.test.ts src/block-editor/legacyRichTextPlugins.test.ts src/block-editor/markdownShortcuts.test.ts src/block-editor/plugins/registry.test.ts src/block-editor/plugins/compatibility.test.ts src/block-editor/plugins/metadata.test.ts src/block-editor/plugins/legacyRichTextUi.test.ts src/block-editor/plugins/legacyRichTextBlocks.test.ts src/block-editor/plugins/basicMarks.test.ts src/block-editor/plugins/inlinePlugins.test.ts` passed.
 - `npm run typecheck` passed.
+
+### Phase 6 Continued: Inline Code And Active Mark Registry Filtering
+
+- Added `codePlugin` for the inline `code` mark.
+- Moved the `mark:code` toolbar item out of `legacyRichTextUiPlugin` and into `codePlugin`.
+- Added `codePlugin` to `legacyRichTextPlugins` so inline code mark records are recognized by the transitional preset compatibility scan.
+- Added `activeInlineMarkTypesFromRegistry(registry)` and updated `BlockRichTextEditor` to derive active inline marks from registered inline mark ids.
+- Kept `deriveActiveInlineMarks` backward-compatible by defaulting to the full current inline mark list when no explicit mark type list is passed.
+- Added tests for:
+  - `codePlugin` registry and compatibility declarations
+  - registry-derived active inline mark types
+  - ignoring unregistered mark types during active mark derivation
+
+Issues/workarounds:
+
+- The previous log entry listed `mark:code` as still owned by `legacyRichTextUiPlugin`; that was true for that slice, but this slice moves it into `codePlugin`.
+- Keyboard shortcuts and command handlers still know about the legacy mark ids directly. This change filters active mark derivation through the registry, but it does not yet add a command-policy layer that disables hard-coded keyboard commands when a plugin is unavailable.
+
+Verification:
+
+- `npm exec vitest -- run src/block-editor/editorCrdtConfig.test.ts src/block-editor/legacyRichTextPlugins.test.ts src/block-editor/markdownShortcuts.test.ts src/block-editor/inlineRunRendering.test.ts src/block-editor/plugins/registry.test.ts src/block-editor/plugins/compatibility.test.ts src/block-editor/plugins/metadata.test.ts src/block-editor/plugins/legacyRichTextUi.test.ts src/block-editor/plugins/legacyRichTextBlocks.test.ts src/block-editor/plugins/basicMarks.test.ts src/block-editor/plugins/inlinePlugins.test.ts src/block-editor/plugins/code.test.ts` passed.
+- `npm run typecheck` passed.

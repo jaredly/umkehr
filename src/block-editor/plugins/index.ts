@@ -3,6 +3,7 @@ export * from './registry.js';
 export * from './compatibility.js';
 export * from './metadata.js';
 export * from './basicMarks.js';
+export * from './code.js';
 export * from './links.js';
 export * from './math.js';
 export * from './inlineDate.js';
