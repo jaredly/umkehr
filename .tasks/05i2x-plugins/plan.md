@@ -420,10 +420,13 @@ Work items:
 - Document base editor usage.
 - Document full preset usage.
 - Document writing a plugin.
+- Document custom selection plugins, including registry-aware retain/resolve helpers and compatibility errors for persisted selection types.
 - Document document compatibility/load errors.
+- Document persisted code preview metadata as a dependency on the matching code preview renderer sub-plugin.
 - Document conflict rules.
-- Document plugin style packaging.
+- Document plugin style packaging, including static CSS entrypoints plus `styleImportsFromRegistry` / `styleTextFromRegistry`.
 - Document sub-plugin pattern using code preview renderers.
+- Mention that several legacy renderer/command implementations are still centrally executed even though their feature declarations are plugin-owned.
 
 Example target API:
 

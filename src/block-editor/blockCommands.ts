@@ -75,6 +75,7 @@ import {
     type BlockPoint,
     type EditorSelection,
 } from './selectionModel';
+import {isTableCellSelection} from './tableSelectionPlugin';
 import {textSegments} from './charUtils';
 import {applyCharInsertOpsOrApplyMany, localInsertTextOps} from './localTextOps';
 import {INLINE_EMBED_MARK, INLINE_EMBED_TEXT, type InlineEmbedData} from './inlineEmbeds';
@@ -2527,7 +2528,7 @@ export const deleteTableCellSelection = (
     selection: EditorSelection,
     context: CommandContext,
 ): CommandResult | null => {
-    if (selection.type !== 'table-cells') return null;
+    if (!isTableCellSelection(selection)) return null;
     const rectangle = tableCellRectangleForSelection(state, selection);
     if (!rectangle) return null;
     const rows = tableRows(state, selection.tableId);

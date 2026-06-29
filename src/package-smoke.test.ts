@@ -1,5 +1,6 @@
 import {existsSync, readFileSync} from 'node:fs';
 import {describe, expect, it} from 'vitest';
+import {createBlockEditorRegistry, legacyRichTextPlugins, styleImportsFromRegistry} from './block-editor/index';
 
 const packageImportTimeoutMs = 15_000;
 
@@ -122,5 +123,33 @@ describe('package exports', () => {
         expect(readFileSync('dist/src/block-editor/legacyRichTextPlugins.css', 'utf8')).toContain(
             "@import './plugins/table.css';",
         );
+    });
+
+    it('keeps bundled plugin style declarations aligned with package CSS entrypoints', () => {
+        const packageJson = JSON.parse(readFileSync('package.json', 'utf8')) as {
+            exports: Record<string, unknown>;
+        };
+        const registry = createBlockEditorRegistry(legacyRichTextPlugins);
+        const styleImports = styleImportsFromRegistry(registry);
+        const legacyPresetCss = readFileSync('src/block-editor/legacyRichTextPlugins.css', 'utf8');
+        const copyCssScript = readFileSync('scripts/copy-css.mjs', 'utf8');
+        let previousIndex = -1;
+
+        expect(packageJson.exports['./block-editor/plugins/*.css']).toBe('./dist/src/block-editor/plugins/*.css');
+        expect(copyCssScript).toContain("readdirSync('src/block-editor/plugins')");
+        expect(copyCssScript).toContain("file.endsWith('.css')");
+
+        for (const href of styleImports) {
+            const cssFile = href.replace('umkehr/block-editor/plugins/', '');
+            const importLine = `@import './plugins/${cssFile}';`;
+            expect(href).toMatch(/^umkehr\/block-editor\/plugins\/[^/]+\.css$/);
+            expect(existsSync(`src/block-editor/plugins/${cssFile}`)).toBe(true);
+            expect(packageJson.exports[`./block-editor/plugins/${cssFile}`] ?? packageJson.exports['./block-editor/plugins/*.css'])
+                .toBe('./dist/src/block-editor/plugins/*.css');
+            expect(legacyPresetCss).toContain(importLine);
+            const index = legacyPresetCss.indexOf(importLine);
+            expect(index).toBeGreaterThan(previousIndex);
+            previousIndex = index;
+        }
     });
 });

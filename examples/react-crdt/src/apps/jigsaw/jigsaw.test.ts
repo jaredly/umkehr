@@ -37,6 +37,7 @@ describe('jigsaw board artifacts', () => {
         [30, 6, 5],
         [60, 10, 6],
         [120, 15, 8],
+        [600, 30, 20],
     ] satisfies Array<[JigsawPieceCount, number, number]>)(
         'generates a %s-piece %sx%s rectangular board',
         (pieceCount, cols, rows) => {
@@ -73,7 +74,6 @@ describe('jigsaw board artifacts', () => {
             expect(piece.bounds.width).toBeGreaterThan(0);
             expect(piece.bounds.height).toBeGreaterThan(0);
             expect(piece.mask.length).toBeGreaterThanOrEqual(3);
-            expect(piece.neighbors.length).toBeGreaterThanOrEqual(2);
             expect(maskFitsBounds(piece)).toBe(true);
             piece.neighbors.forEach((neighbor) => {
                 const reverse = board.pieces[neighbor.piece].neighbors.find((entry) => entry.piece === index);
@@ -98,8 +98,43 @@ describe('jigsaw board artifacts', () => {
         expect(validConnections(board, {[connectionKey(0, nonNeighbor)]: 1})).toEqual([]);
     });
 
-    it('generates reciprocal neighbor offsets', () => {
-        const board = generateJigsawBoard(12);
+    it('generates viable 600-piece Voronoi board geometry', () => {
+        const board = generateJigsawBoard(600, {type: 'voronoi'});
+        expect(board.id).toBe(JIGSAW_BOARD_ARTIFACT_ID);
+        expect(board.image).toBe('stock:hue');
+        expect(board.pieces).toHaveLength(600);
+        expect(board.title).toContain('Voronoi');
+        expect(totalMaskArea(board)).toBeCloseTo(board.imageSize.width * board.imageSize.height, -4);
+
+        const sampleIndexes = [0, 17, 29, 300, 570, 599];
+        sampleIndexes.forEach((index) => {
+            const piece = board.pieces[index];
+            expect(Number.isFinite(piece.center.x)).toBe(true);
+            expect(Number.isFinite(piece.center.y)).toBe(true);
+            expect(piece.bounds.width).toBeGreaterThan(0);
+            expect(piece.bounds.height).toBeGreaterThan(0);
+            expect(piece.mask.length).toBeGreaterThanOrEqual(3);
+            expect(piece.neighbors.length).toBeGreaterThanOrEqual(2);
+            expect(maskFitsBounds(piece)).toBe(true);
+            piece.neighbors.forEach((neighbor) => {
+                const reverse = board.pieces[neighbor.piece].neighbors.find((entry) => entry.piece === index);
+                expect(reverse).toBeTruthy();
+                expect(reverse?.offset.x).toBeCloseTo(-neighbor.offset.x);
+                expect(reverse?.offset.y).toBeCloseTo(-neighbor.offset.y);
+            });
+        });
+
+        expect(board.pieces.reduce((sum, piece) => sum + piece.neighbors.length, 0)).toBeGreaterThan(600);
+        const source = board.pieces.findIndex((piece) => piece.neighbors.length > 0);
+        expect(source).toBeGreaterThanOrEqual(0);
+        const sourceNeighbor = board.pieces[source].neighbors[0];
+        expect(validConnections(board, {[connectionKey(source, sourceNeighbor.piece)]: 1})).toEqual([
+            {key: connectionKey(source, sourceNeighbor.piece), from: source, to: sourceNeighbor.piece, strength: 1},
+        ]);
+    });
+
+    it.each([12, 600] satisfies JigsawPieceCount[])('generates reciprocal neighbor offsets for %s pieces', (pieceCount) => {
+        const board = generateJigsawBoard(pieceCount);
         board.pieces.forEach((piece, index) => {
             piece.neighbors.forEach((neighbor) => {
                 const reverse = board.pieces[neighbor.piece].neighbors.find((entry) => entry.piece === index);
@@ -150,6 +185,7 @@ describe('jigsaw board artifacts', () => {
         expect(isJigsawPieceCount(30)).toBe(true);
         expect(isJigsawPieceCount(60)).toBe(true);
         expect(isJigsawPieceCount(120)).toBe(true);
+        expect(isJigsawPieceCount(600)).toBe(true);
         expect(isJigsawPieceCount(24)).toBe(false);
         expect(jigsawApp.documentInit?.validate({pieceCount: 30})).toEqual({
             success: true,
@@ -166,6 +202,7 @@ describe('jigsaw board artifacts', () => {
             pieceCount: 60,
             title: expect.stringContaining('Voronoi'),
         });
+        expect(initialJigsawArtifacts(600)[0].data).toMatchObject({pieceCount: 600});
         const appArtifacts = jigsawApp.documentInit?.initialArtifacts?.({pieceCount: 120, type: 'voronoi'});
         expect(appArtifacts?.[0].data).toMatchObject({
             pieceCount: 120,

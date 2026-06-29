@@ -3,16 +3,29 @@ import {blockContents, cachedState, rootBlockIds} from 'umkehr/block-crdt';
 import {initialState} from 'umkehr/block-crdt/initialState';
 import type {CachedState} from 'umkehr/block-crdt/types';
 import {deleteBackward, insertText, moveBlock, pastePlainText, type CommandContext} from 'umkehr/block-editor';
-import {caret, type EditorSelection} from 'umkehr/block-editor';
+import {
+    BlockEditorSelectionPluginError,
+    caret,
+    createBlockEditorRegistry,
+    type BlockEditorPlugin,
+    type EditorSelection,
+    type PluginEditorSelection,
+    type PluginRetainedSelection,
+    type RetainedSelection,
+} from 'umkehr/block-editor';
 import {
     appendSelection,
     blockLevelDecorationsForSelectionSet,
+    blockLevelDecorationsForSelectionSetFromRegistry,
     decorationsForSelectionSet,
     dedupeSelectionSet,
+    dedupeSelectionSetFromRegistry,
     mergeOverlappingRanges,
     primarySelection,
     resolveSelectionSet,
+    resolveSelectionSetFromRegistry,
     singleRetainedSelectionSet,
+    singleRetainedSelectionSetFromRegistry,
 } from 'umkehr/block-editor';
 
 const ctx = (actor = 'left'): CommandContext => {
@@ -28,6 +41,44 @@ const init = () => cachedState(initialState('doc', '00000'));
 const onlyBlock = (state: CachedState) => rootBlockIds(state)[0];
 
 const lines = (state: CachedState) => rootBlockIds(state).map((id) => blockContents(state, id));
+
+const testZonePlugin = (): BlockEditorPlugin => ({
+    id: 'test-zone-plugin',
+    selectionTypes: [{id: 'test-zone', label: 'Test zone'}],
+    selectionPlugins: [
+        {
+            id: 'test-zone',
+            retain: ({selection}) => selection,
+            resolve: ({selection}) => selection,
+            focusPoint: ({selection}) => ({blockId: stringField(selection, 'focusBlockId'), offset: 0}),
+            firstPoint: ({selection}) => ({blockId: stringField(selection, 'anchorBlockId'), offset: 0}),
+            selectedBlockIds: ({selection}) => [
+                stringField(selection, 'anchorBlockId'),
+                stringField(selection, 'focusBlockId'),
+            ],
+            selectedTopLevelBlockIds: ({selection}) => [
+                stringField(selection, 'anchorBlockId'),
+                stringField(selection, 'focusBlockId'),
+            ],
+            blockLevelDecorations: ({selection, primary}) =>
+                new Map([
+                    [stringField(selection, 'anchorBlockId'), {selected: true, primary, focus: false}],
+                    [stringField(selection, 'focusBlockId'), {selected: true, primary, focus: true}],
+                ]),
+            compare: ({one, two}) =>
+                stringField(one, 'anchorBlockId').localeCompare(stringField(two, 'anchorBlockId')),
+        },
+    ],
+});
+
+const testZoneSelection = (anchorBlockId: string, focusBlockId: string): EditorSelection => ({
+    type: 'test-zone',
+    anchorBlockId,
+    focusBlockId,
+});
+
+const stringField = (selection: PluginEditorSelection | PluginRetainedSelection, key: string): string =>
+    typeof selection[key] === 'string' ? selection[key] : '';
 
 describe('block rich text selection sets', () => {
     it('retains and resolves multiple selections with a primary entry', () => {
@@ -276,5 +327,46 @@ describe('block rich text selection sets', () => {
             carets: [{id: 'primary', offset: 0, primary: true}],
             segments: [],
         });
+    });
+
+    it('flows a non-table custom selection through registry-aware helpers', () => {
+        const registry = createBlockEditorRegistry([testZonePlugin()]);
+        const pasted = pastePlainText(init(), caret(onlyBlock(init()), 0), 'one\ntwo\nthree', ctx());
+        const [firstBlock, secondBlock, thirdBlock] = rootBlockIds(pasted.state);
+        const selection = testZoneSelection(firstBlock, secondBlock);
+
+        const set = singleRetainedSelectionSetFromRegistry(registry, pasted.state, selection, 'zone');
+        const resolved = resolveSelectionSetFromRegistry(registry, pasted.state, set);
+        const decorations = blockLevelDecorationsForSelectionSetFromRegistry(registry, pasted.state, resolved);
+        const deduped = dedupeSelectionSetFromRegistry(registry, pasted.state, {
+            primaryId: 'zone-2',
+            entries: [
+                ...set.entries,
+                {
+                    id: 'zone-2',
+                    selection: testZoneSelection(secondBlock, thirdBlock) as RetainedSelection,
+                },
+            ],
+        });
+
+        expect(primarySelection(resolved)).toEqual(selection);
+        expect(decorations).toEqual(
+            new Map([
+                [firstBlock, {selected: true, primary: true, focus: false}],
+                [secondBlock, {selected: true, primary: true, focus: true}],
+            ]),
+        );
+        expect(resolveSelectionSetFromRegistry(registry, pasted.state, deduped).entries.map((entry) => entry.id)).toEqual([
+            'zone',
+            'zone-2',
+        ]);
+    });
+
+    it('throws a clear selection plugin error when unknown custom selections bypass compatibility', () => {
+        const pasted = pastePlainText(init(), caret(onlyBlock(init()), 0), 'one\ntwo', ctx());
+        const [firstBlock, secondBlock] = rootBlockIds(pasted.state);
+        const selection = testZoneSelection(firstBlock, secondBlock);
+
+        expect(() => singleRetainedSelectionSet(pasted.state, selection)).toThrow(BlockEditorSelectionPluginError);
     });
 });

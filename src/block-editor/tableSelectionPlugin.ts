@@ -33,7 +33,7 @@ export type TableCellRectangle = {
 };
 
 export const isTableCellSelection = (
-    selection: PluginEditorSelection | PluginRetainedSelection,
+    selection: {type: string; tableId?: unknown; anchorCellId?: unknown; focusCellId?: unknown},
 ): selection is TableCellSelection =>
     selection.type === 'table-cells' &&
     typeof selection.tableId === 'string' &&
@@ -199,6 +199,13 @@ const clampTableSelection = (
     focusCellId: clampBlockId(state, selection.focusCellId),
 });
 
+export const retainTableCellSelection = (selection: TableCellSelection): RetainedTableCellSelection => selection;
+
+export const clampTableCellSelection = (
+    state: CachedState<RichBlockMeta>,
+    selection: TableCellSelection,
+): TableCellSelection => clampTableSelection(state, selection);
+
 const resolveTableSelection = (
     state: CachedState<RichBlockMeta>,
     selection: RetainedTableCellSelection,
@@ -208,6 +215,11 @@ const resolveTableSelection = (
     anchorCellId: resolveBlockId(state, selection.anchorCellId),
     focusCellId: resolveBlockId(state, selection.focusCellId),
 });
+
+export const resolveTableCellSelection = (
+    state: CachedState<RichBlockMeta>,
+    selection: RetainedTableCellSelection,
+): TableCellSelection => resolveTableSelection(state, selection);
 
 const selectedTopLevelTableCellIdsForSelection = (
     state: CachedState<RichBlockMeta>,

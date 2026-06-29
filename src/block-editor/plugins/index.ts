@@ -2,6 +2,7 @@ export * from './types.js';
 export * from './registry.js';
 export * from './compatibility.js';
 export * from './metadata.js';
+export * from './pluginStyles.js';
 export * from './basicMarks.js';
 export * from './code.js';
 export * from './links.js';

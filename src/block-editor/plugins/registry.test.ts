@@ -1,6 +1,7 @@
 import {describe, expect, it} from 'vitest';
 
 import {createBlockEditorRegistry} from './registry';
+import {styleImportsFromRegistry, styleTextFromRegistry} from './pluginStyles';
 import {BlockEditorPluginRegistryError, type BlockEditorPlugin} from './types';
 
 type TestMeta =
@@ -65,6 +66,25 @@ describe('createBlockEditorRegistry', () => {
             ['z.early', 'z'],
             ['z.late', 'z'],
         ]);
+    });
+
+    it('extracts registry style text and imports in deterministic registry order', () => {
+        const registry = createBlockEditorRegistry<TestMeta>([
+            plugin({
+                id: 'imports',
+                styles: [{id: 'imports.styles', type: 'import', href: 'umkehr/block-editor/plugins/imports.css', order: 20}],
+            }),
+            plugin({
+                id: 'text',
+                styles: [
+                    {id: 'text.base', type: 'css', cssText: '.base{}', order: 10},
+                    {id: 'text.extra', type: 'css', cssText: '.extra{}', order: 30},
+                ],
+            }),
+        ]);
+
+        expect(styleTextFromRegistry(registry)).toBe('.base{}\n.extra{}');
+        expect(styleImportsFromRegistry(registry)).toEqual(['umkehr/block-editor/plugins/imports.css']);
     });
 
     it('rejects duplicate plugin ids', () => {

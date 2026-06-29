@@ -82,13 +82,16 @@ export const editorSelectionKey = (selection: EditorSelection): string => {
     if (selection.type === 'table-cells') {
         return `table-cells:${selection.tableId}:${selection.anchorCellId}:${selection.focusCellId}`;
     }
-    return [
-        'range',
-        selection.anchor.blockId,
-        selection.anchor.offset,
-        selection.focus.blockId,
-        selection.focus.offset,
-    ].join(':');
+    if (selection.type === 'range') {
+        return [
+            'range',
+            selection.anchor.blockId,
+            selection.anchor.offset,
+            selection.focus.blockId,
+            selection.focus.offset,
+        ].join(':');
+    }
+    return `plugin:${selection.type}:${JSON.stringify(selection)}`;
 };
 
 export const measureInput = (

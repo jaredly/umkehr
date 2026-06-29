@@ -157,9 +157,11 @@ function generateVoronoiJigsawBoard(pieceCount: JigsawPieceCount): JigsawBoardAr
         }
     }
 
-    const polygons = sites.map((site, index) => voronoiCell(site, index, sites, JIGSAW_IMAGE_SIZE));
+    const polygons = sites.map((site, index) =>
+        voronoiCell(site, index, sites, JIGSAW_IMAGE_SIZE, grid),
+    );
     const centers = polygons.map((polygon) => centerOfBounds(boundsForPolygon(polygon)));
-    const neighbors = neighborsForPolygons(polygons, centers);
+    const neighbors = neighborsForPolygons(polygons, centers, grid);
     const pieces = polygons.map((polygon, index): JigsawPiece => {
         const imageBounds = boundsForPolygon(polygon);
         const center = centerOfBounds(imageBounds);
@@ -204,7 +206,7 @@ export function gridForPieceCount(pieceCount: JigsawPieceCount) {
         case 120:
             return {cols: 15, rows: 8};
         case 600:
-            return {cols: 60, rows: 10};
+            return {cols: 30, rows: 20};
     }
 }
 
@@ -246,15 +248,20 @@ function signedPerturbation(size: number) {
     return magnitude * (Math.random() < 0.5 ? -1 : 1);
 }
 
-function voronoiCell(site: Coord, siteIndex: number, sites: Coord[], size: {width: number; height: number}) {
+function voronoiCell(
+    site: Coord,
+    siteIndex: number,
+    sites: Coord[],
+    size: {width: number; height: number},
+    grid: {cols: number; rows: number},
+) {
     let polygon: Coord[] = [
         {x: 0, y: 0},
         {x: size.width, y: 0},
         {x: size.width, y: size.height},
         {x: 0, y: size.height},
     ];
-    for (let index = 0; index < sites.length; index++) {
-        if (index === siteIndex) continue;
+    for (const index of nearbyGridIndexes(siteIndex, grid, 3)) {
         polygon = clipToCloserSite(polygon, site, sites[index]);
         if (polygon.length === 0) break;
     }
@@ -317,17 +324,31 @@ function polygonToMask(polygon: Coord[], center: Coord): PathSegment[] {
     return polygon.map((point) => ({type: 'Line', to: subtract(point, center)}));
 }
 
-function neighborsForPolygons(polygons: Coord[][], centers: Coord[]) {
+function neighborsForPolygons(polygons: Coord[][], centers: Coord[], grid: {cols: number; rows: number}) {
     const neighbors = new Map<number, Array<{piece: number; offset: Coord}>>();
     for (let index = 0; index < polygons.length; index++) neighbors.set(index, []);
     for (let a = 0; a < polygons.length; a++) {
-        for (let b = a + 1; b < polygons.length; b++) {
+        for (const b of nearbyGridIndexes(a, grid, 3)) {
+            if (b <= a) continue;
             if (!polygonsShareEdge(polygons[a], polygons[b])) continue;
             neighbors.get(a)?.push({piece: b, offset: subtract(centers[b], centers[a])});
             neighbors.get(b)?.push({piece: a, offset: subtract(centers[a], centers[b])});
         }
     }
     return neighbors;
+}
+
+function nearbyGridIndexes(index: number, grid: {cols: number; rows: number}, radius: number) {
+    const row = Math.floor(index / grid.cols);
+    const col = index % grid.cols;
+    const result: number[] = [];
+    for (let nextRow = Math.max(0, row - radius); nextRow <= Math.min(grid.rows - 1, row + radius); nextRow++) {
+        for (let nextCol = Math.max(0, col - radius); nextCol <= Math.min(grid.cols - 1, col + radius); nextCol++) {
+            const next = nextRow * grid.cols + nextCol;
+            if (next !== index) result.push(next);
+        }
+    }
+    return result;
 }
 
 function polygonsShareEdge(a: Coord[], b: Coord[]) {

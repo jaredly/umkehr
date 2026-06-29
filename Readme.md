@@ -60,8 +60,9 @@ import 'umkehr/block-editor/plugins/table.css';
 ```
 
 `registry.styles` is a deterministic declaration surface for style ids, package CSS hrefs, and
-future runtime injection. The bundled editor does not inject styles at runtime; applications should
-load the static CSS entrypoints they use.
+custom CSS text. Applications can use `styleImportsFromRegistry(registry)` to inspect static package
+CSS hrefs and `styleTextFromRegistry(registry)` to collect opt-in custom CSS text. The bundled editor
+does not inject styles at runtime; applications should load the static CSS entrypoints they use.
 
 ## Examples
 

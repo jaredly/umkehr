@@ -1,4 +1,6 @@
 import {
+    memo,
+    useCallback,
     useEffect,
     useLayoutEffect,
     useMemo,
@@ -59,6 +61,7 @@ const maxZoom = 2.5;
 const wheelZoomInFactor = 1.08;
 const wheelZoomOutFactor = 0.92;
 const remoteMoveAnimationMs = 240;
+const maxCanvasBackingScale = 4;
 
 export function JigsawPanel({
     editor,
@@ -83,7 +86,14 @@ export function JigsawPanel({
     const threshold = useMemo(() => snapThreshold(board), [board]);
     const viewportRef = useRef<HTMLDivElement | null>(null);
     const pieceRefs = useRef(new Map<number, HTMLElement>());
-    const backdropRefs = useRef(new Map<number, HTMLElement>());
+    const pieceElementRefs = useMemo(
+        () =>
+            board.pieces.map(
+                (_piece, index) => (element: HTMLButtonElement | null) =>
+                    setPieceElement(pieceRefs.current, index, element),
+            ),
+        [board],
+    );
     const [viewportSize, setViewportSize] = useState({width: 1, height: 1});
     const [viewport, setViewport] = useState<JigsawViewport>({panX: 0, panY: 0, zoom: 1});
     const [viewportInitialized, setViewportInitialized] = useState(false);
@@ -215,11 +225,6 @@ export function JigsawPanel({
         durationMs: remoteMoveAnimationMs,
         localMoveAnimationNonce,
     });
-    usePieceMoveAnimation(renderedPositions, backdropRefs, {
-        disabled: Boolean(drag),
-        durationMs: remoteMoveAnimationMs,
-        localMoveAnimationNonce,
-    });
     const activeComponent = useMemo(() => new Set(drag?.component ?? []), [drag]);
     const placedPieces = useMemo(() => new Set(layout.positions.keys()), [layout.positions]);
     const totalConnections = board.pieces.reduce((sum, piece) => sum + piece.neighbors.length, 0) / 2;
@@ -253,6 +258,13 @@ export function JigsawPanel({
             delta: {x: 0, y: 0},
         });
     };
+    const startDragRef = useRef(startDrag);
+    startDragRef.current = startDrag;
+    const handlePiecePointerDown = useCallback((event: PointerEvent<HTMLButtonElement>) => {
+        const piece = Number(event.currentTarget.dataset.piece);
+        if (!Number.isInteger(piece)) return;
+        startDragRef.current(piece, event);
+    }, []);
 
     const startPan = (event: PointerEvent<HTMLDivElement>) => {
         if (event.button !== 0 || !event.isPrimary || drag) return;
@@ -430,36 +442,6 @@ export function JigsawPanel({
                         const position = renderedPositions.get(index);
                         if (!position) return null;
                         const canvasPosition = imageToCanvas(position, boardGeometry.imageOffset);
-                        return (
-                            <div
-                                key={`backdrop-${index}`}
-                                ref={(element) => setPieceElement(backdropRefs.current, index, element)}
-                                className="jigsawPieceBackdrop"
-                                style={
-                                    {
-                                        '--piece-left': `${canvasPosition.x + piece.bounds.left}px`,
-                                        '--piece-top': `${canvasPosition.y + piece.bounds.top}px`,
-                                        '--piece-width': `${piece.bounds.width}px`,
-                                        '--piece-height': `${piece.bounds.height}px`,
-                                        '--piece-z': index,
-                                    } as CSSProperties
-                                }
-                                aria-hidden="true"
-                            >
-                                <PieceCanvas
-                                    source={sourceImage}
-                                    pieceCenter={piece.center}
-                                    bounds={piece.bounds}
-                                    mask={piece.mask}
-                                    className="jigsawPieceBackdropCanvas"
-                                />
-                            </div>
-                        );
-                    })}
-                    {board.pieces.map((piece, index) => {
-                        const position = renderedPositions.get(index);
-                        if (!position) return null;
-                        const canvasPosition = imageToCanvas(position, boardGeometry.imageOffset);
                         const componentIndex = layout.pieceToComponent.get(index);
                         const component =
                             componentIndex === undefined
@@ -471,40 +453,33 @@ export function JigsawPanel({
                         const active = activeComponent.has(index);
                         const snapped = snapPulse?.pieces.has(index) ?? false;
                         return (
-                            <button
+                            <JigsawPieceView
                                 key={index}
-                                ref={(element) => setPieceElement(pieceRefs.current, index, element)}
-                                type="button"
-                                className={`jigsawPiece ${placed ? 'placed' : 'unplaced'} ${
-                                    active ? 'dragging' : ''
-                                } ${snapped ? 'snapped' : ''}`}
-                                data-snap-pulse={snapped ? snapPulse?.id : undefined}
-                                disabled={readOnly}
-                                onPointerDown={(event) => startDrag(index, event)}
-                                style={
-                                    {
-                                        '--piece-left': `${canvasPosition.x + piece.bounds.left}px`,
-                                        '--piece-top': `${canvasPosition.y + piece.bounds.top}px`,
-                                        '--piece-width': `${piece.bounds.width}px`,
-                                        '--piece-height': `${piece.bounds.height}px`,
-                                        '--piece-z': pieceZIndex({
-                                            piece: index,
-                                            component,
-                                            anchor,
-                                            placed,
-                                            active,
-                                        }),
-                                    } as CSSProperties
-                                }
-                                aria-label={`Piece ${index + 1}`}
-                            >
-                                <PieceCanvas
-                                    source={sourceImage}
-                                    pieceCenter={piece.center}
-                                    bounds={piece.bounds}
-                                    mask={piece.mask}
-                                />
-                            </button>
+                                elementRef={pieceElementRefs[index]}
+                                piece={index}
+                                left={canvasPosition.x + piece.bounds.left}
+                                top={canvasPosition.y + piece.bounds.top}
+                                width={piece.bounds.width}
+                                height={piece.bounds.height}
+                                zIndex={pieceZIndex({
+                                    piece: index,
+                                    component,
+                                    anchor,
+                                    placed,
+                                    active,
+                                })}
+                                placed={placed}
+                                active={active}
+                                snapped={snapped}
+                                snapPulseId={snapPulse?.id}
+                                readOnly={readOnly}
+                                source={sourceImage}
+                                pieceCenterX={piece.center.x}
+                                pieceCenterY={piece.center.y}
+                                bounds={piece.bounds}
+                                mask={piece.mask}
+                                onPointerDown={handlePiecePointerDown}
+                            />
                         );
                     })}
                 </div>
@@ -618,24 +593,126 @@ function setPieceElement(
     refs.delete(piece);
 }
 
+type JigsawPieceViewProps = {
+    elementRef: (element: HTMLButtonElement | null) => void;
+    piece: number;
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+    zIndex: number;
+    placed: boolean;
+    active: boolean;
+    snapped: boolean;
+    snapPulseId?: number;
+    readOnly: boolean;
+    source: HTMLCanvasElement;
+    pieceCenterX: number;
+    pieceCenterY: number;
+    bounds: PieceBounds;
+    mask: PathSegment[];
+    onPointerDown: (event: PointerEvent<HTMLButtonElement>) => void;
+};
+
+const JigsawPieceView = memo(function JigsawPieceView({
+    elementRef,
+    piece,
+    left,
+    top,
+    width,
+    height,
+    zIndex,
+    placed,
+    active,
+    snapped,
+    snapPulseId,
+    readOnly,
+    source,
+    pieceCenterX,
+    pieceCenterY,
+    bounds,
+    mask,
+    onPointerDown,
+}: JigsawPieceViewProps) {
+    return (
+        <button
+            ref={elementRef}
+            type="button"
+            className={`jigsawPiece ${placed ? 'placed' : 'unplaced'} ${active ? 'dragging' : ''} ${
+                snapped ? 'snapped' : ''
+            }`}
+            data-piece={piece}
+            data-snap-pulse={snapped ? snapPulseId : undefined}
+            disabled={readOnly}
+            onPointerDown={onPointerDown}
+            style={
+                {
+                    '--piece-left': `${left}px`,
+                    '--piece-top': `${top}px`,
+                    '--piece-width': `${width}px`,
+                    '--piece-height': `${height}px`,
+                    '--piece-z': zIndex,
+                } as CSSProperties
+            }
+            aria-label={`Piece ${piece + 1}`}
+        >
+            <PieceCanvas
+                source={source}
+                pieceCenter={{x: pieceCenterX, y: pieceCenterY}}
+                bounds={bounds}
+                mask={mask}
+            />
+        </button>
+    );
+}, areJigsawPieceViewPropsEqual);
+
+function areJigsawPieceViewPropsEqual(previous: JigsawPieceViewProps, next: JigsawPieceViewProps) {
+    return (
+        previous.elementRef === next.elementRef &&
+        previous.piece === next.piece &&
+        previous.left === next.left &&
+        previous.top === next.top &&
+        previous.width === next.width &&
+        previous.height === next.height &&
+        previous.zIndex === next.zIndex &&
+        previous.placed === next.placed &&
+        previous.active === next.active &&
+        previous.snapped === next.snapped &&
+        previous.snapPulseId === next.snapPulseId &&
+        previous.readOnly === next.readOnly &&
+        previous.source === next.source &&
+        previous.pieceCenterX === next.pieceCenterX &&
+        previous.pieceCenterY === next.pieceCenterY &&
+        previous.bounds === next.bounds &&
+        previous.mask === next.mask &&
+        previous.onPointerDown === next.onPointerDown
+    );
+}
+
 function SolvedImageCanvas({source, offset}: {source: HTMLCanvasElement; offset: Coord}) {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
+    const backingScale = canvasBackingScale();
+    const backingWidth = Math.max(1, Math.round(source.width * backingScale));
+    const backingHeight = Math.max(1, Math.round(source.height * backingScale));
+
     useEffect(() => {
         const canvas = canvasRef.current;
         if (!canvas) return;
-        canvas.width = source.width;
-        canvas.height = source.height;
+        canvas.width = backingWidth;
+        canvas.height = backingHeight;
         const context = canvas.getContext('2d');
         if (!context) return;
         context.clearRect(0, 0, canvas.width, canvas.height);
-        context.drawImage(source, 0, 0);
-    }, [source]);
+        context.imageSmoothingEnabled = true;
+        context.imageSmoothingQuality = 'high';
+        context.drawImage(source, 0, 0, source.width, source.height, 0, 0, canvas.width, canvas.height);
+    }, [backingHeight, backingWidth, source]);
     return (
         <canvas
             ref={canvasRef}
             className="jigsawSolvedImage"
-            width={source.width}
-            height={source.height}
+            width={backingWidth}
+            height={backingHeight}
             style={{left: offset.x, top: offset.y, width: source.width, height: source.height}}
             aria-hidden="true"
         />
@@ -656,14 +733,23 @@ function PieceCanvas({
     className?: string;
 }) {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
+    const backingScale = canvasBackingScale();
+    const logicalWidth = Math.max(1, Math.round(bounds.width));
+    const logicalHeight = Math.max(1, Math.round(bounds.height));
+    const backingWidth = Math.max(1, Math.round(bounds.width * backingScale));
+    const backingHeight = Math.max(1, Math.round(bounds.height * backingScale));
+
     useEffect(() => {
         const canvas = canvasRef.current;
         if (!canvas) return;
-        canvas.width = Math.max(1, Math.round(bounds.width));
-        canvas.height = Math.max(1, Math.round(bounds.height));
+        canvas.width = backingWidth;
+        canvas.height = backingHeight;
         const context = canvas.getContext('2d');
         if (!context) return;
         context.clearRect(0, 0, canvas.width, canvas.height);
+        context.scale(backingScale, backingScale);
+        context.imageSmoothingEnabled = true;
+        context.imageSmoothingQuality = 'high';
         context.save();
         drawMaskPath(context, mask, bounds);
         context.clip();
@@ -677,28 +763,28 @@ function PieceCanvas({
             bounds.height,
             0,
             0,
-            canvas.width,
-            canvas.height,
+            bounds.width,
+            bounds.height,
         );
         context.restore();
 
-        context.save();
-        drawMaskPath(context, mask, bounds);
-        context.strokeStyle = 'rgb(31 41 55 / 0.42)';
-        context.lineWidth = 1;
-        context.stroke();
-        context.restore();
-    }, [bounds, mask, pieceCenter.x, pieceCenter.y, source]);
+    }, [backingHeight, backingScale, backingWidth, bounds, mask, pieceCenter.x, pieceCenter.y, source]);
 
     return (
         <canvas
             ref={canvasRef}
             className={className}
-            width={Math.max(1, Math.round(bounds.width))}
-            height={Math.max(1, Math.round(bounds.height))}
+            width={backingWidth}
+            height={backingHeight}
+            style={{width: logicalWidth, height: logicalHeight}}
             aria-hidden="true"
         />
     );
+}
+
+function canvasBackingScale() {
+    if (typeof window === 'undefined') return 1;
+    return Math.max(1, Math.min(maxCanvasBackingScale, Math.ceil(window.devicePixelRatio * maxZoom)));
 }
 
 function createStockHueCanvas(size: {width: number; height: number}) {

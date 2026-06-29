@@ -105,31 +105,11 @@
     touch-action: none;
 }
 
-.jigsawPieceBackdrop {
-    position: absolute;
-    left: var(--piece-left);
-    top: var(--piece-top);
-    width: var(--piece-width);
-    height: var(--piece-height);
-    z-index: var(--piece-z);
-    overflow: visible;
-    pointer-events: none;
-}
-
-.jigsawPieceCanvas,
-.jigsawPieceBackdropCanvas {
+.jigsawPieceCanvas {
     display: block;
     width: 100%;
     height: 100%;
     transform-origin: center;
-}
-
-.jigsawPieceBackdropCanvas {
-    filter:
-        drop-shadow(0 1px 1px rgb(15 23 42 / 42%))
-        drop-shadow(0 0 2px rgb(15 23 42 / 28%));
-    opacity: 0.72;
-    transform: scale(1.018);
 }
 
 .jigsawPiece.unplaced {

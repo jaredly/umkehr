@@ -81,6 +81,7 @@ import {
     type BlockPoint,
     type EditorSelection,
 } from './selectionModel';
+import {isTableCellSelection} from './tableSelectionPlugin';
 import {
     ANNOTATION_MARK,
     richTextVirtualParents,
@@ -296,9 +297,9 @@ const pasteRichClipboardIntoBlockSelection = (
 ): MultiCommandResult | null => {
     const resolved = resolveSelectionSet(state, selection);
     const primary = primarySelection(resolved);
-    if (primary.type !== 'block' && primary.type !== 'table-cells') return null;
+    if (primary.type !== 'block' && !isTableCellSelection(primary)) return null;
     const noOp = {state, ops: [], selection: dedupeSelectionSet(state, selection)};
-    if (primary.type !== 'table-cells' || !payload.fragments.length) return noOp;
+    if (!isTableCellSelection(primary) || !payload.fragments.length) return noOp;
 
     const rectangle = tableCellRectangleForSelection(state, primary);
     if (!rectangle) return noOp;

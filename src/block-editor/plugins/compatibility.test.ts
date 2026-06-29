@@ -6,11 +6,13 @@ import {
     blockEditorDocumentCompatibilityIssues,
     BlockEditorPluginLoadError,
 } from './compatibility';
+import {codeMermaidPlugin, codePlugin, codeVegaPlugin} from './code';
 import type {BlockEditorPlugin} from './types';
 import type {CachedState} from '../../block-crdt/types';
 
 type TestMeta =
     | {type: 'paragraph'; ts: string}
+    | {type: 'code'; language: string; preview?: 'mermaid' | 'vega-lite'; ts: string}
     | {type: 'poll'; ts: string}
     | {type: 'card'; ts: string};
 
@@ -32,6 +34,15 @@ const emptyState = (): CachedState<TestMeta> => ({
 });
 
 const plugin = (input: BlockEditorPlugin<TestMeta>): BlockEditorPlugin<TestMeta> => input;
+
+const addBlock = (state: CachedState<TestMeta>, id: string, meta: TestMeta) => {
+    state.state.blocks[id] = {
+        id: [1, id],
+        meta,
+        style: {},
+        order: {id: [1, id], path: [], index: [], ts: '1'},
+    };
+};
 
 describe('block editor document plugin compatibility', () => {
     it('allows paragraph blocks without plugins', () => {
@@ -136,5 +147,76 @@ describe('block editor document plugin compatibility', () => {
 
         expect(() => assertBlockEditorDocumentPluginsAvailable(createBlockEditorRegistry<TestMeta>([]), {state}))
             .toThrow(BlockEditorPluginLoadError);
+    });
+
+    it('allows plain code metadata with the code plugin only', () => {
+        const state = emptyState();
+        addBlock(state, 'code', {type: 'code', language: 'ts', ts: '1'});
+
+        expect(
+            blockEditorDocumentCompatibilityIssues(
+                createBlockEditorRegistry<TestMeta>([codePlugin as BlockEditorPlugin<TestMeta>]),
+                {state},
+            ),
+        ).toEqual([]);
+    });
+
+    it('reports Mermaid preview metadata without the Mermaid renderer plugin', () => {
+        const state = emptyState();
+        addBlock(state, 'diagram', {type: 'code', language: 'mermaid', preview: 'mermaid', ts: '1'});
+
+        expect(
+            blockEditorDocumentCompatibilityIssues(
+                createBlockEditorRegistry<TestMeta>([codePlugin as BlockEditorPlugin<TestMeta>]),
+                {state},
+            ),
+        ).toEqual([{type: 'code-preview', id: 'diagram', previewKind: 'mermaid', language: 'mermaid'}]);
+    });
+
+    it('accepts Mermaid preview metadata when the Mermaid renderer plugin is registered', () => {
+        const state = emptyState();
+        addBlock(state, 'diagram', {type: 'code', language: 'mermaid', preview: 'mermaid', ts: '1'});
+
+        expect(
+            blockEditorDocumentCompatibilityIssues(
+                createBlockEditorRegistry<TestMeta>([
+                    codePlugin as BlockEditorPlugin<TestMeta>,
+                    codeMermaidPlugin as BlockEditorPlugin<TestMeta>,
+                ]),
+                {state},
+            ),
+        ).toEqual([]);
+    });
+
+    it('accepts Vega-Lite preview metadata for both language aliases with the Vega renderer plugin', () => {
+        const state = emptyState();
+        addBlock(state, 'vega-lite', {type: 'code', language: 'vega-lite', preview: 'vega-lite', ts: '1'});
+        addBlock(state, 'vegalite', {type: 'code', language: 'vegalite', preview: 'vega-lite', ts: '1'});
+
+        expect(
+            blockEditorDocumentCompatibilityIssues(
+                createBlockEditorRegistry<TestMeta>([
+                    codePlugin as BlockEditorPlugin<TestMeta>,
+                    codeVegaPlugin as BlockEditorPlugin<TestMeta>,
+                ]),
+                {state},
+            ),
+        ).toEqual([]);
+    });
+
+    it('reports preview kind and language mismatches', () => {
+        const state = emptyState();
+        addBlock(state, 'mismatch', {type: 'code', language: 'mermaid', preview: 'vega-lite', ts: '1'});
+
+        expect(
+            blockEditorDocumentCompatibilityIssues(
+                createBlockEditorRegistry<TestMeta>([
+                    codePlugin as BlockEditorPlugin<TestMeta>,
+                    codeMermaidPlugin as BlockEditorPlugin<TestMeta>,
+                    codeVegaPlugin as BlockEditorPlugin<TestMeta>,
+                ]),
+                {state},
+            ),
+        ).toEqual([{type: 'code-preview', id: 'mismatch', previewKind: 'vega-lite', language: 'mermaid'}]);
     });
 });

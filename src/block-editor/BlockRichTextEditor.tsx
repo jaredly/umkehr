@@ -202,16 +202,21 @@ import {
 import {useBlockReorder, type DropTarget} from './useBlockReorder.js';
 import {
     appendSelection,
+    appendSelectionFromRegistry,
     blockLevelDecorationsForSelectionSetFromRegistry,
     dedupeSelectionSet,
     decorationsForSelectionSet,
     mergeOverlappingRanges,
     primarySelection,
     replacePrimarySelection,
+    replacePrimarySelectionFromRegistry,
     replaceSelectionSet,
+    replaceSelectionSetFromRegistry,
     resolveSelectionSet,
+    resolveSelectionSetFromRegistry,
     reverseSortedRetainedEntries,
     retainSelectionSet,
+    retainSelectionSetFromRegistry,
     selectedTopLevelBlockIdsForSelectionSetFromRegistry,
     singleRetainedSelectionSet,
     type BlockLevelSelectionDecorations,
@@ -221,6 +226,7 @@ import {
     type RetainedSelectionSet,
 } from './selectionSet.js';
 import {resolveSelection, retainSelection} from './retainedSelection.js';
+import {focusPointFromRegistry} from './selectionPlugins.js';
 import {findWordOccurrences, wordAtPoint} from './wordOccurrences.js';
 import {
     popoverIdsForTrigger,
@@ -731,7 +737,7 @@ export function BlockRichTextEditor({
         [blocksWithAnnotationBodies],
     );
     const orderedListNumbers = useMemo(() => deriveOrderedListNumbers(blocks), [blocks]);
-    const retainedResolvedSelectionSet = resolveSelectionSet(replica.state, replica.selection);
+    const retainedResolvedSelectionSet = resolveSelectionSetFromRegistry(registry, replica.state, replica.selection);
     const resolvedSelectionSet: EditorSelectionSet = dragSelection
         ? {
               primaryId: retainedResolvedSelectionSet.primaryId,
@@ -761,7 +767,8 @@ export function BlockRichTextEditor({
     const selectedPopoverIdsKey = selectedPopoverIds.join('\0');
     const selectedBlockType = blockTypeMenuValueFromRegistry(
         registry,
-        replica.state.state.blocks[focusPoint(primaryResolvedSelection).blockId]?.meta,
+        replica.state.state.blocks[focusPointFromRegistry(registry, replica.state, primaryResolvedSelection).blockId]
+            ?.meta,
     );
     const activeInlineMarks = useMemo(
         () =>
@@ -792,7 +799,9 @@ export function BlockRichTextEditor({
         const domSelection = window.getSelection();
         if (domSelection) domSelection.removeAllRanges();
         pendingBlockSelectionFocusRef.current = editorSelection ?? null;
-        const focusBlockId = editorSelection ? focusPoint(editorSelection).blockId : null;
+        const focusBlockId = editorSelection
+            ? focusPointFromRegistry(registry, replica.state, editorSelection).blockId
+            : null;
         const target =
             editorSelection?.type === 'table-cells'
                 ? rootRef.current?.querySelector<HTMLElement>(
@@ -811,7 +820,7 @@ export function BlockRichTextEditor({
         if (target && !target.matches('.slideViewport:not(.slideViewport-presentation)')) {
             pendingBlockSelectionFocusRef.current = null;
         }
-    }, []);
+    }, [registry, replica.state]);
 
     const submitCommand = useCallback(
         (command: (replica: Replica) => MultiCommandResult, options: SubmitCommandOptions = {}) => {
@@ -1200,20 +1209,22 @@ export function BlockRichTextEditor({
                 state: current.state,
                 ops: [],
                 selection: addSelection
-                    ? appendSelection(
+                    ? appendSelectionFromRegistry(
+                          registry,
                           current.state,
                           current.selection,
                           selection,
                           nextSelectionId(),
                       )
                     : event.type === 'keyup'
-                      ? replacePrimarySelection(current.state, current.selection, selection)
-                      : replaceSelectionSet(current.state, selection, current.selection.primaryId),
+                      ? replacePrimarySelectionFromRegistry(registry, current.state, current.selection, selection)
+                      : replaceSelectionSetFromRegistry(registry, current.state, selection, current.selection.primaryId),
             }));
         },
         [
             clearPendingInlineMarks,
             nextSelectionId,
+            registry,
             submitCommand,
             primaryResolvedSelection,
             resetVerticalCaretIntent,
@@ -1445,9 +1456,9 @@ export function BlockRichTextEditor({
         const root = rootRef.current;
         const selection = root ? readSelectionFromDom(root) : null;
         return selection
-            ? replacePrimarySelection(current.state, current.selection, selection)
+            ? replacePrimarySelectionFromRegistry(registry, current.state, current.selection, selection)
             : current.selection;
-    }, []);
+    }, [registry]);
 
     const runEditCommand = useCallback(
         (command: (current: Replica, selection: RetainedSelectionSet) => MultiCommandResult) => {
@@ -1455,26 +1466,26 @@ export function BlockRichTextEditor({
                 resetVerticalCaretIntent();
                 const retainedSelection = current.selection;
                 const currentPrimary = primarySelection(
-                    resolveSelectionSet(current.state, retainedSelection),
+                    resolveSelectionSetFromRegistry(registry, current.state, retainedSelection),
                 );
                 const selection = isBlockLevelSelection(currentPrimary)
                     ? retainedSelection
                     : liveSelectionSet(current);
                 const result = command(current, selection);
                 const primaryResultSelection = primarySelection(
-                    resolveSelectionSet(result.state, result.selection),
+                    resolveSelectionSetFromRegistry(registry, result.state, result.selection),
                 );
                 scheduleSelectionRestore(primaryResultSelection);
                 return result;
             });
         },
-        [liveSelectionSet, resetVerticalCaretIntent, scheduleSelectionRestore, submitCommand],
+        [liveSelectionSet, registry, resetVerticalCaretIntent, scheduleSelectionRestore, submitCommand],
     );
 
     const currentClipboardPayload = useCallback((): RichClipboardPayload | null => {
             const currentPrimary = primarySelection(resolvedSelectionSet);
             const selection = isBlockLevelSelection(currentPrimary)
-                ? retainSelectionSet(replica.state, resolvedSelectionSet)
+                ? retainSelectionSetFromRegistry(registry, replica.state, resolvedSelectionSet)
                 : liveSelectionSet(replica);
             return serializeSelectionToClipboardPayload(
                 replica.state,

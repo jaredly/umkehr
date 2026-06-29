@@ -22,16 +22,8 @@ import {
     type RetainedSelection,
 } from './retainedSelection.js';
 import type {BlockLevelSelectionDecorations} from './selectionSet.js';
-
-export class BlockEditorSelectionPluginError extends Error {
-    readonly code: string;
-
-    constructor(code: string, message: string) {
-        super(message);
-        this.name = 'BlockEditorSelectionPluginError';
-        this.code = code;
-    }
-}
+export {BlockEditorSelectionPluginError} from './selectionPluginError.js';
+import {BlockEditorSelectionPluginError} from './selectionPluginError.js';
 
 export const retainSelectionFromRegistry = (
     registry: Pick<BlockEditorRegistry<RichBlockMeta>, 'selectionPlugins'>,
@@ -165,7 +157,11 @@ export const compareSelectionsFromRegistry = (
     two: EditorSelection,
 ): number => {
     if (!isCoreSelection(one) && one.type === two.type) {
-        const compared = selectionPlugin(registry, one.type).compare?.({state, one, two: two as PluginEditorSelection});
+        const compared = selectionPlugin(registry, one.type).compare?.({
+            state,
+            one: one as PluginEditorSelection,
+            two: two as PluginEditorSelection,
+        });
         if (typeof compared === 'number') return compared;
     }
     return comparePoints(state, firstPointFromRegistry(registry, state, one), firstPointFromRegistry(registry, state, two));

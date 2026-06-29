@@ -11,8 +11,14 @@ import {
     type BlockPoint,
     type DecorationAffinity,
     type EditorSelection,
+    type PluginRetainedSelection,
 } from './selectionModel';
-import {tableSelectionPlugin, type RetainedTableCellSelection} from './tableSelectionPlugin';
+import {
+    resolveTableCellSelection,
+    retainTableCellSelection,
+    type RetainedTableCellSelection,
+} from './tableSelectionPlugin';
+import {BlockEditorSelectionPluginError} from './selectionPluginError';
 
 export type RetainedPoint = {
     blockId: string;
@@ -26,7 +32,7 @@ export type CoreRetainedSelection =
     | {type: 'range'; anchor: RetainedPoint; focus: RetainedPoint}
     | {type: 'block'; anchorBlockId: string; focusBlockId: string};
 
-export type RetainedSelection = CoreRetainedSelection | RetainedTableCellSelection;
+export type RetainedSelection = CoreRetainedSelection | PluginRetainedSelection;
 
 export const initialRetainedSelection = (state: CachedState<RichBlockMeta>): RetainedSelection => {
     const blockId = editableBlockIds(state)[0] ?? allBlockIds(state)[0] ?? '';
@@ -48,13 +54,16 @@ export const retainSelection = (
         };
     }
     if (selection.type === 'table-cells') {
-        return tableSelectionPlugin.retain({state, selection}) as RetainedSelection;
+        return retainTableCellSelection(selection as RetainedTableCellSelection);
     }
-    return {
-        type: 'range',
-        anchor: retainPoint(state, selection.anchor),
-        focus: retainPoint(state, selection.focus),
-    };
+    if (selection.type === 'range') {
+        return {
+            type: 'range',
+            anchor: retainPoint(state, selection.anchor),
+            focus: retainPoint(state, selection.focus),
+        };
+    }
+    throw unknownSelectionPluginError(selection.type, 'retain');
 };
 
 export const retainPoint = (state: CachedState<RichBlockMeta>, point: BlockPoint): RetainedPoint => {
@@ -83,8 +92,9 @@ export const resolveSelection = (
         };
     }
     if (selection.type === 'table-cells') {
-        return tableSelectionPlugin.resolve({state, selection}) as EditorSelection;
+        return resolveTableCellSelection(state, selection as RetainedTableCellSelection);
     }
+    if (selection.type !== 'range') throw unknownSelectionPluginError(selection.type, 'resolve');
     const anchor = resolvePoint(state, selection.anchor);
     const focus = resolvePoint(state, selection.focus);
     if (anchor.blockId === focus.blockId && anchor.offset === focus.offset) {
@@ -112,3 +122,9 @@ export const resolveBlockId = (state: CachedState<RichBlockMeta>, blockId: strin
 
 export const retainedCaret = (state: CachedState<RichBlockMeta>, blockId: string, offset: number): RetainedSelection =>
     retainSelection(state, caret(blockId, offset));
+
+const unknownSelectionPluginError = (type: string, action: string): BlockEditorSelectionPluginError =>
+    new BlockEditorSelectionPluginError(
+        'unknown-selection-plugin',
+        `Selection type "${type}" requires a registered selection plugin to ${action} this selection.`,
+    );

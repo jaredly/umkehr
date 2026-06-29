@@ -120,18 +120,20 @@ export function JigsawMinimap({
                         stroke="#94a3b8"
                         strokeWidth={6}
                     />
-                    {Array.from(renderedPositions.entries()).map(([piece, position]) => (
-                        <path
-                            key={piece}
-                            d={svgPathForMask(board.pieces[piece]?.mask ?? [])}
-                            transform={`translate(${position.x + imageOffset.x} ${position.y + imageOffset.y})`}
-                            fill={pieceFill(board, piece)}
-                            fillOpacity={placedPieces.has(piece) ? 0.86 : 0.56}
-                            stroke={placedPieces.has(piece) ? '#1e3a8a' : '#64748b'}
-                            strokeWidth={4}
-                            vectorEffect="non-scaling-stroke"
-                        />
-                    ))}
+                    {Array.from(renderedPositions.entries()).map(([piece, position]) => {
+                        const pieceData = board.pieces[piece];
+                        if (!pieceData) return null;
+                        const placed = placedPieces.has(piece);
+                        return (
+                            <path
+                                key={piece}
+                                d={svgPathForMask(pieceData.mask)}
+                                transform={`translate(${position.x + imageOffset.x} ${position.y + imageOffset.y})`}
+                                fill={pieceFill(board, piece)}
+                                fillOpacity={placed ? 0.86 : 0.56}
+                            />
+                        );
+                    })}
                     <rect
                         x={viewRect.x}
                         y={viewRect.y}

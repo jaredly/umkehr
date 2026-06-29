@@ -5,16 +5,17 @@ import type {RichBlockMeta} from './blockMeta';
 import {richTextVirtualParents} from './virtualParents';
 import {
     selectedCellIdsForSelection as selectedTableCellIdsForSelection,
+    clampTableCellSelection,
     tableCellPosition as tableSelectionCellPosition,
     tableCellRectangleForSelection as tableSelectionCellRectangleForSelection,
     tableCellsForSelection as tableSelectionCellsForSelection,
     tableRowsForSelection as tableSelectionRowsForSelection,
-    tableSelectionPlugin,
     isTableCellSelection,
     type TableCellPosition,
     type TableCellRectangle,
     type TableCellSelection,
 } from './tableSelectionPlugin';
+import {BlockEditorSelectionPluginError} from './selectionPluginError';
 
 export type DecorationAffinity = 'beforeDecorations' | 'afterDecorations';
 
@@ -32,12 +33,13 @@ export type CoreBlockSelection = {type: 'block'; anchorBlockId: string; focusBlo
 
 export type CoreEditorSelection = TextSelection | CoreBlockSelection;
 
-export type PluginEditorSelection = {type: string} & Record<string, JsonValue>;
-export type PluginRetainedSelection = {type: string} & Record<string, JsonValue>;
+export type PluginSelectionType = `${string}-${string}` | `${string}/${string}` | `${string}:${string}`;
+export type PluginEditorSelection = {type: PluginSelectionType} & Record<string, JsonValue>;
+export type PluginRetainedSelection = {type: PluginSelectionType} & Record<string, JsonValue>;
 
-export type BlockLevelSelection = CoreBlockSelection | TableCellSelection;
+export type BlockLevelSelection = CoreBlockSelection | PluginEditorSelection;
 
-export type EditorSelection = CoreEditorSelection | TableCellSelection;
+export type EditorSelection = CoreEditorSelection | PluginEditorSelection;
 
 export type SelectionSegment = {
     blockId: string;
@@ -111,13 +113,16 @@ export const clampSelection = (state: CachedState<RichBlockMeta>, selection: Edi
         };
     }
     if (selection.type === 'table-cells') {
-        return (tableSelectionPlugin.clamp?.({state, selection}) ?? selection) as EditorSelection;
+        return clampTableCellSelection(state, selection as TableCellSelection);
     }
-    return {
-        type: 'range',
-        anchor: clampPoint(state, selection.anchor),
-        focus: clampPoint(state, selection.focus),
-    };
+    if (selection.type === 'range') {
+        return {
+            type: 'range',
+            anchor: clampPoint(state, selection.anchor),
+            focus: clampPoint(state, selection.focus),
+        };
+    }
+    throw unknownSelectionPluginError(selection.type, 'clamp');
 };
 
 export const isTextSelection = (selection: EditorSelection): selection is TextSelection =>
@@ -137,7 +142,7 @@ export const focusPoint = (selection: EditorSelection): BlockPoint => {
     if (selection.type === 'range') return selection.focus;
     if (selection.type === 'block') return {blockId: selection.focusBlockId, offset: 0};
     if (isTableCellSelection(selection)) return {blockId: selection.focusCellId, offset: 0};
-    return {blockId: '', offset: 0};
+    throw unknownSelectionPluginError(selection.type, 'find the focus point for');
 };
 
 export const textFocusPoint = (selection: TextSelection): BlockPoint =>
@@ -148,7 +153,7 @@ export const focusBlockId = (selection: EditorSelection): string => {
     if (selection.type === 'range') return selection.focus.blockId;
     if (selection.type === 'block') return selection.focusBlockId;
     if (isTableCellSelection(selection)) return selection.focusCellId;
-    return '';
+    throw unknownSelectionPluginError(selection.type, 'find the focus block for');
 };
 
 export const normalizeSelectionSegments = (
@@ -191,6 +196,7 @@ export const firstPointForSelection = (state: CachedState<RichBlockMeta>, select
     if (selection.type === 'caret') return clampPoint(state, selection.point);
     if (selection.type === 'block') return {blockId: clampBlockId(state, selection.anchorBlockId), offset: 0};
     if (isTableCellSelection(selection)) return {blockId: clampBlockId(state, selection.anchorCellId), offset: 0};
+    if (selection.type !== 'range') throw unknownSelectionPluginError(selection.type, 'find the first point for');
     const segments = normalizeSelectionSegments(state, selection);
     if (!segments.length) return clampPoint(state, selection.focus);
     return {blockId: segments[0].blockId, offset: segments[0].startOffset};
@@ -213,7 +219,8 @@ export const selectedBlockIdsForSelection = (
     if (selection.type === 'block') {
         return selectedBlockRange(state, selection.anchorBlockId, selection.focusBlockId);
     }
-    return isTableCellSelection(selection) ? selectedCellIdsForSelection(state, selection) : [];
+    if (isTableCellSelection(selection)) return selectedCellIdsForSelection(state, selection);
+    throw unknownSelectionPluginError(selection.type, 'find selected block ids for');
 };
 
 export const selectedCellIdsForSelection = (
@@ -310,6 +317,12 @@ const clampBlockId = (state: CachedState<RichBlockMeta>, blockId: string): strin
     if (block && !isDeleted(block) && !state.cache.joinedBlocks[blockId]) return blockId;
     return visibleBlockIds(state)[0] ?? blockId;
 };
+
+const unknownSelectionPluginError = (type: string, action: string): BlockEditorSelectionPluginError =>
+    new BlockEditorSelectionPluginError(
+        'unknown-selection-plugin',
+        `Selection type "${type}" requires a registered selection plugin to ${action} this selection.`,
+    );
 
 export const segmentText = (text: string): string[] =>
     /^[\x00-\x7F]*$/.test(text)

@@ -1,9 +1,11 @@
 import type {CachedState, Mark, TimestampedBlockMeta} from '../../block-crdt/types.js';
 
 import type {BlockEditorRegistry} from './types.js';
+import {normalizeCodePreviewLanguage} from '../codePreviewRegistry.js';
 
 export type BlockEditorDocumentCompatibilityIssue =
     | {type: 'block'; id: string; blockType: string}
+    | {type: 'code-preview'; id: string; previewKind: string; language: string}
     | {type: 'mark'; id: string; markType: string}
     | {type: 'inline-embed'; id: string; embedType: string}
     | {type: 'selection'; id: string; selectionType: string};
@@ -49,6 +51,15 @@ export const blockEditorDocumentCompatibilityIssues = <Meta extends TimestampedB
         if (blockType && !coreBlockTypes.has(blockType) && !registry.blockTypes.has(blockType)) {
             issues.push({type: 'block', id, blockType});
         }
+        const codePreview = codePreviewMetadata(block.meta);
+        if (codePreview) {
+            const renderer = registry.codePreviewRenderersByLanguage.get(
+                normalizeCodePreviewLanguage(codePreview.language),
+            );
+            if (!renderer || renderer.previewKind !== codePreview.previewKind) {
+                issues.push({type: 'code-preview', id, ...codePreview});
+            }
+        }
     }
 
     for (const [id, mark] of Object.entries(input.state.state.marks)) {
@@ -92,6 +103,8 @@ const documentCompatibilityMessage = (issues: readonly BlockEditorDocumentCompat
             switch (issue.type) {
                 case 'block':
                     return `block "${issue.id}" requires block type "${issue.blockType}"`;
+                case 'code-preview':
+                    return `code block "${issue.id}" requires a "${issue.previewKind}" preview renderer for language "${issue.language}"`;
                 case 'mark':
                     return `mark "${issue.id}" requires mark type "${issue.markType}"`;
                 case 'inline-embed':
@@ -103,6 +116,17 @@ const documentCompatibilityMessage = (issues: readonly BlockEditorDocumentCompat
         .join('; ');
     const suffix = issues.length > 5 ? `; and ${issues.length - 5} more` : '';
     return `Document requires unavailable block editor plugins: ${summary}${suffix}.`;
+};
+
+const codePreviewMetadata = (
+    meta: TimestampedBlockMeta,
+): {previewKind: string; language: string} | null => {
+    const record = meta as unknown as {type?: unknown; preview?: unknown; language?: unknown};
+    if (record.type !== 'code' || typeof record.preview !== 'string') return null;
+    return {
+        previewKind: record.preview,
+        language: typeof record.language === 'string' ? record.language : '',
+    };
 };
 
 const metadataType = (meta: TimestampedBlockMeta): string | null => {
