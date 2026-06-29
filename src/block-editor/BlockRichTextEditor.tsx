@@ -1412,9 +1412,10 @@ export function BlockRichTextEditor({
                 replica.state,
                 selection,
                 serializeAttachments(attachments),
+                inlineRenderFeatures,
             );
         },
-        [attachments, liveSelectionSet, replica, resolvedSelectionSet],
+        [attachments, inlineRenderFeatures, liveSelectionSet, replica, resolvedSelectionSet],
     );
 
     const writeCurrentSelectionToClipboard = useCallback(async () => {
@@ -6590,6 +6591,8 @@ function AnnotationBodyBlock({
             const payload = serializeSelectionToClipboardPayload(
                 state,
                 singleRetainedSelectionSet(state, selected),
+                [],
+                inlineRenderFeatures,
             );
             if (!payload) return;
             event.preventDefault();
@@ -6597,7 +6600,7 @@ function AnnotationBodyBlock({
             event.clipboardData.setData('text/plain', payload.plainText);
             event.clipboardData.setData('text/html', htmlWithClipboardPayload(payload));
         },
-        [selection, state],
+        [inlineRenderFeatures, selection, state],
     );
 
     useLayoutEffect(() => {
@@ -6648,6 +6651,8 @@ function AnnotationBodyBlock({
             const payload = serializeSelectionToClipboardPayload(
                 state,
                 singleRetainedSelectionSet(state, selected),
+                [],
+                inlineRenderFeatures,
             );
             if (!payload) return;
             event.preventDefault();
@@ -6658,7 +6663,7 @@ function AnnotationBodyBlock({
                 replaceAnnotationBodySelection(currentState, activeSelection, '', context),
             );
         },
-        [run, selection, state],
+        [inlineRenderFeatures, run, selection, state],
     );
 
     const rangeSelection = useCallback(

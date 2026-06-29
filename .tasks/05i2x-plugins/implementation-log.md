@@ -455,3 +455,21 @@ Verification:
 
 - `npm run typecheck` passed.
 - `npm exec vitest -- run src/block-editor/editorCrdtConfig.test.ts src/block-editor/legacyRichTextPlugins.test.ts src/block-editor/markdownShortcuts.test.ts src/block-editor/inlineRunRendering.test.ts src/block-editor/plugins/registry.test.ts src/block-editor/plugins/compatibility.test.ts src/block-editor/plugins/metadata.test.ts src/block-editor/plugins/legacyRichTextUi.test.ts src/block-editor/plugins/legacyRichTextBlocks.test.ts src/block-editor/plugins/basicMarks.test.ts src/block-editor/plugins/inlinePlugins.test.ts src/block-editor/plugins/code.test.ts` passed.
+
+### Phase 6 Continued: Clipboard Inline Feature Filtering
+
+- Added optional `ClipboardInlineFeatureSet` support to `serializeSelectionToClipboardPayload`.
+- Filtered clipboard mark export for basic marks, links, math, and inline embeds based on registered inline features.
+- Passed registry-derived inline features into main editor and annotation body copy/cut serialization.
+- Added `clipboard.test.ts` coverage for default copy preservation and filtered copy behavior.
+
+Issues/workarounds:
+
+- Inline code marks still are not represented in the existing clipboard payload model; this slice preserves that current behavior rather than adding a new clipboard mark type.
+- Paste/import still trusts marks present in incoming rich clipboard payloads. Plugin-aware paste filtering remains a separate follow-up.
+- The new test asserts exported feature families rather than one mark entry per type because the clipboard model can split repeated mark ranges across formatted runs.
+
+Verification:
+
+- `npm run typecheck` passed.
+- `npm exec vitest -- run src/block-editor/clipboard.test.ts src/block-editor/editorCrdtConfig.test.ts src/block-editor/legacyRichTextPlugins.test.ts src/block-editor/markdownShortcuts.test.ts src/block-editor/inlineRunRendering.test.ts src/block-editor/plugins/registry.test.ts src/block-editor/plugins/compatibility.test.ts src/block-editor/plugins/metadata.test.ts src/block-editor/plugins/legacyRichTextUi.test.ts src/block-editor/plugins/legacyRichTextBlocks.test.ts src/block-editor/plugins/basicMarks.test.ts src/block-editor/plugins/inlinePlugins.test.ts src/block-editor/plugins/code.test.ts` passed.

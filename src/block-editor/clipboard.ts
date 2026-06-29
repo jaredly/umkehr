@@ -68,6 +68,20 @@ const HTML_PAYLOAD_PREFIX = 'umkehr-block-rich-text:';
 export type ClipboardBooleanMarkType = 'bold' | 'italic' | 'strikethrough' | 'underline';
 export type ClipboardInlineMarkType = ClipboardBooleanMarkType | 'link' | 'annotation' | 'embed' | 'math';
 
+export type ClipboardInlineFeatureSet = {
+    booleanMarks?: ReadonlySet<ClipboardBooleanMarkType>;
+    links?: boolean;
+    math?: boolean;
+    inlineEmbeds?: ReadonlySet<string>;
+};
+
+type NormalizedClipboardInlineFeatureSet = {
+    booleanMarks: ReadonlySet<ClipboardBooleanMarkType>;
+    links: boolean;
+    math: boolean;
+    inlineEmbeds: ReadonlySet<string> | null;
+};
+
 export type ClipboardMarkRange = {
     type: ClipboardInlineMarkType;
     startOffset: number;
@@ -118,6 +132,21 @@ const INLINE_MARK_TYPES = new Set<ClipboardInlineMarkType>([
 ]);
 
 const PRESENTATIONS = new Set<AnnotationPresentation>(['sidebar', 'footnote', 'popover']);
+const ALL_CLIPBOARD_BOOLEAN_MARKS: readonly ClipboardBooleanMarkType[] = [
+    'bold',
+    'italic',
+    'strikethrough',
+    'underline',
+];
+
+const normalizeClipboardInlineFeatures = (
+    features: ClipboardInlineFeatureSet = {},
+): NormalizedClipboardInlineFeatureSet => ({
+    booleanMarks: features.booleanMarks ?? new Set(ALL_CLIPBOARD_BOOLEAN_MARKS),
+    links: features.links ?? true,
+    math: features.math ?? true,
+    inlineEmbeds: features.inlineEmbeds ?? null,
+});
 
 export const parseBlockRichTextClipboardPayload = (value: string): RichClipboardPayload | null => {
     if (!value || value.trimStart()[0] !== '{') return null;
@@ -184,7 +213,9 @@ export const serializeSelectionToClipboardPayload = (
     state: CachedState<RichBlockMeta>,
     selection: RetainedSelectionSet,
     attachments: SerializedImageAttachment[] = [],
+    inlineFeatures?: ClipboardInlineFeatureSet,
 ): RichClipboardPayload | null => {
+    const normalizedInlineFeatures = normalizeClipboardInlineFeatures(inlineFeatures);
     const formatted = materializeFormattedBlocks(state, annotationMarkBehavior);
     const formattedById = new Map(formatted.map((block) => [block.id, block]));
     const initialResolved = resolveSelectionSet(state, selection);
@@ -205,7 +236,12 @@ export const serializeSelectionToClipboardPayload = (
                 if (includedBlockIds.has(blockId)) continue;
                 const block = formattedById.get(blockId);
                 if (!block) continue;
-                const built = fragmentForRange(block, 0, formattedRunsTextLength(block.runs));
+                const built = fragmentForRange(
+                    block,
+                    0,
+                    formattedRunsTextLength(block.runs),
+                    normalizedInlineFeatures,
+                );
                 built.fragment.sourceBlockId = block.id;
                 fragments.push(built.fragment);
                 refs.push(...built.annotationRefs);
@@ -219,7 +255,12 @@ export const serializeSelectionToClipboardPayload = (
         for (const segment of normalizeSelectionSegments(state, entry.selection)) {
             const block = formattedById.get(segment.blockId);
             if (!block) continue;
-            const built = fragmentForRange(block, segment.startOffset, segment.endOffset);
+            const built = fragmentForRange(
+                block,
+                segment.startOffset,
+                segment.endOffset,
+                normalizedInlineFeatures,
+            );
             if (!built.fragment.text && built.fragment.meta.type !== 'image') continue;
             fragments.push(built.fragment);
             refs.push(...built.annotationRefs);
@@ -229,7 +270,7 @@ export const serializeSelectionToClipboardPayload = (
             if (includedBlockIds.has(blockId)) continue;
             const block = formattedById.get(blockId);
             if (!block) continue;
-            const built = fragmentForRange(block, 0, 0);
+            const built = fragmentForRange(block, 0, 0, normalizedInlineFeatures);
             fragments.push(built.fragment);
             refs.push(...built.annotationRefs);
             includedBlockIds.add(block.id);
@@ -238,7 +279,7 @@ export const serializeSelectionToClipboardPayload = (
 
     if (!fragments.length) return null;
 
-    const annotations = collectAnnotations(state, refs);
+    const annotations = collectAnnotations(state, refs, normalizedInlineFeatures);
     const plainText = fragments.map(fragmentToPlainText).join('\n');
     const html = fragmentsToHtml(fragments);
     const attachmentIds = new Set(
@@ -394,6 +435,7 @@ const parseAttachments = (value: unknown): SerializedImageAttachment[] | null =>
 const collectAnnotations = (
     state: CachedState<RichBlockMeta>,
     initialRefs: ClipboardAnnotationRef[],
+    inlineFeatures: NormalizedClipboardInlineFeatureSet,
 ): ClipboardAnnotation[] => {
     const formattedBodies = materializeFormattedBlocks(state, richTextVirtualParents(state));
     const formattedById = new Map(formattedBodies.map((block) => [block.id, block]));
@@ -417,7 +459,7 @@ const collectAnnotations = (
         const ref = queue.shift();
         if (!ref || visited.has(ref.originalId)) continue;
         visited.add(ref.originalId);
-        const bodyBlocks = bodyFragmentsForAnnotation(state, formattedById, ref);
+        const bodyBlocks = bodyFragmentsForAnnotation(state, formattedById, ref, inlineFeatures);
         result.push({
             originalId: ref.originalId,
             presentation: ref.presentation,
@@ -436,13 +478,14 @@ const bodyFragmentsForAnnotation = (
     state: CachedState<RichBlockMeta>,
     formattedById: Map<string, FormattedBlock<RichBlockMeta>>,
     ref: ClipboardAnnotationRef,
+    inlineFeatures: NormalizedClipboardInlineFeatureSet,
 ): FragmentBuildResult[] => {
     const id = parseLamportStringOrNull(ref.originalId);
     if (!id) return [];
     return annotationBodyBlockIds(state, id)
         .map((blockId) => formattedById.get(blockId))
         .filter((block): block is FormattedBlock<RichBlockMeta> => Boolean(block))
-        .map((block) => fragmentForRange(block, 0, formattedRunsTextLength(block.runs)))
+        .map((block) => fragmentForRange(block, 0, formattedRunsTextLength(block.runs), inlineFeatures))
         .filter((result) => result.fragment.text || result.fragment.marks.length || result.fragment.meta);
 };
 
@@ -450,6 +493,7 @@ const fragmentForRange = (
     block: FormattedBlock<RichBlockMeta>,
     startOffset: number,
     endOffset: number,
+    inlineFeatures: NormalizedClipboardInlineFeatureSet,
 ): FragmentBuildResult => {
     const chars: string[] = [];
     const marks: ClipboardMarkRange[] = [];
@@ -464,7 +508,7 @@ const fragmentForRange = (
         const runChars = segmentText(run.run.text);
         chars.push(...runChars.slice(start - run.startOffset, end - run.startOffset));
         const localEnd = chars.length;
-        appendRunMarks(marks, annotationRefs, run.run, localStart, localEnd);
+        appendRunMarks(marks, annotationRefs, run.run, localStart, localEnd, inlineFeatures);
     }
 
     const style = documentStyleFromBlockStyle(block.block.style);
@@ -485,17 +529,20 @@ const appendRunMarks = (
     run: FormattedRun,
     startOffset: number,
     endOffset: number,
+    inlineFeatures: NormalizedClipboardInlineFeatureSet,
 ) => {
     if (startOffset >= endOffset) return;
     for (const type of ['bold', 'italic', 'strikethrough', 'underline'] as const) {
-        if (run.marks[type] === true) marks.push({type, startOffset, endOffset});
+        if (inlineFeatures.booleanMarks.has(type) && run.marks[type] === true) {
+            marks.push({type, startOffset, endOffset});
+        }
     }
     const href = run.marks[LINK_MARK];
-    if (typeof href === 'string') {
+    if (inlineFeatures.links && typeof href === 'string') {
         marks.push({type: 'link', startOffset, endOffset, data: href});
     }
     const mathMode = mathDisplayModeFromMarkValue(run.marks[MATH_MARK]);
-    if (mathMode) {
+    if (inlineFeatures.math && mathMode) {
         marks.push({
             type: 'math',
             startOffset,
@@ -514,7 +561,7 @@ const appendRunMarks = (
         annotationRefs.push(ref);
     }
     const embed = run.marks[INLINE_EMBED_MARK];
-    if (isInlineEmbedData(embed)) {
+    if (isInlineEmbedData(embed) && (!inlineFeatures.inlineEmbeds || inlineFeatures.inlineEmbeds.has(embed.type))) {
         marks.push({type: 'embed', startOffset, endOffset, data: embed});
     }
 };
@@ -608,13 +655,14 @@ const wrapHtmlText = (
 ): string => {
     const embed = marks.find((mark) => mark.type === 'embed' && isInlineEmbedData(mark.data));
     if (text === INLINE_EMBED_TEXT) {
+        if (!embed || !isInlineEmbedData(embed.data)) return escapeHtml(text);
         const plainText = plainTextForInlineEmbed(
-            embed && isInlineEmbedData(embed.data) ? embed.data : null,
+            embed.data,
             inlineEmbedPlugins,
             {ambientMarks: {}},
         );
         return `<span data-umkehr-embed-type="${escapeAttribute(
-            embed && isInlineEmbedData(embed.data) ? embed.data.type : 'unknown',
+            embed.data.type,
         )}">${escapeHtml(plainText)}</span>`;
     }
     let result = escapeHtml(text);
