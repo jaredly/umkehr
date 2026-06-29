@@ -1,6 +1,7 @@
 import {openDB, type DBSchema, type IDBPDatabase} from 'idb';
 import type {History} from 'umkehr';
 import type {LocalDocumentSummary} from '../documentArchive';
+import type {SerializedArtifact} from '../artifacts';
 
 const DB_NAME = 'umkehr-react-crdt-solo-documents';
 const DB_VERSION = 2;
@@ -12,6 +13,7 @@ export type PersistedSoloDocument<TState> = {
     schemaVersion: number;
     schemaFingerprintHash: string;
     history: History<TState, unknown>;
+    artifacts?: SerializedArtifact[];
     createdAt: string;
     updatedAt: string;
 };

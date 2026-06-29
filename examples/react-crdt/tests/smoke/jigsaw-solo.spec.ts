@@ -1,12 +1,16 @@
 import {expect, test} from '@playwright/test';
 import {openApp, uniqueTestDocId} from '../helpers/app';
+import {createDocument, openDocument} from '../helpers/documents';
 
 test('contains jigsaw pieces and supports local canvas navigation', async ({page}, testInfo) => {
+    const title = `Jigsaw smoke ${Date.now()}`;
     await openApp(page, {
         mode: 'solo',
         appId: 'jigsaw',
         docId: uniqueTestDocId(testInfo, 'jigsaw'),
     });
+    await createDocument(page, title, {pieceCount: '12'});
+    await openDocument(page, title);
 
     const panel = page.getByTestId('jigsaw-panel');
     const viewport = page.getByTestId('jigsaw-viewport');
@@ -67,6 +71,34 @@ test('contains jigsaw pieces and supports local canvas navigation', async ({page
             return Math.abs(after.x - before!.x) > 1 || Math.abs(after.y - before!.y) > 1;
         })
         .toBe(true);
+});
+
+test('requires creation options before opening a missing jigsaw document', async ({page}, testInfo) => {
+    const title = `Jigsaw options ${Date.now()}`;
+    await openApp(page, {
+        mode: 'solo',
+        appId: 'jigsaw',
+        docId: uniqueTestDocId(testInfo, 'missing-jigsaw'),
+    });
+
+    const modal = page.getByTestId('document-manager-modal');
+    await expect(modal).toBeVisible();
+    await expect(page.getByTestId('jigsaw-panel')).toHaveCount(0);
+
+    await createDocument(page, title, {pieceCount: '30'});
+    await expect(page.getByTestId('jigsaw-panel')).toHaveCount(0);
+    await openDocument(page, title);
+    await expect(page.getByText('30 piece hue puzzle')).toBeVisible();
+});
+
+test('opens the document manager when jigsaw has no current document', async ({page}) => {
+    await openApp(page, {
+        mode: 'solo',
+        appId: 'jigsaw',
+    });
+
+    await expect(page.getByTestId('document-manager-modal')).toBeVisible();
+    await expect(page.getByTestId('jigsaw-panel')).toHaveCount(0);
 });
 
 async function expectNoPieceHitOutsideViewport(page: import('@playwright/test').Page) {

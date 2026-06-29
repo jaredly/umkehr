@@ -4,9 +4,12 @@ import {
     JIGSAW_BOARD_ARTIFACT_ID,
     currentJigsawBoard,
     generateJigsawBoard,
+    initialJigsawArtifacts,
+    isJigsawPieceCount,
     jigsawArtifactStore,
     type JigsawPieceCount,
 } from './artifacts';
+import {jigsawApp} from './JigsawApp';
 import type {JigsawState} from './schema';
 import {
     anchorPieceForComponent,
@@ -69,6 +72,22 @@ describe('jigsaw board artifacts', () => {
         });
         if (serialized) jigsawArtifactStore.load(serialized);
         expect(currentJigsawBoard()).toEqual(serialized?.data);
+    });
+
+    it('validates creation piece counts and creates matching initial artifacts', () => {
+        expect(isJigsawPieceCount(12)).toBe(true);
+        expect(isJigsawPieceCount(30)).toBe(true);
+        expect(isJigsawPieceCount(60)).toBe(true);
+        expect(isJigsawPieceCount(120)).toBe(true);
+        expect(isJigsawPieceCount(24)).toBe(false);
+        expect(jigsawApp.documentInit?.validate({pieceCount: 30})).toEqual({
+            success: true,
+            data: {pieceCount: 30},
+        });
+        expect(jigsawApp.documentInit?.validate({pieceCount: 24}).success).toBe(false);
+        expect(initialJigsawArtifacts(60)[0].data).toMatchObject({pieceCount: 60});
+        const appArtifacts = jigsawApp.documentInit?.initialArtifacts?.({pieceCount: 120});
+        expect(appArtifacts?.[0].data).toMatchObject({pieceCount: 120});
     });
 });
 

@@ -9,7 +9,15 @@ import {
     type Coord,
     type JigsawState,
 } from './schema';
-import {jigsawArtifactStore, type JigsawBoardArtifact, type JigsawPiece, type PathSegment} from './artifacts';
+import {
+    initialJigsawArtifacts,
+    isJigsawPieceCount,
+    jigsawArtifactStore,
+    type JigsawBoardArtifact,
+    type JigsawPiece,
+    type JigsawPieceCount,
+    type PathSegment,
+} from './artifacts';
 
 export {
     JIGSAW_DOC_ID,
@@ -17,9 +25,12 @@ export {
     initialJigsawTimestamp,
     jigsawSchema,
     validateJigsawState,
+    initialJigsawArtifacts,
+    isJigsawPieceCount,
     jigsawArtifactStore,
     type Coord,
     type JigsawBoardArtifact,
+    type JigsawPieceCount,
     type JigsawPiece,
     type JigsawState,
     type PathSegment,

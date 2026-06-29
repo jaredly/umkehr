@@ -643,7 +643,8 @@ button:disabled:hover {
     border-bottom: 1px solid #e2e8f0;
 }
 
-.documentCreateForm input {
+.documentCreateForm input,
+.documentCreateField select {
     min-width: min(360px, 100%);
     flex: 1 1 240px;
     height: 38px;
@@ -651,6 +652,21 @@ button:disabled:hover {
     border-radius: 6px;
     padding: 0 10px;
     background: #fff;
+}
+
+.documentCreateField {
+    display: flex;
+    flex: 0 1 180px;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #334155;
+}
+
+.documentCreateField select {
+    min-width: 100%;
+    flex-basis: auto;
 }
 
 .documentModalSection h2 {

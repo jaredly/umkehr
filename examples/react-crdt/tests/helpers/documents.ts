@@ -2,9 +2,15 @@ import {expect, type Locator, type Page} from '@playwright/test';
 
 export async function openDocumentManager(page: Page) {
     const existing = page.getByTestId('document-manager-modal');
-    if (await existing.isVisible().catch(() => false)) return existing;
+    if ((await existing.count()) > 0) {
+        await expect(existing).toBeVisible();
+        return existing;
+    }
 
-    await page.getByTestId('document-manager-trigger').click();
+    const trigger = page.getByTestId('document-manager-trigger');
+    if ((await trigger.getAttribute('aria-expanded')) !== 'true') {
+        await trigger.click();
+    }
     const modal = page.getByTestId('document-manager-modal');
     await expect(modal).toBeVisible();
     return modal;
@@ -15,9 +21,16 @@ export async function closeDocumentManager(page: Page) {
     await expect(page.getByTestId('document-manager-modal')).toHaveCount(0);
 }
 
-export async function createDocument(page: Page, title: string) {
+export async function createDocument(
+    page: Page,
+    title: string,
+    options: {pieceCount?: '12' | '30' | '60' | '120'} = {},
+) {
     const modal = await openDocumentManager(page);
     await modal.getByLabel('New document title').fill(title);
+    if (options.pieceCount) {
+        await modal.getByLabel('Number of pieces').selectOption(options.pieceCount);
+    }
     await modal.getByRole('button', {name: 'New document'}).click();
     await expect(modal.getByText('Document created')).toBeVisible();
     await expect(documentRow(modal, title)).toBeVisible();

@@ -113,6 +113,10 @@ export function generateJigsawBoard(pieceCount: JigsawPieceCount): JigsawBoardAr
     };
 }
 
+export function initialJigsawArtifacts(pieceCount: JigsawPieceCount): SerializedArtifact[] {
+    return [serializeBoard(generateJigsawBoard(pieceCount))];
+}
+
 export function gridForPieceCount(pieceCount: JigsawPieceCount) {
     switch (pieceCount) {
         case 12:
@@ -238,6 +242,10 @@ function isImageSize(input: unknown): input is JigsawBoardArtifact['imageSize'] 
 
 function isPieceCount(input: unknown): input is JigsawPieceCount {
     return input === 12 || input === 30 || input === 60 || input === 120;
+}
+
+export function isJigsawPieceCount(input: unknown): input is JigsawPieceCount {
+    return isPieceCount(input);
 }
 
 function isCoord(input: unknown): input is Coord {
