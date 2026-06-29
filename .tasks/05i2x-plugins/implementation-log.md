@@ -433,3 +433,25 @@ Verification:
 
 - `npm run typecheck` passed.
 - `npm exec vitest -- run src/block-editor/editorCrdtConfig.test.ts src/block-editor/legacyRichTextPlugins.test.ts src/block-editor/markdownShortcuts.test.ts src/block-editor/inlineRunRendering.test.ts src/block-editor/plugins/registry.test.ts src/block-editor/plugins/compatibility.test.ts src/block-editor/plugins/metadata.test.ts src/block-editor/plugins/legacyRichTextUi.test.ts src/block-editor/plugins/legacyRichTextBlocks.test.ts src/block-editor/plugins/basicMarks.test.ts src/block-editor/plugins/inlinePlugins.test.ts src/block-editor/plugins/code.test.ts` passed.
+
+### Phase 6 Continued: Inline Render Feature Gating
+
+- Added registry-derived inline render features for:
+  - basic boolean marks
+  - inline code
+  - links
+  - math
+  - inline embeds by embed type
+- Threaded those render features through main editable blocks and annotation body editors.
+- Updated run rendering so unavailable inline plugins no longer add plugin-specific DOM classes, datasets, previews, or inline embed widgets.
+- Included the render feature key in run serialization so changing plugin availability causes editable surfaces to rerender.
+
+Issues/workarounds:
+
+- Rendering is still implemented by the legacy central run renderer rather than plugin-owned inline renderer callbacks. This slice gates legacy rendering by registry support; it does not yet consume `registry.inlineRenderers`.
+- Unknown/unavailable inline embeds currently fall back to the object replacement character as plain text in the editor surface.
+
+Verification:
+
+- `npm run typecheck` passed.
+- `npm exec vitest -- run src/block-editor/editorCrdtConfig.test.ts src/block-editor/legacyRichTextPlugins.test.ts src/block-editor/markdownShortcuts.test.ts src/block-editor/inlineRunRendering.test.ts src/block-editor/plugins/registry.test.ts src/block-editor/plugins/compatibility.test.ts src/block-editor/plugins/metadata.test.ts src/block-editor/plugins/legacyRichTextUi.test.ts src/block-editor/plugins/legacyRichTextBlocks.test.ts src/block-editor/plugins/basicMarks.test.ts src/block-editor/plugins/inlinePlugins.test.ts src/block-editor/plugins/code.test.ts` passed.

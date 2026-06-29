@@ -322,7 +322,7 @@ import {
     type SlashCommand,
     type SlashMenuState,
 } from './slashCommands.js';
-import {createBlockEditorRegistry, type BlockEditorPlugin} from './plugins/index.js';
+import {createBlockEditorRegistry, type BlockEditorPlugin, type BlockEditorRegistry} from './plugins/index.js';
 import {blockTypeMenuItemsFromToolbarSpecs} from './plugins/legacyRichTextUi.js';
 
 import * as hlc from '../crdt/hlc.js';
@@ -367,6 +367,43 @@ const hasRetainedInlineMarkSessions = (marks: RetainedInlineMarkSessionMap): boo
     Object.values(marks).some((sessions) => sessions.length > 0);
 
 const inlineMarkToolbarCommandId = (markType: BooleanInlineMark): string => `mark:${markType}`;
+
+type InlineRenderFeatures = {
+    booleanMarks: ReadonlySet<BooleanInlineMark>;
+    code: boolean;
+    links: boolean;
+    math: boolean;
+    inlineEmbeds: ReadonlySet<string>;
+};
+
+const DEFAULT_INLINE_RENDER_FEATURES: InlineRenderFeatures = {
+    booleanMarks: new Set(BOOLEAN_INLINE_MARKS),
+    code: true,
+    links: true,
+    math: true,
+    inlineEmbeds: new Set(['date']),
+};
+
+const inlineRenderFeaturesFromRegistry = (
+    registry: Pick<BlockEditorRegistry<RichBlockMeta>, 'marks' | 'inlineEmbeds'>,
+): InlineRenderFeatures => ({
+    booleanMarks: new Set(BOOLEAN_INLINE_MARKS.filter((mark) => registry.marks.has(mark))),
+    code: registry.marks.has(CODE_MARK),
+    links: registry.marks.has(LINK_MARK),
+    math: registry.marks.has(MATH_MARK),
+    inlineEmbeds: registry.marks.has(INLINE_EMBED_MARK)
+        ? new Set(registry.inlineEmbeds.keys())
+        : new Set(),
+});
+
+const inlineRenderFeaturesKey = (features: InlineRenderFeatures): string =>
+    JSON.stringify({
+        booleanMarks: [...features.booleanMarks].sort(),
+        code: features.code,
+        links: features.links,
+        math: features.math,
+        inlineEmbeds: [...features.inlineEmbeds].sort(),
+    });
 
 export type BlockEditorId = 'left' | 'right' | string;
 
@@ -495,6 +532,7 @@ export function BlockRichTextEditor({
         [toolbarItemIds],
     );
     const activeInlineMarkTypes = useMemo(() => activeInlineMarkTypesFromRegistry(registry), [registry]);
+    const inlineRenderFeatures = useMemo(() => inlineRenderFeaturesFromRegistry(registry), [registry]);
     const rootRef = useRef<HTMLDivElement>(null);
     const editorContentRef = useRef<HTMLDivElement>(null);
     const pendingCaretRestoreBlockIdRef = useRef<string | null>(null);
@@ -3350,6 +3388,7 @@ export function BlockRichTextEditor({
                                 orderedListNumbers,
                                 popoverTextById,
                                 footnoteNumberById,
+                                inlineRenderFeatures,
                                 onPopoverTriggerEnter: showPopover,
                                 onPopoverTriggerLeave: schedulePopoverHideFromPointer,
                                 openLinkFromCurrentSelection: () => {
@@ -3454,6 +3493,7 @@ export function BlockRichTextEditor({
                         onBodyFocusRequest={requestCommentFocus}
                         onBodySelectionChange={setActiveAnnotationBodySelection}
                         isToolbarCommandAvailable={isToolbarCommandAvailable}
+                        inlineRenderFeatures={inlineRenderFeatures}
                         popoverTextById={popoverTextById}
                         footnoteNumberById={footnoteNumberById}
                         rainbowLamportIds={rainbowLamportIds}
@@ -3480,6 +3520,7 @@ export function BlockRichTextEditor({
                     onBodyFocusRequest={requestCommentFocus}
                     onBodySelectionChange={setActiveAnnotationBodySelection}
                     isToolbarCommandAvailable={isToolbarCommandAvailable}
+                    inlineRenderFeatures={inlineRenderFeatures}
                     onResolveAnnotation={(annotation) => {
                         runAnnotationBodyCommand((current, context) =>
                             resolveAnnotation(current.state, annotation.id, context),
@@ -3517,6 +3558,7 @@ export function BlockRichTextEditor({
                     onBodyFocusRequest={requestCommentFocus}
                     onBodySelectionChange={setActiveAnnotationBodySelection}
                     isToolbarCommandAvailable={isToolbarCommandAvailable}
+                    inlineRenderFeatures={inlineRenderFeatures}
                     popoverTextById={popoverTextById}
                     footnoteNumberById={footnoteNumberById}
                     rainbowLamportIds={rainbowLamportIds}
@@ -3695,6 +3737,7 @@ type RenderBlockContext = {
     orderedListNumbers: Map<string, number>;
     popoverTextById: Map<string, string>;
     footnoteNumberById: Map<string, number>;
+    inlineRenderFeatures: InlineRenderFeatures;
     runEditCommand(
         command: (current: Replica, selection: RetainedSelectionSet) => MultiCommandResult,
     ): void;
@@ -5543,6 +5586,7 @@ const renderEditableBlock = (
             onStartBlockDragFromHandle={context.startBlockDragFromHandle}
             popoverTextById={context.popoverTextById}
             footnoteNumberById={context.footnoteNumberById}
+            inlineRenderFeatures={context.inlineRenderFeatures}
             onPopoverTriggerEnter={context.onPopoverTriggerEnter}
             onPopoverTriggerLeave={context.onPopoverTriggerLeave}
             onInsertText={(text, activeSelection) =>
@@ -6162,6 +6206,7 @@ function AnnotationSidebar({
     onBodyFocusRequest,
     onBodySelectionChange,
     isToolbarCommandAvailable,
+    inlineRenderFeatures,
     onResolveAnnotation,
     popoverTextById,
     footnoteNumberById,
@@ -6189,6 +6234,7 @@ function AnnotationSidebar({
     onBodyFocusRequest(blockId: string, selection: EditorSelection): void;
     onBodySelectionChange(selection: EditorSelection | null): void;
     isToolbarCommandAvailable(commandId: string): boolean;
+    inlineRenderFeatures: InlineRenderFeatures;
     onResolveAnnotation(annotation: RenderedAnnotation): void;
     popoverTextById: Map<string, string>;
     footnoteNumberById: Map<string, number>;
@@ -6246,6 +6292,7 @@ function AnnotationSidebar({
                                         onBodyFocusRequest={onBodyFocusRequest}
                                         onBodySelectionChange={onBodySelectionChange}
                                         isToolbarCommandAvailable={isToolbarCommandAvailable}
+                                        inlineRenderFeatures={inlineRenderFeatures}
                                         popoverTextById={popoverTextById}
                                         footnoteNumberById={footnoteNumberById}
                                         rainbowLamportIds={rainbowLamportIds}
@@ -6288,6 +6335,7 @@ function Footnotes({
     onBodyFocusRequest,
     onBodySelectionChange,
     isToolbarCommandAvailable,
+    inlineRenderFeatures,
     popoverTextById,
     footnoteNumberById,
     rainbowLamportIds,
@@ -6309,6 +6357,7 @@ function Footnotes({
     onBodyFocusRequest(blockId: string, selection: EditorSelection): void;
     onBodySelectionChange(selection: EditorSelection | null): void;
     isToolbarCommandAvailable(commandId: string): boolean;
+    inlineRenderFeatures: InlineRenderFeatures;
     popoverTextById: Map<string, string>;
     footnoteNumberById: Map<string, number>;
     rainbowLamportIds: boolean;
@@ -6335,6 +6384,7 @@ function Footnotes({
                                   onBodyFocusRequest={onBodyFocusRequest}
                                   onBodySelectionChange={onBodySelectionChange}
                                   isToolbarCommandAvailable={isToolbarCommandAvailable}
+                                  inlineRenderFeatures={inlineRenderFeatures}
                                   popoverTextById={popoverTextById}
                                   footnoteNumberById={footnoteNumberById}
                                   rainbowLamportIds={rainbowLamportIds}
@@ -6365,6 +6415,7 @@ function FloatingAnnotationPopover({
     onBodyFocusRequest,
     onBodySelectionChange,
     isToolbarCommandAvailable,
+    inlineRenderFeatures,
     popoverTextById,
     footnoteNumberById,
     rainbowLamportIds,
@@ -6391,6 +6442,7 @@ function FloatingAnnotationPopover({
     onBodyFocusRequest(blockId: string, selection: EditorSelection): void;
     onBodySelectionChange(selection: EditorSelection | null): void;
     isToolbarCommandAvailable(commandId: string): boolean;
+    inlineRenderFeatures: InlineRenderFeatures;
     popoverTextById: Map<string, string>;
     footnoteNumberById: Map<string, number>;
     rainbowLamportIds: boolean;
@@ -6432,6 +6484,7 @@ function FloatingAnnotationPopover({
                     onBodyFocusRequest={onBodyFocusRequest}
                     onBodySelectionChange={onBodySelectionChange}
                     isToolbarCommandAvailable={isToolbarCommandAvailable}
+                    inlineRenderFeatures={inlineRenderFeatures}
                     popoverTextById={popoverTextById}
                     footnoteNumberById={footnoteNumberById}
                     rainbowLamportIds={rainbowLamportIds}
@@ -6457,6 +6510,7 @@ function AnnotationBodyBlock({
     onBodyFocusRequest,
     onBodySelectionChange,
     isToolbarCommandAvailable,
+    inlineRenderFeatures,
     popoverTextById,
     footnoteNumberById,
     rainbowLamportIds,
@@ -6481,6 +6535,7 @@ function AnnotationBodyBlock({
     onBodyFocusRequest?(blockId: string, selection: EditorSelection): void;
     onBodySelectionChange(selection: EditorSelection | null): void;
     isToolbarCommandAvailable(commandId: string): boolean;
+    inlineRenderFeatures: InlineRenderFeatures;
     popoverTextById: Map<string, string>;
     footnoteNumberById: Map<string, number>;
     rainbowLamportIds: boolean;
@@ -6763,6 +6818,7 @@ function AnnotationBodyBlock({
                 placeholder={fallbackText || 'Annotation body'}
                 popoverTextById={popoverTextById}
                 footnoteNumberById={footnoteNumberById}
+                inlineRenderFeatures={inlineRenderFeatures}
                 onPopoverTriggerEnter={onPopoverTriggerEnter}
                 onPopoverTriggerLeave={onPopoverTriggerLeave}
                 onLinkHoverEnter={showBodyLinkHover}
@@ -7091,6 +7147,7 @@ function EditableBlock({
     onStartBlockDragFromHandle,
     popoverTextById,
     footnoteNumberById,
+    inlineRenderFeatures,
     onPopoverTriggerEnter,
     onPopoverTriggerLeave,
     onInsertText,
@@ -7188,6 +7245,7 @@ function EditableBlock({
     onStartBlockDragFromHandle(blockId: string, event: PointerEvent<HTMLElement>): void;
     popoverTextById: Map<string, string>;
     footnoteNumberById: Map<string, number>;
+    inlineRenderFeatures: InlineRenderFeatures;
     onPopoverTriggerEnter(id: string, element: HTMLElement): void;
     onPopoverTriggerLeave(id?: string, transition?: PopoverPointerTransition): void;
     onInsertText(text: string, selection?: EditorSelection): void;
@@ -7312,6 +7370,7 @@ function EditableBlock({
             ingredientTokens={ingredientTokens}
             popoverTextById={popoverTextById}
             footnoteNumberById={footnoteNumberById}
+            inlineRenderFeatures={inlineRenderFeatures}
             onPopoverTriggerEnter={onPopoverTriggerEnter}
             onPopoverTriggerLeave={onPopoverTriggerLeave}
             onLinkHoverEnter={onLinkHoverEnter}
@@ -8186,6 +8245,7 @@ function RichTextEditableSurfaceInner({
     ingredientTokens,
     popoverTextById = new Map(),
     footnoteNumberById = new Map(),
+    inlineRenderFeatures = DEFAULT_INLINE_RENDER_FEATURES,
     onInsertText,
     onDeleteBackward,
     onDeleteForward,
@@ -8227,6 +8287,7 @@ function RichTextEditableSurfaceInner({
     ingredientTokens?: IngredientHighlightToken[];
     popoverTextById?: Map<string, string>;
     footnoteNumberById?: Map<string, number>;
+    inlineRenderFeatures?: InlineRenderFeatures;
     onInsertText(text: string, selection?: EditorSelection): void;
     onDeleteBackward(selection?: EditorSelection): void;
     onDeleteForward(selection?: EditorSelection): void;
@@ -8311,6 +8372,7 @@ function RichTextEditableSurfaceInner({
             selection,
             activeMathSourceKey,
             mathRenderVersion,
+            inlineRenderFeatures,
         );
         if (renderedRunsRef.current !== renderedRuns) {
             renderedRunsRef.current = renderedRuns;
@@ -8328,6 +8390,7 @@ function RichTextEditableSurfaceInner({
                     selection,
                     activeMathSourceKey,
                     mathRenderer,
+                    inlineRenderFeatures,
                 }),
             );
         }
@@ -8359,6 +8422,7 @@ function RichTextEditableSurfaceInner({
         decorations,
         footnoteNumberById,
         ingredientTokens,
+        inlineRenderFeatures,
         activeMathSourceKey,
         mathRenderVersion,
         mathRenderer,
@@ -8425,6 +8489,7 @@ function RichTextEditableSurfaceInner({
                         selection,
                         activeMathSourceKey,
                         mathRenderer,
+                        inlineRenderFeatures,
                     }),
                 );
                 renderedRunsRef.current = serializeRuns(
@@ -8440,6 +8505,7 @@ function RichTextEditableSurfaceInner({
                     selection,
                     activeMathSourceKey,
                     mathRenderVersion,
+                    inlineRenderFeatures,
                 );
             }}
             onMouseUp={(event) => onSelectionChange?.(readSelectionFromDom(event.currentTarget))}
@@ -8565,6 +8631,7 @@ function RichTextEditableSurfaceInner({
                             selection,
                             activeMathSourceKey,
                             mathRenderer,
+                            inlineRenderFeatures,
                         }),
                     );
                     return;
@@ -8609,7 +8676,7 @@ type RichTextEditableSurfaceProps = Omit<
 >;
 
 function RichTextEditableSurface(props: RichTextEditableSurfaceProps) {
-    if (blockHasMathRuns(props.runs)) {
+    if ((props.inlineRenderFeatures ?? DEFAULT_INLINE_RENDER_FEATURES).math && blockHasMathRuns(props.runs)) {
         return <MathRichTextEditableSurface {...props} />;
     }
     return (
@@ -9519,6 +9586,7 @@ const serializeRuns = (
     selection?: EditorSelection,
     activeMathSourceKey?: string | null,
     mathRenderVersion = 0,
+    inlineRenderFeatures: InlineRenderFeatures = DEFAULT_INLINE_RENDER_FEATURES,
 ) => {
     const hasMath = blockHasMathRuns(runs);
     return JSON.stringify({
@@ -9548,6 +9616,7 @@ const serializeRuns = (
                   mathRenderVersion,
               }
             : undefined,
+        inlineRenderFeatures: inlineRenderFeaturesKey(inlineRenderFeatures),
         footnoteNumbers: [...footnoteNumberById.entries()].sort(([a], [b]) => a.localeCompare(b)),
     });
 };
@@ -9571,6 +9640,7 @@ const renderRunNodes = (
         selection?: EditorSelection;
         activeMathSourceKey?: string | null;
         mathRenderer?: MathRenderer | null;
+        inlineRenderFeatures?: InlineRenderFeatures;
     } = {},
 ): Node[] => {
     const chunks = runRenderChunks(
@@ -9631,13 +9701,21 @@ const renderRunChunkNode = (
         selection?: EditorSelection;
         activeMathSourceKey?: string | null;
         mathRenderer?: MathRenderer | null;
+        inlineRenderFeatures?: InlineRenderFeatures;
     },
 ): HTMLElement => {
+    const inlineRenderFeatures = options.inlineRenderFeatures ?? DEFAULT_INLINE_RENDER_FEATURES;
     const rainbowColor = options.rainbowLamportIds
         ? rainbowLamportColor(options.charIdsByOffset?.[chunk.blockStartOffset])
         : null;
     if (chunk.text === INLINE_EMBED_TEXT && segmentText(chunk.text).length === 1) {
         const data = inlineEmbedDataForRun(chunk.run);
+        if (!data || !inlineRenderFeatures.inlineEmbeds.has(data.type)) {
+            const span = document.createElement('span');
+            span.textContent = chunk.text;
+            if (rainbowColor) span.style.backgroundColor = rainbowColor;
+            return span;
+        }
         const plainText = plainTextForInlineEmbed(data, inlineEmbedPlugins, {
             ambientMarks: chunk.run.marks,
         });
@@ -9652,7 +9730,7 @@ const renderRunChunkNode = (
         return element;
     }
     const mathMode =
-        chunk.run.marks[MATH_MARK] !== undefined ? mathModeForRun(chunk.run) : null;
+        inlineRenderFeatures.math && chunk.run.marks[MATH_MARK] !== undefined ? mathModeForRun(chunk.run) : null;
     if (mathMode) {
         const key = mathSourceKey(options.blockId ?? '', chunk.blockStartOffset, chunk.blockEndOffset, mathMode);
         if (
@@ -9674,7 +9752,7 @@ const renderRunChunkNode = (
     }
     const span = document.createElement('span');
     span.textContent = chunk.text;
-    applyRunClasses(span, chunk, options.popoverTextById, options.visibleBlockIdSet);
+    applyRunClasses(span, chunk, inlineRenderFeatures, options.popoverTextById, options.visibleBlockIdSet);
     if (rainbowColor) span.style.backgroundColor = rainbowColor;
     return span;
 };
@@ -10004,28 +10082,33 @@ const renderCaretsAtOffset = (
 const applyRunClasses = (
     span: HTMLElement,
     chunk: RunRenderChunk,
+    inlineRenderFeatures: InlineRenderFeatures,
     popoverTextById?: Map<string, string>,
     visibleBlockIdSet?: Set<string>,
 ) => {
     const run = chunk.run;
     if (chunk.decoratorClassNames.length) span.classList.add(...chunk.decoratorClassNames);
-    if (run.marks.bold) span.classList.add('markBold');
-    if (run.marks.italic) span.classList.add('markItalic');
-    if (run.marks.strikethrough) span.classList.add('markStrikethrough');
-    if (run.marks.underline) span.classList.add('markUnderline');
-    if (isCodeMarkValue(run.marks[CODE_MARK])) {
+    if (inlineRenderFeatures.booleanMarks.has('bold') && run.marks.bold) span.classList.add('markBold');
+    if (inlineRenderFeatures.booleanMarks.has('italic') && run.marks.italic) span.classList.add('markItalic');
+    if (inlineRenderFeatures.booleanMarks.has('strikethrough') && run.marks.strikethrough) {
+        span.classList.add('markStrikethrough');
+    }
+    if (inlineRenderFeatures.booleanMarks.has('underline') && run.marks.underline) {
+        span.classList.add('markUnderline');
+    }
+    if (inlineRenderFeatures.code && isCodeMarkValue(run.marks[CODE_MARK])) {
         span.classList.add('markCode');
         if (typeof run.marks[CODE_MARK] === 'string') span.classList.add('markCodeHighlighted');
         span.dataset.codeLanguage = typeof run.marks[CODE_MARK] === 'string' ? run.marks[CODE_MARK] : '';
         span.dataset.codeStartOffset = String(chunk.blockStartOffset);
         span.dataset.codeEndOffset = String(chunk.blockEndOffset);
     }
-    const mathMode = mathModeForRun(run);
+    const mathMode = inlineRenderFeatures.math ? mathModeForRun(run) : null;
     if (mathMode) {
         span.classList.add('markMath');
         if (mathMode === 'display') span.classList.add('markMathDisplay');
     }
-    if (typeof run.marks[LINK_MARK] === 'string') {
+    if (inlineRenderFeatures.links && typeof run.marks[LINK_MARK] === 'string') {
         span.classList.add('markLink');
         const targetBlockId = blockIdFromBlockLinkHref(run.marks[LINK_MARK]);
         if (targetBlockId && !visibleBlockIdSet?.has(targetBlockId)) {
