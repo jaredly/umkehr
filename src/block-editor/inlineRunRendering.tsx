@@ -17,7 +17,7 @@ import {
 
 type RichFormattedBlock = FormattedBlock<RichBlockMeta>;
 
-const BOOLEAN_INLINE_MARKS: BooleanInlineMark[] = ['bold', 'italic', 'strikethrough'];
+const BOOLEAN_INLINE_MARKS: BooleanInlineMark[] = ['bold', 'italic', 'strikethrough', 'underline'];
 const BARE_INLINE_MARKS: BareInlineMark[] = [...BOOLEAN_INLINE_MARKS, CODE_MARK];
 
 export const deriveActiveInlineMarks = (

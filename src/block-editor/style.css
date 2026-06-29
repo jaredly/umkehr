@@ -683,6 +683,11 @@ select {
     text-decoration-line: line-through;
 }
 
+.toolbarUnderline {
+    text-decoration-line: underline;
+    text-underline-offset: 0.14em;
+}
+
 .editorUndoStatus {
     margin: 0;
     padding: 6px 12px;
@@ -2311,6 +2316,15 @@ select {
 
 .markStrikethrough {
     text-decoration-line: line-through;
+}
+
+.markUnderline {
+    text-decoration-line: underline;
+    text-underline-offset: 0.14em;
+}
+
+.markUnderline.markStrikethrough {
+    text-decoration-line: underline line-through;
 }
 
 .markCode {

@@ -65,7 +65,7 @@ import type {CachedState} from '../block-crdt/types.js';
 export const BLOCK_RICH_TEXT_MIME = 'application/x-umkehr-block-rich-text+json';
 const HTML_PAYLOAD_PREFIX = 'umkehr-block-rich-text:';
 
-export type ClipboardBooleanMarkType = 'bold' | 'italic' | 'strikethrough';
+export type ClipboardBooleanMarkType = 'bold' | 'italic' | 'strikethrough' | 'underline';
 export type ClipboardInlineMarkType = ClipboardBooleanMarkType | 'link' | 'annotation' | 'embed' | 'math';
 
 export type ClipboardMarkRange = {
@@ -110,6 +110,7 @@ const INLINE_MARK_TYPES = new Set<ClipboardInlineMarkType>([
     'bold',
     'italic',
     'strikethrough',
+    'underline',
     'link',
     'annotation',
     'embed',
@@ -486,7 +487,7 @@ const appendRunMarks = (
     endOffset: number,
 ) => {
     if (startOffset >= endOffset) return;
-    for (const type of ['bold', 'italic', 'strikethrough'] as const) {
+    for (const type of ['bold', 'italic', 'strikethrough', 'underline'] as const) {
         if (run.marks[type] === true) marks.push({type, startOffset, endOffset});
     }
     const href = run.marks[LINK_MARK];
@@ -621,6 +622,7 @@ const wrapHtmlText = (
         if (mark.type === 'bold') result = `<strong>${result}</strong>`;
         if (mark.type === 'italic') result = `<em>${result}</em>`;
         if (mark.type === 'strikethrough') result = `<s>${result}</s>`;
+        if (mark.type === 'underline') result = `<u>${result}</u>`;
         if (mark.type === 'link' && typeof mark.data === 'string') {
             result = `<a href="${escapeAttribute(mark.data)}">${result}</a>`;
         }
@@ -676,10 +678,12 @@ const htmlMarkRank = (type: ClipboardInlineMarkType): number => {
             return 3;
         case 'strikethrough':
             return 4;
-        case 'italic':
+        case 'underline':
             return 5;
-        case 'bold':
+        case 'italic':
             return 6;
+        case 'bold':
+            return 7;
     }
 };
 

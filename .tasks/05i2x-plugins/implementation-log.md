@@ -276,3 +276,50 @@ Verification:
 
 - `npm exec vitest -- run src/block-editor/editorCrdtConfig.test.ts src/block-editor/plugins/registry.test.ts src/block-editor/plugins/compatibility.test.ts src/block-editor/plugins/metadata.test.ts src/block-editor/plugins/legacyRichTextUi.test.ts` passed.
 - `npm run typecheck` passed.
+
+### Phase 6 Started: Basic Marks Plugin
+
+- Added `basicMarksPlugin` with explicit mark declarations for:
+  - `bold`
+  - `italic`
+  - `strikethrough`
+  - `underline`
+- Added the basic marks plugin to `legacyRichTextPlugins` so compatibility checks recognize current basic inline mark records through the transitional preset.
+- Added underline as a first-class boolean inline mark in the existing editor paths:
+  - active mark derivation/toggling
+  - toolbar button and command dispatch
+  - static run rendering and DOM class application
+  - clipboard serialization/deserialization HTML wrapping
+  - annotation body mark toggling
+- Added underline toolbar/run CSS, including combined underline + strikethrough decoration handling.
+- Added tests for the basic marks plugin and legacy preset mark compatibility.
+
+Issues/workarounds:
+
+- `basicMarksPlugin` currently declares mark metadata only. Toolbar items remain in `legacyRichTextUiPlugin` for now because that plugin already owns the existing toolbar command ids; duplicating them in `basicMarksPlugin` creates registry conflicts.
+- The first test run caught an initialization-order bug in `basicMarksPlugin`; the label helper was converted to a function declaration before rerunning verification.
+
+Verification:
+
+- `npm exec vitest -- run src/block-editor/editorCrdtConfig.test.ts src/block-editor/legacyRichTextPlugins.test.ts src/block-editor/markdownShortcuts.test.ts src/block-editor/plugins/registry.test.ts src/block-editor/plugins/compatibility.test.ts src/block-editor/plugins/metadata.test.ts src/block-editor/plugins/legacyRichTextUi.test.ts src/block-editor/plugins/legacyRichTextBlocks.test.ts src/block-editor/plugins/basicMarks.test.ts` passed.
+- `npm run typecheck` passed.
+
+### Phase 6 Continued: Inline Feature Declaration Plugins
+
+- Added focused declaration plugins for the next inline features:
+  - `linksPlugin` declares the `link` mark.
+  - `mathPlugin` declares the `math` mark.
+  - `inlineDatePlugin` declares the generic `embed` mark and the `date` inline embed type.
+- Added these plugins to `legacyRichTextPlugins` so the transitional full-feature preset recognizes link, math, and date embed records during compatibility checks.
+- Added `inlinePlugins.test.ts` to verify registry declarations and document compatibility for link/math/date embed marks.
+- Extended `legacyRichTextPlugins.test.ts` to cover these inline records through the aggregate preset.
+
+Issues/workarounds:
+
+- `inlineDatePlugin` owns the generic `embed` mark for now because the compatibility scanner validates both mark type and inline embed type. If more inline embed plugins are added, this likely wants a small shared `inline-embeds` base plugin to avoid duplicate `embed` mark declarations.
+- Link popovers, math rendering, and date embed rendering still live in the legacy editor implementation. This step only moves their declared compatibility surface into plugins.
+
+Verification:
+
+- `npm exec vitest -- run src/block-editor/editorCrdtConfig.test.ts src/block-editor/legacyRichTextPlugins.test.ts src/block-editor/markdownShortcuts.test.ts src/block-editor/plugins/registry.test.ts src/block-editor/plugins/compatibility.test.ts src/block-editor/plugins/metadata.test.ts src/block-editor/plugins/legacyRichTextUi.test.ts src/block-editor/plugins/legacyRichTextBlocks.test.ts src/block-editor/plugins/basicMarks.test.ts src/block-editor/plugins/inlinePlugins.test.ts` passed.
+- `npm run typecheck` passed.

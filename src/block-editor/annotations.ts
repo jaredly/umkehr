@@ -418,7 +418,7 @@ export const deleteAnnotationBodyForward = (
 export const toggleAnnotationBodyMark = (
     state: CachedState<RichBlockMeta>,
     selection: EditorSelection,
-    markType: 'bold' | 'italic' | 'strikethrough',
+    markType: 'bold' | 'italic' | 'strikethrough' | 'underline',
     context: CommandContext,
 ): CommandResult => {
     const range = bodySelectionRange(state, selection);

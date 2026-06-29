@@ -334,7 +334,7 @@ type MatrixPollView = {rows: PollOptionView[]; columns: PollOptionView[]};
 type PollEditorMode = 'view' | 'edit';
 type SubmitCommandOptions = {constrainFullscreenSlideSelection?: boolean};
 
-const BOOLEAN_INLINE_MARKS: BooleanInlineMark[] = ['bold', 'italic', 'strikethrough'];
+const BOOLEAN_INLINE_MARKS: BooleanInlineMark[] = ['bold', 'italic', 'strikethrough', 'underline'];
 const BARE_INLINE_MARKS: BareInlineMark[] = [...BOOLEAN_INLINE_MARKS, CODE_MARK];
 const DEFAULT_DATE_EMBED_DATA = {type: 'date', value: '2026-06-23'} as const;
 export const coreBlockEditorPlugins: readonly BlockEditorPlugin<RichBlockMeta>[] = [];
@@ -3020,6 +3020,9 @@ export function BlockRichTextEditor({
             case 'mark:strikethrough':
                 runInlineMarkToggle('strikethrough');
                 return;
+            case 'mark:underline':
+                runInlineMarkToggle('underline');
+                return;
             case 'mark:code':
                 if (activeAnnotationBodySelection) {
                     runAnnotationBodyCommand((current, context) =>
@@ -3115,6 +3118,7 @@ export function BlockRichTextEditor({
                 onBold={() => runInlineMarkToggle('bold')}
                 onItalic={() => runInlineMarkToggle('italic')}
                 onStrikethrough={() => runInlineMarkToggle('strikethrough')}
+                onUnderline={() => runInlineMarkToggle('underline')}
                 onCode={() =>
                     activeAnnotationBodySelection
                         ? runAnnotationBodyCommand((current, context) =>
@@ -6979,6 +6983,7 @@ const renderStaticRuns = (runs: RichFormattedBlock['runs']): ReactElement[] =>
                 run.marks.bold ? 'markBold' : '',
                 run.marks.italic ? 'markItalic' : '',
                 run.marks.strikethrough ? 'markStrikethrough' : '',
+                run.marks.underline ? 'markUnderline' : '',
                 typeof run.marks[LINK_MARK] === 'string' ? 'markLink' : '',
                 isCodeMarkValue(run.marks[CODE_MARK]) ? 'markCode' : '',
                 hasAnnotationMark(run) ? 'markAnnotation' : '',
@@ -9468,6 +9473,7 @@ const serializeRuns = (
             run.marks.bold,
             run.marks.italic,
             run.marks.strikethrough,
+            run.marks.underline,
             run.marks[LINK_MARK],
             run.marks[CODE_MARK],
             run.marks[MATH_MARK],
@@ -9952,6 +9958,7 @@ const applyRunClasses = (
     if (run.marks.bold) span.classList.add('markBold');
     if (run.marks.italic) span.classList.add('markItalic');
     if (run.marks.strikethrough) span.classList.add('markStrikethrough');
+    if (run.marks.underline) span.classList.add('markUnderline');
     if (isCodeMarkValue(run.marks[CODE_MARK])) {
         span.classList.add('markCode');
         if (typeof run.marks[CODE_MARK] === 'string') span.classList.add('markCodeHighlighted');

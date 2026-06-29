@@ -109,6 +109,7 @@ export const legacyToolbarItemSpecs: readonly BlockEditorToolbarItemSpec[] = wit
     toolbarItem('mark:bold', 'Inline marks', 'Bold'),
     toolbarItem('mark:italic', 'Inline marks', 'Italic'),
     toolbarItem('mark:strikethrough', 'Inline marks', 'Strikethrough'),
+    toolbarItem('mark:underline', 'Inline marks', 'Underline'),
     toolbarItem('mark:code', 'Inline marks', 'Code'),
     toolbarItem('mark:math', 'Inline marks', 'Math'),
     toolbarItem('mark:display-math', 'Inline marks', 'Display Math'),

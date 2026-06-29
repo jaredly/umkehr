@@ -3,7 +3,7 @@ import type {RichBlockMeta} from './blockMeta';
 import {segmentText, type SelectionSegment} from './selectionModel';
 import {normalizeCodeLanguage} from './syntaxHighlight';
 
-export type BooleanInlineMark = 'bold' | 'italic' | 'strikethrough';
+export type BooleanInlineMark = 'bold' | 'italic' | 'strikethrough' | 'underline';
 export type BareInlineMark = BooleanInlineMark | 'code';
 export type InlineMark = BareInlineMark | 'link';
 export type MathRenderMode = 'inline' | 'display';

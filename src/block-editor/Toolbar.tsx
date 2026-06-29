@@ -16,6 +16,7 @@ export function Toolbar({
     onBold,
     onItalic,
     onStrikethrough,
+    onUnderline,
     onCode,
     onMath,
     onDisplayMath,
@@ -38,6 +39,7 @@ export function Toolbar({
     onBold(): void;
     onItalic(): void;
     onStrikethrough(): void;
+    onUnderline(): void;
     onCode(): void;
     onMath(): void;
     onDisplayMath(): void;
@@ -62,6 +64,7 @@ export function Toolbar({
         'mark:bold',
         'mark:italic',
         'mark:strikethrough',
+        'mark:underline',
         'mark:code',
         'mark:math',
         'mark:display-math',
@@ -126,6 +129,17 @@ export function Toolbar({
                         aria-label="Strikethrough"
                     >
                         <span className="toolbarStrike">S</span>
+                    </button>
+                ) : null}
+                {enabled('mark:underline') ? (
+                    <button
+                        type="button"
+                        aria-pressed={!!activeMarks.underline}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => runCommand('mark:underline', onUnderline)}
+                        aria-label="Underline"
+                    >
+                        <span className="toolbarUnderline">U</span>
                     </button>
                 ) : null}
                 {enabled('mark:code') ? (
