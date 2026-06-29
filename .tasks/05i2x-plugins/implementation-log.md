@@ -506,3 +506,22 @@ Verification:
 
 - `npm run typecheck` passed.
 - `npm exec vitest -- run src/block-editor/clipboard.test.ts src/block-editor/editorCrdtConfig.test.ts src/block-editor/legacyRichTextPlugins.test.ts src/block-editor/markdownShortcuts.test.ts src/block-editor/inlineRunRendering.test.ts src/block-editor/plugins/registry.test.ts src/block-editor/plugins/compatibility.test.ts src/block-editor/plugins/metadata.test.ts src/block-editor/plugins/legacyRichTextUi.test.ts src/block-editor/plugins/legacyRichTextBlocks.test.ts src/block-editor/plugins/basicMarks.test.ts src/block-editor/plugins/inlinePlugins.test.ts src/block-editor/plugins/code.test.ts` passed.
+
+### Phase 6 Continued: Registry Command Availability
+
+- Added a registry-derived command availability set in `BlockRichTextEditor`.
+- Command availability now includes:
+  - explicit registry command handlers
+  - toolbar item command ids
+  - slash command command ids
+- Switched the existing command availability predicate to use registered command ids instead of toolbar item ids only.
+
+Issues/workarounds:
+
+- The legacy editor command switch still owns many command implementations. This slice makes availability less toolbar-coupled, but it does not yet move those implementations into plugin command handlers.
+- The exported prop name passed through annotation rendering is still `isToolbarCommandAvailable` for compatibility with the current component plumbing.
+
+Verification:
+
+- `npm run typecheck` passed.
+- `npm exec vitest -- run src/block-editor/clipboard.test.ts src/block-editor/editorCrdtConfig.test.ts src/block-editor/legacyRichTextPlugins.test.ts src/block-editor/markdownShortcuts.test.ts src/block-editor/inlineRunRendering.test.ts src/block-editor/plugins/registry.test.ts src/block-editor/plugins/compatibility.test.ts src/block-editor/plugins/metadata.test.ts src/block-editor/plugins/legacyRichTextUi.test.ts src/block-editor/plugins/legacyRichTextBlocks.test.ts src/block-editor/plugins/basicMarks.test.ts src/block-editor/plugins/inlinePlugins.test.ts src/block-editor/plugins/code.test.ts` passed.

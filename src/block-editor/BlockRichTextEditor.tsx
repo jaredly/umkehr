@@ -527,9 +527,23 @@ export function BlockRichTextEditor({
         () => new Set(registry.toolbarItems.map((item) => item.id)),
         [registry],
     );
+    const registeredCommandIds = useMemo(() => {
+        const ids = new Set(registry.commands.keys());
+        for (const item of registry.toolbarItems) {
+            ids.add(item.commandId ?? item.id);
+        }
+        for (const command of registry.slashCommands) {
+            ids.add(command.commandId ?? command.id);
+        }
+        return ids;
+    }, [registry]);
+    const isEditorCommandAvailable = useCallback(
+        (commandId: string): boolean => registeredCommandIds.has(commandId),
+        [registeredCommandIds],
+    );
     const isToolbarCommandAvailable = useCallback(
-        (commandId: string): boolean => toolbarItemIds.has(commandId),
-        [toolbarItemIds],
+        (commandId: string): boolean => isEditorCommandAvailable(commandId),
+        [isEditorCommandAvailable],
     );
     const activeInlineMarkTypes = useMemo(() => activeInlineMarkTypesFromRegistry(registry), [registry]);
     const inlineRenderFeatures = useMemo(() => inlineRenderFeaturesFromRegistry(registry), [registry]);
