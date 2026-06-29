@@ -20,3 +20,5 @@
 - Verification after canvas rendering: focused `jigsaw.test.ts` passes and `npm run build` passes with the same SSH agent warning and Vite large-chunk warning as before.
 - Bug fix: unplaced pieces were recomputing their transient layout after CRDT updates, which made them jump/reshuffle without user action. Replaced render-derived unplaced layout with persistent local state that preserves existing unplaced piece positions, drops entries for newly placed pieces, and only generates positions for newly unplaced pieces. The `Reshuffle` button is now the only path that regenerates all unplaced positions.
 - Verification after unplaced-layout fix: focused `jigsaw.test.ts` passes and `npm run build` passes with the same SSH agent warning and Vite large-chunk warning as before.
+- UI fix: removed the decorative `::after` overlay from pieces. Pieces now show only their masked source-image canvas plus outline/shadow, so visual matching is not distorted by extra gradients.
+- Verification after overlay removal: focused `jigsaw.test.ts` passes and `npm run build` passes with the same SSH agent warning and Vite large-chunk warning as before.
