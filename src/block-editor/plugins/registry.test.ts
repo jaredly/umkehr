@@ -179,6 +179,10 @@ describe('createBlockEditorRegistry', () => {
                     {
                         id: 'mermaid',
                         languages: ['Mermaid'],
+                        previewKind: 'mermaid',
+                        emptyLabel: 'Empty diagram',
+                        loadingLabel: 'Rendering diagram...',
+                        errorLabel: 'Unable to render Mermaid diagram.',
                         render: async () => ({html: '<svg />'}),
                     },
                 ],
@@ -194,11 +198,31 @@ describe('createBlockEditorRegistry', () => {
             createBlockEditorRegistry<TestMeta>([
                 plugin({
                     id: 'a',
-                    codePreviewRenderers: [{id: 'a.mermaid', languages: ['mermaid'], render: async () => ({html: ''})}],
+                    codePreviewRenderers: [
+                        {
+                            id: 'a.mermaid',
+                            languages: ['mermaid'],
+                            previewKind: 'mermaid',
+                            emptyLabel: 'Empty',
+                            loadingLabel: 'Loading',
+                            errorLabel: 'Error',
+                            render: async () => ({html: ''}),
+                        },
+                    ],
                 }),
                 plugin({
                     id: 'b',
-                    codePreviewRenderers: [{id: 'b.mermaid', languages: [' Mermaid '], render: async () => ({html: ''})}],
+                    codePreviewRenderers: [
+                        {
+                            id: 'b.mermaid',
+                            languages: [' Mermaid '],
+                            previewKind: 'mermaid',
+                            emptyLabel: 'Empty',
+                            loadingLabel: 'Loading',
+                            errorLabel: 'Error',
+                            render: async () => ({html: ''}),
+                        },
+                    ],
                 }),
             ]),
         ).toThrow(/Code preview language "mermaid"/);

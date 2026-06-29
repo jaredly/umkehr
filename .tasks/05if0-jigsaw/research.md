@@ -9,7 +9,7 @@ The puzzle board should be immutable artifact data. CRDT state should contain on
 ```ts
 type State = {
     positions: Record<string, Coord>;
-    connections: Record<string, true>;
+    connections: Record<string, number>;
 };
 ```
 
@@ -109,7 +109,7 @@ export type JigsawBoardArtifact = {
 
 export type JigsawState = {
     positions: Record<string, Coord>;
-    connections: Record<string, true>;
+    connections: Record<string, number>;
 };
 ```
 
@@ -152,7 +152,7 @@ Add `examples/react-crdt/src/apps/jigsaw/schema.ts` with Typia schema generation
 ```ts
 export type JigsawState = {
     positions: Record<string, Coord>;
-    connections: Record<string, true>;
+    connections: Record<string, number>;
 };
 
 export const JIGSAW_DOC_ID = 'umkehr-react-crdt-jigsaw-v1';
@@ -179,9 +179,9 @@ Ephemeral data is not required for correctness. It is useful for remote drag pre
 
 Put the core logic in pure helpers so it can be tested independently of React:
 
-- `validConnections(board, state.connections)` filters connection keys to edges that exist in `board.pieces[a].neighbors`.
+- `validConnections(board, state.connections)` filters connection keys to edges that exist in `board.pieces[a].neighbors` and have valid positive strength values.
 - `connectedComponents(board, connections)` builds undirected components from valid directed edges.
-- `pieceDepths(board, connections)` computes traversal depth with cycle condensation.
+- `pieceDepths(board, connections)` computes weighted traversal depth with cycle condensation.
 - `anchorPieceForComponent(board, state, component, depths)` chooses the placed node with greatest depth, tie-breaking by largest piece index.
 - `relativeOffset(board, from, to, connections)` resolves the offset between any two pieces in the same valid component.
 - `placedPiecePositions(board, state)` returns derived absolute positions for every piece in anchored components.
@@ -189,6 +189,8 @@ Put the core logic in pure helpers so it can be tested independently of React:
 - `connectionPatchesForDrop(board, derivedPositions, droppedComponent, state)` creates valid new connection patches when pieces are within snap distance.
 
 The task describes connections as directed edges (`A:B`) and says anchor depth is based on directed traversal. Placement itself should treat the connected component as an undirected set after invalid connections are discarded, because a connection `A:B` still means `A` and `B` are physically attached and both should move together.
+
+Connection values should be numeric strengths rather than booleans. A normal connection can have strength `1`, and a snap between two existing components can use a larger strength to make the destination component authoritative over the dragged component. Concurrent writes to the same connection key can resolve with the CRDT's normal last-writer-wins value semantics; if the implementation wants stricter monotonic behavior later, it can write the max strength under a distinct merge policy, but LWW is enough for the first app.
 
 ## Anchor Depth Algorithm
 
@@ -200,13 +202,21 @@ Recommended implementation:
 2. Build strongly connected components with Tarjan or Kosaraju.
 3. Build a DAG of SCCs from valid directed edges.
 4. SCC roots are components with no incoming SCC edges and start at depth `0`.
-5. Propagate depth through the DAG, using `max(parentDepth + 1)`.
+5. Propagate depth through the DAG, using `max(parentDepth + connectionStrength)`.
 6. Assign each piece the depth of its SCC.
 7. For each connected physical component, choose the piece with a CRDT `position` and the greatest depth; tie-break by largest piece index.
 
-This matches the task's cycle requirement: all nodes in a cycle get the same depth, one greater than the highest-depth node that points into the cycle.
+This matches the task's cycle requirement, with strength included: all nodes in a cycle get the same depth, `connectionStrength` greater than the highest-depth node that points into the cycle. For multiple inbound edges, use the maximum resulting depth.
 
 If a connected component has no positioned pieces, it is not globally placed. Its pieces should be included in the local unplaced layout unless they are currently being dragged locally.
+
+When a component is dragged onto another component, the snap edge should be strong enough that the destination component's placed pieces outrank the dragged component's placed pieces. One practical rule:
+
+```ts
+const strength = Math.max(1, draggedMaxDepth - draggedEndpointDepth + 1);
+```
+
+The edge is still written from the moved piece to the destination neighbor (`draggedPiece:destinationPiece`). Since depth flows along the edge, this makes the destination endpoint at least one level deeper than the previous max depth of the dragged component. If the destination component already has a positioned piece, that destination placement becomes authoritative. If it does not, the newly written position for the dragged component still wins, which is acceptable.
 
 ## Position Derivation
 
@@ -220,7 +230,7 @@ For a component with anchor piece `A` at absolute position `P`:
 
 Do not trust `state.positions` for every piece in a connected component. Only the anchor's CRDT position should determine the component. Other position records may be stale from earlier drags before connections formed.
 
-When the user drags a connected component and drops it, only write the dropped/dragged piece's `position`. The anchor rule will decide whether that piece becomes authoritative. If this produces surprising behavior, the alternative is to write the selected anchor's position adjusted by the drag delta, but that slightly diverges from the task's "state.position is added" wording.
+When the user drags a connected component and drops it, write the dragged component's current anchor piece position, adjusted by the drag delta, so standalone drops still place that component. This does not have to be the piece under the cursor. If the drop also snaps to another piece/component, the new connection strength should make an already-positioned destination component authoritative, overriding the dragged component's newly written anchor position in derived layout.
 
 ## Local Unplaced Layout
 
@@ -253,9 +263,9 @@ Interaction flow:
 3. Capture the component's current derived/local positions.
 4. During pointer move, apply local delta to every piece in that component.
 5. On pointer up:
-   - write a `positions[pieceIndex]` patch for the dragged piece's final center
+   - write a `positions[anchorPiece]` patch for the dragged component's final anchor-piece center
    - detect snaps between every piece in the dragged component and its correct declared board neighbors outside the component
-   - for each close correct-neighbor pair, add `connections["draggedPiece:neighborPiece"] = true` where the first index is the moved piece in that pair
+   - for each close correct-neighbor pair, add `connections["draggedPiece:neighborPiece"] = strength` where the first index is the moved piece in that pair and `strength` is high enough for an already-positioned destination component to become authoritative
 
 Snap check:
 
@@ -311,11 +321,11 @@ High-value unit tests:
 - artifact serialize/load validates kind/version/fingerprint
 - invalid connection keys are discarded
 - components are built from valid physical neighbor connections
-- depth calculation handles roots, multiple roots, max-depth merge, and cycles
+- weighted depth calculation handles roots, multiple roots, max-depth merge, and cycles
 - anchor selection uses greatest depth with largest index tie-break
 - derived positions follow board offsets from the chosen anchor
 - stale non-anchor `positions` do not distort a connected component
-- snap detection only checks correct declared neighbors and emits directed connection keys from moved piece to neighbor
+- snap detection only checks correct declared neighbors and emits directed connection keys from moved piece to neighbor with enough strength for an already-positioned destination placement to win
 - unplaced layout is deterministic enough for tests when given a fixed container size/seed
 
 Useful commands:
@@ -334,26 +344,36 @@ The repo uses `pnpm` scripts too, but this package already has local dependencie
 
 The current app contract exposes `artifacts.createInitial()` but does not pass app-specific options. Supporting 12/30/60/120 cleanly may require either a small shared API extension or a jigsaw-specific "new game" flow.
 
+- we can just start with a default (12) and deal with user-input document options later
+
 2. What image should the initial board use?
 
 Options are a bundled static image, a generated SVG/data URL, or a CSS/color test image. A real bitmap is better for a jigsaw, but it adds asset handling and copyright/source decisions.
+
+- let's make a 2d gradient HSL where X is Hue (0-360) and Y is Lightness (30-70%)
 
 3. Should `image` inside `JigsawBoardArtifact` be an artifact id immediately?
 
 The task sketch uses `image: artifactId`. Implementing that literally implies an image artifact plus a board artifact. That is architecturally nice, but the existing artifact store is flat and app-local. The first version can keep the image reference inside the board artifact and migrate later if binary/image persistence becomes a shared requirement.
 
-4. When dragging a connected component, which position should be written on drop?
+- we can punt on that, and have it be a fixed `"stock:hue"` value
 
-The task says the clicked/dragged piece gets a `state.position`. With the anchor-depth rule, dropping a lower-depth piece in a component may not visibly move the component if a deeper placed piece remains anchor. A more ergonomic behavior may be to write the current anchor's adjusted position instead.
-
-5. Should snapping create one connection or all eligible connections?
+4. Should snapping create one connection or all eligible connections?
 
 When a component is dropped near multiple neighbors, creating all valid close connections feels natural and helps lock larger solved areas. Creating only the nearest connection is simpler and may avoid accidental multi-snaps.
 
-6. How should z-order be represented?
+- all eligible
+
+5. How should z-order be represented?
 
 No z-order exists in CRDT state. A local z-order based on recent drag is enough initially, but concurrent users may see different stacking for overlapping unconnected pieces.
 
-7. Should remote drag previews be shown?
+- any positioned pieces are rendered over non-positioned pieces
+- parts of a component all have the same z-index
+- components with more recent `anchor positions` (by HLC of crdt metadata) are rendered above those with older positions
+
+6. Should remote drag previews be shown?
 
 The task says drag state is local-only and not broadcast. That keeps implementation simple. If remote previews are desired later, add jigsaw ephemeral messages rather than CRDT state.
+
+- not right now

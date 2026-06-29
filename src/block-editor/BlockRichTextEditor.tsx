@@ -105,9 +105,6 @@ import {
     type AnnotationPresentation,
 } from './annotations.js';
 import {
-    codeMetaWithPreviewForLanguage,
-    codePreviewKindForLanguage,
-    isPreviewableCodeMeta,
     normalizeSlideDeckSize,
     paragraphMeta,
     richBlockStyleValue,
@@ -125,6 +122,12 @@ import {
     type SlideDeckFooterMode,
     type SlideTransition,
 } from './blockMeta.js';
+import {
+    codeMetaWithPreviewForRegistry,
+    codePreviewRendererForLanguage,
+    codePreviewRendererForMeta,
+    isPreviewableCodeMetaFromRegistry,
+} from './codePreviewRegistry.js';
 import {
     closestCaretOffsetForHorizontalIntent,
     caretRectForBlockOffset,
@@ -3476,6 +3479,7 @@ export function BlockRichTextEditor({
                                 footnoteNumberById,
                                 inlineRenderFeatures,
                                 blockRenderFeatures,
+                                registry,
                                 optionPanelBlockTypes,
                                 onPopoverTriggerEnter: showPopover,
                                 onPopoverTriggerLeave: schedulePopoverHideFromPointer,
@@ -3833,6 +3837,7 @@ type RenderBlockContext = {
     footnoteNumberById: Map<string, number>;
     inlineRenderFeatures: InlineRenderFeatures;
     blockRenderFeatures: BlockRenderFeatures;
+    registry: Pick<BlockEditorRegistry<RichBlockMeta>, 'codePreviewRenderersByLanguage' | 'optionPanels'>;
     optionPanelBlockTypes: ReadonlySet<string>;
     runEditCommand(
         command: (current: Replica, selection: RetainedSelectionSet) => MultiCommandResult,
@@ -4530,6 +4535,7 @@ function SlideBlockOptions({
         <BlockOptions
             className="slideBlockOptions"
             meta={meta}
+            registry={context.registry}
             style={style}
             optionPanelBlockTypes={context.optionPanelBlockTypes}
             onSetCodeLanguage={noop}
@@ -5688,6 +5694,7 @@ const renderEditableBlock = (
             footnoteNumberById={context.footnoteNumberById}
             inlineRenderFeatures={context.inlineRenderFeatures}
             blockRenderFeatures={context.blockRenderFeatures}
+            registry={context.registry}
             optionPanelBlockTypes={context.optionPanelBlockTypes}
             onPopoverTriggerEnter={context.onPopoverTriggerEnter}
             onPopoverTriggerLeave={context.onPopoverTriggerLeave}
@@ -5997,10 +6004,15 @@ const renderEditableBlock = (
             onSetCodeLanguage={(language) =>
                 context.runBlockControlCommand((current) => {
                     const currentBlock = current.state.state.blocks[block.id];
-                    if (!currentBlock || currentBlock.meta.type !== 'code') {
+                    if (
+                        !currentBlock ||
+                        currentBlock.meta.type !== 'code' ||
+                        !context.registry.optionPanels.has('code')
+                    ) {
                         return {state: current.state, ops: [], selection: current.selection};
                     }
-                    const nextMeta = codeMetaWithPreviewForLanguage(
+                    const nextMeta = codeMetaWithPreviewForRegistry(
+                        context.registry,
                         {
                             type: 'code',
                             language,
@@ -6018,13 +6030,18 @@ const renderEditableBlock = (
             onSetCodePreview={(enabled) =>
                 context.runBlockControlCommand((current) => {
                     const currentBlock = current.state.state.blocks[block.id];
-                    if (!currentBlock || currentBlock.meta.type !== 'code') {
+                    if (
+                        !currentBlock ||
+                        currentBlock.meta.type !== 'code' ||
+                        !context.registry.optionPanels.has('code')
+                    ) {
                         return {state: current.state, ops: [], selection: current.selection};
                     }
                     const result = setBlockMeta(
                         current.state,
                         block.id,
-                        codeMetaWithPreviewForLanguage(
+                        codeMetaWithPreviewForRegistry(
+                            context.registry,
                             {...currentBlock.meta, ts: nextReplicaTs(current)},
                             enabled,
                         ),
@@ -7326,6 +7343,7 @@ function EditableBlock({
     footnoteNumberById,
     inlineRenderFeatures,
     blockRenderFeatures,
+    registry,
     optionPanelBlockTypes,
     onPopoverTriggerEnter,
     onPopoverTriggerLeave,
@@ -7426,6 +7444,7 @@ function EditableBlock({
     footnoteNumberById: Map<string, number>;
     inlineRenderFeatures: InlineRenderFeatures;
     blockRenderFeatures: BlockRenderFeatures;
+    registry: Pick<BlockEditorRegistry<RichBlockMeta>, 'codePreviewRenderersByLanguage'>;
     optionPanelBlockTypes: ReadonlySet<string>;
     onPopoverTriggerEnter(id: string, element: HTMLElement): void;
     onPopoverTriggerLeave(id?: string, transition?: PopoverPointerTransition): void;
@@ -7503,7 +7522,9 @@ function EditableBlock({
     const meta = block.block.meta;
     const hasBlockRenderFeature = blockRenderFeatures.has(meta.type);
     const isCodeBlock = meta.type === 'code';
-    const isPlainTextCodeLikeBlock = meta.type === 'code';
+    const codeBlockRenderer = codePreviewRendererForMeta(registry, meta);
+    const isRenderedCodeBlock = isCodeBlock && hasBlockRenderFeature;
+    const isPlainTextCodeLikeBlock = isRenderedCodeBlock;
     const codeLikeHasTrailingNewline =
         isPlainTextCodeLikeBlock &&
         block.runs
@@ -7515,8 +7536,8 @@ function EditableBlock({
     const blockText = block.runs.map((run) => run.text).join('');
     const blockStyle = blockStyleProps(block.block.style);
     const syntaxTokens = useMemo(
-        () => (isCodeBlock ? highlightCode(codeText, codeLanguage) : undefined),
-        [codeLanguage, codeText, isCodeBlock],
+        () => (isRenderedCodeBlock ? highlightCode(codeText, codeLanguage) : undefined),
+        [codeLanguage, codeText, isRenderedCodeBlock],
     );
     const ingredientTokens = useMemo(
         () =>
@@ -7540,7 +7561,7 @@ function EditableBlock({
             className={[
                 'editableBlock',
                 isPlainTextCodeLikeBlock ? 'codeBlock' : '',
-                isPreviewableCodeMeta(meta) ? 'previewCodeEditor' : '',
+                isPreviewableCodeMetaFromRegistry(registry, meta) ? 'previewCodeEditor' : '',
                 meta.type === 'heading' && hasBlockRenderFeature ? `headingLevel${meta.level}` : '',
                 meta.type === 'image' && hasBlockRenderFeature ? 'imageCaption' : '',
                 meta.type === 'recipe_ingredient' && hasBlockRenderFeature ? 'recipeIngredientBlock' : '',
@@ -7883,10 +7904,10 @@ function EditableBlock({
                     onVote={onPollVote}
                     onLongAnswer={onPollLongAnswer}
                 />
-            ) : isPreviewableCodeMeta(meta) ? (
+            ) : codeBlockRenderer ? (
                 <PreviewableCodeBlock
                     blockId={block.id}
-                    previewKind={meta.preview}
+                    renderer={codeBlockRenderer}
                     source={blockText}
                     editor={editableSurface}
                 />
@@ -7896,6 +7917,7 @@ function EditableBlock({
             {!hideInlineControls && (
                 <BlockOptions
                     meta={meta}
+                    registry={registry}
                     style={block.block.style}
                     optionPanelBlockTypes={optionPanelBlockTypes}
                     onSetCodeLanguage={onSetCodeLanguage}
@@ -8991,6 +9013,7 @@ function BlockAffordance({
 function BlockOptions({
     className,
     meta,
+    registry,
     style,
     optionPanelBlockTypes,
     onSetCodeLanguage,
@@ -9011,6 +9034,7 @@ function BlockOptions({
 }: {
     className?: string;
     meta: RichBlockMeta;
+    registry: Pick<BlockEditorRegistry<RichBlockMeta>, 'codePreviewRenderersByLanguage'>;
     style?: BlockStyle;
     optionPanelBlockTypes: ReadonlySet<string>;
     onSetCodeLanguage(language: string): void;
@@ -9032,8 +9056,8 @@ function BlockOptions({
     let label = 'Block style options';
     let controls: ReactElement | null = null;
 
-    if (meta.type === 'code') {
-        const previewKind = codePreviewKindForLanguage(meta.language);
+    if (meta.type === 'code' && optionPanelBlockTypes.has('code')) {
+        const previewRenderer = codePreviewRendererForLanguage(registry, meta.language);
         label = 'Code block options';
         controls = (
             <>
@@ -9044,11 +9068,11 @@ function BlockOptions({
                     aria-label="Code language"
                     onChange={(event) => onSetCodeLanguage(event.currentTarget.value)}
                 />
-                {previewKind ? (
+                {previewRenderer ? (
                     <label className="blockOptionsToggle">
                         <input
                             type="checkbox"
-                            checked={meta.preview === previewKind}
+                            checked={meta.preview === previewRenderer.previewKind}
                             aria-label="Preview code"
                             onChange={(event) => onSetCodePreview(event.currentTarget.checked)}
                         />

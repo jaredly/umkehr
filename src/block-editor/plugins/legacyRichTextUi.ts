@@ -76,9 +76,6 @@ export function withOrder<Item extends {order?: number}>(items: readonly Item[])
 
 export const legacyBlockTypeMenuItems: readonly LegacyBlockTypeMenuItem[] = [
     {value: 'paragraph', label: 'Paragraph'},
-    {value: 'code', label: 'Code'},
-    {value: 'mermaid', label: 'Mermaid diagram'},
-    {value: 'vega-lite', label: 'Vega-Lite chart'},
     {value: 'table', label: 'Table'},
     {value: 'columns', label: 'Columns'},
     {value: 'card-columns', label: 'Card columns'},
@@ -92,9 +89,6 @@ export const legacyBlockTypeMenuItems: readonly LegacyBlockTypeMenuItem[] = [
 
 export const legacySlashCommandSpecs: readonly BlockEditorSlashCommandSpec[] = withOrder([
     blockSlashCommand('paragraph', 'Paragraph', ['text']),
-    blockSlashCommand('code', 'Code', ['pre']),
-    blockSlashCommand('mermaid', 'Mermaid diagram', ['diagram', 'chart', 'flowchart', 'mermaid']),
-    blockSlashCommand('vega-lite', 'Vega-Lite chart', ['chart', 'graph', 'vega', 'visualization']),
     blockSlashCommand('table', 'Table', ['grid']),
     blockSlashCommand('columns', 'Columns', ['columns', 'layout']),
     blockSlashCommand('card-columns', 'Card columns', ['board', 'cards', 'columns']),

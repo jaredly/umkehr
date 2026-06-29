@@ -2,8 +2,10 @@ import type {RichBlockMeta} from './blockMeta.js';
 import {legacyRichTextCrdtPlugins} from './editorCrdtConfig.js';
 import {
     basicMarksPlugin,
+    codeMermaidPlugin,
     calloutsPlugin,
     codePlugin,
+    codeVegaPlugin,
     headingsPlugin,
     imagesPlugin,
     inlineDatePlugin,
@@ -23,6 +25,8 @@ export const legacyRichTextPlugins: readonly BlockEditorPlugin<RichBlockMeta>[] 
     basicMarksPlugin,
     calloutsPlugin,
     codePlugin,
+    codeMermaidPlugin,
+    codeVegaPlugin,
     headingsPlugin,
     imagesPlugin,
     inlineDatePlugin,

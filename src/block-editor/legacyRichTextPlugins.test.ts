@@ -32,6 +32,8 @@ describe('legacyRichTextPlugins', () => {
             'basic-marks',
             'callouts',
             'code',
+            'code/mermaid',
+            'code/vega',
             'headings',
             'images',
             'ingredients',
@@ -50,6 +52,7 @@ describe('legacyRichTextPlugins', () => {
         expect(registry.marks.has('bold')).toBe(true);
         expect(registry.marks.has('underline')).toBe(true);
         expect(registry.blockTypes.has('heading')).toBe(true);
+        expect(registry.blockTypes.has('code')).toBe(true);
         expect(registry.blockTypes.has('image')).toBe(true);
         expect(registry.blockTypes.has('preview')).toBe(true);
         expect(registry.blockTypes.has('poll')).toBe(true);

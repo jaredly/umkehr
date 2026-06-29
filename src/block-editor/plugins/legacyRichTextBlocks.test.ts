@@ -33,7 +33,6 @@ const emptyState = (): CachedState<RichBlockMeta> => ({
 describe('legacy rich text block plugin', () => {
     it('declares every non-core rich text block metadata type', () => {
         expect(legacyRichTextBlockTypeIds).toEqual([
-            'code',
             'table',
             'columns',
             'slide_deck',
@@ -46,7 +45,6 @@ describe('legacy rich text block plugin', () => {
         const registry = createBlockEditorRegistry([legacyRichTextBlocksPlugin]);
         const state = emptyState();
         const metas: RichBlockMeta[] = [
-            {type: 'code', language: 'ts', ts: '1'},
             {type: 'table', ts: '1'},
             {type: 'columns', display: 'blocks', ts: '1'},
             {type: 'slide_deck', width: 1920, height: 1080, footer: 'slide-number', ts: '1'},
@@ -80,7 +78,7 @@ describe('legacy rich text block plugin', () => {
     it('validates rich block metadata and rejects malformed metadata', () => {
         const registry = createBlockEditorRegistry([legacyRichTextBlocksPlugin]);
 
-        expect(validateBlockEditorMeta(registry, {type: 'code', language: 'ts', ts: '1'})).toBe(true);
+        expect(validateBlockEditorMeta(registry, {type: 'code', language: 'ts', ts: '1'})).toBe(false);
         expect(validateBlockEditorMeta(registry, {type: 'heading', level: 2, ts: '1'})).toBe(false);
         expect(validateBlockEditorMeta(registry, {type: 'heading', level: 4, ts: '1'})).toBe(false);
         expect(isLegacyRichBlockMeta({type: 'code', language: 'ts', preview: 'unknown', ts: '1'})).toBe(false);
@@ -89,9 +87,9 @@ describe('legacy rich text block plugin', () => {
     it('updates timestamps through legacy block type specs', () => {
         const registry = createBlockEditorRegistry([legacyRichTextBlocksPlugin]);
 
-        expect(blockEditorMetaWithTs(registry, {type: 'code', language: 'ts', ts: '1'}, '2')).toEqual({
-            type: 'code',
-            language: 'ts',
+        expect(registry.blockTypes.has('code')).toBe(false);
+        expect(blockEditorMetaWithTs(registry, {type: 'table', ts: '1'}, '2')).toEqual({
+            type: 'table',
             ts: '2',
         });
     });

@@ -10,6 +10,7 @@ import type {
     TimestampedBlockMeta,
 } from '../../block-crdt/types.js';
 import type {RetainedSelectionSet} from '../selectionSet.js';
+import type {CodePreviewKind} from '../blockMeta.js';
 
 export type BlockEditorPluginId = string;
 export type BlockEditorContributionId = string;
@@ -141,6 +142,10 @@ export type BlockEditorCodePreviewRenderer = {
     pluginId?: BlockEditorPluginId;
     languages: readonly string[];
     label?: string;
+    previewKind: CodePreviewKind;
+    emptyLabel: string;
+    loadingLabel: string;
+    errorLabel: string;
     render(source: string, renderId: string): Promise<{html: string}>;
 };
 
