@@ -7,6 +7,7 @@ import {
     createAttachmentFromFile,
     deserializeAttachments,
     initialRetainedSelectionSet,
+    legacyRichTextPlugins,
     revokeAttachments,
     type AttachmentStore,
     type BlockEditorReplica,
@@ -124,6 +125,7 @@ export function BlockNotesPanel({
             <BlockRichTextEditor
                 replica={replicaForCommand()}
                 attachments={attachments}
+                plugins={legacyRichTextPlugins}
                 resetSignal={0}
                 undoState={{
                     canUndo: editor.canUndo(),

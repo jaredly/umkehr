@@ -370,3 +370,22 @@ Verification:
 
 - `npm exec vitest -- run src/block-editor/editorCrdtConfig.test.ts src/block-editor/legacyRichTextPlugins.test.ts src/block-editor/markdownShortcuts.test.ts src/block-editor/inlineRunRendering.test.ts src/block-editor/plugins/registry.test.ts src/block-editor/plugins/compatibility.test.ts src/block-editor/plugins/metadata.test.ts src/block-editor/plugins/legacyRichTextUi.test.ts src/block-editor/plugins/legacyRichTextBlocks.test.ts src/block-editor/plugins/basicMarks.test.ts src/block-editor/plugins/inlinePlugins.test.ts src/block-editor/plugins/code.test.ts` passed.
 - `npm run typecheck` passed.
+
+### Phase 6 Continued: Explicit Presets And Toolbar Command Gating
+
+- Updated local rich editor example callers to pass `legacyRichTextPlugins` explicitly:
+  - `examples/block-rich-text`
+  - `examples/react-crdt` block notes panel
+- Tightened `BlockRichTextEditor` toolbar filtering so it always passes registry-derived toolbar item ids and block type menu items to `Toolbar`, including the empty-registry case.
+- Added a guard around hard-coded legacy toolbar command execution so known toolbar commands only run when their toolbar item is registered.
+- Kept unknown registry command handlers executable even without toolbar items, since commands can be invoked by other plugin-owned surfaces.
+
+Issues/workarounds:
+
+- `Toolbar` itself still keeps its no-`toolbarItemIds` legacy fallback for isolated usage. The stricter behavior is applied by `BlockRichTextEditor`, which now always provides a registry-derived set.
+- Keyboard shortcuts and some editor-local command paths still need a plugin-aware command policy. This slice gates toolbar dispatch only.
+
+Verification:
+
+- `npm run typecheck` passed.
+- `npm exec vitest -- run src/block-editor/editorCrdtConfig.test.ts src/block-editor/legacyRichTextPlugins.test.ts src/block-editor/markdownShortcuts.test.ts src/block-editor/inlineRunRendering.test.ts src/block-editor/plugins/registry.test.ts src/block-editor/plugins/compatibility.test.ts src/block-editor/plugins/metadata.test.ts src/block-editor/plugins/legacyRichTextUi.test.ts src/block-editor/plugins/legacyRichTextBlocks.test.ts src/block-editor/plugins/basicMarks.test.ts src/block-editor/plugins/inlinePlugins.test.ts src/block-editor/plugins/code.test.ts` passed.

@@ -14,7 +14,7 @@ import {
     type PointerEvent,
     type ReactElement,
 } from 'react';
-import {BlockRichTextEditor} from 'umkehr/block-editor';
+import {BlockRichTextEditor, legacyRichTextPlugins} from 'umkehr/block-editor';
 import {
     applyMany,
     blockContents,
@@ -753,6 +753,7 @@ export function EditorApp() {
                 <BlockRichTextEditor
                     replica={displayDemo.left}
                     attachments={attachments}
+                    plugins={legacyRichTextPlugins}
                     resetSignal={historyResetSignal}
                     undoState={undoStates.left}
                     undoStatus={undoStatus.left ?? ''}
@@ -775,6 +776,7 @@ export function EditorApp() {
                 <BlockRichTextEditor
                     replica={displayDemo.right}
                     attachments={attachments}
+                    plugins={legacyRichTextPlugins}
                     resetSignal={historyResetSignal}
                     undoState={undoStates.right}
                     undoStatus={undoStatus.right ?? ''}
@@ -798,4 +800,3 @@ export function EditorApp() {
         </main>
     );
 }
-

@@ -337,6 +337,23 @@ type SubmitCommandOptions = {constrainFullscreenSlideSelection?: boolean};
 const BOOLEAN_INLINE_MARKS: BooleanInlineMark[] = ['bold', 'italic', 'strikethrough', 'underline'];
 const BARE_INLINE_MARKS: BareInlineMark[] = [...BOOLEAN_INLINE_MARKS, CODE_MARK];
 const DEFAULT_DATE_EMBED_DATA = {type: 'date', value: '2026-06-23'} as const;
+const LEGACY_TOOLBAR_COMMAND_IDS = new Set([
+    'history:undo',
+    'history:redo',
+    'mark:bold',
+    'mark:italic',
+    'mark:strikethrough',
+    'mark:underline',
+    'mark:code',
+    'mark:math',
+    'mark:display-math',
+    'link:edit',
+    'inline-embed:date',
+    'image:upload',
+    'annotation:sidebar',
+    'annotation:footnote',
+    'annotation:popover',
+]);
 export const coreBlockEditorPlugins: readonly BlockEditorPlugin<RichBlockMeta>[] = [];
 export const defaultBlockEditorPlugins = coreBlockEditorPlugins;
 
@@ -466,11 +483,10 @@ export function BlockRichTextEditor({
     const registry = useMemo(() => createBlockEditorRegistry(plugins), [plugins]);
     const slashCommands = useMemo(() => slashCommandsFromRegistry(registry), [registry]);
     const blockTypeItems = useMemo(() => {
-        const items = blockTypeMenuItemsFromToolbarSpecs(registry.toolbarItems);
-        return items.length ? items : undefined;
+        return blockTypeMenuItemsFromToolbarSpecs(registry.toolbarItems);
     }, [registry]);
     const toolbarItemIds = useMemo(
-        () => (registry.toolbarItems.length ? new Set(registry.toolbarItems.map((item) => item.id)) : undefined),
+        () => new Set(registry.toolbarItems.map((item) => item.id)),
         [registry],
     );
     const activeInlineMarkTypes = useMemo(() => activeInlineMarkTypesFromRegistry(registry), [registry]);
@@ -3002,7 +3018,11 @@ export function BlockRichTextEditor({
     };
 
     const runToolbarCommand = (commandId: string) => {
+        const isRegisteredLegacyToolbarCommand =
+            commandId.startsWith('block-type:') ? toolbarItemIds.has(commandId) : toolbarItemIds.has(commandId);
+        if (LEGACY_TOOLBAR_COMMAND_IDS.has(commandId) && !isRegisteredLegacyToolbarCommand) return;
         if (commandId.startsWith('block-type:')) {
+            if (!isRegisteredLegacyToolbarCommand) return;
             runToolbarBlockTypeCommand(commandId.slice('block-type:'.length) as BlockTypeMenuValue);
             return;
         }
