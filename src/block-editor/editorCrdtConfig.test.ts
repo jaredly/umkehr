@@ -1,6 +1,7 @@
 import {describe, expect, it} from 'vitest';
 
 import {createBlockEditorRegistry} from './plugins/registry';
+import {blockEditorDocumentCompatibilityIssues} from './plugins/compatibility';
 import {
     blockEditorCrdtConfigFromRegistry,
     legacyRichTextCrdtPlugins,
@@ -81,6 +82,22 @@ describe('richTextCrdtConfig', () => {
         expect(blockEditorCrdtConfigFromRegistry(registry).markBehavior).toEqual(
             legacyRichTextCrdtRegistry.crdtConfig().markBehavior,
         );
+    });
+
+    it('declares annotation mark compatibility through the legacy annotations plugin', () => {
+        const registry = createBlockEditorRegistry(legacyRichTextCrdtPlugins);
+        const state = emptyState();
+        state.state.marks.annotation = {
+            id: [1, 'a'],
+            start: {id: [2, 'a'], at: 'before'},
+            end: {id: [3, 'a'], at: 'after'},
+            remove: false,
+            type: 'annotation',
+            data: {id: [4, 'a'], presentation: 'sidebar'},
+            crossedSplits: [],
+        };
+
+        expect(blockEditorDocumentCompatibilityIssues(registry, {state})).toEqual([]);
     });
 
     it('allows richTextCrdtConfig callers to provide a registry', () => {

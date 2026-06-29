@@ -124,6 +124,15 @@ describe('legacyRichTextPlugins', () => {
             data: 'ts',
             crossedSplits: [],
         };
+        state.state.marks.annotation = {
+            id: [7, 'a'],
+            start: {id: [10, 'a'], at: 'before'},
+            end: {id: [11, 'a'], at: 'after'},
+            remove: false,
+            type: 'annotation',
+            data: {id: [12, 'a'], presentation: 'sidebar'},
+            crossedSplits: [],
+        };
 
         expect(blockEditorDocumentCompatibilityIssues(registry, {state})).toEqual([]);
     });

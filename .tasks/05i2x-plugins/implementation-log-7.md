@@ -65,9 +65,16 @@
 - Clipboard hooks remain document-wide; this phase uses a registry-derived block metadata filter rather than executing plugin-specific clipboard hooks.
 - Added explicit Phase 14 cleanup items in `plan.md` to replace the image/preview command bridges and registry-derived clipboard filters with plugin-owned handlers/hooks once the required APIs exist.
 
+### Compatibility Follow-Up
+
+- Added the missing `annotation` mark declaration to `legacyAnnotationsCrdtPlugin`.
+- This preserves annotated fixture/document loading under `legacyRichTextPlugins` now that `BlockRichTextEditor` enforces registry compatibility at render time.
+
 ### Verification
 
 - `npm run typecheck` passed.
 - `npm exec vitest -- run src/block-editor/plugins/simpleBlockPlugins.test.ts src/block-editor/plugins/legacyRichTextBlocks.test.ts src/block-editor/plugins/legacyRichTextUi.test.ts src/block-editor/legacyRichTextPlugins.test.ts src/block-editor/markdownShortcuts.test.ts src/block-editor/clipboard.test.ts` passed.
 - `npm exec vitest -- run src/block-editor` passed.
 - `npm run typecheck:examples` passed.
+- Follow-up verification: `npm exec vitest -- run src/block-editor/editorCrdtConfig.test.ts src/block-editor/legacyRichTextPlugins.test.ts src/block-editor/plugins/compatibility.test.ts` passed.
+- Follow-up verification: `npm exec vitest -- run src/block-editor examples/block-rich-text/src/documentFixtures.test.ts examples/block-rich-text/src/documentFormat.test.ts` passed.

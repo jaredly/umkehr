@@ -8,6 +8,7 @@ import {createBlockEditorRegistry, type BlockEditorPlugin, type BlockEditorRegis
 
 export const legacyAnnotationsCrdtPlugin: BlockEditorPlugin<RichBlockMeta> = {
     id: 'annotations',
+    marks: [{id: ANNOTATION_MARK, label: 'Annotation'}],
     crdt: {
         markBehavior: annotationMarkBehavior.markBehavior,
         virtualParents: tableVirtualParentsForBlock,
