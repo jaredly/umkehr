@@ -1500,6 +1500,7 @@ export function BlockRichTextEditor({
                     : liveSelectionSet(current);
                 const pastePrimary = primarySelection(resolveSelectionSet(current.state, selection));
                 const isBlockLinkPaste =
+                    isToolbarCommandAvailable('link:edit') &&
                     pastePrimary.type === 'range' &&
                     !isCollapsed(pastePrimary) &&
                     (rich.sourceSelectionType === 'block' || rich.sourceSelectionType === 'table-cells');
@@ -1540,6 +1541,7 @@ export function BlockRichTextEditor({
             resetVerticalCaretIntent,
             scheduleSelectionRestore,
             inlineRenderFeatures,
+            isToolbarCommandAvailable,
         ],
     );
 
@@ -1559,7 +1561,7 @@ export function BlockRichTextEditor({
                       )
                     : selection;
                 const pastePrimary = primarySelection(resolveSelectionSet(current.state, pasteSelection));
-                if (isLinkLikeText(text) && pastePrimary.type === 'range') {
+                if (isToolbarCommandAvailable('link:edit') && isLinkLikeText(text) && pastePrimary.type === 'range') {
                     return setLinkMarkEverywhere(
                         current.state,
                         pasteSelection,
@@ -1576,6 +1578,7 @@ export function BlockRichTextEditor({
             });
         },
         [
+            isToolbarCommandAvailable,
             runEditCommand,
         ],
     );

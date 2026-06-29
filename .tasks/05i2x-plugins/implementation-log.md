@@ -491,3 +491,18 @@ Verification:
 
 - `npm run typecheck` passed.
 - `npm exec vitest -- run src/block-editor/clipboard.test.ts src/block-editor/editorCrdtConfig.test.ts src/block-editor/legacyRichTextPlugins.test.ts src/block-editor/markdownShortcuts.test.ts src/block-editor/inlineRunRendering.test.ts src/block-editor/plugins/registry.test.ts src/block-editor/plugins/compatibility.test.ts src/block-editor/plugins/metadata.test.ts src/block-editor/plugins/legacyRichTextUi.test.ts src/block-editor/plugins/legacyRichTextBlocks.test.ts src/block-editor/plugins/basicMarks.test.ts src/block-editor/plugins/inlinePlugins.test.ts src/block-editor/plugins/code.test.ts` passed.
+
+### Phase 6 Continued: Main Editor Link Paste Gating
+
+- Gated main-editor plain-text URL paste auto-linking on `link:edit` availability.
+- Gated block/table-cell rich clipboard link paste on `link:edit` availability.
+- Kept the fallback behavior as normal plain/rich paste when the links plugin is not registered.
+
+Issues/workarounds:
+
+- This uses the existing toolbar command availability predicate as the command policy source; a standalone command dispatcher policy layer is still future work.
+
+Verification:
+
+- `npm run typecheck` passed.
+- `npm exec vitest -- run src/block-editor/clipboard.test.ts src/block-editor/editorCrdtConfig.test.ts src/block-editor/legacyRichTextPlugins.test.ts src/block-editor/markdownShortcuts.test.ts src/block-editor/inlineRunRendering.test.ts src/block-editor/plugins/registry.test.ts src/block-editor/plugins/compatibility.test.ts src/block-editor/plugins/metadata.test.ts src/block-editor/plugins/legacyRichTextUi.test.ts src/block-editor/plugins/legacyRichTextBlocks.test.ts src/block-editor/plugins/basicMarks.test.ts src/block-editor/plugins/inlinePlugins.test.ts src/block-editor/plugins/code.test.ts` passed.
