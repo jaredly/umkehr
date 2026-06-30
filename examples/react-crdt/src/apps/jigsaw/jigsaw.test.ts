@@ -128,6 +128,7 @@ describe('jigsaw board artifacts', () => {
         expect(board.pieces).toHaveLength(30);
         expect(board.title).toBe('30 piece tabbed hue puzzle');
         expect(board.pieces.some((piece) => hasCurvedSegment(piece.mask))).toBe(true);
+        expect(maxCurveExcursion(board)).toBeGreaterThan(20);
 
         board.pieces.forEach((piece, index) => {
             expectFinitePieceGeometry(piece);
@@ -146,6 +147,7 @@ describe('jigsaw board artifacts', () => {
         expect(board.pieces).toHaveLength(30);
         expect(board.title).toContain('tabbed Voronoi');
         expect(board.pieces.some((piece) => hasCurvedSegment(piece.mask))).toBe(true);
+        expect(maxCurveExcursion(board)).toBeGreaterThan(12);
 
         board.pieces.forEach((piece, index) => {
             expectFinitePieceGeometry(piece);
@@ -608,6 +610,20 @@ function hasCurvedSegment(mask: Array<{type: string}>) {
     return mask.some((segment) => segment.type === 'Cubic' || segment.type === 'Quadratic');
 }
 
+function maxCurveExcursion(board: ReturnType<typeof generateJigsawBoard>) {
+    let max = 0;
+    for (const piece of board.pieces) {
+        for (const segment of piece.mask) {
+            if (segment.type === 'Cubic') {
+                max = Math.max(max, distance(segment.control1, segment.to), distance(segment.control2, segment.to));
+            } else if (segment.type === 'Quadratic') {
+                max = Math.max(max, distance(segment.control, segment.to));
+            }
+        }
+    }
+    return max;
+}
+
 function expectFinitePieceGeometry(piece: {
     center: {x: number; y: number};
     bounds: {left: number; top: number; width: number; height: number};
@@ -620,6 +636,10 @@ function expectFinitePieceGeometry(piece: {
     expect(piece.bounds.width).toBeGreaterThan(0);
     expect(piece.bounds.height).toBeGreaterThan(0);
     expect(piece.mask.length).toBeGreaterThanOrEqual(3);
+}
+
+function distance(a: {x: number; y: number}, b: {x: number; y: number}) {
+    return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
 function totalMaskArea(board: ReturnType<typeof generateJigsawBoard>) {

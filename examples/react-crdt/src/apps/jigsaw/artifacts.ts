@@ -621,19 +621,19 @@ function tabSpecsForSharedEdges(
     imageSize: {width: number; height: number},
     grid: {cols: number; rows: number},
 ) {
-    const baseRadius = Math.min(imageSize.width / grid.cols, imageSize.height / grid.rows) / 10;
-    const margin = baseRadius * 0.25;
-    const minRadius = baseRadius * 0.45;
+    const cellSize = Math.min(imageSize.width / grid.cols, imageSize.height / grid.rows);
+    const margin = cellSize / 10;
+    const minRadius = margin * 0.35;
     const centers = sharedEdges.map((edge) => midpoint(edge.start, edge.end));
     const specs = new Map<string, TabSpec>();
 
     for (let index = 0; index < sharedEdges.length; index++) {
         const edge = sharedEdges[index];
         const edgeLength = distance(edge.start, edge.end);
-        let radius = Math.min(baseRadius, edgeLength * 0.32);
+        let radius = edgeLength * 0.48;
         for (let other = 0; other < centers.length; other++) {
             if (other === index) continue;
-            radius = Math.min(radius, distance(centers[index], centers[other]) / 2 - margin);
+            radius = Math.min(radius, (distance(centers[index], centers[other]) - margin) / 2);
         }
         if (radius < minRadius) continue;
         specs.set(edgeKey(edge.a, edge.b), {
