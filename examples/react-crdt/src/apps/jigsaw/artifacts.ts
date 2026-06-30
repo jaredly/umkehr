@@ -503,7 +503,7 @@ function piecesFromPolygons({
     const tabSpecs = tabs
         ? tabSpecsForSharedEdges(sharedEdges, imageSize, grid, random)
         : new Map<string, TabSpec>();
-    return polygons.slice(0, 4).map((polygon, index): JigsawPiece => {
+    return polygons.map((polygon, index): JigsawPiece => {
         const center = centers[index];
         const mask = tabs
             ? tabbedPolygonToMask(polygon, center, index, tabSpecs)
@@ -670,7 +670,7 @@ function tabSpecsForSharedEdges(
 ) {
     const cellSize = Math.min(imageSize.width / grid.cols, imageSize.height / grid.rows);
     const margin = cellSize / 10;
-    const minRadius = margin * 0.35;
+    const minRadius = margin * 0.7;
     const centers = sharedEdges.map((edge) => midpoint(edge.start, edge.end));
     const specs = new Map<string, TabSpec>();
 
@@ -742,11 +742,14 @@ function tabbedPolygonToMask(
         const orientedEnd = orientedStart === tabStart ? tabEnd : tabStart;
         const orientedTangent = normalize(subtract(orientedEnd, orientedStart));
         const neckDepth = Math.max(tab.radius * 0.2, distance(from, tabStart) / 3);
-        const shoulderDepth = tab.radius * 0.42;
+        const shoulderDepth = tab.radius * 0.1;
         const tabDepth = tab.radius * 0.82;
         const neckOffset = tab.radius * 0.58;
         const shoulderOffset = tab.radius * 0.34;
         const tabHandle = tab.radius * 0.22;
+        const bulgeSize = tabHandle * 1.5;
+        const bulgeOffset = tab.radius * 0.4;
+
         const leftNeck = add(
             tab.center,
             add(multiply(orientedTangent, -neckOffset), multiply(bulge, -neckDepth)),
@@ -776,24 +779,48 @@ function tabbedPolygonToMask(
         mask.push({
             type: 'Cubic',
             control1: subtract(add(leftNeck, multiply(orientedTangent, tabHandle)), center),
-            control2: subtract(add(leftShoulder, multiply(orientedTangent, -tabHandle)), center),
+            control2: subtract(
+                add(
+                    add(leftShoulder, multiply(orientedTangent, bulgeSize)),
+                    multiply(bulge, -bulgeOffset),
+                ),
+                center,
+            ),
             to: subtract(leftShoulder, center),
         });
         mask.push({
             type: 'Cubic',
-            control1: subtract(add(leftShoulder, multiply(orientedTangent, tabHandle)), center),
-            control2: subtract(add(apex, multiply(orientedTangent, -tabHandle * 1.35)), center),
+            control1: subtract(
+                add(
+                    add(leftShoulder, multiply(orientedTangent, -bulgeSize)),
+                    multiply(bulge, bulgeOffset),
+                ),
+                center,
+            ),
+            control2: subtract(add(apex, multiply(orientedTangent, -bulgeSize)), center),
             to: subtract(apex, center),
         });
         mask.push({
             type: 'Cubic',
-            control1: subtract(add(apex, multiply(orientedTangent, tabHandle * 1.35)), center),
-            control2: subtract(add(rightShoulder, multiply(orientedTangent, -tabHandle)), center),
+            control1: subtract(add(apex, multiply(orientedTangent, bulgeSize)), center),
+            control2: subtract(
+                add(
+                    add(rightShoulder, multiply(orientedTangent, bulgeSize)),
+                    multiply(bulge, bulgeOffset),
+                ),
+                center,
+            ),
             to: subtract(rightShoulder, center),
         });
         mask.push({
             type: 'Cubic',
-            control1: subtract(add(rightShoulder, multiply(orientedTangent, tabHandle)), center),
+            control1: subtract(
+                add(
+                    add(rightShoulder, multiply(orientedTangent, -bulgeSize)),
+                    multiply(bulge, -bulgeOffset),
+                ),
+                center,
+            ),
             control2: subtract(add(rightNeck, multiply(orientedTangent, -tabHandle)), center),
             to: subtract(rightNeck, center),
         });
