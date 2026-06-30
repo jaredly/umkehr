@@ -52,9 +52,24 @@ export type JigsawImageMimeType = 'image/jpeg' | 'image/webp';
 
 export type JigsawBoardOptions = {
     type?: JigsawGenerationType;
+    tabs?: boolean;
     image?: JigsawImageRef;
     imageSize?: {width: number; height: number};
     imageName?: string;
+};
+
+type SharedEdge = {
+    a: number;
+    b: number;
+    start: Coord;
+    end: Coord;
+};
+
+type TabSpec = {
+    edge: SharedEdge;
+    center: Coord;
+    radius: number;
+    outwardPiece: number;
 };
 
 export const JIGSAW_BOARD_ARTIFACT_ID = 'board';
@@ -151,7 +166,9 @@ function generateRectangularJigsawBoard(
     const grid = gridForPieceCount(pieceCount);
     const pieceWidth = imageSize.width / grid.cols;
     const pieceHeight = imageSize.height / grid.rows;
-    const pieces: JigsawPiece[] = [];
+    const polygons: Coord[][] = [];
+    const centers: Coord[] = [];
+    const sharedEdges: SharedEdge[] = [];
 
     for (let row = 0; row < grid.rows; row++) {
         for (let col = 0; col < grid.cols; col++) {
@@ -160,26 +177,51 @@ function generateRectangularJigsawBoard(
                 x: (col + 0.5) * pieceWidth,
                 y: (row + 0.5) * pieceHeight,
             };
-            pieces.push({
-                center,
-                bounds: rectangleBounds(pieceWidth, pieceHeight),
-                mask: rectangleMask(pieceWidth, pieceHeight),
-                neighbors: neighborIndexes({row, col, cols: grid.cols, rows: grid.rows}).map(
-                    (neighbor) => {
-                        const neighborCenter = {
-                            x: (neighbor.col + 0.5) * pieceWidth,
-                            y: (neighbor.row + 0.5) * pieceHeight,
-                        };
-                        return {
-                            piece: neighbor.row * grid.cols + neighbor.col,
-                            offset: subtract(neighborCenter, center),
-                        };
-                    },
-                ),
-            });
-            if (pieces.length !== index + 1) throw new Error('Unexpected jigsaw piece order.');
+            centers.push(center);
+            polygons.push([
+                {x: col * pieceWidth, y: row * pieceHeight},
+                {x: (col + 1) * pieceWidth, y: row * pieceHeight},
+                {x: (col + 1) * pieceWidth, y: (row + 1) * pieceHeight},
+                {x: col * pieceWidth, y: (row + 1) * pieceHeight},
+            ]);
+            if (polygons.length !== index + 1) throw new Error('Unexpected jigsaw piece order.');
+            if (col < grid.cols - 1) {
+                sharedEdges.push({
+                    a: index,
+                    b: index + 1,
+                    start: {x: (col + 1) * pieceWidth, y: row * pieceHeight},
+                    end: {x: (col + 1) * pieceWidth, y: (row + 1) * pieceHeight},
+                });
+            }
+            if (row < grid.rows - 1) {
+                sharedEdges.push({
+                    a: index,
+                    b: index + grid.cols,
+                    start: {x: (col + 1) * pieceWidth, y: (row + 1) * pieceHeight},
+                    end: {x: col * pieceWidth, y: (row + 1) * pieceHeight},
+                });
+            }
         }
     }
+
+    const neighbors = neighborsFromSharedEdges(sharedEdges, centers);
+    const pieces = piecesFromPolygons({
+        polygons,
+        centers,
+        neighbors,
+        sharedEdges,
+        grid,
+        imageSize,
+        tabs: options.tabs === true,
+    }).map((piece) =>
+        options.tabs === true
+            ? piece
+            : {
+                  ...piece,
+                  bounds: rectangleBounds(pieceWidth, pieceHeight),
+                  mask: rectangleMask(pieceWidth, pieceHeight),
+              },
+    );
 
     return {
         id: JIGSAW_BOARD_ARTIFACT_ID,
@@ -220,21 +262,16 @@ function generateVoronoiJigsawBoard(
         voronoiCell(site, index, sites, imageSize, grid),
     );
     const centers = polygons.map((polygon) => centerOfBounds(boundsForPolygon(polygon)));
-    const neighbors = neighborsForPolygons(polygons, centers, grid);
-    const pieces = polygons.map((polygon, index): JigsawPiece => {
-        const imageBounds = boundsForPolygon(polygon);
-        const center = centerOfBounds(imageBounds);
-        return {
-            center,
-            bounds: {
-                left: imageBounds.left - center.x,
-                top: imageBounds.top - center.y,
-                width: imageBounds.width,
-                height: imageBounds.height,
-            },
-            mask: polygonToMask(polygon, center),
-            neighbors: neighbors.get(index) ?? [],
-        };
+    const sharedEdges = sharedEdgesForPolygons(polygons, grid);
+    const neighbors = neighborsFromSharedEdges(sharedEdges, centers);
+    const pieces = piecesFromPolygons({
+        polygons,
+        centers,
+        neighbors,
+        sharedEdges,
+        grid,
+        imageSize,
+        tabs: options.tabs === true,
     });
 
     return {
@@ -317,14 +354,15 @@ function normalizedGenerationImageSize(input: unknown): JigsawBoardArtifact['ima
 }
 
 function jigsawBoardTitle(pieceCount: JigsawPieceCount, options: JigsawBoardOptions, voronoi: boolean) {
+    const tabs = options.tabs ? 'tabbed ' : '';
     const shape = voronoi ? 'Voronoi ' : '';
     if (options.image === JIGSAW_ARTIFACT_IMAGE_REF && options.imageName) {
-        return `${pieceCount} piece ${shape}${options.imageName} puzzle`;
+        return `${pieceCount} piece ${tabs}${shape}${options.imageName} puzzle`;
     }
     if (options.image === JIGSAW_ARTIFACT_IMAGE_REF) {
-        return `${pieceCount} piece ${shape}image puzzle`;
+        return `${pieceCount} piece ${tabs}${shape}image puzzle`;
     }
-    return `${pieceCount} piece ${shape}hue puzzle`;
+    return `${pieceCount} piece ${tabs}${shape}hue puzzle`;
 }
 
 function rectangleMask(width: number, height: number): PathSegment[] {
@@ -425,18 +463,89 @@ function polygonToMask(polygon: Coord[], center: Coord): PathSegment[] {
     return polygon.map((point) => ({type: 'Line', to: subtract(point, center)}));
 }
 
-function neighborsForPolygons(polygons: Coord[][], centers: Coord[], grid: {cols: number; rows: number}) {
+function piecesFromPolygons({
+    polygons,
+    centers,
+    neighbors,
+    sharedEdges,
+    grid,
+    imageSize,
+    tabs,
+}: {
+    polygons: Coord[][];
+    centers: Coord[];
+    neighbors: Map<number, Array<{piece: number; offset: Coord}>>;
+    sharedEdges: SharedEdge[];
+    grid: {cols: number; rows: number};
+    imageSize: {width: number; height: number};
+    tabs: boolean;
+}) {
+    const tabSpecs = tabs ? tabSpecsForSharedEdges(sharedEdges, imageSize, grid) : new Map<string, TabSpec>();
+    return polygons.map((polygon, index): JigsawPiece => {
+        const center = centers[index];
+        const mask = tabs ? tabbedPolygonToMask(polygon, center, index, tabSpecs) : polygonToMask(polygon, center);
+        const imageBounds = tabs ? boundsForMask(mask) : localBoundsForPolygon(polygon, center);
+        return {
+            center,
+            bounds: {
+                left: imageBounds.left,
+                top: imageBounds.top,
+                width: imageBounds.width,
+                height: imageBounds.height,
+            },
+            mask,
+            neighbors: neighbors.get(index) ?? [],
+        };
+    });
+}
+
+function localBoundsForPolygon(polygon: Coord[], center: Coord): PieceBounds {
+    const imageBounds = boundsForPolygon(polygon);
+    return {
+        left: imageBounds.left - center.x,
+        top: imageBounds.top - center.y,
+        width: imageBounds.width,
+        height: imageBounds.height,
+    };
+}
+
+function neighborsFromSharedEdges(sharedEdges: SharedEdge[], centers: Coord[]) {
     const neighbors = new Map<number, Array<{piece: number; offset: Coord}>>();
-    for (let index = 0; index < polygons.length; index++) neighbors.set(index, []);
+    for (let index = 0; index < centers.length; index++) neighbors.set(index, []);
+    for (const edge of sharedEdges) {
+        neighbors.get(edge.a)?.push({piece: edge.b, offset: subtract(centers[edge.b], centers[edge.a])});
+        neighbors.get(edge.b)?.push({piece: edge.a, offset: subtract(centers[edge.a], centers[edge.b])});
+    }
+    return neighbors;
+}
+
+function sharedEdgesForPolygons(polygons: Coord[][], grid: {cols: number; rows: number}) {
+    const edges: SharedEdge[] = [];
     for (let a = 0; a < polygons.length; a++) {
         for (const b of nearbyGridIndexes(a, grid, 3)) {
             if (b <= a) continue;
-            if (!polygonsShareEdge(polygons[a], polygons[b])) continue;
-            neighbors.get(a)?.push({piece: b, offset: subtract(centers[b], centers[a])});
-            neighbors.get(b)?.push({piece: a, offset: subtract(centers[a], centers[b])});
+            const edge = sharedEdgeForPolygons(a, polygons[a], b, polygons[b]);
+            if (!edge) continue;
+            edges.push(edge);
         }
     }
-    return neighbors;
+    return edges;
+}
+
+function sharedEdgeForPolygons(a: number, aPolygon: Coord[], b: number, bPolygon: Coord[]): SharedEdge | null {
+    for (let i = 0; i < aPolygon.length; i++) {
+        const a1 = aPolygon[i];
+        const a2 = aPolygon[(i + 1) % aPolygon.length];
+        for (let j = 0; j < bPolygon.length; j++) {
+            const b1 = bPolygon[j];
+            const b2 = bPolygon[(j + 1) % bPolygon.length];
+            const overlap = segmentOverlap(a1, a2, b1, b2);
+            if (overlap && distance(overlap.start, overlap.end) > 1e-4) {
+                return {a, b, start: overlap.start, end: overlap.end};
+            }
+        }
+    }
+    return null;
 }
 
 function nearbyGridIndexes(index: number, grid: {cols: number; rows: number}, radius: number) {
@@ -465,28 +574,207 @@ function polygonsShareEdge(a: Coord[], b: Coord[]) {
     return false;
 }
 
-function segmentOverlapLength(a1: Coord, a2: Coord, b1: Coord, b2: Coord) {
+function segmentOverlap(a1: Coord, a2: Coord, b1: Coord, b2: Coord): {start: Coord; end: Coord} | null {
     const ax = a2.x - a1.x;
     const ay = a2.y - a1.y;
     const bx = b2.x - b1.x;
     const by = b2.y - b1.y;
     const aLength = Math.hypot(ax, ay);
     const bLength = Math.hypot(bx, by);
-    if (aLength <= 1e-8 || bLength <= 1e-8) return 0;
+    if (aLength <= 1e-8 || bLength <= 1e-8) return null;
     const crossDirections = Math.abs(ax * by - ay * bx);
-    if (crossDirections > 1e-5 * aLength * bLength) return 0;
+    if (crossDirections > 1e-5 * aLength * bLength) return null;
     const crossOffset = Math.abs(ax * (b1.y - a1.y) - ay * (b1.x - a1.x));
-    if (crossOffset > 1e-5 * aLength) return 0;
+    if (crossOffset > 1e-5 * aLength) return null;
 
     const axis = Math.abs(ax) >= Math.abs(ay) ? 'x' : 'y';
-    const aStart = Math.min(a1[axis], a2[axis]);
-    const aEnd = Math.max(a1[axis], a2[axis]);
-    const bStart = Math.min(b1[axis], b2[axis]);
-    const bEnd = Math.max(b1[axis], b2[axis]);
-    const overlap = Math.min(aEnd, bEnd) - Math.max(aStart, bStart);
-    if (overlap <= 1e-5) return 0;
-    const scale = axis === 'x' ? aLength / Math.max(1e-8, Math.abs(ax)) : aLength / Math.max(1e-8, Math.abs(ay));
-    return overlap * scale;
+    const aMin = Math.min(a1[axis], a2[axis]);
+    const aMax = Math.max(a1[axis], a2[axis]);
+    const bMin = Math.min(b1[axis], b2[axis]);
+    const bMax = Math.max(b1[axis], b2[axis]);
+    const overlapStart = Math.max(aMin, bMin);
+    const overlapEnd = Math.min(aMax, bMax);
+    if (overlapEnd - overlapStart <= 1e-5) return null;
+
+    return {
+        start: pointOnSegmentAtAxis(a1, a2, axis, overlapStart),
+        end: pointOnSegmentAtAxis(a1, a2, axis, overlapEnd),
+    };
+}
+
+function segmentOverlapLength(a1: Coord, a2: Coord, b1: Coord, b2: Coord) {
+    const overlap = segmentOverlap(a1, a2, b1, b2);
+    return overlap ? distance(overlap.start, overlap.end) : 0;
+}
+
+function pointOnSegmentAtAxis(a: Coord, b: Coord, axis: 'x' | 'y', value: number): Coord {
+    const denominator = b[axis] - a[axis];
+    const t = Math.abs(denominator) < 1e-12 ? 0 : (value - a[axis]) / denominator;
+    return {
+        x: a.x + (b.x - a.x) * t,
+        y: a.y + (b.y - a.y) * t,
+    };
+}
+
+function tabSpecsForSharedEdges(
+    sharedEdges: SharedEdge[],
+    imageSize: {width: number; height: number},
+    grid: {cols: number; rows: number},
+) {
+    const baseRadius = Math.min(imageSize.width / grid.cols, imageSize.height / grid.rows) / 10;
+    const margin = baseRadius * 0.25;
+    const minRadius = baseRadius * 0.45;
+    const centers = sharedEdges.map((edge) => midpoint(edge.start, edge.end));
+    const specs = new Map<string, TabSpec>();
+
+    for (let index = 0; index < sharedEdges.length; index++) {
+        const edge = sharedEdges[index];
+        const edgeLength = distance(edge.start, edge.end);
+        let radius = Math.min(baseRadius, edgeLength * 0.32);
+        for (let other = 0; other < centers.length; other++) {
+            if (other === index) continue;
+            radius = Math.min(radius, distance(centers[index], centers[other]) / 2 - margin);
+        }
+        if (radius < minRadius) continue;
+        specs.set(edgeKey(edge.a, edge.b), {
+            edge,
+            center: centers[index],
+            radius,
+            outwardPiece: Math.random() < 0.5 ? edge.a : edge.b,
+        });
+    }
+    return specs;
+}
+
+function tabbedPolygonToMask(
+    polygon: Coord[],
+    center: Coord,
+    piece: number,
+    tabSpecs: Map<string, TabSpec>,
+): PathSegment[] {
+    if (!polygon.length) return [];
+    const mask: PathSegment[] = [{type: 'Line', to: subtract(polygon[0], center)}];
+    const clockwise = signedPolygonArea(polygon) >= 0;
+
+    for (let index = 0; index < polygon.length; index++) {
+        const from = polygon[index];
+        const to = polygon[(index + 1) % polygon.length];
+        const tab = tabSpecForEdge(piece, from, to, tabSpecs);
+        if (!tab) {
+            mask.push({type: 'Line', to: subtract(to, center)});
+            continue;
+        }
+        const tangent = normalize(subtract(to, from));
+        const normal = outwardNormal(tangent, clockwise);
+        const bulge = tab.outwardPiece === piece ? normal : multiply(normal, -1);
+        const tabStart = add(tab.center, multiply(tangent, -tab.radius));
+        const tabEnd = add(tab.center, multiply(tangent, tab.radius));
+        const orientedStart = distance(from, tabStart) <= distance(from, tabEnd) ? tabStart : tabEnd;
+        const orientedEnd = orientedStart === tabStart ? tabEnd : tabStart;
+        const radialStart = normalize(subtract(orientedStart, tab.center));
+        const apex = add(tab.center, multiply(bulge, tab.radius));
+        const k = 0.5522847498307936;
+        const c1 = add(orientedStart, multiply(bulge, tab.radius * k));
+        const c2 = add(apex, multiply(radialStart, tab.radius * k));
+        const c3 = add(apex, multiply(radialStart, -tab.radius * k));
+        const c4 = add(orientedEnd, multiply(bulge, tab.radius * k));
+
+        mask.push({type: 'Line', to: subtract(orientedStart, center)});
+        mask.push({
+            type: 'Cubic',
+            control1: subtract(c1, center),
+            control2: subtract(c2, center),
+            to: subtract(apex, center),
+        });
+        mask.push({
+            type: 'Cubic',
+            control1: subtract(c3, center),
+            control2: subtract(c4, center),
+            to: subtract(orientedEnd, center),
+        });
+        mask.push({type: 'Line', to: subtract(to, center)});
+    }
+    return mask;
+}
+
+function tabSpecForEdge(
+    piece: number,
+    from: Coord,
+    to: Coord,
+    tabSpecs: Map<string, TabSpec>,
+) {
+    for (const tab of tabSpecs.values()) {
+        if (piece !== tab.edge.a && piece !== tab.edge.b) continue;
+        if (pointsMatchUnordered(from, to, tab.edge.start, tab.edge.end)) return tab;
+    }
+    return null;
+}
+
+function pointsMatchUnordered(a1: Coord, a2: Coord, b1: Coord, b2: Coord) {
+    return (
+        (distance(a1, b1) <= 1e-4 && distance(a2, b2) <= 1e-4) ||
+        (distance(a1, b2) <= 1e-4 && distance(a2, b1) <= 1e-4)
+    );
+}
+
+function boundsForMask(mask: PathSegment[]) {
+    let left = Infinity;
+    let right = -Infinity;
+    let top = Infinity;
+    let bottom = -Infinity;
+    const visit = (point: Coord) => {
+        left = Math.min(left, point.x);
+        right = Math.max(right, point.x);
+        top = Math.min(top, point.y);
+        bottom = Math.max(bottom, point.y);
+    };
+    for (const segment of mask) {
+        visit(segment.to);
+        if (segment.type === 'Quadratic') visit(segment.control);
+        if (segment.type === 'Cubic') {
+            visit(segment.control1);
+            visit(segment.control2);
+        }
+    }
+    if (!Number.isFinite(left) || !Number.isFinite(right) || !Number.isFinite(top) || !Number.isFinite(bottom)) {
+        return {left: -0.5, top: -0.5, width: 1, height: 1};
+    }
+    return {left, top, width: Math.max(1e-6, right - left), height: Math.max(1e-6, bottom - top)};
+}
+
+function edgeKey(a: number, b: number) {
+    return a < b ? `${a}:${b}` : `${b}:${a}`;
+}
+
+function signedPolygonArea(points: Coord[]) {
+    let area = 0;
+    for (let index = 0; index < points.length; index++) {
+        const current = points[index];
+        const next = points[(index + 1) % points.length];
+        area += current.x * next.y - next.x * current.y;
+    }
+    return area / 2;
+}
+
+function outwardNormal(tangent: Coord, clockwise: boolean) {
+    return clockwise ? {x: tangent.y, y: -tangent.x} : {x: -tangent.y, y: tangent.x};
+}
+
+function normalize(vector: Coord) {
+    const length = Math.hypot(vector.x, vector.y);
+    return length <= 1e-8 ? {x: 0, y: 0} : {x: vector.x / length, y: vector.y / length};
+}
+
+function add(a: Coord, b: Coord): Coord {
+    return {x: a.x + b.x, y: a.y + b.y};
+}
+
+function multiply(point: Coord, scale: number): Coord {
+    return {x: point.x * scale, y: point.y * scale};
+}
+
+function midpoint(a: Coord, b: Coord): Coord {
+    return {x: (a.x + b.x) / 2, y: (a.y + b.y) / 2};
 }
 
 function neighborIndexes({

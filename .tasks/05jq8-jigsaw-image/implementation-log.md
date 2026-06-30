@@ -26,3 +26,12 @@
   - `pnpm run build` passed.
   - Both commands print `Error connecting to agent: Operation not permitted` before running, but the commands complete successfully.
   - Started the Vite dev server at `http://127.0.0.1:5174/`; port `5173` was already in use.
+
+## Preview Toggle Follow-up
+
+- Changed the solved preview image to be hidden by default.
+- Added a local-only `showPreviewImage` state in `JigsawPanel`; the UI button toggles the preview without writing to CRDT state, artifacts, or persisted document data.
+- Verification after the change:
+  - `pnpm exec vitest run src/apps/jigsaw/jigsaw.test.ts` passed with 32 tests.
+  - `pnpm run build` passed.
+  - Both commands still print `Error connecting to agent: Operation not permitted` before running, but complete successfully.

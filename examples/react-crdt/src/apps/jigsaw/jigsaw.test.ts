@@ -123,6 +123,42 @@ describe('jigsaw board artifacts', () => {
         expect(totalMaskArea(board)).toBeCloseTo(360 * 640, -4);
     });
 
+    it('generates tabbed rectangular board geometry', () => {
+        const board = generateJigsawBoard(30, {tabs: true});
+        expect(board.pieces).toHaveLength(30);
+        expect(board.title).toBe('30 piece tabbed hue puzzle');
+        expect(board.pieces.some((piece) => hasCurvedSegment(piece.mask))).toBe(true);
+
+        board.pieces.forEach((piece, index) => {
+            expectFinitePieceGeometry(piece);
+            expect(maskFitsBounds(piece)).toBe(true);
+            piece.neighbors.forEach((neighbor) => {
+                const reverse = board.pieces[neighbor.piece].neighbors.find((entry) => entry.piece === index);
+                expect(reverse).toBeTruthy();
+                expect(reverse?.offset.x).toBeCloseTo(-neighbor.offset.x);
+                expect(reverse?.offset.y).toBeCloseTo(-neighbor.offset.y);
+            });
+        });
+    });
+
+    it('generates tabbed Voronoi board geometry', () => {
+        const board = generateJigsawBoard(30, {type: 'voronoi', tabs: true});
+        expect(board.pieces).toHaveLength(30);
+        expect(board.title).toContain('tabbed Voronoi');
+        expect(board.pieces.some((piece) => hasCurvedSegment(piece.mask))).toBe(true);
+
+        board.pieces.forEach((piece, index) => {
+            expectFinitePieceGeometry(piece);
+            expect(maskFitsBounds(piece)).toBe(true);
+            piece.neighbors.forEach((neighbor) => {
+                const reverse = board.pieces[neighbor.piece].neighbors.find((entry) => entry.piece === index);
+                expect(reverse).toBeTruthy();
+                expect(reverse?.offset.x).toBeCloseTo(-neighbor.offset.x);
+                expect(reverse?.offset.y).toBeCloseTo(-neighbor.offset.y);
+            });
+        });
+    });
+
     it('uses Voronoi neighbor geometry for connection validation', () => {
         const board = generateJigsawBoard(30, {type: 'voronoi'});
         const neighbor = board.pieces[0].neighbors[0];
@@ -281,15 +317,19 @@ describe('jigsaw board artifacts', () => {
         expect(isJigsawPieceCount(24)).toBe(false);
         expect(jigsawApp.documentInit?.validate({pieceCount: 30})).toEqual({
             success: true,
-            data: {pieceCount: 30, type: 'rectangular', imageStatus: 'idle'},
+            data: {pieceCount: 30, type: 'rectangular', tabs: false, imageStatus: 'idle'},
         });
         expect(jigsawApp.documentInit?.validate({pieceCount: 30, type: 'voronoi'})).toEqual({
             success: true,
-            data: {pieceCount: 30, type: 'voronoi', imageStatus: 'idle'},
+            data: {pieceCount: 30, type: 'voronoi', tabs: false, imageStatus: 'idle'},
+        });
+        expect(jigsawApp.documentInit?.validate({pieceCount: 30, type: 'voronoi', tabs: true})).toEqual({
+            success: true,
+            data: {pieceCount: 30, type: 'voronoi', tabs: true, imageStatus: 'idle'},
         });
         expect(jigsawApp.documentInit?.validate({pieceCount: 30, type: 'voronoi', image: testImageArtifact()})).toEqual({
             success: true,
-            data: {pieceCount: 30, type: 'voronoi', image: testImageArtifact(), imageStatus: 'idle'},
+            data: {pieceCount: 30, type: 'voronoi', tabs: false, image: testImageArtifact(), imageStatus: 'idle'},
         });
         expect(jigsawApp.documentInit?.validate({pieceCount: 30, imageStatus: 'loading'}).success).toBe(false);
         expect(jigsawApp.documentInit?.validate({pieceCount: 30, imageStatus: 'error'}).success).toBe(false);
@@ -301,11 +341,15 @@ describe('jigsaw board artifacts', () => {
             pieceCount: 60,
             title: expect.stringContaining('Voronoi'),
         });
+        expect(initialJigsawArtifacts(60, {type: 'voronoi', tabs: true})[0].data).toMatchObject({
+            pieceCount: 60,
+            title: expect.stringContaining('tabbed Voronoi'),
+        });
         expect(initialJigsawArtifacts(600)[0].data).toMatchObject({pieceCount: 600});
-        const appArtifacts = jigsawApp.documentInit?.initialArtifacts?.({pieceCount: 120, type: 'voronoi'});
+        const appArtifacts = jigsawApp.documentInit?.initialArtifacts?.({pieceCount: 120, type: 'voronoi', tabs: true});
         expect(appArtifacts?.[0].data).toMatchObject({
             pieceCount: 120,
-            title: expect.stringContaining('Voronoi'),
+            title: expect.stringContaining('tabbed Voronoi'),
         });
     });
 });
@@ -511,6 +555,16 @@ describe('jigsaw placement logic', () => {
         expectNoArrangedOverlap(board, positions, pieceCollisionPadding(board));
     });
 
+    it.each([
+        ['rectangular', generateJigsawBoard(30, {tabs: true})],
+        ['Voronoi', generateJigsawBoard(30, {type: 'voronoi', tabs: true})],
+    ])('arranges tabbed %s pieces without bounding-box overlap', (_name, board) => {
+        const pieces = board.pieces.map((_piece, index) => index);
+        const positions = arrangeUnplacedPieces(board, pieces, board.imageSize, 42);
+        expect(positions.size).toBe(30);
+        expectNoArrangedOverlap(board, positions, pieceCollisionPadding(board));
+    });
+
     it('returns no unplaced positions for empty input or invalid stages', () => {
         const board = generateJigsawBoard(12);
         expect(arrangeUnplacedPieces(board, [], board.imageSize, 1).size).toBe(0);
@@ -548,6 +602,24 @@ function maskFitsBounds(piece: {bounds: {left: number; top: number; width: numbe
             segment.to.y >= piece.bounds.top - 1e-6 &&
             segment.to.y <= bottom + 1e-6,
     );
+}
+
+function hasCurvedSegment(mask: Array<{type: string}>) {
+    return mask.some((segment) => segment.type === 'Cubic' || segment.type === 'Quadratic');
+}
+
+function expectFinitePieceGeometry(piece: {
+    center: {x: number; y: number};
+    bounds: {left: number; top: number; width: number; height: number};
+    mask: Array<{to: {x: number; y: number}}>;
+}) {
+    expect(Number.isFinite(piece.center.x)).toBe(true);
+    expect(Number.isFinite(piece.center.y)).toBe(true);
+    expect(Number.isFinite(piece.bounds.left)).toBe(true);
+    expect(Number.isFinite(piece.bounds.top)).toBe(true);
+    expect(piece.bounds.width).toBeGreaterThan(0);
+    expect(piece.bounds.height).toBeGreaterThan(0);
+    expect(piece.mask.length).toBeGreaterThanOrEqual(3);
 }
 
 function totalMaskArea(board: ReturnType<typeof generateJigsawBoard>) {

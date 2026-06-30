@@ -25,6 +25,7 @@ import type {ChangeEvent} from 'react';
 type JigsawDocumentInitParams = {
     pieceCount: JigsawPieceCount;
     type: JigsawGenerationType;
+    tabs?: boolean;
     image?: JigsawImageArtifact;
     imageStatus?: JigsawImageStatus;
     imageError?: string;
@@ -49,7 +50,7 @@ export const jigsawApp: AppDefinition<JigsawState, JigsawEphemeralData> = {
     documentInit: {
         required: true,
         defaultParams() {
-            return {pieceCount: 12, type: 'rectangular', imageStatus: 'idle'};
+            return {pieceCount: 12, type: 'rectangular', tabs: false, imageStatus: 'idle'};
         },
         renderFields({value, onChange}) {
             const imageLoading = value.imageStatus === 'loading';
@@ -117,6 +118,20 @@ export const jigsawApp: AppDefinition<JigsawState, JigsawEphemeralData> = {
                             <option value="voronoi">Voronoi</option>
                         </select>
                     </label>
+                    <label className="documentCreateField">
+                        <span>Tabs</span>
+                        <input
+                            type="checkbox"
+                            checked={value.tabs === true}
+                            disabled={imageLoading}
+                            onChange={(event) =>
+                                onChange({
+                                    ...value,
+                                    tabs: event.currentTarget.checked,
+                                })
+                            }
+                        />
+                    </label>
                     <label className="documentCreateField documentCreateFieldWide">
                         <span>Image</span>
                         <input type="file" accept="image/*" onChange={updateImage} />
@@ -174,6 +189,7 @@ export const jigsawApp: AppDefinition<JigsawState, JigsawEphemeralData> = {
                     data: {
                         pieceCount: (input as JigsawDocumentInitParams).pieceCount,
                         type: ((input as {type?: JigsawGenerationType}).type ?? 'rectangular'),
+                        tabs: (input as {tabs?: unknown}).tabs === true,
                         ...(((input as {image?: unknown}).image !== undefined &&
                         isJigsawImageArtifact((input as {image?: unknown}).image))
                             ? {image: (input as {image: JigsawImageArtifact}).image}
@@ -190,6 +206,7 @@ export const jigsawApp: AppDefinition<JigsawState, JigsawEphemeralData> = {
         initialArtifacts(params) {
             return initialJigsawArtifacts(params.pieceCount, {
                 type: params.type,
+                tabs: params.tabs,
                 imageArtifact: params.image,
             });
         },

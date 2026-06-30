@@ -205,9 +205,9 @@ Plugins can also declare `styles` entries. `styleImportsFromRegistry(registry)` 
 package CSS hrefs in registry order, and `styleTextFromRegistry(registry)` returns concatenated
 custom CSS text. The editor does not inject these styles at runtime.
 
-## Legacy Central Execution
+## Central Feature Execution
 
-Feature declarations are plugin-owned, but several older renderer and command implementations are
-still centrally executed inside the editor component and command modules. The registry is the public
-ownership surface; some internal execution paths will remain centralized until the remaining legacy
-cleanup is complete.
+Feature declarations are plugin-owned, but several renderer, command, clipboard, and option-panel
+implementations are still centrally executed inside the editor component and command modules. The
+registry is the public ownership surface; some internal execution paths will remain centralized
+until the corresponding plugin service APIs and renderer extraction points exist.
