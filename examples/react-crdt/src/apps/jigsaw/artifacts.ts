@@ -672,26 +672,36 @@ function tabbedPolygonToMask(
         const orientedStart = distance(from, tabStart) <= distance(from, tabEnd) ? tabStart : tabEnd;
         const orientedEnd = orientedStart === tabStart ? tabEnd : tabStart;
         const orientedTangent = normalize(subtract(orientedEnd, orientedStart));
-        const depth = tab.radius * 0.62;
-        const edgeHandle = tab.radius * 0.42;
-        const apexHandle = tab.radius * 0.5;
-        const apex = add(tab.center, multiply(bulge, depth));
-        const c1 = add(orientedStart, multiply(orientedTangent, edgeHandle));
-        const c2 = add(apex, multiply(orientedTangent, -apexHandle));
-        const c3 = add(apex, multiply(orientedTangent, apexHandle));
-        const c4 = add(orientedEnd, multiply(orientedTangent, -edgeHandle));
+        const neckDepth = tab.radius * 0.22;
+        const tabDepth = tab.radius * 0.72;
+        const handle = tab.radius * 0.24;
+        const leftNeck = add(tab.center, add(multiply(orientedTangent, -tab.radius * 0.48), multiply(bulge, -neckDepth)));
+        const apex = add(tab.center, multiply(bulge, tabDepth));
+        const rightNeck = add(tab.center, add(multiply(orientedTangent, tab.radius * 0.48), multiply(bulge, -neckDepth)));
 
         mask.push({type: 'Line', to: subtract(orientedStart, center)});
         mask.push({
             type: 'Cubic',
-            control1: subtract(c1, center),
-            control2: subtract(c2, center),
+            control1: subtract(add(orientedStart, multiply(orientedTangent, handle)), center),
+            control2: subtract(add(leftNeck, multiply(orientedTangent, -handle)), center),
+            to: subtract(leftNeck, center),
+        });
+        mask.push({
+            type: 'Cubic',
+            control1: subtract(add(leftNeck, multiply(orientedTangent, handle)), center),
+            control2: subtract(add(apex, multiply(orientedTangent, -handle * 1.25)), center),
             to: subtract(apex, center),
         });
         mask.push({
             type: 'Cubic',
-            control1: subtract(c3, center),
-            control2: subtract(c4, center),
+            control1: subtract(add(apex, multiply(orientedTangent, handle * 1.25)), center),
+            control2: subtract(add(rightNeck, multiply(orientedTangent, -handle)), center),
+            to: subtract(rightNeck, center),
+        });
+        mask.push({
+            type: 'Cubic',
+            control1: subtract(add(rightNeck, multiply(orientedTangent, handle)), center),
+            control2: subtract(add(orientedEnd, multiply(orientedTangent, -handle)), center),
             to: subtract(orientedEnd, center),
         });
         mask.push({type: 'Line', to: subtract(to, center)});
