@@ -3,12 +3,13 @@
 Bundled block editor CSS is loaded through static entrypoints:
 
 - `umkehr/block-editor/style.css`: core editor shell, toolbar, block rows, options, generic popovers, retained selection, and shared drag/drop affordances.
-- `umkehr/block-editor/legacyRichTextPlugins.css`: core CSS plus bundled plugin CSS in full legacy preset order.
+- `umkehr/block-editor/legacyRichTextPlugins.css`: core CSS plus bundled plugin CSS in full preset order.
 - `umkehr/block-editor/plugins/<plugin>.css`: individual bundled plugin CSS entrypoints.
 
 Bundled plugins also declare `styles` metadata. `registry.styles` is deterministic and documents the
-style id, owner plugin, package CSS href, and order. It is not injected by the React editor in this
-phase.
+style id, owner plugin, package CSS href, and order. Use `styleImportsFromRegistry(registry)` to
+read package CSS hrefs and `styleTextFromRegistry(registry)` to collect custom CSS text. The React
+editor does not inject styles at runtime.
 
 Runtime injection can be added later as long as it dedupes by style id, applies registry order,
 removes styles when plugin sets change, and avoids SSR/hydration surprises.

@@ -347,6 +347,7 @@ import {
     type BlockEditorRegistry,
 } from './plugins/index.js';
 import {blockTypeMenuItemsFromToolbarSpecs} from './plugins/legacyRichTextUi.js';
+import {defaultBlockEditorPlugins} from './legacyRichTextPlugins.js';
 import {richTextVirtualParentsFromRegistry} from './editorCrdtConfig.js';
 
 import * as hlc from '../crdt/hlc.js';
@@ -399,7 +400,6 @@ const LEGACY_TOOLBAR_COMMAND_IDS = new Set([
     'annotation:popover',
 ]);
 export const coreBlockEditorPlugins: readonly BlockEditorPlugin<RichBlockMeta>[] = [];
-export const defaultBlockEditorPlugins = coreBlockEditorPlugins;
 
 const activePendingInlineMarks = (marks: PendingInlineMarks): BareInlineMark[] =>
     BARE_INLINE_MARKS.filter((mark) => marks[mark]);

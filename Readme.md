@@ -46,7 +46,7 @@ base editor layout:
 import 'umkehr/block-editor/style.css';
 ```
 
-Import the full legacy rich-text preset when using `legacyRichTextPlugins`:
+Import the full bundled rich-text preset when using `defaultBlockEditorPlugins`:
 
 ```ts
 import 'umkehr/block-editor/legacyRichTextPlugins.css';
@@ -63,6 +63,10 @@ import 'umkehr/block-editor/plugins/table.css';
 custom CSS text. Applications can use `styleImportsFromRegistry(registry)` to inspect static package
 CSS hrefs and `styleTextFromRegistry(registry)` to collect opt-in custom CSS text. The bundled editor
 does not inject styles at runtime; applications should load the static CSS entrypoints they use.
+
+See [`docs/block-editor-plugins.md`](./docs/block-editor-plugins.md) for base editor usage, the
+full preset, writing plugins, compatibility errors, custom selection plugins, code preview renderer
+sub-plugins, and plugin style packaging.
 
 ## Examples
 

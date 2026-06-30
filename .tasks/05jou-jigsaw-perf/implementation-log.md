@@ -38,3 +38,14 @@
 - Removed the 1px mask stroke pass from the main `PieceCanvas` renderer, leaving only clipped image content.
 - Reran `npm exec vitest -- run examples/react-crdt/src/apps/jigsaw/jigsaw.test.ts`: passed, 28 tests in 2.29s reported by Vitest.
 - Vite hot-reloaded `src/apps/jigsaw/JigsawPanel.tsx` on the existing dev server without a compile error.
+
+## Main Renderer Bleed Follow-Up
+
+- Added a 2 logical-pixel visual bleed around each main-renderer piece to cover antialiasing gaps between adjacent pieces.
+- Shifted and enlarged the visual element box symmetrically while leaving puzzle positions, snapping, and board geometry unchanged.
+- Inflated the canvas clip path and sampled the source image from the same expanded bounds, so the bleed contains neighboring source pixels rather than transparent padding.
+- Removed the now-unused exact mask drawing helper.
+- Reran `npm exec vitest -- run examples/react-crdt/src/apps/jigsaw/jigsaw.test.ts`: passed, 28 tests in 1.82s reported by Vitest.
+- Vite hot-reloaded `src/apps/jigsaw/JigsawPanel.tsx` on the existing dev server without a compile error.
+- Reverted this visual bleed change after it looked buggy. Restored exact piece bounds and exact mask clipping while keeping the prior high-DPI backing canvas and no-stroke rendering.
+- Reran `npm exec vitest -- run examples/react-crdt/src/apps/jigsaw/jigsaw.test.ts`: passed, 28 tests in 1.94s reported by Vitest.

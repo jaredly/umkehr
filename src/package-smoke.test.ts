@@ -1,6 +1,15 @@
 import {existsSync, readFileSync} from 'node:fs';
 import {describe, expect, it} from 'vitest';
-import {createBlockEditorRegistry, legacyRichTextPlugins, styleImportsFromRegistry} from './block-editor/index';
+import {
+    basicMarksPlugin,
+    BlockRichTextEditor,
+    createBlockEditorRegistry,
+    defaultBlockEditorPlugins,
+    headingsPlugin,
+    legacyRichTextPlugins,
+    linksPlugin,
+    styleImportsFromRegistry,
+} from './block-editor/index';
 
 const packageImportTimeoutMs = 15_000;
 
@@ -68,6 +77,19 @@ describe('package exports', () => {
         expect(blockRichTextPkg.BLOCK_RICH_TEXT_LEAF_PLUGIN_ID).toBe('umkehr.block-rich-text');
     }, packageImportTimeoutMs);
 
+    it('imports the built block editor entry point separately', async () => {
+        expect(existsSync('dist/src/block-editor/index.js')).toBe(true);
+
+        const blockEditorPkg = await import('umkehr/block-editor');
+
+        expect(typeof blockEditorPkg.BlockRichTextEditor).toBe('function');
+        expect(blockEditorPkg.basicMarksPlugin.id).toBe('basic-marks');
+        expect(blockEditorPkg.linksPlugin.id).toBe('links');
+        expect(blockEditorPkg.headingsPlugin.id).toBe('headings');
+        expect(blockEditorPkg.defaultBlockEditorPlugins).toBe(blockEditorPkg.legacyRichTextPlugins);
+        expect(blockEditorPkg.defaultBlockEditorPlugins.map((plugin: {id: string}) => plugin.id)).toContain('table');
+    }, packageImportTimeoutMs);
+
     it('imports the built React entry point separately', async () => {
         expect(existsSync('dist/src/react/index.js')).toBe(true);
 
@@ -123,6 +145,15 @@ describe('package exports', () => {
         expect(readFileSync('dist/src/block-editor/legacyRichTextPlugins.css', 'utf8')).toContain(
             "@import './plugins/table.css';",
         );
+    });
+
+    it('exports the public block editor component, plugins, and full preset', () => {
+        expect(typeof BlockRichTextEditor).toBe('function');
+        expect(basicMarksPlugin.id).toBe('basic-marks');
+        expect(linksPlugin.id).toBe('links');
+        expect(headingsPlugin.id).toBe('headings');
+        expect(defaultBlockEditorPlugins).toBe(legacyRichTextPlugins);
+        expect(defaultBlockEditorPlugins.map((plugin) => plugin.id)).toContain('table');
     });
 
     it('keeps bundled plugin style declarations aligned with package CSS entrypoints', () => {

@@ -23,7 +23,7 @@ import {
     type BlockEditorPlugin,
 } from './plugins/index.js';
 
-export const legacyRichTextPlugins: readonly BlockEditorPlugin<RichBlockMeta>[] = [
+export const defaultBlockEditorPlugins: readonly BlockEditorPlugin<RichBlockMeta>[] = [
     basicMarksPlugin,
     calloutsPlugin,
     codePlugin,
@@ -45,3 +45,5 @@ export const legacyRichTextPlugins: readonly BlockEditorPlugin<RichBlockMeta>[] 
     todosPlugin,
     ...legacyRichTextCrdtPlugins,
 ];
+
+export const legacyRichTextPlugins = defaultBlockEditorPlugins;
