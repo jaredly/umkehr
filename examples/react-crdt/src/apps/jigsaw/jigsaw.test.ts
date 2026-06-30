@@ -161,6 +161,24 @@ describe('jigsaw board artifacts', () => {
         });
     });
 
+    it('uses a seed for reproducible tabbed rectangular randomness', () => {
+        const a = generateJigsawBoard(30, {tabs: true, seed: 'tabs-a'});
+        const b = generateJigsawBoard(30, {tabs: true, seed: 'tabs-a'});
+        const c = generateJigsawBoard(30, {tabs: true, seed: 'tabs-b'});
+
+        expect(a).toEqual(b);
+        expect(a.pieces.map((piece) => piece.mask)).not.toEqual(c.pieces.map((piece) => piece.mask));
+    });
+
+    it('uses a seed for reproducible Voronoi site and tab randomness', () => {
+        const a = generateJigsawBoard(30, {type: 'voronoi', tabs: true, seed: 1234});
+        const b = generateJigsawBoard(30, {type: 'voronoi', tabs: true, seed: 1234});
+        const c = generateJigsawBoard(30, {type: 'voronoi', tabs: true, seed: 5678});
+
+        expect(a).toEqual(b);
+        expect(a.pieces.map((piece) => piece.center)).not.toEqual(c.pieces.map((piece) => piece.center));
+    });
+
     it('uses Voronoi neighbor geometry for connection validation', () => {
         const board = generateJigsawBoard(30, {type: 'voronoi'});
         const neighbor = board.pieces[0].neighbors[0];

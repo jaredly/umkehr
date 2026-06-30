@@ -20,10 +20,11 @@ const usage = `Usage:
 
 Examples:
   bun scripts/jigsaw-board-svg.ts '{"pieceCount":30,"type":"voronoi","tabs":true}' > /tmp/jigsaw.svg
-  bun scripts/jigsaw-board-svg.ts '{"pieceCount":12,"tabs":true,"strokeWidth":1.5}' /tmp/jigsaw.svg
+  bun scripts/jigsaw-board-svg.ts '{"pieceCount":12,"tabs":true,"seed":"inspect","strokeWidth":1.5}' /tmp/jigsaw.svg
 
 The JSON is JigsawBoardOptions plus optional script fields:
   pieceCount: 12 | 30 | 60 | 120 | 600 (default 30)
+  seed: string | number for reproducible random boards
   stroke: SVG stroke color (default "#111827")
   strokeWidth: SVG stroke width (default 1)
   showBounds: draw per-piece bounds in red (default false)
