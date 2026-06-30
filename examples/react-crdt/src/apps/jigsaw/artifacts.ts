@@ -671,13 +671,15 @@ function tabbedPolygonToMask(
         const tabEnd = add(tab.center, multiply(tangent, tab.radius));
         const orientedStart = distance(from, tabStart) <= distance(from, tabEnd) ? tabStart : tabEnd;
         const orientedEnd = orientedStart === tabStart ? tabEnd : tabStart;
-        const radialStart = normalize(subtract(orientedStart, tab.center));
-        const apex = add(tab.center, multiply(bulge, tab.radius));
-        const k = 0.5522847498307936;
-        const c1 = add(orientedStart, multiply(bulge, tab.radius * k));
-        const c2 = add(apex, multiply(radialStart, tab.radius * k));
-        const c3 = add(apex, multiply(radialStart, -tab.radius * k));
-        const c4 = add(orientedEnd, multiply(bulge, tab.radius * k));
+        const orientedTangent = normalize(subtract(orientedEnd, orientedStart));
+        const depth = tab.radius * 0.62;
+        const edgeHandle = tab.radius * 0.42;
+        const apexHandle = tab.radius * 0.5;
+        const apex = add(tab.center, multiply(bulge, depth));
+        const c1 = add(orientedStart, multiply(orientedTangent, edgeHandle));
+        const c2 = add(apex, multiply(orientedTangent, -apexHandle));
+        const c3 = add(apex, multiply(orientedTangent, apexHandle));
+        const c4 = add(orientedEnd, multiply(orientedTangent, -edgeHandle));
 
         mask.push({type: 'Line', to: subtract(orientedStart, center)});
         mask.push({
