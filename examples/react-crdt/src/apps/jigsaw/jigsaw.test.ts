@@ -2,14 +2,21 @@ import {describe, expect, it} from 'vitest';
 import {artifactFingerprintHash} from '../../lib/artifacts';
 import {
     DEFAULT_JIGSAW_PIECE_COUNT,
+    JIGSAW_ARTIFACT_IMAGE_REF,
     JIGSAW_BOARD_ARTIFACT_ID,
     JIGSAW_BOARD_KIND,
     JIGSAW_BOARD_VERSION,
+    JIGSAW_IMAGE_ARTIFACT_ID,
+    JIGSAW_IMAGE_KIND,
+    JIGSAW_IMAGE_VERSION,
     currentJigsawBoard,
+    currentJigsawImage,
     generateJigsawBoard,
     initialJigsawArtifacts,
+    isJigsawImageArtifact,
     isJigsawPieceCount,
     jigsawArtifactStore,
+    type JigsawImageArtifact,
     type JigsawPieceCount,
 } from './artifacts';
 import {jigsawApp} from './JigsawApp';
@@ -82,6 +89,38 @@ describe('jigsaw board artifacts', () => {
                 expect(reverse?.offset.y).toBeCloseTo(-neighbor.offset.y);
             });
         });
+    });
+
+    it('generates rectangular board geometry for an uploaded image size', () => {
+        const board = generateJigsawBoard(30, {
+            image: JIGSAW_ARTIFACT_IMAGE_REF,
+            imageSize: {width: 640, height: 360},
+            imageName: 'lake.jpg',
+        });
+        expect(board.image).toBe(JIGSAW_ARTIFACT_IMAGE_REF);
+        expect(board.imageSize).toEqual({width: 640, height: 360});
+        expect(board.title).toBe('30 piece lake.jpg puzzle');
+        expect(estimatedPieceSize(board)).toEqual({width: 640 / 6, height: 360 / 5});
+        expect(board.pieces[0].bounds).toEqual({
+            left: -640 / 6 / 2,
+            top: -360 / 5 / 2,
+            width: 640 / 6,
+            height: 360 / 5,
+        });
+    });
+
+    it('generates Voronoi board geometry for an uploaded image size', () => {
+        const board = generateJigsawBoard(30, {
+            type: 'voronoi',
+            image: JIGSAW_ARTIFACT_IMAGE_REF,
+            imageSize: {width: 360, height: 640},
+            imageName: 'portrait.webp',
+        });
+        expect(board.image).toBe(JIGSAW_ARTIFACT_IMAGE_REF);
+        expect(board.imageSize).toEqual({width: 360, height: 640});
+        expect(board.title).toBe('30 piece Voronoi portrait.webp puzzle');
+        expect(board.pieces).toHaveLength(30);
+        expect(totalMaskArea(board)).toBeCloseTo(360 * 640, -4);
     });
 
     it('uses Voronoi neighbor geometry for connection validation', () => {
@@ -163,6 +202,59 @@ describe('jigsaw board artifacts', () => {
         expect(currentJigsawBoard()).toEqual(serialized?.data);
     });
 
+    it('serializes, manifests, and loads uploaded image artifacts', () => {
+        const image = testImageArtifact();
+        const artifacts = initialJigsawArtifacts(60, {type: 'voronoi', imageArtifact: image});
+        expect(artifacts).toHaveLength(2);
+        expect(artifacts[0]).toMatchObject({
+            id: JIGSAW_BOARD_ARTIFACT_ID,
+            kind: JIGSAW_BOARD_KIND,
+            version: JIGSAW_BOARD_VERSION,
+        });
+        expect(artifacts[0].data).toMatchObject({
+            image: JIGSAW_ARTIFACT_IMAGE_REF,
+            imageSize: {width: image.width, height: image.height},
+            title: expect.stringContaining('sample.jpg'),
+        });
+        expect(artifacts[1]).toEqual({
+            id: JIGSAW_IMAGE_ARTIFACT_ID,
+            kind: JIGSAW_IMAGE_KIND,
+            version: JIGSAW_IMAGE_VERSION,
+            fingerprintHash: artifactFingerprintHash(image),
+            data: image,
+        });
+        expect(jigsawArtifactStore.manifest()).toHaveLength(2);
+        expect(jigsawArtifactStore.serialize(JIGSAW_IMAGE_ARTIFACT_ID)?.data).toEqual(image);
+        expect(currentJigsawImage()).toEqual(image);
+
+        jigsawArtifactStore.createInitial?.();
+        expect(currentJigsawImage()).toBeNull();
+        expect(jigsawArtifactStore.manifest()).toHaveLength(1);
+
+        artifacts.forEach((artifact) => jigsawArtifactStore.load(artifact));
+        expect(currentJigsawBoard().image).toBe(JIGSAW_ARTIFACT_IMAGE_REF);
+        expect(currentJigsawImage()).toEqual(image);
+
+        const stock = initialJigsawArtifacts(12)[0];
+        jigsawArtifactStore.load(stock);
+        expect(currentJigsawBoard().image).toBe('stock:hue');
+        expect(currentJigsawImage()).toBeNull();
+    });
+
+    it('ignores invalid uploaded image artifact data', () => {
+        jigsawArtifactStore.createInitial?.();
+        jigsawArtifactStore.load({
+            id: JIGSAW_IMAGE_ARTIFACT_ID,
+            kind: JIGSAW_IMAGE_KIND,
+            version: JIGSAW_IMAGE_VERSION,
+            fingerprintHash: artifactFingerprintHash({id: JIGSAW_IMAGE_ARTIFACT_ID}),
+            data: {id: JIGSAW_IMAGE_ARTIFACT_ID},
+        });
+        expect(currentJigsawImage()).toBeNull();
+        expect(isJigsawImageArtifact(testImageArtifact())).toBe(true);
+        expect(isJigsawImageArtifact({...testImageArtifact(), dataUrl: 'data:image/png;base64,aaaa'})).toBe(false);
+    });
+
     it('loads legacy rectangular artifacts without piece bounds', () => {
         const board = generateJigsawBoard(12);
         const legacyBoard = {
@@ -189,12 +281,19 @@ describe('jigsaw board artifacts', () => {
         expect(isJigsawPieceCount(24)).toBe(false);
         expect(jigsawApp.documentInit?.validate({pieceCount: 30})).toEqual({
             success: true,
-            data: {pieceCount: 30, type: 'rectangular'},
+            data: {pieceCount: 30, type: 'rectangular', imageStatus: 'idle'},
         });
         expect(jigsawApp.documentInit?.validate({pieceCount: 30, type: 'voronoi'})).toEqual({
             success: true,
-            data: {pieceCount: 30, type: 'voronoi'},
+            data: {pieceCount: 30, type: 'voronoi', imageStatus: 'idle'},
         });
+        expect(jigsawApp.documentInit?.validate({pieceCount: 30, type: 'voronoi', image: testImageArtifact()})).toEqual({
+            success: true,
+            data: {pieceCount: 30, type: 'voronoi', image: testImageArtifact(), imageStatus: 'idle'},
+        });
+        expect(jigsawApp.documentInit?.validate({pieceCount: 30, imageStatus: 'loading'}).success).toBe(false);
+        expect(jigsawApp.documentInit?.validate({pieceCount: 30, imageStatus: 'error'}).success).toBe(false);
+        expect(jigsawApp.documentInit?.validate({pieceCount: 30, image: {id: 'image'}}).success).toBe(false);
         expect(jigsawApp.documentInit?.validate({pieceCount: 24}).success).toBe(false);
         expect(jigsawApp.documentInit?.validate({pieceCount: 30, type: 'spiral'}).success).toBe(false);
         expect(initialJigsawArtifacts(60)[0].data).toMatchObject({pieceCount: 60});
@@ -210,6 +309,17 @@ describe('jigsaw board artifacts', () => {
         });
     });
 });
+
+function testImageArtifact(): JigsawImageArtifact {
+    return {
+        id: JIGSAW_IMAGE_ARTIFACT_ID,
+        mimeType: 'image/jpeg',
+        dataUrl: 'data:image/jpeg;base64,aaaa',
+        width: 640,
+        height: 360,
+        originalName: 'sample.jpg',
+    };
+}
 
 describe('jigsaw placement logic', () => {
     it('filters invalid connections', () => {

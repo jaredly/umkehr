@@ -3,7 +3,7 @@
 Bundled block editor CSS is loaded through static entrypoints:
 
 - `umkehr/block-editor/style.css`: core editor shell, toolbar, block rows, options, generic popovers, retained selection, and shared drag/drop affordances.
-- `umkehr/block-editor/legacyRichTextPlugins.css`: core CSS plus bundled plugin CSS in full preset order.
+- `umkehr/block-editor/defaultBlockEditorPlugins.css`: core CSS plus bundled plugin CSS in full preset order.
 - `umkehr/block-editor/plugins/<plugin>.css`: individual bundled plugin CSS entrypoints.
 
 Bundled plugins also declare `styles` metadata. `registry.styles` is deterministic and documents the

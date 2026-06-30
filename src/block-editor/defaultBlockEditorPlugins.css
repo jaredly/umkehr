@@ -1,4 +1,4 @@
-/* Full legacy rich-text editor preset styles in deterministic preset order. */
+/* Full block editor preset styles in deterministic preset order. */
 @import './style.css';
 
 @import './plugins/basicMarks.css';

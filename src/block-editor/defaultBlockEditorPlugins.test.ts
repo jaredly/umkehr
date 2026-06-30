@@ -3,7 +3,7 @@ import {describe, expect, it} from 'vitest';
 import type {CachedState} from '../block-crdt/types';
 import {createBlockEditorRegistry} from './plugins/registry';
 import {blockEditorDocumentCompatibilityIssues} from './plugins/compatibility';
-import {legacyRichTextPlugins} from './legacyRichTextPlugins';
+import {defaultBlockEditorPlugins} from './defaultBlockEditorPlugins';
 import type {RichBlockMeta} from './blockMeta';
 
 const emptyState = (): CachedState<RichBlockMeta> => ({
@@ -23,9 +23,9 @@ const emptyState = (): CachedState<RichBlockMeta> => ({
     },
 });
 
-describe('legacyRichTextPlugins', () => {
+describe('defaultBlockEditorPlugins', () => {
     it('builds a conflict-free registry for current rich-text features', () => {
-        const registry = createBlockEditorRegistry(legacyRichTextPlugins);
+        const registry = createBlockEditorRegistry(defaultBlockEditorPlugins);
 
         expect(registry.plugins.map((plugin) => plugin.id)).toEqual([
             'annotations',
@@ -113,7 +113,7 @@ describe('legacyRichTextPlugins', () => {
     });
 
     it('declares metadata support for non-core current rich-text blocks', () => {
-        const registry = createBlockEditorRegistry(legacyRichTextPlugins);
+        const registry = createBlockEditorRegistry(defaultBlockEditorPlugins);
         const state = emptyState();
         state.state.blocks.poll = {
             id: [1, 'a'],
@@ -126,7 +126,7 @@ describe('legacyRichTextPlugins', () => {
     });
 
     it('declares metadata support for basic inline marks', () => {
-        const registry = createBlockEditorRegistry(legacyRichTextPlugins);
+        const registry = createBlockEditorRegistry(defaultBlockEditorPlugins);
         const state = emptyState();
         state.state.marks.bold = {
             id: [1, 'a'],

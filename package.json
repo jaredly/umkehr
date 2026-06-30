@@ -100,7 +100,7 @@
             "import": "./dist/src/block-editor/index.js"
         },
         "./block-editor/style.css": "./dist/src/block-editor/style.css",
-        "./block-editor/legacyRichTextPlugins.css": "./dist/src/block-editor/legacyRichTextPlugins.css",
+        "./block-editor/defaultBlockEditorPlugins.css": "./dist/src/block-editor/defaultBlockEditorPlugins.css",
         "./block-editor/plugins/*.css": "./dist/src/block-editor/plugins/*.css",
         "./block-editor/*": {
             "types": "./dist/src/block-editor/*.d.ts",

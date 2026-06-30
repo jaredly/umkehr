@@ -45,5 +45,3 @@ export const defaultBlockEditorPlugins: readonly BlockEditorPlugin<RichBlockMeta
     todosPlugin,
     ...legacyRichTextCrdtPlugins,
 ];
-
-export const legacyRichTextPlugins = defaultBlockEditorPlugins;

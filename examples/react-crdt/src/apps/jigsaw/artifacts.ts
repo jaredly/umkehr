@@ -28,54 +28,101 @@ export type JigsawPiece = {
     neighbors: {piece: number; offset: Coord}[];
 };
 
+export type JigsawImageRef = 'stock:hue' | typeof JIGSAW_ARTIFACT_IMAGE_REF;
+
 export type JigsawBoardArtifact = {
     id: string;
     title: string;
-    image: 'stock:hue';
+    image: JigsawImageRef;
     imageSize: {width: number; height: number};
     pieceCount: JigsawPieceCount;
     pieces: JigsawPiece[];
 };
 
+export type JigsawImageArtifact = {
+    id: typeof JIGSAW_IMAGE_ARTIFACT_ID;
+    mimeType: JigsawImageMimeType;
+    dataUrl: string;
+    width: number;
+    height: number;
+    originalName?: string;
+};
+
+export type JigsawImageMimeType = 'image/jpeg' | 'image/webp';
+
+export type JigsawBoardOptions = {
+    type?: JigsawGenerationType;
+    image?: JigsawImageRef;
+    imageSize?: {width: number; height: number};
+    imageName?: string;
+};
+
 export const JIGSAW_BOARD_ARTIFACT_ID = 'board';
 export const JIGSAW_BOARD_KIND = 'jigsaw-board';
 export const JIGSAW_BOARD_VERSION = 1;
+export const JIGSAW_IMAGE_ARTIFACT_ID = 'image';
+export const JIGSAW_IMAGE_KIND = 'jigsaw-image';
+export const JIGSAW_IMAGE_VERSION = 1;
+export const JIGSAW_ARTIFACT_IMAGE_REF = 'artifact:image';
 export const DEFAULT_JIGSAW_PIECE_COUNT: JigsawPieceCount = 12;
 export const JIGSAW_IMAGE_SIZE = {width: 720, height: 540} as const;
 
 let loadedBoard = generateJigsawBoard(DEFAULT_JIGSAW_PIECE_COUNT);
+let loadedImage: JigsawImageArtifact | null = null;
 
-export const jigsawArtifactStore: ArtifactStore<JigsawBoardArtifact> = {
+export const jigsawArtifactStore: ArtifactStore<JigsawBoardArtifact | JigsawImageArtifact> = {
     get(id) {
-        return id === JIGSAW_BOARD_ARTIFACT_ID ? loadedBoard : null;
+        if (id === JIGSAW_BOARD_ARTIFACT_ID) return loadedBoard;
+        if (id === JIGSAW_IMAGE_ARTIFACT_ID) return loadedImage;
+        return null;
     },
     serialize(id) {
-        if (id !== JIGSAW_BOARD_ARTIFACT_ID) return null;
-        return serializeBoard(loadedBoard);
+        if (id === JIGSAW_BOARD_ARTIFACT_ID) return serializeBoard(loadedBoard);
+        if (id === JIGSAW_IMAGE_ARTIFACT_ID && loadedImage) return serializeImage(loadedImage);
+        return null;
     },
     load(artifact) {
-        const board = normalizeJigsawBoardArtifact(artifact.data);
         if (
-            artifact.id !== JIGSAW_BOARD_ARTIFACT_ID ||
-            artifact.kind !== JIGSAW_BOARD_KIND ||
-            artifact.version !== JIGSAW_BOARD_VERSION ||
-            !board
+            artifact.id === JIGSAW_BOARD_ARTIFACT_ID &&
+            artifact.kind === JIGSAW_BOARD_KIND &&
+            artifact.version === JIGSAW_BOARD_VERSION
         ) {
+            const board = normalizeJigsawBoardArtifact(artifact.data);
+            if (!board) return;
+            if (
+                artifact.fingerprintHash !== artifactFingerprintHash(artifact.data) &&
+                artifact.fingerprintHash !== artifactFingerprintHash(board)
+            ) {
+                return;
+            }
+            loadedBoard = board;
+            loadedImage = null;
             return;
         }
+
         if (
-            artifact.fingerprintHash !== artifactFingerprintHash(artifact.data) &&
-            artifact.fingerprintHash !== artifactFingerprintHash(board)
+            artifact.id === JIGSAW_IMAGE_ARTIFACT_ID &&
+            artifact.kind === JIGSAW_IMAGE_KIND &&
+            artifact.version === JIGSAW_IMAGE_VERSION
         ) {
+            const image = normalizeJigsawImageArtifact(artifact.data);
+            if (!image) return;
+            if (
+                artifact.fingerprintHash !== artifactFingerprintHash(artifact.data) &&
+                artifact.fingerprintHash !== artifactFingerprintHash(image)
+            ) {
+                return;
+            }
+            loadedImage = image;
             return;
         }
-        loadedBoard = board;
     },
     manifest() {
-        return [manifestForBoard(loadedBoard)];
+        return loadedImage ? [manifestForBoard(loadedBoard), manifestForImage(loadedImage)] : [manifestForBoard(loadedBoard)];
     },
     createInitial() {
         loadedBoard = generateJigsawBoard(DEFAULT_JIGSAW_PIECE_COUNT);
+        loadedImage = null;
         return [serializeBoard(loadedBoard)];
     },
 };
@@ -84,18 +131,26 @@ export function currentJigsawBoard() {
     return loadedBoard;
 }
 
-export function generateJigsawBoard(
-    pieceCount: JigsawPieceCount,
-    options: {type?: JigsawGenerationType} = {},
-): JigsawBoardArtifact {
-    if (options.type === 'voronoi') return generateVoronoiJigsawBoard(pieceCount);
-    return generateRectangularJigsawBoard(pieceCount);
+export function currentJigsawImage() {
+    return loadedImage;
 }
 
-function generateRectangularJigsawBoard(pieceCount: JigsawPieceCount): JigsawBoardArtifact {
+export function generateJigsawBoard(
+    pieceCount: JigsawPieceCount,
+    options: JigsawBoardOptions = {},
+): JigsawBoardArtifact {
+    if (options.type === 'voronoi') return generateVoronoiJigsawBoard(pieceCount, options);
+    return generateRectangularJigsawBoard(pieceCount, options);
+}
+
+function generateRectangularJigsawBoard(
+    pieceCount: JigsawPieceCount,
+    options: JigsawBoardOptions = {},
+): JigsawBoardArtifact {
+    const imageSize = normalizedGenerationImageSize(options.imageSize);
     const grid = gridForPieceCount(pieceCount);
-    const pieceWidth = JIGSAW_IMAGE_SIZE.width / grid.cols;
-    const pieceHeight = JIGSAW_IMAGE_SIZE.height / grid.rows;
+    const pieceWidth = imageSize.width / grid.cols;
+    const pieceHeight = imageSize.height / grid.rows;
     const pieces: JigsawPiece[] = [];
 
     for (let row = 0; row < grid.rows; row++) {
@@ -128,18 +183,22 @@ function generateRectangularJigsawBoard(pieceCount: JigsawPieceCount): JigsawBoa
 
     return {
         id: JIGSAW_BOARD_ARTIFACT_ID,
-        title: `${pieceCount} piece hue puzzle`,
-        image: 'stock:hue',
-        imageSize: {...JIGSAW_IMAGE_SIZE},
+        title: jigsawBoardTitle(pieceCount, options, false),
+        image: options.image ?? 'stock:hue',
+        imageSize,
         pieceCount,
         pieces,
     };
 }
 
-function generateVoronoiJigsawBoard(pieceCount: JigsawPieceCount): JigsawBoardArtifact {
+function generateVoronoiJigsawBoard(
+    pieceCount: JigsawPieceCount,
+    options: JigsawBoardOptions = {},
+): JigsawBoardArtifact {
+    const imageSize = normalizedGenerationImageSize(options.imageSize);
     const grid = gridForPieceCount(pieceCount);
-    const cellWidth = JIGSAW_IMAGE_SIZE.width / grid.cols;
-    const cellHeight = JIGSAW_IMAGE_SIZE.height / grid.rows;
+    const cellWidth = imageSize.width / grid.cols;
+    const cellHeight = imageSize.height / grid.rows;
     const sites: Coord[] = [];
 
     for (let row = 0; row < grid.rows; row++) {
@@ -151,14 +210,14 @@ function generateVoronoiJigsawBoard(pieceCount: JigsawPieceCount): JigsawBoardAr
             const dx = signedPerturbation(cellWidth);
             const dy = signedPerturbation(cellHeight);
             sites.push({
-                x: clamp(center.x + dx, 0.001, JIGSAW_IMAGE_SIZE.width - 0.001),
-                y: clamp(center.y + dy, 0.001, JIGSAW_IMAGE_SIZE.height - 0.001),
+                x: clamp(center.x + dx, 0.001, imageSize.width - 0.001),
+                y: clamp(center.y + dy, 0.001, imageSize.height - 0.001),
             });
         }
     }
 
     const polygons = sites.map((site, index) =>
-        voronoiCell(site, index, sites, JIGSAW_IMAGE_SIZE, grid),
+        voronoiCell(site, index, sites, imageSize, grid),
     );
     const centers = polygons.map((polygon) => centerOfBounds(boundsForPolygon(polygon)));
     const neighbors = neighborsForPolygons(polygons, centers, grid);
@@ -180,9 +239,9 @@ function generateVoronoiJigsawBoard(pieceCount: JigsawPieceCount): JigsawBoardAr
 
     return {
         id: JIGSAW_BOARD_ARTIFACT_ID,
-        title: `${pieceCount} piece Voronoi hue puzzle`,
-        image: 'stock:hue',
-        imageSize: {...JIGSAW_IMAGE_SIZE},
+        title: jigsawBoardTitle(pieceCount, options, true),
+        image: options.image ?? 'stock:hue',
+        imageSize,
         pieceCount,
         pieces,
     };
@@ -190,9 +249,20 @@ function generateVoronoiJigsawBoard(pieceCount: JigsawPieceCount): JigsawBoardAr
 
 export function initialJigsawArtifacts(
     pieceCount: JigsawPieceCount,
-    options: {type?: JigsawGenerationType} = {},
+    options: JigsawBoardOptions & {imageArtifact?: JigsawImageArtifact} = {},
 ): SerializedArtifact[] {
-    return [serializeBoard(generateJigsawBoard(pieceCount, options))];
+    const boardOptions: JigsawBoardOptions = options.imageArtifact
+        ? {
+              ...options,
+              image: JIGSAW_ARTIFACT_IMAGE_REF,
+              imageSize: {width: options.imageArtifact.width, height: options.imageArtifact.height},
+              imageName: options.imageArtifact.originalName,
+          }
+        : options;
+    const board = generateJigsawBoard(pieceCount, boardOptions);
+    loadedBoard = board;
+    loadedImage = options.imageArtifact ?? null;
+    return loadedImage ? [serializeBoard(board), serializeImage(loadedImage)] : [serializeBoard(board)];
 }
 
 export function gridForPieceCount(pieceCount: JigsawPieceCount) {
@@ -217,6 +287,13 @@ function serializeBoard(board: JigsawBoardArtifact): SerializedArtifact {
     };
 }
 
+function serializeImage(image: JigsawImageArtifact): SerializedArtifact {
+    return {
+        ...manifestForImage(image),
+        data: image,
+    };
+}
+
 function manifestForBoard(board: JigsawBoardArtifact): ArtifactManifestEntry {
     return {
         id: board.id,
@@ -224,6 +301,30 @@ function manifestForBoard(board: JigsawBoardArtifact): ArtifactManifestEntry {
         version: JIGSAW_BOARD_VERSION,
         fingerprintHash: artifactFingerprintHash(board),
     };
+}
+
+function manifestForImage(image: JigsawImageArtifact): ArtifactManifestEntry {
+    return {
+        id: image.id,
+        kind: JIGSAW_IMAGE_KIND,
+        version: JIGSAW_IMAGE_VERSION,
+        fingerprintHash: artifactFingerprintHash(image),
+    };
+}
+
+function normalizedGenerationImageSize(input: unknown): JigsawBoardArtifact['imageSize'] {
+    return isImageSize(input) ? {width: input.width, height: input.height} : {...JIGSAW_IMAGE_SIZE};
+}
+
+function jigsawBoardTitle(pieceCount: JigsawPieceCount, options: JigsawBoardOptions, voronoi: boolean) {
+    const shape = voronoi ? 'Voronoi ' : '';
+    if (options.image === JIGSAW_ARTIFACT_IMAGE_REF && options.imageName) {
+        return `${pieceCount} piece ${shape}${options.imageName} puzzle`;
+    }
+    if (options.image === JIGSAW_ARTIFACT_IMAGE_REF) {
+        return `${pieceCount} piece ${shape}image puzzle`;
+    }
+    return `${pieceCount} piece ${shape}hue puzzle`;
 }
 
 function rectangleMask(width: number, height: number): PathSegment[] {
@@ -429,7 +530,7 @@ function normalizeJigsawBoardArtifact(input: unknown): JigsawBoardArtifact | nul
     if (
         input.id === JIGSAW_BOARD_ARTIFACT_ID &&
         typeof input.title === 'string' &&
-        input.image === 'stock:hue' &&
+        isJigsawImageRef(input.image) &&
         isImageSize(input.imageSize) &&
         isPieceCount(input.pieceCount) &&
         Array.isArray(pieces) &&
@@ -447,6 +548,43 @@ function normalizeJigsawBoardArtifact(input: unknown): JigsawBoardArtifact | nul
         };
     }
     return null;
+}
+
+function normalizeJigsawImageArtifact(input: unknown): JigsawImageArtifact | null {
+    if (!isJigsawImageArtifact(input)) return null;
+    return {
+        id: input.id,
+        mimeType: input.mimeType,
+        dataUrl: input.dataUrl,
+        width: input.width,
+        height: input.height,
+        ...(input.originalName ? {originalName: input.originalName} : {}),
+    };
+}
+
+export function isJigsawImageArtifact(input: unknown): input is JigsawImageArtifact {
+    return (
+        isRecord(input) &&
+        input.id === JIGSAW_IMAGE_ARTIFACT_ID &&
+        isJigsawImageMimeType(input.mimeType) &&
+        typeof input.dataUrl === 'string' &&
+        input.dataUrl.startsWith(`data:${input.mimeType};base64,`) &&
+        typeof input.width === 'number' &&
+        Number.isFinite(input.width) &&
+        input.width > 0 &&
+        typeof input.height === 'number' &&
+        Number.isFinite(input.height) &&
+        input.height > 0 &&
+        (input.originalName === undefined || typeof input.originalName === 'string')
+    );
+}
+
+function isJigsawImageRef(input: unknown): input is JigsawImageRef {
+    return input === 'stock:hue' || input === JIGSAW_ARTIFACT_IMAGE_REF;
+}
+
+function isJigsawImageMimeType(input: unknown): input is JigsawImageMimeType {
+    return input === 'image/jpeg' || input === 'image/webp';
 }
 
 function isJigsawPieceLike(input: unknown, pieceCount: number, index: number) {

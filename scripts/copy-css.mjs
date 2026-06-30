@@ -3,7 +3,7 @@ import {dirname, join} from 'node:path';
 
 const cssFiles = [
     'src/block-editor/style.css',
-    'src/block-editor/legacyRichTextPlugins.css',
+    'src/block-editor/defaultBlockEditorPlugins.css',
     ...readdirSync('src/block-editor/plugins')
         .filter((file) => file.endsWith('.css'))
         .map((file) => `src/block-editor/plugins/${file}`),

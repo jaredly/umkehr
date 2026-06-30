@@ -49,7 +49,7 @@ import 'umkehr/block-editor/style.css';
 Import the full bundled rich-text preset when using `defaultBlockEditorPlugins`:
 
 ```ts
-import 'umkehr/block-editor/legacyRichTextPlugins.css';
+import 'umkehr/block-editor/defaultBlockEditorPlugins.css';
 ```
 
 Individual bundled plugin styles are available under stable plugin entrypoints, for example:

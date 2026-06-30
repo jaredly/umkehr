@@ -38,8 +38,7 @@ import 'umkehr/block-editor/style.css';
 
 ## Full Preset Usage
 
-Use `defaultBlockEditorPlugins` for the bundled rich-text feature set. The older
-`legacyRichTextPlugins` export is retained as an alias for existing callers.
+Use `defaultBlockEditorPlugins` for the bundled rich-text feature set.
 
 ```tsx
 import {
@@ -49,7 +48,7 @@ import {
     headingsPlugin,
     linksPlugin,
 } from 'umkehr/block-editor';
-import 'umkehr/block-editor/legacyRichTextPlugins.css';
+import 'umkehr/block-editor/defaultBlockEditorPlugins.css';
 
 <BlockRichTextEditor
     plugins={defaultBlockEditorPlugins}
@@ -198,7 +197,7 @@ Static CSS entrypoints are the primary packaging surface:
 
 ```ts
 import 'umkehr/block-editor/style.css';
-import 'umkehr/block-editor/legacyRichTextPlugins.css';
+import 'umkehr/block-editor/defaultBlockEditorPlugins.css';
 import 'umkehr/block-editor/plugins/table.css';
 ```
 

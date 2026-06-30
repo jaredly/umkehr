@@ -1,7 +1,7 @@
 import {describe, expect, it} from 'vitest';
 
 import {DEFAULT_SLASH_COMMANDS, slashCommandsFromRegistry, slashCommandsFromSpecs} from '../slashCommands';
-import {legacyRichTextPlugins} from '../legacyRichTextPlugins';
+import {defaultBlockEditorPlugins} from '../defaultBlockEditorPlugins';
 import {createBlockEditorRegistry} from './registry';
 import {
     blockTypeMenuItemsFromToolbarSpecs,
@@ -68,7 +68,7 @@ describe('legacy rich text UI plugin', () => {
     });
 
     it('exposes the full current slash command set through the legacy aggregate preset', () => {
-        const registry = createBlockEditorRegistry(legacyRichTextPlugins);
+        const registry = createBlockEditorRegistry(defaultBlockEditorPlugins);
 
         expect(slashCommandsFromRegistry(registry)).toEqual(DEFAULT_SLASH_COMMANDS);
     });

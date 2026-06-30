@@ -688,6 +688,22 @@ button:disabled:hover {
     flex-basis: auto;
 }
 
+.documentCreateFieldWide {
+    flex-basis: 260px;
+}
+
+.documentCreateField small {
+    min-height: 14px;
+    color: #64748b;
+    font-weight: 600;
+}
+
+.documentCreateField input[type='file'] {
+    min-width: 100%;
+    flex-basis: auto;
+    padding: 8px 10px;
+}
+
 .documentModalSection h2 {
     margin: 0 0 10px;
     font-size: 14px;

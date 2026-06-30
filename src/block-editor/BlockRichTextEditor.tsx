@@ -347,7 +347,7 @@ import {
     type BlockEditorRegistry,
 } from './plugins/index.js';
 import {blockTypeMenuItemsFromToolbarSpecs} from './plugins/legacyRichTextUi.js';
-import {defaultBlockEditorPlugins} from './legacyRichTextPlugins.js';
+import {defaultBlockEditorPlugins} from './defaultBlockEditorPlugins.js';
 import {richTextVirtualParentsFromRegistry} from './editorCrdtConfig.js';
 
 import * as hlc from '../crdt/hlc.js';
@@ -382,23 +382,6 @@ export type BlockRichTextEditorProps = {
 const BOOLEAN_INLINE_MARKS: BooleanInlineMark[] = ['bold', 'italic', 'strikethrough', 'underline'];
 const BARE_INLINE_MARKS: BareInlineMark[] = [...BOOLEAN_INLINE_MARKS, CODE_MARK];
 const DEFAULT_DATE_EMBED_DATA = {type: 'date', value: '2026-06-23'} as const;
-const LEGACY_TOOLBAR_COMMAND_IDS = new Set([
-    'history:undo',
-    'history:redo',
-    'mark:bold',
-    'mark:italic',
-    'mark:strikethrough',
-    'mark:underline',
-    'mark:code',
-    'mark:math',
-    'mark:display-math',
-    'link:edit',
-    'inline-embed:date',
-    'image:upload',
-    'annotation:sidebar',
-    'annotation:footnote',
-    'annotation:popover',
-]);
 export const coreBlockEditorPlugins: readonly BlockEditorPlugin<RichBlockMeta>[] = [];
 
 const activePendingInlineMarks = (marks: PendingInlineMarks): BareInlineMark[] =>
@@ -3093,80 +3076,13 @@ export function BlockRichTextEditor({
 
     const runToolbarBlockTypeCommand = (kind: BlockTypeMenuValue) => {
         runEditCommand((current, selection) => {
-            if (kind === 'table') {
-                const result = convertBlockToTable(
-                    current.state,
-                    primarySelection(resolveSelectionSet(current.state, selection)),
-                    makeCommandContext(current),
-                );
-                return {
-                    state: result.state,
-                    ops: result.ops,
-                    selection: replacePrimarySelection(result.state, current.selection, result.selection),
-                };
-            }
-            if (kind === 'columns' || kind === 'card-columns') {
-                const result = convertBlockToColumns(
-                    current.state,
-                    primarySelection(resolveSelectionSet(current.state, selection)),
-                    makeCommandContext(current),
-                    kind === 'card-columns' ? 'cards' : 'blocks',
-                );
-                return {
-                    state: result.state,
-                    ops: result.ops,
-                    selection: replacePrimarySelection(result.state, current.selection, result.selection),
-                };
-            }
-            if (kind === 'slide-deck') {
-                const result = convertBlockToSlideDeck(
-                    current.state,
-                    primarySelection(resolveSelectionSet(current.state, selection)),
-                    makeCommandContext(current),
-                );
-                return {
-                    state: result.state,
-                    ops: result.ops,
-                    selection: replacePrimarySelection(result.state, current.selection, result.selection),
-                };
-            }
-            if (kind === 'slide') {
-                const result = convertBlockToSlide(
-                    current.state,
-                    primarySelection(resolveSelectionSet(current.state, selection)),
-                    makeCommandContext(current),
-                );
-                return {
-                    state: result.state,
-                    ops: result.ops,
-                    selection: replacePrimarySelection(result.state, current.selection, result.selection),
-                };
-            }
-            if (kind === 'preview') {
-                const result = insertPreviewBlock(
-                    current.state,
-                    primarySelection(resolveSelectionSet(current.state, selection)),
-                    '',
-                    makeCommandContext(current),
-                );
-                return {
-                    state: result.state,
-                    ops: result.ops,
-                    selection: replacePrimarySelection(result.state, current.selection, result.selection),
-                };
-            }
-            return setBlockTypeEverywhere(current.state, selection, (_blockId, meta) => {
-                const nextMeta = blockTypeMetaFromRegistry(registry, kind, meta, nextReplicaTs(current));
-                return nextMeta ?? meta;
-            });
+            return runBlockTypeCommandEverywhere(current.state, selection, kind, makeCommandContext(current));
         });
     };
 
     const runToolbarCommand = (commandId: string) => {
-        const isRegisteredLegacyToolbarCommand = isToolbarCommandAvailable(commandId);
-        if (LEGACY_TOOLBAR_COMMAND_IDS.has(commandId) && !isRegisteredLegacyToolbarCommand) return;
+        if (!isToolbarCommandAvailable(commandId)) return;
         if (commandId.startsWith('block-type:')) {
-            if (!isRegisteredLegacyToolbarCommand) return;
             runToolbarBlockTypeCommand(commandId.slice('block-type:'.length) as BlockTypeMenuValue);
             return;
         }

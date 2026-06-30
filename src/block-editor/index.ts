@@ -60,4 +60,4 @@ export * from './useBlockReorder.js';
 export * from './virtualParents.js';
 export * from './wordOccurrences.js';
 export * from './plugins/index.js';
-export * from './legacyRichTextPlugins.js';
+export * from './defaultBlockEditorPlugins.js';

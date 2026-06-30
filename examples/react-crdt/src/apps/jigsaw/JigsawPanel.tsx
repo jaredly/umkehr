@@ -12,7 +12,7 @@ import {
 } from 'react';
 import {useValue} from 'umkehr/react';
 import type {AppEditorContext, GridSlot} from '../../lib/crdtApp';
-import {currentJigsawBoard, type JigsawBoardArtifact, type PieceBounds} from './artifacts';
+import {currentJigsawBoard, currentJigsawImage, type JigsawBoardArtifact, type PieceBounds} from './artifacts';
 import type {Coord, JigsawEphemeralData, JigsawState, PathSegment} from './model';
 import {
     add,
@@ -78,7 +78,7 @@ export function JigsawPanel({
     const board = currentJigsawBoard();
     const positions = useValue(editor.$.positions);
     const connections = useValue(editor.$.connections);
-    const sourceImage = useMemo(() => createStockHueCanvas(board.imageSize), [board.imageSize]);
+    const sourceImage = useJigsawSourceCanvas(board);
     const state = useMemo(() => ({positions, connections}), [connections, positions]);
     const layout = useMemo(() => buildPuzzleLayout(board, state), [board, state]);
     const pieceSize = useMemo(() => estimatedPieceSize(board), [board]);
@@ -106,6 +106,7 @@ export function JigsawPanel({
     const [draggingMinimap, setDraggingMinimap] = useState(false);
     const [snapPulse, setSnapPulse] = useState<SnapPulse | null>(null);
     const [localMoveAnimationNonce, setLocalMoveAnimationNonce] = useState(0);
+    const [showPreviewImage, setShowPreviewImage] = useState(false);
     const unplaced = useMemo(() => unplacedPieces(board, layout), [board, layout]);
     const localPositions = localLayout.positions;
 
@@ -379,6 +380,14 @@ export function JigsawPanel({
                 <div className="jigsawActions">
                     <button
                         type="button"
+                        className={showPreviewImage ? 'active' : undefined}
+                        aria-pressed={showPreviewImage}
+                        onClick={() => setShowPreviewImage((current) => !current)}
+                    >
+                        {showPreviewImage ? 'Hide preview' : 'Show preview'}
+                    </button>
+                    <button
+                        type="button"
                         onClick={() => {
                             suppressLocalMoveAnimation();
                             setLocalLayout((current) => {
@@ -437,7 +446,9 @@ export function JigsawPanel({
                         transform: `translate(${viewport.panX}px, ${viewport.panY}px) scale(${viewport.zoom})`,
                     }}
                 >
-                    <SolvedImageCanvas source={sourceImage} offset={boardGeometry.imageOffset} />
+                    {showPreviewImage ? (
+                        <SolvedImageCanvas source={sourceImage} offset={boardGeometry.imageOffset} />
+                    ) : null}
                     {board.pieces.map((piece, index) => {
                         const position = renderedPositions.get(index);
                         if (!position) return null;
@@ -785,6 +796,59 @@ function PieceCanvas({
 function canvasBackingScale() {
     if (typeof window === 'undefined') return 1;
     return Math.max(1, Math.min(maxCanvasBackingScale, Math.ceil(window.devicePixelRatio * maxZoom)));
+}
+
+function useJigsawSourceCanvas(board: JigsawBoardArtifact) {
+    const stockSource = useMemo(() => createStockHueCanvas(board.imageSize), [board.imageSize]);
+    const [artifactSource, setArtifactSource] = useState<HTMLCanvasElement | null>(null);
+    const imageArtifact = board.image === 'artifact:image' ? currentJigsawImage() : null;
+    const imageDataUrl = imageArtifact?.dataUrl;
+
+    useEffect(() => {
+        if (board.image !== 'artifact:image' || !imageDataUrl) {
+            setArtifactSource(null);
+            return;
+        }
+        let cancelled = false;
+        void canvasFromImageDataUrl(imageDataUrl, board.imageSize).then(
+            (canvas) => {
+                if (!cancelled) setArtifactSource(canvas);
+            },
+            () => {
+                if (!cancelled) setArtifactSource(null);
+            },
+        );
+        return () => {
+            cancelled = true;
+        };
+    }, [board.image, board.imageSize, imageDataUrl]);
+
+    return board.image === 'artifact:image' ? artifactSource ?? stockSource : stockSource;
+}
+
+function canvasFromImageDataUrl(
+    dataUrl: string,
+    size: {width: number; height: number},
+): Promise<HTMLCanvasElement> {
+    return new Promise((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = size.width;
+            canvas.height = size.height;
+            const context = canvas.getContext('2d');
+            if (!context) {
+                reject(new Error('Could not render jigsaw image.'));
+                return;
+            }
+            context.imageSmoothingEnabled = true;
+            context.imageSmoothingQuality = 'high';
+            context.drawImage(image, 0, 0, size.width, size.height);
+            resolve(canvas);
+        };
+        image.onerror = () => reject(new Error('Could not load jigsaw image.'));
+        image.src = dataUrl;
+    });
 }
 
 function createStockHueCanvas(size: {width: number; height: number}) {

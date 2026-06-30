@@ -1,4 +1,4 @@
-/* Core block editor shell styles. Import feature CSS separately, or use legacyRichTextPlugins.css for the full legacy preset. */
+/* Core block editor shell styles. Import feature CSS separately, or use defaultBlockEditorPlugins.css for the full preset. */
 :root {
     font-family:
         Inter,
