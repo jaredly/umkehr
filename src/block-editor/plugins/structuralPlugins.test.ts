@@ -63,6 +63,8 @@ describe('structural block plugins', () => {
         expect([...registry.blockRenderers.keys()]).toEqual(
             expect.arrayContaining(['poll', 'columns', 'slide_deck', 'slide', 'table']),
         );
+        expect(registry.blockRenderers.get('slide_deck')?.id).toBe('render:slide-deck');
+        expect(registry.blockRenderers.get('slide')?.id).toBe('render:slide');
         expect(registry.optionPanels.get('poll')?.map((panel) => panel.id)).toEqual(['options:poll']);
         expect(registry.optionPanels.get('columns')?.map((panel) => panel.id)).toEqual(['options:columns']);
         expect(registry.optionPanels.get('slide_deck')?.map((panel) => panel.id)).toEqual(['options:slide-deck']);

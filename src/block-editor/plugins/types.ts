@@ -18,7 +18,7 @@ import type {
     PluginRetainedSelection,
 } from '../selectionModel.js';
 import type {BlockLevelSelectionDecorations} from '../selectionSet.js';
-import type {CodePreviewKind} from '../blockMeta.js';
+import type {CodePreviewKind, RichBlockStyleAttribute, SlideDeckFooterMode, SlideTransition} from '../blockMeta.js';
 
 export type BlockEditorPluginId = string;
 export type BlockEditorContributionId = string;
@@ -156,6 +156,7 @@ export type BlockEditorEditableBlockOptions = {
     hideInlineControls?: boolean;
     hideBlockLevelDecoration?: boolean;
     registerBlockRow?: boolean;
+    onSplit?(): void;
 };
 
 export type BlockEditorBlockRenderServices<Meta extends TimestampedBlockMeta = TimestampedBlockMeta> = {
@@ -207,7 +208,49 @@ export type BlockEditorDecorationRenderServices = {
 };
 
 export type BlockEditorTableRenderServices = Record<string, unknown>;
-export type BlockEditorSlideRenderServices = Record<string, unknown>;
+export type BlockEditorSlideDeckDisplayMode = 'presentation' | 'overview' | 'outline';
+export type BlockEditorOrphanSlideDisplayMode = 'view' | 'outline';
+export type BlockEditorSlideDeckUiState = {
+    mode: BlockEditorSlideDeckDisplayMode;
+    currentSlideId: string | null;
+    fullScreen: boolean;
+};
+export type BlockEditorElementSize = {
+    width: number;
+    height: number;
+};
+export type BlockEditorSlideRenderServices = {
+    deckUiForBlock(deckId: string): BlockEditorSlideDeckUiState;
+    setDeckUiForBlock(
+        deckId: string,
+        update: (current: BlockEditorSlideDeckUiState) => BlockEditorSlideDeckUiState,
+    ): void;
+    orphanModeForBlock(slideId: string): BlockEditorOrphanSlideDisplayMode;
+    setOrphanModeForBlock(slideId: string, mode: BlockEditorOrphanSlideDisplayMode): void;
+    deckForSlide(slideId: string): string | null;
+    addSlideToDeck(deckId: string, afterSlideId?: string): void;
+    selectSlideBlock(
+        slideId: string | null,
+        options?: {constrainFullscreenSlideSelection?: boolean},
+    ): void;
+    isCurrentBlockSelection(blockId: string): boolean;
+    isEditableSurfaceEventTarget(target: EventTarget | null): boolean;
+    registerSlideViewport(slideId: string, element: HTMLElement | null): void;
+    measureElement<T extends HTMLElement>(): [(element: T | null) => void, BlockEditorElementSize];
+    calculateScale(
+        viewport: BlockEditorElementSize,
+        deckSize: {width: number; height: number},
+    ): number;
+    footerText(
+        footer: SlideDeckFooterMode,
+        deckTitle: string,
+        slideIndex: number,
+        slideCount: number,
+    ): string;
+    setSlideTitleVisibility(slideId: string, showTitle: boolean): void;
+    setSlideTransition(slideId: string, transition: SlideTransition): void;
+    setBlockStyle(blockId: string, attribute: RichBlockStyleAttribute, value: string | null): void;
+};
 export type BlockEditorPollRenderServices = {
     modeForBlock(blockId: string): string;
     setModeForBlock(blockId: string, mode: string): void;

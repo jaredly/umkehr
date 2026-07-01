@@ -344,9 +344,11 @@ import {
     assertBlockEditorDocumentPluginsAvailable,
     createBlockEditorRegistry,
     type BlockEditorBlockRenderContext,
+    type BlockEditorOrphanSlideDisplayMode,
     type BlockEditorPlugin,
     type BlockEditorRenderedBlockNode,
     type BlockEditorRegistry,
+    type BlockEditorSlideDeckUiState,
 } from './plugins/index.js';
 import {blockTypeMenuItemsFromToolbarSpecs} from './plugins/legacyRichTextUi.js';
 import {defaultBlockEditorPlugins} from './defaultBlockEditorPlugins.js';
@@ -3649,63 +3651,8 @@ export function BlockRichTextEditor({
 
 type RenderTreeNode = BlockEditorRenderedBlockNode<RichBlockMeta>;
 
-type SlideDeckDisplayMode = 'presentation' | 'overview' | 'outline';
-type OrphanSlideDisplayMode = 'view' | 'outline';
-
-type SlideDeckUiState = {
-    mode: SlideDeckDisplayMode;
-    currentSlideId: string | null;
-    fullScreen: boolean;
-};
-
-type ElementSize = {
-    width: number;
-    height: number;
-};
-
-const emptyElementSize: ElementSize = {width: 0, height: 0};
-
-const calculateSlideScale = (
-    viewport: ElementSize,
-    deck: Pick<Extract<RichBlockMeta, {type: 'slide_deck'}>, 'width' | 'height'>,
-): number => {
-    if (viewport.width <= 0 || viewport.height <= 0 || deck.width <= 0 || deck.height <= 0) {
-        return 1;
-    }
-    return Math.min(viewport.width / deck.width, viewport.height / deck.height);
-};
-
-const useElementSize = <T extends HTMLElement>(): [(element: T | null) => void, ElementSize] => {
-    const [element, setElement] = useState<T | null>(null);
-    const [size, setSize] = useState<ElementSize>(emptyElementSize);
-
-    useLayoutEffect(() => {
-        if (!element) {
-            setSize(emptyElementSize);
-            return;
-        }
-
-        const updateSize = () => {
-            const rect = element.getBoundingClientRect();
-            setSize((current) =>
-                current.width === rect.width && current.height === rect.height
-                    ? current
-                    : {width: rect.width, height: rect.height},
-            );
-        };
-
-        updateSize();
-        if (typeof ResizeObserver === 'undefined') {
-            return;
-        }
-
-        const observer = new ResizeObserver(updateSize);
-        observer.observe(element);
-        return () => observer.disconnect();
-    }, [element]);
-
-    return [setElement, size];
-};
+type SlideDeckUiState = BlockEditorSlideDeckUiState;
+type OrphanSlideDisplayMode = BlockEditorOrphanSlideDisplayMode;
 
 const runSelectionCommandEverywhere = (
     state: CachedState<RichBlockMeta>,
@@ -3961,7 +3908,128 @@ const pluginBlockRenderContext = (
         setDeckUiForBlock: context.setSlideDeckUiForBlock,
         orphanModeForBlock: context.orphanSlideModeForBlock,
         setOrphanModeForBlock: context.setOrphanSlideModeForBlock,
+        deckForSlide: (slideId) => slideDeckForSlide(context.state, slideId),
         addSlideToDeck: context.addSlideToDeck,
+        selectSlideBlock: (slideId, options) => {
+            if (!slideId) return;
+            const selection = {
+                type: 'block' as const,
+                anchorBlockId: slideId,
+                focusBlockId: slideId,
+            };
+            context.runBlockControlCommand(
+                (current) => ({
+                    state: current.state,
+                    ops: [],
+                    selection: replaceSelectionSet(current.state, selection, current.selection.primaryId),
+                }),
+                options,
+            );
+            context.focusBlockSelectionTarget(selection);
+        },
+        isCurrentBlockSelection: (blockId) =>
+            context.selection.type === 'block' &&
+            context.selection.anchorBlockId === blockId &&
+            context.selection.focusBlockId === blockId,
+        isEditableSurfaceEventTarget: eventFromEditableSurface,
+        registerSlideViewport: context.registerRow,
+        measureElement: <T extends HTMLElement>() => {
+            const [element, setElement] = useState<T | null>(null);
+            const [size, setSize] = useState({width: 0, height: 0});
+
+            useLayoutEffect(() => {
+                if (!element) {
+                    setSize({width: 0, height: 0});
+                    return;
+                }
+
+                const updateSize = () => {
+                    const rect = element.getBoundingClientRect();
+                    setSize((current) =>
+                        current.width === rect.width && current.height === rect.height
+                            ? current
+                            : {width: rect.width, height: rect.height},
+                    );
+                };
+
+                updateSize();
+                if (typeof ResizeObserver === 'undefined') {
+                    return;
+                }
+
+                const observer = new ResizeObserver(updateSize);
+                observer.observe(element);
+                return () => observer.disconnect();
+            }, [element]);
+
+            return [setElement, size];
+        },
+        calculateScale: (viewport, deckSize) => {
+            if (viewport.width <= 0 || viewport.height <= 0 || deckSize.width <= 0 || deckSize.height <= 0) {
+                return 1;
+            }
+            return Math.min(viewport.width / deckSize.width, viewport.height / deckSize.height);
+        },
+        footerText: (footer, deckTitle, slideIndex, slideCount) => {
+            const number = slideCount ? `${slideIndex + 1}/${slideCount}` : '';
+            if (footer === 'deck-title') return deckTitle;
+            if (footer === 'slide-number') return number;
+            if (footer === 'deck-title-and-slide-number') return [deckTitle, number].filter(Boolean).join(' · ');
+            return '';
+        },
+        setSlideTitleVisibility: (blockId, showTitle) => {
+            context.runBlockControlCommand((current) => {
+                const currentBlock = current.state.state.blocks[blockId];
+                if (
+                    !currentBlock ||
+                    currentBlock.meta.type !== 'slide' ||
+                    !context.registry.optionPanels.has('slide')
+                ) {
+                    return {state: current.state, ops: [], selection: current.selection};
+                }
+                const result = setBlockMeta(current.state, blockId, {
+                    ...currentBlock.meta,
+                    showTitle,
+                    ts: nextReplicaTs(current),
+                });
+                return {state: result.state, ops: result.ops, selection: current.selection};
+            });
+        },
+        setSlideTransition: (blockId, transition) => {
+            context.runBlockControlCommand((current) => {
+                const currentBlock = current.state.state.blocks[blockId];
+                if (
+                    !currentBlock ||
+                    currentBlock.meta.type !== 'slide' ||
+                    !context.registry.optionPanels.has('slide')
+                ) {
+                    return {state: current.state, ops: [], selection: current.selection};
+                }
+                const result = setBlockMeta(current.state, blockId, {
+                    ...currentBlock.meta,
+                    transition,
+                    ts: nextReplicaTs(current),
+                });
+                return {state: result.state, ops: result.ops, selection: current.selection};
+            });
+        },
+        setBlockStyle: (blockId, attribute, value) => {
+            context.runBlockControlCommand((current) => {
+                const result = updateBlockStyle(
+                    current.state,
+                    blockId,
+                    attribute,
+                    value,
+                    makeCommandContext(current),
+                );
+                return {
+                    state: result.state,
+                    ops: result.ops,
+                    selection: current.selection,
+                    commandLabel: `Set block ${attribute}`,
+                };
+            });
+        },
     },
     polls: {
         modeForBlock: context.pollModeForBlock,
@@ -4108,16 +4176,6 @@ const renderBlockNode = (node: RenderTreeNode, context: RenderBlockContext): Rea
     if (meta.type === 'columns' && context.blockRenderFeatures.has('columns')) {
         return <ColumnsBlock key={node.block.id} node={node} context={context} />;
     }
-    if (meta.type === 'slide_deck' && context.blockRenderFeatures.has('slide_deck')) {
-        return <SlideDeckBlock key={node.block.id} node={node} context={context} />;
-    }
-    if (
-        meta.type === 'slide' &&
-        context.blockRenderFeatures.has('slide') &&
-        !slideDeckForSlide(context.state, node.block.id)
-    ) {
-        return <OrphanSlideBlock key={node.block.id} node={node} context={context} />;
-    }
     if (
         (meta.type === 'blockquote' && context.blockRenderFeatures.has('blockquote')) ||
         (meta.type === 'callout' && context.blockRenderFeatures.has('callout'))
@@ -4180,599 +4238,6 @@ type TableCellDragTarget =
           kind: 'block-slot';
           dropTarget: DropTarget;
       };
-
-function SlideDeckBlock({node, context}: {node: RenderTreeNode; context: RenderBlockContext}) {
-    const presentationRef = useRef<HTMLElement>(null);
-    const meta = node.block.block.meta;
-    if (meta.type !== 'slide_deck') {
-        return <div className="renderTreeBranch">{renderEditableBlock(node.block, context)}</div>;
-    }
-    const slides = node.children.filter((child) => child.block.block.meta.type === 'slide');
-    const ui = context.slideDeckUiForBlock(node.block.id);
-    const currentSlideId =
-        ui.currentSlideId && slides.some((slide) => slide.block.id === ui.currentSlideId)
-            ? ui.currentSlideId
-            : slides[0]?.block.id ?? null;
-    const currentIndex = currentSlideId
-        ? Math.max(0, slides.findIndex((slide) => slide.block.id === currentSlideId))
-        : -1;
-    const currentSlide = currentIndex >= 0 ? slides[currentIndex] : null;
-    const deckTitle = blockPlainText(node.block);
-    const selectSlideBlock = (slideId: string | null) => {
-        if (!slideId) return;
-        const selection = {
-            type: 'block' as const,
-            anchorBlockId: slideId,
-            focusBlockId: slideId,
-        };
-        context.runBlockControlCommand(
-            (current) => ({
-                state: current.state,
-                ops: [],
-                selection: replaceSelectionSet(current.state, selection, current.selection.primaryId),
-            }),
-            {constrainFullscreenSlideSelection: false},
-        );
-        context.focusBlockSelectionTarget(selection);
-    };
-    const setMode = (mode: SlideDeckDisplayMode) => {
-        if (mode === 'presentation') selectSlideBlock(currentSlideId);
-        context.setSlideDeckUiForBlock(node.block.id, (current) => ({...current, mode}));
-    };
-    const setCurrentSlide = (slideId: string | null, select = ui.mode === 'presentation') => {
-        if (select) selectSlideBlock(slideId);
-        context.setSlideDeckUiForBlock(node.block.id, (current) => ({...current, currentSlideId: slideId}));
-    };
-    const showPrevious = () => {
-        if (!slides.length) return;
-        const previous = slides[Math.max(0, currentIndex - 1)] ?? slides[0];
-        setCurrentSlide(previous.block.id);
-    };
-    const showNext = () => {
-        if (!slides.length) return;
-        const next = slides[Math.min(slides.length - 1, currentIndex + 1)] ?? slides[slides.length - 1];
-        setCurrentSlide(next.block.id);
-    };
-    const setFullScreen = (fullScreen: boolean) =>
-        context.setSlideDeckUiForBlock(node.block.id, (current) => ({...current, fullScreen}));
-    const exitFullScreen = () => {
-        if (document.fullscreenElement === presentationRef.current) {
-            void document.exitFullscreen?.();
-        }
-        setFullScreen(false);
-    };
-    const toggleFullScreen = () => {
-        const element = presentationRef.current;
-        if (!element) return;
-        if (document.fullscreenElement === element) {
-            exitFullScreen();
-        } else {
-            void element.requestFullscreen?.();
-            setFullScreen(true);
-        }
-    };
-
-    useEffect(() => {
-        const onFullScreenChange = () => {
-            if (document.fullscreenElement !== presentationRef.current && ui.fullScreen) {
-                setFullScreen(false);
-            }
-        };
-        document.addEventListener('fullscreenchange', onFullScreenChange);
-        return () => document.removeEventListener('fullscreenchange', onFullScreenChange);
-    }, [ui.fullScreen]);
-
-    const handlePresentationKeyDown = (event: KeyboardEvent<HTMLElement>) => {
-        const modifierPressed = event.altKey || event.metaKey || event.ctrlKey;
-        const activeElement = event.currentTarget.ownerDocument.activeElement;
-        const currentSlideElement = currentSlideId
-            ? presentationRef.current?.querySelector<HTMLElement>(
-                  `.slideViewport[data-slide-id="${CSS.escape(currentSlideId)}"]`,
-              )
-            : null;
-        const hasCurrentSlideBlockSelection =
-            currentSlideId !== null &&
-            activeElement === currentSlideElement &&
-            context.selection.type === 'block' &&
-            context.selection.anchorBlockId === currentSlideId &&
-            context.selection.focusBlockId === currentSlideId;
-        if (
-            hasCurrentSlideBlockSelection &&
-            !modifierPressed &&
-            (event.key === 'ArrowRight' || event.key === 'PageDown' || event.key === ' ')
-        ) {
-            event.preventDefault();
-            event.stopPropagation();
-            showNext();
-        } else if (
-            hasCurrentSlideBlockSelection &&
-            !modifierPressed &&
-            (event.key === 'ArrowLeft' || event.key === 'PageUp')
-        ) {
-            event.preventDefault();
-            event.stopPropagation();
-            showPrevious();
-        } else if (event.key === 'Escape' && document.fullscreenElement === presentationRef.current) {
-            if (eventFromEditableSurface(event.target)) return;
-            event.preventDefault();
-            event.stopPropagation();
-            exitFullScreen();
-        }
-    };
-
-    if (ui.mode === 'outline') {
-        return (
-            <section
-                className="slideDeckBlock slideDeckOutline"
-                data-slide-deck-id={node.block.id}
-                style={{'--block-depth': node.block.depth} as CSSProperties}
-            >
-                <SlideDeckToolbar
-                    mode={ui.mode}
-                    currentIndex={currentIndex}
-                    slideCount={slides.length}
-                    onMode={setMode}
-                    onPrevious={showPrevious}
-                    onNext={showNext}
-                    onAddSlide={() => context.addSlideToDeck(node.block.id, currentSlideId ?? undefined)}
-                    onToggleFullScreen={toggleFullScreen}
-                    fullScreen={ui.fullScreen}
-                />
-                {renderEditableBlock(node.block, context, {surfaceClassName: 'slideDeckTitleText'})}
-                <div className="slideDeckOutlineChildren">
-                    {node.children.map((child) => renderBlockNode(child, context))}
-                </div>
-            </section>
-        );
-    }
-
-    return (
-        <section
-            ref={ui.mode === 'presentation' ? presentationRef : undefined}
-            className={[
-                'slideDeckBlock',
-                ui.mode === 'presentation' ? 'slideDeckPresentation' : 'slideDeckOverview',
-                ui.fullScreen ? 'slideDeckFullScreen' : '',
-            ].join(' ')}
-            data-slide-deck-id={node.block.id}
-            style={{'--block-depth': node.block.depth} as CSSProperties}
-            tabIndex={ui.mode === 'presentation' ? 0 : undefined}
-            onKeyDown={ui.mode === 'presentation' ? handlePresentationKeyDown : undefined}
-        >
-            {ui.fullScreen ? null : (
-                <div className="slideDeckHeader">
-                    {renderEditableBlock(node.block, context, {
-                        surfaceClassName: 'slideDeckTitleText',
-                        hideBlockAffordance: true,
-                        registerBlockRow: false,
-                    })}
-                    <SlideDeckToolbar
-                        mode={ui.mode}
-                        currentIndex={currentIndex}
-                        slideCount={slides.length}
-                        onMode={setMode}
-                        onPrevious={showPrevious}
-                        onNext={showNext}
-                        onAddSlide={() => context.addSlideToDeck(node.block.id, currentSlideId ?? undefined)}
-                        onToggleFullScreen={toggleFullScreen}
-                        fullScreen={ui.fullScreen}
-                    />
-                </div>
-            )}
-            {ui.mode === 'presentation' ? (
-                currentSlide ? (
-                    <>
-                        <SlideBlockView
-                            node={currentSlide}
-                            context={context}
-                            deckId={node.block.id}
-                            deck={meta}
-                            deckTitle={deckTitle}
-                            slideIndex={currentIndex}
-                            slideCount={slides.length}
-                            mode="presentation"
-                        />
-                        {ui.fullScreen ? (
-                            <SlideFullScreenControls
-                                currentIndex={currentIndex}
-                                slideCount={slides.length}
-                                onPrevious={showPrevious}
-                                onNext={showNext}
-                                onExitFullScreen={exitFullScreen}
-                            />
-                        ) : null}
-                    </>
-                ) : (
-                    <div className="slideDeckEmpty">No slides</div>
-                )
-            ) : (
-                <div className="slideOverviewList">
-                    {slides.length ? (
-                        slides.map((slide, index) => (
-                            <SlideBlockView
-                                key={slide.block.id}
-                                node={slide}
-                                context={context}
-                                deckId={node.block.id}
-                                deck={meta}
-                                deckTitle={deckTitle}
-                                slideIndex={index}
-                                slideCount={slides.length}
-                                mode="overview"
-                            />
-                        ))
-                    ) : (
-                        <div className="slideDeckEmpty">No slides</div>
-                    )}
-                </div>
-            )}
-        </section>
-    );
-}
-
-function SlideFullScreenControls({
-    currentIndex,
-    slideCount,
-    onPrevious,
-    onNext,
-    onExitFullScreen,
-}: {
-    currentIndex: number;
-    slideCount: number;
-    onPrevious(): void;
-    onNext(): void;
-    onExitFullScreen(): void;
-}) {
-    return (
-        <div
-            className="slideFullScreenControls"
-            contentEditable={false}
-            onMouseDown={stopEditorControlEvent}
-            aria-label="Full screen slide controls"
-        >
-            <button type="button" onClick={onPrevious} disabled={currentIndex <= 0} aria-label="Previous slide">
-                Prev
-            </button>
-            <span>
-                {slideCount ? currentIndex + 1 : 0}/{slideCount}
-            </span>
-            <button type="button" onClick={onNext} disabled={currentIndex < 0 || currentIndex >= slideCount - 1} aria-label="Next slide">
-                Next
-            </button>
-            <button type="button" onClick={onExitFullScreen}>
-                Exit full screen
-            </button>
-        </div>
-    );
-}
-
-function SlideDeckToolbar({
-    mode,
-    currentIndex,
-    slideCount,
-    onMode,
-    onPrevious,
-    onNext,
-    onAddSlide,
-    onToggleFullScreen,
-    fullScreen,
-}: {
-    mode: SlideDeckDisplayMode;
-    currentIndex: number;
-    slideCount: number;
-    onMode(mode: SlideDeckDisplayMode): void;
-    onPrevious(): void;
-    onNext(): void;
-    onAddSlide(): void;
-    onToggleFullScreen(): void;
-    fullScreen: boolean;
-}) {
-    return (
-        <div className="slideDeckToolbar" contentEditable={false} onMouseDown={stopEditorControlEvent}>
-            <div className="slideModeTabs" role="group" aria-label="Slide deck display mode">
-                {(['presentation', 'overview', 'outline'] as const).map((value) => (
-                    <button
-                        key={value}
-                        type="button"
-                        aria-pressed={mode === value}
-                        onClick={() => onMode(value)}
-                    >
-                        {capitalize(value)}
-                    </button>
-                ))}
-            </div>
-            <div className="slideNavigation" aria-label="Slide navigation">
-                <button type="button" onClick={onPrevious} disabled={currentIndex <= 0}>
-                    Prev
-                </button>
-                <span>
-                    {slideCount ? currentIndex + 1 : 0}/{slideCount}
-                </span>
-                <button type="button" onClick={onNext} disabled={currentIndex < 0 || currentIndex >= slideCount - 1}>
-                    Next
-                </button>
-            </div>
-            <button type="button" onClick={onAddSlide}>
-                Add slide
-            </button>
-            {mode === 'presentation' ? (
-                <button type="button" onClick={onToggleFullScreen} aria-pressed={fullScreen}>
-                    {fullScreen ? 'Exit full screen' : 'Full screen'}
-                </button>
-            ) : null}
-        </div>
-    );
-}
-
-function OrphanSlideBlock({node, context}: {node: RenderTreeNode; context: RenderBlockContext}) {
-    const mode = context.orphanSlideModeForBlock(node.block.id);
-    if (mode === 'outline') {
-        return (
-            <section className="orphanSlideBlock orphanSlideOutline">
-                <div className="orphanSlideToolbar" contentEditable={false} onMouseDown={stopEditorControlEvent}>
-                    <button type="button" aria-pressed={false} onClick={() => context.setOrphanSlideModeForBlock(node.block.id, 'view')}>
-                        View
-                    </button>
-                    <button type="button" aria-pressed>
-                        Outline
-                    </button>
-                </div>
-                {renderEditableBlock(node.block, context)}
-                {node.children.map((child) => renderBlockNode(child, context))}
-            </section>
-        );
-    }
-    return (
-        <section className="orphanSlideBlock orphanSlideView">
-            <div className="orphanSlideToolbar" contentEditable={false} onMouseDown={stopEditorControlEvent}>
-                <button type="button" aria-pressed>
-                    View
-                </button>
-                <button type="button" aria-pressed={false} onClick={() => context.setOrphanSlideModeForBlock(node.block.id, 'outline')}>
-                    Outline
-                </button>
-            </div>
-            <SlideBlockView
-                node={node}
-                context={context}
-                deckId={null}
-                deck={{type: 'slide_deck', width: 1920, height: 1080, footer: 'none', ts: node.block.block.meta.ts}}
-                deckTitle=""
-                slideIndex={0}
-                slideCount={1}
-                mode="orphan"
-            />
-        </section>
-    );
-}
-
-function SlideBlockView({
-    node,
-    context,
-    deckId,
-    deck,
-    deckTitle,
-    slideIndex,
-    slideCount,
-    mode,
-}: {
-    node: RenderTreeNode;
-    context: RenderBlockContext;
-    deckId: string | null;
-    deck: Extract<RichBlockMeta, {type: 'slide_deck'}>;
-    deckTitle: string;
-    slideIndex: number;
-    slideCount: number;
-    mode: 'presentation' | 'overview' | 'orphan';
-}) {
-    const meta = node.block.block.meta;
-    const [setViewportElement, viewportSize] = useElementSize<HTMLElement>();
-    const contextRef = useRef(context);
-    contextRef.current = context;
-    if (meta.type !== 'slide') {
-        return <div className="renderTreeBranch">{renderEditableBlock(node.block, context)}</div>;
-    }
-    const footer = slideFooterText(deck.footer, deckTitle, slideIndex, slideCount);
-    const scale = calculateSlideScale(viewportSize, deck);
-    const style = {
-        '--slide-width': deck.width,
-        '--slide-height': deck.height,
-        backgroundColor: richBlockStyleValue(node.block.block.style, 'background-color') ?? '#ffffff',
-    } as CSSProperties;
-    const scaleLayerStyle = {
-        width: `${deck.width}px`,
-        height: `${deck.height}px`,
-        transform: `scale(${scale})`,
-    } as CSSProperties;
-    const handleRimPointerDown = (event: PointerEvent<HTMLElement>) => {
-        if (event.target !== event.currentTarget) return;
-        event.preventDefault();
-        event.stopPropagation();
-        context.startBlockDragFromHandle(node.block.id, event);
-    };
-    const selectSlideBlock = () => {
-        const selection = {
-            type: 'block' as const,
-            anchorBlockId: node.block.id,
-            focusBlockId: node.block.id,
-        };
-        context.runBlockControlCommand((current) => ({
-            state: current.state,
-            ops: [],
-            selection: replaceSelectionSet(current.state, selection, current.selection.primaryId),
-        }));
-        context.focusBlockSelectionTarget(selection);
-    };
-    const handleSurfacePointerDown = (event: PointerEvent<HTMLElement>) => {
-        if (eventFromEditableSurface(event.target)) return;
-        event.preventDefault();
-        event.stopPropagation();
-        selectSlideBlock();
-    };
-    const stopSurfaceMouseDown = (event: MouseEvent<HTMLElement>) => {
-        if (eventFromEditableSurface(event.target)) return;
-        event.preventDefault();
-        event.stopPropagation();
-    };
-    const stopRimMouseDown = (event: MouseEvent<HTMLElement>) => {
-        if (event.target !== event.currentTarget) return;
-        event.preventDefault();
-        event.stopPropagation();
-    };
-    const setSlideViewportElement = useCallback((element: HTMLElement | null) => {
-        contextRef.current.registerRow(node.block.id, element);
-        setViewportElement(element);
-    }, [node.block.id, setViewportElement]);
-    return (
-        <article
-            ref={setSlideViewportElement}
-            className={[
-                'slideViewport',
-                `slideViewport-${mode}`,
-                `slideTransition-${meta.transition}`,
-                context.draggingSubtreeIds.has(node.block.id) ? 'dragging' : '',
-                context.draggingId === node.block.id ? 'draggingRoot' : '',
-                context.blockLevelDecorationsByBlock.get(node.block.id)?.selected ? 'blockSelected' : '',
-                context.blockLevelDecorationsByBlock.get(node.block.id)?.focus ? 'blockSelectionFocus' : '',
-                context.dropTarget?.indicatorBlockId === node.block.id
-                    ? `drop${capitalize(context.dropTarget.indicatorPlacement)}`
-                    : '',
-            ]
-                .filter(Boolean)
-                .join(' ')}
-            data-slide-id={node.block.id}
-            data-slide-logical-width={deck.width}
-            data-slide-logical-height={deck.height}
-            data-slide-scale={scale}
-            tabIndex={-1}
-            style={style}
-            onPointerDown={handleRimPointerDown}
-            onMouseDown={stopRimMouseDown}
-        >
-            <div className="slideScaleLayer" style={scaleLayerStyle}>
-                <div
-                    className="slideSurface"
-                    onPointerDown={handleSurfacePointerDown}
-                    onMouseDown={stopSurfaceMouseDown}
-                >
-                    {meta.showTitle ? (
-                        <div className="slideTitle">
-                            {renderEditableBlock({...node.block, depth: 0}, context, {
-                                surfaceClassName: 'slideTitleText',
-                                hideBlockAffordance: true,
-                                hideInlineControls: true,
-                                hideBlockLevelDecoration: true,
-                                registerBlockRow: false,
-                                ...(deckId ? {onSplit: () => context.addSlideToDeck(deckId, node.block.id)} : {}),
-                            })}
-                        </div>
-                    ) : null}
-                    <div className="slideBody">
-                        {node.children.map((child) =>
-                            renderBlockNodeAtRelativeDepth(child, context, node.block.depth + 1),
-                        )}
-                    </div>
-                    {footer ? <div className="slideFooter">{footer}</div> : null}
-                </div>
-            </div>
-            {mode === 'overview' ? (
-                <SlideBlockOptions blockId={node.block.id} meta={meta} context={context} />
-            ) : null}
-        </article>
-    );
-}
-
-function SlideBlockOptions({
-    blockId,
-    meta,
-    context,
-}: {
-    blockId: string;
-    meta: Extract<RichBlockMeta, {type: 'slide'}>;
-    context: RenderBlockContext;
-}) {
-    const noop = () => undefined;
-    const style = context.state.state.blocks[blockId]?.style;
-    return (
-        <BlockOptions
-            className="slideBlockOptions"
-            meta={meta}
-            registry={context.registry}
-            style={style}
-            optionPanelBlockTypes={context.optionPanelBlockTypes}
-            onSetCodeLanguage={noop}
-            onSetCodePreview={noop}
-            onSetCalloutKind={noop}
-            onSetImageSize={noop}
-            onSetPollChoiceMode={noop}
-            onSetPollDisplayMode={noop}
-            onSetColumnsDisplay={noop}
-            onSetPollAllowChange={noop}
-            onSetRatingPollMax={noop}
-            onSetRatingPollPresentation={noop}
-            onSetSlideDeckSize={noop}
-            onSetSlideDeckFooter={noop}
-            onSetSlideShowTitle={(showTitle) =>
-                context.runBlockControlCommand((current) => {
-                    const currentBlock = current.state.state.blocks[blockId];
-                    if (!currentBlock || currentBlock.meta.type !== 'slide') {
-                        return {state: current.state, ops: [], selection: current.selection};
-                    }
-                    const result = setBlockMeta(current.state, blockId, {
-                        ...currentBlock.meta,
-                        showTitle,
-                        ts: nextReplicaTs(current),
-                    });
-                    return {state: result.state, ops: result.ops, selection: current.selection};
-                })
-            }
-            onSetSlideTransition={(transition) =>
-                context.runBlockControlCommand((current) => {
-                    const currentBlock = current.state.state.blocks[blockId];
-                    if (!currentBlock || currentBlock.meta.type !== 'slide') {
-                        return {state: current.state, ops: [], selection: current.selection};
-                    }
-                    const result = setBlockMeta(current.state, blockId, {
-                        ...currentBlock.meta,
-                        transition,
-                        ts: nextReplicaTs(current),
-                    });
-                    return {state: result.state, ops: result.ops, selection: current.selection};
-                })
-            }
-            onSetBlockStyle={(attribute, value) =>
-                context.runBlockControlCommand((current) => {
-                    const result = updateBlockStyle(
-                        current.state,
-                        blockId,
-                        attribute,
-                        value,
-                        makeCommandContext(current),
-                    );
-                    return {
-                        state: result.state,
-                        ops: result.ops,
-                        selection: current.selection,
-                        commandLabel: `Set block ${attribute}`,
-                    };
-                })
-            }
-        />
-    );
-}
-
-const slideFooterText = (
-    footer: Extract<RichBlockMeta, {type: 'slide_deck'}>['footer'],
-    deckTitle: string,
-    slideIndex: number,
-    slideCount: number,
-): string => {
-    const number = slideCount ? `${slideIndex + 1}/${slideCount}` : '';
-    if (footer === 'deck-title') return deckTitle;
-    if (footer === 'slide-number') return number;
-    if (footer === 'deck-title-and-slide-number') return [deckTitle, number].filter(Boolean).join(' · ');
-    return '';
-};
 
 const eventFromEditableSurface = (target: EventTarget | null): boolean => {
     const ownerDocument = (target as {ownerDocument?: Document} | null)?.ownerDocument;

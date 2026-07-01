@@ -13,6 +13,7 @@ import {
     initialJigsawArtifacts,
     isJigsawPieceCount,
     isJigsawImageArtifact,
+    isJigsawSurface,
     jigsawArtifactStore,
     type JigsawBoardArtifact,
     type JigsawGenerationType,
@@ -21,6 +22,7 @@ import {
     type JigsawImageRef,
     type JigsawPiece,
     type JigsawPieceCount,
+    type JigsawSurface,
     type PathSegment,
 } from './artifacts';
 
@@ -33,6 +35,7 @@ export {
     initialJigsawArtifacts,
     isJigsawPieceCount,
     isJigsawImageArtifact,
+    isJigsawSurface,
     jigsawArtifactStore,
     type Coord,
     type JigsawBoardArtifact,
@@ -41,6 +44,7 @@ export {
     type JigsawImageMimeType,
     type JigsawImageRef,
     type JigsawPieceCount,
+    type JigsawSurface,
     type JigsawPiece,
     type JigsawState,
     type PathSegment,

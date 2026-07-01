@@ -5,6 +5,7 @@ import {
     initialJigsawArtifacts,
     isJigsawImageArtifact,
     isJigsawPieceCount,
+    isJigsawSurface,
     JIGSAW_DOC_ID,
     jigsawArtifactStore,
     jigsawSchema,
@@ -17,6 +18,7 @@ import {
     type JigsawGenerationType,
     type JigsawImageArtifact,
     type JigsawPieceCount,
+    type JigsawSurface,
     type JigsawState,
 } from './model';
 import {JigsawPanel} from './JigsawPanel';
@@ -25,6 +27,7 @@ import type {ChangeEvent} from 'react';
 type JigsawDocumentInitParams = {
     pieceCount: JigsawPieceCount;
     type: JigsawGenerationType;
+    surface?: JigsawSurface;
     tabs?: boolean;
     image?: JigsawImageArtifact;
     imageStatus?: JigsawImageStatus;
@@ -50,7 +53,7 @@ export const jigsawApp: AppDefinition<JigsawState, JigsawEphemeralData> = {
     documentInit: {
         required: true,
         defaultParams() {
-            return {pieceCount: 12, type: 'rectangular', tabs: false, imageStatus: 'idle'};
+            return {pieceCount: 12, type: 'rectangular', surface: 'plane', tabs: false, imageStatus: 'idle'};
         },
         renderFields({value, onChange}) {
             const imageLoading = value.imageStatus === 'loading';
@@ -120,6 +123,22 @@ export const jigsawApp: AppDefinition<JigsawState, JigsawEphemeralData> = {
                         </select>
                     </label>
                     <label className="documentCreateField">
+                        <span>Surface</span>
+                        <select
+                            value={value.surface ?? 'plane'}
+                            disabled={imageLoading}
+                            onChange={(event) =>
+                                onChange({
+                                    ...value,
+                                    surface: event.currentTarget.value as JigsawSurface,
+                                })
+                            }
+                        >
+                            <option value="plane">Plane</option>
+                            <option value="torus">Torus</option>
+                        </select>
+                    </label>
+                    <label className="documentCreateField">
                         <span>Tabs</span>
                         <input
                             type="checkbox"
@@ -183,13 +202,16 @@ export const jigsawApp: AppDefinition<JigsawState, JigsawEphemeralData> = {
                 input !== null &&
                 isJigsawPieceCount((input as {pieceCount?: unknown}).pieceCount) &&
                 ((input as {type?: unknown}).type === undefined ||
-                    isJigsawGenerationType((input as {type?: unknown}).type))
+                    isJigsawGenerationType((input as {type?: unknown}).type)) &&
+                ((input as {surface?: unknown}).surface === undefined ||
+                    isJigsawSurface((input as {surface?: unknown}).surface))
             ) {
                 return {
                     success: true,
                     data: {
                         pieceCount: (input as JigsawDocumentInitParams).pieceCount,
                         type: ((input as {type?: JigsawGenerationType}).type ?? 'rectangular'),
+                        surface: ((input as {surface?: JigsawSurface}).surface ?? 'plane'),
                         tabs: (input as {tabs?: unknown}).tabs === true,
                         ...(((input as {image?: unknown}).image !== undefined &&
                         isJigsawImageArtifact((input as {image?: unknown}).image))
@@ -207,6 +229,7 @@ export const jigsawApp: AppDefinition<JigsawState, JigsawEphemeralData> = {
         initialArtifacts(params) {
             return initialJigsawArtifacts(params.pieceCount, {
                 type: params.type,
+                surface: params.surface,
                 tabs: params.tabs,
                 imageArtifact: params.image,
             });

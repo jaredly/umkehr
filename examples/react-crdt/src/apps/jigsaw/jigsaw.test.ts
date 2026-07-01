@@ -15,6 +15,7 @@ import {
     initialJigsawArtifacts,
     isJigsawImageArtifact,
     isJigsawPieceCount,
+    isJigsawSurface,
     jigsawArtifactStore,
     type JigsawImageArtifact,
     type JigsawPieceCount,
@@ -75,6 +76,54 @@ describe('jigsaw board artifacts', () => {
             });
         },
     );
+
+    it('defaults plane boards by omitting the surface field', () => {
+        const board = generateJigsawBoard(12);
+        expect(isJigsawSurface('plane')).toBe(true);
+        expect(isJigsawSurface('torus')).toBe(true);
+        expect(isJigsawSurface('sphere')).toBe(false);
+        expect(board.surface).toBeUndefined();
+        expect(initialJigsawArtifacts(12, {surface: 'plane'})[0].data).not.toHaveProperty('surface');
+    });
+
+    it('generates rectangular torus boards with wrapped neighbors and shortest offsets', () => {
+        const board = generateJigsawBoard(12, {surface: 'torus'});
+        expect(board.surface).toBe('torus');
+        expect(board.title).toBe('12 piece torus hue puzzle');
+        expect(board.pieces.every((piece) => piece.neighbors.length === 4)).toBe(true);
+
+        const rightToLeft = board.pieces[3].neighbors.find((neighbor) => neighbor.piece === 0);
+        const leftToRight = board.pieces[0].neighbors.find((neighbor) => neighbor.piece === 3);
+        expect(rightToLeft?.offset).toEqual({x: 180, y: 0});
+        expect(leftToRight?.offset).toEqual({x: -180, y: -0});
+
+        const bottomToTop = board.pieces[8].neighbors.find((neighbor) => neighbor.piece === 0);
+        const topToBottom = board.pieces[0].neighbors.find((neighbor) => neighbor.piece === 8);
+        expect(bottomToTop?.offset).toEqual({x: 0, y: 180});
+        expect(topToBottom?.offset).toEqual({x: -0, y: -180});
+
+        expect(validConnections(board, {[connectionKey(3, 0)]: 1, [connectionKey(8, 0)]: 1})).toEqual([
+            {key: connectionKey(3, 0), from: 3, to: 0, strength: 1},
+            {key: connectionKey(8, 0), from: 8, to: 0, strength: 1},
+        ]);
+    });
+
+    it('generates tabbed rectangular torus seam geometry', () => {
+        const board = generateJigsawBoard(12, {surface: 'torus', tabs: true, seed: 'torus-tabs'});
+        expect(board.surface).toBe('torus');
+        expect(board.pieces.every((piece) => piece.neighbors.length === 4)).toBe(true);
+        expect(board.pieces.some((piece) => hasCurvedSegment(piece.mask))).toBe(true);
+        board.pieces.forEach((piece, index) => {
+            expectFinitePieceGeometry(piece);
+            expect(maskFitsBounds(piece)).toBe(true);
+            piece.neighbors.forEach((neighbor) => {
+                const reverse = board.pieces[neighbor.piece].neighbors.find((entry) => entry.piece === index);
+                expect(reverse).toBeTruthy();
+                expect(reverse?.offset.x).toBeCloseTo(-neighbor.offset.x);
+                expect(reverse?.offset.y).toBeCloseTo(-neighbor.offset.y);
+            });
+        });
+    });
 
     it('generates concrete Voronoi board geometry', () => {
         const board = generateJigsawBoard(30, {type: 'voronoi'});
@@ -158,6 +207,62 @@ describe('jigsaw board artifacts', () => {
         expect(board.pieces.some((piece) => hasCurvedSegment(piece.mask))).toBe(true);
         expect(maxCurveExcursion(board)).toBeGreaterThan(12);
 
+        board.pieces.forEach((piece, index) => {
+            expectFinitePieceGeometry(piece);
+            expect(maskFitsBounds(piece)).toBe(true);
+            piece.neighbors.forEach((neighbor) => {
+                const reverse = board.pieces[neighbor.piece].neighbors.find((entry) => entry.piece === index);
+                expect(reverse).toBeTruthy();
+                expect(reverse?.offset.x).toBeCloseTo(-neighbor.offset.x);
+                expect(reverse?.offset.y).toBeCloseTo(-neighbor.offset.y);
+            });
+        });
+    });
+
+    it('generates periodic Voronoi torus board geometry', () => {
+        const board = generateJigsawBoard(30, {
+            type: 'voronoi',
+            surface: 'torus',
+            seed: 'periodic-voronoi',
+        });
+        expect(board.surface).toBe('torus');
+        expect(board.pieces).toHaveLength(30);
+        expect(board.title).toContain('torus Voronoi');
+
+        board.pieces.forEach((piece, index) => {
+            expectFinitePieceGeometry(piece);
+            expect(maskFitsBounds(piece)).toBe(true);
+            expect(piece.neighbors.length).toBeGreaterThanOrEqual(3);
+            piece.neighbors.forEach((neighbor) => {
+                expect(neighbor.piece).not.toBe(index);
+                const reverse = board.pieces[neighbor.piece].neighbors.find((entry) => entry.piece === index);
+                expect(reverse).toBeTruthy();
+                expect(reverse?.offset.x).toBeCloseTo(-neighbor.offset.x);
+                expect(reverse?.offset.y).toBeCloseTo(-neighbor.offset.y);
+            });
+        });
+
+        const seamNeighbor = board.pieces.findIndex((piece, index) =>
+            piece.neighbors.some((neighbor) => {
+                const other = board.pieces[neighbor.piece];
+                const rawDx = Math.abs(other.center.x - board.pieces[index].center.x);
+                const rawDy = Math.abs(other.center.y - board.pieces[index].center.y);
+                return rawDx > board.imageSize.width / 2 || rawDy > board.imageSize.height / 2;
+            }),
+        );
+        expect(seamNeighbor).toBeGreaterThanOrEqual(0);
+    });
+
+    it('generates tabbed periodic Voronoi torus board geometry', () => {
+        const board = generateJigsawBoard(30, {
+            type: 'voronoi',
+            surface: 'torus',
+            tabs: true,
+            seed: 'periodic-voronoi-tabs',
+        });
+        expect(board.surface).toBe('torus');
+        expect(board.pieces).toHaveLength(30);
+        expect(board.pieces.some((piece) => hasCurvedSegment(piece.mask))).toBe(true);
         board.pieces.forEach((piece, index) => {
             expectFinitePieceGeometry(piece);
             expect(maskFitsBounds(piece)).toBe(true);
@@ -342,6 +447,30 @@ describe('jigsaw board artifacts', () => {
         expect(currentJigsawBoard().pieces[0].bounds).toEqual(board.pieces[0].bounds);
     });
 
+    it('loads explicit plane surfaces as the default and rejects invalid surface values', () => {
+        const board = generateJigsawBoard(12);
+        const explicitPlane = {...board, surface: 'plane'};
+        jigsawArtifactStore.load({
+            id: JIGSAW_BOARD_ARTIFACT_ID,
+            kind: JIGSAW_BOARD_KIND,
+            version: JIGSAW_BOARD_VERSION,
+            fingerprintHash: artifactFingerprintHash(explicitPlane),
+            data: explicitPlane,
+        });
+        expect(currentJigsawBoard().surface).toBeUndefined();
+
+        const before = currentJigsawBoard();
+        const invalidSurface = {...board, surface: 'sphere'};
+        jigsawArtifactStore.load({
+            id: JIGSAW_BOARD_ARTIFACT_ID,
+            kind: JIGSAW_BOARD_KIND,
+            version: JIGSAW_BOARD_VERSION,
+            fingerprintHash: artifactFingerprintHash(invalidSurface),
+            data: invalidSurface,
+        });
+        expect(currentJigsawBoard()).toBe(before);
+    });
+
     it('validates creation piece counts and creates matching initial artifacts', () => {
         expect(isJigsawPieceCount(12)).toBe(true);
         expect(isJigsawPieceCount(30)).toBe(true);
@@ -352,26 +481,35 @@ describe('jigsaw board artifacts', () => {
         expect(isJigsawPieceCount(24)).toBe(false);
         expect(jigsawApp.documentInit?.validate({pieceCount: 30})).toEqual({
             success: true,
-            data: {pieceCount: 30, type: 'rectangular', tabs: false, imageStatus: 'idle'},
+            data: {pieceCount: 30, type: 'rectangular', surface: 'plane', tabs: false, imageStatus: 'idle'},
         });
         expect(jigsawApp.documentInit?.validate({pieceCount: 30, type: 'voronoi'})).toEqual({
             success: true,
-            data: {pieceCount: 30, type: 'voronoi', tabs: false, imageStatus: 'idle'},
+            data: {pieceCount: 30, type: 'voronoi', surface: 'plane', tabs: false, imageStatus: 'idle'},
         });
         expect(jigsawApp.documentInit?.validate({pieceCount: 30, type: 'voronoi', tabs: true})).toEqual({
             success: true,
-            data: {pieceCount: 30, type: 'voronoi', tabs: true, imageStatus: 'idle'},
+            data: {pieceCount: 30, type: 'voronoi', surface: 'plane', tabs: true, imageStatus: 'idle'},
+        });
+        expect(jigsawApp.documentInit?.validate({pieceCount: 30, type: 'voronoi', surface: 'torus'})).toEqual({
+            success: true,
+            data: {pieceCount: 30, type: 'voronoi', surface: 'torus', tabs: false, imageStatus: 'idle'},
         });
         expect(jigsawApp.documentInit?.validate({pieceCount: 30, type: 'voronoi', image: testImageArtifact()})).toEqual({
             success: true,
-            data: {pieceCount: 30, type: 'voronoi', tabs: false, image: testImageArtifact(), imageStatus: 'idle'},
+            data: {pieceCount: 30, type: 'voronoi', surface: 'plane', tabs: false, image: testImageArtifact(), imageStatus: 'idle'},
         });
         expect(jigsawApp.documentInit?.validate({pieceCount: 30, imageStatus: 'loading'}).success).toBe(false);
         expect(jigsawApp.documentInit?.validate({pieceCount: 30, imageStatus: 'error'}).success).toBe(false);
         expect(jigsawApp.documentInit?.validate({pieceCount: 30, image: {id: 'image'}}).success).toBe(false);
         expect(jigsawApp.documentInit?.validate({pieceCount: 24}).success).toBe(false);
         expect(jigsawApp.documentInit?.validate({pieceCount: 30, type: 'spiral'}).success).toBe(false);
+        expect(jigsawApp.documentInit?.validate({pieceCount: 30, surface: 'sphere'}).success).toBe(false);
         expect(initialJigsawArtifacts(60)[0].data).toMatchObject({pieceCount: 60});
+        expect(initialJigsawArtifacts(60, {surface: 'torus'})[0].data).toMatchObject({
+            pieceCount: 60,
+            surface: 'torus',
+        });
         expect(initialJigsawArtifacts(60, {type: 'voronoi'})[0].data).toMatchObject({
             pieceCount: 60,
             title: expect.stringContaining('Voronoi'),
@@ -511,6 +649,46 @@ describe('jigsaw placement logic', () => {
             ],
             value: 1,
         });
+    });
+
+    it('creates snap candidates across rectangular torus seams', () => {
+        const board = generateJigsawBoard(12, {surface: 'torus'});
+        const state: JigsawState = {
+            positions: {
+                '3': {x: 630, y: 90},
+                '0': {x: 810, y: 90},
+            },
+            connections: {},
+        };
+        const layout = buildPuzzleLayout(board, state);
+        const draggedPositions = new Map([[3, {x: 630, y: 90}]]);
+        const allPositions = new Map([
+            [3, {x: 630, y: 90}],
+            [0, {x: 810, y: 90}],
+        ]);
+
+        expect(
+            snapCandidates({
+                board,
+                layout,
+                draggedPieces: new Set([3]),
+                draggedPositions,
+                allPositions,
+                snapThreshold: 2,
+            }),
+        ).toEqual([{from: 3, to: 0, key: connectionKey(3, 0), strength: 1}]);
+    });
+
+    it('lays out rectangular torus seam components as an unwrapped embedding', () => {
+        const board = generateJigsawBoard(12, {surface: 'torus'});
+        const state: JigsawState = {
+            positions: {'3': {x: 630, y: 90}},
+            connections: {[connectionKey(3, 0)]: 1},
+        };
+        const layout = buildPuzzleLayout(board, state);
+
+        expect(layout.positions.get(3)).toEqual({x: 630, y: 90});
+        expect(layout.positions.get(0)).toEqual({x: 810, y: 90});
     });
 
     it('computes stronger snap edges when the dragged endpoint is shallower than the dragged anchor', () => {

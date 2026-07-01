@@ -766,17 +766,7 @@ function PieceCanvas({
         context.clip();
         const sourceX = pieceCenter.x + bounds.left;
         const sourceY = pieceCenter.y + bounds.top;
-        context.drawImage(
-            source,
-            sourceX,
-            sourceY,
-            bounds.width,
-            bounds.height,
-            0,
-            0,
-            bounds.width,
-            bounds.height,
-        );
+        drawWrappedImageRegion(context, source, sourceX, sourceY, bounds.width, bounds.height);
         context.restore();
 
     }, [backingHeight, backingScale, backingWidth, bounds, mask, pieceCenter.x, pieceCenter.y, source]);
@@ -796,6 +786,45 @@ function PieceCanvas({
 function canvasBackingScale() {
     if (typeof window === 'undefined') return 1;
     return Math.max(1, Math.min(maxCanvasBackingScale, Math.ceil(window.devicePixelRatio * maxZoom)));
+}
+
+function drawWrappedImageRegion(
+    context: CanvasRenderingContext2D,
+    source: HTMLCanvasElement,
+    sourceX: number,
+    sourceY: number,
+    width: number,
+    height: number,
+) {
+    if (source.width <= 0 || source.height <= 0 || width <= 0 || height <= 0) return;
+
+    let drawnX = 0;
+    while (drawnX < width - 1e-6) {
+        const tileX = positiveModulo(sourceX + drawnX, source.width);
+        const chunkWidth = Math.min(width - drawnX, source.width - tileX);
+        let drawnY = 0;
+        while (drawnY < height - 1e-6) {
+            const tileY = positiveModulo(sourceY + drawnY, source.height);
+            const chunkHeight = Math.min(height - drawnY, source.height - tileY);
+            context.drawImage(
+                source,
+                tileX,
+                tileY,
+                chunkWidth,
+                chunkHeight,
+                drawnX,
+                drawnY,
+                chunkWidth,
+                chunkHeight,
+            );
+            drawnY += chunkHeight;
+        }
+        drawnX += chunkWidth;
+    }
+}
+
+function positiveModulo(value: number, size: number) {
+    return ((value % size) + size) % size;
 }
 
 function useJigsawSourceCanvas(board: JigsawBoardArtifact) {

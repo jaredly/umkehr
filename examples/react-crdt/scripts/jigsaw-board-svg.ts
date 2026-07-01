@@ -24,6 +24,7 @@ Examples:
 
 The JSON is JigsawBoardOptions plus optional script fields:
   pieceCount: 12 | 30 | 60 | 120 | 600 | 1000 (default 30)
+  surface: "plane" | "torus" (default "plane")
   seed: string | number for reproducible random boards
   stroke: SVG stroke color (default "#111827")
   strokeWidth: SVG stroke width (default 1)

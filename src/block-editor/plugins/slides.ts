@@ -9,11 +9,11 @@ import {
     structuralBlockTypeSpec,
     structuralCommands,
     structuralOptionPanels,
-    structuralRenderers,
     structuralSlashCommands,
     structuralToolbarItems,
 } from './structuralHelpers.js';
 import {bundledPluginStyle} from './pluginStyles.js';
+import {slideBlockRenderer, slideDeckBlockRenderer} from './slideRenderer.js';
 
 export const slidesPlugin: BlockEditorPlugin<RichBlockMeta> = {
     id: 'slides',
@@ -45,10 +45,7 @@ export const slidesPlugin: BlockEditorPlugin<RichBlockMeta> = {
         'slides:set-transition',
         'slides:set-presentation-mode',
     ]),
-    blockRenderers: structuralRenderers([
-        {id: 'slide-deck', blockType: 'slide_deck'},
-        {id: 'slide', blockType: 'slide'},
-    ]),
+    blockRenderers: [slideDeckBlockRenderer, slideBlockRenderer],
     optionPanels: structuralOptionPanels([
         {id: 'slide-deck', blockType: 'slide_deck'},
         {id: 'slide', blockType: 'slide'},
