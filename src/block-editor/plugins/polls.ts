@@ -5,10 +5,10 @@ import {
     structuralBlockTypeSpec,
     structuralCommands,
     structuralOptionPanels,
-    structuralRenderers,
     structuralToolbarItems,
 } from './structuralHelpers.js';
 import {bundledPluginStyle} from './pluginStyles.js';
+import {pollBlockRenderer} from './pollRenderer.js';
 
 export const pollsPlugin: BlockEditorPlugin<RichBlockMeta> = {
     id: 'polls',
@@ -28,7 +28,7 @@ export const pollsPlugin: BlockEditorPlugin<RichBlockMeta> = {
         'poll:set-rating-maximum',
         'poll:set-rating-presentation',
     ]),
-    blockRenderers: structuralRenderers([{id: 'poll', blockType: 'poll'}]),
+    blockRenderers: [pollBlockRenderer],
     optionPanels: structuralOptionPanels([{id: 'poll', blockType: 'poll'}]),
     crdt: {
         mergeBlockMetaTypes: ['poll'],

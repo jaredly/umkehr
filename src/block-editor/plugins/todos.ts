@@ -1,6 +1,6 @@
 import type {RichBlockMeta} from '../blockMeta.js';
 import type {BlockEditorMarkdownShortcutSpec, BlockEditorPlugin, BlockEditorToolbarItemSpec} from './types.js';
-import {declarationBlockRenderer, simpleRichBlockTypeSpec} from './blockPluginUtils.js';
+import {editableBlockRenderer, simpleRichBlockTypeSpec} from './blockPluginUtils.js';
 import {blockSlashCommand, toolbarItem, withOrder} from './legacyRichTextUi.js';
 import {bundledPluginStyle} from './pluginStyles.js';
 
@@ -47,7 +47,7 @@ export const todosPlugin: BlockEditorPlugin<RichBlockMeta> = {
     slashCommands: withOrder([blockSlashCommand('todo', 'Todo', ['task', 'checkbox'])]),
     markdownShortcuts: todoMarkdownShortcuts,
     commands: [{id: 'todo:toggle', handle: () => undefined}],
-    blockRenderers: [declarationBlockRenderer('render:todo', 'todo')],
+    blockRenderers: [editableBlockRenderer('render:todo', 'todo')],
     optionPanels: [{id: 'options:todo', blockType: 'todo', render: () => null}],
     styles: [bundledPluginStyle('todos', 'todos.css', 70)],
 };

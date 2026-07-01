@@ -1,6 +1,6 @@
 import type {RichBlockMeta} from '../blockMeta.js';
 import type {BlockEditorPlugin, BlockEditorToolbarItemSpec} from './types.js';
-import {declarationBlockRenderer, simpleRichBlockTypeSpec} from './blockPluginUtils.js';
+import {groupedBlockRenderer, simpleRichBlockTypeSpec} from './blockPluginUtils.js';
 import {blockSlashCommand, toolbarItem, withOrder} from './legacyRichTextUi.js';
 import {bundledPluginStyle} from './pluginStyles.js';
 
@@ -15,6 +15,6 @@ export const quotePlugin: BlockEditorPlugin<RichBlockMeta> = {
     blockTypes: [quoteBlockTypeSpec],
     toolbarItems: quoteToolbarItems,
     slashCommands: withOrder([blockSlashCommand('blockquote', 'Blockquote', ['quote'])]),
-    blockRenderers: [declarationBlockRenderer('render:blockquote', 'blockquote')],
+    blockRenderers: [groupedBlockRenderer('render:blockquote', 'blockquote', 'groupedSubtree blockquoteGroup')],
     styles: [bundledPluginStyle('quote', 'quote.css', 80)],
 };

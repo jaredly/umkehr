@@ -24,14 +24,22 @@ import type {JigsawState} from './schema';
 import {
     anchorPieceForComponent,
     arrangeUnplacedPieces,
+    arrangeUnplacedPiecesBestFirstGrid,
+    arrangeUnplacedPiecesPerimeterShelves,
     buildPuzzleLayout,
     connectionKey,
     connectionPatch,
+    endpointPolygonForPiece,
     estimatedPieceSize,
+    isPlacedPieceOutsideStage,
+    packingMetricsForPositions,
+    packingPolygonArea,
+    pieceBorderDistanceFromStage,
+    placedPieceOverlapRatio,
     overlapArea,
-    pieceCollisionPadding,
+    polygonOverlapArea,
+    polygonOverlapRatio,
     pieceDepths,
-    rectForPiece,
     rectsOverlap,
     snapCandidates,
     snapStrength,
@@ -45,6 +53,7 @@ describe('jigsaw board artifacts', () => {
         [60, 10, 6],
         [120, 15, 8],
         [600, 30, 20],
+        [1000, 40, 25],
     ] satisfies Array<[JigsawPieceCount, number, number]>)(
         'generates a %s-piece %sx%s rectangular board',
         (pieceCount, cols, rows) => {
@@ -193,15 +202,19 @@ describe('jigsaw board artifacts', () => {
         expect(validConnections(board, {[connectionKey(0, nonNeighbor)]: 1})).toEqual([]);
     });
 
-    it('generates viable 600-piece Voronoi board geometry', () => {
-        const board = generateJigsawBoard(600, {type: 'voronoi'});
+    it.each([
+        [600, [0, 17, 29, 300, 570, 599]],
+        [1000, [0, 23, 39, 500, 960, 999]],
+    ] satisfies Array<[JigsawPieceCount, number[]]>)(
+        'generates viable %s-piece Voronoi board geometry',
+        (pieceCount, sampleIndexes) => {
+        const board = generateJigsawBoard(pieceCount, {type: 'voronoi', seed: `viable-${pieceCount}`});
         expect(board.id).toBe(JIGSAW_BOARD_ARTIFACT_ID);
         expect(board.image).toBe('stock:hue');
-        expect(board.pieces).toHaveLength(600);
+        expect(board.pieces).toHaveLength(pieceCount);
         expect(board.title).toContain('Voronoi');
         expect(totalMaskArea(board)).toBeCloseTo(board.imageSize.width * board.imageSize.height, -4);
 
-        const sampleIndexes = [0, 17, 29, 300, 570, 599];
         sampleIndexes.forEach((index) => {
             const piece = board.pieces[index];
             expect(Number.isFinite(piece.center.x)).toBe(true);
@@ -219,16 +232,17 @@ describe('jigsaw board artifacts', () => {
             });
         });
 
-        expect(board.pieces.reduce((sum, piece) => sum + piece.neighbors.length, 0)).toBeGreaterThan(600);
+        expect(board.pieces.reduce((sum, piece) => sum + piece.neighbors.length, 0)).toBeGreaterThan(pieceCount);
         const source = board.pieces.findIndex((piece) => piece.neighbors.length > 0);
         expect(source).toBeGreaterThanOrEqual(0);
         const sourceNeighbor = board.pieces[source].neighbors[0];
         expect(validConnections(board, {[connectionKey(source, sourceNeighbor.piece)]: 1})).toEqual([
             {key: connectionKey(source, sourceNeighbor.piece), from: source, to: sourceNeighbor.piece, strength: 1},
         ]);
-    });
+        },
+    );
 
-    it.each([12, 600] satisfies JigsawPieceCount[])('generates reciprocal neighbor offsets for %s pieces', (pieceCount) => {
+    it.each([12, 600, 1000] satisfies JigsawPieceCount[])('generates reciprocal neighbor offsets for %s pieces', (pieceCount) => {
         const board = generateJigsawBoard(pieceCount);
         board.pieces.forEach((piece, index) => {
             piece.neighbors.forEach((neighbor) => {
@@ -334,6 +348,7 @@ describe('jigsaw board artifacts', () => {
         expect(isJigsawPieceCount(60)).toBe(true);
         expect(isJigsawPieceCount(120)).toBe(true);
         expect(isJigsawPieceCount(600)).toBe(true);
+        expect(isJigsawPieceCount(1000)).toBe(true);
         expect(isJigsawPieceCount(24)).toBe(false);
         expect(jigsawApp.documentInit?.validate({pieceCount: 30})).toEqual({
             success: true,
@@ -366,6 +381,7 @@ describe('jigsaw board artifacts', () => {
             title: expect.stringContaining('tabbed Voronoi'),
         });
         expect(initialJigsawArtifacts(600)[0].data).toMatchObject({pieceCount: 600});
+        expect(initialJigsawArtifacts(1000)[0].data).toMatchObject({pieceCount: 1000});
         const appArtifacts = jigsawApp.documentInit?.initialArtifacts?.({pieceCount: 120, type: 'voronoi', tabs: true});
         expect(appArtifacts?.[0].data).toMatchObject({
             pieceCount: 120,
@@ -527,18 +543,110 @@ describe('jigsaw placement logic', () => {
         ).toBe(false);
     });
 
+    it('measures polygon overlap area and treats edge touching as zero overlap', () => {
+        const square = [
+            {x: 0, y: 0},
+            {x: 10, y: 0},
+            {x: 10, y: 10},
+            {x: 0, y: 10},
+        ];
+        const overlapping = [
+            {x: 5, y: 5},
+            {x: 15, y: 5},
+            {x: 15, y: 15},
+            {x: 5, y: 15},
+        ];
+        const touching = [
+            {x: 10, y: 0},
+            {x: 20, y: 0},
+            {x: 20, y: 10},
+            {x: 10, y: 10},
+        ];
+
+        expect(packingPolygonArea(square)).toBe(100);
+        expect(polygonOverlapArea(square, overlapping)).toBeCloseTo(25);
+        expect(polygonOverlapArea(square, touching)).toBe(0);
+    });
+
+    it('uses the smaller piece as the polygon overlap ratio denominator', () => {
+        const small = [
+            {x: 0, y: 0},
+            {x: 10, y: 0},
+            {x: 10, y: 10},
+            {x: 0, y: 10},
+        ];
+        const large = [
+            {x: 5, y: 5},
+            {x: 25, y: 5},
+            {x: 25, y: 25},
+            {x: 5, y: 25},
+        ];
+
+        expect(polygonOverlapRatio(small, large)).toBeCloseTo(0.25);
+    });
+
+    it('checks whether placed pieces remain outside the image rectangle', () => {
+        const board = generateJigsawBoard(12);
+        expect(isPlacedPieceOutsideStage(board, 0, {x: 90, y: -90}, board.imageSize)).toBe(true);
+        expect(isPlacedPieceOutsideStage(board, 0, {x: 90, y: -89}, board.imageSize)).toBe(false);
+        expect(pieceBorderDistanceFromStage(board, 0, {x: 90, y: -100}, board.imageSize)).toBeCloseTo(10);
+    });
+
+    it('converts tabbed masks to collision polygons using only segment endpoints', () => {
+        const board = generateJigsawBoard(30, {tabs: true, seed: 'packing-endpoints'});
+        const pieceIndex = board.pieces.findIndex((piece) => piece.mask.some((segment) => segment.type === 'Cubic'));
+        expect(pieceIndex).toBeGreaterThanOrEqual(0);
+        const piece = board.pieces[pieceIndex];
+
+        expect(endpointPolygonForPiece(board, pieceIndex)).toEqual(piece.mask.map((segment) => segment.to));
+    });
+
+    it('summarizes packing metrics for placed pieces', () => {
+        const board = generateJigsawBoard(12);
+        const positions = new Map([
+            [0, {x: 90, y: -90}],
+            [1, {x: 270, y: -90}],
+        ]);
+
+        expect(packingMetricsForPositions(board, positions, board.imageSize)).toMatchObject({
+            placedCount: 2,
+            maxBorderDistance: 0,
+            overlapViolations: 0,
+            outsideViolations: 0,
+        });
+        expect(placedPieceOverlapRatio(board, 0, positions.get(0)!, 1, positions.get(1)!)).toBe(0);
+    });
+
+    it('uses grid packing for small boards and perimeter shelves for 120 pieces and above', () => {
+        const smallBoard = generateJigsawBoard(60);
+        const smallPieces = smallBoard.pieces.map((_piece, index) => index);
+        expect(arrangeUnplacedPieces(smallBoard, smallPieces, smallBoard.imageSize, 42)).toEqual(
+            arrangeUnplacedPiecesBestFirstGrid(smallBoard, smallPieces, smallBoard.imageSize, 42),
+        );
+
+        const largeBoard = generateJigsawBoard(120);
+        const largePieces = largeBoard.pieces.map((_piece, index) => index);
+        expect(arrangeUnplacedPieces(largeBoard, largePieces, largeBoard.imageSize, 42)).toEqual(
+            arrangeUnplacedPiecesPerimeterShelves(largeBoard, largePieces, largeBoard.imageSize, 42),
+        );
+    });
+
     it.each([12, 30, 60, 120] satisfies JigsawPieceCount[])(
-        'arranges all %s rectangular pieces without bounding-box overlap',
+        'arranges all %s rectangular pieces within packing constraints',
         (pieceCount) => {
             const board = generateJigsawBoard(pieceCount);
             const pieces = board.pieces.map((_piece, index) => index);
             const positions = arrangeUnplacedPieces(board, pieces, board.imageSize, 42);
+            const metrics = packingMetricsForPositions(board, positions, board.imageSize);
+
             expect(positions.size).toBe(pieceCount);
-            expectNoArrangedOverlap(board, positions, pieceCollisionPadding(board));
+            expect(metrics.outsideViolations).toBe(0);
+            expect(metrics.overlapViolations).toBe(0);
+            expect(metrics.maxOverlapRatio).toBeLessThanOrEqual(0.1);
         },
     );
 
-    it('extends shuffle lanes into expanded corner quadrants', () => {
+    it('packs shuffled pieces outside the board with bounded border distance', () => {
         const board = generateJigsawBoard(12);
         const positions = arrangeUnplacedPieces(
             board,
@@ -546,44 +654,58 @@ describe('jigsaw placement logic', () => {
             board.imageSize,
             0,
         );
-        const cornerBand = 60;
-        const corners = [
-            (position: {x: number; y: number}) => position.x < 0 && position.y < 0,
-            (position: {x: number; y: number}) =>
-                position.x > board.imageSize.width && position.y < 0,
-            (position: {x: number; y: number}) =>
-                position.x > board.imageSize.width && position.y > board.imageSize.height,
-            (position: {x: number; y: number}) =>
-                position.x < 0 && position.y > board.imageSize.height,
-        ];
-        const arranged = Array.from(positions.values());
-        expect(corners.every((matches) => arranged.some(matches))).toBe(true);
-        expect(
-            arranged.some(
-                (position) =>
-                    position.x < cornerBand &&
-                    position.y < cornerBand,
-            ),
-        ).toBe(true);
+        const metrics = packingMetricsForPositions(board, positions, board.imageSize);
+
+        expect(metrics.outsideViolations).toBe(0);
+        expect(metrics.overlapViolations).toBe(0);
+        expect(metrics.maxBorderDistance).toBeLessThan(estimatedPieceSize(board).height * 1.25);
     });
 
-    it('arranges Voronoi pieces without bounding-box overlap', () => {
+    it('arranges Voronoi pieces within packing constraints', () => {
         const board = generateJigsawBoard(30, {type: 'voronoi'});
         const pieces = board.pieces.map((_piece, index) => index);
         const positions = arrangeUnplacedPieces(board, pieces, board.imageSize, 42);
+        const metrics = packingMetricsForPositions(board, positions, board.imageSize);
+
         expect(positions.size).toBe(30);
-        expectNoArrangedOverlap(board, positions, pieceCollisionPadding(board));
+        expect(metrics.outsideViolations).toBe(0);
+        expect(metrics.overlapViolations).toBe(0);
+        expect(metrics.maxOverlapRatio).toBeLessThanOrEqual(0.1);
     });
 
     it.each([
         ['rectangular', generateJigsawBoard(30, {tabs: true})],
         ['Voronoi', generateJigsawBoard(30, {type: 'voronoi', tabs: true})],
-    ])('arranges tabbed %s pieces without bounding-box overlap', (_name, board) => {
+    ])('arranges tabbed %s pieces within packing constraints', (_name, board) => {
         const pieces = board.pieces.map((_piece, index) => index);
         const positions = arrangeUnplacedPieces(board, pieces, board.imageSize, 42);
+        const metrics = packingMetricsForPositions(board, positions, board.imageSize);
+
         expect(positions.size).toBe(30);
-        expectNoArrangedOverlap(board, positions, pieceCollisionPadding(board));
+        expect(metrics.outsideViolations).toBe(0);
+        expect(metrics.overlapViolations).toBe(0);
+        expect(metrics.maxOverlapRatio).toBeLessThanOrEqual(0.1);
     });
+
+    it.each([
+        [600, 'rectangular', false],
+        [1000, 'rectangular', false],
+        [1000, 'voronoi', true],
+    ] satisfies Array<[JigsawPieceCount, 'rectangular' | 'voronoi', boolean]>)(
+        'packs %s-piece %s boards outside the image rectangle',
+        (pieceCount, type, tabs) => {
+            const board = generateJigsawBoard(pieceCount, {type, tabs, seed: `packing-${pieceCount}-${type}-${tabs}`});
+            const pieces = board.pieces.map((_piece, index) => index);
+            const positions = arrangeUnplacedPieces(board, pieces, board.imageSize, 42);
+            const metrics = packingMetricsForPositions(board, positions, board.imageSize);
+
+            expect(positions.size).toBe(pieceCount);
+            expect(metrics.outsideViolations).toBe(0);
+            expect(metrics.overlapViolations).toBe(0);
+            expect(metrics.maxOverlapRatio).toBeLessThanOrEqual(0.1);
+            expect(metrics.maxBorderDistance).toBeLessThan(board.imageSize.width * 1.1);
+        },
+    );
 
     it('returns no unplaced positions for empty input or invalid stages', () => {
         const board = generateJigsawBoard(12);
@@ -592,25 +714,6 @@ describe('jigsaw placement logic', () => {
         expect(arrangeUnplacedPieces(board, [0, 1], {width: 720, height: 0}, 1).size).toBe(0);
     });
 });
-
-function expectNoArrangedOverlap(
-    board: ReturnType<typeof generateJigsawBoard>,
-    positions: Map<number, {x: number; y: number}>,
-    padding: number,
-) {
-    const rects = Array.from(positions, ([piece, position]) => ({
-        piece,
-        rect: rectForPiece(board, piece, position, padding),
-    }));
-    for (let a = 0; a < rects.length; a++) {
-        for (let b = a + 1; b < rects.length; b++) {
-            expect(
-                rectsOverlap(rects[a].rect, rects[b].rect),
-                `expected pieces ${rects[a].piece} and ${rects[b].piece} not to overlap`,
-            ).toBe(false);
-        }
-    }
-}
 
 function maskFitsBounds(piece: {bounds: {left: number; top: number; width: number; height: number}; mask: Array<{to: {x: number; y: number}}>}) {
     const right = piece.bounds.left + piece.bounds.width;

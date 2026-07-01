@@ -1,6 +1,6 @@
 import type {RichBlockMeta} from '../blockMeta.js';
 import type {BlockEditorPlugin, BlockEditorToolbarItemSpec} from './types.js';
-import {declarationBlockRenderer, simpleRichBlockTypeSpec} from './blockPluginUtils.js';
+import {editableBlockRenderer, simpleRichBlockTypeSpec} from './blockPluginUtils.js';
 import {blockSlashCommand, toolbarItem, withOrder} from './legacyRichTextUi.js';
 import {bundledPluginStyle} from './pluginStyles.js';
 
@@ -17,7 +17,7 @@ export const ingredientsPlugin: BlockEditorPlugin<RichBlockMeta> = {
     slashCommands: withOrder([
         blockSlashCommand('recipe-ingredient', 'Ingredient', ['ingredient', 'recipe', 'food', 'line']),
     ]),
-    blockRenderers: [declarationBlockRenderer('render:recipe-ingredient', 'recipe_ingredient')],
+    blockRenderers: [editableBlockRenderer('render:recipe-ingredient', 'recipe_ingredient')],
     clipboard: [{id: 'clipboard:recipe-ingredient'}],
     styles: [bundledPluginStyle('ingredients', 'ingredients.css', 110)],
 };

@@ -343,7 +343,9 @@ import {
 import {
     assertBlockEditorDocumentPluginsAvailable,
     createBlockEditorRegistry,
+    type BlockEditorBlockRenderContext,
     type BlockEditorPlugin,
+    type BlockEditorRenderedBlockNode,
     type BlockEditorRegistry,
 } from './plugins/index.js';
 import {blockTypeMenuItemsFromToolbarSpecs} from './plugins/legacyRichTextUi.js';
@@ -3645,10 +3647,7 @@ export function BlockRichTextEditor({
     );
 }
 
-type RenderTreeNode = {
-    block: RichFormattedBlock;
-    children: RenderTreeNode[];
-};
+type RenderTreeNode = BlockEditorRenderedBlockNode<RichBlockMeta>;
 
 type SlideDeckDisplayMode = 'presentation' | 'overview' | 'outline';
 type OrphanSlideDisplayMode = 'view' | 'outline';
@@ -3766,7 +3765,7 @@ type RenderBlockContext = {
     footnoteNumberById: Map<string, number>;
     inlineRenderFeatures: InlineRenderFeatures;
     blockRenderFeatures: BlockRenderFeatures;
-    registry: Pick<BlockEditorRegistry<RichBlockMeta>, 'codePreviewRenderersByLanguage' | 'optionPanels' | 'commands'>;
+    registry: BlockEditorRegistry<RichBlockMeta>;
     optionPanelBlockTypes: ReadonlySet<string>;
     runEditCommand(
         command: (current: Replica, selection: RetainedSelectionSet) => MultiCommandResult,
@@ -3838,7 +3837,7 @@ const buildRenderTree = (blocks: RichFormattedBlock[]): RenderTreeNode[] => {
     const roots: RenderTreeNode[] = [];
     const stack: RenderTreeNode[] = [];
     for (const block of blocks) {
-        const node = {block, children: []};
+        const node: RenderTreeNode = {id: block.id, block, children: []};
         while (stack.length && stack[stack.length - 1].block.depth >= block.depth) stack.pop();
         const parent = stack[stack.length - 1];
         if (parent) {
@@ -3868,8 +3867,236 @@ const matrixPollViewForNode = (node: RenderTreeNode): MatrixPollView => {
     };
 };
 
+const pluginBlockRenderContext = (
+    context: RenderBlockContext,
+): BlockEditorBlockRenderContext<RichBlockMeta> => ({
+    state: context.state,
+    registry: context.registry,
+    userId: context.userId,
+    blocks: {
+        renderEditableBlock: (nodeOrBlock, options) =>
+            renderEditableBlock(
+                'children' in nodeOrBlock ? nodeOrBlock.block : nodeOrBlock,
+                context,
+                options,
+            ),
+        renderChildren: (node) => node.children.map((child) => renderBlockNode(child, context)),
+        renderChildrenAtRelativeDepth: (node, baseDepth) =>
+            node.children.map((child) => renderBlockNodeAtRelativeDepth(child, context, baseDepth)),
+        renderNodeAtRelativeDepth: (node, baseDepth) =>
+            renderBlockNodeAtRelativeDepth(node, context, baseDepth),
+        blockText: blockPlainText,
+        nodeText: (node) => blockPlainText(node.block),
+    },
+    selection: {
+        focus: context.focusBlockSelectionTarget,
+        dispatch: (command) => {
+            context.registry.commands.get(command.id)?.handle(command, {
+                state: context.state,
+                selection: singleRetainedSelectionSet(context.state, context.selection),
+                dispatch: () => undefined,
+            });
+        },
+    },
+    attachments: {
+        get: (id) => context.attachments.get(id) ?? null,
+    },
+    previews: {
+        setUrl: (blockId, url) => {
+            context.runBlockControlCommand((current) => {
+                const block = current.state.state.blocks[blockId];
+                if (!block || block.meta.type !== 'preview') {
+                    return {state: current.state, ops: [], selection: current.selection};
+                }
+                const result = setPreviewBlockData(
+                    current.state,
+                    blockId,
+                    url,
+                    null,
+                    makeCommandContext(current),
+                );
+                return {state: result.state, ops: result.ops, selection: current.selection};
+            });
+        },
+        setMetadata: (blockId, url, metadata) => {
+            context.runBlockControlCommand((current) => {
+                const block = current.state.state.blocks[blockId];
+                if (!block || block.meta.type !== 'preview' || block.meta.url !== url) {
+                    return {state: current.state, ops: [], selection: current.selection};
+                }
+                const result = setPreviewBlockData(
+                    current.state,
+                    blockId,
+                    url,
+                    metadata as PreviewMetadata | null,
+                    makeCommandContext(current),
+                );
+                return {state: result.state, ops: result.ops, selection: current.selection};
+            });
+        },
+    },
+    dragDrop: {
+        registerRow: context.registerRow,
+        startBlockDragFromHandle: (blockId, event) =>
+            context.startBlockDragFromHandle(blockId, event as PointerEvent<HTMLElement>),
+        isDragging: (blockId) => context.draggingSubtreeIds.has(blockId),
+        isDraggingRoot: (blockId) => context.draggingId === blockId,
+        dropTargetForBlock: (blockId) =>
+            context.dropTarget?.indicatorBlockId === blockId
+                ? {indicatorPlacement: context.dropTarget.indicatorPlacement}
+                : null,
+    },
+    decorations: {
+        blockLevel: (blockId) => context.blockLevelDecorationsByBlock.get(blockId) ?? null,
+    },
+    table: {
+        createMissingCell: context.createMissingTableCell,
+        addRow: context.addTableRow,
+        addColumn: context.addTableColumn,
+        moveSelectionByArrowKey: context.moveTableSelectionByArrowKey,
+        extendSelectionByArrowKey: context.extendTableSelectionByArrowKey,
+    },
+    slides: {
+        deckUiForBlock: context.slideDeckUiForBlock,
+        setDeckUiForBlock: context.setSlideDeckUiForBlock,
+        orphanModeForBlock: context.orphanSlideModeForBlock,
+        setOrphanModeForBlock: context.setOrphanSlideModeForBlock,
+        addSlideToDeck: context.addSlideToDeck,
+    },
+    polls: {
+        modeForBlock: context.pollModeForBlock,
+        setModeForBlock: (blockId, mode) => {
+            if (mode === 'view' || mode === 'edit') context.setPollModeForBlock(blockId, mode);
+        },
+        vote: (blockId, optionId, rowId) => {
+            context.runEditCommand((current) => {
+                const currentBlock = current.state.state.blocks[blockId];
+                if (
+                    !context.userId ||
+                    !currentBlock ||
+                    currentBlock.meta.type !== 'poll' ||
+                    !context.registry.optionPanels.has('poll') ||
+                    (
+                        currentBlock.meta.kind !== 'rating' &&
+                        currentBlock.meta.kind !== 'children' &&
+                        currentBlock.meta.kind !== 'matrix'
+                    )
+                ) {
+                    return {state: current.state, ops: [], selection: current.selection};
+                }
+                if (currentBlock.meta.kind === 'matrix' && !rowId) {
+                    return {state: current.state, ops: [], selection: current.selection};
+                }
+                const previous = currentBlock.meta.votes[context.userId];
+                if (previous && !previous.deleted && !currentBlock.meta.allowChange) {
+                    return {state: current.state, ops: [], selection: current.selection};
+                }
+                const voteTs = nextReplicaTs(current);
+                const after: PollVote =
+                    currentBlock.meta.kind === 'children' && currentBlock.meta.choiceMode === 'multiple'
+                        ? {
+                              type: 'multiple',
+                              optionIds: toggleOptionId(
+                                  previous?.type === 'multiple' && !previous.deleted
+                                      ? previous.optionIds
+                                      : [],
+                                  optionId,
+                              ),
+                              ts: voteTs,
+                          }
+                        : currentBlock.meta.kind === 'matrix'
+                          ? {
+                                type: 'matrix',
+                                answers: nextMatrixAnswers(
+                                    previous?.type === 'matrix' && !previous.deleted
+                                        ? previous.answers
+                                        : {},
+                                    rowId ?? '',
+                                    optionId,
+                                    currentBlock.meta.choiceMode === 'multiple',
+                                ),
+                                ts: voteTs,
+                            }
+                          : {type: 'single', optionId, ts: voteTs};
+                const nextMeta = {
+                    ...currentBlock.meta,
+                    votes: {...currentBlock.meta.votes, [context.userId]: after},
+                    ts: nextReplicaTs(current),
+                };
+                const result = setBlockMeta(current.state, blockId, nextMeta);
+                const pollVote: PollVoteCommandData = {
+                    blockId,
+                    userId: context.userId,
+                    ...(previous ? {before: previous} : {}),
+                    after,
+                };
+                return {
+                    state: result.state,
+                    ops: result.ops,
+                    selection: current.selection,
+                    commandLabel: 'Vote in poll',
+                    pollVote,
+                };
+            });
+        },
+        answerLong: (blockId, text) => {
+            context.runEditCommand((current) => {
+                const currentBlock = current.state.state.blocks[blockId];
+                if (
+                    !context.userId ||
+                    !currentBlock ||
+                    currentBlock.meta.type !== 'poll' ||
+                    !context.registry.optionPanels.has('poll') ||
+                    currentBlock.meta.kind !== 'long' ||
+                    !text.trim()
+                ) {
+                    return {state: current.state, ops: [], selection: current.selection};
+                }
+                const previous = currentBlock.meta.votes[context.userId];
+                if (previous && !previous.deleted && !currentBlock.meta.allowChange) {
+                    return {state: current.state, ops: [], selection: current.selection};
+                }
+                const after: PollVote = {type: 'long', text, ts: nextReplicaTs(current)};
+                const nextMeta = {
+                    ...currentBlock.meta,
+                    votes: {...currentBlock.meta.votes, [context.userId]: after},
+                    ts: nextReplicaTs(current),
+                };
+                const result = setBlockMeta(current.state, blockId, nextMeta);
+                return {
+                    state: result.state,
+                    ops: result.ops,
+                    selection: current.selection,
+                    commandLabel: 'Answer poll',
+                    pollVote: {
+                        blockId,
+                        userId: context.userId,
+                        ...(previous ? {before: previous} : {}),
+                        after,
+                    },
+                };
+            });
+        },
+    },
+    annotations: {},
+});
+
 const renderBlockNode = (node: RenderTreeNode, context: RenderBlockContext): ReactElement => {
     const meta = node.block.block.meta;
+    const pluginRenderer = context.registry.blockRenderers.get(meta.type);
+    if (pluginRenderer) {
+        const pluginRendered = pluginRenderer.render(node, pluginBlockRenderContext(context));
+        if (pluginRendered) {
+            return pluginRenderer.children === 'renderer' ? (
+                <Fragment key={node.block.id}>{pluginRendered}</Fragment>
+            ) : (
+                <div key={node.block.id} className="renderTreeBranch">
+                    {pluginRendered}
+                    {node.children.map((child) => renderBlockNode(child, context))}
+                </div>
+            );
+        }
+    }
     const isChildBackedPoll =
         meta.type === 'poll' &&
         context.blockRenderFeatures.has('poll') &&
@@ -5245,6 +5472,7 @@ const renderBlockNodeAtRelativeDepth = (
 };
 
 const withRelativeDepth = (node: RenderTreeNode, baseDepth: number): RenderTreeNode => ({
+    id: node.id,
     block: {...node.block, depth: Math.max(0, node.block.depth - baseDepth)},
     children: node.children.map((child) => withRelativeDepth(child, baseDepth)),
 });

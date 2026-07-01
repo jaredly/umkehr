@@ -1,8 +1,9 @@
 import type {ReactElement} from 'react';
 
-import type {FormattedRun, VirtualBlockParentConfig} from '../../block-crdt/index.js';
+import type {FormattedBlock, FormattedRun, VirtualBlockParentConfig} from '../../block-crdt/index.js';
 import type {
     Block,
+    BlockStyle,
     CachedState,
     JsonValue,
     Mark,
@@ -10,7 +11,12 @@ import type {
     TimestampedBlockMeta,
 } from '../../block-crdt/types.js';
 import type {RetainedSelectionSet} from '../selectionSet.js';
-import type {BlockPoint, PluginEditorSelection, PluginRetainedSelection} from '../selectionModel.js';
+import type {
+    BlockPoint,
+    EditorSelection,
+    PluginEditorSelection,
+    PluginRetainedSelection,
+} from '../selectionModel.js';
 import type {BlockLevelSelectionDecorations} from '../selectionSet.js';
 import type {CodePreviewKind} from '../blockMeta.js';
 
@@ -134,11 +140,128 @@ export type BlockEditorRenderContext<Meta extends TimestampedBlockMeta = Timesta
     registry: BlockEditorRegistry<Meta>;
 };
 
+export type BlockEditorRenderedBlockNode<Meta extends TimestampedBlockMeta = TimestampedBlockMeta> = {
+    id: string;
+    block: FormattedBlock<Meta>;
+    children: BlockEditorRenderedBlockNode<Meta>[];
+};
+
+export type BlockEditorBlockChildrenMode = 'core' | 'renderer';
+
+export type BlockEditorEditableBlockOptions = {
+    ariaLabel?: string;
+    placeholder?: string;
+    surfaceClassName?: string;
+    hideBlockAffordance?: boolean;
+    hideInlineControls?: boolean;
+    hideBlockLevelDecoration?: boolean;
+    registerBlockRow?: boolean;
+};
+
+export type BlockEditorBlockRenderServices<Meta extends TimestampedBlockMeta = TimestampedBlockMeta> = {
+    renderEditableBlock(
+        node: BlockEditorRenderedBlockNode<Meta> | FormattedBlock<Meta>,
+        options?: BlockEditorEditableBlockOptions,
+    ): ReactElement;
+    renderChildren(node: BlockEditorRenderedBlockNode<Meta>): ReactElement[];
+    renderChildrenAtRelativeDepth(
+        node: BlockEditorRenderedBlockNode<Meta>,
+        baseDepth: number,
+    ): ReactElement[];
+    renderNodeAtRelativeDepth(
+        node: BlockEditorRenderedBlockNode<Meta>,
+        baseDepth: number,
+    ): ReactElement;
+    blockText(block: FormattedBlock<Meta>): string;
+    nodeText(node: BlockEditorRenderedBlockNode<Meta>): string;
+};
+
+export type BlockEditorSelectionRenderServices = {
+    focus(selection?: EditorSelection | null): void;
+    dispatch(command: BlockEditorCommand): void;
+};
+
+export type BlockEditorAttachmentRenderServices = {
+    get(id: string): unknown;
+};
+
+export type BlockEditorPreviewRenderServices = {
+    setUrl(blockId: string, url: string): void;
+    setMetadata(blockId: string, url: string, metadata: JsonValue | null): void;
+};
+
+export type BlockEditorBlockDropIndicator = {
+    indicatorPlacement: string;
+};
+
+export type BlockEditorDragDropRenderServices = {
+    registerRow(blockId: string, element: HTMLElement | null): void;
+    startBlockDragFromHandle(blockId: string, event: unknown): void;
+    isDragging(blockId: string): boolean;
+    isDraggingRoot(blockId: string): boolean;
+    dropTargetForBlock(blockId: string): BlockEditorBlockDropIndicator | null;
+};
+
+export type BlockEditorDecorationRenderServices = {
+    blockLevel(blockId: string): BlockLevelSelectionDecorations | null;
+};
+
+export type BlockEditorTableRenderServices = Record<string, unknown>;
+export type BlockEditorSlideRenderServices = Record<string, unknown>;
+export type BlockEditorPollRenderServices = {
+    modeForBlock(blockId: string): string;
+    setModeForBlock(blockId: string, mode: string): void;
+    vote(blockId: string, optionId: string, rowId?: string): void;
+    answerLong(blockId: string, text: string): void;
+};
+export type BlockEditorAnnotationRenderServices = Record<string, unknown>;
+
+export type BlockEditorBlockRenderContext<Meta extends TimestampedBlockMeta = TimestampedBlockMeta> =
+    BlockEditorRenderContext<Meta> & {
+        userId: string;
+        blocks: BlockEditorBlockRenderServices<Meta>;
+        selection: BlockEditorSelectionRenderServices;
+        attachments: BlockEditorAttachmentRenderServices;
+        previews: BlockEditorPreviewRenderServices;
+        dragDrop: BlockEditorDragDropRenderServices;
+        decorations: BlockEditorDecorationRenderServices;
+        table: BlockEditorTableRenderServices;
+        slides: BlockEditorSlideRenderServices;
+        polls: BlockEditorPollRenderServices;
+        annotations: BlockEditorAnnotationRenderServices;
+    };
+
+export type BlockEditorInlineRenderContext<Meta extends TimestampedBlockMeta = TimestampedBlockMeta> =
+    BlockEditorRenderContext<Meta> & {
+        markClassNames(markType: string, value: unknown): readonly string[];
+        markAttributes(markType: string, value: unknown): Record<string, string | undefined>;
+        dispatch(command: BlockEditorCommand): void;
+    };
+
+export type BlockEditorDestinationRenderContext<Meta extends TimestampedBlockMeta = TimestampedBlockMeta> =
+    BlockEditorRenderContext<Meta> & {
+        destination: string;
+        userId: string;
+        annotations: BlockEditorAnnotationRenderServices;
+        dispatch(command: BlockEditorCommand): void;
+    };
+
+export type BlockEditorOptionPanelRenderContext<Meta extends TimestampedBlockMeta = TimestampedBlockMeta> =
+    BlockEditorRenderContext<Meta> & {
+        updateBlockMeta(blockId: string, meta: Meta): void;
+        updateBlockStyle(blockId: string, style: BlockStyle | undefined): void;
+        dispatch(command: BlockEditorCommand): void;
+    };
+
 export type BlockEditorBlockRenderer<Meta extends TimestampedBlockMeta = TimestampedBlockMeta> = {
     id: string;
     pluginId?: BlockEditorPluginId;
     blockType: string;
-    render(block: Block<Meta>, context: BlockEditorRenderContext<Meta>): ReactElement | null;
+    children?: BlockEditorBlockChildrenMode;
+    render(
+        node: BlockEditorRenderedBlockNode<Meta>,
+        context: BlockEditorBlockRenderContext<Meta>,
+    ): ReactElement | null;
 };
 
 export type BlockEditorInlineRenderer<Meta extends TimestampedBlockMeta = TimestampedBlockMeta> = {
@@ -146,7 +269,7 @@ export type BlockEditorInlineRenderer<Meta extends TimestampedBlockMeta = Timest
     pluginId?: BlockEditorPluginId;
     markType?: string;
     embedType?: string;
-    render(run: FormattedRun, context: BlockEditorRenderContext<Meta>): ReactElement | null;
+    render(run: FormattedRun, context: BlockEditorInlineRenderContext<Meta>): ReactElement | null;
 };
 
 export type BlockEditorDestinationRenderer<Meta extends TimestampedBlockMeta = TimestampedBlockMeta> = {
@@ -154,14 +277,14 @@ export type BlockEditorDestinationRenderer<Meta extends TimestampedBlockMeta = T
     pluginId?: BlockEditorPluginId;
     destination: 'sidebar' | 'footer' | 'floating' | string;
     order?: number;
-    render(context: BlockEditorRenderContext<Meta>): ReactElement | null;
+    render(context: BlockEditorDestinationRenderContext<Meta>): ReactElement | null;
 };
 
 export type BlockEditorOptionPanelSpec<Meta extends TimestampedBlockMeta = TimestampedBlockMeta> = {
     id: string;
     pluginId?: BlockEditorPluginId;
     blockType: string;
-    render(block: Block<Meta>, context: BlockEditorRenderContext<Meta>): ReactElement | null;
+    render(block: Block<Meta>, context: BlockEditorOptionPanelRenderContext<Meta>): ReactElement | null;
 };
 
 export type BlockEditorCodePreviewRenderer = {

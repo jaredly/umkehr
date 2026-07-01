@@ -11,7 +11,7 @@ export type PathSegment =
     | {type: 'Cubic'; control1: Coord; control2: Coord; to: Coord}
     | {type: 'Quadratic'; control: Coord; to: Coord};
 
-export type JigsawPieceCount = 12 | 30 | 60 | 120 | 600;
+export type JigsawPieceCount = 12 | 30 | 60 | 120 | 600 | 1000;
 export type JigsawGenerationType = 'rectangular' | 'voronoi';
 
 export type PieceBounds = {
@@ -323,6 +323,8 @@ export function gridForPieceCount(pieceCount: JigsawPieceCount) {
             return {cols: 15, rows: 8};
         case 600:
             return {cols: 30, rows: 20};
+        case 1000:
+            return {cols: 40, rows: 25};
     }
 }
 
@@ -1106,7 +1108,14 @@ function isImageSize(input: unknown): input is JigsawBoardArtifact['imageSize'] 
 }
 
 function isPieceCount(input: unknown): input is JigsawPieceCount {
-    return input === 12 || input === 30 || input === 60 || input === 120 || input === 600;
+    return (
+        input === 12 ||
+        input === 30 ||
+        input === 60 ||
+        input === 120 ||
+        input === 600 ||
+        input === 1000
+    );
 }
 
 export function isJigsawPieceCount(input: unknown): input is JigsawPieceCount {

@@ -23,7 +23,7 @@ Examples:
   bun scripts/jigsaw-board-svg.ts '{"pieceCount":12,"tabs":true,"seed":"inspect","strokeWidth":1.5}' /tmp/jigsaw.svg
 
 The JSON is JigsawBoardOptions plus optional script fields:
-  pieceCount: 12 | 30 | 60 | 120 | 600 (default 30)
+  pieceCount: 12 | 30 | 60 | 120 | 600 | 1000 (default 30)
   seed: string | number for reproducible random boards
   stroke: SVG stroke color (default "#111827")
   strokeWidth: SVG stroke width (default 1)
@@ -40,7 +40,7 @@ function main() {
     const options = parseOptions(json);
     const pieceCount = options.pieceCount ?? 30;
     if (!isJigsawPieceCount(pieceCount)) {
-        throw new Error('pieceCount must be one of 12, 30, 60, 120, or 600.');
+        throw new Error('pieceCount must be one of 12, 30, 60, 120, 600, or 1000.');
     }
 
     const board = generateJigsawBoard(pieceCount, options);

@@ -22,6 +22,13 @@ and the next one is voronoi shapes around poisson points
 and then we can get the mechanics actually going
 
 and then we could do smaller shapes that glom together
+-> hexagons
+
+jigsaw puzzle on interesting surfaces!
+- torus (can still have 'edge pieces' if we want)
+- mobius strip
+- klein bottle
+
 
 
 - look at examples/block-rich-text. Are there ways we should change block-crdt to make the editor implementation simpler/more straightforward? Are there any utilities that should be moved into (or out of) the library?

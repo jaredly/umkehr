@@ -1,6 +1,6 @@
 import type {RichBlockMeta} from '../blockMeta.js';
 import type {BlockEditorMarkdownShortcutSpec, BlockEditorPlugin, BlockEditorToolbarItemSpec} from './types.js';
-import {declarationBlockRenderer, simpleRichBlockTypeSpec} from './blockPluginUtils.js';
+import {editableBlockRenderer, simpleRichBlockTypeSpec} from './blockPluginUtils.js';
 import {blockSlashCommand, toolbarItem, withOrder} from './legacyRichTextUi.js';
 import {bundledPluginStyle} from './pluginStyles.js';
 
@@ -51,6 +51,6 @@ export const listsPlugin: BlockEditorPlugin<RichBlockMeta> = {
         blockSlashCommand('ordered', 'Numbered list', ['number', 'ordered']),
     ]),
     markdownShortcuts: listMarkdownShortcuts,
-    blockRenderers: [declarationBlockRenderer('render:list-item', 'list_item')],
+    blockRenderers: [editableBlockRenderer('render:list-item', 'list_item')],
     styles: [bundledPluginStyle('lists', 'lists.css', 60)],
 };

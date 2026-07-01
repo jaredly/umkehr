@@ -4,11 +4,11 @@ import {
     structuralBlockTypeSpec,
     structuralCommands,
     structuralOptionPanels,
-    structuralRenderers,
     structuralSlashCommands,
     structuralToolbarItems,
 } from './structuralHelpers.js';
 import {bundledPluginStyle} from './pluginStyles.js';
+import {columnsBlockRenderer} from './columnsRenderer.js';
 
 export const columnsPlugin: BlockEditorPlugin<RichBlockMeta> = {
     id: 'columns',
@@ -28,7 +28,7 @@ export const columnsPlugin: BlockEditorPlugin<RichBlockMeta> = {
         'columns:move-out',
         'columns:drop',
     ]),
-    blockRenderers: structuralRenderers([{id: 'columns', blockType: 'columns'}]),
+    blockRenderers: [columnsBlockRenderer],
     optionPanels: structuralOptionPanels([{id: 'columns', blockType: 'columns'}]),
     styles: [bundledPluginStyle('columns', 'columns.css', 160)],
 };

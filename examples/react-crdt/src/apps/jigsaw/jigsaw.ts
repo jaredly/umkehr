@@ -37,6 +37,21 @@ export type PieceRect = {
     bottom: number;
 };
 
+export type ArrangementResult = {
+    positions: Map<number, Coord>;
+    attempts: number;
+};
+
+type PackingSide = 'top' | 'right' | 'bottom' | 'left';
+
+type BorderCandidate = {
+    side: PackingSide;
+    along: number;
+    offsetX: number;
+    offsetY: number;
+    rank: number;
+};
+
 export function connectionKey(from: number, to: number) {
     return `${from}:${to}`;
 }
@@ -225,6 +240,17 @@ export function arrangeUnplacedPieces(
     stage: StageSize,
     seed = 0,
 ) {
+    return shouldUsePerimeterShelves(board)
+        ? arrangeUnplacedPiecesPerimeterShelves(board, pieces, stage, seed)
+        : arrangeUnplacedPiecesBestFirstGrid(board, pieces, stage, seed);
+}
+
+export function arrangeUnplacedPiecesRingLane(
+    board: JigsawBoardArtifact,
+    pieces: number[],
+    stage: StageSize,
+    seed = 0,
+) {
     if (!pieces.length || stage.width <= 0 || stage.height <= 0) return new Map<number, Coord>();
     const positions = new Map<number, Coord>();
     const rects: PieceRect[] = [];
@@ -256,6 +282,345 @@ export function arrangeUnplacedPieces(
         rects.push(rectForPiece(board, piece, position, padding));
     }
     return positions;
+}
+
+export function arrangeUnplacedPiecesPerimeterShelves(
+    board: JigsawBoardArtifact,
+    pieces: number[],
+    stage: StageSize,
+    seed = 0,
+) {
+    return arrangeUnplacedPiecesPerimeterShelvesWithStats(board, pieces, stage, seed).positions;
+}
+
+export function arrangeUnplacedPiecesPerimeterShelvesWithStats(
+    board: JigsawBoardArtifact,
+    pieces: number[],
+    stage: StageSize,
+    seed = 0,
+): ArrangementResult {
+    if (!pieces.length || stage.width <= 0 || stage.height <= 0) {
+        return {positions: new Map(), attempts: 0};
+    }
+
+    const sorted = sortedPackingPieces(board, pieces, seed);
+    const positions = new Map<number, Coord>();
+    const gap = piecePackingGap(board);
+    const maxSize = maxPieceSize(board);
+    const rowStepX = Math.max(1, maxSize.width + gap);
+    const rowStepY = Math.max(1, maxSize.height + gap);
+    const sideOrder = rotatedPackingSides(seed);
+    let nextPiece = 0;
+    let attempts = 0;
+    const maxRows = Math.max(8, sorted.length + 4);
+
+    for (let row = 0; nextPiece < sorted.length && row < maxRows; row++) {
+        const offsetX = row * rowStepX;
+        const offsetY = row * rowStepY;
+        for (const side of sideOrder) {
+            const result = fillPackingShelf({
+                board,
+                sorted,
+                positions,
+                stage,
+                side,
+                offsetX,
+                offsetY,
+                gap,
+                nextPiece,
+            });
+            nextPiece = result.nextPiece;
+            attempts += result.attempts;
+            if (nextPiece >= sorted.length) break;
+        }
+    }
+
+    return {positions, attempts};
+}
+
+export function arrangeUnplacedPiecesBestFirstGrid(
+    board: JigsawBoardArtifact,
+    pieces: number[],
+    stage: StageSize,
+    seed = 0,
+) {
+    return arrangeUnplacedPiecesBestFirstGridWithStats(board, pieces, stage, seed).positions;
+}
+
+export function arrangeUnplacedPiecesBestFirstGridWithStats(
+    board: JigsawBoardArtifact,
+    pieces: number[],
+    stage: StageSize,
+    seed = 0,
+): ArrangementResult {
+    if (!pieces.length || stage.width <= 0 || stage.height <= 0) {
+        return {positions: new Map(), attempts: 0};
+    }
+
+    const sorted = sortedPackingPieces(board, pieces, seed);
+    const candidates = borderGridCandidates(board, sorted.length, stage, seed);
+    const positions = new Map<number, Coord>();
+    const rects: PieceRect[] = [];
+    const index = new RectSpatialIndex(Math.max(12, Math.max(maxPieceSize(board).width, maxPieceSize(board).height)));
+    let attempts = 0;
+
+    for (const piece of sorted) {
+        let fallback: {position: Coord; overlapCount: number} | null = null;
+        for (const candidate of candidates) {
+            attempts++;
+            const position = positionForBorderCandidate(board, piece, stage, candidate);
+            const rect = rectForPiece(board, piece, position);
+            if (!rectOutsideStage(rect, stage)) continue;
+            const overlapping = index.query(rect).filter((rectIndex) => rectsOverlap(rect, rects[rectIndex]));
+            if (!overlapping.length) {
+                positions.set(piece, position);
+                rects.push(rect);
+                index.add(rect, rects.length - 1);
+                fallback = null;
+                break;
+            }
+            if (!fallback || overlapping.length < fallback.overlapCount) {
+                fallback = {position, overlapCount: overlapping.length};
+            }
+        }
+        if (!positions.has(piece) && fallback) {
+            const rect = rectForPiece(board, piece, fallback.position);
+            positions.set(piece, fallback.position);
+            rects.push(rect);
+            index.add(rect, rects.length - 1);
+        }
+    }
+
+    return {positions, attempts};
+}
+
+function fillPackingShelf({
+    board,
+    sorted,
+    positions,
+    stage,
+    side,
+    offsetX,
+    offsetY,
+    gap,
+    nextPiece,
+}: {
+    board: JigsawBoardArtifact;
+    sorted: number[];
+    positions: Map<number, Coord>;
+    stage: StageSize;
+    side: PackingSide;
+    offsetX: number;
+    offsetY: number;
+    gap: number;
+    nextPiece: number;
+}) {
+    let attempts = 0;
+    let cursor = (side === 'top' || side === 'bottom' ? -offsetX : -offsetY) + gap;
+    const limit =
+        (side === 'top' || side === 'bottom' ? stage.width + offsetX : stage.height + offsetY) - gap;
+
+    while (nextPiece < sorted.length) {
+        const piece = sorted[nextPiece];
+        const bounds = board.pieces[piece]?.bounds;
+        if (!bounds) {
+            nextPiece++;
+            continue;
+        }
+        attempts++;
+        const footprint = side === 'top' || side === 'bottom' ? bounds.width : bounds.height;
+        if (cursor + footprint > limit + 1e-6) break;
+        positions.set(
+            piece,
+            positionForShelfPiece({
+                bounds,
+                side,
+                cursor,
+                stage,
+                offsetX,
+                offsetY,
+            }),
+        );
+        cursor += footprint + gap;
+        nextPiece++;
+    }
+
+    return {nextPiece, attempts};
+}
+
+function positionForShelfPiece({
+    bounds,
+    side,
+    cursor,
+    stage,
+    offsetX,
+    offsetY,
+}: {
+    bounds: {left: number; top: number; width: number; height: number};
+    side: PackingSide;
+    cursor: number;
+    stage: StageSize;
+    offsetX: number;
+    offsetY: number;
+}): Coord {
+    switch (side) {
+        case 'top':
+            return {x: cursor - bounds.left, y: -offsetY - bounds.height - bounds.top};
+        case 'right':
+            return {x: stage.width + offsetX - bounds.left, y: cursor - bounds.top};
+        case 'bottom':
+            return {x: cursor - bounds.left, y: stage.height + offsetY - bounds.top};
+        case 'left':
+            return {x: -offsetX - bounds.width - bounds.left, y: cursor - bounds.top};
+    }
+}
+
+function borderGridCandidates(
+    board: JigsawBoardArtifact,
+    pieceCount: number,
+    stage: StageSize,
+    seed: number,
+) {
+    const average = averagePieceSize(board);
+    const maxSize = maxPieceSize(board);
+    const stepX = Math.max(4, average.width * 0.65);
+    const stepY = Math.max(4, average.height * 0.65);
+    const rowStepX = Math.max(1, maxSize.width * 0.72);
+    const rowStepY = Math.max(1, maxSize.height * 0.72);
+    const target = Math.max(pieceCount * 12, 64);
+    const candidates: BorderCandidate[] = [];
+    const sides = rotatedPackingSides(seed);
+
+    for (let row = 0; candidates.length < target && row < pieceCount + 24; row++) {
+        const offsetX = row * rowStepX;
+        const offsetY = row * rowStepY;
+        for (const side of sides) {
+            const horizontal = side === 'top' || side === 'bottom';
+            const start = horizontal ? -offsetX : -offsetY;
+            const end = horizontal ? stage.width + offsetX : stage.height + offsetY;
+            const step = horizontal ? stepX : stepY;
+            let slot = 0;
+            for (let along = start; along <= end; along += step) {
+                candidates.push({
+                    side,
+                    along,
+                    offsetX,
+                    offsetY,
+                    rank: row * 1_000_000 + slot * 10 + seededPieceRank(slot, seed),
+                });
+                slot++;
+            }
+        }
+    }
+
+    return candidates.sort((a, b) => candidateDistance(a) - candidateDistance(b) || a.rank - b.rank);
+}
+
+function positionForBorderCandidate(
+    board: JigsawBoardArtifact,
+    piece: number,
+    stage: StageSize,
+    candidate: BorderCandidate,
+) {
+    const bounds = board.pieces[piece]?.bounds ?? {left: 0, top: 0, width: 0, height: 0};
+    return positionForShelfPiece({
+        bounds,
+        side: candidate.side,
+        cursor: candidate.along,
+        stage,
+        offsetX: candidate.offsetX,
+        offsetY: candidate.offsetY,
+    });
+}
+
+function candidateDistance(candidate: BorderCandidate) {
+    return Math.hypot(candidate.offsetX, candidate.offsetY);
+}
+
+function sortedPackingPieces(board: JigsawBoardArtifact, pieces: number[], seed: number) {
+    const seen = new Set<number>();
+    const normalized = normalizedSeed(seed);
+    return pieces
+        .filter((piece) => {
+            if (!isPieceIndex(board, piece) || seen.has(piece)) return false;
+            seen.add(piece);
+            return true;
+        })
+        .sort((a, b) => {
+            const areaDelta = pieceAreaEstimate(board, b) - pieceAreaEstimate(board, a);
+            if (Math.abs(areaDelta) > 1e-6) return areaDelta;
+            return seededPieceRank(a, normalized) - seededPieceRank(b, normalized) || a - b;
+        });
+}
+
+function shouldUsePerimeterShelves(board: JigsawBoardArtifact) {
+    return board.pieceCount >= 120;
+}
+
+function pieceAreaEstimate(board: JigsawBoardArtifact, piece: number) {
+    const bounds = board.pieces[piece]?.bounds;
+    return bounds ? bounds.width * bounds.height : 0;
+}
+
+function piecePackingGap(board: JigsawBoardArtifact) {
+    return pieceCollisionPadding(board) * 2 + 0.5;
+}
+
+function rotatedPackingSides(seed: number): PackingSide[] {
+    const sides: PackingSide[] = ['top', 'right', 'bottom', 'left'];
+    const rotation = normalizedSeed(seed) % sides.length;
+    return sides.slice(rotation).concat(sides.slice(0, rotation));
+}
+
+function seededPieceRank(piece: number, seed: number) {
+    let state = (piece + 1) * 0x9e3779b1 + seed * 0x85ebca6b;
+    state ^= state >>> 16;
+    state = Math.imul(state, 0x7feb352d);
+    state ^= state >>> 15;
+    state = Math.imul(state, 0x846ca68b);
+    state ^= state >>> 16;
+    return state >>> 0;
+}
+
+function rectOutsideStage(rect: PieceRect, stage: StageSize) {
+    return rect.right <= 0 || rect.left >= stage.width || rect.bottom <= 0 || rect.top >= stage.height;
+}
+
+class RectSpatialIndex {
+    private cells = new Map<string, number[]>();
+
+    constructor(private readonly cellSize: number) {}
+
+    add(rect: PieceRect, index: number) {
+        for (const key of this.keysForRect(rect)) {
+            const cell = this.cells.get(key);
+            if (cell) {
+                cell.push(index);
+            } else {
+                this.cells.set(key, [index]);
+            }
+        }
+    }
+
+    query(rect: PieceRect) {
+        const result = new Set<number>();
+        for (const key of this.keysForRect(rect)) {
+            for (const index of this.cells.get(key) ?? []) result.add(index);
+        }
+        return Array.from(result);
+    }
+
+    private keysForRect(rect: PieceRect) {
+        const minX = Math.floor(rect.left / this.cellSize);
+        const maxX = Math.floor((rect.right - 1e-6) / this.cellSize);
+        const minY = Math.floor(rect.top / this.cellSize);
+        const maxY = Math.floor((rect.bottom - 1e-6) / this.cellSize);
+        const keys: string[] = [];
+        for (let x = minX; x <= maxX; x++) {
+            for (let y = minY; y <= maxY; y++) keys.push(`${x}:${y}`);
+        }
+        return keys;
+    }
 }
 
 export function rectForPiece(
@@ -594,3 +959,15 @@ function maxDepth(pieces: Set<number>, depths: Map<number, number>) {
 function isPieceIndex(board: JigsawBoardArtifact, piece: number) {
     return Number.isInteger(piece) && piece >= 0 && piece < board.pieces.length;
 }
+
+export {
+    endpointPolygonForPiece,
+    isPlacedPieceOutsideStage,
+    maxAllowedPieceOverlapRatio,
+    packingMetricsForPositions,
+    pieceBorderDistanceFromStage,
+    placedPieceOverlapRatio,
+    polygonArea as packingPolygonArea,
+    polygonOverlapArea,
+    polygonOverlapRatio,
+} from './jigsawPacking';

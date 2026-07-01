@@ -1,10 +1,14 @@
 /// <reference path="../optionalPreviewModules.d.ts" />
 
+import {createElement} from 'react';
+
 import type {RichBlockMeta} from '../blockMeta.js';
+import {codePreviewRendererForMeta} from '../codePreviewRegistry.js';
 import {CODE_MARK} from '../inlineMarks.js';
+import {PreviewableCodeBlock} from '../mediaBlocks.js';
 
 import type {BlockEditorPlugin} from './types.js';
-import {declarationBlockRenderer, declarationOptionPanel, simpleRichBlockTypeSpec} from './blockPluginUtils.js';
+import {declarationOptionPanel, simpleRichBlockTypeSpec} from './blockPluginUtils.js';
 import {blockSlashCommand, toolbarItem} from './legacyRichTextUi.js';
 import {bundledPluginStyle} from './pluginStyles.js';
 
@@ -35,6 +39,24 @@ const parseJsonOrYaml = (source: string, parseYaml: (value: string) => unknown):
     }
 };
 
+const codeBlockRenderer = {
+    id: 'render:code',
+    blockType: 'code',
+    render(node, context) {
+        const meta = node.block.block.meta;
+        if (meta.type !== 'code') return null;
+        const editor = context.blocks.renderEditableBlock(node);
+        const renderer = codePreviewRendererForMeta(context.registry, meta);
+        if (!renderer) return editor;
+        return createElement(PreviewableCodeBlock, {
+            blockId: node.id,
+            renderer,
+            source: context.blocks.nodeText(node),
+            editor,
+        });
+    },
+} satisfies NonNullable<BlockEditorPlugin<RichBlockMeta>['blockRenderers']>[number];
+
 export const codePlugin: BlockEditorPlugin<RichBlockMeta> = {
     id: 'code',
     blockTypes: [
@@ -46,7 +68,7 @@ export const codePlugin: BlockEditorPlugin<RichBlockMeta> = {
         ),
     ],
     marks: [{id: CODE_MARK, label: 'Code'}],
-    blockRenderers: [declarationBlockRenderer('render:code', 'code')],
+    blockRenderers: [codeBlockRenderer],
     inlineRenderers: [{id: 'render:code', markType: CODE_MARK, render: () => null}],
     optionPanels: [declarationOptionPanel('options:code', 'code')],
     toolbarItems: [

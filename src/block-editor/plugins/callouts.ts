@@ -1,6 +1,6 @@
 import type {RichBlockMeta} from '../blockMeta.js';
 import type {BlockEditorPlugin, BlockEditorToolbarItemSpec} from './types.js';
-import {declarationBlockRenderer, declarationOptionPanel, simpleRichBlockTypeSpec} from './blockPluginUtils.js';
+import {declarationOptionPanel, groupedBlockRenderer, simpleRichBlockTypeSpec} from './blockPluginUtils.js';
 import {blockSlashCommand, toolbarItem, withOrder} from './legacyRichTextUi.js';
 import {bundledPluginStyle} from './pluginStyles.js';
 
@@ -24,7 +24,20 @@ export const calloutsPlugin: BlockEditorPlugin<RichBlockMeta> = {
         blockSlashCommand('callout-error', 'Error callout', ['error']),
     ]),
     commands: [{id: 'callout:set-kind', handle: () => undefined}],
-    blockRenderers: [declarationBlockRenderer('render:callout', 'callout')],
+    blockRenderers: [
+        groupedBlockRenderer('render:callout', 'callout', (node) => {
+            const meta = node.block.block.meta;
+            return [
+                'groupedSubtree',
+                'calloutGroup',
+                meta.type === 'callout' ? `callout${capitalize(meta.kind)}` : '',
+            ]
+                .filter(Boolean)
+                .join(' ');
+        }),
+    ],
     optionPanels: [declarationOptionPanel('options:callout', 'callout')],
     styles: [bundledPluginStyle('callouts', 'callouts.css', 90)],
 };
+
+const capitalize = (value: string): string => (value ? value[0].toUpperCase() + value.slice(1) : value);

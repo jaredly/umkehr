@@ -24,7 +24,10 @@ export async function closeDocumentManager(page: Page) {
 export async function createDocument(
     page: Page,
     title: string,
-    options: {pieceCount?: '12' | '30' | '60' | '120'; boardType?: 'rectangular' | 'voronoi'} = {},
+    options: {
+        pieceCount?: '12' | '30' | '60' | '120' | '600' | '1000';
+        boardType?: 'rectangular' | 'voronoi';
+    } = {},
 ) {
     const modal = await openDocumentManager(page);
     await modal.getByLabel('New document title').fill(title);
