@@ -28,11 +28,15 @@ import {
     arrangeUnplacedPiecesBestFirstGrid,
     arrangeUnplacedPiecesPerimeterShelves,
     buildPuzzleLayout,
+    canonicalTorusPoint,
     connectionKey,
     connectionPatch,
     endpointPolygonForPiece,
     estimatedPieceSize,
+    isInsideTorusViewport,
     isPlacedPieceOutsideStage,
+    nearestEquivalentPoint,
+    outsideTorusDropPatches,
     packingMetricsForPositions,
     packingPolygonArea,
     pieceBorderDistanceFromStage,
@@ -40,11 +44,15 @@ import {
     overlapArea,
     polygonOverlapArea,
     polygonOverlapRatio,
+    positiveModulo,
     pieceDepths,
     rectsOverlap,
+    removePositionPatch,
     snapCandidates,
     snapStrength,
+    torusPieceCopies,
     validConnections,
+    wrappedDistance,
 } from './jigsaw';
 
 describe('jigsaw board artifacts', () => {
@@ -706,6 +714,100 @@ describe('jigsaw placement logic', () => {
         expect(layout.positions.get(0)).toEqual({x: 810, y: 90});
         expect(layout.positions.get(1)).toEqual({x: 990, y: 90});
         expect(layout.positions.get(2)).toEqual({x: 1170, y: 90});
+    });
+
+    it('canonicalizes torus positions and finds nearest equivalent drag points', () => {
+        const size = {width: 720, height: 540};
+
+        expect(positiveModulo(-1, size.width)).toBe(719);
+        expect(canonicalTorusPoint({x: -20, y: 560}, size)).toEqual({x: 700, y: 20});
+        expect(nearestEquivalentPoint({x: 5, y: 538}, {x: 715, y: 2}, size)).toEqual({
+            x: 725,
+            y: -2,
+        });
+        expect(wrappedDistance({x: 719, y: 2}, {x: 1, y: 538}, size)).toBeCloseTo(Math.hypot(2, 4));
+    });
+
+    it('computes filtered torus render copies around edges and corners', () => {
+        const board = generateJigsawBoard(12);
+
+        expect(
+            torusPieceCopies({
+                board,
+                piece: 0,
+                position: {x: 90, y: 90},
+                pan: {x: 0, y: 0},
+            }).map((copy) => copy.key),
+        ).toEqual(['0:0']);
+
+        expect(
+            torusPieceCopies({
+                board,
+                piece: 0,
+                position: {x: 90, y: 10},
+                pan: {x: 0, y: 0},
+            }).map((copy) => copy.key),
+        ).toEqual(['0:0', `0:${board.imageSize.height}`]);
+
+        expect(
+            torusPieceCopies({
+                board,
+                piece: 0,
+                position: {x: 10, y: 10},
+                pan: {x: 0, y: 0},
+            }).map((copy) => copy.key),
+        ).toEqual([
+            '0:0',
+            `${board.imageSize.width}:0`,
+            `0:${board.imageSize.height}`,
+            `${board.imageSize.width}:${board.imageSize.height}`,
+        ]);
+    });
+
+    it('classifies torus viewport drops and outside-drop patches', () => {
+        const size = {width: 720, height: 540};
+        const state: JigsawState = {
+            positions: {'3': {x: 630, y: 90}},
+            connections: {[connectionKey(3, 0)]: 1},
+        };
+
+        expect(isInsideTorusViewport({x: 0, y: 540}, size)).toBe(true);
+        expect(isInsideTorusViewport({x: -1, y: 20}, size)).toBe(false);
+        expect(outsideTorusDropPatches(state, [3])).toEqual({
+            type: 'patches',
+            patches: [removePositionPatch(3)],
+        });
+        expect(outsideTorusDropPatches(state, [4])).toEqual({type: 'patches', patches: []});
+        expect(outsideTorusDropPatches(state, [3, 0])).toEqual({type: 'cancel'});
+    });
+
+    it('can compare torus snap candidates with wrapped distance', () => {
+        const board = generateJigsawBoard(12, {surface: 'torus'});
+        const state: JigsawState = {
+            positions: {
+                '3': {x: 630, y: 90},
+                '0': {x: 90, y: 90},
+            },
+            connections: {},
+        };
+        const layout = buildPuzzleLayout(board, state);
+        const draggedPositions = new Map([[3, {x: 630, y: 90}]]);
+        const allPositions = new Map([
+            [3, {x: 630, y: 90}],
+            [0, {x: 90, y: 90}],
+        ]);
+
+        expect(
+            snapCandidates({
+                board,
+                layout,
+                draggedPieces: new Set([3]),
+                draggedPositions,
+                allPositions,
+                snapThreshold: 2,
+                distanceBetween: (a, b) => wrappedDistance(a, b, board.imageSize),
+            }),
+        ).toEqual([{from: 3, to: 0, key: connectionKey(3, 0), strength: 1}]);
     });
 
     it('computes stronger snap edges when the dragged endpoint is shallower than the dragged anchor', () => {

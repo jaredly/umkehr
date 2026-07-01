@@ -37,6 +37,18 @@ export type PieceRect = {
     bottom: number;
 };
 
+export type TorusPieceCopy = {
+    key: string;
+    position: Coord;
+    tileOffset: Coord;
+    rect: PieceRect;
+    primary: boolean;
+};
+
+export type OutsideTorusDropResult =
+    | {type: 'cancel'}
+    | {type: 'patches'; patches: DraftPatch<JigsawState>[]};
+
 export type ArrangementResult = {
     positions: Map<number, Coord>;
     attempts: number;
@@ -769,6 +781,7 @@ export function snapCandidates({
     draggedPositions,
     allPositions,
     snapThreshold,
+    distanceBetween = distance,
 }: {
     board: JigsawBoardArtifact;
     layout: PuzzleLayout;
@@ -776,6 +789,7 @@ export function snapCandidates({
     draggedPositions: Map<number, Coord>;
     allPositions: Map<number, Coord>;
     snapThreshold: number;
+    distanceBetween?: (a: Coord, b: Coord) => number;
 }): SnapCandidate[] {
     const candidates: SnapCandidate[] = [];
     const existing = new Set(layout.connections.map((connection) => connection.key));
@@ -791,7 +805,7 @@ export function snapCandidates({
             const neighborPosition = allPositions.get(neighbor.piece);
             if (!neighborPosition) continue;
             const expected = add(fromPosition, neighbor.offset);
-            if (distance(expected, neighborPosition) > snapThreshold) continue;
+            if (distanceBetween(expected, neighborPosition) > snapThreshold) continue;
             const strength = snapStrength({
                 draggedMaxDepth,
                 draggedEndpointDepth: layout.depths.get(from) ?? 0,
@@ -826,6 +840,28 @@ export function positionPatch(
         ],
         value: position,
     };
+}
+
+export function removePositionPatch(piece: number): DraftPatch<JigsawState> {
+    return {
+        op: 'remove',
+        path: [
+            {type: 'key', key: 'positions'},
+            {type: 'key', key: pieceKey(piece)},
+        ],
+    };
+}
+
+export function outsideTorusDropPatches(
+    state: JigsawState,
+    component: number[],
+): OutsideTorusDropResult {
+    if (component.length !== 1) return {type: 'cancel'};
+    const [piece] = component;
+    if (piece === undefined || state.positions[pieceKey(piece)] === undefined) {
+        return {type: 'patches', patches: []};
+    }
+    return {type: 'patches', patches: [removePositionPatch(piece)]};
 }
 
 export function connectionPatch(candidate: SnapCandidate): DraftPatch<JigsawState> {
@@ -883,6 +919,116 @@ export function subtract(a: Coord, b: Coord): Coord {
 
 export function distance(a: Coord, b: Coord) {
     return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+export function positiveModulo(value: number, size: number) {
+    if (size <= 0) return value;
+    return ((value % size) + size) % size;
+}
+
+export function canonicalTorusPoint(
+    point: Coord,
+    size: {width: number; height: number},
+): Coord {
+    return {
+        x: positiveModulo(point.x, size.width),
+        y: positiveModulo(point.y, size.height),
+    };
+}
+
+export function shortestWrappedDelta(
+    from: Coord,
+    to: Coord,
+    size: {width: number; height: number},
+): Coord {
+    return {
+        x: shortestAxisDelta(from.x, to.x, size.width),
+        y: shortestAxisDelta(from.y, to.y, size.height),
+    };
+}
+
+export function wrappedDistance(
+    a: Coord,
+    b: Coord,
+    size: {width: number; height: number},
+) {
+    const delta = shortestWrappedDelta(a, b, size);
+    return Math.hypot(delta.x, delta.y);
+}
+
+export function nearestEquivalentPoint(
+    point: Coord,
+    reference: Coord,
+    size: {width: number; height: number},
+): Coord {
+    return {
+        x: nearestEquivalentAxis(point.x, reference.x, size.width),
+        y: nearestEquivalentAxis(point.y, reference.y, size.height),
+    };
+}
+
+export function torusPieceCopies({
+    board,
+    piece,
+    position,
+    pan,
+    viewport,
+}: {
+    board: JigsawBoardArtifact;
+    piece: number;
+    position: Coord;
+    pan: Coord;
+    viewport?: PieceRect;
+}): TorusPieceCopy[] {
+    const imageSize = board.imageSize;
+    const base = canonicalTorusPoint(add(position, pan), imageSize);
+    const tileOffsets = [
+        {x: -imageSize.width, y: -imageSize.height},
+        {x: 0, y: -imageSize.height},
+        {x: imageSize.width, y: -imageSize.height},
+        {x: -imageSize.width, y: 0},
+        {x: 0, y: 0},
+        {x: imageSize.width, y: 0},
+        {x: -imageSize.width, y: imageSize.height},
+        {x: 0, y: imageSize.height},
+        {x: imageSize.width, y: imageSize.height},
+    ];
+    const bounds = viewport ?? {
+        left: 0,
+        top: 0,
+        right: imageSize.width,
+        bottom: imageSize.height,
+    };
+
+    return tileOffsets.flatMap((tileOffset): TorusPieceCopy[] => {
+        const copyPosition = add(base, tileOffset);
+        const rect = rectForPiece(board, piece, copyPosition);
+        if (!rectsOverlap(rect, bounds)) return [];
+        return [
+            {
+                key: `${tileOffset.x}:${tileOffset.y}`,
+                position: copyPosition,
+                tileOffset,
+                rect,
+                primary: tileOffset.x === 0 && tileOffset.y === 0,
+            },
+        ];
+    });
+}
+
+export function isInsideTorusViewport(point: Coord, imageSize: {width: number; height: number}) {
+    return point.x >= 0 && point.x <= imageSize.width && point.y >= 0 && point.y <= imageSize.height;
+}
+
+function shortestAxisDelta(from: number, to: number, size: number) {
+    const delta = to - from;
+    if (size <= 0) return delta;
+    return delta - Math.round(delta / size) * size;
+}
+
+function nearestEquivalentAxis(value: number, reference: number, size: number) {
+    if (size <= 0) return value;
+    return value + Math.round((reference - value) / size) * size;
 }
 
 function stronglyConnectedComponents(pieceCount: number, connections: ValidConnection[]) {

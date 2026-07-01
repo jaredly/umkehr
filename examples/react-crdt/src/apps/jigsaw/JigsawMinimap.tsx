@@ -26,6 +26,7 @@ export function JigsawMinimap({
     placedPieces,
     viewport,
     viewportSize,
+    torus,
     dragging,
     setDragging,
     recenter,
@@ -38,6 +39,11 @@ export function JigsawMinimap({
     placedPieces: Set<number>;
     viewport: JigsawViewport;
     viewportSize: {width: number; height: number};
+    torus?: {
+        imageSize: {width: number; height: number};
+        panX: number;
+        panY: number;
+    };
     dragging: boolean;
     setDragging(value: boolean): void;
     recenter(point: Coord): void;
@@ -58,6 +64,12 @@ export function JigsawMinimap({
         width: clamp(viewportSize.width / viewport.zoom, 1, boardSpace.width),
         height: clamp(viewportSize.height / viewport.zoom, 1, boardSpace.height),
     };
+    const torusCut = torus
+        ? {
+              x: imageOffset.x + positiveModulo(-torus.panX, torus.imageSize.width),
+              y: imageOffset.y + positiveModulo(-torus.panY, torus.imageSize.height),
+          }
+        : null;
 
     const recenterFromPointer = (event: PointerEvent<HTMLButtonElement>) => {
         const rect = event.currentTarget.getBoundingClientRect();
@@ -120,6 +132,28 @@ export function JigsawMinimap({
                         stroke="#94a3b8"
                         strokeWidth={6}
                     />
+                    {torusCut ? (
+                        <g opacity={0.82}>
+                            <line
+                                x1={torusCut.x}
+                                y1={imageOffset.y}
+                                x2={torusCut.x}
+                                y2={imageOffset.y + imageSize.height}
+                                stroke="#0f766e"
+                                strokeWidth={8}
+                                strokeDasharray="18 14"
+                            />
+                            <line
+                                x1={imageOffset.x}
+                                y1={torusCut.y}
+                                x2={imageOffset.x + imageSize.width}
+                                y2={torusCut.y}
+                                stroke="#0f766e"
+                                strokeWidth={8}
+                                strokeDasharray="18 14"
+                            />
+                        </g>
+                    ) : null}
                     {Array.from(renderedPositions.entries()).map(([piece, position]) => {
                         const pieceData = board.pieces[piece];
                         if (!pieceData) return null;
@@ -165,6 +199,11 @@ function minimapToBoard(
 
 function clamp(value: number, min: number, max: number) {
     return Math.max(min, Math.min(max, value));
+}
+
+function positiveModulo(value: number, size: number) {
+    if (size <= 0) return value;
+    return ((value % size) + size) % size;
 }
 
 function minimapContentBounds(

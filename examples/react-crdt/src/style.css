@@ -82,6 +82,29 @@
     user-select: none;
 }
 
+.jigsawTorusViewport {
+    position: absolute;
+    overflow: hidden;
+    border: 2px solid #475569;
+    border-radius: 8px;
+    background:
+        linear-gradient(#cbd5e1 1px, transparent 1px),
+        linear-gradient(90deg, #cbd5e1 1px, transparent 1px), #e8edf3;
+    background-size: 28px 28px;
+    box-shadow:
+        0 0 0 1px rgb(255 255 255 / 82%) inset,
+        0 12px 28px rgb(15 23 42 / 12%);
+    touch-action: none;
+}
+
+.jigsawTorusCanvas {
+    position: absolute;
+    left: 0;
+    top: 0;
+    overflow: visible;
+    user-select: none;
+}
+
 .jigsawSolvedImage {
     position: absolute;
     display: block;

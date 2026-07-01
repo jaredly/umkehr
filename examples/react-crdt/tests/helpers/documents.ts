@@ -27,6 +27,7 @@ export async function createDocument(
     options: {
         pieceCount?: '12' | '30' | '60' | '120' | '600' | '1000';
         boardType?: 'rectangular' | 'voronoi';
+        surface?: 'plane' | 'torus';
     } = {},
 ) {
     const modal = await openDocumentManager(page);
@@ -36,6 +37,9 @@ export async function createDocument(
     }
     if (options.boardType) {
         await modal.getByLabel('Board type').selectOption(options.boardType);
+    }
+    if (options.surface) {
+        await modal.getByLabel('Surface').selectOption(options.surface);
     }
     await modal.getByRole('button', {name: 'New document'}).click();
     await expect(modal.getByText('Document created')).toBeVisible();

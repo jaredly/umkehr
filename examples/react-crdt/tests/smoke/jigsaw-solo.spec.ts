@@ -63,7 +63,7 @@ test('contains jigsaw pieces and supports local canvas navigation', async ({page
 
     const pieceLabel = await firstHitTestablePieceLabel(page);
     expect(pieceLabel).toBeTruthy();
-    const piece = panel.getByRole('button', {name: pieceLabel!});
+    const piece = panel.getByRole('button', {name: pieceLabel!, exact: true});
     const before = await piece.boundingBox();
     expect(before).toBeTruthy();
     await page.mouse.move(before!.x + before!.width / 2, before!.y + before!.height / 2);
@@ -95,6 +95,69 @@ test('requires creation options before opening a missing jigsaw document', async
     await expect(page.getByTestId('jigsaw-panel')).toHaveCount(0);
     await openDocument(page, title);
     await expect(page.getByText('30 piece hue puzzle')).toBeVisible();
+});
+
+test('renders torus pieces through wrapped sub-canvas interactions', async ({page}, testInfo) => {
+    const title = `Jigsaw torus ${Date.now()}`;
+    await openApp(page, {
+        mode: 'solo',
+        appId: 'jigsaw',
+        docId: uniqueTestDocId(testInfo, 'jigsaw-torus'),
+    });
+    await createDocument(page, title, {pieceCount: '12', surface: 'torus'});
+    await openDocument(page, title);
+
+    const viewport = page.getByTestId('jigsaw-viewport');
+    const torus = page.getByTestId('jigsaw-torus-viewport');
+    const torusCanvas = page.getByTestId('jigsaw-torus-canvas');
+    await expect(torus).toBeVisible();
+    await expect(torusCanvas).toBeVisible();
+
+    const pieceInfo = await firstHitTestableUnplacedPiece(page);
+    expect(pieceInfo).toBeTruthy();
+    const torusBox = await torus.boundingBox();
+    expect(torusBox).toBeTruthy();
+    await page.mouse.move(pieceInfo!.center.x, pieceInfo!.center.y);
+    await page.mouse.down();
+    await page.mouse.move(torusBox!.x + torusBox!.width / 2, torusBox!.y + 6, {steps: 8});
+    await page.mouse.up();
+
+    const torusCopies = torus.locator(`.jigsawPiece[data-piece="${pieceInfo!.piece}"]`);
+    await expect.poll(() => torusCopies.count()).toBeGreaterThan(1);
+
+    const unplaced = page.locator('.jigsawCanvas > .jigsawPiece.unplaced').first();
+    const unplacedBefore = await unplaced.boundingBox();
+    const placedBefore = await torusCopies.first().boundingBox();
+    expect(unplacedBefore).toBeTruthy();
+    expect(placedBefore).toBeTruthy();
+    await page.mouse.move(torusBox!.x + torusBox!.width / 2, torusBox!.y + torusBox!.height / 2);
+    await page.mouse.wheel(0, 72);
+    await expect
+        .poll(async () => {
+            const after = await torusCopies.first().boundingBox();
+            if (!after) return false;
+            return Math.abs(after.y - placedBefore!.y) > 1;
+        })
+        .toBe(true);
+    const unplacedAfter = await unplaced.boundingBox();
+    expect(unplacedAfter).toBeTruthy();
+    expect(Math.abs(unplacedAfter!.x - unplacedBefore!.x)).toBeLessThan(1);
+    expect(Math.abs(unplacedAfter!.y - unplacedBefore!.y)).toBeLessThan(1);
+
+    const placedAfterPan = await torusCopies.first().boundingBox();
+    expect(placedAfterPan).toBeTruthy();
+    await page.mouse.move(
+        placedAfterPan!.x + placedAfterPan!.width / 2,
+        placedAfterPan!.y + placedAfterPan!.height / 2,
+    );
+    await page.mouse.down();
+    await page.mouse.move(torusBox!.x + torusBox!.width + 36, torusBox!.y + torusBox!.height + 36, {steps: 8});
+    await page.mouse.up();
+
+    await expect.poll(() => torusCopies.count()).toBe(0);
+    await expect(page.locator(`.jigsawCanvas > .jigsawPiece.unplaced[data-piece="${pieceInfo!.piece}"]`)).toHaveCount(1);
+    await expectNoPieceHitOutsideViewport(page);
+    await expect(viewport).toHaveCSS('overflow', 'hidden');
 });
 
 test('creates and opens a Voronoi jigsaw document', async ({page}, testInfo) => {
@@ -173,6 +236,34 @@ async function firstHitTestablePieceLabel(page: import('@playwright/test').Page)
             }
             if (!document.elementsFromPoint(center.x, center.y).includes(piece)) continue;
             return piece.getAttribute('aria-label');
+        }
+        return null;
+    });
+}
+
+async function firstHitTestableUnplacedPiece(page: import('@playwright/test').Page) {
+    return page.evaluate(() => {
+        const viewport = document.querySelector('[data-testid="jigsaw-viewport"]');
+        if (!viewport) return null;
+        const viewportRect = viewport.getBoundingClientRect();
+        for (const piece of document.querySelectorAll<HTMLElement>('.jigsawCanvas > .jigsawPiece.unplaced')) {
+            const rect = piece.getBoundingClientRect();
+            const center = {
+                x: rect.left + rect.width / 2,
+                y: rect.top + rect.height / 2,
+            };
+            if (
+                center.x < viewportRect.left ||
+                center.x > viewportRect.right ||
+                center.y < viewportRect.top ||
+                center.y > viewportRect.bottom
+            ) {
+                continue;
+            }
+            if (!document.elementsFromPoint(center.x, center.y).includes(piece)) continue;
+            const pieceId = Number(piece.dataset.piece);
+            if (!Number.isInteger(pieceId)) continue;
+            return {piece: pieceId, center};
         }
         return null;
     });

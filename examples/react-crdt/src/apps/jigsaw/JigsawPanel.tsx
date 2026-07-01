@@ -18,14 +18,21 @@ import {
     add,
     arrangeUnplacedPieces,
     buildPuzzleLayout,
+    canonicalTorusPoint,
     connectionPatch,
     estimatedPieceSize,
+    isInsideTorusViewport,
+    nearestEquivalentPoint,
+    outsideTorusDropPatches,
     positionPatch,
+    positiveModulo,
     snapCandidates,
     snapThreshold,
     subtract,
+    torusPieceCopies,
     unplacedPieces,
     validConnections,
+    wrappedDistance,
 } from './jigsaw';
 import {JigsawMinimap, type JigsawBoardSpace, type JigsawViewport} from './JigsawMinimap';
 
@@ -34,14 +41,22 @@ type DragState = {
     component: number[];
     anchor: number;
     startPointer: Coord;
+    currentPointer: Coord;
     initialPositions: Map<number, Coord>;
     delta: Coord;
+    mode: 'outer' | 'torus';
 };
 
 type PanState = {
     pointerId: number;
+    mode: 'outer' | 'torus';
     startX: number;
     startY: number;
+    panX: number;
+    panY: number;
+};
+
+type TorusViewport = {
     panX: number;
     panY: number;
 };
@@ -79,6 +94,7 @@ export function JigsawPanel({
     const positions = useValue(editor.$.positions);
     const connections = useValue(editor.$.connections);
     const sourceImage = useJigsawSourceCanvas(board);
+    const isTorusBoard = board.surface === 'torus';
     const state = useMemo(() => ({positions, connections}), [connections, positions]);
     const layout = useMemo(() => buildPuzzleLayout(board, state), [board, state]);
     const pieceSize = useMemo(() => estimatedPieceSize(board), [board]);
@@ -96,6 +112,7 @@ export function JigsawPanel({
     );
     const [viewportSize, setViewportSize] = useState({width: 1, height: 1});
     const [viewport, setViewport] = useState<JigsawViewport>({panX: 0, panY: 0, zoom: 1});
+    const [torusViewport, setTorusViewport] = useState<TorusViewport>({panX: 0, panY: 0});
     const [viewportInitialized, setViewportInitialized] = useState(false);
     const [localLayout, setLocalLayout] = useState<LocalLayoutState>(() => ({
         seed: 1,
@@ -109,6 +126,10 @@ export function JigsawPanel({
     const [showPreviewImage, setShowPreviewImage] = useState(false);
     const unplaced = useMemo(() => unplacedPieces(board, layout), [board, layout]);
     const localPositions = localLayout.positions;
+
+    useEffect(() => {
+        setTorusViewport({panX: 0, panY: 0});
+    }, [board.imageSize.height, board.imageSize.width, isTorusBoard]);
 
     useEffect(() => {
         const element = viewportRef.current;
@@ -161,6 +182,13 @@ export function JigsawPanel({
                 });
                 return;
             }
+            if (isTorusBoard && eventTargetIsInTorusViewport(event.target)) {
+                setTorusViewport((current) => ({
+                    panX: positiveModulo(current.panX - event.deltaX / viewport.zoom, board.imageSize.width),
+                    panY: positiveModulo(current.panY - event.deltaY / viewport.zoom, board.imageSize.height),
+                }));
+                return;
+            }
             setViewport((current) => ({
                 ...current,
                 panX: current.panX - event.deltaX,
@@ -169,7 +197,7 @@ export function JigsawPanel({
         };
         element.addEventListener('wheel', onWheel, {passive: false});
         return () => element.removeEventListener('wheel', onWheel);
-    }, [viewport]);
+    }, [board.imageSize.height, board.imageSize.width, isTorusBoard, viewport]);
 
     useEffect(() => {
         setLocalLayout((current) => {
@@ -221,8 +249,34 @@ export function JigsawPanel({
         }
         return result;
     }, [drag, layout.positions, localPositions]);
+    const renderedPlacedPositions = useMemo(() => {
+        const result = new Map<number, Coord>(layout.positions);
+        if (drag) {
+            for (const [piece, position] of drag.initialPositions) {
+                if (layout.positions.has(piece)) result.set(piece, add(position, drag.delta));
+            }
+        }
+        return result;
+    }, [drag, layout.positions]);
+    const renderedUnplacedPositions = useMemo(() => {
+        const result = new Map<number, Coord>(localPositions);
+        if (drag) {
+            for (const [piece, position] of drag.initialPositions) {
+                if (!layout.positions.has(piece)) result.set(piece, add(position, drag.delta));
+            }
+        }
+        return result;
+    }, [drag, layout.positions, localPositions]);
+    const minimapPositions = useMemo(() => {
+        if (!isTorusBoard) return renderedPositions;
+        const result = new Map<number, Coord>(renderedUnplacedPositions);
+        for (const [piece, position] of renderedPlacedPositions) {
+            result.set(piece, canonicalTorusPoint(position, board.imageSize));
+        }
+        return result;
+    }, [board.imageSize, isTorusBoard, renderedPlacedPositions, renderedPositions, renderedUnplacedPositions]);
     usePieceMoveAnimation(renderedPositions, pieceRefs, {
-        disabled: Boolean(drag),
+        disabled: Boolean(drag) || isTorusBoard,
         durationMs: remoteMoveAnimationMs,
         localMoveAnimationNonce,
     });
@@ -235,7 +289,9 @@ export function JigsawPanel({
         if (readOnly) return;
         event.preventDefault();
         event.stopPropagation();
-        const pointer = pointerToBoard(event);
+        const placed = layout.positions.has(piece);
+        const mode = isTorusBoard && placed ? 'torus' : 'outer';
+        const pointer = mode === 'torus' ? pointerToTorusImage(event) : pointerToBoard(event);
         if (!pointer) return;
         const componentIndex = layout.pieceToComponent.get(piece);
         const component = componentIndex === undefined ? [piece] : layout.components[componentIndex] ?? [piece];
@@ -255,8 +311,10 @@ export function JigsawPanel({
             component,
             anchor,
             startPointer: pointer,
+            currentPointer: pointer,
             initialPositions,
             delta: {x: 0, y: 0},
+            mode,
         });
     };
     const startDragRef = useRef(startDrag);
@@ -271,18 +329,27 @@ export function JigsawPanel({
         if (event.button !== 0 || !event.isPrimary || drag) return;
         event.preventDefault();
         event.currentTarget.setPointerCapture(event.pointerId);
+        const mode = isTorusBoard && eventTargetIsInTorusViewport(event.target) ? 'torus' : 'outer';
         setPan({
             pointerId: event.pointerId,
+            mode,
             startX: event.clientX,
             startY: event.clientY,
-            panX: viewport.panX,
-            panY: viewport.panY,
+            panX: mode === 'torus' ? torusViewport.panX : viewport.panX,
+            panY: mode === 'torus' ? torusViewport.panY : viewport.panY,
         });
     };
 
     const updateDrag = (event: PointerEvent<HTMLDivElement>) => {
         if (pan && event.pointerId === pan.pointerId) {
             event.preventDefault();
+            if (pan.mode === 'torus') {
+                setTorusViewport({
+                    panX: positiveModulo(pan.panX + (event.clientX - pan.startX) / viewport.zoom, board.imageSize.width),
+                    panY: positiveModulo(pan.panY + (event.clientY - pan.startY) / viewport.zoom, board.imageSize.height),
+                });
+                return;
+            }
             setViewport((current) => ({
                 ...current,
                 panX: pan.panX + event.clientX - pan.startX,
@@ -292,9 +359,16 @@ export function JigsawPanel({
         }
         if (!drag || event.pointerId !== drag.pointerId) return;
         event.preventDefault();
-        const pointer = pointerToBoard(event);
+        const pointer =
+            drag.mode === 'torus'
+                ? pointerToTorusImage(event, drag.currentPointer)
+                : pointerToBoard(event);
         if (!pointer) return;
-        setDrag({...drag, delta: subtract(pointer, drag.startPointer)});
+        setDrag({
+            ...drag,
+            currentPointer: pointer,
+            delta: subtract(pointer, drag.startPointer),
+        });
     };
 
     const finishDrag = (event: PointerEvent<HTMLDivElement>) => {
@@ -320,6 +394,18 @@ export function JigsawPanel({
             return;
         }
 
+        const torusLocalDrop = isTorusBoard ? pointerToTorusLocal(event) : null;
+        const torusDropInside = torusLocalDrop ? isInsideTorusViewport(torusLocalDrop, board.imageSize) : false;
+        if (isTorusBoard && !torusDropInside) {
+            const outsideDrop = outsideTorusDropPatches(latest, drag.component);
+            suppressLocalMoveAnimation();
+            if (outsideDrop.type === 'patches' && outsideDrop.patches.length) {
+                editor.dispatch(outsideDrop.patches);
+            }
+            setDrag(null);
+            return;
+        }
+
         const allPositions = new Map<number, Coord>(localPositions);
         for (const [piece, position] of latestLayout.positions) allPositions.set(piece, position);
         for (const [piece, position] of draggedPositions) allPositions.set(piece, position);
@@ -330,12 +416,16 @@ export function JigsawPanel({
             draggedPositions,
             allPositions,
             snapThreshold: threshold,
+            distanceBetween: isTorusBoard ? (a, b) => wrappedDistance(a, b, board.imageSize) : undefined,
         });
         const newConnections = candidates.filter(
             (candidate) => latest.connections[candidate.key] === undefined,
         );
+        const storedAnchorPosition = isTorusBoard
+            ? canonicalTorusPoint(anchorPosition, board.imageSize)
+            : anchorPosition;
         const patches = [
-            positionPatch(latest, drag.anchor, anchorPosition),
+            positionPatch(latest, drag.anchor, storedAnchorPosition),
             ...newConnections.map(connectionPatch),
         ];
         suppressLocalMoveAnimation();
@@ -361,6 +451,70 @@ export function JigsawPanel({
             panX: viewportSize.width / 2 - point.x * current.zoom,
             panY: viewportSize.height / 2 - point.y * current.zoom,
         }));
+    };
+
+    const renderPiece = ({
+        index,
+        position,
+        placed,
+        layer,
+        keyPrefix,
+        copyKey,
+        copyPrimary = true,
+        elementRef = pieceElementRefs[index],
+    }: {
+        index: number;
+        position: Coord;
+        placed: boolean;
+        layer: 'outer' | 'torus';
+        keyPrefix: string;
+        copyKey?: string;
+        copyPrimary?: boolean;
+        elementRef?: (element: HTMLButtonElement | null) => void;
+    }) => {
+        const piece = board.pieces[index];
+        if (!piece) return null;
+        const canvasPosition = layer === 'outer' ? imageToCanvas(position, boardGeometry.imageOffset) : position;
+        const componentIndex = layout.pieceToComponent.get(index);
+        const component =
+            componentIndex === undefined
+                ? [index]
+                : layout.components[componentIndex] ?? [index];
+        const anchor =
+            componentIndex === undefined ? undefined : layout.anchors.get(componentIndex);
+        const active = activeComponent.has(index);
+        const snapped = snapPulse?.pieces.has(index) ?? false;
+        return (
+            <JigsawPieceView
+                key={`${keyPrefix}-${index}${copyKey ? `-${copyKey}` : ''}`}
+                elementRef={elementRef}
+                piece={index}
+                copyKey={copyKey}
+                copyPrimary={copyPrimary}
+                left={canvasPosition.x + piece.bounds.left}
+                top={canvasPosition.y + piece.bounds.top}
+                width={piece.bounds.width}
+                height={piece.bounds.height}
+                zIndex={pieceZIndex({
+                    piece: index,
+                    component,
+                    anchor,
+                    placed,
+                    active,
+                })}
+                placed={placed}
+                active={active}
+                snapped={snapped}
+                snapPulseId={snapPulse?.id}
+                readOnly={readOnly}
+                source={sourceImage}
+                pieceCenterX={piece.center.x}
+                pieceCenterY={piece.center.y}
+                bounds={piece.bounds}
+                mask={piece.mask}
+                onPointerDown={handlePiecePointerDown}
+            />
+        );
     };
 
     return (
@@ -446,63 +600,107 @@ export function JigsawPanel({
                         transform: `translate(${viewport.panX}px, ${viewport.panY}px) scale(${viewport.zoom})`,
                     }}
                 >
-                    {showPreviewImage ? (
-                        <SolvedImageCanvas source={sourceImage} offset={boardGeometry.imageOffset} />
-                    ) : null}
-                    {board.pieces.map((piece, index) => {
-                        const position = renderedPositions.get(index);
-                        if (!position) return null;
-                        const canvasPosition = imageToCanvas(position, boardGeometry.imageOffset);
-                        const componentIndex = layout.pieceToComponent.get(index);
-                        const component =
-                            componentIndex === undefined
-                                ? [index]
-                                : layout.components[componentIndex] ?? [index];
-                        const anchor =
-                            componentIndex === undefined ? undefined : layout.anchors.get(componentIndex);
-                        const placed = layout.positions.has(index);
-                        const active = activeComponent.has(index);
-                        const snapped = snapPulse?.pieces.has(index) ?? false;
-                        return (
-                            <JigsawPieceView
-                                key={index}
-                                elementRef={pieceElementRefs[index]}
-                                piece={index}
-                                left={canvasPosition.x + piece.bounds.left}
-                                top={canvasPosition.y + piece.bounds.top}
-                                width={piece.bounds.width}
-                                height={piece.bounds.height}
-                                zIndex={pieceZIndex({
-                                    piece: index,
-                                    component,
-                                    anchor,
-                                    placed,
-                                    active,
-                                })}
-                                placed={placed}
-                                active={active}
-                                snapped={snapped}
-                                snapPulseId={snapPulse?.id}
-                                readOnly={readOnly}
-                                source={sourceImage}
-                                pieceCenterX={piece.center.x}
-                                pieceCenterY={piece.center.y}
-                                bounds={piece.bounds}
-                                mask={piece.mask}
-                                onPointerDown={handlePiecePointerDown}
-                            />
-                        );
-                    })}
+                    {isTorusBoard ? (
+                        <>
+                            <div
+                                className="jigsawTorusViewport"
+                                data-testid="jigsaw-torus-viewport"
+                                style={{
+                                    left: boardGeometry.imageOffset.x,
+                                    top: boardGeometry.imageOffset.y,
+                                    width: board.imageSize.width,
+                                    height: board.imageSize.height,
+                                }}
+                            >
+                                <div
+                                    className="jigsawTorusCanvas"
+                                    data-testid="jigsaw-torus-canvas"
+                                    style={{
+                                        width: board.imageSize.width,
+                                        height: board.imageSize.height,
+                                    }}
+                                >
+                                    {showPreviewImage
+                                        ? torusImageTiles(torusViewport, board.imageSize).map((offset) => (
+                                              <SolvedImageCanvas
+                                                  key={`${offset.x}:${offset.y}`}
+                                                  source={sourceImage}
+                                                  offset={offset}
+                                              />
+                                          ))
+                                        : null}
+                                    {board.pieces.flatMap((_piece, index) => {
+                                        const position = renderedPlacedPositions.get(index);
+                                        if (!position) return [];
+                                        return torusPieceCopies({
+                                            board,
+                                            piece: index,
+                                            position,
+                                            pan: torusPanCoord(torusViewport),
+                                        }).map((copy) =>
+                                            renderPiece({
+                                                index,
+                                                position: copy.position,
+                                                placed: true,
+                                                layer: 'torus',
+                                                keyPrefix: 'torus',
+                                                copyKey: copy.key,
+                                                copyPrimary: copy.primary,
+                                                elementRef: copy.primary ? pieceElementRefs[index] : undefined,
+                                            }),
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                            {board.pieces.map((_piece, index) => {
+                                const position = renderedUnplacedPositions.get(index);
+                                if (!position) return null;
+                                return renderPiece({
+                                    index,
+                                    position,
+                                    placed: false,
+                                    layer: 'outer',
+                                    keyPrefix: 'outer',
+                                });
+                            })}
+                        </>
+                    ) : (
+                        <>
+                            {showPreviewImage ? (
+                                <SolvedImageCanvas source={sourceImage} offset={boardGeometry.imageOffset} />
+                            ) : null}
+                            {board.pieces.map((_piece, index) => {
+                                const position = renderedPositions.get(index);
+                                if (!position) return null;
+                                return renderPiece({
+                                    index,
+                                    position,
+                                    placed: layout.positions.has(index),
+                                    layer: 'outer',
+                                    keyPrefix: 'plane',
+                                });
+                            })}
+                        </>
+                    )}
                 </div>
                 <JigsawMinimap
                     board={board}
                     boardSpace={boardGeometry.boardSpace}
                     imageOffset={boardGeometry.imageOffset}
                     imageSize={board.imageSize}
-                    renderedPositions={renderedPositions}
+                    renderedPositions={minimapPositions}
                     placedPieces={placedPieces}
                     viewport={viewport}
                     viewportSize={viewportSize}
+                    torus={
+                        isTorusBoard
+                            ? {
+                                  panX: torusViewport.panX,
+                                  panY: torusViewport.panY,
+                                  imageSize: board.imageSize,
+                              }
+                            : undefined
+                    }
                     dragging={draggingMinimap}
                     setDragging={setDraggingMinimap}
                     recenter={recenterFromMinimap}
@@ -520,6 +718,28 @@ export function JigsawPanel({
             screenToCanvas(event.clientX, event.clientY, rect, viewport),
             boardGeometry.imageOffset,
         );
+    }
+
+    function pointerToTorusLocal(event: PointerEvent<HTMLElement>): Coord | null {
+        const viewportElement = viewportRef.current;
+        if (!viewportElement) return null;
+        const rect = viewportElement.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return null;
+        return subtract(
+            screenToCanvas(event.clientX, event.clientY, rect, viewport),
+            boardGeometry.imageOffset,
+        );
+    }
+
+    function pointerToTorusImage(
+        event: PointerEvent<HTMLElement>,
+        reference?: Coord,
+    ): Coord | null {
+        const local = pointerToTorusLocal(event);
+        if (!local) return null;
+        const raw = subtract(local, torusPanCoord(torusViewport));
+        const canonical = canonicalTorusPoint(raw, board.imageSize);
+        return reference ? nearestEquivalentPoint(canonical, reference, board.imageSize) : canonical;
     }
 
     function pieceZIndex({
@@ -605,8 +825,10 @@ function setPieceElement(
 }
 
 type JigsawPieceViewProps = {
-    elementRef: (element: HTMLButtonElement | null) => void;
+    elementRef?: (element: HTMLButtonElement | null) => void;
     piece: number;
+    copyKey?: string;
+    copyPrimary?: boolean;
     left: number;
     top: number;
     width: number;
@@ -628,6 +850,8 @@ type JigsawPieceViewProps = {
 const JigsawPieceView = memo(function JigsawPieceView({
     elementRef,
     piece,
+    copyKey,
+    copyPrimary = true,
     left,
     top,
     width,
@@ -653,8 +877,11 @@ const JigsawPieceView = memo(function JigsawPieceView({
                 snapped ? 'snapped' : ''
             }`}
             data-piece={piece}
+            data-piece-copy={copyKey}
             data-snap-pulse={snapped ? snapPulseId : undefined}
             disabled={readOnly}
+            tabIndex={copyPrimary ? undefined : -1}
+            aria-hidden={copyPrimary ? undefined : true}
             onPointerDown={onPointerDown}
             style={
                 {
@@ -681,6 +908,8 @@ function areJigsawPieceViewPropsEqual(previous: JigsawPieceViewProps, next: Jigs
     return (
         previous.elementRef === next.elementRef &&
         previous.piece === next.piece &&
+        previous.copyKey === next.copyKey &&
+        previous.copyPrimary === next.copyPrimary &&
         previous.left === next.left &&
         previous.top === next.top &&
         previous.width === next.width &&
@@ -821,10 +1050,6 @@ function drawWrappedImageRegion(
         }
         drawnX += chunkWidth;
     }
-}
-
-function positiveModulo(value: number, size: number) {
-    return ((value % size) + size) % size;
 }
 
 function useJigsawSourceCanvas(board: JigsawBoardArtifact) {
@@ -969,6 +1194,37 @@ function releasePointerCapture(event: PointerEvent<HTMLElement>) {
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
         event.currentTarget.releasePointerCapture(event.pointerId);
     }
+}
+
+function eventTargetIsInTorusViewport(target: EventTarget | null) {
+    return typeof Element !== 'undefined' && target instanceof Element
+        ? Boolean(target.closest('.jigsawTorusViewport'))
+        : false;
+}
+
+function torusPanCoord(pan: TorusViewport): Coord {
+    return {x: pan.panX, y: pan.panY};
+}
+
+function torusImageTiles(
+    pan: TorusViewport,
+    imageSize: {width: number; height: number},
+): Coord[] {
+    const base = {
+        x: positiveModulo(pan.panX, imageSize.width),
+        y: positiveModulo(pan.panY, imageSize.height),
+    };
+    return [
+        {x: base.x - imageSize.width, y: base.y - imageSize.height},
+        {x: base.x, y: base.y - imageSize.height},
+        {x: base.x + imageSize.width, y: base.y - imageSize.height},
+        {x: base.x - imageSize.width, y: base.y},
+        {x: base.x, y: base.y},
+        {x: base.x + imageSize.width, y: base.y},
+        {x: base.x - imageSize.width, y: base.y + imageSize.height},
+        {x: base.x, y: base.y + imageSize.height},
+        {x: base.x + imageSize.width, y: base.y + imageSize.height},
+    ];
 }
 
 function boardSpaceFor(
