@@ -50,6 +50,7 @@ import {
     removePositionPatch,
     snapCandidates,
     snapStrength,
+    torusLogicalDropPosition,
     torusPieceCopies,
     validConnections,
     wrappedDistance,
@@ -779,6 +780,19 @@ describe('jigsaw placement logic', () => {
         });
         expect(outsideTorusDropPatches(state, [4])).toEqual({type: 'patches', patches: []});
         expect(outsideTorusDropPatches(state, [3, 0])).toEqual({type: 'cancel'});
+    });
+
+    it('converts visual torus drop positions through sub-canvas pan before storing', () => {
+        const size = {width: 720, height: 540};
+
+        expect(torusLogicalDropPosition({x: 300, y: 160}, {x: 120, y: 40}, size)).toEqual({
+            x: 180,
+            y: 120,
+        });
+        expect(torusLogicalDropPosition({x: 40, y: 20}, {x: 120, y: 40}, size)).toEqual({
+            x: 640,
+            y: 520,
+        });
     });
 
     it('can compare torus snap candidates with wrapped distance', () => {

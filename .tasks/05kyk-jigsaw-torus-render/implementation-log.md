@@ -33,3 +33,13 @@
   - `npm run build` passes.
 - Issue observed: shell startup prints `Error connecting to agent: Operation not permitted` during some commands, but the affected commands exited successfully.
 - Vite build warning observed: some chunks exceed 500 kB after minification. This appears unrelated to the torus work and did not fail the build.
+
+## 2026-06-30 22:24 CDT
+
+- Fixed a placement bug found during manual testing: dropping an unplaced piece into a panned torus sub-canvas stored the visual sub-canvas coordinate instead of subtracting torus pan first, so the piece jumped after drop.
+- Added `torusLogicalDropPosition(...)` and use it only for outer-layer drags that finish inside the torus surface. Placed-piece torus drags already track logical torus coordinates and still only need canonicalization.
+- Added unit coverage for visual-drop-to-logical-position conversion, including wrapped negative results.
+- Verification:
+  - `npm exec vitest -- src/apps/jigsaw/jigsaw.test.ts` passes (`64` tests).
+  - `npm exec tsc -- -p tsconfig.json --noEmit` passes.
+  - `pnpm test:e2e -- tests/smoke/jigsaw-solo.spec.ts` passes (`5` tests).

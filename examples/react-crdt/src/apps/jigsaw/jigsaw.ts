@@ -936,6 +936,14 @@ export function canonicalTorusPoint(
     };
 }
 
+export function torusLogicalDropPosition(
+    visualPosition: Coord,
+    pan: Coord,
+    size: {width: number; height: number},
+): Coord {
+    return canonicalTorusPoint(subtract(visualPosition, pan), size);
+}
+
 export function shortestWrappedDelta(
     from: Coord,
     to: Coord,

@@ -30,6 +30,7 @@ import {
     snapThreshold,
     subtract,
     torusPieceCopies,
+    torusLogicalDropPosition,
     unplacedPieces,
     validConnections,
     wrappedDistance,
@@ -422,7 +423,9 @@ export function JigsawPanel({
             (candidate) => latest.connections[candidate.key] === undefined,
         );
         const storedAnchorPosition = isTorusBoard
-            ? canonicalTorusPoint(anchorPosition, board.imageSize)
+            ? drag.mode === 'torus'
+                ? canonicalTorusPoint(anchorPosition, board.imageSize)
+                : torusLogicalDropPosition(anchorPosition, torusPanCoord(torusViewport), board.imageSize)
             : anchorPosition;
         const patches = [
             positionPatch(latest, drag.anchor, storedAnchorPosition),
