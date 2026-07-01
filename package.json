@@ -95,6 +95,10 @@
             "types": "./dist/src/block-richtext/*.d.ts",
             "import": "./dist/src/block-richtext/*.js"
         },
+        "./jigsaw": {
+            "types": "./dist/src/jigsaw/index.d.ts",
+            "import": "./dist/src/jigsaw/index.js"
+        },
         "./block-editor": {
             "types": "./dist/src/block-editor/index.d.ts",
             "import": "./dist/src/block-editor/index.js"
@@ -111,6 +115,9 @@
             "import": "./dist/src/react-rich-text/index.js"
         },
         "./package.json": "./package.json"
+    },
+    "bin": {
+        "jigsaw-board-svg": "./dist/src/jigsaw/jigsaw-board-svg.js"
     },
     "scripts": {
         "clean": "rm -rf dist",

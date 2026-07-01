@@ -6,7 +6,7 @@
     "seed:server": "vite build --configLoader runner --config vite.seed.config.ts 1>&2 && node /private/tmp/umkehr-react-crdt-seed-build/generate.js",
     "build": "tsc -p tsconfig.json --noEmit && vite build",
     "build:wordsearch-peerjs": "tsc -p tsconfig.json --noEmit && vite build --configLoader runner --config vite.wordsearch-peerjs.config.ts",
-    "jigsaw:svg": "bun scripts/jigsaw-board-svg.ts",
+    "jigsaw:svg": "bun ../../src/jigsaw/jigsaw-board-svg.ts",
     "jigsaw:pack-benchmark": "bun scripts/jigsaw-pack-benchmark.ts",
     "test:e2e": "playwright test -c playwright.config.ts",
     "test:e2e:smoke": "playwright test -c playwright.config.ts tests/smoke tests/server/server-history-preview.spec.ts",
