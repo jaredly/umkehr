@@ -14,6 +14,7 @@
             "umkehr/block-richtext/*": ["../../src/block-richtext/*"],
             "umkehr/block-editor": ["../../src/block-editor/index.ts"],
             "umkehr/block-editor/*": ["../../src/block-editor/*"],
+            "umkehr/jigsaw": ["../../src/jigsaw/index.ts"],
             "umkehr/validation": ["../../src/validation/index.ts"],
             "umkehr/react": ["../../src/react/react.tsx"],
             "umkehr/react-crdt": ["../../src/react-crdt/index.ts"]

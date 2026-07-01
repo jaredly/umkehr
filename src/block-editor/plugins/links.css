@@ -1,0 +1,117 @@
+/* Styles owned by the links block editor plugin. */
+.markLink {
+    color: #0b63b6;
+    text-decoration-line: underline;
+    text-underline-offset: 0.16em;
+    cursor: pointer;
+}
+
+.markLinkDead {
+    color: #9a4b00;
+    text-decoration-style: wavy;
+}
+
+.markStrikethrough.markLink {
+    text-decoration-line: underline line-through;
+}
+
+.linkFloatingPopover,
+.embedFloatingPopover {
+    position: fixed;
+    z-index: 45;
+    display: grid;
+    grid-template-columns: minmax(160px, 1fr) auto auto;
+    gap: 6px;
+    width: min(420px, calc(100vw - 24px));
+    max-height: min(280px, calc(100vh - 24px));
+    overflow: auto;
+    padding: 8px;
+    border: 1px solid #9ca3af;
+    border-radius: 8px;
+    background: #fff;
+    box-shadow: 0 12px 32px rgb(0 0 0 / 20%);
+}
+
+.linkHoverPopover {
+    position: fixed;
+    z-index: 44;
+    display: flex;
+    /*grid-template-columns: minmax(140px, 1fr) auto;*/
+    align-items: center;
+    gap: 6px;
+    /*width: min(380px, calc(100vw - 24px));*/
+    padding: 6px;
+    border: 1px solid #9ca3af;
+    border-radius: 8px;
+    background: #fff;
+    box-shadow: 0 10px 26px rgb(0 0 0 / 18%);
+}
+
+.linkHoverUrl {
+    min-width: 0;
+    overflow: hidden;
+    color: #0b63b6;
+    /*font-size: 13px;*/
+    text-overflow: ellipsis;
+    text-decoration-line: underline;
+    white-space: nowrap;
+}
+
+.linkFloatingPopover input,
+.embedFloatingPopover input {
+    min-width: 0;
+    height: 32px;
+    padding: 0 8px;
+    border: 1px solid #cbd5df;
+    border-radius: 6px;
+}
+
+.linkFloatingPopover button,
+.embedFloatingPopover button,
+.linkHoverPopover button {
+    height: 32px;
+    padding: 0 10px;
+    border: 1px solid #cbd5df;
+    border-radius: 6px;
+    color: #23313d;
+    background: #fff;
+    cursor: pointer;
+}
+
+.linkFloatingPopover button:hover,
+.embedFloatingPopover button:hover,
+.linkHoverPopover button:hover {
+    background: #eef3f7;
+}
+
+.linkFloatingPopover button:disabled,
+.embedFloatingPopover button:disabled,
+.linkHoverPopover button:disabled {
+    color: #8a96a3;
+    background: #f3f6f8;
+    cursor: not-allowed;
+}
+
+.linkOpenButton {
+    display: inline-grid;
+    place-items: center;
+    width: 32px;
+    padding: 0;
+}
+
+.linkOpenButton svg {
+    width: 16px;
+    height: 16px;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 2;
+}
+
+@media (max-width: 620px) {
+    .linkFloatingPopover,
+        .embedFloatingPopover {
+            grid-template-columns: minmax(0, 1fr);
+        }
+}

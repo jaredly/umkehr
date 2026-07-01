@@ -1,0 +1,1 @@
+examples/react-crdt: let's add support for uploading an image for the jigsaw puzzle. There should be a file input in the 'new document' form. on creation, the image should be added as an artifact with a fixed name (`image`) and the board artifact should indicate that it's using the artifact:image.

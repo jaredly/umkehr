@@ -30,7 +30,7 @@ import type {
 } from 'umkehr/react-crdt';
 import type {StatusStore} from 'umkehr';
 import type {ReactElement} from 'react';
-import type {ArtifactStore} from './artifacts';
+import {initialArtifactsForStore, type ArtifactStore, type SerializedArtifact} from './artifacts';
 
 export type GridSlot = 'left' | 'right';
 
@@ -123,6 +123,20 @@ export type HistoryProvider<TState, TAnnotations> = (props: {
     save?(history: History<TState, TAnnotations>): void;
 }) => ReactElement;
 
+export type DocumentInitParams = Record<string, unknown>;
+
+export type AppDocumentInitializer<
+    TState,
+    TInit extends DocumentInitParams = DocumentInitParams,
+> = {
+    required?: boolean;
+    defaultParams(): TInit;
+    renderFields(props: {value: TInit; onChange(value: TInit): void}): ReactElement;
+    validate(value: TInit): {success: true; data: TInit} | {success: false; message: string};
+    initialState(params: TInit): TState;
+    initialArtifacts?(params: TInit): SerializedArtifact[];
+};
+
 export type AppDefinition<
     TState,
     EphemeralData = never,
@@ -139,6 +153,7 @@ export type AppDefinition<
     initialState: TState;
     initialTimestamp?: HlcTimestamp;
     artifacts?: ArtifactStore;
+    documentInit?: AppDocumentInitializer<TState, any>;
     renderPanel(props: AppPanelProps<TState, EphemeralData, Extensions>): ReactElement;
 };
 
@@ -172,9 +187,10 @@ const defaultInitialTimestamp = hlc.pack(hlc.init('seed', 0));
 
 export function createInitialCrdtHistory<TState, EphemeralData = never>(
     app: AppDefinition<TState, EphemeralData, readonly LeafBuilderExtensionAny[]>,
+    initParams?: unknown,
 ): CrdtLocalHistory<TState> {
     return createCrdtLocalHistory(
-        createCrdtDocument(app.initialState, app.schema, {
+        createCrdtDocument(initialStateForApp(app, initParams), app.schema, {
             timestamp: app.initialTimestamp ?? defaultInitialTimestamp,
             leafPlugins: app.leafPlugins,
         }),
@@ -225,7 +241,7 @@ function cloneSerializableCrdtDocument<TState>(doc: CrdtDocument<TState>): CrdtD
 function appSchemaContext<TState, EphemeralData = never>(
     app: AppDefinition<TState, EphemeralData, readonly LeafBuilderExtensionAny[]>,
 ) {
-    return createCrdtDocument(app.initialState, app.schema, {
+    return createCrdtDocument(initialStateForApp(app), app.schema, {
         timestamp: app.initialTimestamp ?? defaultInitialTimestamp,
         leafPlugins: app.leafPlugins,
     }).schema;
@@ -233,8 +249,37 @@ function appSchemaContext<TState, EphemeralData = never>(
 
 export function createInitialHistory<TState, TAnnotations = never>(
     app: AppDefinition<TState, any, readonly LeafBuilderExtensionAny[]>,
+    initParams?: unknown,
 ): History<TState, TAnnotations> {
-    return blankHistory<TState, TAnnotations>(app.initialState);
+    return blankHistory<TState, TAnnotations>(initialStateForApp(app, initParams));
+}
+
+export function initialArtifactsForApp<TState, EphemeralData = never>(
+    app: AppDefinition<TState, EphemeralData, readonly LeafBuilderExtensionAny[]>,
+    initParams?: unknown,
+): SerializedArtifact[] {
+    if (!app.documentInit?.initialArtifacts) return initialArtifactsForStore(app.artifacts);
+    const params = validatedDocumentInitParams(app.documentInit, initParams);
+    return app.documentInit.initialArtifacts(params);
+}
+
+function initialStateForApp<TState, EphemeralData = never>(
+    app: AppDefinition<TState, EphemeralData, readonly LeafBuilderExtensionAny[]>,
+    initParams?: unknown,
+): TState {
+    if (!app.documentInit) return app.initialState;
+    const params = validatedDocumentInitParams(app.documentInit, initParams);
+    return app.documentInit.initialState(params);
+}
+
+function validatedDocumentInitParams<TInit extends DocumentInitParams>(
+    initializer: AppDocumentInitializer<unknown, TInit>,
+    initParams: unknown,
+): TInit {
+    const candidate = initParams === undefined ? initializer.defaultParams() : initParams;
+    const result = initializer.validate(candidate as TInit);
+    if (!result.success) throw new Error(result.message);
+    return result.data;
 }
 
 export function withDisabledEphemeral<TEditor, EphemeralData>(

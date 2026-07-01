@@ -79,7 +79,7 @@ export function usePeerJsSync<TState>({
         );
     }, [connectionsStore]);
 
-    const setProtocolError = useCallback(
+    const setPeerError = useCallback(
         (message: string, conn?: DataConnection) => {
             if (conn) {
                 const record = connectionsRef.current.get(conn.peer);
@@ -89,6 +89,25 @@ export function usePeerJsSync<TState>({
             stateStore.setSnapshot({kind: 'error', role: roleRef.current, message});
         },
         [publishConnections, stateStore],
+    );
+
+    const sendOrQueue = useCallback(
+        (record: ConnectionRecord<TState>, message: PeerMessage<TState>) => {
+            if (record.open && record.conn.open) {
+                try {
+                    record.conn.send(message);
+                } catch (error) {
+                    setPeerError(
+                        `Failed to send ${message.kind} message to ${record.conn.peer}: ${errorMessage(error)}`,
+                        record.conn,
+                    );
+                }
+            } else {
+                record.queued.push(message);
+                publishConnections();
+            }
+        },
+        [publishConnections, setPeerError],
     );
 
     const flushQueued = useCallback(
@@ -103,23 +122,11 @@ export function usePeerJsSync<TState>({
                 if (!record.open || !record.conn.open || !record.queued.length) continue;
                 const queued = record.queued;
                 record.queued = [];
-                for (const message of queued) record.conn.send(message);
+                for (const message of queued) sendOrQueue(record, message);
             }
             publishConnections();
         },
-        [publishConnections],
-    );
-
-    const sendOrQueue = useCallback(
-        (record: ConnectionRecord<TState>, message: PeerMessage<TState>) => {
-            if (record.open && record.conn.open) {
-                record.conn.send(message);
-            } else {
-                record.queued.push(message);
-                publishConnections();
-            }
-        },
-        [publishConnections],
+        [publishConnections, sendOrQueue],
     );
 
     const sendHello = useCallback(
@@ -213,7 +220,7 @@ export function usePeerJsSync<TState>({
         (conn: DataConnection, input: unknown) => {
             const message = parsePeerMessage(input, protocolRef.current);
             if (!message) {
-                setProtocolError(`Rejected invalid message from ${conn.peer}.`, conn);
+                setPeerError(`Rejected invalid message from ${conn.peer}.`, conn);
                 return;
             }
 
@@ -266,7 +273,7 @@ export function usePeerJsSync<TState>({
             deliverUpdates,
             flushQueued,
             publishConnections,
-            setProtocolError,
+            setPeerError,
             snapshotStore,
             stateStore,
         ],
@@ -313,14 +320,13 @@ export function usePeerJsSync<TState>({
                 }
             });
             conn.on('error', (error) => {
-                record.error = error instanceof Error ? error.message : String(error);
-                publishConnections();
+                setPeerError(`Peer connection error with ${conn.peer}: ${errorMessage(error)}`, conn);
             });
 
             publishConnections();
             return record;
         },
-        [flushQueued, handleMessage, publishConnections, sendHello, sendSnapshot],
+        [flushQueued, handleMessage, publishConnections, sendHello, sendSnapshot, setPeerError],
     );
 
     const transport = useMemo(
@@ -393,7 +399,7 @@ export function usePeerJsSync<TState>({
             const trimmed = peerId.trim();
             if (!peer || !trimmed) return;
             lastHostPeerIdRef.current = trimmed;
-            const conn = peer.connect(trimmed, {serialization: 'json'});
+            const conn = peer.connect(trimmed, {serialization: 'binary'});
             trackConnection(conn);
             if (roleRef.current === 'client') {
                 stateStore.setSnapshot({
@@ -484,6 +490,10 @@ export function usePeerJsSync<TState>({
             transport,
         ],
     );
+}
+
+function errorMessage(error: unknown) {
+    return error instanceof Error ? error.message : String(error);
 }
 
 function createUpdatesMessage<TState>(

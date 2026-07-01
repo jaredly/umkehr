@@ -14,20 +14,27 @@ import {
     type BareInlineMark,
     type BooleanInlineMark,
 } from './inlineMarks';
+import type {BlockEditorRegistry} from './plugins/types';
 
 type RichFormattedBlock = FormattedBlock<RichBlockMeta>;
 
-const BOOLEAN_INLINE_MARKS: BooleanInlineMark[] = ['bold', 'italic', 'strikethrough'];
-const BARE_INLINE_MARKS: BareInlineMark[] = [...BOOLEAN_INLINE_MARKS, CODE_MARK];
+const BOOLEAN_INLINE_MARKS: readonly BooleanInlineMark[] = ['bold', 'italic', 'strikethrough', 'underline'];
+export const DEFAULT_ACTIVE_INLINE_MARK_TYPES: readonly BareInlineMark[] = [...BOOLEAN_INLINE_MARKS, CODE_MARK];
+
+export const activeInlineMarkTypesFromRegistry = (
+    registry: Pick<BlockEditorRegistry<RichBlockMeta>, 'marks'>,
+): readonly BareInlineMark[] =>
+    DEFAULT_ACTIVE_INLINE_MARK_TYPES.filter((mark) => registry.marks.has(mark));
 
 export const deriveActiveInlineMarks = (
     state: CachedState<RichBlockMeta>,
     blocks: RichFormattedBlock[],
     selection: EditorSelection,
     pendingMarks: PendingInlineMarks,
+    markTypes: readonly BareInlineMark[] = DEFAULT_ACTIVE_INLINE_MARK_TYPES,
 ): PendingInlineMarks => {
     const result: PendingInlineMarks = {};
-    for (const mark of BARE_INLINE_MARKS) {
+    for (const mark of markTypes) {
         result[mark] =
             selection.type === 'caret'
                 ? !!pendingMarks[mark] || caretInsertionHasInlineMark(blocks, selection.point, mark)

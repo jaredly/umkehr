@@ -1,12 +1,6 @@
-/// <reference path="./optionalPreviewModules.d.ts" />
-
 import {useEffect, useRef, useState, type ReactElement} from 'react';
 
-import type {
-    CodePreviewKind,
-    PreviewMetadata,
-    RichBlockMeta,
-} from './blockMeta';
+import type {PreviewMetadata, RichBlockMeta} from './blockMeta';
 import type {ImageAttachment} from './attachments';
 import {
     fetchPreviewMetadata,
@@ -16,6 +10,7 @@ import {
     type PreviewUrlInvalidReason,
 } from './previewMetadata';
 import {stopEditorControlEvent} from './editorUiUtils';
+import type {BlockEditorCodePreviewRenderer} from './plugins/index.js';
 
 type CodePreviewRenderState =
     | {type: 'empty'}
@@ -24,79 +19,17 @@ type CodePreviewRenderState =
     | {type: 'rendered'; html: string}
     | {type: 'error'; message: string; html?: string};
 
-type CodePreviewRenderer = {
-    kind: CodePreviewKind;
-    emptyLabel: string;
-    loadingLabel: string;
-    errorLabel: string;
-    render(source: string, renderId: string): Promise<{html: string}>;
-};
-
-let mermaidInitialized = false;
-let mermaidLoadPromise: Promise<typeof import('mermaid')> | null = null;
-
-const loadMermaid = () => {
-    mermaidLoadPromise ??= import('mermaid');
-    return mermaidLoadPromise;
-};
-
-const ensureMermaidInitialized = async () => {
-    const mermaid = await loadMermaid();
-    if (mermaidInitialized) return mermaid.default;
-    mermaid.default.initialize({startOnLoad: false, securityLevel: 'strict'});
-    mermaidInitialized = true;
-    return mermaid.default;
-};
-
-const codePreviewRenderers: Record<CodePreviewKind, CodePreviewRenderer> = {
-    mermaid: {
-        kind: 'mermaid',
-        emptyLabel: 'Empty diagram',
-        loadingLabel: 'Rendering diagram...',
-        errorLabel: 'Unable to render Mermaid diagram.',
-        async render(source, renderId) {
-            const mermaid = await ensureMermaidInitialized();
-            const result = await mermaid.render(renderId, source);
-            return {html: result.svg};
-        },
-    },
-    'vega-lite': {
-        kind: 'vega-lite',
-        emptyLabel: 'Empty chart',
-        loadingLabel: 'Rendering chart...',
-        errorLabel: 'Unable to render Vega-Lite chart.',
-        async render(source, renderId) {
-            const [vegaLite, vega, yaml] = await Promise.all([import('vega-lite'), import('vega'), import('yaml')]);
-            const spec = parseJsonOrYaml(source, yaml.parse) as Parameters<typeof vegaLite.compile>[0];
-            const compiled = vegaLite.compile(spec).spec;
-            const view = new vega.View(vega.parse(compiled), {renderer: 'none'});
-            const svg = await view.toSVG();
-            await view.finalize();
-            return {html: `<div id="${renderId}">${svg}</div>`};
-        },
-    },
-};
-
-const parseJsonOrYaml = (source: string, parseYaml: (value: string) => unknown): unknown => {
-    try {
-        return JSON.parse(source);
-    } catch {
-        return parseYaml(source);
-    }
-};
-
 export function PreviewableCodeBlock({
     blockId,
-    previewKind,
+    renderer,
     source,
     editor,
 }: {
     blockId: string;
-    previewKind: CodePreviewKind;
+    renderer: BlockEditorCodePreviewRenderer;
     source: string;
     editor: ReactElement;
 }) {
-    const renderer = codePreviewRenderers[previewKind];
     const [mode, setMode] = useState<'edit' | 'preview' | 'split'>(() =>
         source.trim() === '' ? 'edit' : 'preview',
     );
@@ -207,7 +140,13 @@ const cachedPreviewHtml = (state: CodePreviewRenderState): string | undefined =>
     return undefined;
 };
 
-function CodePreview({state, renderer}: {state: CodePreviewRenderState; renderer: CodePreviewRenderer}) {
+function CodePreview({
+    state,
+    renderer,
+}: {
+    state: CodePreviewRenderState;
+    renderer: BlockEditorCodePreviewRenderer;
+}) {
     const visualHtml = cachedPreviewHtml(state);
     if (visualHtml) {
         return (

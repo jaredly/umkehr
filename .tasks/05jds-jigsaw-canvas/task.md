@@ -1,0 +1,1 @@
+examples/react-crdt: Currently, the jigsaw puzzle board is rendered in such a way that pieces can overlap other UI elements. Can you make the board be more self contained? Like the pieces should be rendered within an SVG canvas (or htmlcanvas, whichever you prefer), and there should be scroll/pan/zoom with a minimap.

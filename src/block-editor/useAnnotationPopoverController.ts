@@ -291,11 +291,13 @@ const pointerClearIds = (
 };
 
 export const useAnnotationPopoverController = ({
+    enabled = true,
     rootRef,
     selectedPopoverIds,
     selectedPopoverIdsKey,
     selectedPopoverSelectionKey,
 }: {
+    enabled?: boolean;
     rootRef: {readonly current: HTMLElement | null};
     selectedPopoverIds: string[];
     selectedPopoverIdsKey: string;
@@ -306,8 +308,8 @@ export const useAnnotationPopoverController = ({
     const intentHideTimersRef = useRef<Map<string, number>>(new Map());
 
     const activePopovers = useMemo(
-        () => derivedActivePopovers(managedPopovers),
-        [managedPopovers],
+        () => (enabled ? derivedActivePopovers(managedPopovers) : []),
+        [enabled, managedPopovers],
     );
 
     const cancelPopoverHide = useCallback(() => {
@@ -346,6 +348,7 @@ export const useAnnotationPopoverController = ({
 
     const schedulePopoverHideFromPointer = useCallback(
         (id?: string, transition?: PopoverPointerTransition) => {
+            if (!enabled) return;
             const relatedTarget = transition?.relatedTarget ?? null;
             setManagedPopovers((current) => {
                 if (id && targetIsInsidePopoverSubtree(current, id, relatedTarget)) {
@@ -380,21 +383,23 @@ export const useAnnotationPopoverController = ({
                 return pruneClosedPopovers(clearReasons(current, ids, ['hover', 'activation']));
             });
         },
-        [cancelPopoverHideForIds],
+        [cancelPopoverHideForIds, enabled],
     );
 
     const showPopover = useCallback(
         (id: string, element: HTMLElement, source: ActivePopover['source'] = 'hover') => {
+            if (!enabled) return;
             cancelPopoverHide();
             setManagedPopovers((current) =>
                 upsertPopover(current, id, element, source === 'selection' ? 'selection' : 'hover'),
             );
         },
-        [cancelPopoverHide],
+        [cancelPopoverHide, enabled],
     );
 
     const setPopoverFocusPinned = useCallback(
         (focused: boolean, id?: string, _relatedTarget?: EventTarget | null) => {
+            if (!enabled) return;
             cancelPopoverHide();
             if (focused && id) {
                 focusedPopoverIdRef.current = id;
@@ -421,7 +426,7 @@ export const useAnnotationPopoverController = ({
                 ),
             );
         },
-        [cancelPopoverHide],
+        [cancelPopoverHide, enabled],
     );
 
     const closeAllPopovers = useCallback(() => {
@@ -452,6 +457,7 @@ export const useAnnotationPopoverController = ({
     }, [cancelPopoverHide]);
 
     const repositionOpenPopovers = useCallback(() => {
+        if (!enabled) return;
         const root = rootRef.current;
         const panel = root?.closest<HTMLElement>('.editorPanel');
         if (!panel) return;
@@ -479,9 +485,17 @@ export const useAnnotationPopoverController = ({
             }
             return changed ? next : current;
         });
-    }, [rootRef]);
+    }, [enabled, rootRef]);
 
     useLayoutEffect(() => {
+        if (enabled) return;
+        cancelPopoverHide();
+        setManagedPopovers([]);
+        focusedPopoverIdRef.current = null;
+    }, [cancelPopoverHide, enabled]);
+
+    useLayoutEffect(() => {
+        if (!enabled) return;
         const root = rootRef.current;
         const panel = root?.closest<HTMLElement>('.editorPanel');
         const document = root?.ownerDocument;
@@ -496,7 +510,7 @@ export const useAnnotationPopoverController = ({
 
         document.addEventListener('mousedown', onMouseDown, true);
         return () => document.removeEventListener('mousedown', onMouseDown, true);
-    }, [closeAllPopovers, rootRef]);
+    }, [closeAllPopovers, enabled, rootRef]);
 
     useLayoutEffect(() => () => cancelPopoverHide(), [cancelPopoverHide]);
 
@@ -505,6 +519,7 @@ export const useAnnotationPopoverController = ({
     });
 
     useLayoutEffect(() => {
+        if (!enabled) return;
         const root = rootRef.current;
         const view = root?.ownerDocument.defaultView;
         if (!view) return;
@@ -515,9 +530,10 @@ export const useAnnotationPopoverController = ({
             view.removeEventListener('resize', repositionOpenPopovers);
             view.removeEventListener('scroll', repositionOpenPopovers, true);
         };
-    }, [repositionOpenPopovers, rootRef]);
+    }, [enabled, repositionOpenPopovers, rootRef]);
 
     useLayoutEffect(() => {
+        if (!enabled) return;
         setManagedPopovers((current) => {
             const withoutSelection = current.map((popover) => ({
                 ...popover,
@@ -546,6 +562,7 @@ export const useAnnotationPopoverController = ({
         rootRef,
         selectedPopoverIdsKey,
         selectedPopoverSelectionKey,
+        enabled,
     ]);
 
     return {

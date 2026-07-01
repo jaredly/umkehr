@@ -4,6 +4,7 @@ import type {SyncedTransport} from 'umkehr/react-crdt';
 import {
     createInitialCrdtHistory,
     hydrateCrdtLocalHistoryForApp,
+    initialArtifactsForApp,
     type AppDefinition,
     type CrdtRuntime,
 } from '../crdtApp';
@@ -48,7 +49,6 @@ import type {
     ServerUser,
 } from './types';
 import {
-    initialArtifactsForStore,
     loadSerializedArtifacts,
     serializedArtifactsForStore,
 } from '../artifacts';
@@ -62,6 +62,7 @@ type Loaded<TState> = {
 type LoadState<TState> =
     | {kind: 'loading'}
     | {kind: 'needsUser'; sessionId: string; users: ServerUser[]; message?: string}
+    | {kind: 'needsDocument'; identity: ServerSessionIdentity}
     | {kind: 'ready'; loaded: Loaded<TState>}
     | {kind: 'error'; message: string};
 
@@ -96,6 +97,8 @@ export function ServerApp<TState, EphemeralData = never>({
     oldPendingChangesPolicy?: ServerOldPendingChangesPolicy;
     topBar: DemoTopBarProps;
 }) {
+    const requiresDocumentInit = app.documentInit?.required === true;
+    const [hasExplicitDoc, setHasExplicitDoc] = useState(() => readActiveDocId() !== undefined);
     const [activeDocId, setActiveDocId] = useState(() => readActiveDocId() ?? runtime.docId);
     const fingerprint = useMemo(() => schemaFingerprint(app), [app]);
     const fingerprintHash = useMemo(() => schemaFingerprintHash(app), [app]);
@@ -138,7 +141,15 @@ export function ServerApp<TState, EphemeralData = never>({
     useEffect(() => {
         let alive = true;
         setLoadState({kind: 'loading'});
-        bootstrapInitialState(app, activeDocId, fingerprint, fingerprintHash, schemaConfig)
+        bootstrapInitialState(
+            app,
+            activeDocId,
+            fingerprint,
+            fingerprintHash,
+            schemaConfig,
+            !requiresDocumentInit,
+            requiresDocumentInit && !hasExplicitDoc,
+        )
             .then((loaded) => {
                 if (!alive) return;
                 if (loaded.kind === 'ready') {
@@ -157,7 +168,7 @@ export function ServerApp<TState, EphemeralData = never>({
         return () => {
             alive = false;
         };
-    }, [activeDocId, app, fingerprint, fingerprintHash, schemaConfig]);
+    }, [activeDocId, app, fingerprint, fingerprintHash, hasExplicitDoc, requiresDocumentInit, schemaConfig]);
 
     const login = useCallback(
         async (sessionId: string, nickname: string) => {
@@ -165,15 +176,21 @@ export function ServerApp<TState, EphemeralData = never>({
             try {
                 const user = await loginServerUser(nickname);
                 await saveServerUser(user);
+                const identity = createSessionIdentity(user, sessionId);
+                if (requiresDocumentInit && !hasExplicitDoc) {
+                    setLoadState({kind: 'needsDocument', identity});
+                    return;
+                }
                 const loaded = await loadInitialState(
                     app,
                     activeDocId,
                     fingerprint,
                     fingerprintHash,
                     schemaConfig,
-                    createSessionIdentity(user, sessionId),
+                    identity,
+                    !requiresDocumentInit,
                 );
-                setLoadState({kind: 'ready', loaded});
+                setLoadState(loaded ? {kind: 'ready', loaded} : {kind: 'needsDocument', identity});
             } catch (error) {
                 const users = await fetchKnownUsers().catch(() => []);
                 setLoadState({
@@ -184,7 +201,7 @@ export function ServerApp<TState, EphemeralData = never>({
                 });
             }
         },
-        [activeDocId, app, fingerprint, fingerprintHash, schemaConfig],
+        [activeDocId, app, fingerprint, fingerprintHash, hasExplicitDoc, requiresDocumentInit, schemaConfig],
     );
 
     const logout = useCallback(async () => {
@@ -198,6 +215,7 @@ export function ServerApp<TState, EphemeralData = never>({
         (docId: string) => {
             const nextDocId = docId.trim();
             if (!nextDocId || nextDocId === activeDocId) return;
+            setHasExplicitDoc(true);
             writeActiveDocId(nextDocId);
             setActiveDocId(nextDocId);
         },
@@ -247,6 +265,28 @@ export function ServerApp<TState, EphemeralData = never>({
         );
     }
 
+    if (loadState.kind === 'needsDocument') {
+        return (
+            <ServerNeedsDocumentApp
+                app={app}
+                docId={activeDocId}
+                remoteDocuments={documentsState.remoteDocuments}
+                localDocuments={documentsState.localDocuments}
+                documentsUnavailableMessage={
+                    documentsState.kind === 'error' ? documentsState.message : undefined
+                }
+                onSwitchDocument={switchDocument}
+                onDocumentsChanged={(remoteDocuments, localDocuments) =>
+                    setDocumentsState({kind: 'ready', remoteDocuments, localDocuments})
+                }
+                schemaFingerprint={fingerprint}
+                schemaFingerprintHash={fingerprintHash}
+                schemaConfig={schemaConfig}
+                topBar={topBar}
+            />
+        );
+    }
+
     return (
         <ServerReadyApp
             key={activeDocId}
@@ -270,6 +310,135 @@ export function ServerApp<TState, EphemeralData = never>({
             onLogout={() => void logout()}
             topBar={topBar}
         />
+    );
+}
+
+function ServerNeedsDocumentApp<TState, EphemeralData>({
+    app,
+    docId,
+    remoteDocuments,
+    localDocuments,
+    documentsUnavailableMessage,
+    onSwitchDocument,
+    onDocumentsChanged,
+    schemaFingerprint,
+    schemaFingerprintHash,
+    schemaConfig,
+    topBar,
+}: {
+    app: AppDefinition<TState, EphemeralData>;
+    docId: string;
+    remoteDocuments: ServerDocumentSummary[];
+    localDocuments: ServerDocumentSummary[];
+    documentsUnavailableMessage?: string;
+    onSwitchDocument(docId: string): void;
+    onDocumentsChanged(
+        remoteDocuments: ServerDocumentSummary[],
+        localDocuments: ServerDocumentSummary[],
+    ): void;
+    schemaFingerprint: string;
+    schemaFingerprintHash: string;
+    schemaConfig: ServerSchemaConfig<TState>;
+    topBar: DemoTopBarProps;
+}) {
+    const refreshDocuments = useCallback(async () => {
+        const [nextRemoteDocuments, nextLocalDocuments] = await Promise.all([
+            fetchServerDocuments().catch(() => remoteDocuments),
+            listLocalServerDocuments(),
+        ]);
+        onDocumentsChanged(nextRemoteDocuments, nextLocalDocuments);
+    }, [onDocumentsChanged, remoteDocuments]);
+    const documentItems = useMemo(
+        () =>
+            classifyServerDocumentItems({
+                appId: app.id,
+                remoteDocuments,
+                localDocuments,
+            }),
+        [app.id, localDocuments, remoteDocuments],
+    );
+    const seedItems = useMemo(
+        () => filterUnrealizedSeeds(seedModalItemsForApp(app, 'server'), documentItems),
+        [app, documentItems],
+    );
+    const createBlankDocument = useCallback(
+        async ({docId: nextDocId, title, initParams}: {docId: string; title: string; initParams?: unknown}) => {
+            await saveBlankServerReplica({
+                app,
+                docId: nextDocId,
+                title,
+                schemaVersion: schemaConfig.version,
+                schemaFingerprint,
+                schemaFingerprintHash,
+                initParams,
+            });
+            await refreshDocuments();
+        },
+        [app, refreshDocuments, schemaConfig.version, schemaFingerprint, schemaFingerprintHash],
+    );
+    const createSeedDocument = useCallback(
+        async (seed: SeedModalItem) => {
+            const fixture = loadBranchFreeSeedFixtureForApp(app, seed.docId);
+            if (!fixture) throw new Error(`No seed document exists for "${seed.docId}".`);
+            await saveServerReplica({
+                ...createServerClientSeedReplica({fixture, scenario: 'cached'}),
+                title: fixture.title || fixture.docId,
+                artifacts: initialArtifactsForApp(app),
+            });
+            await refreshDocuments();
+        },
+        [app, refreshDocuments],
+    );
+    const deleteLocalDocument = useCallback(
+        async (document: DocumentModalItem) => {
+            await deleteServerReplica(document.docId);
+            await refreshDocuments();
+        },
+        [refreshDocuments],
+    );
+    const topBarControls = useMemo(
+        () => ({
+            documentPicker: (
+                <DocumentManagerModal
+                    documents={documentItems}
+                    seeds={seedItems}
+                    activeDocId={docId}
+                    createOptions={app.documentInit}
+                    initialOpen
+                    onSwitchDocument={onSwitchDocument}
+                    onCreateDocument={createBlankDocument}
+                    onCreateSeed={createSeedDocument}
+                    onDeleteLocal={deleteLocalDocument}
+                    onChanged={() => void refreshDocuments()}
+                />
+            ),
+            statusMessage: documentsUnavailableMessage ? (
+                <p className="topBarMessage">{documentsUnavailableMessage}</p>
+            ) : null,
+        }),
+        [
+            app.documentInit,
+            createBlankDocument,
+            createSeedDocument,
+            deleteLocalDocument,
+            docId,
+            documentItems,
+            documentsUnavailableMessage,
+            onSwitchDocument,
+            refreshDocuments,
+            seedItems,
+        ],
+    );
+    return (
+        <>
+            <DemoTopBar {...topBar} controls={topBarControls} />
+            <main className="serverShell">
+                <section className="waitingPanel">
+                    <h1>Choose a document</h1>
+                    <p>Create or open a document to start.</p>
+                </section>
+            </main>
+        </>
     );
 }
 
@@ -409,41 +578,15 @@ function ServerReadyApp<TState, EphemeralData>({
         [app, documentItems],
     );
     const createBlankDocument = useCallback(
-        async ({docId: nextDocId, title}: {docId: string; title: string}) => {
-            const history = createInitialCrdtHistory(app);
-            const now = new Date().toISOString();
-            await saveServerReplica({
+        async ({docId: nextDocId, title, initParams}: {docId: string; title: string; initParams?: unknown}) => {
+            await saveBlankServerReplica({
+                app,
                 docId: nextDocId,
-                appId: app.id,
                 title,
-                storageVersion: 4,
-                protocolVersion: SERVER_PROTOCOL_VERSION,
                 schemaVersion: schemaConfig.version,
                 schemaFingerprint,
                 schemaFingerprintHash,
-                activeBranchId: 'main',
-                branchList: [
-                    {
-                        docId: nextDocId,
-                        branchId: 'main',
-                        name: 'main',
-                        tipEventIndex: 0,
-                        createdAt: now,
-                        updatedAt: now,
-                    },
-                ],
-                branches: {
-                    main: {
-                        branchId: 'main',
-                        history,
-                        lastSeenEventIndex: 0,
-                        undoCheckpointEventIndex: 0,
-                        events: [],
-                        mirrored: true,
-                    },
-                },
-                artifacts: initialArtifactsForStore(app.artifacts),
-                updatedAt: now,
+                initParams,
             });
             await refreshDocuments();
         },
@@ -456,7 +599,7 @@ function ServerReadyApp<TState, EphemeralData>({
             await saveServerReplica({
                 ...createServerClientSeedReplica({fixture, scenario: 'cached'}),
                 title: fixture.title || fixture.docId,
-                artifacts: initialArtifactsForStore(app.artifacts),
+                artifacts: initialArtifactsForApp(app),
             });
             await refreshDocuments();
         },
@@ -480,6 +623,7 @@ function ServerReadyApp<TState, EphemeralData>({
                     documents={documentItems}
                     seeds={seedItems}
                     activeDocId={docId}
+                    createOptions={app.documentInit}
                     onSwitchDocument={onSwitchDocument}
                     onCreateDocument={createBlankDocument}
                     onCreateSeed={createSeedDocument}
@@ -790,7 +934,8 @@ async function loadInitialState<TState>(
     fingerprintHash: string,
     schemaConfig: ServerSchemaConfig<TState>,
     identity: ServerSessionIdentity,
-): Promise<Loaded<TState>> {
+    allowCreate = true,
+): Promise<Loaded<TState> | null> {
     const persisted = await loadServerReplica<TState>(docId);
     if (persisted) {
         const normalized = hydrateServerReplica(normalizeServerReplica(persisted), app);
@@ -823,17 +968,53 @@ async function loadInitialState<TState>(
         };
     }
 
-    const history = createInitialCrdtHistory(app);
-    const now = new Date().toISOString();
-    const replica: PersistedServerReplica<TState> = {
+    if (!allowCreate) return null;
+    const replica = createBlankServerReplica({
+        app,
         docId,
-        appId: app.id,
         title: docId,
-        storageVersion: 4,
-        protocolVersion: SERVER_PROTOCOL_VERSION,
         schemaVersion: schemaConfig.version,
         schemaFingerprint: fingerprint,
         schemaFingerprintHash: fingerprintHash,
+    });
+    await saveServerReplica(replica);
+    return {
+        identity,
+        replica,
+        source: 'created',
+    };
+}
+
+type BlankServerReplicaInput<TState> = {
+    app: AppDefinition<TState, any>;
+    docId: string;
+    title: string;
+    schemaVersion: number;
+    schemaFingerprint: string;
+    schemaFingerprintHash: string;
+    initParams?: unknown;
+};
+
+function createBlankServerReplica<TState>({
+    app,
+    docId,
+    title,
+    schemaVersion,
+    schemaFingerprint,
+    schemaFingerprintHash,
+    initParams,
+}: BlankServerReplicaInput<TState>): PersistedServerReplica<TState> {
+    const history = createInitialCrdtHistory(app, initParams);
+    const now = new Date().toISOString();
+    return {
+        docId,
+        appId: app.id,
+        title,
+        storageVersion: 4,
+        protocolVersion: SERVER_PROTOCOL_VERSION,
+        schemaVersion,
+        schemaFingerprint,
+        schemaFingerprintHash,
         activeBranchId: 'main',
         branchList: [
             {
@@ -855,15 +1036,13 @@ async function loadInitialState<TState>(
                 mirrored: true,
             },
         },
-        artifacts: initialArtifactsForStore(app.artifacts),
+        artifacts: initialArtifactsForApp(app, initParams),
         updatedAt: now,
     };
-    await saveServerReplica(replica);
-    return {
-        identity,
-        replica,
-        source: 'created',
-    };
+}
+
+async function saveBlankServerReplica<TState>(input: BlankServerReplicaInput<TState>) {
+    await saveServerReplica(createBlankServerReplica(input));
 }
 
 function hydrateServerReplica<TState>(
@@ -891,9 +1070,12 @@ async function bootstrapInitialState<TState>(
     fingerprint: string,
     fingerprintHash: string,
     schemaConfig: ServerSchemaConfig<TState>,
+    allowCreate: boolean,
+    needsExplicitDocument: boolean,
 ): Promise<
     | {kind: 'ready'; loaded: Loaded<TState>}
     | {kind: 'needsUser'; sessionId: string; users: ServerUser[]; message?: string}
+    | {kind: 'needsDocument'; identity: ServerSessionIdentity}
 > {
     const sessionId = ensureServerSessionId();
     const user = await loadServerUser();
@@ -901,14 +1083,18 @@ async function bootstrapInitialState<TState>(
         const users = await fetchKnownUsers();
         return {kind: 'needsUser', sessionId, users};
     }
+    const identity = createSessionIdentity(user, sessionId);
+    if (needsExplicitDocument) return {kind: 'needsDocument', identity};
     const loaded = await loadInitialState(
         app,
         docId,
         fingerprint,
         fingerprintHash,
         schemaConfig,
-        createSessionIdentity(user, sessionId),
+        identity,
+        allowCreate,
     );
+    if (!loaded) return {kind: 'needsDocument', identity};
     return {kind: 'ready', loaded};
 }
 

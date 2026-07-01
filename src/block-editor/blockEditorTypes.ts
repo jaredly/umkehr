@@ -1,6 +1,15 @@
-import type {BareInlineMark, CodeTargetRange, LinkTargetRange} from './inlineMarks';
+import type {BareInlineMark, BooleanInlineMark, CodeTargetRange, LinkTargetRange} from './inlineMarks';
 
 export type PendingInlineMarks = Partial<Record<BareInlineMark, boolean>>;
+
+export type InlineRenderFeatures = {
+    booleanMarks: ReadonlySet<BooleanInlineMark>;
+    code: boolean;
+    links: boolean;
+    math: boolean;
+    annotations: boolean;
+    inlineEmbeds: ReadonlySet<string>;
+};
 
 export type LinkPopoverState = {
     ranges: LinkTargetRange[];

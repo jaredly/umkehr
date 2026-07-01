@@ -1,0 +1,30 @@
+/* Styles owned by the basic-marks block editor plugin. */
+.toolbarStrike {
+    text-decoration-line: line-through;
+}
+
+.toolbarUnderline {
+    text-decoration-line: underline;
+    text-underline-offset: 0.14em;
+}
+
+.markBold {
+    font-weight: 700;
+}
+
+.markItalic {
+    font-style: italic;
+}
+
+.markStrikethrough {
+    text-decoration-line: line-through;
+}
+
+.markUnderline {
+    text-decoration-line: underline;
+    text-underline-offset: 0.14em;
+}
+
+.markUnderline.markStrikethrough {
+    text-decoration-line: underline line-through;
+}

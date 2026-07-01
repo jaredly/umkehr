@@ -1,5 +1,14 @@
-import {existsSync} from 'node:fs';
+import {existsSync, readFileSync} from 'node:fs';
 import {describe, expect, it} from 'vitest';
+import {
+    basicMarksPlugin,
+    BlockRichTextEditor,
+    createBlockEditorRegistry,
+    defaultBlockEditorPlugins,
+    headingsPlugin,
+    linksPlugin,
+    styleImportsFromRegistry,
+} from './block-editor/index';
 
 const packageImportTimeoutMs = 15_000;
 
@@ -67,6 +76,19 @@ describe('package exports', () => {
         expect(blockRichTextPkg.BLOCK_RICH_TEXT_LEAF_PLUGIN_ID).toBe('umkehr.block-rich-text');
     }, packageImportTimeoutMs);
 
+    it('imports the built block editor entry point separately', async () => {
+        expect(existsSync('dist/src/block-editor/index.js')).toBe(true);
+
+        const blockEditorPkg = await import('umkehr/block-editor');
+
+        expect(typeof blockEditorPkg.BlockRichTextEditor).toBe('function');
+        expect(blockEditorPkg.basicMarksPlugin.id).toBe('basic-marks');
+        expect(blockEditorPkg.linksPlugin.id).toBe('links');
+        expect(blockEditorPkg.headingsPlugin.id).toBe('headings');
+        expect('legacyRichTextPlugins' in blockEditorPkg).toBe(false);
+        expect(blockEditorPkg.defaultBlockEditorPlugins.map((plugin: {id: string}) => plugin.id)).toContain('table');
+    }, packageImportTimeoutMs);
+
     it('imports the built React entry point separately', async () => {
         expect(existsSync('dist/src/react/index.js')).toBe(true);
 
@@ -103,4 +125,61 @@ describe('package exports', () => {
         expect(typeof remixPkg.createStateContext).toBe('function');
         expect(typeof remixPkg.createHistoryContext).toBe('function');
     }, packageImportTimeoutMs);
+
+    it('publishes block editor CSS entrypoints', () => {
+        const packageJson = JSON.parse(readFileSync('package.json', 'utf8')) as {
+            exports: Record<string, unknown>;
+            sideEffects: unknown;
+        };
+
+        expect(packageJson.exports['./block-editor/style.css']).toBe('./dist/src/block-editor/style.css');
+        expect(packageJson.exports['./block-editor/defaultBlockEditorPlugins.css']).toBe(
+            './dist/src/block-editor/defaultBlockEditorPlugins.css',
+        );
+        expect(packageJson.exports['./block-editor/legacyRichTextPlugins.css']).toBeUndefined();
+        expect(packageJson.exports['./block-editor/plugins/*.css']).toBe('./dist/src/block-editor/plugins/*.css');
+        expect(packageJson.sideEffects).toEqual(['**/*.css']);
+        expect(existsSync('dist/src/block-editor/style.css')).toBe(true);
+        expect(existsSync('dist/src/block-editor/defaultBlockEditorPlugins.css')).toBe(true);
+        expect(existsSync('dist/src/block-editor/plugins/annotations.css')).toBe(true);
+        expect(readFileSync('dist/src/block-editor/defaultBlockEditorPlugins.css', 'utf8')).toContain(
+            "@import './plugins/table.css';",
+        );
+    });
+
+    it('exports the public block editor component, plugins, and full preset', () => {
+        expect(typeof BlockRichTextEditor).toBe('function');
+        expect(basicMarksPlugin.id).toBe('basic-marks');
+        expect(linksPlugin.id).toBe('links');
+        expect(headingsPlugin.id).toBe('headings');
+        expect(defaultBlockEditorPlugins.map((plugin) => plugin.id)).toContain('table');
+    });
+
+    it('keeps bundled plugin style declarations aligned with package CSS entrypoints', () => {
+        const packageJson = JSON.parse(readFileSync('package.json', 'utf8')) as {
+            exports: Record<string, unknown>;
+        };
+        const registry = createBlockEditorRegistry(defaultBlockEditorPlugins);
+        const styleImports = styleImportsFromRegistry(registry);
+        const presetCss = readFileSync('src/block-editor/defaultBlockEditorPlugins.css', 'utf8');
+        const copyCssScript = readFileSync('scripts/copy-css.mjs', 'utf8');
+        let previousIndex = -1;
+
+        expect(packageJson.exports['./block-editor/plugins/*.css']).toBe('./dist/src/block-editor/plugins/*.css');
+        expect(copyCssScript).toContain("readdirSync('src/block-editor/plugins')");
+        expect(copyCssScript).toContain("file.endsWith('.css')");
+
+        for (const href of styleImports) {
+            const cssFile = href.replace('umkehr/block-editor/plugins/', '');
+            const importLine = `@import './plugins/${cssFile}';`;
+            expect(href).toMatch(/^umkehr\/block-editor\/plugins\/[^/]+\.css$/);
+            expect(existsSync(`src/block-editor/plugins/${cssFile}`)).toBe(true);
+            expect(packageJson.exports[`./block-editor/plugins/${cssFile}`] ?? packageJson.exports['./block-editor/plugins/*.css'])
+                .toBe('./dist/src/block-editor/plugins/*.css');
+            expect(presetCss).toContain(importLine);
+            const index = presetCss.indexOf(importLine);
+            expect(index).toBeGreaterThan(previousIndex);
+            previousIndex = index;
+        }
+    });
 });

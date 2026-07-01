@@ -47,3 +47,14 @@
   - `tsc -p examples/react-crdt/tsconfig.json --noEmit`
 - Workaround/known issue: block-notes publishes selection presence, but the extracted editor does not yet accept/render remote selections. The presence transport and validation are in place; visual remote selection rendering still needs an explicit prop and decoration path.
 - Workaround/known issue: block-notes currently imports `src/block-editor/style.css` by relative source path. The package build does not yet copy CSS into `dist`, so published CSS export/copy handling remains to be finalized.
+
+## 2026-06-28
+
+- Fixed a circular import introduced by the extraction: `BlockRichTextEditor.tsx` imported most editor helpers from `./index.js`, while `index.ts` also exports `BlockRichTextEditor`. This could initialize the barrel before `inlineMarks.ts` exported `CODE_MARK`, causing `cannot access CODE_MARK before initialization`.
+- Replaced every `BlockRichTextEditor.tsx` import from `./index.js` with direct imports from concrete local modules.
+- Changed `src/block-richtext` to import `paragraphMeta`, `RichBlockMeta`, and `richTextCrdtConfig` from concrete `src/block-editor` modules instead of the `block-editor` barrel, so the leaf plugin does not initialize the React editor path.
+- Verified with:
+  - `npm run typecheck`
+  - `tsc -p examples/block-rich-text/tsconfig.json --noEmit`
+  - `tsc -p examples/react-crdt/tsconfig.json --noEmit`
+  - `npm exec vitest -- run examples/react-crdt/src/apps/block-notes/model.test.ts examples/react-crdt/src/lib/appRegistry.test.ts src/crdt/leafPlugin.test.ts`

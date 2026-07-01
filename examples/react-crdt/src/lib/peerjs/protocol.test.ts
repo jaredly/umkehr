@@ -1,8 +1,15 @@
 import {describe, expect, it} from 'vitest';
 import type {IJsonSchemaCollection, IValidation} from 'typia';
 import type {ArtifactStore, SerializedArtifact} from '../artifacts';
+import {jigsawApp} from '../../apps/jigsaw/JigsawApp';
+import {createInitialCrdtHistory} from '../crdtApp';
 import {artifactsForPeerJsHistorySave} from './PeerJsApp';
-import {MAX_PEER_EPHEMERAL_BYTES, parsePeerMessage, type PeerProtocolConfig} from './protocol';
+import {
+    MAX_PEER_ARTIFACT_BYTES,
+    MAX_PEER_EPHEMERAL_BYTES,
+    parsePeerMessage,
+    type PeerProtocolConfig,
+} from './protocol';
 
 type State = {title: string};
 
@@ -122,6 +129,36 @@ describe('parsePeerMessage', () => {
             ),
         ).toBeNull();
     });
+
+    it('accepts a large jigsaw snapshot with board artifacts', () => {
+        const initParams = {pieceCount: 120, type: 'voronoi'};
+        const artifacts = jigsawApp.documentInit?.initialArtifacts?.(initParams) ?? [];
+        expect(encodedSize(artifacts)).toBeLessThan(MAX_PEER_ARTIFACT_BYTES);
+
+        expect(
+            parsePeerMessage(
+                {
+                    kind: 'snapshot',
+                    version: 1,
+                    actor: 'host-1',
+                    docId: 'jigsaw-doc',
+                    document: createInitialCrdtHistory(jigsawApp, initParams).doc,
+                    artifacts,
+                },
+                {
+                    docId: 'jigsaw-doc',
+                    tagKey: jigsawApp.tagKey,
+                    schema: jigsawApp.schema,
+                    leafPlugins: jigsawApp.leafPlugins,
+                    validateState: jigsawApp.validateState,
+                },
+            ),
+        ).toMatchObject({
+            kind: 'snapshot',
+            actor: 'host-1',
+            artifacts: [{kind: 'jigsaw-board'}],
+        });
+    });
 });
 
 describe('artifactsForPeerJsHistorySave', () => {
@@ -162,3 +199,7 @@ describe('artifactsForPeerJsHistorySave', () => {
         expect(createInitialCalls).toBe(0);
     });
 });
+
+function encodedSize(input: unknown) {
+    return new TextEncoder().encode(JSON.stringify(input)).byteLength;
+}

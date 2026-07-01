@@ -23,7 +23,6 @@ import {
     isDeleted,
     materializeFormattedBlocks,
     materializedBlockParent,
-    materializedBlockPath,
     orderedCharIdsForBlock,
     visibleBlockChildren,
     visibleRangesForMark,
@@ -37,7 +36,6 @@ import {
     addSlide,
     advanceFromTableCellEnd,
     clearCodeLanguage,
-    closeRetainedInlineMarkSessions,
     commandApplied,
     convertBlockToColumns,
     convertBlockToSlide,
@@ -70,38 +68,29 @@ import {
     slideChildren,
     slideDeckForSlide,
     splitTableTitleToParagraph,
+    type CommandContext,
     type CommandResult,
     type MoveTarget,
-    type RetainedInlineMarkSession,
-    type TableCellSlotTarget,
-} from './index.js';
+} from './blockCommands.js';
 import {
     annotationVirtualParents,
     ANNOTATION_MARK,
     annotationMarkBehavior,
     annotationBodyBlockIds,
-    clearAnnotationBodyCodeLanguage,
     createAnnotation,
-    deleteAnnotationBodyBackward,
-    deleteAnnotationBodyForward,
+    footnoteNumberByAnnotationId,
     renderedAnnotations,
+    renderedAnnotationMapById,
+    renderedAnnotationsByPresentation,
     isAnnotationData,
-    pasteAnnotationBodyTextWithMarkdownShortcuts,
-    replaceAnnotationBodySelection,
-    removeAnnotationBodyCodeMark,
-    removeAnnotationBodyLink,
+    popoverTextByAnnotationId,
     resolveAnnotation,
-    setAnnotationBodyCodeMark,
-    setAnnotationBodyLink,
-    splitAnnotationBodyBlock,
     toggleAnnotationBodyCodeMark,
-    toggleAnnotationBodyMark,
     type AnnotationMarkData,
-} from './index.js';
+    type AnnotationPresentation,
+    type RenderedAnnotation,
+} from './annotations.js';
 import {
-    codeMetaWithPreviewForLanguage,
-    codePreviewKindForLanguage,
-    isPreviewableCodeMeta,
     normalizeSlideDeckSize,
     paragraphMeta,
     richBlockStyleValue,
@@ -118,7 +107,13 @@ import {
     type RichBlockMeta,
     type SlideDeckFooterMode,
     type SlideTransition,
-} from './index.js';
+} from './blockMeta.js';
+import {
+    codeMetaWithPreviewForRegistry,
+    codePreviewRendererForLanguage,
+    codePreviewRendererForMeta,
+    isPreviewableCodeMetaFromRegistry,
+} from './codePreviewRegistry.js';
 import {
     closestCaretOffsetForHorizontalIntent,
     caretRectForBlockOffset,
@@ -130,7 +125,7 @@ import {
     readSelectionFromDom,
     restoreCaretToDom,
     restoreSelectionToDom,
-} from './index.js';
+} from './domSelection.js';
 import {
     caret,
     editableBlockIds,
@@ -148,8 +143,8 @@ import {
     visibleBlockIds,
     visibleSubtreeBlockIds,
     type EditorSelection,
-} from './index.js';
-import {constrainSelectionToFullscreenSlide} from './index.js';
+} from './selectionModel.js';
+import {constrainSelectionToFullscreenSlide} from './slidePresentationSelection.js';
 import {
     deleteBackwardEverywhere,
     deleteForwardEverywhere,
@@ -177,47 +172,53 @@ import {
     type HorizontalMovementUnit,
     type MultiCommandResult,
     type RetainedInlineMarkSessionMap,
-} from './index.js';
+} from './multiSelectionCommands.js';
 import {
     BLOCK_RICH_TEXT_MIME,
     blockIdFromBlockLinkHref,
     blockDomIdForBlockId,
     blockLinkHrefForClipboardPayload,
+    filterRichClipboardPayloadBlockFeatures,
     htmlWithClipboardPayload,
     parseBlockRichTextClipboardHtml,
     parseBlockRichTextClipboardPayload,
     serializeSelectionToClipboardPayload,
     type RichClipboardPayload,
-} from './index.js';
-import {useBlockReorder, type DropTarget} from './index.js';
+} from './clipboard.js';
+import {useBlockReorder, type DropTarget} from './useBlockReorder.js';
 import {
     appendSelection,
-    blockLevelDecorationsForSelectionSet,
+    appendSelectionFromRegistry,
+    blockLevelDecorationsForSelectionSetFromRegistry,
     dedupeSelectionSet,
     decorationsForSelectionSet,
     mergeOverlappingRanges,
     primarySelection,
     replacePrimarySelection,
+    replacePrimarySelectionFromRegistry,
     replaceSelectionSet,
+    replaceSelectionSetFromRegistry,
     resolveSelectionSet,
+    resolveSelectionSetFromRegistry,
     reverseSortedRetainedEntries,
     retainSelectionSet,
-    selectedTopLevelBlockIdsForSelectionSet,
+    retainSelectionSetFromRegistry,
+    selectedTopLevelBlockIdsForSelectionSetFromRegistry,
     singleRetainedSelectionSet,
     type BlockLevelSelectionDecorations,
     type BlockSelectionDecorations,
     type EditorSelectionSet,
     type RetainedSelectionEntry,
     type RetainedSelectionSet,
-} from './index.js';
-import {resolveSelection, retainSelection} from './index.js';
-import {findWordOccurrences, wordAtPoint} from './index.js';
+} from './selectionSet.js';
+import {resolveSelection, retainSelection} from './retainedSelection.js';
+import {focusPointFromRegistry} from './selectionPlugins.js';
+import {findWordOccurrences, wordAtPoint} from './wordOccurrences.js';
 import {
     popoverIdsForTrigger,
     useAnnotationPopoverController,
-    type ActivePopover,
     type PopoverPointerTransition,
-} from './index.js';
+} from './useAnnotationPopoverController.js';
 import {
     isLinkLikeText,
     linkHrefForSelectionSegments,
@@ -235,7 +236,7 @@ import {
     textForSelectionSegments,
     type BooleanInlineMark,
     type LinkTargetRange,
-} from './index.js';
+} from './inlineMarks.js';
 import {
     INLINE_EMBED_MARK,
     INLINE_EMBED_TEXT,
@@ -244,10 +245,10 @@ import {
     isInlineEmbedData,
     plainTextForInlineEmbed,
     renderInlineEmbed,
-} from './index.js';
-import {BrowserMathJaxRenderer, type MathRenderer} from './index.js';
-import {highlightIngredientLine, type IngredientHighlightToken} from './index.js';
-import {highlightCode, type SyntaxToken} from './index.js';
+} from './inlineEmbeds.js';
+import {BrowserMathJaxRenderer, type MathRenderer} from './mathRendering.js';
+import {highlightIngredientLine, type IngredientHighlightToken} from './ingredientHighlight.js';
+import {highlightCode, type SyntaxToken} from './syntaxHighlight.js';
 import {
     createAttachmentFromFile,
     deserializeAttachments,
@@ -256,30 +257,45 @@ import {
     type AttachmentStore,
     type ImageAttachment,
     type SerializedImageAttachment,
-} from './index.js';
+} from './attachments.js';
 import type {
     BlockTypeMenuValue,
     CodeHoverPopoverState,
     CodePopoverState,
     EmbedPopoverState,
+    InlineRenderFeatures,
     LinkHoverPopoverState,
     LinkPopoverState,
     PendingInlineMarks,
-} from './index.js';
-import {Toolbar} from './index.js';
+} from './blockEditorTypes.js';
+import {Toolbar} from './Toolbar.js';
 import {
     CodeFloatingPopover,
     CodeHoverPopover,
     DateEmbedFloatingPopover,
     LinkFloatingPopover,
     LinkHoverPopover,
-} from './index.js';
-import {deriveActiveInlineMarks} from './index.js';
+} from './floatingPopovers.js';
+import {activeInlineMarkTypesFromRegistry, deriveActiveInlineMarks} from './inlineRunRendering.js';
 import {
-    blockDropTargetFromPoint,
     orderDraggedBlockIds,
     orderDraggedBlockIdsForCellSlot,
-} from './index.js';
+} from './blockDropTargets.js';
+import {
+    tableDragTargetAtPoint,
+    tableElementAtPoint,
+    tableCellSlotAtPoint,
+    tableRowSlotAtPoint,
+    cellBorderPointerHit,
+} from './tableDomTargets.js';
+import {
+    fullColumnSelectionCellIds,
+    isTableCellBlock,
+    selectedTableRectangleSelection,
+    tableCellIdForSelection,
+    tableCellRectangleSelectionForTextSelection,
+    tableCellSelectionForCell,
+} from './tableRenderHelpers.js';
 import {
     activePollVotes,
     choiceResults,
@@ -292,7 +308,7 @@ import {
     votedOptionIds,
     type PollResult,
     type PollVoteCommandData,
-} from './index.js';
+} from './pollBlocks.js';
 import {
     beforeInputLabel,
     editorSelectionKey,
@@ -308,30 +324,71 @@ import {
     removePrimaryDecorations,
     sameSelectionRange,
     stopEditorControlEvent,
-} from './index.js';
-import {ImagePreview, PreviewableCodeBlock, PreviewBlockCard} from './index.js';
-import {blockTypeMenuValue, blockTypeMeta, deriveOrderedListNumbers} from './index.js';
+} from './editorUiUtils.js';
+import {ImagePreview, PreviewableCodeBlock, PreviewBlockCard} from './mediaBlocks.js';
+import {
+    blockTypeMenuValueFromRegistry,
+    blockTypeMetaFromRegistry,
+    deriveOrderedListNumbers,
+} from './blockTypeHelpers.js';
 import {
     canOpenSlashMenuForSelection,
     deleteSlashTriggers,
     SlashCommandPopover,
+    slashCommandsFromRegistry,
     slashTriggersFromInsertResult,
     type SlashCommand,
     type SlashMenuState,
-} from './index.js';
+} from './slashCommands.js';
+import {
+    assertBlockEditorDocumentPluginsAvailable,
+    createBlockEditorRegistry,
+    type BlockEditorAnnotationFocusRequest,
+    type BlockEditorAnnotationRenderServices,
+    type BlockEditorBlockRenderContext,
+    type BlockEditorDestinationRenderContext,
+    type BlockEditorOrphanSlideDisplayMode,
+    type BlockEditorPlugin,
+    type BlockEditorRenderedBlockNode,
+    type BlockEditorRegistry,
+    type BlockEditorSlideDeckUiState,
+} from './plugins/index.js';
+import {blockTypeMenuItemsFromToolbarSpecs} from './plugins/legacyRichTextUi.js';
+import {defaultBlockEditorPlugins} from './defaultBlockEditorPlugins.js';
+import {richTextVirtualParentsFromRegistry} from './editorCrdtConfig.js';
 
 import * as hlc from '../crdt/hlc.js';
 type RichFormattedBlock = FormattedBlock<RichBlockMeta>;
-type RenderedAnnotation = ReturnType<typeof renderedAnnotations>[number];
-type CommentFocusRequest = {blockId: string; token: number; selection?: EditorSelection};
+type CommentFocusRequest = BlockEditorAnnotationFocusRequest;
 type PollOptionView = {id: string; label: string; archived?: boolean};
 type MatrixPollView = {rows: PollOptionView[]; columns: PollOptionView[]};
 type PollEditorMode = 'view' | 'edit';
 type SubmitCommandOptions = {constrainFullscreenSlideSelection?: boolean};
 
-const BOOLEAN_INLINE_MARKS: BooleanInlineMark[] = ['bold', 'italic', 'strikethrough'];
+export type BlockRichTextEditorProps = {
+    replica: Replica;
+    attachments: AttachmentStore;
+    plugins?: readonly BlockEditorPlugin<RichBlockMeta>[];
+    resetSignal: number;
+    undoState: BlockEditorUndoState;
+    undoStatus: string;
+    rainbowLamportIds: boolean;
+    userId: string;
+    onUserIdChange(value: string): void;
+    onCommand(command: (replica: Replica) => MultiCommandResult): void;
+    onUndo(): void;
+    onRedo(): void;
+    onToggleOnline(): void;
+    onCreateImageAttachment(file: File): Promise<ImageAttachment>;
+    onMergeSerializedAttachments(attachments: SerializedImageAttachment[]): void;
+    onKeystroke(blockId: string, event: KeyboardEvent<HTMLElement>): void;
+    onKeyPerfSample?(sample: Omit<BlockEditorKeyPerfSampleInput, 'editorId'>): void;
+};
+
+const BOOLEAN_INLINE_MARKS: BooleanInlineMark[] = ['bold', 'italic', 'strikethrough', 'underline'];
 const BARE_INLINE_MARKS: BareInlineMark[] = [...BOOLEAN_INLINE_MARKS, CODE_MARK];
 const DEFAULT_DATE_EMBED_DATA = {type: 'date', value: '2026-06-23'} as const;
+export const coreBlockEditorPlugins: readonly BlockEditorPlugin<RichBlockMeta>[] = [];
 
 const activePendingInlineMarks = (marks: PendingInlineMarks): BareInlineMark[] =>
     BARE_INLINE_MARKS.filter((mark) => marks[mark]);
@@ -342,6 +399,54 @@ const hasPendingInlineMarks = (marks: PendingInlineMarks): boolean =>
 const hasRetainedInlineMarkSessions = (marks: RetainedInlineMarkSessionMap): boolean =>
     Object.values(marks).some((sessions) => sessions.length > 0);
 
+const inlineMarkToolbarCommandId = (markType: BooleanInlineMark): string => `mark:${markType}`;
+
+type BlockRenderFeatures = ReadonlySet<RichBlockMeta['type']>;
+
+const DEFAULT_INLINE_RENDER_FEATURES: InlineRenderFeatures = {
+    booleanMarks: new Set(BOOLEAN_INLINE_MARKS),
+    code: true,
+    links: true,
+    math: true,
+    annotations: true,
+    inlineEmbeds: new Set(['date']),
+};
+
+const blockRenderFeaturesFromRegistry = (
+    registry: Pick<BlockEditorRegistry<RichBlockMeta>, 'blockRenderers'>,
+): BlockRenderFeatures => new Set([...registry.blockRenderers.keys()] as RichBlockMeta['type'][]);
+
+const inlineRenderFeaturesFromRegistry = (
+    registry: Pick<BlockEditorRegistry<RichBlockMeta>, 'inlineRenderers'>,
+): InlineRenderFeatures => {
+    const renderedMarks = new Set(
+        registry.inlineRenderers
+            .map((renderer) => renderer.markType)
+            .filter((markType): markType is string => typeof markType === 'string'),
+    );
+    return {
+        booleanMarks: new Set(BOOLEAN_INLINE_MARKS.filter((mark) => renderedMarks.has(mark))),
+        code: renderedMarks.has(CODE_MARK),
+        links: renderedMarks.has(LINK_MARK),
+        math: renderedMarks.has(MATH_MARK),
+        annotations: renderedMarks.has(ANNOTATION_MARK),
+        inlineEmbeds: new Set(
+            registry.inlineRenderers
+                .map((renderer) => renderer.embedType)
+                .filter((embedType): embedType is string => typeof embedType === 'string'),
+        ),
+    };
+};
+
+const inlineRenderFeaturesKey = (features: InlineRenderFeatures): string =>
+    JSON.stringify({
+        booleanMarks: [...features.booleanMarks].sort(),
+        code: features.code,
+        links: features.links,
+        math: features.math,
+        annotations: features.annotations,
+        inlineEmbeds: [...features.inlineEmbeds].sort(),
+    });
 
 export type BlockEditorId = 'left' | 'right' | string;
 
@@ -422,6 +527,7 @@ const charParentTimestamps = (ts: CharParentTs): HLC[] =>
 export function BlockRichTextEditor({
     replica,
     attachments,
+    plugins = defaultBlockEditorPlugins,
     resetSignal,
     undoState,
     undoStatus,
@@ -436,24 +542,50 @@ export function BlockRichTextEditor({
     onMergeSerializedAttachments,
     onKeystroke,
     onKeyPerfSample,
-}: {
-    replica: Replica;
-    attachments: AttachmentStore;
-    resetSignal: number;
-    undoState: BlockEditorUndoState;
-    undoStatus: string;
-    rainbowLamportIds: boolean;
-    userId: string;
-    onUserIdChange(value: string): void;
-    onCommand(command: (replica: Replica) => MultiCommandResult): void;
-    onUndo(): void;
-    onRedo(): void;
-    onToggleOnline(): void;
-    onCreateImageAttachment(file: File): Promise<ImageAttachment>;
-    onMergeSerializedAttachments(attachments: SerializedImageAttachment[]): void;
-    onKeystroke(blockId: string, event: KeyboardEvent<HTMLElement>): void;
-    onKeyPerfSample?(sample: Omit<BlockEditorKeyPerfSampleInput, 'editorId'>): void;
-}) {
+}: BlockRichTextEditorProps) {
+    const registry = useMemo(() => createBlockEditorRegistry(plugins), [plugins]);
+    assertBlockEditorDocumentPluginsAvailable(registry, {
+        state: replica.state,
+        selections: replica.selection.entries,
+    });
+    const slashCommands = useMemo(() => slashCommandsFromRegistry(registry), [registry]);
+    const blockTypeItems = useMemo(() => {
+        return blockTypeMenuItemsFromToolbarSpecs(registry.toolbarItems);
+    }, [registry]);
+    const toolbarItemIds = useMemo(
+        () => new Set(registry.toolbarItems.map((item) => item.id)),
+        [registry],
+    );
+    const registeredCommandIds = useMemo(() => {
+        const ids = new Set(registry.commands.keys());
+        for (const item of registry.toolbarItems) {
+            ids.add(item.commandId ?? item.id);
+        }
+        for (const command of registry.slashCommands) {
+            ids.add(command.commandId ?? command.id);
+        }
+        return ids;
+    }, [registry]);
+    const isEditorCommandAvailable = useCallback(
+        (commandId: string): boolean => registeredCommandIds.has(commandId),
+        [registeredCommandIds],
+    );
+    const isToolbarCommandAvailable = useCallback(
+        (commandId: string): boolean => isEditorCommandAvailable(commandId),
+        [isEditorCommandAvailable],
+    );
+    const activeInlineMarkTypes = useMemo(() => activeInlineMarkTypesFromRegistry(registry), [registry]);
+    const inlineRenderFeatures = useMemo(() => inlineRenderFeaturesFromRegistry(registry), [registry]);
+    const blockRenderFeatures = useMemo(() => blockRenderFeaturesFromRegistry(registry), [registry]);
+    const floatingDestinationEnabled = useMemo(
+        () => Boolean(registry.destinationRenderers.get('floating')?.length),
+        [registry],
+    );
+    const optionPanelBlockTypes = useMemo(() => new Set(registry.optionPanels.keys()), [registry]);
+    const virtualParents = useMemo(
+        () => richTextVirtualParentsFromRegistry(replica.state, registry),
+        [registry, replica.state],
+    );
     const rootRef = useRef<HTMLDivElement>(null);
     const editorContentRef = useRef<HTMLDivElement>(null);
     const pendingCaretRestoreBlockIdRef = useRef<string | null>(null);
@@ -523,58 +655,39 @@ export function BlockRichTextEditor({
     );
     const blocksWithAnnotationBodies = materializeFormattedBlocks(
         replica.state,
-        annotationVirtualParents(replica.state),
+        virtualParents,
     );
     const annotationBodyIds = useMemo(() => {
         const result = new Set<string>();
         for (const mark of Object.values(replica.state.state.marks)) {
             if (mark.type !== ANNOTATION_MARK || mark.remove || !isAnnotationData(mark.data))
                 continue;
-            for (const bodyId of annotationBodyBlockIds(replica.state, mark.data.id)) {
+            for (const bodyId of annotationBodyBlockIds(replica.state, mark.data.id, virtualParents)) {
                 result.add(bodyId);
             }
         }
         return result;
-    }, [replica.state]);
+    }, [replica.state, virtualParents]);
     const blocks = useMemo(
         () => blocksWithAnnotationBodies.filter((block) => !annotationBodyIds.has(block.id)),
         [annotationBodyIds, blocksWithAnnotationBodies],
     );
-    const annotations = renderedAnnotations(replica.state, blocks, blocksWithAnnotationBodies);
+    const annotations = renderedAnnotations(replica.state, blocks, blocksWithAnnotationBodies, virtualParents);
     const sidebarAnnotations = useMemo(
-        () => annotations.filter((item) => item.data.presentation === 'sidebar'),
+        () => renderedAnnotationsByPresentation(annotations, 'sidebar'),
         [annotations],
     );
     const sidebarAnnotationKey = sidebarAnnotations.map((annotation) => annotation.id).join('\0');
-    const popoverAnnotationsById = useMemo(() => {
-        const result = new Map<string, RenderedAnnotation>();
-        for (const annotation of annotations) {
-            if (annotation.data.presentation === 'popover') result.set(annotation.id, annotation);
-        }
-        return result;
-    }, [annotations]);
-    const popoverTextById = useMemo(() => {
-        const result = new Map<string, string>();
-        for (const annotation of annotations) {
-            if (annotation.data.presentation !== 'popover') continue;
-            const text = annotation.bodyBlocks
-                .map((block) => block.text)
-                .filter(Boolean)
-                .join('\n');
-            result.set(annotation.id, text || 'Empty popover');
-        }
-        return result;
-    }, [annotations]);
-    const footnoteNumberById = useMemo(() => {
-        const result = new Map<string, number>();
-        let nextNumber = 1;
-        for (const annotation of annotations) {
-            if (annotation.data.presentation !== 'footnote') continue;
-            result.set(annotation.id, nextNumber);
-            nextNumber++;
-        }
-        return result;
-    }, [annotations]);
+    const annotationsById = useMemo(
+        () => renderedAnnotationMapById(annotations),
+        [annotations],
+    );
+    const popoverAnnotationsById = useMemo(
+        () => renderedAnnotationMapById(annotations, 'popover'),
+        [annotations],
+    );
+    const popoverTextById = useMemo(() => popoverTextByAnnotationId(annotations), [annotations]);
+    const footnoteNumberById = useMemo(() => footnoteNumberByAnnotationId(annotations), [annotations]);
     const renderTree = useMemo(() => buildRenderTree(blocks), [blocks]);
     const charIdsByBlock = useMemo(() => {
         const result = new Map<string, string[]>();
@@ -588,7 +701,7 @@ export function BlockRichTextEditor({
         [blocksWithAnnotationBodies],
     );
     const orderedListNumbers = useMemo(() => deriveOrderedListNumbers(blocks), [blocks]);
-    const retainedResolvedSelectionSet = resolveSelectionSet(replica.state, replica.selection);
+    const retainedResolvedSelectionSet = resolveSelectionSetFromRegistry(registry, replica.state, replica.selection);
     const resolvedSelectionSet: EditorSelectionSet = dragSelection
         ? {
               primaryId: retainedResolvedSelectionSet.primaryId,
@@ -606,16 +719,20 @@ export function BlockRichTextEditor({
     const selectedPopoverSelectionKey = editorSelectionKey(selectedPopoverSelection);
     const selectedPopoverIds = useMemo(
         () =>
-            selectedPopoverIdsForSelection(
-                blocksWithAnnotationBodies,
-                selectedPopoverSelection,
-                popoverTextById,
-            ),
-        [blocksWithAnnotationBodies, popoverTextById, selectedPopoverSelectionKey],
+            floatingDestinationEnabled
+                ? selectedPopoverIdsForSelection(
+                      blocksWithAnnotationBodies,
+                      selectedPopoverSelection,
+                      popoverTextById,
+                  )
+                : [],
+        [floatingDestinationEnabled, blocksWithAnnotationBodies, popoverTextById, selectedPopoverSelectionKey],
     );
     const selectedPopoverIdsKey = selectedPopoverIds.join('\0');
-    const selectedBlockType = blockTypeMenuValue(
-        replica.state.state.blocks[focusPoint(primaryResolvedSelection).blockId]?.meta,
+    const selectedBlockType = blockTypeMenuValueFromRegistry(
+        registry,
+        replica.state.state.blocks[focusPointFromRegistry(registry, replica.state, primaryResolvedSelection).blockId]
+            ?.meta,
     );
     const activeInlineMarks = useMemo(
         () =>
@@ -624,8 +741,9 @@ export function BlockRichTextEditor({
                 blocks,
                 primaryResolvedSelection,
                 pendingInlineMarks,
+                activeInlineMarkTypes,
             ),
-        [blocks, pendingInlineMarks, primaryResolvedSelection, replica.state],
+        [activeInlineMarkTypes, blocks, pendingInlineMarks, primaryResolvedSelection, replica.state],
     );
     const decorationsByBlock = useMemo(
         () =>
@@ -636,8 +754,8 @@ export function BlockRichTextEditor({
         [dragSelection, hasFocus, isExtendingSelection, replica.state, resolvedSelectionSet],
     );
     const blockLevelDecorationsByBlock = useMemo(
-        () => blockLevelDecorationsForSelectionSet(replica.state, resolvedSelectionSet),
-        [replica.state, resolvedSelectionSet],
+        () => blockLevelDecorationsForSelectionSetFromRegistry(registry, replica.state, resolvedSelectionSet),
+        [registry, replica.state, resolvedSelectionSet],
     );
     const [cellDragBlockDropTarget, setCellDragBlockDropTarget] = useState<DropTarget | null>(null);
 
@@ -645,7 +763,9 @@ export function BlockRichTextEditor({
         const domSelection = window.getSelection();
         if (domSelection) domSelection.removeAllRanges();
         pendingBlockSelectionFocusRef.current = editorSelection ?? null;
-        const focusBlockId = editorSelection ? focusPoint(editorSelection).blockId : null;
+        const focusBlockId = editorSelection
+            ? focusPointFromRegistry(registry, replica.state, editorSelection).blockId
+            : null;
         const target =
             editorSelection?.type === 'table-cells'
                 ? rootRef.current?.querySelector<HTMLElement>(
@@ -664,13 +784,14 @@ export function BlockRichTextEditor({
         if (target && !target.matches('.slideViewport:not(.slideViewport-presentation)')) {
             pendingBlockSelectionFocusRef.current = null;
         }
-    }, []);
+    }, [registry, replica.state]);
 
     const submitCommand = useCallback(
         (command: (replica: Replica) => MultiCommandResult, options: SubmitCommandOptions = {}) => {
             onCommand((current) => {
                 const result = command(current);
                 if (options.constrainFullscreenSlideSelection === false) return result;
+                if (!blockRenderFeatures.has('slide_deck')) return result;
                 const constrained = constrainSelectionToFullscreenSlide(
                     result.state,
                     result.selection,
@@ -681,7 +802,7 @@ export function BlockRichTextEditor({
                 return {...result, selection: constrained.selection};
             });
         },
-        [focusBlockSelectionTarget, onCommand, slideDeckUiByBlockId],
+        [blockRenderFeatures, focusBlockSelectionTarget, onCommand, slideDeckUiByBlockId],
     );
 
     const {draggingId, draggingSubtreeIds, dropTarget, registerRow, startDrag} = useBlockReorder({
@@ -743,6 +864,7 @@ export function BlockRichTextEditor({
         setPopoverFocusPinned,
         showPopover,
     } = useAnnotationPopoverController({
+        enabled: floatingDestinationEnabled,
         rootRef,
         selectedPopoverIds,
         selectedPopoverIdsKey,
@@ -1051,20 +1173,22 @@ export function BlockRichTextEditor({
                 state: current.state,
                 ops: [],
                 selection: addSelection
-                    ? appendSelection(
+                    ? appendSelectionFromRegistry(
+                          registry,
                           current.state,
                           current.selection,
                           selection,
                           nextSelectionId(),
                       )
                     : event.type === 'keyup'
-                      ? replacePrimarySelection(current.state, current.selection, selection)
-                      : replaceSelectionSet(current.state, selection, current.selection.primaryId),
+                      ? replacePrimarySelectionFromRegistry(registry, current.state, current.selection, selection)
+                      : replaceSelectionSetFromRegistry(registry, current.state, selection, current.selection.primaryId),
             }));
         },
         [
             clearPendingInlineMarks,
             nextSelectionId,
+            registry,
             submitCommand,
             primaryResolvedSelection,
             resetVerticalCaretIntent,
@@ -1296,9 +1420,9 @@ export function BlockRichTextEditor({
         const root = rootRef.current;
         const selection = root ? readSelectionFromDom(root) : null;
         return selection
-            ? replacePrimarySelection(current.state, current.selection, selection)
+            ? replacePrimarySelectionFromRegistry(registry, current.state, current.selection, selection)
             : current.selection;
-    }, []);
+    }, [registry]);
 
     const runEditCommand = useCallback(
         (command: (current: Replica, selection: RetainedSelectionSet) => MultiCommandResult) => {
@@ -1306,34 +1430,37 @@ export function BlockRichTextEditor({
                 resetVerticalCaretIntent();
                 const retainedSelection = current.selection;
                 const currentPrimary = primarySelection(
-                    resolveSelectionSet(current.state, retainedSelection),
+                    resolveSelectionSetFromRegistry(registry, current.state, retainedSelection),
                 );
                 const selection = isBlockLevelSelection(currentPrimary)
                     ? retainedSelection
                     : liveSelectionSet(current);
                 const result = command(current, selection);
                 const primaryResultSelection = primarySelection(
-                    resolveSelectionSet(result.state, result.selection),
+                    resolveSelectionSetFromRegistry(registry, result.state, result.selection),
                 );
                 scheduleSelectionRestore(primaryResultSelection);
                 return result;
             });
         },
-        [liveSelectionSet, resetVerticalCaretIntent, scheduleSelectionRestore, submitCommand],
+        [liveSelectionSet, registry, resetVerticalCaretIntent, scheduleSelectionRestore, submitCommand],
     );
 
     const currentClipboardPayload = useCallback((): RichClipboardPayload | null => {
             const currentPrimary = primarySelection(resolvedSelectionSet);
             const selection = isBlockLevelSelection(currentPrimary)
-                ? retainSelectionSet(replica.state, resolvedSelectionSet)
+                ? retainSelectionSetFromRegistry(registry, replica.state, resolvedSelectionSet)
                 : liveSelectionSet(replica);
             return serializeSelectionToClipboardPayload(
                 replica.state,
                 selection,
                 serializeAttachments(attachments),
+                inlineRenderFeatures,
+                {blockTypes: blockRenderFeatures},
+                registry,
             );
         },
-        [attachments, liveSelectionSet, replica, resolvedSelectionSet],
+        [attachments, blockRenderFeatures, inlineRenderFeatures, liveSelectionSet, registry, replica, resolvedSelectionSet],
     );
 
     const writeCurrentSelectionToClipboard = useCallback(async () => {
@@ -1370,6 +1497,7 @@ export function BlockRichTextEditor({
 
     const insertImageFiles = useCallback(
         async (files: File[], selectionSnapshot?: RetainedSelectionSet | null) => {
+            if (!isEditorCommandAvailable('image:upload')) return;
             const file = files.find(isImageFile);
             if (!file) return;
             const retainedSelection =
@@ -1399,13 +1527,18 @@ export function BlockRichTextEditor({
             replica,
             resetVerticalCaretIntent,
             scheduleSelectionRestore,
+            isEditorCommandAvailable,
         ],
     );
 
     const pasteRichPayload = useCallback(
         (rich: RichClipboardPayload) => {
-            if (rich.attachments?.length) {
-                onMergeSerializedAttachments(rich.attachments);
+            const filteredRich = filterRichClipboardPayloadBlockFeatures(rich, {
+                blockTypes: blockRenderFeatures,
+            });
+            if (!filteredRich.fragments.length) return;
+            if (filteredRich.attachments?.length) {
+                onMergeSerializedAttachments(filteredRich.attachments);
             }
             submitCommand((current) => {
                 resetVerticalCaretIntent();
@@ -1418,11 +1551,13 @@ export function BlockRichTextEditor({
                     : liveSelectionSet(current);
                 const pastePrimary = primarySelection(resolveSelectionSet(current.state, selection));
                 const isBlockLinkPaste =
+                    isToolbarCommandAvailable('link:edit') &&
                     pastePrimary.type === 'range' &&
                     !isCollapsed(pastePrimary) &&
-                    (rich.sourceSelectionType === 'block' || rich.sourceSelectionType === 'table-cells');
+                    (filteredRich.sourceSelectionType === 'block' ||
+                        filteredRich.sourceSelectionType === 'table-cells');
                 if (isBlockLinkPaste) {
-                    const blockLinkHref = blockLinkHrefForClipboardPayload(current.state, rich);
+                    const blockLinkHref = blockLinkHrefForClipboardPayload(current.state, filteredRich);
                     const result = blockLinkHref
                         ? setLinkMarkEverywhere(
                               current.state,
@@ -1440,8 +1575,9 @@ export function BlockRichTextEditor({
                 const result = pasteRichClipboardEverywhere(
                     current.state,
                     selection,
-                    rich,
+                    filteredRich,
                     makeCommandContext(current),
+                    inlineRenderFeatures,
                 );
                 const primaryResultSelection = primarySelection(
                     resolveSelectionSet(result.state, result.selection),
@@ -1456,6 +1592,9 @@ export function BlockRichTextEditor({
             onMergeSerializedAttachments,
             resetVerticalCaretIntent,
             scheduleSelectionRestore,
+            inlineRenderFeatures,
+            blockRenderFeatures,
+            isToolbarCommandAvailable,
         ],
     );
 
@@ -1475,7 +1614,7 @@ export function BlockRichTextEditor({
                       )
                     : selection;
                 const pastePrimary = primarySelection(resolveSelectionSet(current.state, pasteSelection));
-                if (isLinkLikeText(text) && pastePrimary.type === 'range') {
+                if (isToolbarCommandAvailable('link:edit') && isLinkLikeText(text) && pastePrimary.type === 'range') {
                     return setLinkMarkEverywhere(
                         current.state,
                         pasteSelection,
@@ -1488,10 +1627,13 @@ export function BlockRichTextEditor({
                     pasteSelection,
                     text,
                     makeCommandContext(current),
+                    registry.markdownShortcuts,
                 );
             });
         },
         [
+            isToolbarCommandAvailable,
+            registry,
             runEditCommand,
         ],
     );
@@ -1678,11 +1820,12 @@ export function BlockRichTextEditor({
             const activeMarks = activePendingInlineMarks(pendingInlineMarks);
             const result = !activeMarks.length
                 ? insertTextWithMarkdownShortcutsEverywhere(
-                    current.state,
-                    selection,
-                    text,
-                    makeCommandContext(current),
-                )
+                      current.state,
+                      selection,
+                      text,
+                      makeCommandContext(current),
+                      registry.markdownShortcuts,
+                  )
                 : (() => {
                       const resolved = resolveSelectionSet(current.state, selection);
                       if (!resolved.entries.every((entry) => entry.selection.type === 'caret')) {
@@ -1691,6 +1834,7 @@ export function BlockRichTextEditor({
                               selection,
                               text,
                               makeCommandContext(current),
+                              registry.markdownShortcuts,
                           );
                       }
                       const marked = insertTextWithRetainedMarksEverywhere(
@@ -1720,7 +1864,7 @@ export function BlockRichTextEditor({
             }
             return result;
         },
-        [pendingInlineMarks, retainedInlineMarks],
+        [pendingInlineMarks, registry, retainedInlineMarks],
     );
 
     const closeSlashMenuAndRestoreSelection = useCallback(() => {
@@ -1738,6 +1882,48 @@ export function BlockRichTextEditor({
         setSlashMenu((current) => (current ? {...current, activeIndex} : current));
     }, []);
 
+    const runBlockTypeCommandEverywhere = (
+        state: CachedState<RichBlockMeta>,
+        selection: RetainedSelectionSet,
+        kind: BlockTypeMenuValue,
+        context: CommandContext,
+    ): MultiCommandResult => {
+        if (kind === 'table') {
+            return runSelectionCommandEverywhere(state, selection, (working, entry) =>
+                convertBlockToTable(working, resolveSelection(working, entry.selection), context),
+            );
+        }
+        if (kind === 'columns' || kind === 'card-columns') {
+            return runSelectionCommandEverywhere(state, selection, (working, entry) =>
+                convertBlockToColumns(
+                    working,
+                    resolveSelection(working, entry.selection),
+                    context,
+                    kind === 'card-columns' ? 'cards' : 'blocks',
+                ),
+            );
+        }
+        if (kind === 'slide-deck') {
+            return runSelectionCommandEverywhere(state, selection, (working, entry) =>
+                convertBlockToSlideDeck(working, resolveSelection(working, entry.selection), context),
+            );
+        }
+        if (kind === 'slide') {
+            return runSelectionCommandEverywhere(state, selection, (working, entry) =>
+                convertBlockToSlide(working, resolveSelection(working, entry.selection), context),
+            );
+        }
+        if (kind === 'preview') {
+            return runSelectionCommandEverywhere(state, selection, (working, entry) =>
+                insertPreviewBlock(working, resolveSelection(working, entry.selection), '', context),
+            );
+        }
+        return setBlockTypeEverywhere(state, selection, (_blockId, meta) => {
+            const nextMeta = blockTypeMetaFromRegistry(registry, kind, meta, context.nextTs());
+            return nextMeta ?? meta;
+        });
+    };
+
     const runSlashCommand = useCallback(
         (command: SlashCommand) => {
             const menu = slashMenu;
@@ -1748,7 +1934,7 @@ export function BlockRichTextEditor({
                 const context = makeCommandContext(current);
                 const deleted = deleteSlashTriggers(current.state, menu, context);
                 let result: MultiCommandResult;
-                if (command.type === 'date-embed') {
+                if (command.commandId === 'inline-embed:date') {
                     result = runSelectionCommandEverywhere(
                         deleted.state,
                         deleted.selection,
@@ -1760,69 +1946,30 @@ export function BlockRichTextEditor({
                                 context,
                             ),
                     );
-                } else if (command.value === 'table') {
-                    result = runSelectionCommandEverywhere(
+                } else if (command.commandId.startsWith('block-type:') && command.type === 'block') {
+                    result = runBlockTypeCommandEverywhere(
                         deleted.state,
                         deleted.selection,
-                        (working, entry) =>
-                            convertBlockToTable(
-                                working,
-                                resolveSelection(working, entry.selection),
-                                context,
-                            ),
-                    );
-                } else if (command.value === 'columns' || command.value === 'card-columns') {
-                    result = runSelectionCommandEverywhere(
-                        deleted.state,
-                        deleted.selection,
-                        (working, entry) =>
-                            convertBlockToColumns(
-                                working,
-                                resolveSelection(working, entry.selection),
-                                context,
-                                command.value === 'card-columns' ? 'cards' : 'blocks',
-                            ),
-                    );
-                } else if (command.value === 'slide-deck') {
-                    result = runSelectionCommandEverywhere(
-                        deleted.state,
-                        deleted.selection,
-                        (working, entry) =>
-                            convertBlockToSlideDeck(
-                                working,
-                                resolveSelection(working, entry.selection),
-                                context,
-                            ),
-                    );
-                } else if (command.value === 'slide') {
-                    result = runSelectionCommandEverywhere(
-                        deleted.state,
-                        deleted.selection,
-                        (working, entry) =>
-                            convertBlockToSlide(
-                                working,
-                                resolveSelection(working, entry.selection),
-                                context,
-                            ),
-                    );
-                } else if (command.value === 'preview') {
-                    result = runSelectionCommandEverywhere(
-                        deleted.state,
-                        deleted.selection,
-                        (working, entry) =>
-                            insertPreviewBlock(
-                                working,
-                                resolveSelection(working, entry.selection),
-                                '',
-                                context,
-                            ),
+                        command.value,
+                        context,
                     );
                 } else {
-                    result = setBlockTypeEverywhere(
-                        deleted.state,
-                        deleted.selection,
-                        (_blockId, meta) => blockTypeMeta(command.value, meta, context.nextTs()),
+                    const handler = registry.commands.get(command.commandId);
+                    const handled = handler?.handle(
+                        {id: command.commandId},
+                        {
+                            state: deleted.state,
+                            selection: deleted.selection,
+                            dispatch: (next) => runToolbarCommand(next.id),
+                        },
                     );
+                    result = handled
+                        ? {
+                              state: handled.state,
+                              ops: handled.ops,
+                              selection: handled.selection ?? deleted.selection,
+                          }
+                        : {state: deleted.state, ops: [], selection: deleted.selection};
                 }
                 const primary = primarySelection(resolveSelectionSet(result.state, result.selection));
                 scheduleSelectionRestore(primary);
@@ -2004,7 +2151,7 @@ export function BlockRichTextEditor({
             const selectedTopLevelBlockIds =
                 primary.type === 'caret'
                     ? []
-                    : selectedTopLevelBlockIdsForSelectionSet(replica.state, resolvedSelectionSet);
+                    : selectedTopLevelBlockIdsForSelectionSetFromRegistry(registry, replica.state, resolvedSelectionSet);
             if (selectedTopLevelBlockIds.includes(blockId)) {
                 startDrag(blockId, event, selectedTopLevelBlockIds);
                 return;
@@ -2012,7 +2159,7 @@ export function BlockRichTextEditor({
             selectBlockFromHandle(blockId);
             startDrag(blockId, event, [blockId]);
         },
-        [replica.state, resolvedSelectionSet, selectBlockFromHandle, startDrag],
+        [registry, replica.state, resolvedSelectionSet, selectBlockFromHandle, startDrag],
     );
 
     const textCaretForBlockSelection = useCallback(
@@ -2048,7 +2195,7 @@ export function BlockRichTextEditor({
                 };
             }
             const resolved = resolveSelectionSet(current.state, current.selection);
-            const blockIds = selectedTopLevelBlockIdsForSelectionSet(current.state, resolved);
+            const blockIds = selectedTopLevelBlockIdsForSelectionSetFromRegistry(registry, current.state, resolved);
             if (!blockIds.length) {
                 return {state: current.state, ops: [], selection: current.selection};
             }
@@ -2074,7 +2221,7 @@ export function BlockRichTextEditor({
                 selection: replaceSelectionSet(working, fallback, current.selection.primaryId),
             };
         },
-        [scheduleSelectionRestore],
+        [registry, scheduleSelectionRestore],
     );
 
     const cutRichSelection = useCallback(
@@ -2876,6 +3023,216 @@ export function BlockRichTextEditor({
         pendingBlockSelectionFocusRef.current = null;
     }, [replica.state, replica.selection]);
 
+    const runToolbarAnnotationCommand = (presentation: AnnotationPresentation) => {
+        if (!isEditorCommandAvailable(`annotation:${presentation}`)) return;
+        if (activeAnnotationBodySelection) {
+            runBlockControlCommand((current) => {
+                const result = createAnnotation(
+                    current.state,
+                    activeAnnotationBodySelection,
+                    presentation,
+                    makeCommandContext(current),
+                );
+                if (presentation === 'sidebar') handleSidebarCommentCreated(result);
+                return {
+                    state: result.state,
+                    ops: result.ops,
+                    selection: current.selection,
+                };
+            });
+            return;
+        }
+
+        runEditCommand((current, selection) => {
+            const result = createAnnotation(
+                current.state,
+                primarySelection(resolveSelectionSet(current.state, selection)),
+                presentation,
+                makeCommandContext(current),
+            );
+            if (presentation === 'sidebar') handleSidebarCommentCreated(result);
+            return {state: result.state, ops: result.ops, selection};
+        });
+    };
+
+    const runToolbarBlockTypeCommand = (kind: BlockTypeMenuValue) => {
+        runEditCommand((current, selection) => {
+            return runBlockTypeCommandEverywhere(current.state, selection, kind, makeCommandContext(current));
+        });
+    };
+
+    const runToolbarCommand = (commandId: string) => {
+        if (!isToolbarCommandAvailable(commandId)) return;
+        if (commandId.startsWith('block-type:')) {
+            runToolbarBlockTypeCommand(commandId.slice('block-type:'.length) as BlockTypeMenuValue);
+            return;
+        }
+        switch (commandId) {
+            case 'history:undo':
+                onUndo();
+                return;
+            case 'history:redo':
+                onRedo();
+                return;
+            case 'mark:bold':
+                runInlineMarkToggle('bold');
+                return;
+            case 'mark:italic':
+                runInlineMarkToggle('italic');
+                return;
+            case 'mark:strikethrough':
+                runInlineMarkToggle('strikethrough');
+                return;
+            case 'mark:underline':
+                runInlineMarkToggle('underline');
+                return;
+            case 'mark:code':
+                if (activeAnnotationBodySelection) {
+                    runAnnotationBodyCommand((current, context) =>
+                        toggleAnnotationBodyCodeMark(current.state, activeAnnotationBodySelection, context),
+                    );
+                } else {
+                    runCodeToggle();
+                }
+                return;
+            case 'mark:math':
+                if (!activeAnnotationBodySelection) runMathToggle('inline');
+                return;
+            case 'mark:display-math':
+                if (!activeAnnotationBodySelection) runMathToggle('display');
+                return;
+            case 'link:edit':
+                openLinkFromCurrentSelection();
+                return;
+            case 'inline-embed:date':
+                insertDateEmbedFromCurrentSelection();
+                return;
+            case 'image:upload':
+                captureImageUploadSelection();
+                return;
+            case 'annotation:sidebar':
+                runToolbarAnnotationCommand('sidebar');
+                return;
+            case 'annotation:footnote':
+                runToolbarAnnotationCommand('footnote');
+                return;
+            case 'annotation:popover':
+                runToolbarAnnotationCommand('popover');
+                return;
+            default:
+                const handler = registry.commands.get(commandId);
+                if (!handler) return;
+                runBlockControlCommand((current) => {
+                    const handled = handler.handle(
+                        {id: commandId},
+                        {
+                            state: current.state,
+                            selection: current.selection,
+                            dispatch: (command) => runToolbarCommand(command.id),
+                        },
+                    );
+                    return handled
+                        ? {
+                              state: handled.state,
+                              ops: handled.ops,
+                              selection: handled.selection ?? current.selection,
+                          }
+                        : {state: current.state, ops: [], selection: current.selection};
+                });
+        }
+    };
+
+    const annotationRenderServices = useMemo<BlockEditorAnnotationRenderServices>(() => ({
+        all: () => annotations,
+        byPresentation: (presentation) => renderedAnnotationsByPresentation(annotations, presentation),
+        byId: (id) => annotationsById.get(id) ?? null,
+        popoverTextById: () => popoverTextById,
+        footnoteNumberById: () => footnoteNumberById,
+        sidebarOpen: () => commentsOpen,
+        gutterTops: () => commentGutterTops,
+        focusRequest: () => commentFocusRequest,
+        activePopovers: () => activePopovers,
+        popoverAnnotation: (id) => popoverAnnotationsById.get(id) ?? null,
+        visibleBodyBlockIds: () => annotationBodyIds,
+        setSidebarOpen: setCommentsOpen,
+        focusAnnotation: (annotation) => {
+            setCommentsOpen(true);
+            requestCommentFocus(focusBodyBlockForAnnotation(annotation));
+        },
+        focusBodyBlock: focusBodyBlockForAnnotation,
+        requestBodyFocus: requestCommentFocus,
+        markFocusRequestHandled: () => setCommentFocusRequest(null),
+        recordBodyActivity: recordCommentBodyActivity,
+        setActiveBodySelection: setActiveAnnotationBodySelection,
+        resolve: (annotation) => {
+            if (!isEditorCommandAvailable('annotation:resolve')) return;
+            runAnnotationBodyCommand((current, context) =>
+                resolveAnnotation(current.state, annotation.id, context),
+            );
+        },
+        isToolbarCommandAvailable,
+        runBodyCommand: runAnnotationBodyCommand,
+        dispatch: (command) => runToolbarCommand(command.id),
+        showPopover,
+        schedulePopoverHide: schedulePopoverHideFromPointer,
+        cancelPopoverHide,
+        setPopoverFocusPinned,
+        closeDeepestPopover,
+        inlineRenderFeatures: () => inlineRenderFeatures,
+        registry: () => registry,
+        rainbowLamportIds: () => rainbowLamportIds,
+        renderEditableSurface: (props) => <RichTextEditableSurface {...props} />,
+        onInputMeasured,
+        onDisplayInputRenderStarted,
+    }), [
+        activePopovers,
+        annotationBodyIds,
+        annotations,
+        annotationsById,
+        cancelPopoverHide,
+        closeDeepestPopover,
+        commentFocusRequest,
+        commentGutterTops,
+        commentsOpen,
+        focusBodyBlockForAnnotation,
+        footnoteNumberById,
+        inlineRenderFeatures,
+        isEditorCommandAvailable,
+        isToolbarCommandAvailable,
+        onDisplayInputRenderStarted,
+        onInputMeasured,
+        popoverAnnotationsById,
+        popoverTextById,
+        rainbowLamportIds,
+        recordCommentBodyActivity,
+        registry,
+        requestCommentFocus,
+        runAnnotationBodyCommand,
+        runToolbarCommand,
+        schedulePopoverHideFromPointer,
+        setPopoverFocusPinned,
+        showPopover,
+    ]);
+
+    const renderDestination = (destination: 'footer' | 'sidebar' | 'floating'): ReactElement | null => {
+        const renderers = registry.destinationRenderers.get(destination) ?? [];
+        const rendered = renderers
+            .map((renderer) => {
+                const renderContext: BlockEditorDestinationRenderContext<RichBlockMeta> = {
+                    state: replica.state,
+                    registry,
+                    destination,
+                    userId,
+                    annotations: annotationRenderServices,
+                    dispatch: annotationRenderServices.dispatch,
+                };
+                const element = renderer.render(renderContext);
+                return element ? <Fragment key={renderer.id}>{element}</Fragment> : null;
+            })
+            .filter((element): element is ReactElement => element !== null);
+        return rendered.length ? <>{rendered}</> : null;
+    };
+
     return (
         <article className={replica.online ? 'editorPanel' : 'editorPanel offline'}>
             <header className="editorHeader">
@@ -2906,12 +3263,16 @@ export function BlockRichTextEditor({
                 canUndo={undoState.canUndo}
                 canRedo={undoState.canRedo}
                 blockType={selectedBlockType}
+                blockTypeItems={blockTypeItems}
+                toolbarItemIds={toolbarItemIds}
                 activeMarks={activeInlineMarks}
+                onCommand={runToolbarCommand}
                 onUndo={onUndo}
                 onRedo={onRedo}
                 onBold={() => runInlineMarkToggle('bold')}
                 onItalic={() => runInlineMarkToggle('italic')}
                 onStrikethrough={() => runInlineMarkToggle('strikethrough')}
+                onUnderline={() => runInlineMarkToggle('underline')}
                 onCode={() =>
                     activeAnnotationBodySelection
                         ? runAnnotationBodyCommand((current, context) =>
@@ -3045,7 +3406,7 @@ export function BlockRichTextEditor({
                             };
                         }
                         return setBlockTypeEverywhere(current.state, selection, (_blockId, meta) =>
-                            blockTypeMeta(kind, meta, nextReplicaTs(current)),
+                            blockTypeMetaFromRegistry(registry, kind, meta, nextReplicaTs(current)) ?? meta,
                         );
                     })
                 }
@@ -3117,17 +3478,31 @@ export function BlockRichTextEditor({
                                 orderedListNumbers,
                                 popoverTextById,
                                 footnoteNumberById,
+                                inlineRenderFeatures,
+                                blockRenderFeatures,
+                                registry,
+                                annotations: annotationRenderServices,
+                                optionPanelBlockTypes,
                                 onPopoverTriggerEnter: showPopover,
                                 onPopoverTriggerLeave: schedulePopoverHideFromPointer,
-                                openLinkFromCurrentSelection,
+                                openLinkFromCurrentSelection: () => {
+                                    if (!isToolbarCommandAvailable('link:edit')) return;
+                                    openLinkFromCurrentSelection();
+                                },
                                 showLinkHoverFromRange,
                                 hideLinkHover: scheduleLinkHoverHide,
                                 showCodeHoverFromRange,
                                 hideCodeHover: scheduleCodeHoverHide,
                                 openInlineEmbed: openEmbedPopover,
                                 insertText: insertTextWithPendingMarks,
-                                runInlineMarkToggle,
-                                runCodeToggle,
+                                runInlineMarkToggle: (markType) => {
+                                    if (!isToolbarCommandAvailable(inlineMarkToolbarCommandId(markType))) return;
+                                    runInlineMarkToggle(markType);
+                                },
+                                runCodeToggle: () => {
+                                    if (!isToolbarCommandAvailable('mark:code')) return;
+                                    runCodeToggle();
+                                },
                                 createMissingTableCell: (tableId, rowId, columnIndex) =>
                                     runBlockControlCommand((current) => {
                                         const result = createMissingTableCell(
@@ -3201,88 +3576,14 @@ export function BlockRichTextEditor({
                             }),
                         )}
                     </div>
-                    <Footnotes
-                        state={replica.state}
-                        annotations={annotations.filter(
-                            (item) => item.data.presentation === 'footnote',
-                        )}
-                        focusRequest={commentFocusRequest}
-                        onFocusRequestHandled={() => setCommentFocusRequest(null)}
-                        onBodyCommand={runAnnotationBodyCommand}
-                        onBodyFocusRequest={requestCommentFocus}
-                        onBodySelectionChange={setActiveAnnotationBodySelection}
-                        popoverTextById={popoverTextById}
-                        footnoteNumberById={footnoteNumberById}
-                        rainbowLamportIds={rainbowLamportIds}
-                        onPopoverTriggerEnter={showPopover}
-                        onPopoverTriggerLeave={schedulePopoverHideFromPointer}
-                        onInputMeasured={onInputMeasured}
-                        onDisplayInputRenderStarted={onDisplayInputRenderStarted}
-                    />
+                    {renderDestination('footer')}
                 </div>
-                <AnnotationSidebar
-                    state={replica.state}
-                    annotations={sidebarAnnotations}
-                    open={commentsOpen}
-                    gutterTops={commentGutterTops}
-                    focusRequest={commentFocusRequest}
-                    onToggle={setCommentsOpen}
-                    onFocusRequestHandled={() => setCommentFocusRequest(null)}
-                    onFocusAnnotation={(annotation) => {
-                        setCommentsOpen(true);
-                        requestCommentFocus(focusBodyBlockForAnnotation(annotation));
-                    }}
-                    onBodyActivity={recordCommentBodyActivity}
-                    onBodyCommand={runAnnotationBodyCommand}
-                    onBodyFocusRequest={requestCommentFocus}
-                    onBodySelectionChange={setActiveAnnotationBodySelection}
-                    onResolveAnnotation={(annotation) => {
-                        runAnnotationBodyCommand((current, context) =>
-                            resolveAnnotation(current.state, annotation.id, context),
-                        );
-                    }}
-                    popoverTextById={popoverTextById}
-                    footnoteNumberById={footnoteNumberById}
-                    rainbowLamportIds={rainbowLamportIds}
-                    onPopoverTriggerEnter={showPopover}
-                    onPopoverTriggerLeave={schedulePopoverHideFromPointer}
-                    onInputMeasured={onInputMeasured}
-                    onDisplayInputRenderStarted={onDisplayInputRenderStarted}
-                />
+                {renderDestination('sidebar')}
             </div>
-            {activePopovers.map((popover) => (
-                <FloatingAnnotationPopover
-                    state={replica.state}
-                    key={popover.id}
-                    annotation={popoverAnnotationsById.get(popover.id) ?? null}
-                    position={popover}
-                    onMouseEnter={cancelPopoverHide}
-                    onMouseLeave={(event) =>
-                        schedulePopoverHideFromPointer(popover.id, {
-                            source: 'panel',
-                            relatedTarget: event.relatedTarget,
-                            clientX: event.clientX,
-                            clientY: event.clientY,
-                        })
-                    }
-                    onFocusChange={setPopoverFocusPinned}
-                    onEscape={closeDeepestPopover}
-                    focusRequest={commentFocusRequest}
-                    onFocusRequestHandled={() => setCommentFocusRequest(null)}
-                    onBodyCommand={runAnnotationBodyCommand}
-                    onBodyFocusRequest={requestCommentFocus}
-                    onBodySelectionChange={setActiveAnnotationBodySelection}
-                    popoverTextById={popoverTextById}
-                    footnoteNumberById={footnoteNumberById}
-                    rainbowLamportIds={rainbowLamportIds}
-                    onPopoverTriggerEnter={showPopover}
-                    onPopoverTriggerLeave={schedulePopoverHideFromPointer}
-                    onInputMeasured={onInputMeasured}
-                    onDisplayInputRenderStarted={onDisplayInputRenderStarted}
-                />
-            ))}
+            {renderDestination('floating')}
             <SlashCommandPopover
                 state={slashMenu}
+                commands={slashCommands}
                 onQueryChange={updateSlashMenuQuery}
                 onActiveIndexChange={updateSlashMenuActiveIndex}
                 onSelect={runSlashCommand}
@@ -3330,68 +3631,10 @@ export function BlockRichTextEditor({
     );
 }
 
-type RenderTreeNode = {
-    block: RichFormattedBlock;
-    children: RenderTreeNode[];
-};
+type RenderTreeNode = BlockEditorRenderedBlockNode<RichBlockMeta>;
 
-type SlideDeckDisplayMode = 'presentation' | 'overview' | 'outline';
-type OrphanSlideDisplayMode = 'view' | 'outline';
-
-type SlideDeckUiState = {
-    mode: SlideDeckDisplayMode;
-    currentSlideId: string | null;
-    fullScreen: boolean;
-};
-
-type ElementSize = {
-    width: number;
-    height: number;
-};
-
-const emptyElementSize: ElementSize = {width: 0, height: 0};
-
-const calculateSlideScale = (
-    viewport: ElementSize,
-    deck: Pick<Extract<RichBlockMeta, {type: 'slide_deck'}>, 'width' | 'height'>,
-): number => {
-    if (viewport.width <= 0 || viewport.height <= 0 || deck.width <= 0 || deck.height <= 0) {
-        return 1;
-    }
-    return Math.min(viewport.width / deck.width, viewport.height / deck.height);
-};
-
-const useElementSize = <T extends HTMLElement>(): [(element: T | null) => void, ElementSize] => {
-    const [element, setElement] = useState<T | null>(null);
-    const [size, setSize] = useState<ElementSize>(emptyElementSize);
-
-    useLayoutEffect(() => {
-        if (!element) {
-            setSize(emptyElementSize);
-            return;
-        }
-
-        const updateSize = () => {
-            const rect = element.getBoundingClientRect();
-            setSize((current) =>
-                current.width === rect.width && current.height === rect.height
-                    ? current
-                    : {width: rect.width, height: rect.height},
-            );
-        };
-
-        updateSize();
-        if (typeof ResizeObserver === 'undefined') {
-            return;
-        }
-
-        const observer = new ResizeObserver(updateSize);
-        observer.observe(element);
-        return () => observer.disconnect();
-    }, [element]);
-
-    return [setElement, size];
-};
+type SlideDeckUiState = BlockEditorSlideDeckUiState;
+type OrphanSlideDisplayMode = BlockEditorOrphanSlideDisplayMode;
 
 const runSelectionCommandEverywhere = (
     state: CachedState<RichBlockMeta>,
@@ -3449,6 +3692,11 @@ type RenderBlockContext = {
     orderedListNumbers: Map<string, number>;
     popoverTextById: Map<string, string>;
     footnoteNumberById: Map<string, number>;
+    inlineRenderFeatures: InlineRenderFeatures;
+    blockRenderFeatures: BlockRenderFeatures;
+    registry: BlockEditorRegistry<RichBlockMeta>;
+    annotations: BlockEditorAnnotationRenderServices;
+    optionPanelBlockTypes: ReadonlySet<string>;
     runEditCommand(
         command: (current: Replica, selection: RetainedSelectionSet) => MultiCommandResult,
     ): void;
@@ -3519,7 +3767,7 @@ const buildRenderTree = (blocks: RichFormattedBlock[]): RenderTreeNode[] => {
     const roots: RenderTreeNode[] = [];
     const stack: RenderTreeNode[] = [];
     for (const block of blocks) {
-        const node = {block, children: []};
+        const node: RenderTreeNode = {id: block.id, block, children: []};
         while (stack.length && stack[stack.length - 1].block.depth >= block.depth) stack.pop();
         const parent = stack[stack.length - 1];
         if (parent) {
@@ -3549,24 +3797,515 @@ const matrixPollViewForNode = (node: RenderTreeNode): MatrixPollView => {
     };
 };
 
+const pluginBlockRenderContext = (
+    context: RenderBlockContext,
+): BlockEditorBlockRenderContext<RichBlockMeta> => ({
+    state: context.state,
+    registry: context.registry,
+    userId: context.userId,
+    blocks: {
+        renderEditableBlock: (nodeOrBlock, options) =>
+            renderEditableBlock(
+                'children' in nodeOrBlock ? nodeOrBlock.block : nodeOrBlock,
+                context,
+                options,
+            ),
+        renderChildren: (node) => node.children.map((child) => renderBlockNode(child, context)),
+        renderChildrenAtRelativeDepth: (node, baseDepth) =>
+            node.children.map((child) => renderBlockNodeAtRelativeDepth(child, context, baseDepth)),
+        renderNodeAtRelativeDepth: (node, baseDepth) =>
+            renderBlockNodeAtRelativeDepth(node, context, baseDepth),
+        blockText: blockPlainText,
+        nodeText: (node) => blockPlainText(node.block),
+    },
+    selection: {
+        focus: context.focusBlockSelectionTarget,
+        dispatch: (command) => {
+            context.registry.commands.get(command.id)?.handle(command, {
+                state: context.state,
+                selection: singleRetainedSelectionSet(context.state, context.selection),
+                dispatch: () => undefined,
+            });
+        },
+    },
+    attachments: {
+        get: (id) => context.attachments.get(id) ?? null,
+    },
+    previews: {
+        setUrl: (blockId, url) => {
+            context.runBlockControlCommand((current) => {
+                const block = current.state.state.blocks[blockId];
+                if (!block || block.meta.type !== 'preview') {
+                    return {state: current.state, ops: [], selection: current.selection};
+                }
+                const result = setPreviewBlockData(
+                    current.state,
+                    blockId,
+                    url,
+                    null,
+                    makeCommandContext(current),
+                );
+                return {state: result.state, ops: result.ops, selection: current.selection};
+            });
+        },
+        setMetadata: (blockId, url, metadata) => {
+            context.runBlockControlCommand((current) => {
+                const block = current.state.state.blocks[blockId];
+                if (!block || block.meta.type !== 'preview' || block.meta.url !== url) {
+                    return {state: current.state, ops: [], selection: current.selection};
+                }
+                const result = setPreviewBlockData(
+                    current.state,
+                    blockId,
+                    url,
+                    metadata as PreviewMetadata | null,
+                    makeCommandContext(current),
+                );
+                return {state: result.state, ops: result.ops, selection: current.selection};
+            });
+        },
+    },
+    dragDrop: {
+        registerRow: context.registerRow,
+        startBlockDragFromHandle: (blockId, event) =>
+            context.startBlockDragFromHandle(blockId, event as PointerEvent<HTMLElement>),
+        isDragging: (blockId) => context.draggingSubtreeIds.has(blockId),
+        isDraggingRoot: (blockId) => context.draggingId === blockId,
+        dropTargetForBlock: (blockId) =>
+            context.dropTarget?.indicatorBlockId === blockId
+                ? {indicatorPlacement: context.dropTarget.indicatorPlacement}
+                : null,
+    },
+    decorations: {
+        blockLevel: (blockId) => context.blockLevelDecorationsByBlock.get(blockId) ?? null,
+    },
+    table: {
+        currentSelection: () => context.selection,
+        cellIdForSelection: (selection) => tableCellIdForSelection(context.state, selection),
+        cellSelectionForCell: (cellId) => tableCellSelectionForCell(context.state, cellId),
+        isCellBlock: (blockId) => isTableCellBlock(context.state, blockId),
+        fullColumnSelectionCellIds: (selection, tableId) =>
+            fullColumnSelectionCellIds(context.state, selection, tableId),
+        selectedRectangleSelection: (selection, tableId) =>
+            selectedTableRectangleSelection(context.state, selection, tableId),
+        rectangleSelectionForTextSelection: (selection, tableId) =>
+            tableCellRectangleSelectionForTextSelection(context.state, selection, tableId),
+        rectangleForSelection: (selection) => tableCellRectangleForSelection(context.state, selection),
+        rowsForTable: (tableId) => tableRowsForSelection(context.state, tableId),
+        cellsForRow: (rowId) => tableCellsForSelection(context.state, rowId),
+        blockLevelDecoration: (blockId) => context.blockLevelDecorationsByBlock.get(blockId) ?? null,
+        dropTarget: () => context.dropTarget,
+        createMissingCell: context.createMissingTableCell,
+        addRow: context.addTableRow,
+        addColumn: context.addTableColumn,
+        selectCells: (selection) => {
+            context.runBlockControlCommand((current) => ({
+                state: current.state,
+                ops: [],
+                selection: replaceSelectionSet(current.state, selection, current.selection.primaryId),
+            }));
+        },
+        moveCellsToNewRow: (cellIds, target) => {
+            context.runBlockControlCommand((current) => {
+                const result = moveTableCellsToNewRow(
+                    current.state,
+                    cellIds,
+                    target,
+                    makeCommandContext(current),
+                );
+                return {
+                    state: result.state,
+                    ops: result.ops,
+                    selection: replaceSelectionSet(
+                        result.state,
+                        result.selection,
+                        current.selection.primaryId,
+                    ),
+                };
+            });
+        },
+        moveCellsOutAsBlocks: (cellIds, dropCommand) => {
+            context.runBlockControlCommand((current) => {
+                const result = moveTableCellsOutAsBlocks(
+                    current.state,
+                    cellIds,
+                    dropCommand,
+                    makeCommandContext(current),
+                );
+                return {
+                    state: result.state,
+                    ops: result.ops,
+                    selection: replaceSelectionSet(
+                        result.state,
+                        result.selection,
+                        current.selection.primaryId,
+                    ),
+                };
+            });
+        },
+        moveRectangleOutToNewTable: (selection, dropCommand) => {
+            context.runBlockControlCommand((current) => {
+                const result = moveCellRectangleOutToNewTable(
+                    current.state,
+                    selection,
+                    dropCommand,
+                    makeCommandContext(current),
+                );
+                return result
+                    ? {
+                          state: result.state,
+                          ops: result.ops,
+                          selection: replaceSelectionSet(
+                              result.state,
+                              result.selection,
+                              current.selection.primaryId,
+                          ),
+                      }
+                    : {state: current.state, ops: [], selection: current.selection};
+            });
+        },
+        moveCellRectangleContents: (selection, target) => {
+            context.runBlockControlCommand((current) => {
+                const result = moveTableCellRectangleContents(
+                    current.state,
+                    selection,
+                    target,
+                    makeCommandContext(current),
+                );
+                return result
+                    ? {
+                          state: result.state,
+                          ops: result.ops,
+                          selection: replaceSelectionSet(
+                              result.state,
+                              result.selection,
+                              current.selection.primaryId,
+                          ),
+                      }
+                    : {state: current.state, ops: [], selection: current.selection};
+            });
+        },
+        moveCell: (cellId, target) => {
+            context.runBlockControlCommand((current) => {
+                const result = moveTableCell(
+                    current.state,
+                    cellId,
+                    target,
+                    makeCommandContext(current),
+                );
+                return {state: result.state, ops: result.ops, selection: current.selection};
+            });
+        },
+        moveColumnCells: (cellIds, targetColumnIndex) => {
+            context.runBlockControlCommand((current) => {
+                let working = current.state;
+                const ops: Array<Op<RichBlockMeta>> = [];
+                for (const cellId of cellIds) {
+                    const rowId = lamportToString(
+                        materializedBlockParent(working, cellId, annotationVirtualParents(working)),
+                    );
+                    const result = moveTableCell(
+                        working,
+                        cellId,
+                        {rowId, index: targetColumnIndex},
+                        makeCommandContext(current),
+                    );
+                    working = result.state;
+                    ops.push(...result.ops);
+                }
+                return {state: working, ops, selection: current.selection};
+            });
+        },
+        setCellDragBlockDropTarget: context.setCellDragBlockDropTarget,
+        cellElementFromPoint: tableElementAtPoint,
+        cellSlotTargetFromPoint: tableCellSlotAtPoint,
+        rowSlotTargetFromPoint: tableRowSlotAtPoint,
+        dragTargetFromPoint: (clientX, clientY, tableId) =>
+            tableDragTargetAtPoint(clientX, clientY, tableId, context),
+        isCellBorderPointer: cellBorderPointerHit,
+        onCopy: context.onCopy,
+        onCut: context.onCut,
+        onPaste: context.onPaste,
+        onKeystroke: context.onKeystroke,
+        onUndo: context.onUndo,
+        onRedo: context.onRedo,
+        moveSelectionByArrowKey: context.moveTableSelectionByArrowKey,
+        extendSelectionByArrowKey: context.extendTableSelectionByArrowKey,
+    },
+    slides: {
+        deckUiForBlock: context.slideDeckUiForBlock,
+        setDeckUiForBlock: context.setSlideDeckUiForBlock,
+        orphanModeForBlock: context.orphanSlideModeForBlock,
+        setOrphanModeForBlock: context.setOrphanSlideModeForBlock,
+        deckForSlide: (slideId) => slideDeckForSlide(context.state, slideId),
+        addSlideToDeck: context.addSlideToDeck,
+        selectSlideBlock: (slideId, options) => {
+            if (!slideId) return;
+            const selection = {
+                type: 'block' as const,
+                anchorBlockId: slideId,
+                focusBlockId: slideId,
+            };
+            context.runBlockControlCommand(
+                (current) => ({
+                    state: current.state,
+                    ops: [],
+                    selection: replaceSelectionSet(current.state, selection, current.selection.primaryId),
+                }),
+                options,
+            );
+            context.focusBlockSelectionTarget(selection);
+        },
+        isCurrentBlockSelection: (blockId) =>
+            context.selection.type === 'block' &&
+            context.selection.anchorBlockId === blockId &&
+            context.selection.focusBlockId === blockId,
+        isEditableSurfaceEventTarget: eventFromEditableSurface,
+        registerSlideViewport: context.registerRow,
+        measureElement: <T extends HTMLElement>() => {
+            const [element, setElement] = useState<T | null>(null);
+            const [size, setSize] = useState({width: 0, height: 0});
+
+            useLayoutEffect(() => {
+                if (!element) {
+                    setSize({width: 0, height: 0});
+                    return;
+                }
+
+                const updateSize = () => {
+                    const rect = element.getBoundingClientRect();
+                    setSize((current) =>
+                        current.width === rect.width && current.height === rect.height
+                            ? current
+                            : {width: rect.width, height: rect.height},
+                    );
+                };
+
+                updateSize();
+                if (typeof ResizeObserver === 'undefined') {
+                    return;
+                }
+
+                const observer = new ResizeObserver(updateSize);
+                observer.observe(element);
+                return () => observer.disconnect();
+            }, [element]);
+
+            return [setElement, size];
+        },
+        calculateScale: (viewport, deckSize) => {
+            if (viewport.width <= 0 || viewport.height <= 0 || deckSize.width <= 0 || deckSize.height <= 0) {
+                return 1;
+            }
+            return Math.min(viewport.width / deckSize.width, viewport.height / deckSize.height);
+        },
+        footerText: (footer, deckTitle, slideIndex, slideCount) => {
+            const number = slideCount ? `${slideIndex + 1}/${slideCount}` : '';
+            if (footer === 'deck-title') return deckTitle;
+            if (footer === 'slide-number') return number;
+            if (footer === 'deck-title-and-slide-number') return [deckTitle, number].filter(Boolean).join(' · ');
+            return '';
+        },
+        setSlideTitleVisibility: (blockId, showTitle) => {
+            context.runBlockControlCommand((current) => {
+                const currentBlock = current.state.state.blocks[blockId];
+                if (
+                    !currentBlock ||
+                    currentBlock.meta.type !== 'slide' ||
+                    !context.registry.optionPanels.has('slide')
+                ) {
+                    return {state: current.state, ops: [], selection: current.selection};
+                }
+                const result = setBlockMeta(current.state, blockId, {
+                    ...currentBlock.meta,
+                    showTitle,
+                    ts: nextReplicaTs(current),
+                });
+                return {state: result.state, ops: result.ops, selection: current.selection};
+            });
+        },
+        setSlideTransition: (blockId, transition) => {
+            context.runBlockControlCommand((current) => {
+                const currentBlock = current.state.state.blocks[blockId];
+                if (
+                    !currentBlock ||
+                    currentBlock.meta.type !== 'slide' ||
+                    !context.registry.optionPanels.has('slide')
+                ) {
+                    return {state: current.state, ops: [], selection: current.selection};
+                }
+                const result = setBlockMeta(current.state, blockId, {
+                    ...currentBlock.meta,
+                    transition,
+                    ts: nextReplicaTs(current),
+                });
+                return {state: result.state, ops: result.ops, selection: current.selection};
+            });
+        },
+        setBlockStyle: (blockId, attribute, value) => {
+            context.runBlockControlCommand((current) => {
+                const result = updateBlockStyle(
+                    current.state,
+                    blockId,
+                    attribute,
+                    value,
+                    makeCommandContext(current),
+                );
+                return {
+                    state: result.state,
+                    ops: result.ops,
+                    selection: current.selection,
+                    commandLabel: `Set block ${attribute}`,
+                };
+            });
+        },
+    },
+    polls: {
+        modeForBlock: context.pollModeForBlock,
+        setModeForBlock: (blockId, mode) => {
+            if (mode === 'view' || mode === 'edit') context.setPollModeForBlock(blockId, mode);
+        },
+        vote: (blockId, optionId, rowId) => {
+            context.runEditCommand((current) => {
+                const currentBlock = current.state.state.blocks[blockId];
+                if (
+                    !context.userId ||
+                    !currentBlock ||
+                    currentBlock.meta.type !== 'poll' ||
+                    !context.registry.optionPanels.has('poll') ||
+                    (
+                        currentBlock.meta.kind !== 'rating' &&
+                        currentBlock.meta.kind !== 'children' &&
+                        currentBlock.meta.kind !== 'matrix'
+                    )
+                ) {
+                    return {state: current.state, ops: [], selection: current.selection};
+                }
+                if (currentBlock.meta.kind === 'matrix' && !rowId) {
+                    return {state: current.state, ops: [], selection: current.selection};
+                }
+                const previous = currentBlock.meta.votes[context.userId];
+                if (previous && !previous.deleted && !currentBlock.meta.allowChange) {
+                    return {state: current.state, ops: [], selection: current.selection};
+                }
+                const voteTs = nextReplicaTs(current);
+                const after: PollVote =
+                    currentBlock.meta.kind === 'children' && currentBlock.meta.choiceMode === 'multiple'
+                        ? {
+                              type: 'multiple',
+                              optionIds: toggleOptionId(
+                                  previous?.type === 'multiple' && !previous.deleted
+                                      ? previous.optionIds
+                                      : [],
+                                  optionId,
+                              ),
+                              ts: voteTs,
+                          }
+                        : currentBlock.meta.kind === 'matrix'
+                          ? {
+                                type: 'matrix',
+                                answers: nextMatrixAnswers(
+                                    previous?.type === 'matrix' && !previous.deleted
+                                        ? previous.answers
+                                        : {},
+                                    rowId ?? '',
+                                    optionId,
+                                    currentBlock.meta.choiceMode === 'multiple',
+                                ),
+                                ts: voteTs,
+                            }
+                          : {type: 'single', optionId, ts: voteTs};
+                const nextMeta = {
+                    ...currentBlock.meta,
+                    votes: {...currentBlock.meta.votes, [context.userId]: after},
+                    ts: nextReplicaTs(current),
+                };
+                const result = setBlockMeta(current.state, blockId, nextMeta);
+                const pollVote: PollVoteCommandData = {
+                    blockId,
+                    userId: context.userId,
+                    ...(previous ? {before: previous} : {}),
+                    after,
+                };
+                return {
+                    state: result.state,
+                    ops: result.ops,
+                    selection: current.selection,
+                    commandLabel: 'Vote in poll',
+                    pollVote,
+                };
+            });
+        },
+        answerLong: (blockId, text) => {
+            context.runEditCommand((current) => {
+                const currentBlock = current.state.state.blocks[blockId];
+                if (
+                    !context.userId ||
+                    !currentBlock ||
+                    currentBlock.meta.type !== 'poll' ||
+                    !context.registry.optionPanels.has('poll') ||
+                    currentBlock.meta.kind !== 'long' ||
+                    !text.trim()
+                ) {
+                    return {state: current.state, ops: [], selection: current.selection};
+                }
+                const previous = currentBlock.meta.votes[context.userId];
+                if (previous && !previous.deleted && !currentBlock.meta.allowChange) {
+                    return {state: current.state, ops: [], selection: current.selection};
+                }
+                const after: PollVote = {type: 'long', text, ts: nextReplicaTs(current)};
+                const nextMeta = {
+                    ...currentBlock.meta,
+                    votes: {...currentBlock.meta.votes, [context.userId]: after},
+                    ts: nextReplicaTs(current),
+                };
+                const result = setBlockMeta(current.state, blockId, nextMeta);
+                return {
+                    state: result.state,
+                    ops: result.ops,
+                    selection: current.selection,
+                    commandLabel: 'Answer poll',
+                    pollVote: {
+                        blockId,
+                        userId: context.userId,
+                        ...(previous ? {before: previous} : {}),
+                        after,
+                    },
+                };
+            });
+        },
+    },
+    annotations: context.annotations,
+});
+
 const renderBlockNode = (node: RenderTreeNode, context: RenderBlockContext): ReactElement => {
     const meta = node.block.block.meta;
-    const isChildBackedPoll =
-        meta.type === 'poll' && (meta.kind === 'children' || meta.kind === 'matrix');
-    const pollEditorMode = isChildBackedPoll ? context.pollModeForBlock(node.block.id) : undefined;
-    if (meta.type === 'table') {
-        return <TableBlock key={node.block.id} node={node} context={context} />;
+    const pluginRenderer = context.registry.blockRenderers.get(meta.type);
+    if (pluginRenderer) {
+        const pluginRendered = pluginRenderer.render(node, pluginBlockRenderContext(context));
+        if (pluginRendered) {
+            return pluginRenderer.children === 'renderer' ? (
+                <Fragment key={node.block.id}>{pluginRendered}</Fragment>
+            ) : (
+                <div key={node.block.id} className="renderTreeBranch">
+                    {pluginRendered}
+                    {node.children.map((child) => renderBlockNode(child, context))}
+                </div>
+            );
+        }
     }
-    if (meta.type === 'columns') {
+    const isChildBackedPoll =
+        meta.type === 'poll' &&
+        context.blockRenderFeatures.has('poll') &&
+        (meta.kind === 'children' || meta.kind === 'matrix');
+    const pollEditorMode = isChildBackedPoll ? context.pollModeForBlock(node.block.id) : undefined;
+    if (meta.type === 'columns' && context.blockRenderFeatures.has('columns')) {
         return <ColumnsBlock key={node.block.id} node={node} context={context} />;
     }
-    if (meta.type === 'slide_deck') {
-        return <SlideDeckBlock key={node.block.id} node={node} context={context} />;
-    }
-    if (meta.type === 'slide' && !slideDeckForSlide(context.state, node.block.id)) {
-        return <OrphanSlideBlock key={node.block.id} node={node} context={context} />;
-    }
-    if (meta.type === 'blockquote' || meta.type === 'callout') {
+    if (
+        (meta.type === 'blockquote' && context.blockRenderFeatures.has('blockquote')) ||
+        (meta.type === 'callout' && context.blockRenderFeatures.has('callout'))
+    ) {
         return (
             <div
                 key={node.block.id}
@@ -3609,612 +4348,6 @@ const renderBlockNode = (node: RenderTreeNode, context: RenderBlockContext): Rea
                 : null}
         </div>
     );
-};
-
-type TableCellDragTarget =
-    | ({kind: 'cell-slot'} & TableCellSlotTarget)
-    | {
-          kind: 'row-slot';
-          tableId: string;
-          beforeRowId: string | null;
-          afterRowId: string | null;
-          indicatorRowId: string;
-          indicatorPlacement: 'before' | 'after';
-      }
-    | {
-          kind: 'block-slot';
-          dropTarget: DropTarget;
-      };
-
-function SlideDeckBlock({node, context}: {node: RenderTreeNode; context: RenderBlockContext}) {
-    const presentationRef = useRef<HTMLElement>(null);
-    const meta = node.block.block.meta;
-    if (meta.type !== 'slide_deck') {
-        return <div className="renderTreeBranch">{renderEditableBlock(node.block, context)}</div>;
-    }
-    const slides = node.children.filter((child) => child.block.block.meta.type === 'slide');
-    const ui = context.slideDeckUiForBlock(node.block.id);
-    const currentSlideId =
-        ui.currentSlideId && slides.some((slide) => slide.block.id === ui.currentSlideId)
-            ? ui.currentSlideId
-            : slides[0]?.block.id ?? null;
-    const currentIndex = currentSlideId
-        ? Math.max(0, slides.findIndex((slide) => slide.block.id === currentSlideId))
-        : -1;
-    const currentSlide = currentIndex >= 0 ? slides[currentIndex] : null;
-    const deckTitle = blockPlainText(node.block);
-    const selectSlideBlock = (slideId: string | null) => {
-        if (!slideId) return;
-        const selection = {
-            type: 'block' as const,
-            anchorBlockId: slideId,
-            focusBlockId: slideId,
-        };
-        context.runBlockControlCommand(
-            (current) => ({
-                state: current.state,
-                ops: [],
-                selection: replaceSelectionSet(current.state, selection, current.selection.primaryId),
-            }),
-            {constrainFullscreenSlideSelection: false},
-        );
-        context.focusBlockSelectionTarget(selection);
-    };
-    const setMode = (mode: SlideDeckDisplayMode) => {
-        if (mode === 'presentation') selectSlideBlock(currentSlideId);
-        context.setSlideDeckUiForBlock(node.block.id, (current) => ({...current, mode}));
-    };
-    const setCurrentSlide = (slideId: string | null, select = ui.mode === 'presentation') => {
-        if (select) selectSlideBlock(slideId);
-        context.setSlideDeckUiForBlock(node.block.id, (current) => ({...current, currentSlideId: slideId}));
-    };
-    const showPrevious = () => {
-        if (!slides.length) return;
-        const previous = slides[Math.max(0, currentIndex - 1)] ?? slides[0];
-        setCurrentSlide(previous.block.id);
-    };
-    const showNext = () => {
-        if (!slides.length) return;
-        const next = slides[Math.min(slides.length - 1, currentIndex + 1)] ?? slides[slides.length - 1];
-        setCurrentSlide(next.block.id);
-    };
-    const setFullScreen = (fullScreen: boolean) =>
-        context.setSlideDeckUiForBlock(node.block.id, (current) => ({...current, fullScreen}));
-    const exitFullScreen = () => {
-        if (document.fullscreenElement === presentationRef.current) {
-            void document.exitFullscreen?.();
-        }
-        setFullScreen(false);
-    };
-    const toggleFullScreen = () => {
-        const element = presentationRef.current;
-        if (!element) return;
-        if (document.fullscreenElement === element) {
-            exitFullScreen();
-        } else {
-            void element.requestFullscreen?.();
-            setFullScreen(true);
-        }
-    };
-
-    useEffect(() => {
-        const onFullScreenChange = () => {
-            if (document.fullscreenElement !== presentationRef.current && ui.fullScreen) {
-                setFullScreen(false);
-            }
-        };
-        document.addEventListener('fullscreenchange', onFullScreenChange);
-        return () => document.removeEventListener('fullscreenchange', onFullScreenChange);
-    }, [ui.fullScreen]);
-
-    const handlePresentationKeyDown = (event: KeyboardEvent<HTMLElement>) => {
-        const modifierPressed = event.altKey || event.metaKey || event.ctrlKey;
-        const activeElement = event.currentTarget.ownerDocument.activeElement;
-        const currentSlideElement = currentSlideId
-            ? presentationRef.current?.querySelector<HTMLElement>(
-                  `.slideViewport[data-slide-id="${CSS.escape(currentSlideId)}"]`,
-              )
-            : null;
-        const hasCurrentSlideBlockSelection =
-            currentSlideId !== null &&
-            activeElement === currentSlideElement &&
-            context.selection.type === 'block' &&
-            context.selection.anchorBlockId === currentSlideId &&
-            context.selection.focusBlockId === currentSlideId;
-        if (
-            hasCurrentSlideBlockSelection &&
-            !modifierPressed &&
-            (event.key === 'ArrowRight' || event.key === 'PageDown' || event.key === ' ')
-        ) {
-            event.preventDefault();
-            event.stopPropagation();
-            showNext();
-        } else if (
-            hasCurrentSlideBlockSelection &&
-            !modifierPressed &&
-            (event.key === 'ArrowLeft' || event.key === 'PageUp')
-        ) {
-            event.preventDefault();
-            event.stopPropagation();
-            showPrevious();
-        } else if (event.key === 'Escape' && document.fullscreenElement === presentationRef.current) {
-            if (eventFromEditableSurface(event.target)) return;
-            event.preventDefault();
-            event.stopPropagation();
-            exitFullScreen();
-        }
-    };
-
-    if (ui.mode === 'outline') {
-        return (
-            <section
-                className="slideDeckBlock slideDeckOutline"
-                data-slide-deck-id={node.block.id}
-                style={{'--block-depth': node.block.depth} as CSSProperties}
-            >
-                <SlideDeckToolbar
-                    mode={ui.mode}
-                    currentIndex={currentIndex}
-                    slideCount={slides.length}
-                    onMode={setMode}
-                    onPrevious={showPrevious}
-                    onNext={showNext}
-                    onAddSlide={() => context.addSlideToDeck(node.block.id, currentSlideId ?? undefined)}
-                    onToggleFullScreen={toggleFullScreen}
-                    fullScreen={ui.fullScreen}
-                />
-                {renderEditableBlock(node.block, context, {surfaceClassName: 'slideDeckTitleText'})}
-                <div className="slideDeckOutlineChildren">
-                    {node.children.map((child) => renderBlockNode(child, context))}
-                </div>
-            </section>
-        );
-    }
-
-    return (
-        <section
-            ref={ui.mode === 'presentation' ? presentationRef : undefined}
-            className={[
-                'slideDeckBlock',
-                ui.mode === 'presentation' ? 'slideDeckPresentation' : 'slideDeckOverview',
-                ui.fullScreen ? 'slideDeckFullScreen' : '',
-            ].join(' ')}
-            data-slide-deck-id={node.block.id}
-            style={{'--block-depth': node.block.depth} as CSSProperties}
-            tabIndex={ui.mode === 'presentation' ? 0 : undefined}
-            onKeyDown={ui.mode === 'presentation' ? handlePresentationKeyDown : undefined}
-        >
-            {ui.fullScreen ? null : (
-                <div className="slideDeckHeader">
-                    {renderEditableBlock(node.block, context, {
-                        surfaceClassName: 'slideDeckTitleText',
-                        hideBlockAffordance: true,
-                        registerBlockRow: false,
-                    })}
-                    <SlideDeckToolbar
-                        mode={ui.mode}
-                        currentIndex={currentIndex}
-                        slideCount={slides.length}
-                        onMode={setMode}
-                        onPrevious={showPrevious}
-                        onNext={showNext}
-                        onAddSlide={() => context.addSlideToDeck(node.block.id, currentSlideId ?? undefined)}
-                        onToggleFullScreen={toggleFullScreen}
-                        fullScreen={ui.fullScreen}
-                    />
-                </div>
-            )}
-            {ui.mode === 'presentation' ? (
-                currentSlide ? (
-                    <>
-                        <SlideBlockView
-                            node={currentSlide}
-                            context={context}
-                            deckId={node.block.id}
-                            deck={meta}
-                            deckTitle={deckTitle}
-                            slideIndex={currentIndex}
-                            slideCount={slides.length}
-                            mode="presentation"
-                        />
-                        {ui.fullScreen ? (
-                            <SlideFullScreenControls
-                                currentIndex={currentIndex}
-                                slideCount={slides.length}
-                                onPrevious={showPrevious}
-                                onNext={showNext}
-                                onExitFullScreen={exitFullScreen}
-                            />
-                        ) : null}
-                    </>
-                ) : (
-                    <div className="slideDeckEmpty">No slides</div>
-                )
-            ) : (
-                <div className="slideOverviewList">
-                    {slides.length ? (
-                        slides.map((slide, index) => (
-                            <SlideBlockView
-                                key={slide.block.id}
-                                node={slide}
-                                context={context}
-                                deckId={node.block.id}
-                                deck={meta}
-                                deckTitle={deckTitle}
-                                slideIndex={index}
-                                slideCount={slides.length}
-                                mode="overview"
-                            />
-                        ))
-                    ) : (
-                        <div className="slideDeckEmpty">No slides</div>
-                    )}
-                </div>
-            )}
-        </section>
-    );
-}
-
-function SlideFullScreenControls({
-    currentIndex,
-    slideCount,
-    onPrevious,
-    onNext,
-    onExitFullScreen,
-}: {
-    currentIndex: number;
-    slideCount: number;
-    onPrevious(): void;
-    onNext(): void;
-    onExitFullScreen(): void;
-}) {
-    return (
-        <div
-            className="slideFullScreenControls"
-            contentEditable={false}
-            onMouseDown={stopEditorControlEvent}
-            aria-label="Full screen slide controls"
-        >
-            <button type="button" onClick={onPrevious} disabled={currentIndex <= 0} aria-label="Previous slide">
-                Prev
-            </button>
-            <span>
-                {slideCount ? currentIndex + 1 : 0}/{slideCount}
-            </span>
-            <button type="button" onClick={onNext} disabled={currentIndex < 0 || currentIndex >= slideCount - 1} aria-label="Next slide">
-                Next
-            </button>
-            <button type="button" onClick={onExitFullScreen}>
-                Exit full screen
-            </button>
-        </div>
-    );
-}
-
-function SlideDeckToolbar({
-    mode,
-    currentIndex,
-    slideCount,
-    onMode,
-    onPrevious,
-    onNext,
-    onAddSlide,
-    onToggleFullScreen,
-    fullScreen,
-}: {
-    mode: SlideDeckDisplayMode;
-    currentIndex: number;
-    slideCount: number;
-    onMode(mode: SlideDeckDisplayMode): void;
-    onPrevious(): void;
-    onNext(): void;
-    onAddSlide(): void;
-    onToggleFullScreen(): void;
-    fullScreen: boolean;
-}) {
-    return (
-        <div className="slideDeckToolbar" contentEditable={false} onMouseDown={stopEditorControlEvent}>
-            <div className="slideModeTabs" role="group" aria-label="Slide deck display mode">
-                {(['presentation', 'overview', 'outline'] as const).map((value) => (
-                    <button
-                        key={value}
-                        type="button"
-                        aria-pressed={mode === value}
-                        onClick={() => onMode(value)}
-                    >
-                        {capitalize(value)}
-                    </button>
-                ))}
-            </div>
-            <div className="slideNavigation" aria-label="Slide navigation">
-                <button type="button" onClick={onPrevious} disabled={currentIndex <= 0}>
-                    Prev
-                </button>
-                <span>
-                    {slideCount ? currentIndex + 1 : 0}/{slideCount}
-                </span>
-                <button type="button" onClick={onNext} disabled={currentIndex < 0 || currentIndex >= slideCount - 1}>
-                    Next
-                </button>
-            </div>
-            <button type="button" onClick={onAddSlide}>
-                Add slide
-            </button>
-            {mode === 'presentation' ? (
-                <button type="button" onClick={onToggleFullScreen} aria-pressed={fullScreen}>
-                    {fullScreen ? 'Exit full screen' : 'Full screen'}
-                </button>
-            ) : null}
-        </div>
-    );
-}
-
-function OrphanSlideBlock({node, context}: {node: RenderTreeNode; context: RenderBlockContext}) {
-    const mode = context.orphanSlideModeForBlock(node.block.id);
-    if (mode === 'outline') {
-        return (
-            <section className="orphanSlideBlock orphanSlideOutline">
-                <div className="orphanSlideToolbar" contentEditable={false} onMouseDown={stopEditorControlEvent}>
-                    <button type="button" aria-pressed={false} onClick={() => context.setOrphanSlideModeForBlock(node.block.id, 'view')}>
-                        View
-                    </button>
-                    <button type="button" aria-pressed>
-                        Outline
-                    </button>
-                </div>
-                {renderEditableBlock(node.block, context)}
-                {node.children.map((child) => renderBlockNode(child, context))}
-            </section>
-        );
-    }
-    return (
-        <section className="orphanSlideBlock orphanSlideView">
-            <div className="orphanSlideToolbar" contentEditable={false} onMouseDown={stopEditorControlEvent}>
-                <button type="button" aria-pressed>
-                    View
-                </button>
-                <button type="button" aria-pressed={false} onClick={() => context.setOrphanSlideModeForBlock(node.block.id, 'outline')}>
-                    Outline
-                </button>
-            </div>
-            <SlideBlockView
-                node={node}
-                context={context}
-                deckId={null}
-                deck={{type: 'slide_deck', width: 1920, height: 1080, footer: 'none', ts: node.block.block.meta.ts}}
-                deckTitle=""
-                slideIndex={0}
-                slideCount={1}
-                mode="orphan"
-            />
-        </section>
-    );
-}
-
-function SlideBlockView({
-    node,
-    context,
-    deckId,
-    deck,
-    deckTitle,
-    slideIndex,
-    slideCount,
-    mode,
-}: {
-    node: RenderTreeNode;
-    context: RenderBlockContext;
-    deckId: string | null;
-    deck: Extract<RichBlockMeta, {type: 'slide_deck'}>;
-    deckTitle: string;
-    slideIndex: number;
-    slideCount: number;
-    mode: 'presentation' | 'overview' | 'orphan';
-}) {
-    const meta = node.block.block.meta;
-    const [setViewportElement, viewportSize] = useElementSize<HTMLElement>();
-    const contextRef = useRef(context);
-    contextRef.current = context;
-    if (meta.type !== 'slide') {
-        return <div className="renderTreeBranch">{renderEditableBlock(node.block, context)}</div>;
-    }
-    const footer = slideFooterText(deck.footer, deckTitle, slideIndex, slideCount);
-    const scale = calculateSlideScale(viewportSize, deck);
-    const style = {
-        '--slide-width': deck.width,
-        '--slide-height': deck.height,
-        backgroundColor: richBlockStyleValue(node.block.block.style, 'background-color') ?? '#ffffff',
-    } as CSSProperties;
-    const scaleLayerStyle = {
-        width: `${deck.width}px`,
-        height: `${deck.height}px`,
-        transform: `scale(${scale})`,
-    } as CSSProperties;
-    const handleRimPointerDown = (event: PointerEvent<HTMLElement>) => {
-        if (event.target !== event.currentTarget) return;
-        event.preventDefault();
-        event.stopPropagation();
-        context.startBlockDragFromHandle(node.block.id, event);
-    };
-    const selectSlideBlock = () => {
-        const selection = {
-            type: 'block' as const,
-            anchorBlockId: node.block.id,
-            focusBlockId: node.block.id,
-        };
-        context.runBlockControlCommand((current) => ({
-            state: current.state,
-            ops: [],
-            selection: replaceSelectionSet(current.state, selection, current.selection.primaryId),
-        }));
-        context.focusBlockSelectionTarget(selection);
-    };
-    const handleSurfacePointerDown = (event: PointerEvent<HTMLElement>) => {
-        if (eventFromEditableSurface(event.target)) return;
-        event.preventDefault();
-        event.stopPropagation();
-        selectSlideBlock();
-    };
-    const stopSurfaceMouseDown = (event: MouseEvent<HTMLElement>) => {
-        if (eventFromEditableSurface(event.target)) return;
-        event.preventDefault();
-        event.stopPropagation();
-    };
-    const stopRimMouseDown = (event: MouseEvent<HTMLElement>) => {
-        if (event.target !== event.currentTarget) return;
-        event.preventDefault();
-        event.stopPropagation();
-    };
-    const setSlideViewportElement = useCallback((element: HTMLElement | null) => {
-        contextRef.current.registerRow(node.block.id, element);
-        setViewportElement(element);
-    }, [node.block.id, setViewportElement]);
-    return (
-        <article
-            ref={setSlideViewportElement}
-            className={[
-                'slideViewport',
-                `slideViewport-${mode}`,
-                `slideTransition-${meta.transition}`,
-                context.draggingSubtreeIds.has(node.block.id) ? 'dragging' : '',
-                context.draggingId === node.block.id ? 'draggingRoot' : '',
-                context.blockLevelDecorationsByBlock.get(node.block.id)?.selected ? 'blockSelected' : '',
-                context.blockLevelDecorationsByBlock.get(node.block.id)?.focus ? 'blockSelectionFocus' : '',
-                context.dropTarget?.indicatorBlockId === node.block.id
-                    ? `drop${capitalize(context.dropTarget.indicatorPlacement)}`
-                    : '',
-            ]
-                .filter(Boolean)
-                .join(' ')}
-            data-slide-id={node.block.id}
-            data-slide-logical-width={deck.width}
-            data-slide-logical-height={deck.height}
-            data-slide-scale={scale}
-            tabIndex={-1}
-            style={style}
-            onPointerDown={handleRimPointerDown}
-            onMouseDown={stopRimMouseDown}
-        >
-            <div className="slideScaleLayer" style={scaleLayerStyle}>
-                <div
-                    className="slideSurface"
-                    onPointerDown={handleSurfacePointerDown}
-                    onMouseDown={stopSurfaceMouseDown}
-                >
-                    {meta.showTitle ? (
-                        <div className="slideTitle">
-                            {renderEditableBlock({...node.block, depth: 0}, context, {
-                                surfaceClassName: 'slideTitleText',
-                                hideBlockAffordance: true,
-                                hideInlineControls: true,
-                                hideBlockLevelDecoration: true,
-                                registerBlockRow: false,
-                                ...(deckId ? {onSplit: () => context.addSlideToDeck(deckId, node.block.id)} : {}),
-                            })}
-                        </div>
-                    ) : null}
-                    <div className="slideBody">
-                        {node.children.map((child) =>
-                            renderBlockNodeAtRelativeDepth(child, context, node.block.depth + 1),
-                        )}
-                    </div>
-                    {footer ? <div className="slideFooter">{footer}</div> : null}
-                </div>
-            </div>
-            {mode === 'overview' ? (
-                <SlideBlockOptions blockId={node.block.id} meta={meta} context={context} />
-            ) : null}
-        </article>
-    );
-}
-
-function SlideBlockOptions({
-    blockId,
-    meta,
-    context,
-}: {
-    blockId: string;
-    meta: Extract<RichBlockMeta, {type: 'slide'}>;
-    context: RenderBlockContext;
-}) {
-    const noop = () => undefined;
-    const style = context.state.state.blocks[blockId]?.style;
-    return (
-        <BlockOptions
-            className="slideBlockOptions"
-            meta={meta}
-            style={style}
-            onSetCodeLanguage={noop}
-            onSetCodePreview={noop}
-            onSetCalloutKind={noop}
-            onSetImageSize={noop}
-            onSetPollChoiceMode={noop}
-            onSetPollDisplayMode={noop}
-            onSetColumnsDisplay={noop}
-            onSetPollAllowChange={noop}
-            onSetRatingPollMax={noop}
-            onSetRatingPollPresentation={noop}
-            onSetSlideDeckSize={noop}
-            onSetSlideDeckFooter={noop}
-            onSetSlideShowTitle={(showTitle) =>
-                context.runBlockControlCommand((current) => {
-                    const currentBlock = current.state.state.blocks[blockId];
-                    if (!currentBlock || currentBlock.meta.type !== 'slide') {
-                        return {state: current.state, ops: [], selection: current.selection};
-                    }
-                    const result = setBlockMeta(current.state, blockId, {
-                        ...currentBlock.meta,
-                        showTitle,
-                        ts: nextReplicaTs(current),
-                    });
-                    return {state: result.state, ops: result.ops, selection: current.selection};
-                })
-            }
-            onSetSlideTransition={(transition) =>
-                context.runBlockControlCommand((current) => {
-                    const currentBlock = current.state.state.blocks[blockId];
-                    if (!currentBlock || currentBlock.meta.type !== 'slide') {
-                        return {state: current.state, ops: [], selection: current.selection};
-                    }
-                    const result = setBlockMeta(current.state, blockId, {
-                        ...currentBlock.meta,
-                        transition,
-                        ts: nextReplicaTs(current),
-                    });
-                    return {state: result.state, ops: result.ops, selection: current.selection};
-                })
-            }
-            onSetBlockStyle={(attribute, value) =>
-                context.runBlockControlCommand((current) => {
-                    const result = updateBlockStyle(
-                        current.state,
-                        blockId,
-                        attribute,
-                        value,
-                        makeCommandContext(current),
-                    );
-                    return {
-                        state: result.state,
-                        ops: result.ops,
-                        selection: current.selection,
-                        commandLabel: `Set block ${attribute}`,
-                    };
-                })
-            }
-        />
-    );
-}
-
-const slideFooterText = (
-    footer: Extract<RichBlockMeta, {type: 'slide_deck'}>['footer'],
-    deckTitle: string,
-    slideIndex: number,
-    slideCount: number,
-): string => {
-    const number = slideCount ? `${slideIndex + 1}/${slideCount}` : '';
-    if (footer === 'deck-title') return deckTitle;
-    if (footer === 'slide-number') return number;
-    if (footer === 'deck-title-and-slide-number') return [deckTitle, number].filter(Boolean).join(' · ');
-    return '';
 };
 
 const eventFromEditableSurface = (target: EventTarget | null): boolean => {
@@ -4376,535 +4509,6 @@ function ColumnsCard({
     );
 }
 
-function TableBlock({node, context}: {node: RenderTreeNode; context: RenderBlockContext}) {
-    const [cellDrag, setCellDrag] = useState<{
-        sourceCellId: string;
-        columnCellIds?: string[];
-        rectangleSelection?: EditorSelection;
-        target: TableCellDragTarget | null;
-    } | null>(null);
-    const [cellSelectionDrag, setCellSelectionDrag] = useState<{
-        tableId: string;
-        anchorCellId: string;
-        focusCellId: string;
-    } | null>(null);
-    const rowNodes = node.children;
-    const columnCount = Math.max(
-        1,
-        ...rowNodes.map((row) => (row.block.block.meta.type === 'table' ? 0 : row.children.length)),
-    );
-    const selectedCellId = tableCellIdForSelection(context.state, context.selection);
-
-    useLayoutEffect(() => {
-        if (!cellDrag) return;
-        const onPointerMove = (event: globalThis.PointerEvent) => {
-            event.preventDefault();
-            const nextTarget = tableCellDragTargetFromPoint(
-                event.clientX,
-                event.clientY,
-                node.block.id,
-                context,
-            );
-            context.setCellDragBlockDropTarget(
-                nextTarget?.kind === 'block-slot' ? nextTarget.dropTarget : null,
-            );
-            setCellDrag((current) =>
-                current
-                    ? {
-                          ...current,
-                          target: nextTarget,
-                      }
-                    : current,
-            );
-        };
-        const onPointerUp = (event: globalThis.PointerEvent) => {
-            event.preventDefault();
-            const target =
-                tableCellDragTargetFromPoint(event.clientX, event.clientY, node.block.id, context) ??
-                cellDrag.target;
-            const sourceCellId = cellDrag.sourceCellId;
-            setCellDrag(null);
-            context.setCellDragBlockDropTarget(null);
-            if (!target) return;
-            context.runBlockControlCommand((current) => {
-                const rectangle = cellDrag.rectangleSelection
-                    ? tableCellRectangleForSelection(current.state, cellDrag.rectangleSelection)
-                    : null;
-                const draggedCellIds = cellDrag.columnCellIds?.length
-                    ? cellDrag.columnCellIds
-                    : rectangle?.cellIds.length
-                      ? rectangle.cellIds
-                      : [sourceCellId];
-                if (target.kind === 'row-slot') {
-                    const result = moveTableCellsToNewRow(
-                        current.state,
-                        draggedCellIds,
-                        {
-                            tableId: target.tableId,
-                            beforeRowId: target.beforeRowId,
-                            afterRowId: target.afterRowId,
-                        },
-                        makeCommandContext(current),
-                    );
-                    return {
-                        state: result.state,
-                        ops: result.ops,
-                        selection: replaceSelectionSet(
-                            result.state,
-                            result.selection,
-                            current.selection.primaryId,
-                        ),
-                    };
-                }
-                if (target.kind === 'block-slot') {
-                    const command = target.dropTarget.command;
-                    if (command.type === 'table-cell-slot') {
-                        return {state: current.state, ops: [], selection: current.selection};
-                    }
-                    if (cellDrag.rectangleSelection) {
-                        const result = moveCellRectangleOutToNewTable(
-                            current.state,
-                            cellDrag.rectangleSelection,
-                            command,
-                            makeCommandContext(current),
-                        );
-                        return result
-                            ? {
-                                  state: result.state,
-                                  ops: result.ops,
-                                  selection: replaceSelectionSet(
-                                      result.state,
-                                      result.selection,
-                                      current.selection.primaryId,
-                                  ),
-                              }
-                            : {state: current.state, ops: [], selection: current.selection};
-                    }
-                    const result = moveTableCellsOutAsBlocks(
-                        current.state,
-                        draggedCellIds,
-                        command,
-                        makeCommandContext(current),
-                    );
-                    return {
-                        state: result.state,
-                        ops: result.ops,
-                        selection: replaceSelectionSet(
-                            result.state,
-                            result.selection,
-                            current.selection.primaryId,
-                        ),
-                    };
-                }
-                if (cellDrag.rectangleSelection) {
-                    const result = moveTableCellRectangleContents(
-                        current.state,
-                        cellDrag.rectangleSelection,
-                        target,
-                        makeCommandContext(current),
-                    );
-                    return result
-                        ? {
-                              state: result.state,
-                              ops: result.ops,
-                              selection: replaceSelectionSet(
-                                  result.state,
-                                  result.selection,
-                                  current.selection.primaryId,
-                              ),
-                          }
-                        : {state: current.state, ops: [], selection: current.selection};
-                }
-                if (!cellDrag.columnCellIds?.length) {
-                    const result = moveTableCell(
-                        current.state,
-                        sourceCellId,
-                        target,
-                        makeCommandContext(current),
-                    );
-                    return {state: result.state, ops: result.ops, selection: current.selection};
-                }
-                let working = current.state;
-                const ops: Array<Op<RichBlockMeta>> = [];
-                for (const cellId of cellDrag.columnCellIds) {
-                    const rowId = lamportToString(
-                        materializedBlockParent(working, cellId, annotationVirtualParents(working)),
-                    );
-                    const result = moveTableCell(
-                        working,
-                        cellId,
-                        {rowId, index: target.index},
-                        makeCommandContext(current),
-                    );
-                    working = result.state;
-                    ops.push(...result.ops);
-                }
-                return {state: working, ops, selection: current.selection};
-            });
-        };
-        const onPointerCancel = () => {
-            setCellDrag(null);
-            context.setCellDragBlockDropTarget(null);
-        };
-        window.addEventListener('pointermove', onPointerMove, {passive: false});
-        window.addEventListener('pointerup', onPointerUp, {passive: false});
-        window.addEventListener('pointercancel', onPointerCancel);
-        return () => {
-            window.removeEventListener('pointermove', onPointerMove);
-            window.removeEventListener('pointerup', onPointerUp);
-            window.removeEventListener('pointercancel', onPointerCancel);
-        };
-    }, [cellDrag, context]);
-
-    useLayoutEffect(() => {
-        if (!cellSelectionDrag) return;
-        const selectCells = (focusCellId: string) => {
-            const selection: EditorSelection = {
-                type: 'table-cells',
-                tableId: cellSelectionDrag.tableId,
-                anchorCellId: cellSelectionDrag.anchorCellId,
-                focusCellId,
-            };
-            context.runBlockControlCommand((current) => ({
-                state: current.state,
-                ops: [],
-                selection: replaceSelectionSet(current.state, selection, current.selection.primaryId),
-            }));
-        };
-        const onPointerMove = (event: globalThis.PointerEvent) => {
-            event.preventDefault();
-            const target = tableCellElementFromPoint(event.clientX, event.clientY);
-            const focusCellId = target?.dataset.cellId ?? null;
-            if (!focusCellId || target?.closest<HTMLElement>('[data-table-id]')?.dataset.tableId !== cellSelectionDrag.tableId) {
-                return;
-            }
-            setCellSelectionDrag((current) =>
-                current ? {...current, focusCellId} : current,
-            );
-            selectCells(focusCellId);
-        };
-        const onPointerUp = (event: globalThis.PointerEvent) => {
-            event.preventDefault();
-            setCellSelectionDrag((current) => {
-                if (current) selectCells(current.focusCellId);
-                return null;
-            });
-        };
-        const onPointerCancel = () => setCellSelectionDrag(null);
-        window.addEventListener('pointermove', onPointerMove, {passive: false});
-        window.addEventListener('pointerup', onPointerUp, {passive: false});
-        window.addEventListener('pointercancel', onPointerCancel);
-        return () => {
-            window.removeEventListener('pointermove', onPointerMove);
-            window.removeEventListener('pointerup', onPointerUp);
-            window.removeEventListener('pointercancel', onPointerCancel);
-        };
-    }, [cellSelectionDrag, context]);
-
-    return (
-        <div
-            className="tableBlock"
-            style={{'--block-depth': node.block.depth} as CSSProperties}
-            data-table-id={node.block.id}
-        >
-            <div className="tableGrid" role="table" aria-label="Table block"
-                style={{'--table-columns': columnCount} as CSSProperties}
-            >
-                <div className="tableTitleRow">{renderEditableBlock(node.block, context)}</div>
-                <div
-                    className="tableColumnInsertControls"
-                    aria-label="Column insert controls"
-                    style={{'--table-columns': columnCount} as CSSProperties}
-                >
-                    {Array.from({length: columnCount + 1}, (_, columnIndex) => (
-                        <button
-                            key={columnIndex}
-                            type="button"
-                            className="tableColumnInsert"
-                            aria-label={`Add column ${columnIndex + 1}`}
-                            onMouseDown={(event) => event.preventDefault()}
-                            onClick={() => context.addTableColumn(node.block.id, columnIndex)}
-                        >
-                            +
-                        </button>
-                    ))}
-                </div>
-                {rowNodes.map((row, rowIndex) => (
-                    <Fragment key={row.block.id}>
-                        {row.block.block.meta.type === 'table' ? (
-                            <div
-                                ref={(element) => context.registerRow(row.block.id, element)}
-                                className={[
-                                    'tableInterstitialRow',
-                                    context.blockLevelDecorationsByBlock.get(row.block.id)?.selected
-                                        ? 'blockSelected'
-                                        : '',
-                                    context.blockLevelDecorationsByBlock.get(row.block.id)?.focus
-                                        ? 'blockSelectionFocus'
-                                        : '',
-                                    context.draggingSubtreeIds.has(row.block.id) ? 'dragging' : '',
-                                    context.draggingId === row.block.id ? 'draggingRoot' : '',
-                                    context.dropTarget?.indicatorBlockId === row.block.id
-                                        ? `drop${capitalize(context.dropTarget.indicatorPlacement)}`
-                                        : '',
-                                    cellDrag?.target?.kind === 'row-slot' &&
-                                    cellDrag.target.indicatorRowId === row.block.id
-                                        ? `drop${capitalize(cellDrag.target.indicatorPlacement)}`
-                                        : '',
-                                ]
-                                    .filter(Boolean)
-                                    .join(' ')}
-                                role="row"
-                                data-row-id={row.block.id}
-                            >
-                                <TableBlock node={{...row, block: {...row.block, depth: 0}}} context={context} />
-                            </div>
-                        ) : (
-                            <div
-                                ref={(element) => context.registerRow(row.block.id, element)}
-                                className={[
-                                    'tableRow',
-                                    context.blockLevelDecorationsByBlock.get(row.block.id)?.selected
-                                        ? 'blockSelected'
-                                        : '',
-                                    context.blockLevelDecorationsByBlock.get(row.block.id)?.focus
-                                        ? 'blockSelectionFocus'
-                                        : '',
-                                    context.draggingSubtreeIds.has(row.block.id) ? 'dragging' : '',
-                                    context.draggingId === row.block.id ? 'draggingRoot' : '',
-                                    context.dropTarget?.indicatorBlockId === row.block.id
-                                        ? `drop${capitalize(context.dropTarget.indicatorPlacement)}`
-                                        : '',
-                                    cellDrag?.target?.kind === 'row-slot' &&
-                                    cellDrag.target.indicatorRowId === row.block.id
-                                        ? `drop${capitalize(cellDrag.target.indicatorPlacement)}`
-                                        : '',
-                                ]
-                                    .filter(Boolean)
-                                    .join(' ')}
-                                role="row"
-                                data-row-id={row.block.id}
-                                style={{'--table-columns': columnCount} as CSSProperties}
-                            >
-                                <TableRowHeader row={row.block} rowIndex={rowIndex} context={context} />
-                                {Array.from({length: columnCount}, (_, columnIndex) => {
-                                    const cell = row.children[columnIndex] ?? null;
-                                    const canStartCellDrag =
-                                        !!cell &&
-                                        cell.block.id === selectedCellId;
-                                    return (
-                                        <div
-                                            key={`${row.block.id}:${columnIndex}`}
-                                            className={[
-                                                cell ? 'tableCell' : 'tableCell missingTableCell',
-                                                cell &&
-                                                context.blockLevelDecorationsByBlock.get(cell.block.id)
-                                                    ?.selected
-                                                    ? 'cellSelected'
-                                                    : '',
-                                                cell &&
-                                                context.blockLevelDecorationsByBlock.get(cell.block.id)
-                                                    ?.focus
-                                                    ? 'cellSelectionFocus'
-                                                    : '',
-                                                cell?.block.id === selectedCellId
-                                                    ? 'activeTableCell'
-                                                    : '',
-                                                cellDrag?.sourceCellId === cell?.block.id
-                                                    ? 'draggingCell'
-                                                    : '',
-                                                canStartCellDrag ? 'cellDragCandidate' : '',
-                                                cellDrag?.target?.kind === 'cell-slot' &&
-                                                cellDrag.target.rowId === row.block.id &&
-                                                cellDrag.target.index === columnIndex
-                                                    ? 'cellDropBefore'
-                                                    : '',
-                                                cellDrag?.target?.kind === 'cell-slot' &&
-                                                cellDrag.target.rowId === row.block.id &&
-                                                cellDrag.target.index === columnIndex + 1
-                                                    ? 'cellDropAfter'
-                                                    : '',
-                                                context.dropTarget?.indicatorBlockId === cell?.block.id &&
-                                                context.dropTarget?.indicatorPlacement === 'before'
-                                                    ? 'cellDropBefore'
-                                                    : '',
-                                                context.dropTarget?.indicatorBlockId === cell?.block.id &&
-                                                context.dropTarget?.indicatorPlacement === 'after'
-                                                    ? 'cellDropAfter'
-                                                    : '',
-                                                context.dropTarget?.command.type === 'table-cell-slot' &&
-                                                context.dropTarget.command.target.rowId === row.block.id &&
-                                                context.dropTarget.command.target.index === columnIndex
-                                                    ? 'cellDropBefore'
-                                                    : '',
-                                                context.dropTarget?.command.type === 'table-cell-slot' &&
-                                                context.dropTarget.command.target.rowId === row.block.id &&
-                                                context.dropTarget.command.target.index === columnIndex + 1
-                                                    ? 'cellDropAfter'
-                                                    : '',
-                                            ]
-                                                .filter(Boolean)
-                                                .join(' ')}
-                                            role="cell"
-                                            data-cell-id={cell?.block.id}
-                                            tabIndex={cell ? -1 : undefined}
-                                            onCopy={context.onCopy}
-                                            onCut={context.onCut}
-                                            onPaste={context.onPaste}
-                                            onKeyDown={(event) => {
-                                                if (!cell || event.target !== event.currentTarget) return;
-                                                context.onKeystroke(cell.block.id, event);
-                                                const modifierPressed = event.metaKey || event.ctrlKey;
-                                                const key = event.key.toLowerCase();
-                                                if (modifierPressed && key === 'z' && event.shiftKey) {
-                                                    event.preventDefault();
-                                                    context.onRedo();
-                                                } else if (modifierPressed && key === 'z') {
-                                                    event.preventDefault();
-                                                    context.onUndo();
-                                                } else if (modifierPressed && key === 'y') {
-                                                    event.preventDefault();
-                                                    context.onRedo();
-                                                }
-                                            }}
-                                            onPointerDown={(event) => {
-                                                if (!cell || !isCellBorderPointer(event))
-                                                    return;
-                                                event.preventDefault();
-                                                event.stopPropagation();
-                                                if (cell.block.id !== selectedCellId) {
-                                                    event.currentTarget.setPointerCapture?.(event.pointerId);
-                                                    setCellSelectionDrag({
-                                                        tableId: node.block.id,
-                                                        anchorCellId: cell.block.id,
-                                                        focusCellId: cell.block.id,
-                                                    });
-                                                    context.focusBlockSelectionTarget({
-                                                        type: 'table-cells',
-                                                        tableId: node.block.id,
-                                                        anchorCellId: cell.block.id,
-                                                        focusCellId: cell.block.id,
-                                                    });
-                                                    context.runBlockControlCommand((current) => {
-                                                        const selection = tableCellSelectionForCell(
-                                                            current.state,
-                                                            cell.block.id,
-                                                        );
-                                                        return {
-                                                            state: current.state,
-                                                            ops: [],
-                                                            selection: selection
-                                                                ? replaceSelectionSet(
-                                                                      current.state,
-                                                                      selection,
-                                                                      current.selection.primaryId,
-                                                                  )
-                                                                : current.selection,
-                                                        };
-                                                    });
-                                                    return;
-                                                }
-                                                event.currentTarget.setPointerCapture?.(event.pointerId);
-                                                context.focusBlockSelectionTarget(context.selection);
-                                                const selectedColumnCellIds = fullColumnSelectionCellIds(
-                                                    context.state,
-                                                    context.selection,
-                                                    node.block.id,
-                                                );
-                                                const selectedRectangle = selectedTableRectangleSelection(
-                                                    context.state,
-                                                    context.selection,
-                                                    node.block.id,
-                                                ) ?? tableCellRectangleSelectionForTextSelection(
-                                                    context.state,
-                                                    context.selection,
-                                                    node.block.id,
-                                                );
-                                                setCellDrag({
-                                                    sourceCellId: cell.block.id,
-                                                    ...(selectedColumnCellIds
-                                                        ? {columnCellIds: selectedColumnCellIds}
-                                                        : selectedRectangle
-                                                          ? {rectangleSelection: selectedRectangle}
-                                                        : {}),
-                                                    target: {kind: 'cell-slot', rowId: row.block.id, index: columnIndex},
-                                                });
-                                            }}
-                                        >
-                                            {canStartCellDrag ? (
-                                                <>
-                                                    <span
-                                                        className="tableCellDragEdge tableCellDragEdgeLeft"
-                                                        aria-hidden="true"
-                                                    />
-                                                    <span
-                                                        className="tableCellDragEdge tableCellDragEdgeRight"
-                                                        aria-hidden="true"
-                                                    />
-                                                </>
-                                            ) : null}
-                                            {cell ? (
-                                                renderTableCell(cell, context)
-                                            ) : (
-                                                <button
-                                                    type="button"
-                                                    aria-label="Add cell"
-                                                    onMouseDown={(event) => event.preventDefault()}
-                                                    onClick={() =>
-                                                        context.createMissingTableCell(
-                                                            node.block.id,
-                                                            row.block.id,
-                                                            columnIndex,
-                                                        )
-                                                    }
-                                                >
-                                                    +
-                                                </button>
-                                            )}
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        )}
-                        <div
-                            className="tableRowInsertControl"
-                            aria-label={`Row ${rowIndex + 1} insert control`}
-                            data-table-id={node.block.id}
-                            data-after-row-id={row.block.id}
-                            data-before-row-id={rowNodes[rowIndex + 1]?.block.id}
-                        >
-                            <button
-                                type="button"
-                                aria-label={`Add row after ${rowIndex + 1}`}
-                                onMouseDown={(event) => event.preventDefault()}
-                                onClick={() => context.addTableRow(node.block.id, row.block.id)}
-                            >
-                                +
-                            </button>
-                        </div>
-                    </Fragment>
-                ))}
-            </div>
-        </div>
-    );
-}
-
-const renderTableCell = (node: RenderTreeNode, context: RenderBlockContext): ReactElement => {
-    if (node.block.block.meta.type === 'table') {
-        return <TableBlock node={node} context={context} />;
-    }
-    return (
-        <>
-            {renderEditableBlock({...node.block, depth: 0}, context)}
-            {node.children.length > 0 ? (
-                <div className="tableCellChildren">
-                    {node.children.map((child) => renderBlockNodeAtRelativeDepth(child, context, node.block.depth + 1))}
-                </div>
-            ) : null}
-        </>
-    );
-};
-
 const renderBlockNodeAtRelativeDepth = (
     node: RenderTreeNode,
     context: RenderBlockContext,
@@ -4915,306 +4519,10 @@ const renderBlockNodeAtRelativeDepth = (
 };
 
 const withRelativeDepth = (node: RenderTreeNode, baseDepth: number): RenderTreeNode => ({
+    id: node.id,
     block: {...node.block, depth: Math.max(0, node.block.depth - baseDepth)},
     children: node.children.map((child) => withRelativeDepth(child, baseDepth)),
 });
-
-function TableRowHeader({
-    row,
-    rowIndex,
-    context,
-}: {
-    row: RichFormattedBlock;
-    rowIndex: number;
-    context: RenderBlockContext;
-}) {
-    return (
-        <div className="tableRowHeader" role="rowheader" aria-label={`Row ${rowIndex + 1} header`}>
-            <button
-                type="button"
-                className="tableRowDrag"
-                aria-label={`Move row ${rowIndex + 1}`}
-                onPointerDown={(event) => {
-                    context.startBlockDragFromHandle(row.id, event);
-                }}
-            >
-                ⋮
-            </button>
-            {renderEditableBlock({...row, depth: 0}, context, {
-                variant: 'table-row-header',
-                ariaLabel: `Row header ${rowIndex + 1}`,
-                placeholder: `${rowIndex + 1}`,
-                surfaceClassName: 'tableRowHeaderText',
-                hideBlockAffordance: true,
-                hideInlineControls: true,
-                registerBlockRow: false,
-            })}
-        </div>
-    );
-}
-
-const tableCellIdForSelection = (
-    state: Replica['state'],
-    selection: EditorSelection,
-): string | null => {
-    const point = focusPoint(selection);
-    const path = materializedBlockPath(state, point.blockId, annotationVirtualParents(state)).map(
-        lamportToString,
-    );
-    for (let index = path.length - 1; index >= 0; index--) {
-        const blockId = path[index];
-        if (isTableCellBlock(state, blockId)) return blockId;
-    }
-    return null;
-};
-
-const tableCellSelectionForCell = (
-    state: Replica['state'],
-    cellId: string,
-): EditorSelection | null => {
-    if (!isTableCellBlock(state, cellId)) return null;
-    const rowId = lamportToString(materializedBlockParent(state, cellId, annotationVirtualParents(state)));
-    const tableId = lamportToString(materializedBlockParent(state, rowId, annotationVirtualParents(state)));
-    if (state.state.blocks[tableId]?.meta.type !== 'table') return null;
-    return {
-        type: 'table-cells',
-        tableId,
-        anchorCellId: cellId,
-        focusCellId: cellId,
-    };
-};
-
-const isTableCellBlock = (state: Replica['state'], blockId: string): boolean => {
-    const block = state.state.blocks[blockId];
-    if (!block) return false;
-    const rowId = lamportToString(materializedBlockParent(state, blockId, annotationVirtualParents(state)));
-    const row = state.state.blocks[rowId];
-    if (!row || row.meta.type === 'table') return false;
-    const tableId = lamportToString(materializedBlockParent(state, rowId, annotationVirtualParents(state)));
-    return state.state.blocks[tableId]?.meta.type === 'table';
-};
-
-const fullColumnSelectionCellIds = (
-    state: Replica['state'],
-    selection: EditorSelection,
-    tableId: string,
-): string[] | null => {
-    if (selection.type !== 'table-cells' || selection.tableId !== tableId) return null;
-    const rectangle = tableCellRectangleForSelection(state, selection);
-    if (!rectangle || rectangle.startColumnIndex !== rectangle.endColumnIndex) return null;
-    const rows = tableRowsForSelection(state, tableId);
-    if (
-        rectangle.startRowIndex !== 0 ||
-        rectangle.endRowIndex < rows.length - 1 ||
-        rows.length === 0
-    ) {
-        return null;
-    }
-    const cellIds = rows
-        .map((rowId) => tableCellsForSelection(state, rowId)[rectangle.startColumnIndex])
-        .filter((cellId): cellId is string => Boolean(cellId));
-    return cellIds.length === rows.length ? cellIds : null;
-};
-
-const selectedTableRectangleSelection = (
-    state: Replica['state'],
-    selection: EditorSelection,
-    tableId: string,
-): EditorSelection | null => {
-    if (selection.type !== 'table-cells' || selection.tableId !== tableId) return null;
-    const rectangle = tableCellRectangleForSelection(state, selection);
-    if (!rectangle || rectangle.cellIds.length <= 1) return null;
-    if (fullColumnSelectionCellIds(state, selection, tableId)) return null;
-    return selection;
-};
-
-const tableCellRectangleSelectionForTextSelection = (
-    state: Replica['state'],
-    selection: EditorSelection,
-    tableId: string,
-): EditorSelection | null => {
-    if (selection.type !== 'range') return null;
-    const anchorCell = tableCellIdForSelection(state, {
-        type: 'caret',
-        point: selection.anchor,
-    });
-    const focusCell = tableCellIdForSelection(state, {
-        type: 'caret',
-        point: selection.focus,
-    });
-    if (!anchorCell || !focusCell || anchorCell === focusCell) return null;
-    const cellSelection: EditorSelection = {
-        type: 'table-cells',
-        tableId,
-        anchorCellId: anchorCell,
-        focusCellId: focusCell,
-    };
-    return tableCellRectangleForSelection(state, cellSelection) ? cellSelection : null;
-};
-
-const isFocusedCellBorderDrag = (
-    event: PointerEvent<HTMLDivElement>,
-    selectedCellId: string | null,
-): boolean => {
-    if (!event.isPrimary || event.button !== 0) return false;
-    const cellId = event.currentTarget.dataset.cellId ?? null;
-    if (!cellId || cellId !== selectedCellId) return false;
-    return isCellBorderPointer(event);
-};
-
-const isCellBorderPointer = (
-    event: PointerEvent<HTMLDivElement>,
-): boolean => {
-    if (!event.isPrimary || event.button !== 0) return false;
-    const cellId = event.currentTarget.dataset.cellId ?? null;
-    if (!cellId) return false;
-    const rect = event.currentTarget.getBoundingClientRect();
-    const edge = 7;
-    return (
-        event.clientX - rect.left <= edge ||
-        rect.right - event.clientX <= edge ||
-        event.clientY - rect.top <= edge ||
-        rect.bottom - event.clientY <= edge
-    );
-};
-
-const tableCellDragTargetFromPoint = (
-    clientX: number,
-    clientY: number,
-    tableId: string,
-    context: RenderBlockContext,
-): TableCellDragTarget | null => {
-    const cellSlot = tableCellSlotTargetFromPoint(clientX, clientY, tableId);
-    if (cellSlot) return {kind: 'cell-slot', ...cellSlot};
-    const rowSlot = tableRowSlotTargetFromPoint(clientX, clientY, tableId);
-    if (rowSlot) return rowSlot;
-    const blockSlot = blockDropTargetFromPoint(clientX, clientY, tableId, context);
-    return blockSlot ? {kind: 'block-slot', dropTarget: blockSlot} : null;
-};
-
-const tableCellSlotTargetFromPoint = (
-    clientX: number,
-    clientY: number,
-    tableId: string,
-): TableCellSlotTarget | null => {
-    if (typeof document.elementsFromPoint !== 'function') return null;
-    const row = document
-        .elementsFromPoint(clientX, clientY)
-        .map((element) => element.closest<HTMLElement>('[data-row-id]'))
-        .find(
-            (element): element is HTMLElement =>
-                !!element?.dataset.rowId &&
-                element.closest<HTMLElement>('[data-table-id]')?.dataset.tableId === tableId,
-        );
-    if (!row) return null;
-    const rowId = row.dataset.rowId;
-    if (!rowId) return null;
-    const cells = Array.from(row.children).filter(
-        (child): child is HTMLElement =>
-            child instanceof HTMLElement && child.matches('.tableCell[data-cell-id]'),
-    );
-    if (!cells.length) return {rowId, index: 0};
-    const before = cells.findIndex((cell) => {
-        const rect = cell.getBoundingClientRect();
-        return clientX < rect.left + rect.width / 2;
-    });
-    return {rowId, index: before >= 0 ? before : cells.length};
-};
-
-const tableRowSlotTargetFromPoint = (
-    clientX: number,
-    clientY: number,
-    tableId: string,
-): TableCellDragTarget | null => {
-    const slot =
-        typeof document.elementsFromPoint === 'function'
-            ? document
-                  .elementsFromPoint(clientX, clientY)
-                  .find(
-                      (element): element is HTMLElement =>
-                          element instanceof HTMLElement &&
-                          element.matches('.tableRowInsertControl[data-table-id]') &&
-                          element.dataset.tableId === tableId,
-                  )
-            : null;
-    if (slot) {
-        const afterRowId = slot.dataset.afterRowId ?? null;
-        const beforeRowId = slot.dataset.beforeRowId ?? null;
-        return {
-            kind: 'row-slot',
-            tableId,
-            beforeRowId: afterRowId,
-            afterRowId: beforeRowId,
-            indicatorRowId: afterRowId ?? beforeRowId ?? tableId,
-            indicatorPlacement: afterRowId ? 'after' : 'before',
-        };
-    }
-
-    const table = document.querySelector<HTMLElement>(`[data-table-id="${CSS.escape(tableId)}"]`);
-    if (!table) return null;
-    const rows = Array.from(table.querySelectorAll<HTMLElement>('.tableRow[data-row-id]')).filter(
-        (row) => row.closest<HTMLElement>('[data-table-id]')?.dataset.tableId === tableId,
-    );
-    if (!rows.length) return null;
-    const rowRects = rows.map((row) => ({row, rect: row.getBoundingClientRect()}));
-    const first = rowRects[0];
-    const last = rowRects[rowRects.length - 1];
-    const edgeBand = 8;
-    if (clientY >= first.rect.top - edgeBand && clientY < first.rect.top + edgeBand) {
-        const rowId = first.row.dataset.rowId;
-        return rowId
-            ? {
-                  kind: 'row-slot',
-                  tableId,
-                  beforeRowId: null,
-                  afterRowId: rowId,
-                  indicatorRowId: rowId,
-                  indicatorPlacement: 'before',
-              }
-            : null;
-    }
-    for (let index = 0; index < rowRects.length - 1; index++) {
-        const before = rowRects[index];
-        const after = rowRects[index + 1];
-        if (clientY >= before.rect.bottom - edgeBand && clientY <= after.rect.top + edgeBand) {
-            const beforeRowId = before.row.dataset.rowId;
-            const afterRowId = after.row.dataset.rowId;
-            return beforeRowId && afterRowId
-                ? {
-                      kind: 'row-slot',
-                      tableId,
-                      beforeRowId,
-                      afterRowId,
-                      indicatorRowId: beforeRowId,
-                      indicatorPlacement: 'after',
-                  }
-                : null;
-        }
-    }
-    if (clientY > last.rect.bottom - edgeBand && clientY <= last.rect.bottom + edgeBand) {
-        const rowId = last.row.dataset.rowId;
-        return rowId
-            ? {
-                  kind: 'row-slot',
-                  tableId,
-                  beforeRowId: rowId,
-                  afterRowId: null,
-                  indicatorRowId: rowId,
-                  indicatorPlacement: 'after',
-              }
-            : null;
-    }
-    return null;
-};
-
-const tableCellElementFromPoint = (
-    clientX: number,
-    clientY: number,
-): HTMLElement | null =>
-    document
-        .elementsFromPoint(clientX, clientY)
-        .map((element) => element.closest<HTMLElement>('.tableCell[data-cell-id]'))
-        .find((element): element is HTMLElement => !!element?.dataset.cellId) ?? null;
 
 type EditableBlockRenderOptions = {
     variant?: 'block' | 'table-row-header';
@@ -5297,6 +4605,10 @@ const renderEditableBlock = (
             onStartBlockDragFromHandle={context.startBlockDragFromHandle}
             popoverTextById={context.popoverTextById}
             footnoteNumberById={context.footnoteNumberById}
+            inlineRenderFeatures={context.inlineRenderFeatures}
+            blockRenderFeatures={context.blockRenderFeatures}
+            registry={context.registry}
+            optionPanelBlockTypes={context.optionPanelBlockTypes}
             onPopoverTriggerEnter={context.onPopoverTriggerEnter}
             onPopoverTriggerLeave={context.onPopoverTriggerLeave}
             onInsertText={(text, activeSelection) =>
@@ -5489,6 +4801,7 @@ const renderEditableBlock = (
                         !context.userId ||
                         !currentBlock ||
                         currentBlock.meta.type !== 'poll' ||
+                        !context.registry.optionPanels.has('poll') ||
                         (
                             currentBlock.meta.kind !== 'rating' &&
                             currentBlock.meta.kind !== 'children' &&
@@ -5559,6 +4872,7 @@ const renderEditableBlock = (
                         !context.userId ||
                         !currentBlock ||
                         currentBlock.meta.type !== 'poll' ||
+                        !context.registry.optionPanels.has('poll') ||
                         currentBlock.meta.kind !== 'long' ||
                         !text.trim()
                     ) {
@@ -5605,10 +4919,15 @@ const renderEditableBlock = (
             onSetCodeLanguage={(language) =>
                 context.runBlockControlCommand((current) => {
                     const currentBlock = current.state.state.blocks[block.id];
-                    if (!currentBlock || currentBlock.meta.type !== 'code') {
+                    if (
+                        !currentBlock ||
+                        currentBlock.meta.type !== 'code' ||
+                        !context.registry.optionPanels.has('code')
+                    ) {
                         return {state: current.state, ops: [], selection: current.selection};
                     }
-                    const nextMeta = codeMetaWithPreviewForLanguage(
+                    const nextMeta = codeMetaWithPreviewForRegistry(
+                        context.registry,
                         {
                             type: 'code',
                             language,
@@ -5626,13 +4945,18 @@ const renderEditableBlock = (
             onSetCodePreview={(enabled) =>
                 context.runBlockControlCommand((current) => {
                     const currentBlock = current.state.state.blocks[block.id];
-                    if (!currentBlock || currentBlock.meta.type !== 'code') {
+                    if (
+                        !currentBlock ||
+                        currentBlock.meta.type !== 'code' ||
+                        !context.registry.optionPanels.has('code')
+                    ) {
                         return {state: current.state, ops: [], selection: current.selection};
                     }
                     const result = setBlockMeta(
                         current.state,
                         block.id,
-                        codeMetaWithPreviewForLanguage(
+                        codeMetaWithPreviewForRegistry(
+                            context.registry,
                             {...currentBlock.meta, ts: nextReplicaTs(current)},
                             enabled,
                         ),
@@ -5674,6 +4998,7 @@ const renderEditableBlock = (
                     if (
                         !currentBlock ||
                         currentBlock.meta.type !== 'poll' ||
+                        !context.registry.optionPanels.has('poll') ||
                         (currentBlock.meta.kind !== 'children' && currentBlock.meta.kind !== 'matrix')
                     ) {
                         return {state: current.state, ops: [], selection: current.selection};
@@ -5692,6 +5017,7 @@ const renderEditableBlock = (
                     if (
                         !currentBlock ||
                         currentBlock.meta.type !== 'poll' ||
+                        !context.registry.optionPanels.has('poll') ||
                         currentBlock.meta.kind !== 'children'
                     ) {
                         return {state: current.state, ops: [], selection: current.selection};
@@ -5707,7 +5033,11 @@ const renderEditableBlock = (
             onSetColumnsDisplay={(display) =>
                 context.runBlockControlCommand((current) => {
                     const currentBlock = current.state.state.blocks[block.id];
-                    if (!currentBlock || currentBlock.meta.type !== 'columns') {
+                    if (
+                        !currentBlock ||
+                        currentBlock.meta.type !== 'columns' ||
+                        !context.registry.optionPanels.has('columns')
+                    ) {
                         return {state: current.state, ops: [], selection: current.selection};
                     }
                     const result = setBlockMeta(current.state, block.id, {
@@ -5721,7 +5051,11 @@ const renderEditableBlock = (
             onSetPollAllowChange={(allowChange) =>
                 context.runBlockControlCommand((current) => {
                     const currentBlock = current.state.state.blocks[block.id];
-                    if (!currentBlock || currentBlock.meta.type !== 'poll') {
+                    if (
+                        !currentBlock ||
+                        currentBlock.meta.type !== 'poll' ||
+                        !context.registry.optionPanels.has('poll')
+                    ) {
                         return {state: current.state, ops: [], selection: current.selection};
                     }
                     const result = setBlockMeta(current.state, block.id, {
@@ -5738,6 +5072,7 @@ const renderEditableBlock = (
                     if (
                         !currentBlock ||
                         currentBlock.meta.type !== 'poll' ||
+                        !context.registry.optionPanels.has('poll') ||
                         currentBlock.meta.kind !== 'rating'
                     ) {
                         return {state: current.state, ops: [], selection: current.selection};
@@ -5756,6 +5091,7 @@ const renderEditableBlock = (
                     if (
                         !currentBlock ||
                         currentBlock.meta.type !== 'poll' ||
+                        !context.registry.optionPanels.has('poll') ||
                         currentBlock.meta.kind !== 'rating'
                     ) {
                         return {state: current.state, ops: [], selection: current.selection};
@@ -5771,7 +5107,11 @@ const renderEditableBlock = (
             onSetSlideDeckSize={(width, height) =>
                 context.runBlockControlCommand((current) => {
                     const currentBlock = current.state.state.blocks[block.id];
-                    if (!currentBlock || currentBlock.meta.type !== 'slide_deck') {
+                    if (
+                        !currentBlock ||
+                        currentBlock.meta.type !== 'slide_deck' ||
+                        !context.registry.optionPanels.has('slide_deck')
+                    ) {
                         return {state: current.state, ops: [], selection: current.selection};
                     }
                     const size = normalizeSlideDeckSize(width, height);
@@ -5787,7 +5127,11 @@ const renderEditableBlock = (
             onSetSlideDeckFooter={(footer) =>
                 context.runBlockControlCommand((current) => {
                     const currentBlock = current.state.state.blocks[block.id];
-                    if (!currentBlock || currentBlock.meta.type !== 'slide_deck') {
+                    if (
+                        !currentBlock ||
+                        currentBlock.meta.type !== 'slide_deck' ||
+                        !context.registry.optionPanels.has('slide_deck')
+                    ) {
                         return {state: current.state, ops: [], selection: current.selection};
                     }
                     const result = setBlockMeta(current.state, block.id, {
@@ -5801,7 +5145,11 @@ const renderEditableBlock = (
             onSetSlideShowTitle={(showTitle) =>
                 context.runBlockControlCommand((current) => {
                     const currentBlock = current.state.state.blocks[block.id];
-                    if (!currentBlock || currentBlock.meta.type !== 'slide') {
+                    if (
+                        !currentBlock ||
+                        currentBlock.meta.type !== 'slide' ||
+                        !context.registry.optionPanels.has('slide')
+                    ) {
                         return {state: current.state, ops: [], selection: current.selection};
                     }
                     const result = setBlockMeta(current.state, block.id, {
@@ -5815,7 +5163,11 @@ const renderEditableBlock = (
             onSetSlideTransition={(transition) =>
                 context.runBlockControlCommand((current) => {
                     const currentBlock = current.state.state.blocks[block.id];
-                    if (!currentBlock || currentBlock.meta.type !== 'slide') {
+                    if (
+                        !currentBlock ||
+                        currentBlock.meta.type !== 'slide' ||
+                        !context.registry.optionPanels.has('slide')
+                    ) {
                         return {state: current.state, ops: [], selection: current.selection};
                     }
                     const result = setBlockMeta(current.state, block.id, {
@@ -5902,871 +5254,6 @@ const renderEditableBlock = (
     );
 };
 
-function AnnotationSidebar({
-    state,
-    annotations,
-    open,
-    gutterTops,
-    focusRequest,
-    onToggle,
-    onFocusAnnotation,
-    onFocusRequestHandled,
-    onBodyActivity,
-    onBodyCommand,
-    onBodyFocusRequest,
-    onBodySelectionChange,
-    onResolveAnnotation,
-    popoverTextById,
-    footnoteNumberById,
-    rainbowLamportIds,
-    onPopoverTriggerEnter,
-    onPopoverTriggerLeave,
-    onInputMeasured,
-    onDisplayInputRenderStarted,
-}: {
-    state: Replica['state'];
-    annotations: ReturnType<typeof renderedAnnotations>;
-    open: boolean;
-    gutterTops: Record<string, number>;
-    focusRequest: CommentFocusRequest | null;
-    onToggle(open: boolean): void;
-    onFocusAnnotation(annotation: RenderedAnnotation): void;
-    onFocusRequestHandled(): void;
-    onBodyActivity(annotationId: string, bodyBlockId: string): void;
-    onBodyCommand(
-        command: (
-            current: Replica,
-            context: ReturnType<typeof makeCommandContext>,
-        ) => CommandResult,
-    ): void;
-    onBodyFocusRequest(blockId: string, selection: EditorSelection): void;
-    onBodySelectionChange(selection: EditorSelection | null): void;
-    onResolveAnnotation(annotation: RenderedAnnotation): void;
-    popoverTextById: Map<string, string>;
-    footnoteNumberById: Map<string, number>;
-    rainbowLamportIds: boolean;
-    onPopoverTriggerEnter(id: string, element: HTMLElement): void;
-    onPopoverTriggerLeave(id?: string, transition?: PopoverPointerTransition): void;
-    onInputMeasured(label: string, ms: number): void;
-    onDisplayInputRenderStarted(label: string, started: number): void;
-}) {
-    // if (!annotations.length && !open) return null;
-    return (
-        <aside
-            className={
-                open
-                    ? 'annotationSidebar commentSidebarOpen'
-                    : 'annotationSidebar commentSidebarCollapsed'
-            }
-            aria-label="Comments"
-        >
-            <button
-                type="button"
-                className="commentSidebarToggle"
-                aria-label={open ? 'Close comments' : 'Open comments'}
-                onClick={() => onToggle(!open)}
-            >
-                {open ? 'x' : '...'}
-            </button>
-            {open ? (
-                <div className="commentCards">
-                    {annotations.length ? (
-                        annotations.map((annotation) => (
-                            <section key={annotation.id} className="annotationCard">
-                                <div className="annotationCardHeader">
-                                    <strong>Comment on “{annotation.referenceText}”</strong>
-                                    <button
-                                        type="button"
-                                        className="annotationResolveButton"
-                                        aria-label="Resolve comment"
-                                        title="Resolve comment"
-                                        onClick={() => onResolveAnnotation(annotation)}
-                                    >
-                                        x
-                                    </button>
-                                </div>
-                                {annotation.bodyBlocks.map((block) => (
-                                    <AnnotationBodyBlock
-                                        key={block.id}
-                                        state={state}
-                                        annotationId={annotation.id}
-                                        block={block}
-                                        focusRequest={focusRequest}
-                                        onFocusRequestHandled={onFocusRequestHandled}
-                                        onBodyActivity={onBodyActivity}
-                                        onBodyCommand={onBodyCommand}
-                                        onBodyFocusRequest={onBodyFocusRequest}
-                                        onBodySelectionChange={onBodySelectionChange}
-                                        popoverTextById={popoverTextById}
-                                        footnoteNumberById={footnoteNumberById}
-                                        rainbowLamportIds={rainbowLamportIds}
-                                        onPopoverTriggerEnter={onPopoverTriggerEnter}
-                                        onPopoverTriggerLeave={onPopoverTriggerLeave}
-                                        onInputMeasured={onInputMeasured}
-                                        onDisplayInputRenderStarted={onDisplayInputRenderStarted}
-                                    />
-                                ))}
-                            </section>
-                        ))
-                    ) : (
-                        <p className="commentEmpty">No comments</p>
-                    )}
-                </div>
-            ) : (
-                <div className="commentGutter" aria-label="Comment markers">
-                    {annotations.map((annotation, index) => (
-                        <button
-                            key={annotation.id}
-                            type="button"
-                            className="commentGutterDot"
-                            aria-label={`Open comment on ${annotation.referenceText}`}
-                            style={{top: gutterTops[annotation.id] ?? 18 + index * 24}}
-                            onClick={() => onFocusAnnotation(annotation)}
-                        />
-                    ))}
-                </div>
-            )}
-        </aside>
-    );
-}
-
-function Footnotes({
-    state,
-    annotations,
-    focusRequest,
-    onFocusRequestHandled,
-    onBodyCommand,
-    onBodyFocusRequest,
-    onBodySelectionChange,
-    popoverTextById,
-    footnoteNumberById,
-    rainbowLamportIds,
-    onPopoverTriggerEnter,
-    onPopoverTriggerLeave,
-    onInputMeasured,
-    onDisplayInputRenderStarted,
-}: {
-    state: Replica['state'];
-    annotations: ReturnType<typeof renderedAnnotations>;
-    focusRequest: CommentFocusRequest | null;
-    onFocusRequestHandled(): void;
-    onBodyCommand(
-        command: (
-            current: Replica,
-            context: ReturnType<typeof makeCommandContext>,
-        ) => CommandResult,
-    ): void;
-    onBodyFocusRequest(blockId: string, selection: EditorSelection): void;
-    onBodySelectionChange(selection: EditorSelection | null): void;
-    popoverTextById: Map<string, string>;
-    footnoteNumberById: Map<string, number>;
-    rainbowLamportIds: boolean;
-    onPopoverTriggerEnter(id: string, element: HTMLElement): void;
-    onPopoverTriggerLeave(id?: string, transition?: PopoverPointerTransition): void;
-    onInputMeasured(label: string, ms: number): void;
-    onDisplayInputRenderStarted(label: string, started: number): void;
-}) {
-    if (!annotations.length) return null;
-    return (
-        <ol className="footnotes" aria-label="Footnotes">
-            {annotations.map((annotation) => (
-                <li key={annotation.id}>
-                    {annotation.bodyBlocks.length
-                        ? annotation.bodyBlocks.map((block) => (
-                              <AnnotationBodyBlock
-                                  key={block.id}
-                                  state={state}
-                                  block={block}
-                                  fallbackText={annotation.referenceText}
-                                  focusRequest={focusRequest}
-                                  onFocusRequestHandled={onFocusRequestHandled}
-                                  onBodyCommand={onBodyCommand}
-                                  onBodyFocusRequest={onBodyFocusRequest}
-                                  onBodySelectionChange={onBodySelectionChange}
-                                  popoverTextById={popoverTextById}
-                                  footnoteNumberById={footnoteNumberById}
-                                  rainbowLamportIds={rainbowLamportIds}
-                                  onPopoverTriggerEnter={onPopoverTriggerEnter}
-                                  onPopoverTriggerLeave={onPopoverTriggerLeave}
-                                  onInputMeasured={onInputMeasured}
-                                  onDisplayInputRenderStarted={onDisplayInputRenderStarted}
-                              />
-                          ))
-                        : annotation.referenceText}
-                </li>
-            ))}
-        </ol>
-    );
-}
-
-function FloatingAnnotationPopover({
-    state,
-    annotation,
-    position,
-    onMouseEnter,
-    onMouseLeave,
-    onFocusChange,
-    onEscape,
-    focusRequest,
-    onFocusRequestHandled,
-    onBodyCommand,
-    onBodyFocusRequest,
-    onBodySelectionChange,
-    popoverTextById,
-    footnoteNumberById,
-    rainbowLamportIds,
-    onPopoverTriggerEnter,
-    onPopoverTriggerLeave,
-    onInputMeasured,
-    onDisplayInputRenderStarted,
-}: {
-    state: Replica['state'];
-    annotation: RenderedAnnotation | null;
-    position: ActivePopover | null;
-    onMouseEnter(): void;
-    onMouseLeave(event: MouseEvent<HTMLElement>): void;
-    onFocusChange(focused: boolean, id?: string, relatedTarget?: EventTarget | null): void;
-    onEscape(): void;
-    focusRequest: CommentFocusRequest | null;
-    onFocusRequestHandled(): void;
-    onBodyCommand(
-        command: (
-            current: Replica,
-            context: ReturnType<typeof makeCommandContext>,
-        ) => CommandResult,
-    ): void;
-    onBodyFocusRequest(blockId: string, selection: EditorSelection): void;
-    onBodySelectionChange(selection: EditorSelection | null): void;
-    popoverTextById: Map<string, string>;
-    footnoteNumberById: Map<string, number>;
-    rainbowLamportIds: boolean;
-    onPopoverTriggerEnter(id: string, element: HTMLElement): void;
-    onPopoverTriggerLeave(id?: string, transition?: PopoverPointerTransition): void;
-    onInputMeasured(label: string, ms: number): void;
-    onDisplayInputRenderStarted(label: string, started: number): void;
-}) {
-    if (!annotation || !position) return null;
-    return (
-        <section
-            className="annotationFloatingPopover"
-            role="dialog"
-            aria-label="Popover"
-            data-popover-id={position.id}
-            style={{top: position.top, left: position.left}}
-            onMouseEnter={onMouseEnter}
-            onMouseLeave={onMouseLeave}
-            onFocus={() => onFocusChange(true, position.id)}
-            onBlur={(event) => {
-                if (event.currentTarget.contains(event.relatedTarget)) return;
-                onFocusChange(false, position.id, event.relatedTarget);
-            }}
-            onKeyDown={(event) => {
-                if (event.key !== 'Escape') return;
-                event.preventDefault();
-                onEscape();
-            }}
-        >
-            {annotation.bodyBlocks.map((block) => (
-                <AnnotationBodyBlock
-                    key={block.id}
-                    state={state}
-                    block={block}
-                    fallbackText={annotation.referenceText}
-                    focusRequest={focusRequest}
-                    onFocusRequestHandled={onFocusRequestHandled}
-                    onBodyCommand={onBodyCommand}
-                    onBodyFocusRequest={onBodyFocusRequest}
-                    onBodySelectionChange={onBodySelectionChange}
-                    popoverTextById={popoverTextById}
-                    footnoteNumberById={footnoteNumberById}
-                    rainbowLamportIds={rainbowLamportIds}
-                    onPopoverTriggerEnter={onPopoverTriggerEnter}
-                    onPopoverTriggerLeave={onPopoverTriggerLeave}
-                    onInputMeasured={onInputMeasured}
-                    onDisplayInputRenderStarted={onDisplayInputRenderStarted}
-                />
-            ))}
-        </section>
-    );
-}
-
-function AnnotationBodyBlock({
-    state,
-    annotationId,
-    block,
-    fallbackText = '',
-    focusRequest,
-    onFocusRequestHandled,
-    onBodyActivity,
-    onBodyCommand,
-    onBodyFocusRequest,
-    onBodySelectionChange,
-    popoverTextById,
-    footnoteNumberById,
-    rainbowLamportIds,
-    onPopoverTriggerEnter,
-    onPopoverTriggerLeave,
-    onInputMeasured,
-    onDisplayInputRenderStarted,
-}: {
-    state: Replica['state'];
-    annotationId?: string;
-    block: ReturnType<typeof renderedAnnotations>[number]['bodyBlocks'][number];
-    fallbackText?: string;
-    focusRequest?: CommentFocusRequest | null;
-    onFocusRequestHandled?(): void;
-    onBodyActivity?(annotationId: string, bodyBlockId: string): void;
-    onBodyCommand(
-        command: (
-            current: Replica,
-            context: ReturnType<typeof makeCommandContext>,
-        ) => CommandResult,
-    ): void;
-    onBodyFocusRequest?(blockId: string, selection: EditorSelection): void;
-    onBodySelectionChange(selection: EditorSelection | null): void;
-    popoverTextById: Map<string, string>;
-    footnoteNumberById: Map<string, number>;
-    rainbowLamportIds: boolean;
-    onPopoverTriggerEnter(id: string, element: HTMLElement): void;
-    onPopoverTriggerLeave(id?: string, transition?: PopoverPointerTransition): void;
-    onInputMeasured(label: string, ms: number): void;
-    onDisplayInputRenderStarted(label: string, started: number): void;
-}) {
-    const pendingCaretRestoreBlockIdRef = useRef<string | null>(null);
-    const pendingSelectionRestoreRef = useRef<EditorSelection | null>(null);
-    const linkHoverHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const codeHoverHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const [selection, setSelection] = useState<EditorSelection>(() =>
-        caret(block.id, block.text.length),
-    );
-    const [linkPopover, setLinkPopover] = useState<LinkPopoverState | null>(null);
-    const [linkHoverPopover, setLinkHoverPopover] = useState<LinkHoverPopoverState | null>(null);
-    const [codePopover, setCodePopover] = useState<CodePopoverState | null>(null);
-    const [codeHoverPopover, setCodeHoverPopover] = useState<CodeHoverPopoverState | null>(null);
-    const [pendingCodeMark, setPendingCodeMark] = useState(false);
-    const [retainedCodeMarks, setRetainedCodeMarks] = useState<RetainedInlineMarkSession[]>([]);
-    const visibleBlockIdSet = useMemo(
-        () => new Set(materializeFormattedBlocks(state, annotationVirtualParents(state)).map((item) => item.id)),
-        [state],
-    );
-
-    const restoreAfter = useCallback(
-        (selection: EditorSelection) => {
-            pendingCaretRestoreBlockIdRef.current =
-                selection.type === 'caret' && selection.point.blockId === block.id
-                    ? block.id
-                    : null;
-            pendingSelectionRestoreRef.current = selection.type === 'range' ? selection : null;
-            setSelection(selection);
-            onBodySelectionChange(selection);
-            if (annotationId) onBodyActivity?.(annotationId, block.id);
-        },
-        [annotationId, block.id, onBodyActivity, onBodySelectionChange],
-    );
-
-    const updateSelection = useCallback(
-        (nextSelection: EditorSelection | null) => {
-            setSelection(nextSelection ?? caret(block.id, block.text.length));
-            onBodySelectionChange(nextSelection);
-        },
-        [block.id, block.text.length, onBodySelectionChange],
-    );
-
-    const copyBodySelection = useCallback(
-        (event: ClipboardEvent<HTMLDivElement>) => {
-            const selected = readSelectionFromDom(event.currentTarget) ?? selection;
-            const payload = serializeSelectionToClipboardPayload(
-                state,
-                singleRetainedSelectionSet(state, selected),
-            );
-            if (!payload) return;
-            event.preventDefault();
-            event.clipboardData.setData(BLOCK_RICH_TEXT_MIME, JSON.stringify(payload));
-            event.clipboardData.setData('text/plain', payload.plainText);
-            event.clipboardData.setData('text/html', htmlWithClipboardPayload(payload));
-        },
-        [selection, state],
-    );
-
-    useLayoutEffect(() => {
-        if (focusRequest?.blockId !== block.id) return;
-        const nextSelection = focusRequest.selection ?? caret(block.id, block.text.length);
-        pendingCaretRestoreBlockIdRef.current =
-            nextSelection.type === 'caret' && nextSelection.point.blockId === block.id
-                ? block.id
-                : null;
-        pendingSelectionRestoreRef.current = nextSelection.type === 'range' ? nextSelection : null;
-        setSelection(nextSelection);
-        onBodySelectionChange(nextSelection);
-        onFocusRequestHandled?.();
-    }, [
-        block.id,
-        block.text.length,
-        focusRequest?.blockId,
-        focusRequest?.token,
-        onBodySelectionChange,
-        onFocusRequestHandled,
-        focusRequest?.selection,
-    ]);
-
-    const run = useCallback(
-        (
-            selection: EditorSelection,
-            apply: (
-                state: Replica['state'],
-                selection: EditorSelection,
-                context: ReturnType<typeof makeCommandContext>,
-            ) => CommandResult,
-        ) => {
-            onBodyCommand((current, context) => {
-                const result = apply(current.state, selection, context);
-                if (focusPoint(result.selection).blockId !== block.id) {
-                    onBodyFocusRequest?.(focusPoint(result.selection).blockId, result.selection);
-                }
-                restoreAfter(result.selection);
-                return result;
-            });
-        },
-        [block.id, onBodyCommand, onBodyFocusRequest, restoreAfter],
-    );
-
-    const cutBodySelection = useCallback(
-        (event: ClipboardEvent<HTMLDivElement>) => {
-            const selected = readSelectionFromDom(event.currentTarget) ?? selection;
-            const payload = serializeSelectionToClipboardPayload(
-                state,
-                singleRetainedSelectionSet(state, selected),
-            );
-            if (!payload) return;
-            event.preventDefault();
-            event.clipboardData.setData(BLOCK_RICH_TEXT_MIME, JSON.stringify(payload));
-            event.clipboardData.setData('text/plain', payload.plainText);
-            event.clipboardData.setData('text/html', htmlWithClipboardPayload(payload));
-            run(selected, (currentState, activeSelection, context) =>
-                replaceAnnotationBodySelection(currentState, activeSelection, '', context),
-            );
-        },
-        [run, selection, state],
-    );
-
-    const rangeSelection = useCallback(
-        (range: LinkTargetRange): EditorSelection => ({
-            type: 'range',
-            anchor: {blockId: range.blockId, offset: range.startOffset},
-            focus: {blockId: range.blockId, offset: range.endOffset},
-        }),
-        [],
-    );
-
-    const openBodyLinkPopover = useCallback(
-        (ranges: LinkTargetRange[], href: string, position: {top: number; left: number}) => {
-            setLinkPopover({ranges, href, ...position});
-        },
-        [],
-    );
-
-    const applyBodyLink = useCallback(
-        (href: string) => {
-            const range = linkPopover?.ranges[0];
-            setLinkPopover(null);
-            if (!range) return;
-            const selected = rangeSelection(range);
-            const value = href.trim();
-            run(selected, (state, activeSelection, context) =>
-                value
-                    ? setAnnotationBodyLink(state, activeSelection, value, context)
-                    : removeAnnotationBodyLink(state, activeSelection, context),
-            );
-        },
-        [linkPopover?.ranges, rangeSelection, run],
-    );
-
-    const removeBodyLink = useCallback(() => {
-        const range = linkPopover?.ranges[0];
-        setLinkPopover(null);
-        if (!range) return;
-        run(rangeSelection(range), removeAnnotationBodyLink);
-    }, [linkPopover?.ranges, rangeSelection, run]);
-
-    const applyBodyCodeLanguage = useCallback(
-        (language: string, ranges: CodeTargetRange[]) => {
-            const range = ranges[0];
-            setCodePopover(null);
-            if (!range) return;
-            const selected = rangeSelection(range);
-            const value = language.trim();
-            run(selected, (state, activeSelection, context) =>
-                value
-                    ? setAnnotationBodyCodeMark(state, activeSelection, value, context)
-                    : clearAnnotationBodyCodeLanguage(state, activeSelection, context),
-            );
-        },
-        [rangeSelection, run],
-    );
-
-    const clearBodyCodeLanguage = useCallback((ranges: CodeTargetRange[]) => {
-        const range = ranges[0];
-        setCodePopover(null);
-        if (!range) return;
-        run(rangeSelection(range), clearAnnotationBodyCodeLanguage);
-    }, [rangeSelection, run]);
-
-    const removeBodyCode = useCallback((ranges: CodeTargetRange[]) => {
-        const range = ranges[0];
-        setCodePopover(null);
-        if (!range) return;
-        run(rangeSelection(range), removeAnnotationBodyCodeMark);
-    }, [rangeSelection, run]);
-
-    const cancelBodyLinkHoverHide = useCallback(() => {
-        if (linkHoverHideTimerRef.current) clearTimeout(linkHoverHideTimerRef.current);
-        linkHoverHideTimerRef.current = null;
-    }, []);
-
-    const scheduleBodyLinkHoverHide = useCallback(() => {
-        if (linkHoverHideTimerRef.current) clearTimeout(linkHoverHideTimerRef.current);
-        linkHoverHideTimerRef.current = setTimeout(() => {
-            setLinkHoverPopover(null);
-            linkHoverHideTimerRef.current = null;
-        }, 100);
-    }, []);
-
-    const cancelBodyCodeHoverHide = useCallback(() => {
-        if (codeHoverHideTimerRef.current) clearTimeout(codeHoverHideTimerRef.current);
-        codeHoverHideTimerRef.current = null;
-    }, []);
-
-    const scheduleBodyCodeHoverHide = useCallback(() => {
-        if (codeHoverHideTimerRef.current) clearTimeout(codeHoverHideTimerRef.current);
-        codeHoverHideTimerRef.current = setTimeout(() => {
-            setCodeHoverPopover(null);
-            codeHoverHideTimerRef.current = null;
-        }, 100);
-    }, []);
-
-    useLayoutEffect(
-        () => () => {
-            if (linkHoverHideTimerRef.current) clearTimeout(linkHoverHideTimerRef.current);
-            if (codeHoverHideTimerRef.current) clearTimeout(codeHoverHideTimerRef.current);
-        },
-        [],
-    );
-
-    const showBodyLinkHover = useCallback(
-        (range: LinkTargetRange & {href: string}, element: HTMLElement) => {
-            cancelBodyLinkHoverHide();
-            setLinkHoverPopover({
-                ranges: [
-                    {
-                        blockId: range.blockId,
-                        startOffset: range.startOffset,
-                        endOffset: range.endOffset,
-                    },
-                ],
-                href: range.href,
-                ...linkPopoverPositionFromElement(element),
-            });
-        },
-        [cancelBodyLinkHoverHide],
-    );
-
-    const showBodyCodeHover = useCallback(
-        (range: CodeTargetRange & {language: string}, element: HTMLElement) => {
-            cancelBodyCodeHoverHide();
-            setCodeHoverPopover({
-                ranges: [
-                    {
-                        blockId: range.blockId,
-                        startOffset: range.startOffset,
-                        endOffset: range.endOffset,
-                    },
-                ],
-                language: range.language,
-                ...linkPopoverPositionFromElement(element),
-            });
-        },
-        [cancelBodyCodeHoverHide],
-    );
-
-    return (
-        <>
-            {annotationBodyMarker(block.meta)}
-            <RichTextEditableSurface
-                blockId={block.id}
-                runs={block.runs}
-                charIdsByOffset={orderedCharIdsForBlock(state, block.id, {visibleOnly: true})}
-                visibleBlockIdSet={visibleBlockIdSet}
-                rainbowLamportIds={rainbowLamportIds}
-                decorations={null}
-                pendingCaretRestoreBlockIdRef={pendingCaretRestoreBlockIdRef}
-                pendingSelectionRestoreRef={pendingSelectionRestoreRef}
-                selection={selection}
-                className="annotationBodyEditor"
-                ariaLabel="Annotation body"
-                placeholder={fallbackText || 'Annotation body'}
-                popoverTextById={popoverTextById}
-                footnoteNumberById={footnoteNumberById}
-                onPopoverTriggerEnter={onPopoverTriggerEnter}
-                onPopoverTriggerLeave={onPopoverTriggerLeave}
-                onLinkHoverEnter={showBodyLinkHover}
-                onLinkHoverLeave={scheduleBodyLinkHoverHide}
-                onCodeHoverEnter={showBodyCodeHover}
-                onCodeHoverLeave={scheduleBodyCodeHoverHide}
-                onSelectionChange={updateSelection}
-                onInputMeasured={onInputMeasured}
-                onDisplayInputRenderStarted={onDisplayInputRenderStarted}
-                onInsertText={(text, activeSelection) =>
-                    run(activeSelection ?? selection, (state, selected, context) => {
-                        if (pendingCodeMark && selected.type === 'caret') {
-                            const result = insertTextWithRetainedMarks(
-                                state,
-                                selected,
-                                text,
-                                [CODE_MARK],
-                                retainedCodeMarks,
-                                context,
-                            );
-                            setRetainedCodeMarks(result.sessions);
-                            return result;
-                        }
-                        return text === '`'
-                            ? insertTextWithMarkdownShortcuts(state, selected, text, context)
-                            : replaceAnnotationBodySelection(state, selected, text, context);
-                    })
-                }
-                onDeleteBackward={(activeSelection) =>
-                    run(activeSelection ?? selection, (state, selected, context) =>
-                        deleteAnnotationBodyBackward(state, selected, context, {
-                            annotationId,
-                            bodyBlockId: block.id,
-                        }),
-                    )
-                }
-                onDeleteForward={(activeSelection) =>
-                    run(activeSelection ?? selection, deleteAnnotationBodyForward)
-                }
-                onCopy={copyBodySelection}
-                onCut={cutBodySelection}
-                onPaste={(event) => {
-                    const selected = readSelectionFromDom(event.currentTarget) ?? selection;
-                    const rich = richClipboardPayloadFromDataTransfer(event.clipboardData);
-                    if (rich) {
-                        event.preventDefault();
-                        run(selected, (state, activeSelection, context) => {
-                            const result = pasteRichClipboardEverywhere(
-                                state,
-                                singleRetainedSelectionSet(state, activeSelection),
-                                rich,
-                                context,
-                            );
-                            return {
-                                state: result.state,
-                                ops: result.ops,
-                                selection: primarySelection(resolveSelectionSet(result.state, result.selection)),
-                            };
-                        });
-                        return;
-                    }
-
-                    event.preventDefault();
-                    const text = event.clipboardData.getData('text/plain');
-                    if (isLinkLikeText(text) && selected.type === 'range') {
-                        run(selected, (state, activeSelection, context) =>
-                            setAnnotationBodyLink(state, activeSelection, text.trim(), context),
-                        );
-                        return;
-                    }
-                    run(selected, (state, activeSelection, context) =>
-                        pasteAnnotationBodyTextWithMarkdownShortcuts(state, activeSelection, text, context),
-                    );
-                }}
-                onKeyDown={(event) => {
-                    const currentSelection = readSelectionFromDom(event.currentTarget);
-                    if (currentSelection) updateSelection(currentSelection);
-                    const selected = currentSelection ?? selection;
-                    const modifierPressed = event.metaKey || event.ctrlKey;
-                    const key = event.key.toLowerCase();
-                    if (event.key === 'Enter') {
-                        event.preventDefault();
-                        run(selected, (state, activeSelection, context) =>
-                            splitAnnotationBodyBlock(state, activeSelection, context),
-                        );
-                        return;
-                    }
-                    if (modifierPressed && (key === 'b' || key === 'i')) {
-                        event.preventDefault();
-                        run(selected, (state, activeSelection, context) =>
-                            toggleAnnotationBodyMark(
-                                state,
-                                activeSelection,
-                                key === 'b' ? 'bold' : 'italic',
-                                context,
-                            ),
-                        );
-                    } else if (modifierPressed && event.shiftKey && key === 'x') {
-                        event.preventDefault();
-                        run(selected, (state, activeSelection, context) =>
-                            toggleAnnotationBodyMark(
-                                state,
-                                activeSelection,
-                                'strikethrough',
-                                context,
-                            ),
-                        );
-                    } else if (modifierPressed && key === 'e') {
-                        event.preventDefault();
-                        if (selected.type === 'caret') {
-                            if (pendingCodeMark) {
-                                run(selected, (state, _activeSelection, context) => {
-                                    const result = closeRetainedInlineMarkSessions(
-                                        state,
-                                        retainedCodeMarks,
-                                        CODE_MARK,
-                                        context,
-                                    );
-                                    setRetainedCodeMarks(result.sessions);
-                                    setPendingCodeMark(false);
-                                    return {
-                                        state: result.state,
-                                        ops: result.ops,
-                                        selection: selected,
-                                    };
-                                });
-                            } else {
-                                setPendingCodeMark(true);
-                            }
-                        } else {
-                            run(selected, (state, activeSelection, context) =>
-                                toggleAnnotationBodyCodeMark(state, activeSelection, context),
-                            );
-                        }
-                    } else if (modifierPressed && key === 'k') {
-                        event.preventDefault();
-                        if (selected.type === 'range') {
-                            const ranges = [
-                                {
-                                    blockId: block.id,
-                                    startOffset: Math.min(
-                                        selected.anchor.offset,
-                                        selected.focus.offset,
-                                    ),
-                                    endOffset: Math.max(
-                                        selected.anchor.offset,
-                                        selected.focus.offset,
-                                    ),
-                                },
-                            ];
-                            const selectedText = textForSelectionSegments(
-                                [
-                                    {
-                                        id: block.id,
-                                        runs: block.runs,
-                                        depth: 0,
-                                        parentId: '',
-                                        block: {} as RichFormattedBlock['block'],
-                                    },
-                                ],
-                                ranges,
-                            ).trim();
-                            if (isLinkLikeText(selectedText)) {
-                                run(selected, (state, activeSelection, context) =>
-                                    setAnnotationBodyLink(
-                                        state,
-                                        activeSelection,
-                                        selectedText,
-                                        context,
-                                    ),
-                                );
-                            } else {
-                                openBodyLinkPopover(
-                                    ranges,
-                                    linkHrefForSelectionSegments(
-                                        [
-                                            {
-                                                id: block.id,
-                                                runs: block.runs,
-                                                depth: 0,
-                                                parentId: '',
-                                                block: {} as RichFormattedBlock['block'],
-                                            },
-                                        ],
-                                        ranges,
-                                    ) ?? '',
-                                    linkPopoverPositionFromSelection(event.currentTarget),
-                                );
-                            }
-                        } else if (selected.type === 'caret') {
-                            const range = linkRangeAroundOffsetInRuns(
-                                block.id,
-                                block.runs,
-                                selected.point.offset,
-                            );
-                            if (range) {
-                                openBodyLinkPopover(
-                                    [range],
-                                    range.href,
-                                    linkPopoverPositionFromSelection(event.currentTarget),
-                                );
-                            }
-                        }
-                    }
-                }}
-            />
-            <LinkFloatingPopover
-                state={linkPopover}
-                onApply={applyBodyLink}
-                onRemove={removeBodyLink}
-                onClose={() => setLinkPopover(null)}
-            />
-            <LinkHoverPopover
-                state={linkHoverPopover}
-                onEdit={(state) => {
-                    cancelBodyLinkHoverHide();
-                    setLinkHoverPopover(null);
-                    setLinkPopover(state);
-                }}
-                onMouseEnter={cancelBodyLinkHoverHide}
-                onMouseLeave={scheduleBodyLinkHoverHide}
-            />
-            <CodeFloatingPopover
-                state={codePopover}
-                onApply={applyBodyCodeLanguage}
-                onClearLanguage={clearBodyCodeLanguage}
-                onRemove={removeBodyCode}
-                onClose={() => setCodePopover(null)}
-            />
-            <CodeHoverPopover
-                state={codeHoverPopover}
-                onEdit={(state) => {
-                    cancelBodyCodeHoverHide();
-                    setCodeHoverPopover(null);
-                    setCodePopover(state);
-                }}
-                onMouseEnter={cancelBodyCodeHoverHide}
-                onMouseLeave={scheduleBodyCodeHoverHide}
-            />
-        </>
-    );
-}
-
-const annotationBodyMarker = (meta: RichBlockMeta): ReactElement | null => {
-    if (meta.type === 'list_item') {
-        return (
-            <span className="annotationBodyMarker" aria-hidden="true">
-                {meta.kind === 'ordered' ? '1.' : '•'}
-            </span>
-        );
-    }
-    if (meta.type === 'todo') {
-        return (
-            <span className="annotationBodyMarker" aria-hidden="true">
-                {meta.checked ? '☑' : '☐'}
-            </span>
-        );
-    }
-    return null;
-};
-
 const renderStaticRuns = (runs: RichFormattedBlock['runs']): ReactElement[] =>
     runs.map((run, index) => (
         <span
@@ -6775,6 +5262,7 @@ const renderStaticRuns = (runs: RichFormattedBlock['runs']): ReactElement[] =>
                 run.marks.bold ? 'markBold' : '',
                 run.marks.italic ? 'markItalic' : '',
                 run.marks.strikethrough ? 'markStrikethrough' : '',
+                run.marks.underline ? 'markUnderline' : '',
                 typeof run.marks[LINK_MARK] === 'string' ? 'markLink' : '',
                 isCodeMarkValue(run.marks[CODE_MARK]) ? 'markCode' : '',
                 hasAnnotationMark(run) ? 'markAnnotation' : '',
@@ -6828,6 +5316,10 @@ function EditableBlock({
     onStartBlockDragFromHandle,
     popoverTextById,
     footnoteNumberById,
+    inlineRenderFeatures,
+    blockRenderFeatures,
+    registry,
+    optionPanelBlockTypes,
     onPopoverTriggerEnter,
     onPopoverTriggerLeave,
     onInsertText,
@@ -6925,6 +5417,10 @@ function EditableBlock({
     onStartBlockDragFromHandle(blockId: string, event: PointerEvent<HTMLElement>): void;
     popoverTextById: Map<string, string>;
     footnoteNumberById: Map<string, number>;
+    inlineRenderFeatures: InlineRenderFeatures;
+    blockRenderFeatures: BlockRenderFeatures;
+    registry: Pick<BlockEditorRegistry<RichBlockMeta>, 'codePreviewRenderersByLanguage' | 'optionPanels' | 'commands'>;
+    optionPanelBlockTypes: ReadonlySet<string>;
     onPopoverTriggerEnter(id: string, element: HTMLElement): void;
     onPopoverTriggerLeave(id?: string, transition?: PopoverPointerTransition): void;
     onInsertText(text: string, selection?: EditorSelection): void;
@@ -6999,8 +5495,12 @@ function EditableBlock({
     onDisplayInputRenderStarted(label: string, started: number): void;
 }) {
     const meta = block.block.meta;
+    const hasBlockRenderFeature = blockRenderFeatures.has(meta.type);
+    const tableKeyboardAvailable = registry.commands.has('table:keyboard-navigation');
     const isCodeBlock = meta.type === 'code';
-    const isPlainTextCodeLikeBlock = meta.type === 'code';
+    const codeBlockRenderer = codePreviewRendererForMeta(registry, meta);
+    const isRenderedCodeBlock = isCodeBlock && hasBlockRenderFeature;
+    const isPlainTextCodeLikeBlock = isRenderedCodeBlock;
     const codeLikeHasTrailingNewline =
         isPlainTextCodeLikeBlock &&
         block.runs
@@ -7012,12 +5512,15 @@ function EditableBlock({
     const blockText = block.runs.map((run) => run.text).join('');
     const blockStyle = blockStyleProps(block.block.style);
     const syntaxTokens = useMemo(
-        () => (isCodeBlock ? highlightCode(codeText, codeLanguage) : undefined),
-        [codeLanguage, codeText, isCodeBlock],
+        () => (isRenderedCodeBlock ? highlightCode(codeText, codeLanguage) : undefined),
+        [codeLanguage, codeText, isRenderedCodeBlock],
     );
     const ingredientTokens = useMemo(
-        () => (meta.type === 'recipe_ingredient' ? highlightIngredientLine(blockText) : undefined),
-        [blockText, meta.type],
+        () =>
+            meta.type === 'recipe_ingredient' && hasBlockRenderFeature
+                ? highlightIngredientLine(blockText)
+                : undefined,
+        [blockText, hasBlockRenderFeature, meta.type],
     );
     const editableSurface = (
         <RichTextEditableSurface
@@ -7034,10 +5537,10 @@ function EditableBlock({
             className={[
                 'editableBlock',
                 isPlainTextCodeLikeBlock ? 'codeBlock' : '',
-                isPreviewableCodeMeta(meta) ? 'previewCodeEditor' : '',
-                meta.type === 'heading' ? `headingLevel${meta.level}` : '',
-                meta.type === 'image' ? 'imageCaption' : '',
-                meta.type === 'recipe_ingredient' ? 'recipeIngredientBlock' : '',
+                isPreviewableCodeMetaFromRegistry(registry, meta) ? 'previewCodeEditor' : '',
+                meta.type === 'heading' && hasBlockRenderFeature ? `headingLevel${meta.level}` : '',
+                meta.type === 'image' && hasBlockRenderFeature ? 'imageCaption' : '',
+                meta.type === 'recipe_ingredient' && hasBlockRenderFeature ? 'recipeIngredientBlock' : '',
                 surfaceClassName ?? '',
             ]
                 .filter(Boolean)
@@ -7049,6 +5552,7 @@ function EditableBlock({
             ingredientTokens={ingredientTokens}
             popoverTextById={popoverTextById}
             footnoteNumberById={footnoteNumberById}
+            inlineRenderFeatures={inlineRenderFeatures}
             onPopoverTriggerEnter={onPopoverTriggerEnter}
             onPopoverTriggerLeave={onPopoverTriggerLeave}
             onLinkHoverEnter={onLinkHoverEnter}
@@ -7097,7 +5601,7 @@ function EditableBlock({
                         onForceCodeNewline();
                     } else if (isPlainTextCodeLikeBlock) {
                         onSplit();
-                    } else if (isTableCell && !event.shiftKey && meta.type !== 'image') {
+                    } else if (tableKeyboardAvailable && isTableCell && !event.shiftKey && meta.type !== 'image') {
                         onAdvanceFromTableCellEnd(
                             readSelectionFromDom(event.currentTarget) ??
                                 caret(block.id, blockLength),
@@ -7109,7 +5613,7 @@ function EditableBlock({
                     event.preventDefault();
                     if (isPlainTextCodeLikeBlock) {
                         onInsertText('    ');
-                    } else if (isTableCell) {
+                    } else if (tableKeyboardAvailable && isTableCell) {
                         onMoveTableCellByTab(event.shiftKey ? 'backward' : 'forward');
                     } else if (event.shiftKey) {
                         onUnindent();
@@ -7155,6 +5659,7 @@ function EditableBlock({
                         if (
                             event.key === 'ArrowLeft' &&
                             focus.offset === 0 &&
+                            tableKeyboardAvailable &&
                             onExtendTableSelectionByArrowKey(currentSelection, 'left')
                         ) {
                             return;
@@ -7162,6 +5667,7 @@ function EditableBlock({
                         if (
                             event.key === 'ArrowRight' &&
                             focus.offset === blockLength &&
+                            tableKeyboardAvailable &&
                             onExtendTableSelectionByArrowKey(currentSelection, 'right')
                         ) {
                             return;
@@ -7169,6 +5675,7 @@ function EditableBlock({
                         if (
                             event.key === 'ArrowUp' &&
                             isCaretOnFirstVisualLine(event.currentTarget) &&
+                            tableKeyboardAvailable &&
                             onExtendTableSelectionByArrowKey(
                                 currentSelection,
                                 'up',
@@ -7180,6 +5687,7 @@ function EditableBlock({
                         if (
                             event.key === 'ArrowDown' &&
                             isCaretOnLastVisualLine(event.currentTarget) &&
+                            tableKeyboardAvailable &&
                             onExtendTableSelectionByArrowKey(
                                 currentSelection,
                                 'down',
@@ -7228,7 +5736,7 @@ function EditableBlock({
                         currentSelection?.type === 'caret' &&
                         currentSelection.point.offset === 0
                     ) {
-                        if (onMoveTableSelectionByArrowKey(currentSelection, 'left')) {
+                        if (tableKeyboardAvailable && onMoveTableSelectionByArrowKey(currentSelection, 'left')) {
                             event.preventDefault();
                             return;
                         }
@@ -7247,7 +5755,7 @@ function EditableBlock({
                         currentSelection?.type === 'caret' &&
                         currentSelection.point.offset === blockLength
                     ) {
-                        if (onMoveTableSelectionByArrowKey(currentSelection, 'right')) {
+                        if (tableKeyboardAvailable && onMoveTableSelectionByArrowKey(currentSelection, 'right')) {
                             event.preventDefault();
                             return;
                         }
@@ -7267,6 +5775,7 @@ function EditableBlock({
                         isCaretOnFirstVisualLine(event.currentTarget)
                     ) {
                         if (
+                            tableKeyboardAvailable &&
                             onMoveTableSelectionByArrowKey(
                                 currentSelection,
                                 'up',
@@ -7292,6 +5801,7 @@ function EditableBlock({
                         isCaretOnLastVisualLine(event.currentTarget)
                     ) {
                         if (
+                            tableKeyboardAvailable &&
                             onMoveTableSelectionByArrowKey(
                                 currentSelection,
                                 'down',
@@ -7320,7 +5830,7 @@ function EditableBlock({
                 hideBlockAffordance ? 'blockRowNoAffordance' : '',
                 variant === 'table-row-header' ? 'tableRowHeaderBlock' : '',
                 `blockType-${meta.type}`,
-                meta.type === 'callout' ? `callout${capitalize(meta.kind)}` : '',
+                meta.type === 'callout' && hasBlockRenderFeature ? `callout${capitalize(meta.kind)}` : '',
                 blockLevelDecoration?.selected ? 'blockSelected' : '',
                 blockLevelDecoration?.focus ? 'blockSelectionFocus' : '',
                 isDragging ? 'dragging' : '',
@@ -7345,25 +5855,26 @@ function EditableBlock({
                 <BlockAffordance
                     blockId={block.id}
                     meta={meta}
-                    listNumber={listNumber}
+                    listNumber={blockRenderFeatures.has('list_item') ? listNumber : null}
+                    blockRenderFeatures={blockRenderFeatures}
                     onStartDrag={onStartDrag}
                     onStartBlockDragFromHandle={onStartBlockDragFromHandle}
                     onToggleTodo={onToggleTodo}
                 />
             )}
-            {meta.type === 'image' ? (
+            {meta.type === 'image' && hasBlockRenderFeature ? (
                 <figure className={`imageBlock imageSize-${meta.size}`}>
                     <ImagePreview attachment={attachment} attachmentId={meta.attachmentId} />
                     <figcaption>{editableSurface}</figcaption>
                 </figure>
-            ) : meta.type === 'preview' ? (
+            ) : meta.type === 'preview' && hasBlockRenderFeature ? (
                 <PreviewBlockCard
                     meta={meta}
                     subtitle={editableSurface}
                     onSetUrl={onSetPreviewUrl}
                     onSetMetadata={onSetPreviewMetadata}
                 />
-            ) : meta.type === 'poll' ? (
+            ) : meta.type === 'poll' && hasBlockRenderFeature ? (
                 <PollBlock
                     meta={meta}
                     userId={userId}
@@ -7375,10 +5886,10 @@ function EditableBlock({
                     onVote={onPollVote}
                     onLongAnswer={onPollLongAnswer}
                 />
-            ) : isPreviewableCodeMeta(meta) ? (
+            ) : codeBlockRenderer ? (
                 <PreviewableCodeBlock
                     blockId={block.id}
-                    previewKind={meta.preview}
+                    renderer={codeBlockRenderer}
                     source={blockText}
                     editor={editableSurface}
                 />
@@ -7388,7 +5899,9 @@ function EditableBlock({
             {!hideInlineControls && (
                 <BlockOptions
                     meta={meta}
+                    registry={registry}
                     style={block.block.style}
+                    optionPanelBlockTypes={optionPanelBlockTypes}
                     onSetCodeLanguage={onSetCodeLanguage}
                     onSetCodePreview={onSetCodePreview}
                     onSetCalloutKind={onSetCalloutKind}
@@ -7923,6 +6436,7 @@ function RichTextEditableSurfaceInner({
     ingredientTokens,
     popoverTextById = new Map(),
     footnoteNumberById = new Map(),
+    inlineRenderFeatures = DEFAULT_INLINE_RENDER_FEATURES,
     onInsertText,
     onDeleteBackward,
     onDeleteForward,
@@ -7964,6 +6478,7 @@ function RichTextEditableSurfaceInner({
     ingredientTokens?: IngredientHighlightToken[];
     popoverTextById?: Map<string, string>;
     footnoteNumberById?: Map<string, number>;
+    inlineRenderFeatures?: InlineRenderFeatures;
     onInsertText(text: string, selection?: EditorSelection): void;
     onDeleteBackward(selection?: EditorSelection): void;
     onDeleteForward(selection?: EditorSelection): void;
@@ -8048,6 +6563,7 @@ function RichTextEditableSurfaceInner({
             selection,
             activeMathSourceKey,
             mathRenderVersion,
+            inlineRenderFeatures,
         );
         if (renderedRunsRef.current !== renderedRuns) {
             renderedRunsRef.current = renderedRuns;
@@ -8065,6 +6581,7 @@ function RichTextEditableSurfaceInner({
                     selection,
                     activeMathSourceKey,
                     mathRenderer,
+                    inlineRenderFeatures,
                 }),
             );
         }
@@ -8096,6 +6613,7 @@ function RichTextEditableSurfaceInner({
         decorations,
         footnoteNumberById,
         ingredientTokens,
+        inlineRenderFeatures,
         activeMathSourceKey,
         mathRenderVersion,
         mathRenderer,
@@ -8162,6 +6680,7 @@ function RichTextEditableSurfaceInner({
                         selection,
                         activeMathSourceKey,
                         mathRenderer,
+                        inlineRenderFeatures,
                     }),
                 );
                 renderedRunsRef.current = serializeRuns(
@@ -8177,6 +6696,7 @@ function RichTextEditableSurfaceInner({
                     selection,
                     activeMathSourceKey,
                     mathRenderVersion,
+                    inlineRenderFeatures,
                 );
             }}
             onMouseUp={(event) => onSelectionChange?.(readSelectionFromDom(event.currentTarget))}
@@ -8302,6 +6822,7 @@ function RichTextEditableSurfaceInner({
                             selection,
                             activeMathSourceKey,
                             mathRenderer,
+                            inlineRenderFeatures,
                         }),
                     );
                     return;
@@ -8346,7 +6867,7 @@ type RichTextEditableSurfaceProps = Omit<
 >;
 
 function RichTextEditableSurface(props: RichTextEditableSurfaceProps) {
-    if (blockHasMathRuns(props.runs)) {
+    if ((props.inlineRenderFeatures ?? DEFAULT_INLINE_RENDER_FEATURES).math && blockHasMathRuns(props.runs)) {
         return <MathRichTextEditableSurface {...props} />;
     }
     return (
@@ -8385,6 +6906,7 @@ function BlockAffordance({
     blockId,
     meta,
     listNumber,
+    blockRenderFeatures,
     onStartDrag,
     onStartBlockDragFromHandle,
     onToggleTodo,
@@ -8392,6 +6914,7 @@ function BlockAffordance({
     blockId: string;
     meta: RichBlockMeta;
     listNumber: number | null;
+    blockRenderFeatures: BlockRenderFeatures;
     onStartDrag: ReturnType<typeof useBlockReorder>['startDrag'];
     onStartBlockDragFromHandle(blockId: string, event: PointerEvent<HTMLElement>): void;
     onToggleTodo(): void;
@@ -8400,7 +6923,7 @@ function BlockAffordance({
         onStartBlockDragFromHandle(blockId, event);
     };
 
-    if (meta.type === 'list_item') {
+    if (meta.type === 'list_item' && blockRenderFeatures.has('list_item')) {
         return (
             <button
                 type="button"
@@ -8412,7 +6935,7 @@ function BlockAffordance({
             </button>
         );
     }
-    if (meta.type === 'todo') {
+    if (meta.type === 'todo' && blockRenderFeatures.has('todo')) {
         return (
             <span
                 className="blockAffordance blockAffordanceTodo"
@@ -8445,7 +6968,7 @@ function BlockAffordance({
             </span>
         );
     }
-    if (meta.type === 'recipe_ingredient') {
+    if (meta.type === 'recipe_ingredient' && blockRenderFeatures.has('recipe_ingredient')) {
         return (
             <button
                 type="button"
@@ -8472,7 +6995,9 @@ function BlockAffordance({
 function BlockOptions({
     className,
     meta,
+    registry,
     style,
+    optionPanelBlockTypes,
     onSetCodeLanguage,
     onSetCodePreview,
     onSetCalloutKind,
@@ -8491,7 +7016,9 @@ function BlockOptions({
 }: {
     className?: string;
     meta: RichBlockMeta;
+    registry: Pick<BlockEditorRegistry<RichBlockMeta>, 'codePreviewRenderersByLanguage'>;
     style?: BlockStyle;
+    optionPanelBlockTypes: ReadonlySet<string>;
     onSetCodeLanguage(language: string): void;
     onSetCodePreview(enabled: boolean): void;
     onSetCalloutKind(kind: 'info' | 'warning' | 'error'): void;
@@ -8511,8 +7038,8 @@ function BlockOptions({
     let label = 'Block style options';
     let controls: ReactElement | null = null;
 
-    if (meta.type === 'code') {
-        const previewKind = codePreviewKindForLanguage(meta.language);
+    if (meta.type === 'code' && optionPanelBlockTypes.has('code')) {
+        const previewRenderer = codePreviewRendererForLanguage(registry, meta.language);
         label = 'Code block options';
         controls = (
             <>
@@ -8523,11 +7050,11 @@ function BlockOptions({
                     aria-label="Code language"
                     onChange={(event) => onSetCodeLanguage(event.currentTarget.value)}
                 />
-                {previewKind ? (
+                {previewRenderer ? (
                     <label className="blockOptionsToggle">
                         <input
                             type="checkbox"
-                            checked={meta.preview === previewKind}
+                            checked={meta.preview === previewRenderer.previewKind}
                             aria-label="Preview code"
                             onChange={(event) => onSetCodePreview(event.currentTarget.checked)}
                         />
@@ -8536,7 +7063,7 @@ function BlockOptions({
                 ) : null}
             </>
         );
-    } else if (meta.type === 'callout') {
+    } else if (meta.type === 'callout' && optionPanelBlockTypes.has('callout')) {
         label = 'Callout block options';
         controls = (
             <label className="blockOptionsField">
@@ -8555,7 +7082,7 @@ function BlockOptions({
                 </select>
             </label>
         );
-    } else if (meta.type === 'image') {
+    } else if (meta.type === 'image' && optionPanelBlockTypes.has('image')) {
         label = 'Image block options';
         controls = (
             <label className="blockOptionsField">
@@ -8575,7 +7102,7 @@ function BlockOptions({
                 </select>
             </label>
         );
-    } else if (meta.type === 'poll') {
+    } else if (meta.type === 'poll' && optionPanelBlockTypes.has('poll')) {
         label = 'Poll block options';
         controls = (
             <>
@@ -8701,7 +7228,7 @@ function BlockOptions({
                 ) : null}
             </>
         );
-    } else if (meta.type === 'columns') {
+    } else if (meta.type === 'columns' && optionPanelBlockTypes.has('columns')) {
         label = 'Columns block options';
         controls = (
             <label className="blockOptionsField">
@@ -8719,7 +7246,7 @@ function BlockOptions({
                 </select>
             </label>
         );
-    } else if (meta.type === 'slide_deck') {
+    } else if (meta.type === 'slide_deck' && optionPanelBlockTypes.has('slide_deck')) {
         label = 'Slide deck options';
         controls = (
             <>
@@ -8763,7 +7290,7 @@ function BlockOptions({
                 </label>
             </>
         );
-    } else if (meta.type === 'slide') {
+    } else if (meta.type === 'slide' && optionPanelBlockTypes.has('slide')) {
         label = 'Slide options';
         controls = (
             <>
@@ -9256,6 +7783,7 @@ const serializeRuns = (
     selection?: EditorSelection,
     activeMathSourceKey?: string | null,
     mathRenderVersion = 0,
+    inlineRenderFeatures: InlineRenderFeatures = DEFAULT_INLINE_RENDER_FEATURES,
 ) => {
     const hasMath = blockHasMathRuns(runs);
     return JSON.stringify({
@@ -9264,6 +7792,7 @@ const serializeRuns = (
             run.marks.bold,
             run.marks.italic,
             run.marks.strikethrough,
+            run.marks.underline,
             run.marks[LINK_MARK],
             run.marks[CODE_MARK],
             run.marks[MATH_MARK],
@@ -9284,6 +7813,7 @@ const serializeRuns = (
                   mathRenderVersion,
               }
             : undefined,
+        inlineRenderFeatures: inlineRenderFeaturesKey(inlineRenderFeatures),
         footnoteNumbers: [...footnoteNumberById.entries()].sort(([a], [b]) => a.localeCompare(b)),
     });
 };
@@ -9307,8 +7837,10 @@ const renderRunNodes = (
         selection?: EditorSelection;
         activeMathSourceKey?: string | null;
         mathRenderer?: MathRenderer | null;
+        inlineRenderFeatures?: InlineRenderFeatures;
     } = {},
 ): Node[] => {
+    const inlineRenderFeatures = options.inlineRenderFeatures ?? DEFAULT_INLINE_RENDER_FEATURES;
     const chunks = runRenderChunks(
         runs,
         decorations,
@@ -9345,7 +7877,7 @@ const renderRunNodes = (
             ...renderEndingFootnoteReferences(
                 chunk,
                 chunks[index + 1] ?? null,
-                options.footnoteNumberById,
+                inlineRenderFeatures.annotations ? options.footnoteNumberById : undefined,
             ),
         );
     }
@@ -9367,13 +7899,21 @@ const renderRunChunkNode = (
         selection?: EditorSelection;
         activeMathSourceKey?: string | null;
         mathRenderer?: MathRenderer | null;
+        inlineRenderFeatures?: InlineRenderFeatures;
     },
 ): HTMLElement => {
+    const inlineRenderFeatures = options.inlineRenderFeatures ?? DEFAULT_INLINE_RENDER_FEATURES;
     const rainbowColor = options.rainbowLamportIds
         ? rainbowLamportColor(options.charIdsByOffset?.[chunk.blockStartOffset])
         : null;
     if (chunk.text === INLINE_EMBED_TEXT && segmentText(chunk.text).length === 1) {
         const data = inlineEmbedDataForRun(chunk.run);
+        if (!data || !inlineRenderFeatures.inlineEmbeds.has(data.type)) {
+            const span = document.createElement('span');
+            span.textContent = chunk.text;
+            if (rainbowColor) span.style.backgroundColor = rainbowColor;
+            return span;
+        }
         const plainText = plainTextForInlineEmbed(data, inlineEmbedPlugins, {
             ambientMarks: chunk.run.marks,
         });
@@ -9388,7 +7928,7 @@ const renderRunChunkNode = (
         return element;
     }
     const mathMode =
-        chunk.run.marks[MATH_MARK] !== undefined ? mathModeForRun(chunk.run) : null;
+        inlineRenderFeatures.math && chunk.run.marks[MATH_MARK] !== undefined ? mathModeForRun(chunk.run) : null;
     if (mathMode) {
         const key = mathSourceKey(options.blockId ?? '', chunk.blockStartOffset, chunk.blockEndOffset, mathMode);
         if (
@@ -9410,7 +7950,7 @@ const renderRunChunkNode = (
     }
     const span = document.createElement('span');
     span.textContent = chunk.text;
-    applyRunClasses(span, chunk, options.popoverTextById, options.visibleBlockIdSet);
+    applyRunClasses(span, chunk, inlineRenderFeatures, options.popoverTextById, options.visibleBlockIdSet);
     if (rainbowColor) span.style.backgroundColor = rainbowColor;
     return span;
 };
@@ -9740,27 +8280,33 @@ const renderCaretsAtOffset = (
 const applyRunClasses = (
     span: HTMLElement,
     chunk: RunRenderChunk,
+    inlineRenderFeatures: InlineRenderFeatures,
     popoverTextById?: Map<string, string>,
     visibleBlockIdSet?: Set<string>,
 ) => {
     const run = chunk.run;
     if (chunk.decoratorClassNames.length) span.classList.add(...chunk.decoratorClassNames);
-    if (run.marks.bold) span.classList.add('markBold');
-    if (run.marks.italic) span.classList.add('markItalic');
-    if (run.marks.strikethrough) span.classList.add('markStrikethrough');
-    if (isCodeMarkValue(run.marks[CODE_MARK])) {
+    if (inlineRenderFeatures.booleanMarks.has('bold') && run.marks.bold) span.classList.add('markBold');
+    if (inlineRenderFeatures.booleanMarks.has('italic') && run.marks.italic) span.classList.add('markItalic');
+    if (inlineRenderFeatures.booleanMarks.has('strikethrough') && run.marks.strikethrough) {
+        span.classList.add('markStrikethrough');
+    }
+    if (inlineRenderFeatures.booleanMarks.has('underline') && run.marks.underline) {
+        span.classList.add('markUnderline');
+    }
+    if (inlineRenderFeatures.code && isCodeMarkValue(run.marks[CODE_MARK])) {
         span.classList.add('markCode');
         if (typeof run.marks[CODE_MARK] === 'string') span.classList.add('markCodeHighlighted');
         span.dataset.codeLanguage = typeof run.marks[CODE_MARK] === 'string' ? run.marks[CODE_MARK] : '';
         span.dataset.codeStartOffset = String(chunk.blockStartOffset);
         span.dataset.codeEndOffset = String(chunk.blockEndOffset);
     }
-    const mathMode = mathModeForRun(run);
+    const mathMode = inlineRenderFeatures.math ? mathModeForRun(run) : null;
     if (mathMode) {
         span.classList.add('markMath');
         if (mathMode === 'display') span.classList.add('markMathDisplay');
     }
-    if (typeof run.marks[LINK_MARK] === 'string') {
+    if (inlineRenderFeatures.links && typeof run.marks[LINK_MARK] === 'string') {
         span.classList.add('markLink');
         const targetBlockId = blockIdFromBlockLinkHref(run.marks[LINK_MARK]);
         if (targetBlockId && !visibleBlockIdSet?.has(targetBlockId)) {
@@ -9770,17 +8316,19 @@ const applyRunClasses = (
         span.dataset.linkStartOffset = String(chunk.blockStartOffset);
         span.dataset.linkEndOffset = String(chunk.blockEndOffset);
     }
-    if (hasAnnotationMark(run)) span.classList.add('markAnnotation');
-    const sidebarIds = sidebarIdsForRun(run);
-    if (sidebarIds.length) {
-        span.dataset.sidebarAnnotationIds = sidebarIds.join(' ');
-    }
-    const popoverIds = popoverIdsForRun(run, popoverTextById);
-    if (popoverIds.length) {
-        span.classList.add('markPopover');
-        span.dataset.popoverId = popoverIds[0];
-        span.dataset.popoverIds = popoverIds.join(' ');
-        span.setAttribute('aria-label', 'Popover');
+    if (inlineRenderFeatures.annotations) {
+        if (hasAnnotationMark(run)) span.classList.add('markAnnotation');
+        const sidebarIds = sidebarIdsForRun(run);
+        if (sidebarIds.length) {
+            span.dataset.sidebarAnnotationIds = sidebarIds.join(' ');
+        }
+        const popoverIds = popoverIdsForRun(run, popoverTextById);
+        if (popoverIds.length) {
+            span.classList.add('markPopover');
+            span.dataset.popoverId = popoverIds[0];
+            span.dataset.popoverIds = popoverIds.join(' ');
+            span.setAttribute('aria-label', 'Popover');
+        }
     }
 };
 

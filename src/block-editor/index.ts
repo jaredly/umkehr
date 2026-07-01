@@ -7,13 +7,12 @@ export type {
     BlockEditorPresenceSelection,
     BlockEditorSelectionState,
     BlockEditorValue,
-    BlockRichTextEditorComponent,
-    BlockRichTextEditorProps,
 } from './types.js';
 export {
     BlockRichTextEditor,
     type BlockEditorKeyPerfSampleInput,
     type BlockEditorReplica,
+    type BlockRichTextEditorProps,
 } from './BlockRichTextEditor.js';
 export * from './annotations.js';
 export * from './attachments.js';
@@ -41,6 +40,16 @@ export * from './pollBlocks.js';
 export * from './previewMetadata.js';
 export * from './retainedSelection.js';
 export * from './selectionModel.js';
+export {
+    isTableCellSelection,
+    tableSelectionPlugin,
+    tableSelectionPluginBundle,
+    type RetainedTableCellSelection,
+    type TableCellPosition,
+    type TableCellRectangle,
+    type TableCellSelection,
+} from './tableSelectionPlugin.js';
+export * from './selectionPlugins.js';
 export * from './selectionSet.js';
 export * from './slashCommands.js';
 export * from './slidePresentationSelection.js';
@@ -50,3 +59,5 @@ export * from './useAnnotationPopoverController.js';
 export * from './useBlockReorder.js';
 export * from './virtualParents.js';
 export * from './wordOccurrences.js';
+export * from './plugins/index.js';
+export * from './defaultBlockEditorPlugins.js';

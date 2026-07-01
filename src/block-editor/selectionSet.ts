@@ -1,6 +1,7 @@
 import {orderedCharIdsForBlock} from '../block-crdt/index.js';
 import type {CachedState} from '../block-crdt/types.js';
 import type {RichBlockMeta} from './blockMeta';
+import type {BlockEditorRegistry} from './plugins/types.js';
 import {
     firstPointForSelection,
     focusPoint,
@@ -26,6 +27,14 @@ import {
     type RetainedPoint,
     type RetainedSelection,
 } from './retainedSelection';
+import {
+    blockLevelDecorationsForSelectionFromRegistry,
+    compareSelectionsFromRegistry,
+    resolveSelectionFromRegistry,
+    retainSelectionFromRegistry,
+    focusPointFromRegistry,
+    selectedTopLevelBlockIdsFromRegistry,
+} from './selectionPlugins.js';
 
 export type RetainedSelectionEntry = {
     id: string;
@@ -79,6 +88,16 @@ export const singleRetainedSelectionSet = (
     entries: [{id, selection: retainSelection(state, selection)}],
 });
 
+export const singleRetainedSelectionSetFromRegistry = (
+    registry: Pick<BlockEditorRegistry<RichBlockMeta>, 'selectionPlugins'>,
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    id = DEFAULT_SELECTION_ID,
+): RetainedSelectionSet => ({
+    primaryId: id,
+    entries: [{id, selection: retainSelectionFromRegistry(registry, state, selection)}],
+});
+
 export const resolveSelectionSet = (
     state: CachedState<RichBlockMeta>,
     set: RetainedSelectionSet,
@@ -90,6 +109,18 @@ export const resolveSelectionSet = (
     return normalizePrimary({primaryId: set.primaryId, entries});
 };
 
+export const resolveSelectionSetFromRegistry = (
+    registry: Pick<BlockEditorRegistry<RichBlockMeta>, 'selectionPlugins'>,
+    state: CachedState<RichBlockMeta>,
+    set: RetainedSelectionSet,
+): EditorSelectionSet => {
+    const entries = set.entries.map((entry) => ({
+        id: entry.id,
+        selection: resolveSelectionFromRegistry(registry, state, entry.selection),
+    }));
+    return normalizePrimary({primaryId: set.primaryId, entries});
+};
+
 export const retainSelectionSet = (
     state: CachedState<RichBlockMeta>,
     set: EditorSelectionSet,
@@ -97,6 +128,18 @@ export const retainSelectionSet = (
     const entries = set.entries.map((entry) => ({
         id: entry.id,
         selection: retainSelection(state, entry.selection),
+    }));
+    return normalizePrimary({primaryId: set.primaryId, entries});
+};
+
+export const retainSelectionSetFromRegistry = (
+    registry: Pick<BlockEditorRegistry<RichBlockMeta>, 'selectionPlugins'>,
+    state: CachedState<RichBlockMeta>,
+    set: EditorSelectionSet,
+): RetainedSelectionSet => {
+    const entries = set.entries.map((entry) => ({
+        id: entry.id,
+        selection: retainSelectionFromRegistry(registry, state, entry.selection),
     }));
     return normalizePrimary({primaryId: set.primaryId, entries});
 };
@@ -114,6 +157,13 @@ export const replaceSelectionSet = (
     id = DEFAULT_SELECTION_ID,
 ): RetainedSelectionSet => singleRetainedSelectionSet(state, selection, id);
 
+export const replaceSelectionSetFromRegistry = (
+    registry: Pick<BlockEditorRegistry<RichBlockMeta>, 'selectionPlugins'>,
+    state: CachedState<RichBlockMeta>,
+    selection: EditorSelection,
+    id = DEFAULT_SELECTION_ID,
+): RetainedSelectionSet => singleRetainedSelectionSetFromRegistry(registry, state, selection, id);
+
 export const replacePrimarySelection = (
     state: CachedState<RichBlockMeta>,
     set: RetainedSelectionSet,
@@ -129,6 +179,21 @@ export const replacePrimarySelection = (
     return normalizePrimary({primaryId, entries});
 };
 
+export const replacePrimarySelectionFromRegistry = (
+    registry: Pick<BlockEditorRegistry<RichBlockMeta>, 'selectionPlugins'>,
+    state: CachedState<RichBlockMeta>,
+    set: RetainedSelectionSet,
+    selection: EditorSelection,
+): RetainedSelectionSet => {
+    const currentPrimary = primaryEntry(set);
+    const primaryId = currentPrimary?.id ?? DEFAULT_SELECTION_ID;
+    const retained = retainSelectionFromRegistry(registry, state, selection);
+    const entries = set.entries.length
+        ? set.entries.map((entry) => (entry.id === primaryId ? {id: entry.id, selection: retained} : entry))
+        : [{id: primaryId, selection: retained}];
+    return normalizePrimary({primaryId, entries});
+};
+
 export const appendSelection = (
     state: CachedState<RichBlockMeta>,
     set: RetainedSelectionSet,
@@ -138,6 +203,18 @@ export const appendSelection = (
     dedupeSelectionSet(state, {
         primaryId: id,
         entries: [...set.entries, {id, selection: retainSelection(state, selection)}],
+    });
+
+export const appendSelectionFromRegistry = (
+    registry: Pick<BlockEditorRegistry<RichBlockMeta>, 'selectionPlugins'>,
+    state: CachedState<RichBlockMeta>,
+    set: RetainedSelectionSet,
+    selection: EditorSelection,
+    id: string,
+): RetainedSelectionSet =>
+    dedupeSelectionSetFromRegistry(registry, state, {
+        primaryId: id,
+        entries: [...set.entries, {id, selection: retainSelectionFromRegistry(registry, state, selection)}],
     });
 
 export const dedupeSelectionSet = (
@@ -170,12 +247,53 @@ export const dedupeSelectionSet = (
     });
 };
 
+export const dedupeSelectionSetFromRegistry = (
+    registry: Pick<BlockEditorRegistry<RichBlockMeta>, 'selectionPlugins'>,
+    state: CachedState<RichBlockMeta>,
+    set: RetainedSelectionSet,
+): RetainedSelectionSet => {
+    const resolved = resolveSelectionSetFromRegistry(registry, state, set);
+    const caretWinners = new Map<string, EditorSelectionEntry>();
+    const nonCarets: EditorSelectionEntry[] = [];
+
+    for (const entry of resolved.entries) {
+        if (entry.selection.type !== 'caret') {
+            nonCarets.push(entry);
+            continue;
+        }
+
+        const point = focusPointFromRegistry(registry, state, entry.selection);
+        const key = visiblePointKey(point);
+        const current = caretWinners.get(key);
+        if (!current || compareSelectionsFromRegistry(registry, state, entry.selection, current.selection) < 0) {
+            caretWinners.set(key, entry);
+        }
+    }
+
+    const entries = [...nonCarets, ...caretWinners.values()]
+        .sort((a, b) => compareSelectionsFromRegistry(registry, state, a.selection, b.selection))
+        .map((entry) => ({
+            id: entry.id,
+            selection: retainSelectionFromRegistry(registry, state, entry.selection),
+        }));
+    return normalizePrimary({primaryId: set.primaryId, entries});
+};
+
 export const sortedResolvedEntries = (
     state: CachedState<RichBlockMeta>,
     set: RetainedSelectionSet,
 ): EditorSelectionEntry[] =>
     resolveSelectionSet(state, dedupeSelectionSet(state, set)).entries.sort((a, b) =>
         compareSelections(state, a.selection, b.selection),
+    );
+
+export const sortedResolvedEntriesFromRegistry = (
+    registry: Pick<BlockEditorRegistry<RichBlockMeta>, 'selectionPlugins'>,
+    state: CachedState<RichBlockMeta>,
+    set: RetainedSelectionSet,
+): EditorSelectionEntry[] =>
+    resolveSelectionSetFromRegistry(registry, state, dedupeSelectionSetFromRegistry(registry, state, set)).entries.sort(
+        (a, b) => compareSelectionsFromRegistry(registry, state, a.selection, b.selection),
     );
 
 export const reverseSortedRetainedEntries = (
@@ -326,6 +444,32 @@ export const blockLevelDecorationsForSelectionSet = (
     return result;
 };
 
+export const blockLevelDecorationsForSelectionSetFromRegistry = (
+    registry: Pick<BlockEditorRegistry<RichBlockMeta>, 'selectionPlugins'>,
+    state: CachedState<RichBlockMeta>,
+    set: EditorSelectionSet,
+): Map<string, BlockLevelSelectionDecorations> => {
+    const result = new Map<string, BlockLevelSelectionDecorations>();
+    for (const entry of set.entries) {
+        const primary = entry.id === set.primaryId;
+        for (const [blockId, decorations] of blockLevelDecorationsForSelectionFromRegistry(
+            registry,
+            state,
+            entry.selection,
+            entry.id,
+            primary,
+        )) {
+            const current = result.get(blockId);
+            result.set(blockId, {
+                selected: Boolean(current?.selected || decorations.selected),
+                primary: Boolean(current?.primary || decorations.primary),
+                focus: Boolean(current?.focus || decorations.focus),
+            });
+        }
+    }
+    return result;
+};
+
 export const selectedTopLevelBlockIdsForSelectionSet = (
     state: CachedState<RichBlockMeta>,
     set: EditorSelectionSet,
@@ -333,6 +477,21 @@ export const selectedTopLevelBlockIdsForSelectionSet = (
     const selected = new Set<string>();
     for (const entry of set.entries) {
         for (const blockId of selectedTopLevelBlockIdsForSelection(state, entry.selection)) {
+            selected.add(blockId);
+        }
+    }
+    const order = editableBlockIds(state);
+    return [...selected].sort((a, b) => order.indexOf(a) - order.indexOf(b));
+};
+
+export const selectedTopLevelBlockIdsForSelectionSetFromRegistry = (
+    registry: Pick<BlockEditorRegistry<RichBlockMeta>, 'selectionPlugins'>,
+    state: CachedState<RichBlockMeta>,
+    set: EditorSelectionSet,
+): string[] => {
+    const selected = new Set<string>();
+    for (const entry of set.entries) {
+        for (const blockId of selectedTopLevelBlockIdsFromRegistry(registry, state, entry.selection)) {
             selected.add(blockId);
         }
     }

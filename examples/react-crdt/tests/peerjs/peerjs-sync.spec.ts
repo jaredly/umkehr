@@ -1,5 +1,6 @@
 import {expect, test} from '@playwright/test';
 import {openApp, uniqueTestDocId} from '../helpers/app';
+import {createDocument, openDocument} from '../helpers/documents';
 import {expectPeerConnectionOpen, peerConnectionRow, peerJsHostPeerId, startPeerServer} from '../helpers/peer';
 import {addTodoInPanel, expectTodoOrder, todoPanel} from '../helpers/todos';
 
@@ -59,6 +60,47 @@ test('syncs todo edits between a PeerJS host and client through local PeerServer
             clientTitle,
             queuedTitle,
         ]);
+
+        await clientContext.close();
+        await hostContext.close();
+    } finally {
+        await peerServer.stop();
+    }
+});
+
+test('jigsaw PeerJS invite is only shown after the host opens a document', async ({
+    browser,
+}, testInfo) => {
+    const peerServer = await startPeerServer();
+    const docId = uniqueTestDocId(testInfo, 'jigsaw-peerjs-invite-ready');
+    const title = `PeerJS late jigsaw ${Date.now()}`;
+
+    try {
+        const hostContext = await browser.newContext();
+        const hostPage = await hostContext.newPage();
+
+        await openApp(hostPage, {mode: 'peerjs', appId: 'jigsaw', docId});
+        await expect(hostPage.getByRole('heading', {name: 'Choose a document'})).toBeVisible();
+        await expect(hostPage.locator('#peerInviteLink')).toHaveCount(0);
+
+        await createDocument(hostPage, title, {pieceCount: '120', boardType: 'voronoi'});
+        await expect(hostPage.locator('#peerInviteLink')).toHaveCount(0);
+        await openDocument(hostPage, title);
+        await expect(hostPage.getByRole('heading', {name: 'Host Jigsaw'})).toBeVisible();
+        await expect(hostPage.locator('#peerInviteLink')).toHaveValue(/app=jigsaw/);
+        const inviteUrl = await hostPage.locator('#peerInviteLink').inputValue();
+        const hostPeerId = new URL(inviteUrl).searchParams.get('peer');
+        expect(hostPeerId).toBeTruthy();
+
+        const clientContext = await browser.newContext();
+        const clientPage = await clientContext.newPage();
+        await clientPage.goto(inviteUrl);
+        await expectPeerConnectionOpen(clientPage, hostPeerId!);
+        await expect(clientPage.getByRole('heading', {name: 'Client Jigsaw'})).toBeVisible({
+            timeout: 10_000,
+        });
+        await expect(clientPage.getByText('Waiting for host snapshot')).toHaveCount(0);
+        await expect(clientPage.locator('.jigsawPiece')).toHaveCount(120);
 
         await clientContext.close();
         await hostContext.close();

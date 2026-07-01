@@ -1,4 +1,4 @@
-import {useMemo, useRef, useState, type ChangeEvent, type FormEvent} from 'react';
+import {useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent} from 'react';
 import {createPatchValidator} from 'umkehr/validation';
 import {
     createCrdtUpdateValidator,
@@ -7,7 +7,11 @@ import {
     type CrdtUpdate,
 } from 'umkehr/crdt';
 import type {History} from 'umkehr';
-import {hydrateCrdtLocalHistoryForApp, type AppDefinition} from '../crdtApp';
+import {
+    hydrateCrdtLocalHistoryForApp,
+    type AppDefinition,
+    type AppDocumentInitializer,
+} from '../crdtApp';
 import type {TransportState} from '../local/useLocalDemoSync';
 import type {PersistedReplica, PersistedBatch} from '../local-first/types';
 import type {PersistedServerReplica} from '../server/types';
@@ -127,6 +131,12 @@ export type SeedModalItem = {
     sizeLabel: string;
 };
 
+export type CreateDocumentInput = {
+    docId: string;
+    title: string;
+    initParams?: unknown;
+};
+
 export function localDocumentModalItems(
     documents: LocalDocumentSummary[],
     appId: string,
@@ -216,6 +226,8 @@ export function DocumentManagerModal({
     activeDocId,
     label = 'Document',
     archiveAdapter,
+    createOptions,
+    initialOpen = false,
     onSwitchDocument,
     onCreateDocument,
     onCreateSeed,
@@ -227,31 +239,57 @@ export function DocumentManagerModal({
     activeDocId: string;
     label?: string;
     archiveAdapter?: DocumentArchiveAdapter;
+    createOptions?: AppDocumentInitializer<unknown, any>;
+    initialOpen?: boolean;
     onSwitchDocument(docId: string): void;
-    onCreateDocument?(input: {docId: string; title: string}): Promise<void> | void;
+    onCreateDocument?(input: CreateDocumentInput): Promise<void> | void;
     onCreateSeed?(seed: SeedModalItem): Promise<void> | void;
     onDeleteLocal?(document: DocumentModalItem): Promise<void> | void;
     onChanged?(): Promise<unknown> | unknown;
 }) {
     const inputRef = useRef<HTMLInputElement | null>(null);
-    const [open, setOpen] = useState(false);
+    const [open, setOpen] = useState(initialOpen);
     const [message, setMessage] = useState<string | null>(null);
     const [title, setTitle] = useState('');
+    const [initParams, setInitParams] = useState<unknown>(() => createOptions?.defaultParams());
     const [creatingSeedDocId, setCreatingSeedDocId] = useState<string | null>(null);
     const activeDocument = useMemo(
         () => documents.find((document) => document.docId === activeDocId),
         [activeDocId, documents],
     );
     const triggerTitle = activeDocument?.title || activeDocId;
+    const createValidation = useMemo(() => {
+        if (!createOptions) return {success: true as const, data: undefined};
+        return createOptions.validate(initParams);
+    }, [createOptions, initParams]);
+    const canCreateDocument = Boolean(title.trim() && onCreateDocument && createValidation.success);
+
+    useEffect(() => {
+        if (initialOpen) setOpen(true);
+    }, [initialOpen]);
+
+    useEffect(() => {
+        setInitParams(createOptions?.defaultParams());
+    }, [createOptions]);
 
     async function createDocument(event: FormEvent) {
         event.preventDefault();
         const trimmed = title.trim();
         if (!trimmed || !onCreateDocument) return;
+        const validation = createOptions?.validate(initParams);
+        if (validation && !validation.success) {
+            setMessage(validation.message);
+            return;
+        }
         setMessage(null);
         try {
-            await onCreateDocument({docId: crypto.randomUUID(), title: trimmed});
+            await onCreateDocument({
+                docId: crypto.randomUUID(),
+                title: trimmed,
+                ...(validation ? {initParams: validation.data} : {}),
+            });
             setTitle('');
+            setInitParams(createOptions?.defaultParams());
             await onChanged?.();
             setMessage('Document created');
         } catch (error) {
@@ -373,7 +411,13 @@ export function DocumentManagerModal({
                                     placeholder="New document title"
                                     aria-label="New document title"
                                 />
-                                <button type="submit" disabled={!title.trim()}>
+                                {createOptions
+                                    ? createOptions.renderFields({
+                                          value: initParams,
+                                          onChange: setInitParams,
+                                      })
+                                    : null}
+                                <button type="submit" disabled={!canCreateDocument}>
                                     New document
                                 </button>
                             </form>

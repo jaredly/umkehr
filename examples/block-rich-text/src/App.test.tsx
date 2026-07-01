@@ -2,8 +2,6 @@ import '../../../src/react/test-dom';
 
 import {act, cleanup, fireEvent, render, waitFor, within} from '@testing-library/react';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import {App} from './App';
-import {BLOCK_RICH_TEXT_MIME, htmlWithClipboardPayload, type RichClipboardPayload} from 'umkehr/block-editor';
 
 const mermaidMock = vi.hoisted(() => ({
     initialize: vi.fn(),
@@ -16,6 +14,15 @@ vi.mock('mermaid', () => ({
         render: mermaidMock.render,
     },
 }));
+
+(globalThis as {__umkehrTestMermaid?: {initialize: typeof mermaidMock.initialize; render: typeof mermaidMock.render}})
+    .__umkehrTestMermaid = {
+    initialize: mermaidMock.initialize,
+    render: mermaidMock.render,
+};
+
+import {App} from './App';
+import {BLOCK_RICH_TEXT_MIME, htmlWithClipboardPayload, type RichClipboardPayload} from 'umkehr/block-editor';
 
 Object.defineProperty(globalThis, 'NodeFilter', {
     value: window.NodeFilter,

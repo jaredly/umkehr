@@ -38,6 +38,8 @@ import {
     wordsearchHistoryRuntime,
 } from '../apps/wordsearch/WordsearchApp';
 import type {WordsearchEphemeralData, WordsearchState} from '../apps/wordsearch/model';
+import {jigsawApp, jigsawCrdtRuntime, jigsawHistoryRuntime} from '../apps/jigsaw/JigsawApp';
+import type {JigsawEphemeralData, JigsawState} from '../apps/jigsaw/model';
 import {
     todoFixtureMigration,
     todoFixtureMigrationConfig,
@@ -148,6 +150,12 @@ export const registeredApps = [
         history: wordsearchHistoryRuntime,
         serverSchemaConfig: undefined,
     },
+    {
+        app: jigsawApp,
+        crdt: jigsawCrdtRuntime,
+        history: jigsawHistoryRuntime,
+        serverSchemaConfig: undefined,
+    },
 ] satisfies [
     RegisteredApp<TodoState>,
     RegisteredApp<TodoFixtureStateV1>,
@@ -156,6 +164,7 @@ export const registeredApps = [
     RegisteredApp<RichNotesState, RichNotesBuilderExtensions>,
     RegisteredEphemeralApp<BlockNotesState, BlockNotesEphemeralData, BlockNotesBuilderExtensions>,
     RegisteredEphemeralApp<WordsearchState, WordsearchEphemeralData>,
+    RegisteredEphemeralApp<JigsawState, JigsawEphemeralData>,
 ];
 export type AppOption = {
     id: string;

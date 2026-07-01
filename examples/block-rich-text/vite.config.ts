@@ -13,6 +13,10 @@ export default {
     resolve: {
         alias: [
             {
+                find: /^umkehr\/block-editor\/(.+\.css)$/,
+                replacement: fileURLToPath(new URL('../../src/block-editor/$1', import.meta.url)),
+            },
+            {
                 find: /^umkehr\/block-crdt\/(.+)$/,
                 replacement: fileURLToPath(new URL('../../src/block-crdt/$1.ts', import.meta.url)),
             },

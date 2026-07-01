@@ -1,0 +1,54 @@
+/* Styles owned by the math block editor plugin. */
+.mathPreview {
+    color: #17212a;
+    cursor: pointer;
+}
+
+.mathPreviewInline {
+    display: inline-flex;
+    align-items: baseline;
+    max-width: 100%;
+    margin: 0 0.08em;
+    vertical-align: baseline;
+}
+
+.mathPreviewDisplay {
+    display: flex;
+    justify-content: center;
+    max-width: 100%;
+    margin: 0.45em 0;
+    overflow-x: auto;
+}
+
+.mathPreviewRendered {
+    display: inline-block;
+    max-width: 100%;
+}
+
+.mathPreviewLiteral .mathPreviewRendered {
+    border: 1px solid #d7dee6;
+    border-radius: 4px;
+    padding: 0 0.18em;
+    background: #fff7e6;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 0.94em;
+}
+
+.mathPreviewOffsetText {
+    position: absolute;
+    width: 0;
+    overflow: hidden;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.markMath {
+    border-radius: 4px;
+    background: #eef7f1;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 0.94em;
+}
+
+.markMathDisplay {
+    background: #e9f3f6;
+}

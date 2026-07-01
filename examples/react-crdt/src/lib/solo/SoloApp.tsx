@@ -1,6 +1,7 @@
 import {useCallback, useEffect, useMemo, useState} from 'react';
 import {
     createInitialHistory,
+    initialArtifactsForApp,
     withDisabledEphemeral,
     type AppDefinition,
     type HistoryEditorContext,
@@ -24,8 +25,16 @@ import {
     seedModalItemsForApp,
     seedSoloHistoryForApp,
 } from '../seed/documents';
-import {readActiveDocIdFromSearch, urlWithActiveDocId} from '../useUrlSelection';
+import {
+    readActiveDocIdFromSearch,
+    readOptionalActiveDocIdFromSearch,
+    urlWithActiveDocId,
+} from '../useUrlSelection';
 import {HistoryView} from './HistoryView';
+import {
+    loadSerializedArtifacts,
+    serializedArtifactsForStore,
+} from '../artifacts';
 import {
     listSoloDocumentSummaries,
     loadSoloDocument,
@@ -44,12 +53,17 @@ export function SoloApp<TState, TAnnotations = never, EphemeralData = never>({
     topBar: DemoTopBarProps;
 }) {
     const defaultDocId = `${app.id}-solo`;
+    const requiresDocumentInit = app.documentInit?.required === true;
+    const [hasExplicitDoc, setHasExplicitDoc] = useState(
+        () => readOptionalActiveDocIdFromSearch(window.location.search) !== undefined,
+    );
     const [activeDocId, setActiveDocId] = useState(() =>
         readActiveDocIdFromSearch(window.location.search, defaultDocId),
     );
     const fingerprint = useMemo(() => schemaFingerprint(app), [app]);
     const fingerprintHash = useMemo(() => schemaFingerprintHash(app), [app]);
     const [documents, setDocuments] = useState<LocalDocumentSummary[]>([]);
+    const [needsDocument, setNeedsDocument] = useState(() => requiresDocumentInit && !hasExplicitDoc);
     const [historySnapshot, setHistorySnapshot] = useState(() =>
         createInitialHistory<TState, TAnnotations>(app),
     );
@@ -63,9 +77,28 @@ export function SoloApp<TState, TAnnotations = never, EphemeralData = never>({
 
     useEffect(() => {
         let alive = true;
-        loadOrCreateSoloDocument<TState, TAnnotations>(app, activeDocId, fingerprintHash).then(
+        if (requiresDocumentInit && !hasExplicitDoc) {
+            setNeedsDocument(true);
+            refreshDocuments();
+            return () => {
+                alive = false;
+            };
+        }
+        loadOrCreateSoloDocument<TState, TAnnotations>(
+            app,
+            activeDocId,
+            fingerprintHash,
+            !requiresDocumentInit,
+        ).then(
             (document) => {
                 if (!alive) return;
+                if (!document) {
+                    setNeedsDocument(true);
+                    refreshDocuments();
+                    return;
+                }
+                loadSerializedArtifacts(app.artifacts, document.artifacts);
+                setNeedsDocument(false);
                 setHistorySnapshot(document.history as any);
                 refreshDocuments();
             },
@@ -73,7 +106,7 @@ export function SoloApp<TState, TAnnotations = never, EphemeralData = never>({
         return () => {
             alive = false;
         };
-    }, [activeDocId, app, fingerprintHash, refreshDocuments]);
+    }, [activeDocId, app, fingerprintHash, hasExplicitDoc, refreshDocuments, requiresDocumentInit]);
 
     const saveHistory = useCallback(
         (history: typeof historySnapshot) => {
@@ -85,6 +118,7 @@ export function SoloApp<TState, TAnnotations = never, EphemeralData = never>({
                 schemaVersion: app.schemaVersion,
                 schemaFingerprintHash: fingerprintHash,
                 history: history as any,
+                artifacts: serializedArtifactsForStore(app.artifacts),
                 createdAt: now,
                 updatedAt: now,
             });
@@ -93,6 +127,8 @@ export function SoloApp<TState, TAnnotations = never, EphemeralData = never>({
     );
 
     const switchDocument = useCallback((docId: string) => {
+        setHasExplicitDoc(true);
+        setNeedsDocument(false);
         window.history.pushState(
             window.history.state,
             '',
@@ -118,7 +154,7 @@ export function SoloApp<TState, TAnnotations = never, EphemeralData = never>({
         [app, documentItems],
     );
     const createBlankDocument = useCallback(
-        async ({docId, title}: {docId: string; title: string}) => {
+        async ({docId, title, initParams}: {docId: string; title: string; initParams?: unknown}) => {
             const now = new Date().toISOString();
             await saveSoloDocument({
                 docId,
@@ -126,7 +162,8 @@ export function SoloApp<TState, TAnnotations = never, EphemeralData = never>({
                 title,
                 schemaVersion: app.schemaVersion,
                 schemaFingerprintHash: fingerprintHash,
-                history: createInitialHistory<TState, TAnnotations>(app) as any,
+                history: createInitialHistory<TState, TAnnotations>(app, initParams) as any,
+                artifacts: initialArtifactsForApp(app, initParams),
                 createdAt: now,
                 updatedAt: now,
             });
@@ -146,6 +183,7 @@ export function SoloApp<TState, TAnnotations = never, EphemeralData = never>({
                 schemaVersion: fixture.schemaVersion,
                 schemaFingerprintHash: fixture.schemaFingerprintHash,
                 history: seedSoloHistoryForApp<TState, TAnnotations, unknown>(app, fixture) as any,
+                artifacts: initialArtifactsForApp(app),
                 createdAt: fixture.createdAt || now,
                 updatedAt: now,
             });
@@ -181,6 +219,7 @@ export function SoloApp<TState, TAnnotations = never, EphemeralData = never>({
                 topBarControls={topBarControls}
                 documents={documentItems}
                 seeds={seedItems}
+                needsDocument={needsDocument}
                 onCreateDocument={createBlankDocument}
                 onCreateSeed={createSeedDocument}
                 onDeleteLocal={deleteLocalDocument}
@@ -202,6 +241,7 @@ function SoloDocument<TState, TAnnotations, EphemeralData>({
     topBarControls,
     documents,
     seeds,
+    needsDocument,
     onCreateDocument,
     onCreateSeed,
     onDeleteLocal,
@@ -218,7 +258,8 @@ function SoloDocument<TState, TAnnotations, EphemeralData>({
     topBarControls: TopBarControls;
     documents: DocumentModalItem[];
     seeds: SeedModalItem[];
-    onCreateDocument(input: {docId: string; title: string}): Promise<void> | void;
+    needsDocument: boolean;
+    onCreateDocument(input: {docId: string; title: string; initParams?: unknown}): Promise<void> | void;
     onCreateSeed(seed: SeedModalItem): Promise<void> | void;
     onDeleteLocal(document: DocumentModalItem): Promise<void> | void;
     onSwitchDocument(docId: string): void;
@@ -274,6 +315,8 @@ function SoloDocument<TState, TAnnotations, EphemeralData>({
                     seeds={seeds}
                     activeDocId={activeDocId}
                     archiveAdapter={adapter}
+                    createOptions={app.documentInit}
+                    initialOpen={needsDocument}
                     onSwitchDocument={onSwitchDocument}
                     onCreateDocument={onCreateDocument}
                     onCreateSeed={onCreateSeed}
@@ -300,12 +343,21 @@ function SoloDocument<TState, TAnnotations, EphemeralData>({
             <DemoTopBar {...topBar} controls={registeredTopBarControls} />
             <main className="soloShell">
                 <div>
-                    <SoloHistoryPanel editor={editor} />
-                    {app.renderPanel({
-                        actor: 'solo',
-                        editor: panelEditor,
-                        title: app.title,
-                    })}
+                    {needsDocument ? (
+                        <section className="waitingPanel">
+                            <h1>Choose a document</h1>
+                            <p>Create or open a document to start.</p>
+                        </section>
+                    ) : (
+                        <>
+                            <SoloHistoryPanel editor={editor} />
+                            {app.renderPanel({
+                                actor: 'solo',
+                                editor: panelEditor,
+                                title: app.title,
+                            })}
+                        </>
+                    )}
                 </div>
             </main>
         </>
@@ -332,7 +384,8 @@ async function loadOrCreateSoloDocument<TState, TAnnotations>(
     app: AppDefinition<TState, unknown>,
     docId: string,
     schemaFingerprintHash: string,
-): Promise<PersistedSoloDocument<TState>> {
+    allowCreate = true,
+): Promise<PersistedSoloDocument<TState> | null> {
     const existing = await loadSoloDocument<TState>(docId);
     if (existing && existing.appId === app.id) return existing;
     const fixture = loadBranchFreeSeedFixtureForApp(app, docId);
@@ -345,12 +398,14 @@ async function loadOrCreateSoloDocument<TState, TAnnotations>(
             schemaVersion: fixture.schemaVersion,
             schemaFingerprintHash: fixture.schemaFingerprintHash || schemaFingerprintHash,
             history: seedSoloHistoryForApp<TState, TAnnotations, unknown>(app, fixture) as any,
+            artifacts: initialArtifactsForApp(app),
             createdAt: fixture.createdAt || now,
             updatedAt: now,
         };
         await saveSoloDocument(document);
         return document;
     }
+    if (!allowCreate) return null;
     const now = new Date().toISOString();
     const document: PersistedSoloDocument<TState> = {
         docId,
@@ -359,6 +414,7 @@ async function loadOrCreateSoloDocument<TState, TAnnotations>(
         schemaVersion: app.schemaVersion,
         schemaFingerprintHash,
         history: createInitialHistory<TState, TAnnotations>(app) as any,
+        artifacts: initialArtifactsForApp(app),
         createdAt: now,
         updatedAt: now,
     };

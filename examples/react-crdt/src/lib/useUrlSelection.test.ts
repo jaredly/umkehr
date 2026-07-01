@@ -1,5 +1,9 @@
 import {describe, expect, it} from 'vitest';
-import {readUrlSelectionFromSearch, urlForSelection} from './useUrlSelection';
+import {
+    readOptionalActiveDocIdFromSearch,
+    readUrlSelectionFromSearch,
+    urlForSelection,
+} from './useUrlSelection';
 
 describe('url selection', () => {
     it('parses app, mode, and doc from search params', () => {
@@ -58,5 +62,11 @@ describe('url selection', () => {
                 'todos',
             ),
         ).toBe('/?peer=abc&mode=peerjs&app=whiteboard&doc=whiteboard-many-events');
+    });
+
+    it('reads optional active document ids without applying a fallback', () => {
+        expect(readOptionalActiveDocIdFromSearch('?x=1')).toBeUndefined();
+        expect(readOptionalActiveDocIdFromSearch('?doc=%20%20')).toBeUndefined();
+        expect(readOptionalActiveDocIdFromSearch('?doc=jigsaw-30')).toBe('jigsaw-30');
     });
 });

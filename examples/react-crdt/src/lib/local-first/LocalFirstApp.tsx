@@ -3,6 +3,7 @@ import type {CrdtLocalHistory} from 'umkehr/crdt';
 import {
     createInitialCrdtHistory,
     hydrateCrdtLocalHistoryForApp,
+    initialArtifactsForApp,
     type AppDefinition,
     type CrdtRuntime,
 } from '../crdtApp';
@@ -32,7 +33,11 @@ import {
     loadBranchFreeSeedFixtureForApp,
     seedModalItemsForApp,
 } from '../seed/documents';
-import {readActiveDocIdFromSearch, urlWithActiveDocId} from '../useUrlSelection';
+import {
+    readActiveDocIdFromSearch,
+    readOptionalActiveDocIdFromSearch,
+    urlWithActiveDocId,
+} from '../useUrlSelection';
 import {
     initialArtifactsForStore,
     loadSerializedArtifacts,
@@ -71,6 +76,7 @@ type Loaded<TState> = {
 type LoadState<TState> =
     | {kind: 'loading'}
     | {kind: 'ready'; loaded: Loaded<TState>}
+    | {kind: 'needsDocument'; identity: ReplicaIdentity}
     | {
           kind: 'migratable';
           identity: ReplicaIdentity;
@@ -93,6 +99,8 @@ export function LocalFirstApp<TState, EphemeralData = never>({
     topBar: DemoTopBarProps;
 }) {
     const initialPeerId = readInvitePeerId();
+    const requiresDocumentInit = app.documentInit?.required === true;
+    const hasExplicitDoc = readOptionalActiveDocIdFromSearch(window.location.search) !== undefined;
     const activeDocId = readActiveDocIdFromSearch(window.location.search, runtime.docId);
     const fingerprint = useMemo(() => schemaFingerprint(app), [app]);
     const fingerprintHash = useMemo(() => schemaFingerprintHash(app), [app]);
@@ -106,11 +114,24 @@ export function LocalFirstApp<TState, EphemeralData = never>({
         let alive = true;
         let lock: Extract<TabLock, {kind: 'acquired'}> | null = null;
         setLoadState({kind: 'loading'});
-        loadInitialState(app, activeDocId, fingerprint, fingerprintHash, schemaConfig)
+        loadInitialState(
+            app,
+            activeDocId,
+            fingerprint,
+            fingerprintHash,
+            schemaConfig,
+            !requiresDocumentInit,
+            requiresDocumentInit && !hasExplicitDoc,
+        )
             .then((loaded) => {
-                lock = loaded.kind === 'ready' ? loaded.loaded.lock : loaded.lock;
+                lock =
+                    loaded.kind === 'ready'
+                        ? loaded.loaded.lock
+                        : loaded.kind === 'migratable'
+                          ? loaded.lock
+                          : null;
                 if (alive) setLoadState(loaded.kind === 'ready' ? loaded : loaded);
-                else lock.release();
+                else lock?.release();
             })
             .catch((error) => {
                 if (!alive) return;
@@ -123,7 +144,7 @@ export function LocalFirstApp<TState, EphemeralData = never>({
             alive = false;
             lock?.release();
         };
-    }, [activeDocId, app, fingerprint, fingerprintHash, runtime, schemaConfig]);
+    }, [activeDocId, app, fingerprint, fingerprintHash, hasExplicitDoc, requiresDocumentInit, runtime, schemaConfig]);
 
     if (loadState.kind === 'loading') {
         return (
@@ -151,6 +172,20 @@ export function LocalFirstApp<TState, EphemeralData = never>({
         );
     }
 
+    if (loadState.kind === 'needsDocument') {
+        return (
+            <LocalFirstNeedsDocumentApp
+                app={app}
+                runtime={runtime}
+                identity={loadState.identity}
+                schemaConfig={schemaConfig}
+                schemaFingerprint={fingerprint}
+                schemaFingerprintHash={fingerprintHash}
+                topBar={topBar}
+            />
+        );
+    }
+
     if (loadState.kind === 'incompatible' || loadState.kind === 'error') {
         return (
             <>
@@ -173,6 +208,138 @@ export function LocalFirstApp<TState, EphemeralData = never>({
             initialPeerId={initialPeerId}
             topBar={topBar}
         />
+    );
+}
+
+function LocalFirstNeedsDocumentApp<TState, EphemeralData>({
+    app,
+    runtime,
+    identity,
+    schemaConfig,
+    schemaFingerprint,
+    schemaFingerprintHash,
+    topBar,
+}: {
+    app: AppDefinition<TState, EphemeralData>;
+    runtime: CrdtRuntime<TState, EphemeralData>;
+    identity: ReplicaIdentity;
+    schemaConfig: LocalFirstSchemaConfig<TState>;
+    schemaFingerprint: string;
+    schemaFingerprintHash: string;
+    topBar: DemoTopBarProps;
+}) {
+    const [documents, setDocuments] = useState<LocalDocumentSummary[]>([]);
+    const refreshDocuments = useCallback(() => {
+        void listReplicas().then((replicas) =>
+            setDocuments(
+                replicas.map((replica) => ({
+                    docId: replica.docId,
+                    appId: app.id,
+                    title: replica.title || replica.docId,
+                    payloadKind: 'local-first',
+                    schemaVersion: replica.schemaVersion,
+                    schemaFingerprintHash: replica.schemaFingerprintHash,
+                    createdAt: replica.updatedAt,
+                    updatedAt: replica.updatedAt,
+                })),
+            ),
+        );
+    }, [app.id]);
+    useEffect(() => {
+        refreshDocuments();
+    }, [refreshDocuments]);
+    const switchDocument = useCallback((docId: string) => {
+        window.history.pushState(window.history.state, '', urlWithActiveDocId(window.location.href, docId));
+        window.location.reload();
+    }, []);
+    const documentItems = useMemo(
+        () => localDocumentModalItems(documents, app.id, 'local-first'),
+        [app.id, documents],
+    );
+    const seedItems = useMemo(
+        () => filterUnrealizedSeeds(seedModalItemsForApp(app, 'local-first'), documentItems),
+        [app, documentItems],
+    );
+    const createBlankDocument = useCallback(
+        async ({docId, title, initParams}: {docId: string; title: string; initParams?: unknown}) => {
+            const now = new Date().toISOString();
+            await saveReplica({
+                docId,
+                title,
+                storageVersion: 1,
+                protocolVersion: 1,
+                schemaVersion: schemaConfig.version,
+                schemaFingerprint,
+                schemaFingerprintHash,
+                replicaId: identity.replicaId,
+                history: createInitialCrdtHistory(app, initParams),
+                vector: {},
+                artifacts: initialArtifactsForApp(app, initParams),
+                updatedAt: now,
+            });
+            refreshDocuments();
+        },
+        [app, identity.replicaId, refreshDocuments, schemaConfig.version, schemaFingerprint, schemaFingerprintHash],
+    );
+    const createSeedDocument = useCallback(
+        async (seed: SeedModalItem) => {
+            const fixture = loadBranchFreeSeedFixtureForApp(app, seed.docId);
+            if (!fixture) throw new Error(`No seed document exists for "${seed.docId}".`);
+            const seeded = createLocalFirstSeedReplica({fixture});
+            await replaceReplicaState(
+                {...seeded.replica, title: fixture.title || fixture.docId},
+                seeded.batches,
+            );
+            refreshDocuments();
+        },
+        [app, refreshDocuments],
+    );
+    const deleteLocalDocument = useCallback(
+        async (document: DocumentModalItem) => {
+            await clearReplica(document.docId);
+            refreshDocuments();
+        },
+        [refreshDocuments],
+    );
+    const topBarControls = useMemo(
+        () => ({
+            documentPicker: (
+                <DocumentManagerModal
+                    documents={documentItems}
+                    seeds={seedItems}
+                    activeDocId={runtime.docId}
+                    createOptions={app.documentInit}
+                    initialOpen
+                    onSwitchDocument={switchDocument}
+                    onCreateDocument={createBlankDocument}
+                    onCreateSeed={createSeedDocument}
+                    onDeleteLocal={deleteLocalDocument}
+                    onChanged={refreshDocuments}
+                />
+            ),
+        }),
+        [
+            app.documentInit,
+            createBlankDocument,
+            createSeedDocument,
+            deleteLocalDocument,
+            documentItems,
+            refreshDocuments,
+            runtime.docId,
+            seedItems,
+            switchDocument,
+        ],
+    );
+    return (
+        <>
+            <DemoTopBar {...topBar} controls={topBarControls} />
+            <main className="localFirstShell">
+                <section className="waitingPanel">
+                    <h1>Choose a document</h1>
+                    <p>Create or open a document to start.</p>
+                </section>
+            </main>
+        </>
     );
 }
 
@@ -290,7 +457,7 @@ function LocalFirstReadyApp<TState, EphemeralData>({
         [app, documentItems],
     );
     const createBlankDocument = useCallback(
-        async ({docId, title}: {docId: string; title: string}) => {
+        async ({docId, title, initParams}: {docId: string; title: string; initParams?: unknown}) => {
             const now = new Date().toISOString();
             await saveReplica({
                 docId,
@@ -301,9 +468,9 @@ function LocalFirstReadyApp<TState, EphemeralData>({
                 schemaFingerprint: loaded.schemaFingerprint,
                 schemaFingerprintHash: loaded.schemaFingerprintHash,
                 replicaId: loaded.identity.replicaId,
-                history: createInitialCrdtHistory(app),
+                history: createInitialCrdtHistory(app, initParams),
                 vector: {},
-                artifacts: initialArtifactsForStore(app.artifacts),
+                artifacts: initialArtifactsForApp(app, initParams),
                 updatedAt: now,
             });
             refreshDocuments();
@@ -350,6 +517,7 @@ function LocalFirstReadyApp<TState, EphemeralData>({
                     documents={documentItems}
                     seeds={seedItems}
                     activeDocId={loaded.docId}
+                    createOptions={app.documentInit}
                     onSwitchDocument={switchDocument}
                     onCreateDocument={createBlankDocument}
                     onCreateSeed={createSeedDocument}
@@ -429,17 +597,23 @@ async function loadInitialState<TState>(
     schemaFingerprint: string,
     schemaFingerprintHash: string,
     schemaConfig: LocalFirstSchemaConfig<TState>,
-): Promise<LoadState<TState> & {kind: 'ready' | 'migratable'}> {
+    allowCreate = true,
+    needsExplicitDocument = false,
+): Promise<LoadState<TState> & {kind: 'ready' | 'migratable' | 'needsDocument'}> {
     const seedFixture = loadBranchFreeSeedFixtureForApp(app, docId);
     const seeded = seedFixture ? createLocalFirstSeedReplica({fixture: seedFixture}) : null;
     const identity = seeded?.identity ?? await loadOrCreateIdentity();
     if (seeded) await saveIdentity(identity);
+    if (needsExplicitDocument) return {kind: 'needsDocument', identity};
+
+    const persisted = await loadReplica<TState>(docId);
+    if (!persisted && !seeded && !allowCreate) return {kind: 'needsDocument', identity};
+
     const lock = await acquireReplicaTabLock(docId, identity.replicaId);
     if (lock.kind === 'blocked') {
         throw new Error(lock.message);
     }
 
-    const persisted = await loadReplica<TState>(docId);
     if (persisted) {
         const normalized = hydrateLocalFirstReplica(normalizePersistedReplica(persisted), app);
         loadSerializedArtifacts(app.artifacts, normalized.artifacts);
@@ -515,7 +689,7 @@ async function loadInitialState<TState>(
         replicaId: identity.replicaId,
         history,
         vector,
-        artifacts: initialArtifactsForStore(app.artifacts),
+        artifacts: initialArtifactsForApp(app),
         updatedAt: new Date().toISOString(),
     });
     return {

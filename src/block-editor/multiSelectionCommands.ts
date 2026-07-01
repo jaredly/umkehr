@@ -81,6 +81,7 @@ import {
     type BlockPoint,
     type EditorSelection,
 } from './selectionModel';
+import {isTableCellSelection} from './tableSelectionPlugin';
 import {
     ANNOTATION_MARK,
     richTextVirtualParents,
@@ -88,15 +89,18 @@ import {
 } from './virtualParents';
 import {annotationVirtualParents} from './annotations';
 import {
+    filterRichClipboardPayloadInlineFeatures,
     isClipboardAnnotationRef,
     isClipboardMathData,
     type ClipboardAnnotation,
     type ClipboardAnnotationRef,
     type ClipboardFragment,
+    type ClipboardInlineFeatureSet,
     type ClipboardMarkRange,
     type RichClipboardPayload,
 } from './clipboard';
 import type {PollVoteCommandData} from './pollBlocks';
+import type {BlockEditorMarkdownShortcutSpec} from './plugins/index.js';
 
 export type MultiCommandResult = {
     state: CachedState<RichBlockMeta>;
@@ -129,9 +133,10 @@ export const insertTextWithMarkdownShortcutsEverywhere = (
     selection: RetainedSelectionSet,
     text: string,
     context: CommandContext,
+    shortcutSpecs?: readonly BlockEditorMarkdownShortcutSpec<RichBlockMeta>[],
 ): MultiCommandResult =>
     runReplacingCommand(state, selection, (working, entry) =>
-        insertTextWithMarkdownShortcuts(working, resolveSelection(working, entry.selection), text, context),
+        insertTextWithMarkdownShortcuts(working, resolveSelection(working, entry.selection), text, context, shortcutSpecs),
     );
 
 export const insertTextWithMarksEverywhere = (
@@ -235,9 +240,10 @@ export const pastePlainTextWithMarkdownShortcutsEverywhere = (
     selection: RetainedSelectionSet,
     text: string,
     context: CommandContext,
+    shortcutSpecs?: readonly BlockEditorMarkdownShortcutSpec<RichBlockMeta>[],
 ): MultiCommandResult =>
     runReplacingCommand(state, selection, (working, entry) =>
-        pastePlainTextWithMarkdownShortcuts(working, resolveSelection(working, entry.selection), text, context),
+        pastePlainTextWithMarkdownShortcuts(working, resolveSelection(working, entry.selection), text, context, shortcutSpecs),
     );
 
 export const pasteRichClipboardEverywhere = (
@@ -245,13 +251,17 @@ export const pasteRichClipboardEverywhere = (
     selection: RetainedSelectionSet,
     payload: RichClipboardPayload,
     context: CommandContext,
+    inlineFeatures?: ClipboardInlineFeatureSet,
 ): MultiCommandResult => {
-    const blockLevelPaste = pasteRichClipboardIntoBlockSelection(state, selection, payload, context);
+    const pastePayload = inlineFeatures
+        ? filterRichClipboardPayloadInlineFeatures(payload, inlineFeatures)
+        : payload;
+    const blockLevelPaste = pasteRichClipboardIntoBlockSelection(state, selection, pastePayload, context);
     if (blockLevelPaste) return blockLevelPaste;
 
     const deduped = dedupeSelectionSet(state, selection);
     const commandEntries = reverseSortedRetainedEntries(state, mergeOverlappingRanges(state, deduped));
-    if (!commandEntries.length || !payload.fragments.length) return {state, ops: [], selection: deduped};
+    if (!commandEntries.length || !pastePayload.fragments.length) return {state, ops: [], selection: deduped};
 
     let working = state;
     const ops: Array<Op<RichBlockMeta>> = [];
@@ -261,7 +271,7 @@ export const pasteRichClipboardEverywhere = (
         const pasted = pasteRichClipboardAtSelection(
             working,
             resolveSelection(working, entry.selection),
-            payload,
+            pastePayload,
             context,
         );
         working = pasted.state;
@@ -287,9 +297,9 @@ const pasteRichClipboardIntoBlockSelection = (
 ): MultiCommandResult | null => {
     const resolved = resolveSelectionSet(state, selection);
     const primary = primarySelection(resolved);
-    if (primary.type !== 'block' && primary.type !== 'table-cells') return null;
+    if (primary.type !== 'block' && !isTableCellSelection(primary)) return null;
     const noOp = {state, ops: [], selection: dedupeSelectionSet(state, selection)};
-    if (primary.type !== 'table-cells' || !payload.fragments.length) return noOp;
+    if (!isTableCellSelection(primary) || !payload.fragments.length) return noOp;
 
     const rectangle = tableCellRectangleForSelection(state, primary);
     if (!rectangle) return noOp;

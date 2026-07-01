@@ -1,0 +1,2 @@
+examples/react-crdt: initially I had decided that 'unplaced pieces would not be positionable outside of the torus sub-canvas'. Having tried it out, it is annoying. We should allow user-placement of pieces outside of the sub-canvas (as well as snapping), and we should allow connected pieces to be removed from the sub-canvas and placed outside of the sub-canvas.
+I'm not sure how to distinguish a 'sub-canvas position' from a 'outer canvas position' though. And how to architect things such that we're not unnecessarily adding complexity to the normal planar boards.

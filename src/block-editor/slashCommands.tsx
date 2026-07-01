@@ -13,6 +13,7 @@ import {annotationVirtualParents} from './annotations';
 import type {RichBlockMeta} from './blockMeta';
 import type {BlockTypeMenuValue} from './blockEditorTypes';
 import type {MultiCommandResult} from './multiSelectionCommands';
+import type {BlockEditorRegistry, BlockEditorSlashCommandSpec} from './plugins/index.js';
 import {caret, focusPoint, segmentText, type EditorSelection} from './selectionModel';
 import {
     dedupeSelectionSet,
@@ -38,36 +39,133 @@ export type SlashMenuState = {
 };
 
 export type SlashCommand =
-    | {type: 'block'; value: BlockTypeMenuValue; label: string; group: string; keywords: string[]}
-    | {type: 'date-embed'; label: string; group: string; keywords: string[]};
+    | {type: 'block'; value: BlockTypeMenuValue; label: string; group: string; keywords: string[]; commandId: string}
+    | {type: 'date-embed'; label: string; group: string; keywords: string[]; commandId: string}
+    | {type: 'command'; label: string; group: string; keywords: string[]; commandId: string};
 
-const SLASH_COMMANDS: SlashCommand[] = [
-    {type: 'block', value: 'paragraph', label: 'Paragraph', group: 'Block type', keywords: ['text']},
-    {type: 'block', value: 'heading1', label: 'Heading 1', group: 'Block type', keywords: ['h1', 'title']},
-    {type: 'block', value: 'heading2', label: 'Heading 2', group: 'Block type', keywords: ['h2', 'subtitle']},
-    {type: 'block', value: 'heading3', label: 'Heading 3', group: 'Block type', keywords: ['h3']},
-    {type: 'block', value: 'unordered', label: 'Bulleted list', group: 'Block type', keywords: ['bullet', 'unordered']},
-    {type: 'block', value: 'ordered', label: 'Numbered list', group: 'Block type', keywords: ['number', 'ordered']},
-    {type: 'block', value: 'todo', label: 'Todo', group: 'Block type', keywords: ['task', 'checkbox']},
-    {type: 'block', value: 'blockquote', label: 'Blockquote', group: 'Block type', keywords: ['quote']},
-    {type: 'block', value: 'code', label: 'Code', group: 'Block type', keywords: ['pre']},
-    {type: 'block', value: 'mermaid', label: 'Mermaid diagram', group: 'Block type', keywords: ['diagram', 'chart', 'flowchart', 'mermaid']},
-    {type: 'block', value: 'vega-lite', label: 'Vega-Lite chart', group: 'Block type', keywords: ['chart', 'graph', 'vega', 'visualization']},
-    {type: 'block', value: 'callout-info', label: 'Info callout', group: 'Block type', keywords: ['info']},
-    {type: 'block', value: 'callout-warning', label: 'Warning callout', group: 'Block type', keywords: ['warning']},
-    {type: 'block', value: 'callout-error', label: 'Error callout', group: 'Block type', keywords: ['error']},
-    {type: 'block', value: 'recipe-ingredient', label: 'Ingredient', group: 'Block type', keywords: ['ingredient', 'recipe', 'food', 'line']},
-    {type: 'block', value: 'table', label: 'Table', group: 'Block type', keywords: ['grid']},
-    {type: 'block', value: 'columns', label: 'Columns', group: 'Block type', keywords: ['columns', 'layout']},
-    {type: 'block', value: 'card-columns', label: 'Card columns', group: 'Block type', keywords: ['board', 'cards', 'columns']},
-    {type: 'block', value: 'slide-deck', label: 'Slide deck', group: 'Block type', keywords: ['presentation', 'deck', 'slides']},
-    {type: 'block', value: 'slide', label: 'Slide', group: 'Block type', keywords: ['presentation', 'deck']},
-    {type: 'block', value: 'preview', label: 'Preview', group: 'Block type', keywords: ['link', 'card', 'url']},
-    {type: 'date-embed', label: 'Date', group: 'Inline embed', keywords: ['embed', 'calendar']},
+export const DEFAULT_SLASH_COMMANDS: SlashCommand[] = [
+    defaultBlockSlashCommand('paragraph', 'Paragraph', ['text']),
+    defaultBlockSlashCommand('heading1', 'Heading 1', ['h1', 'title']),
+    defaultBlockSlashCommand('heading2', 'Heading 2', ['h2', 'subtitle']),
+    defaultBlockSlashCommand('heading3', 'Heading 3', ['h3']),
+    defaultBlockSlashCommand('unordered', 'Bulleted list', ['bullet', 'unordered']),
+    defaultBlockSlashCommand('ordered', 'Numbered list', ['number', 'ordered']),
+    defaultBlockSlashCommand('todo', 'Todo', ['task', 'checkbox']),
+    defaultBlockSlashCommand('blockquote', 'Blockquote', ['quote']),
+    defaultBlockSlashCommand('code', 'Code', ['pre']),
+    defaultBlockSlashCommand('mermaid', 'Mermaid diagram', ['diagram', 'chart', 'flowchart', 'mermaid']),
+    defaultBlockSlashCommand('vega-lite', 'Vega-Lite chart', ['chart', 'graph', 'vega', 'visualization']),
+    defaultBlockSlashCommand('callout-info', 'Info callout', ['info']),
+    defaultBlockSlashCommand('callout-warning', 'Warning callout', ['warning']),
+    defaultBlockSlashCommand('callout-error', 'Error callout', ['error']),
+    defaultBlockSlashCommand('recipe-ingredient', 'Ingredient', ['ingredient', 'recipe', 'food', 'line']),
+    defaultBlockSlashCommand('table', 'Table', ['grid']),
+    defaultBlockSlashCommand('columns', 'Columns', ['columns', 'layout']),
+    defaultBlockSlashCommand('card-columns', 'Card columns', ['board', 'cards', 'columns']),
+    defaultBlockSlashCommand('slide-deck', 'Slide deck', ['presentation', 'deck', 'slides']),
+    defaultBlockSlashCommand('slide', 'Slide', ['presentation', 'deck']),
+    defaultBlockSlashCommand('preview', 'Preview', ['link', 'card', 'url']),
+    {type: 'date-embed', label: 'Date', group: 'Inline embed', keywords: ['embed', 'calendar'], commandId: 'inline-embed:date'},
 ];
 
 const slashCommandId = (command: SlashCommand): string =>
-    command.type === 'block' ? `block:${command.value}` : command.type;
+    command.commandId;
+
+function defaultBlockSlashCommand(
+    value: BlockTypeMenuValue,
+    label: string,
+    keywords: string[],
+): SlashCommand {
+    return {
+        type: 'block',
+        value,
+        label,
+        group: 'Block type',
+        keywords,
+        commandId: `block-type:${value}`,
+    };
+}
+
+export const slashCommandsFromRegistry = (
+    registry: BlockEditorRegistry<RichBlockMeta>,
+): SlashCommand[] => slashCommandsFromSpecs(registry.slashCommands);
+
+export const slashCommandsFromSpecs = (
+    specs: readonly BlockEditorSlashCommandSpec[],
+): SlashCommand[] =>
+    specs.flatMap<SlashCommand>((spec) => {
+        const commandId = spec.commandId ?? spec.id;
+        const blockValue = blockTypeValueFromCommandId(commandId);
+        if (blockValue) {
+            return [
+                {
+                    type: 'block' as const,
+                    value: blockValue,
+                    label: spec.label,
+                    group: spec.group ?? 'Block type',
+                    keywords: [...(spec.keywords ?? [])],
+                    commandId,
+                },
+            ];
+        }
+        if (commandId === 'inline-embed:date') {
+            return [
+                {
+                    type: 'date-embed' as const,
+                    label: spec.label,
+                    group: spec.group ?? 'Inline embed',
+                    keywords: [...(spec.keywords ?? [])],
+                    commandId,
+                },
+            ];
+        }
+        return [
+            {
+                type: 'command' as const,
+                label: spec.label,
+                group: spec.group ?? 'Commands',
+                keywords: [...(spec.keywords ?? [])],
+                commandId,
+            },
+        ];
+    });
+
+const blockTypeValueFromCommandId = (commandId: string | undefined): BlockTypeMenuValue | null => {
+    if (!commandId?.startsWith('block-type:')) return null;
+    const value = commandId.slice('block-type:'.length);
+    return isBlockTypeMenuValue(value) ? value : null;
+};
+
+const BLOCK_TYPE_MENU_VALUES = new Set<string>([
+    'paragraph',
+    'heading1',
+    'heading2',
+    'heading3',
+    'unordered',
+    'ordered',
+    'todo',
+    'blockquote',
+    'code',
+    'mermaid',
+    'vega-lite',
+    'callout-info',
+    'callout-warning',
+    'callout-error',
+    'recipe-ingredient',
+    'table',
+    'columns',
+    'card-columns',
+    'slide-deck',
+    'slide',
+    'preview',
+    'poll-rating',
+    'poll-children',
+    'poll-matrix',
+    'poll-long',
+]);
+
+const isBlockTypeMenuValue = (value: string): value is BlockTypeMenuValue =>
+    BLOCK_TYPE_MENU_VALUES.has(value);
 
 export const canOpenSlashMenuForSelection = (
     state: CachedState<RichBlockMeta>,
@@ -195,12 +293,14 @@ export const deleteSlashTriggers = (
 
 export function SlashCommandPopover({
     state,
+    commands: commandsProp = DEFAULT_SLASH_COMMANDS,
     onQueryChange,
     onActiveIndexChange,
     onSelect,
     onClose,
 }: {
     state: SlashMenuState | null;
+    commands?: readonly SlashCommand[];
     onQueryChange(query: string): void;
     onActiveIndexChange(index: number): void;
     onSelect(command: SlashCommand): void;
@@ -210,14 +310,14 @@ export function SlashCommandPopover({
     const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
     const commands = useMemo(() => {
         const query = state?.query.trim().toLowerCase() ?? '';
-        if (!query) return SLASH_COMMANDS;
-        return SLASH_COMMANDS.filter((command) => {
+        if (!query) return [...commandsProp];
+        return commandsProp.filter((command) => {
             const haystack = [command.label, command.group, ...command.keywords]
                 .join(' ')
                 .toLowerCase();
             return haystack.includes(query);
         });
-    }, [state?.query]);
+    }, [commandsProp, state?.query]);
     const activeIndex = commands.length
         ? Math.max(0, Math.min(state?.activeIndex ?? 0, commands.length - 1))
         : -1;

@@ -1,0 +1,1 @@
+examples/react-crdt: let's make a board type 'voronoi' to be a little more interesting than the current rectangles. It should generate a grid of points, randomly purturb each point by an amount that's .25<=d<=.5 where d is the grid cell size. Then it should make tiles by doing a voronoi partition of the board.

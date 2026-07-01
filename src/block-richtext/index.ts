@@ -10,7 +10,7 @@ import {
     type State as BlockRichTextState,
 } from '../block-crdt/index.js';
 import {initialStateWithMeta} from '../block-crdt/initialState.js';
-import {paragraphMeta, type RichBlockMeta} from '../block-editor/index.js';
+import {paragraphMeta, type RichBlockMeta} from '../block-editor/blockMeta.js';
 import type {CrdtDocument} from '../crdt/types.js';
 import type {Path} from '../types.js';
 import {BLOCK_RICH_TEXT_LEAF_PLUGIN_ID} from './plugin.js';

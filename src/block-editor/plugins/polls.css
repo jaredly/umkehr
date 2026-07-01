@@ -1,0 +1,307 @@
+/* Styles owned by the polls block editor plugin. */
+.pollBlock {
+    min-width: 0;
+}
+
+.pollControls {
+    margin-top: 8px;
+    padding-left: 2px;
+}
+
+.pollEditorMode {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    margin-top: 8px;
+    border: 1px solid #cbd5df;
+    border-radius: 6px;
+    padding: 2px;
+    background: #f6f8fa;
+}
+
+.pollEditorModeButton {
+    border: 0;
+    border-radius: 4px;
+    padding: 3px 8px;
+    color: #51606d;
+    background: transparent;
+    cursor: pointer;
+    font: inherit;
+    font-size: 12px;
+}
+
+.pollEditorModeButton:hover,
+.pollEditorModeButton.selected {
+    color: #24313c;
+    background: #fff;
+}
+
+.pollOptions {
+    gap: 8px;
+}
+
+.pollOptions-inline {
+    display: flex;
+    flex-wrap: wrap;
+}
+
+.pollOptions-list {
+    display: grid;
+    max-width: 420px;
+}
+
+.pollOptions-list .pollOption {
+    justify-content: space-between;
+    width: 100%;
+}
+
+.pollOption {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 30px;
+    border: 1px solid #cbd5df;
+    border-radius: 6px;
+    padding: 4px 9px;
+    font: inherit;
+    font-size: 13px;
+    color: #24313c;
+    background: #fff;
+    cursor: pointer;
+}
+
+.pollOption:hover:not(:disabled),
+.pollOption.selected {
+    border-color: #4d7c9f;
+    background: #eef6fb;
+}
+
+.pollOption:disabled {
+    cursor: default;
+    color: #657380;
+    background: #f6f8fa;
+}
+
+.pollOption.archived {
+    border-style: dashed;
+}
+
+.pollResult {
+    color: #657380;
+    font-size: 12px;
+}
+
+.ratingStars {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.ratingStar {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border: 0;
+    border-radius: 6px;
+    padding: 0;
+    color: #b7c1ca;
+    background: transparent;
+    cursor: pointer;
+    font: inherit;
+    font-size: 22px;
+    line-height: 1;
+}
+
+.ratingStar.lit {
+    color: #d79325;
+}
+
+.ratingStar:hover:not(:disabled),
+.ratingStar:focus-visible,
+.ratingStar.selected {
+    background: #fff7e8;
+}
+
+.ratingStar:disabled {
+    cursor: default;
+    opacity: 0.72;
+}
+
+.matrixPollControls {
+    overflow-x: auto;
+}
+
+.matrixPollGrid {
+    display: grid;
+    grid-template-columns: minmax(110px, 0.8fr) repeat(var(--matrix-columns), minmax(88px, 1fr));
+    gap: 6px;
+    min-width: max-content;
+}
+
+.matrixPollCorner,
+.matrixPollHeader,
+.matrixPollRowLabel,
+.matrixPollCell {
+    min-height: 32px;
+}
+
+.matrixPollHeader,
+.matrixPollRowLabel {
+    display: flex;
+    align-items: center;
+    border: 1px solid #d9e0e7;
+    border-radius: 6px;
+    padding: 5px 8px;
+    color: #33414d;
+    background: #f8fafb;
+    font-size: 13px;
+}
+
+.matrixPollHeader.archived,
+.matrixPollRowLabel.archived {
+    border-style: dashed;
+    color: #657380;
+}
+
+.matrixPollCell {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    border: 1px solid #cbd5df;
+    border-radius: 6px;
+    padding: 5px 8px;
+    font: inherit;
+    font-size: 13px;
+    color: #24313c;
+    background: #fff;
+    cursor: pointer;
+}
+
+.matrixPollCell:hover:not(:disabled),
+.matrixPollCell.selected {
+    border-color: #4d7c9f;
+    background: #eef6fb;
+}
+
+.matrixPollCell:disabled {
+    cursor: default;
+    color: #657380;
+    background: #f6f8fa;
+}
+
+.pollResultBackground {
+    position: relative;
+}
+
+.pollOption.pollResultBackground,
+.pollOption.pollResultBackground:hover:not(:disabled),
+.pollOption.pollResultBackground.selected,
+.ratingStar.pollResultBackground,
+.ratingStar.pollResultBackground:hover:not(:disabled),
+.ratingStar.pollResultBackground:focus-visible,
+.ratingStar.pollResultBackground.selected,
+.matrixPollCell.pollResultBackground,
+.matrixPollCell.pollResultBackground:hover:not(:disabled),
+.matrixPollCell.pollResultBackground.selected {
+    background: linear-gradient(
+        90deg,
+        rgba(77, 124, 159, 0.22) 0 var(--poll-result-fill, 0%),
+        var(--poll-result-base, #fff) var(--poll-result-fill, 0%) 100%
+    );
+}
+
+.pollResultBackground[data-poll-result]:hover::after,
+.pollResultBackground[data-poll-result]:focus-visible::after {
+    position: absolute;
+    z-index: 20;
+    left: 50%;
+    bottom: calc(100% + 6px);
+    transform: translateX(-50%);
+    border-radius: 4px;
+    padding: 4px 7px;
+    color: #fff;
+    background: #24313c;
+    box-shadow: 0 4px 12px rgba(31, 44, 55, 0.18);
+    content: attr(data-poll-result);
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.2;
+    pointer-events: none;
+    white-space: nowrap;
+}
+
+.pollResultBackground[data-poll-result]:hover::before,
+.pollResultBackground[data-poll-result]:focus-visible::before {
+    position: absolute;
+    z-index: 21;
+    left: 50%;
+    bottom: calc(100% + 2px);
+    transform: translateX(-50%);
+    border: 4px solid transparent;
+    border-top-color: #24313c;
+    content: '';
+    pointer-events: none;
+}
+
+.longPollControls {
+    display: grid;
+    gap: 10px;
+}
+
+.longPollComposer {
+    display: grid;
+    gap: 8px;
+}
+
+.longPollComposer textarea {
+    width: 100%;
+    min-width: 0;
+    resize: vertical;
+    border: 1px solid #cbd5df;
+    border-radius: 6px;
+    padding: 8px;
+    font: inherit;
+    color: #24313c;
+    background: #fff;
+}
+
+.longPollComposer button {
+    justify-self: start;
+    border: 1px solid #cbd5df;
+    border-radius: 6px;
+    padding: 5px 10px;
+    font: inherit;
+    color: #24313c;
+    background: #fff;
+}
+
+.longPollComposer button:disabled {
+    color: #657380;
+    background: #f6f8fa;
+}
+
+.longPollResponses {
+    display: grid;
+    gap: 8px;
+}
+
+.longPollResponse {
+    border: 1px solid #d9e0e7;
+    border-radius: 6px;
+    padding: 8px;
+    background: #f8fafb;
+}
+
+.longPollResponse span {
+    display: block;
+    margin-bottom: 4px;
+    color: #657380;
+    font-size: 12px;
+}
+
+.longPollResponse p {
+    margin: 0;
+    white-space: pre-wrap;
+}

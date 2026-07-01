@@ -11,7 +11,14 @@ import {
     type BlockPoint,
     type DecorationAffinity,
     type EditorSelection,
+    type PluginRetainedSelection,
 } from './selectionModel';
+import {
+    resolveTableCellSelection,
+    retainTableCellSelection,
+    type RetainedTableCellSelection,
+} from './tableSelectionPlugin';
+import {BlockEditorSelectionPluginError} from './selectionPluginError';
 
 export type RetainedPoint = {
     blockId: string;
@@ -20,16 +27,12 @@ export type RetainedPoint = {
     visualAffinity?: DecorationAffinity;
 };
 
-export type RetainedSelection =
+export type CoreRetainedSelection =
     | {type: 'caret'; point: RetainedPoint}
     | {type: 'range'; anchor: RetainedPoint; focus: RetainedPoint}
-    | {type: 'block'; anchorBlockId: string; focusBlockId: string}
-    | {
-          type: 'table-cells';
-          tableId: string;
-          anchorCellId: string;
-          focusCellId: string;
-      };
+    | {type: 'block'; anchorBlockId: string; focusBlockId: string};
+
+export type RetainedSelection = CoreRetainedSelection | PluginRetainedSelection;
 
 export const initialRetainedSelection = (state: CachedState<RichBlockMeta>): RetainedSelection => {
     const blockId = editableBlockIds(state)[0] ?? allBlockIds(state)[0] ?? '';
@@ -51,18 +54,16 @@ export const retainSelection = (
         };
     }
     if (selection.type === 'table-cells') {
+        return retainTableCellSelection(selection as RetainedTableCellSelection);
+    }
+    if (selection.type === 'range') {
         return {
-            type: 'table-cells',
-            tableId: selection.tableId,
-            anchorCellId: selection.anchorCellId,
-            focusCellId: selection.focusCellId,
+            type: 'range',
+            anchor: retainPoint(state, selection.anchor),
+            focus: retainPoint(state, selection.focus),
         };
     }
-    return {
-        type: 'range',
-        anchor: retainPoint(state, selection.anchor),
-        focus: retainPoint(state, selection.focus),
-    };
+    throw unknownSelectionPluginError(selection.type, 'retain');
 };
 
 export const retainPoint = (state: CachedState<RichBlockMeta>, point: BlockPoint): RetainedPoint => {
@@ -91,13 +92,9 @@ export const resolveSelection = (
         };
     }
     if (selection.type === 'table-cells') {
-        return {
-            type: 'table-cells',
-            tableId: resolveBlockId(state, selection.tableId),
-            anchorCellId: resolveBlockId(state, selection.anchorCellId),
-            focusCellId: resolveBlockId(state, selection.focusCellId),
-        };
+        return resolveTableCellSelection(state, selection as RetainedTableCellSelection);
     }
+    if (selection.type !== 'range') throw unknownSelectionPluginError(selection.type, 'resolve');
     const anchor = resolvePoint(state, selection.anchor);
     const focus = resolvePoint(state, selection.focus);
     if (anchor.blockId === focus.blockId && anchor.offset === focus.offset) {
@@ -117,7 +114,7 @@ export const resolvePoint = (state: CachedState<RichBlockMeta>, point: RetainedP
 
 const allBlockIds = (state: CachedState<RichBlockMeta>): string[] => Object.keys(state.state.blocks).sort();
 
-const resolveBlockId = (state: CachedState<RichBlockMeta>, blockId: string): string => {
+export const resolveBlockId = (state: CachedState<RichBlockMeta>, blockId: string): string => {
     const block = state.state.blocks[blockId];
     if (block && !isDeleted(block) && !state.cache.joinedBlocks[blockId]) return blockId;
     return editableBlockIds(state)[0] ?? allBlockIds(state)[0] ?? blockId;
@@ -125,3 +122,9 @@ const resolveBlockId = (state: CachedState<RichBlockMeta>, blockId: string): str
 
 export const retainedCaret = (state: CachedState<RichBlockMeta>, blockId: string, offset: number): RetainedSelection =>
     retainSelection(state, caret(blockId, offset));
+
+const unknownSelectionPluginError = (type: string, action: string): BlockEditorSelectionPluginError =>
+    new BlockEditorSelectionPluginError(
+        'unknown-selection-plugin',
+        `Selection type "${type}" requires a registered selection plugin to ${action} this selection.`,
+    );

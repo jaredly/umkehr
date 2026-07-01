@@ -91,7 +91,11 @@ export function urlForSelection(
 }
 
 export function readActiveDocIdFromSearch(search: string, fallbackDocId: string) {
-    return new URLSearchParams(search).get('doc')?.trim() || fallbackDocId;
+    return readOptionalActiveDocIdFromSearch(search) ?? fallbackDocId;
+}
+
+export function readOptionalActiveDocIdFromSearch(search: string) {
+    return new URLSearchParams(search).get('doc')?.trim() || undefined;
 }
 
 export function urlWithActiveDocId(href: string, docId: string) {

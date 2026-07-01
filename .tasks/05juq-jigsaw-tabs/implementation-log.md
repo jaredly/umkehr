@@ -1,0 +1,42 @@
+# Implementation Log: Jigsaw Tabs Board Mode
+
+## 2026-06-29
+
+- Started implementation from `.tasks/05juq-jigsaw-tabs/plan.md`.
+- Phase 1 in progress: adding `tabs` to document creation params, artifact options, and board title generation.
+- Added `tabs?: boolean` to jigsaw document init params and board artifact options.
+- Added a `Tabs` checkbox to jigsaw document creation.
+- Refactored board generation so rectangular and Voronoi layouts both use shared edge records.
+- Added initial tab spec generation and tabbed mask generation with cubic semicircle segments.
+- Issue found and fixed: the first cubic control-point pass used the edge tangent at the semicircle start, which would not approximate a semicircle correctly. Updated controls to use quarter-circle tangents around the tab center.
+- Issue found and fixed: non-tabbed rectangular boards picked up tiny floating-point width drift when their bounds were derived from generated polygons. Preserved the old exact rectangular bounds and masks when `tabs` is false.
+- Added unit coverage for tabbed rectangular and tabbed Voronoi board generation, creation validation, and unplaced-piece arrangement.
+- Verification: `npm exec vitest -- run src/apps/jigsaw/jigsaw.test.ts` passed with 36 tests.
+- Verification: `npm run build` in `examples/react-crdt` passed. It printed an SSH-agent permission warning and existing Vite large-chunk warnings, but exited successfully.
+- Started the example dev server with `npm run dev -- --host 127.0.0.1 --port 5174`; Vite used `http://127.0.0.1:5175/` because 5174 was already occupied.
+- Verification: `curl -I http://127.0.0.1:5175/` returned `200 OK`.
+- Issue found and fixed: tab circles were too small because `min(cellWidth, cellHeight) / 10` had been implemented as the radius cap. Corrected this to be the margin between neighboring tab circles. Radius now starts near half the edge length and shrinks only to avoid neighboring tab-circle overlap with that margin.
+- Added test assertions that tabbed rectangular and Voronoi boards produce materially large curve excursions.
+- Verification: `npm exec vitest -- run src/apps/jigsaw/jigsaw.test.ts` passed with 36 tests after the radius correction.
+- Verification: `npm run build` in `examples/react-crdt` passed after the radius correction. It printed the same SSH-agent permission warning and Vite large-chunk warnings as before.
+- Refined tab curves from literal semicircles to shallower two-cubic elliptical bumps/sockets. The cubic handles now align with the straight edge at tab start/end, smoothing the transition from line to tab.
+- Verification: `npm exec vitest -- run src/apps/jigsaw/jigsaw.test.ts` passed with 36 tests after the curve refinement.
+- Verification: `npm run build` in `examples/react-crdt` passed after the curve refinement. It printed the same SSH-agent permission warning and Vite large-chunk warnings as before.
+- Updated the tab profile again toward a classic jigsaw shape: the edge now dips inward before the tab, rises into the knob/socket, dips inward after it, and then returns to the straight edge.
+- Verification: `npm exec vitest -- run src/apps/jigsaw/jigsaw.test.ts` passed with 36 tests after the classic profile change.
+- Verification: `npm run build` in `examples/react-crdt` passed after the classic profile change. It printed the same SSH-agent permission warning and Vite large-chunk warnings as before.
+- Refined the classic profile so the inward dip uses the whole available edge segment on each side of the tab instead of being localized next to the knob. Added side shoulders/bulges around the tab before the apex to make the shape closer to a traditional jigsaw connector.
+- Verification: `npm exec vitest -- run src/apps/jigsaw/jigsaw.test.ts` passed with 36 tests after the long-dip/shoulder refinement.
+- Verification: `npm run build` in `examples/react-crdt` passed after the long-dip/shoulder refinement. It printed the same SSH-agent permission warning and Vite large-chunk warnings as before.
+- Added `examples/react-crdt/scripts/jigsaw-board-svg.ts`, a Bun CLI that accepts board options as a JSON string and outputs an outline-only SVG to stdout or an optional output path. The script accepts `JigsawBoardOptions` plus optional `pieceCount`, `stroke`, `strokeWidth`, and `showBounds`.
+- Added `npm run jigsaw:svg` shortcut in `examples/react-crdt/package.json`.
+- Verification: generated `/tmp/jigsaw-voronoi-tabs.svg` with `bun scripts/jigsaw-board-svg.ts '{"pieceCount":30,"type":"voronoi","tabs":true}' /tmp/jigsaw-voronoi-tabs.svg`.
+- Verification: generated `/tmp/jigsaw-rect-tabs.svg` with `bun scripts/jigsaw-board-svg.ts '{"pieceCount":12,"tabs":true,"showBounds":true,"strokeWidth":1.5}' /tmp/jigsaw-rect-tabs.svg`.
+- Verification: `npm exec vitest -- run src/apps/jigsaw/jigsaw.test.ts` passed with 36 tests after adding the SVG script.
+- Verification: `npm run build` in `examples/react-crdt` passed after adding the SVG script. It printed the same SSH-agent permission warning and Vite large-chunk warnings as before.
+- Added optional `seed?: string | number` to `JigsawBoardOptions`. When omitted, generation still uses `Math.random`; when provided, Voronoi perturbation and tab direction use a local seeded PRNG.
+- Updated SVG script help to document `seed`.
+- Added tests that same seeded rectangular/Voronoi tabbed boards are equal and different seeds produce different geometry.
+- Verification: `npm exec vitest -- run src/apps/jigsaw/jigsaw.test.ts` passed with 38 tests after adding seeded randomness.
+- Verification: generated same-seed SVGs and confirmed `cmp -s /tmp/jigsaw-seed-a.svg /tmp/jigsaw-seed-b.svg` succeeded; generated a different-seed SVG and confirmed it differed from the same-seed output.
+- Verification: `npm run build` in `examples/react-crdt` passed after adding seeded randomness. It printed the same SSH-agent permission warning and Vite large-chunk warnings as before.

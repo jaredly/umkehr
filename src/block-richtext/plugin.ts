@@ -17,7 +17,8 @@ import {
     type State as BlockState,
 } from '../block-crdt/index.js';
 import {initialStateWithMeta} from '../block-crdt/initialState.js';
-import {paragraphMeta, richTextCrdtConfig, type RichBlockMeta} from '../block-editor/index.js';
+import {paragraphMeta, type RichBlockMeta} from '../block-editor/blockMeta.js';
+import {richTextCrdtConfig} from '../block-editor/editorCrdtConfig.js';
 import {defineLeafBuilderExtension} from '../builderExtensions.js';
 import {deepEqual as equal} from '../deepEqual.js';
 import type {LeafCrdtPlugin} from '../crdt/plugins.js';
