@@ -9,6 +9,11 @@ import {
 } from '../annotations.js';
 import type {BlockEditorPlugin} from './types.js';
 import {bundledPluginStyle} from './pluginStyles.js';
+import {
+    renderAnnotationFloating,
+    renderAnnotationFooter,
+    renderAnnotationSidebar,
+} from './annotationRenderer.js';
 
 export const annotationMarkVirtualParents = (mark: {
     type: string;
@@ -63,9 +68,9 @@ export const annotationsPlugin: BlockEditorPlugin<RichBlockMeta> = {
     ],
     inlineRenderers: [{id: 'annotations.inline', markType: ANNOTATION_MARK, render: () => null}],
     destinationRenderers: [
-        {id: 'annotations.sidebar', destination: 'sidebar', order: 20, render: () => null},
-        {id: 'annotations.footer', destination: 'footer', order: 20, render: () => null},
-        {id: 'annotations.floating', destination: 'floating', order: 20, render: () => null},
+        {id: 'annotations.sidebar', destination: 'sidebar', order: 20, render: renderAnnotationSidebar},
+        {id: 'annotations.footer', destination: 'footer', order: 20, render: renderAnnotationFooter},
+        {id: 'annotations.floating', destination: 'floating', order: 20, render: renderAnnotationFloating},
     ],
     crdt: {
         markBehavior: annotationMarkBehavior.markBehavior,

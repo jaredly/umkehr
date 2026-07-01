@@ -1,4 +1,4 @@
-import type {ClipboardEvent, KeyboardEvent, ReactElement} from 'react';
+import type {ClipboardEvent, KeyboardEvent, MutableRefObject, ReactElement} from 'react';
 
 import type {FormattedBlock, FormattedRun, VirtualBlockParentConfig} from '../../block-crdt/index.js';
 import type {
@@ -18,9 +18,20 @@ import type {
     PluginRetainedSelection,
 } from '../selectionModel.js';
 import type {BlockLevelSelectionDecorations} from '../selectionSet.js';
-import type {CodePreviewKind, RichBlockStyleAttribute, SlideDeckFooterMode, SlideTransition} from '../blockMeta.js';
+import type {
+    CodePreviewKind,
+    RichBlockMeta,
+    RichBlockStyleAttribute,
+    SlideDeckFooterMode,
+    SlideTransition,
+} from '../blockMeta.js';
 import type {MoveTarget, TableCellSlotTarget} from '../blockCommands.js';
+import type {CommandContext, CommandResult} from '../blockCommands.js';
 import type {TableCellRectangle} from '../tableSelectionPlugin.js';
+import type {AnnotationPresentation, RenderedAnnotation} from '../annotations.js';
+import type {InlineRenderFeatures} from '../blockEditorTypes.js';
+import type {CodeTargetRange, LinkTargetRange} from '../inlineMarks.js';
+import type {ActivePopover, PopoverPointerTransition} from '../useAnnotationPopoverController.js';
 
 export type BlockEditorPluginId = string;
 export type BlockEditorContributionId = string;
@@ -344,7 +355,88 @@ export type BlockEditorPollRenderServices = {
     vote(blockId: string, optionId: string, rowId?: string): void;
     answerLong(blockId: string, text: string): void;
 };
-export type BlockEditorAnnotationRenderServices = Record<string, unknown>;
+
+export type BlockEditorAnnotationFocusRequest = {
+    blockId: string;
+    token: number;
+    selection?: EditorSelection;
+};
+export type BlockEditorRenderedAnnotation = RenderedAnnotation;
+export type BlockEditorAnnotationBodyBlock = RenderedAnnotation['bodyBlocks'][number];
+export type BlockEditorAnnotationPopover = ActivePopover;
+export type BlockEditorAnnotationPopoverPointerTransition = PopoverPointerTransition;
+export type BlockEditorAnnotationBodyMutation = (
+    current: {state: CachedState<RichBlockMeta>},
+    context: CommandContext,
+) => CommandResult;
+export type BlockEditorAnnotationEditableSurfaceProps = {
+    blockId: string;
+    runs: BlockEditorAnnotationBodyBlock['runs'];
+    charIdsByOffset: string[];
+    visibleBlockIdSet: Set<string>;
+    rainbowLamportIds: boolean;
+    decorations: null;
+    pendingCaretRestoreBlockIdRef: MutableRefObject<string | null>;
+    pendingSelectionRestoreRef: MutableRefObject<EditorSelection | null>;
+    selection: EditorSelection;
+    className: string;
+    ariaLabel: string;
+    placeholder: string;
+    popoverTextById: Map<string, string>;
+    footnoteNumberById: Map<string, number>;
+    inlineRenderFeatures: InlineRenderFeatures;
+    onPopoverTriggerEnter(id: string, element: HTMLElement): void;
+    onPopoverTriggerLeave(id?: string, transition?: PopoverPointerTransition): void;
+    onLinkHoverEnter(range: LinkTargetRange & {href: string}, element: HTMLElement): void;
+    onLinkHoverLeave(): void;
+    onCodeHoverEnter(range: CodeTargetRange & {language: string}, element: HTMLElement): void;
+    onCodeHoverLeave(): void;
+    onSelectionChange(selection: EditorSelection | null): void;
+    onInputMeasured(label: string, ms: number): void;
+    onDisplayInputRenderStarted(label: string, started: number): void;
+    onInsertText(text: string, selection?: EditorSelection): void;
+    onDeleteBackward(selection?: EditorSelection): void;
+    onDeleteForward(selection?: EditorSelection): void;
+    onCopy(event: ClipboardEvent<HTMLDivElement>): void;
+    onCut(event: ClipboardEvent<HTMLDivElement>): void;
+    onPaste(event: ClipboardEvent<HTMLDivElement>): void;
+    onKeyDown(event: KeyboardEvent<HTMLDivElement>): void;
+};
+export type BlockEditorAnnotationRenderServices = {
+    all(): readonly RenderedAnnotation[];
+    byPresentation(presentation: AnnotationPresentation): readonly RenderedAnnotation[];
+    byId(id: string): RenderedAnnotation | null;
+    popoverTextById(): ReadonlyMap<string, string>;
+    footnoteNumberById(): ReadonlyMap<string, number>;
+    sidebarOpen(): boolean;
+    gutterTops(): Readonly<Record<string, number>>;
+    focusRequest(): BlockEditorAnnotationFocusRequest | null;
+    activePopovers(): readonly ActivePopover[];
+    popoverAnnotation(id: string): RenderedAnnotation | null;
+    visibleBodyBlockIds(): ReadonlySet<string>;
+    setSidebarOpen(open: boolean): void;
+    focusAnnotation(annotation: RenderedAnnotation): void;
+    focusBodyBlock(annotation: RenderedAnnotation): string | null;
+    requestBodyFocus(blockId: string | null | undefined, selection?: EditorSelection): void;
+    markFocusRequestHandled(): void;
+    recordBodyActivity(annotationId: string, bodyBlockId: string): void;
+    setActiveBodySelection(selection: EditorSelection | null): void;
+    resolve(annotation: RenderedAnnotation): void;
+    isToolbarCommandAvailable(commandId: string): boolean;
+    runBodyCommand(command: BlockEditorAnnotationBodyMutation): void;
+    dispatch(command: BlockEditorCommand): void;
+    showPopover(id: string, element: HTMLElement): void;
+    schedulePopoverHide(id?: string, transition?: PopoverPointerTransition): void;
+    cancelPopoverHide(): void;
+    setPopoverFocusPinned(focused: boolean, id?: string, relatedTarget?: EventTarget | null): void;
+    closeDeepestPopover(): void;
+    inlineRenderFeatures(): InlineRenderFeatures;
+    registry(): BlockEditorRegistry<RichBlockMeta>;
+    rainbowLamportIds(): boolean;
+    renderEditableSurface(props: BlockEditorAnnotationEditableSurfaceProps): ReactElement;
+    onInputMeasured(label: string, ms: number): void;
+    onDisplayInputRenderStarted(label: string, started: number): void;
+};
 
 export type BlockEditorBlockRenderContext<Meta extends TimestampedBlockMeta = TimestampedBlockMeta> =
     BlockEditorRenderContext<Meta> & {

@@ -9,6 +9,8 @@ export type ValidConnection = {
     strength: number;
 };
 
+export type ComponentPlacementSpace = 'plane' | 'surface' | 'outer';
+
 export type PuzzleLayout = {
     connections: ValidConnection[];
     components: number[][];
@@ -16,6 +18,8 @@ export type PuzzleLayout = {
     depths: Map<number, number>;
     anchors: Map<number, number>;
     positions: Map<number, Coord>;
+    componentSpaces: Map<number, ComponentPlacementSpace>;
+    pieceSpaces: Map<number, ComponentPlacementSpace>;
 };
 
 export type SnapCandidate = {
@@ -44,10 +48,6 @@ export type TorusPieceCopy = {
     rect: PieceRect;
     primary: boolean;
 };
-
-export type OutsideTorusDropResult =
-    | {type: 'cancel'}
-    | {type: 'patches'; patches: DraftPatch<JigsawState>[]};
 
 export type ArrangementResult = {
     positions: Map<number, Coord>;
@@ -182,6 +182,8 @@ export function buildPuzzleLayout(board: JigsawBoardArtifact, state: JigsawState
     const depths = pieceDepths(board, connections);
     const anchors = new Map<number, number>();
     const positions = new Map<number, Coord>();
+    const componentSpaces = new Map<number, ComponentPlacementSpace>();
+    const pieceSpaces = new Map<number, ComponentPlacementSpace>();
 
     components.forEach((component, componentIndex) => {
         const anchor = anchorPieceForComponent(component, state.positions, depths);
@@ -189,12 +191,21 @@ export function buildPuzzleLayout(board: JigsawBoardArtifact, state: JigsawState
         anchors.set(componentIndex, anchor);
         const anchorPosition = state.positions[pieceKey(anchor)];
         if (!anchorPosition) return;
-        for (const [piece, position] of positionsForComponent(board, component, anchor, anchorPosition, connections)) {
+        const space = placementSpaceForPosition(board, anchorPosition);
+        componentSpaces.set(componentIndex, space);
+        for (const [piece, position] of positionsForComponent(
+            board,
+            component,
+            anchor,
+            positionPoint(anchorPosition),
+            connections,
+        )) {
             positions.set(piece, position);
+            pieceSpaces.set(piece, space);
         }
     });
 
-    return {connections, components, pieceToComponent, depths, anchors, positions};
+    return {connections, components, pieceToComponent, depths, anchors, positions, componentSpaces, pieceSpaces};
 }
 
 export function anchorPieceForComponent(
@@ -842,26 +853,28 @@ export function positionPatch(
     };
 }
 
-export function removePositionPatch(piece: number): DraftPatch<JigsawState> {
-    return {
-        op: 'remove',
-        path: [
-            {type: 'key', key: 'positions'},
-            {type: 'key', key: pieceKey(piece)},
-        ],
-    };
+export function placementSpaceForPosition(
+    board: JigsawBoardArtifact,
+    position: Coord,
+): ComponentPlacementSpace {
+    if (board.surface !== 'torus') return 'plane';
+    return position.outer === true ? 'outer' : 'surface';
 }
 
-export function outsideTorusDropPatches(
-    state: JigsawState,
-    component: number[],
-): OutsideTorusDropResult {
-    if (component.length !== 1) return {type: 'cancel'};
-    const [piece] = component;
-    if (piece === undefined || state.positions[pieceKey(piece)] === undefined) {
-        return {type: 'patches', patches: []};
-    }
-    return {type: 'patches', patches: [removePositionPatch(piece)]};
+export function isOuterPosition(board: JigsawBoardArtifact, position: Coord) {
+    return placementSpaceForPosition(board, position) === 'outer';
+}
+
+export function positionPoint(position: Coord): Coord {
+    return {x: position.x, y: position.y};
+}
+
+export function surfacePosition(point: Coord): Coord {
+    return {x: point.x, y: point.y};
+}
+
+export function outerPosition(point: Coord): Coord {
+    return {x: point.x, y: point.y, outer: true};
 }
 
 export function connectionPatch(candidate: SnapCandidate): DraftPatch<JigsawState> {

@@ -125,13 +125,24 @@ test('renders torus pieces through wrapped sub-canvas interactions', async ({pag
     const torusCopies = torus.locator(`.jigsawPiece[data-piece="${pieceInfo!.piece}"]`);
     await expect.poll(() => torusCopies.count()).toBeGreaterThan(1);
 
+    const shelvedPiece = await firstHitTestableUnplacedPiece(page);
+    expect(shelvedPiece).toBeTruthy();
+    await page.mouse.move(shelvedPiece!.center.x, shelvedPiece!.center.y);
+    await page.mouse.down();
+    await page.mouse.move(torusBox!.x + torusBox!.width + 42, torusBox!.y + torusBox!.height / 2, {steps: 8});
+    await page.mouse.up();
+    await expect(page.locator(`.jigsawCanvas > .jigsawPiece.placed[data-piece="${shelvedPiece!.piece}"]`)).toHaveCount(1);
+    await expect(page.locator(`.jigsawCanvas > .jigsawPiece.unplaced[data-piece="${shelvedPiece!.piece}"]`)).toHaveCount(0);
+
     const unplaced = page.locator('.jigsawCanvas > .jigsawPiece.unplaced').first();
     const unplacedBefore = await unplaced.boundingBox();
     const placedBefore = await torusCopies.first().boundingBox();
     expect(unplacedBefore).toBeTruthy();
     expect(placedBefore).toBeTruthy();
-    await page.mouse.move(torusBox!.x + torusBox!.width / 2, torusBox!.y + torusBox!.height / 2);
-    await page.mouse.wheel(0, 72);
+    await page.mouse.move(torusBox!.x + torusBox!.width * 0.72, torusBox!.y + torusBox!.height * 0.72);
+    await page.mouse.down();
+    await page.mouse.move(torusBox!.x + torusBox!.width * 0.72, torusBox!.y + torusBox!.height * 0.58, {steps: 6});
+    await page.mouse.up();
     await expect
         .poll(async () => {
             const after = await torusCopies.first().boundingBox();
@@ -144,18 +155,30 @@ test('renders torus pieces through wrapped sub-canvas interactions', async ({pag
     expect(Math.abs(unplacedAfter!.x - unplacedBefore!.x)).toBeLessThan(1);
     expect(Math.abs(unplacedAfter!.y - unplacedBefore!.y)).toBeLessThan(1);
 
-    const placedAfterPan = await torusCopies.first().boundingBox();
+    const placedAfterPan = await firstHitTestableTorusPieceCopy(page, pieceInfo!.piece);
     expect(placedAfterPan).toBeTruthy();
-    await page.mouse.move(
-        placedAfterPan!.x + placedAfterPan!.width / 2,
-        placedAfterPan!.y + placedAfterPan!.height / 2,
-    );
+    await page.mouse.move(placedAfterPan!.center.x, placedAfterPan!.center.y);
     await page.mouse.down();
     await page.mouse.move(torusBox!.x + torusBox!.width + 36, torusBox!.y + torusBox!.height + 36, {steps: 8});
     await page.mouse.up();
 
     await expect.poll(() => torusCopies.count()).toBe(0);
-    await expect(page.locator(`.jigsawCanvas > .jigsawPiece.unplaced[data-piece="${pieceInfo!.piece}"]`)).toHaveCount(1);
+    const outerPlaced = page.locator(`.jigsawCanvas > .jigsawPiece.placed[data-piece="${pieceInfo!.piece}"]`);
+    await expect(outerPlaced).toHaveCount(1);
+    await expect(page.locator(`.jigsawCanvas > .jigsawPiece.unplaced[data-piece="${pieceInfo!.piece}"]`)).toHaveCount(0);
+
+    const outerPlacedBox = await outerPlaced.boundingBox();
+    expect(outerPlacedBox).toBeTruthy();
+    await page.mouse.move(
+        outerPlacedBox!.x + outerPlacedBox!.width / 2,
+        outerPlacedBox!.y + outerPlacedBox!.height / 2,
+    );
+    await page.mouse.down();
+    await page.mouse.move(torusBox!.x + torusBox!.width / 2, torusBox!.y + 8, {steps: 8});
+    await page.mouse.up();
+
+    await expect.poll(() => torusCopies.count()).toBeGreaterThan(1);
+    await expect(outerPlaced).toHaveCount(0);
     await expectNoPieceHitOutsideViewport(page);
     await expect(viewport).toHaveCSS('overflow', 'hidden');
 });
@@ -267,4 +290,32 @@ async function firstHitTestableUnplacedPiece(page: import('@playwright/test').Pa
         }
         return null;
     });
+}
+
+async function firstHitTestableTorusPieceCopy(page: import('@playwright/test').Page, pieceId: number) {
+    return page.evaluate((targetPiece) => {
+        const torus = document.querySelector('[data-testid="jigsaw-torus-viewport"]');
+        if (!torus) return null;
+        const torusRect = torus.getBoundingClientRect();
+        for (const piece of document.querySelectorAll<HTMLElement>(
+            `.jigsawTorusViewport .jigsawPiece[data-piece="${targetPiece}"]`,
+        )) {
+            const rect = piece.getBoundingClientRect();
+            const center = {
+                x: rect.left + rect.width / 2,
+                y: rect.top + rect.height / 2,
+            };
+            if (
+                center.x < torusRect.left ||
+                center.x > torusRect.right ||
+                center.y < torusRect.top ||
+                center.y > torusRect.bottom
+            ) {
+                continue;
+            }
+            if (!document.elementsFromPoint(center.x, center.y).includes(piece)) continue;
+            return {center};
+        }
+        return null;
+    }, pieceId);
 }

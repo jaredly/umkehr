@@ -13,6 +13,10 @@ import {createBlockEditorRegistry} from './registry';
 import {annotationsPlugin} from './annotations';
 import {blockEditorDocumentCompatibilityIssues} from './compatibility';
 import type {CachedState} from '../../block-crdt/types';
+import type {
+    BlockEditorAnnotationRenderServices,
+    BlockEditorDestinationRenderContext,
+} from './types';
 
 const emptyState = (): CachedState<RichBlockMeta> => ({
     state: {
@@ -82,6 +86,22 @@ describe('annotations plugin', () => {
         ).toEqual([[3, 'a']]);
     });
 
+    it('renders concrete annotation destination UI through plugin renderers', () => {
+        const registry = createBlockEditorRegistry([annotationsPlugin]);
+        const annotations = [
+            renderedAnnotation('c1', 'sidebar', 'comment'),
+            renderedAnnotation('f1', 'footnote', 'footnote'),
+            renderedAnnotation('p1', 'popover', 'popover body'),
+        ];
+        const services = annotationServices(annotations);
+
+        for (const destination of ['sidebar', 'footer', 'floating'] as const) {
+            const renderer = registry.destinationRenderers.get(destination)?.[0];
+            expect(renderer?.id).toBe(`annotations.${destination}`);
+            expect(renderer?.render(destinationContext(registry, destination, services))).not.toBeNull();
+        }
+    });
+
     it('does not contribute structural block virtual parents', () => {
         const registry = createBlockEditorRegistry([annotationsPlugin]);
 
@@ -128,6 +148,69 @@ describe('annotations plugin', () => {
         ]);
     });
 });
+
+const destinationContext = (
+    registry: ReturnType<typeof createBlockEditorRegistry<RichBlockMeta>>,
+    destination: 'sidebar' | 'footer' | 'floating',
+    annotations: BlockEditorAnnotationRenderServices,
+): BlockEditorDestinationRenderContext<RichBlockMeta> => ({
+    state: emptyState(),
+    registry,
+    destination,
+    userId: 'user',
+    annotations,
+    dispatch: () => {},
+});
+
+const annotationServices = (
+    annotations: readonly RenderedAnnotation[],
+): BlockEditorAnnotationRenderServices => {
+    const byId = renderedAnnotationMapById(annotations);
+    const popovers = [{id: 'p1', top: 10, left: 20, source: 'hover' as const}];
+    const visibleBodyBlockIds = new Set(annotations.flatMap((annotation) => annotation.bodyBlocks.map((block) => block.id)));
+    return {
+        all: () => annotations,
+        byPresentation: (presentation) => renderedAnnotationsByPresentation(annotations, presentation),
+        byId: (id) => byId.get(id) ?? null,
+        popoverTextById: () => popoverTextByAnnotationId(annotations),
+        footnoteNumberById: () => footnoteNumberByAnnotationId(annotations),
+        sidebarOpen: () => true,
+        gutterTops: () => ({}),
+        focusRequest: () => null,
+        activePopovers: () => popovers,
+        popoverAnnotation: (id) => byId.get(id) ?? null,
+        visibleBodyBlockIds: () => visibleBodyBlockIds,
+        setSidebarOpen: () => {},
+        focusAnnotation: () => {},
+        focusBodyBlock: (annotation) => annotation.bodyBlocks[0]?.id ?? null,
+        requestBodyFocus: () => {},
+        markFocusRequestHandled: () => {},
+        recordBodyActivity: () => {},
+        setActiveBodySelection: () => {},
+        resolve: () => {},
+        isToolbarCommandAvailable: () => true,
+        runBodyCommand: () => {},
+        dispatch: () => {},
+        showPopover: () => {},
+        schedulePopoverHide: () => {},
+        cancelPopoverHide: () => {},
+        setPopoverFocusPinned: () => {},
+        closeDeepestPopover: () => {},
+        inlineRenderFeatures: () => ({
+            booleanMarks: new Set(['bold', 'italic', 'strikethrough', 'underline']),
+            code: true,
+            links: true,
+            math: true,
+            annotations: true,
+            inlineEmbeds: new Set(['date']),
+        }),
+        registry: () => createBlockEditorRegistry([annotationsPlugin]),
+        rainbowLamportIds: () => false,
+        renderEditableSurface: () => null as never,
+        onInputMeasured: () => {},
+        onDisplayInputRenderStarted: () => {},
+    };
+};
 
 const renderedAnnotation = (
     id: string,

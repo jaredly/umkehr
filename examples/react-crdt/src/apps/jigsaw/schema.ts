@@ -5,6 +5,7 @@ import {hlc} from 'umkehr/crdt';
 export type Coord = {
     x: number;
     y: number;
+    outer?: boolean;
 };
 
 export type JigsawState = {

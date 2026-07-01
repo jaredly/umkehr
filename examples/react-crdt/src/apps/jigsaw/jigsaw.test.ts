@@ -34,22 +34,26 @@ import {
     endpointPolygonForPiece,
     estimatedPieceSize,
     isInsideTorusViewport,
+    isOuterPosition,
     isPlacedPieceOutsideStage,
+    outerPosition,
     nearestEquivalentPoint,
-    outsideTorusDropPatches,
     packingMetricsForPositions,
     packingPolygonArea,
     pieceBorderDistanceFromStage,
+    placementSpaceForPosition,
     placedPieceOverlapRatio,
     overlapArea,
     polygonOverlapArea,
     polygonOverlapRatio,
     positiveModulo,
+    positionPatch,
+    positionPoint,
     pieceDepths,
     rectsOverlap,
-    removePositionPatch,
     snapCandidates,
     snapStrength,
+    surfacePosition,
     torusLogicalDropPosition,
     torusPieceCopies,
     validConnections,
@@ -600,6 +604,23 @@ describe('jigsaw placement logic', () => {
         );
     });
 
+    it('classifies optional outer positions by board surface', () => {
+        const plane = generateJigsawBoard(12);
+        const torus = generateJigsawBoard(12, {surface: 'torus'});
+        const plain = {x: 10, y: 20};
+        const outer = {x: -10, y: 40, outer: true};
+
+        expect(placementSpaceForPosition(plane, outer)).toBe('plane');
+        expect(isOuterPosition(plane, outer)).toBe(false);
+        expect(placementSpaceForPosition(torus, plain)).toBe('surface');
+        expect(placementSpaceForPosition(torus, {...plain, outer: false})).toBe('surface');
+        expect(placementSpaceForPosition(torus, outer)).toBe('outer');
+        expect(isOuterPosition(torus, outer)).toBe(true);
+        expect(positionPoint(outer)).toEqual({x: -10, y: 40});
+        expect(surfacePosition(outer)).toEqual({x: -10, y: 40});
+        expect(outerPosition(plain)).toEqual({x: 10, y: 20, outer: true});
+    });
+
     it('derives component positions from the selected anchor and ignores stale non-anchor positions', () => {
         const board = generateJigsawBoard(12);
         const state: JigsawState = {
@@ -617,6 +638,33 @@ describe('jigsaw placement logic', () => {
         expect(layout.positions.get(2)).toEqual({x: 300, y: 90});
         expect(layout.positions.get(1)).toEqual({x: 120, y: 90});
         expect(layout.positions.get(0)).toEqual({x: -60, y: 90});
+        expect(layout.componentSpaces.get(layout.pieceToComponent.get(0)!)).toBe('plane');
+        expect(layout.pieceSpaces.get(0)).toBe('plane');
+    });
+
+    it('tracks torus surface and outer component layout spaces', () => {
+        const board = generateJigsawBoard(12, {surface: 'torus'});
+        const surfaceState: JigsawState = {
+            positions: {'3': {x: 630, y: 90}},
+            connections: {[connectionKey(3, 0)]: 1},
+        };
+        const outerState: JigsawState = {
+            positions: {'3': {x: 820, y: -80, outer: true}},
+            connections: {[connectionKey(3, 0)]: 1},
+        };
+
+        const surfaceLayout = buildPuzzleLayout(board, surfaceState);
+        const outerLayout = buildPuzzleLayout(board, outerState);
+        const surfaceComponent = surfaceLayout.pieceToComponent.get(3)!;
+        const outerComponent = outerLayout.pieceToComponent.get(3)!;
+
+        expect(surfaceLayout.componentSpaces.get(surfaceComponent)).toBe('surface');
+        expect(surfaceLayout.pieceSpaces.get(0)).toBe('surface');
+        expect(surfaceLayout.positions.get(0)).toEqual({x: 810, y: 90});
+        expect(outerLayout.componentSpaces.get(outerComponent)).toBe('outer');
+        expect(outerLayout.pieceSpaces.get(0)).toBe('outer');
+        expect(outerLayout.positions.get(3)).toEqual({x: 820, y: -80});
+        expect(outerLayout.positions.get(0)).toEqual({x: 1000, y: -80});
     });
 
     it('creates all eligible correct-neighbor snap candidates with destination-winning strength', () => {
@@ -765,7 +813,7 @@ describe('jigsaw placement logic', () => {
         ]);
     });
 
-    it('classifies torus viewport drops and outside-drop patches', () => {
+    it('classifies torus viewport drops and persists outside drops as outer positions', () => {
         const size = {width: 720, height: 540};
         const state: JigsawState = {
             positions: {'3': {x: 630, y: 90}},
@@ -774,12 +822,22 @@ describe('jigsaw placement logic', () => {
 
         expect(isInsideTorusViewport({x: 0, y: 540}, size)).toBe(true);
         expect(isInsideTorusViewport({x: -1, y: 20}, size)).toBe(false);
-        expect(outsideTorusDropPatches(state, [3])).toEqual({
-            type: 'patches',
-            patches: [removePositionPatch(3)],
+        expect(positionPatch(state, 3, outerPosition({x: 760, y: -40}))).toEqual({
+            op: 'replace',
+            path: [
+                {type: 'key', key: 'positions'},
+                {type: 'key', key: '3'},
+            ],
+            value: {x: 760, y: -40, outer: true},
         });
-        expect(outsideTorusDropPatches(state, [4])).toEqual({type: 'patches', patches: []});
-        expect(outsideTorusDropPatches(state, [3, 0])).toEqual({type: 'cancel'});
+        expect(positionPatch(state, 4, outerPosition({x: -80, y: 120}))).toEqual({
+            op: 'add',
+            path: [
+                {type: 'key', key: 'positions'},
+                {type: 'key', key: '4'},
+            ],
+            value: {x: -80, y: 120, outer: true},
+        });
     });
 
     it('converts visual torus drop positions through sub-canvas pan before storing', () => {
@@ -811,6 +869,37 @@ describe('jigsaw placement logic', () => {
             [0, {x: 90, y: 90}],
         ]);
 
+        expect(
+            snapCandidates({
+                board,
+                layout,
+                draggedPieces: new Set([3]),
+                draggedPositions,
+                allPositions,
+                snapThreshold: 2,
+                distanceBetween: (a, b) => wrappedDistance(a, b, board.imageSize),
+            }),
+        ).toEqual([{from: 3, to: 0, key: connectionKey(3, 0), strength: 1}]);
+    });
+
+    it('snaps first-time torus drops after converting visual sub-canvas coordinates through pan', () => {
+        const board = generateJigsawBoard(12, {surface: 'torus'});
+        const state: JigsawState = {
+            positions: {
+                '0': {x: 90, y: 90},
+            },
+            connections: {},
+        };
+        const layout = buildPuzzleLayout(board, state);
+        const visualDrop = {x: 30, y: 130};
+        const logicalDrop = torusLogicalDropPosition(visualDrop, {x: 120, y: 40}, board.imageSize);
+        const draggedPositions = new Map([[3, logicalDrop]]);
+        const allPositions = new Map([
+            [0, {x: 90, y: 90}],
+            [3, logicalDrop],
+        ]);
+
+        expect(logicalDrop).toEqual({x: 630, y: 90});
         expect(
             snapCandidates({
                 board,

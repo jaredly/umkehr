@@ -20,20 +20,22 @@ import {
     buildPuzzleLayout,
     canonicalTorusPoint,
     connectionPatch,
+    distance,
     estimatedPieceSize,
     isInsideTorusViewport,
+    outerPosition,
     nearestEquivalentPoint,
-    outsideTorusDropPatches,
     positionPatch,
     positiveModulo,
     snapCandidates,
     snapThreshold,
     subtract,
+    surfacePosition,
     torusPieceCopies,
-    torusLogicalDropPosition,
     unplacedPieces,
     validConnections,
     wrappedDistance,
+    type ComponentPlacementSpace,
 } from './jigsaw';
 import {JigsawMinimap, type JigsawBoardSpace, type JigsawViewport} from './JigsawMinimap';
 
@@ -41,12 +43,14 @@ type DragState = {
     pointerId: number;
     component: number[];
     anchor: number;
-    startPointer: Coord;
     currentPointer: Coord;
-    initialPositions: Map<number, Coord>;
-    delta: Coord;
-    mode: 'outer' | 'torus';
+    pointerOffset: Coord;
+    pieceOffsets: Map<number, Coord>;
+    originSpace: DragSpace;
+    previewSpace: DragSpace;
 };
+
+type DragSpace = 'outer' | 'surface';
 
 type PanState = {
     pointerId: number;
@@ -183,13 +187,6 @@ export function JigsawPanel({
                 });
                 return;
             }
-            if (isTorusBoard && eventTargetIsInTorusViewport(event.target)) {
-                setTorusViewport((current) => ({
-                    panX: positiveModulo(current.panX - event.deltaX / viewport.zoom, board.imageSize.width),
-                    panY: positiveModulo(current.panY - event.deltaY / viewport.zoom, board.imageSize.height),
-                }));
-                return;
-            }
             setViewport((current) => ({
                 ...current,
                 panX: current.panX - event.deltaX,
@@ -240,48 +237,77 @@ export function JigsawPanel({
         return () => window.clearTimeout(timeout);
     }, [snapPulse]);
 
+    const activeComponent = useMemo(() => new Set(drag?.component ?? []), [drag]);
+    const dragPositions = useMemo(() => (drag ? positionsForDrag(drag) : null), [drag]);
+    const renderedSurfacePlacedPositions = useMemo(() => {
+        const result = new Map<number, Coord>();
+        for (const [piece, position] of layout.positions) {
+            if (activeComponent.has(piece)) continue;
+            if (layout.pieceSpaces.get(piece) === 'surface') result.set(piece, position);
+        }
+        if (drag?.previewSpace === 'surface' && dragPositions) {
+            for (const [piece, position] of dragPositions) result.set(piece, position);
+        }
+        return result;
+    }, [activeComponent, drag, dragPositions, layout.pieceSpaces, layout.positions]);
+    const renderedOuterPlacedPositions = useMemo(() => {
+        const result = new Map<number, Coord>();
+        for (const [piece, position] of layout.positions) {
+            if (activeComponent.has(piece)) continue;
+            if (!isTorusBoard || layout.pieceSpaces.get(piece) === 'outer') result.set(piece, position);
+        }
+        if (drag?.previewSpace === 'outer' && dragPositions) {
+            for (const [piece, position] of dragPositions) {
+                if (layout.positions.has(piece)) result.set(piece, position);
+            }
+        }
+        return result;
+    }, [activeComponent, drag, dragPositions, isTorusBoard, layout.pieceSpaces, layout.positions]);
+    const renderedUnplacedPositions = useMemo(() => {
+        const result = new Map<number, Coord>();
+        for (const [piece, position] of localPositions) {
+            if (!activeComponent.has(piece)) result.set(piece, position);
+        }
+        if (drag?.previewSpace === 'outer' && dragPositions) {
+            for (const [piece, position] of dragPositions) {
+                if (!layout.positions.has(piece)) result.set(piece, position);
+            }
+        }
+        return result;
+    }, [activeComponent, drag, dragPositions, layout.positions, localPositions]);
     const renderedPositions = useMemo(() => {
         const result = new Map<number, Coord>(localPositions);
         for (const [piece, position] of layout.positions) result.set(piece, position);
-        if (drag) {
-            for (const [piece, position] of drag.initialPositions) {
-                result.set(piece, add(position, drag.delta));
+        if (dragPositions) {
+            for (const [piece, position] of dragPositions) {
+                result.set(piece, position);
             }
         }
         return result;
-    }, [drag, layout.positions, localPositions]);
-    const renderedPlacedPositions = useMemo(() => {
-        const result = new Map<number, Coord>(layout.positions);
-        if (drag) {
-            for (const [piece, position] of drag.initialPositions) {
-                if (layout.positions.has(piece)) result.set(piece, add(position, drag.delta));
-            }
-        }
-        return result;
-    }, [drag, layout.positions]);
-    const renderedUnplacedPositions = useMemo(() => {
-        const result = new Map<number, Coord>(localPositions);
-        if (drag) {
-            for (const [piece, position] of drag.initialPositions) {
-                if (!layout.positions.has(piece)) result.set(piece, add(position, drag.delta));
-            }
-        }
-        return result;
-    }, [drag, layout.positions, localPositions]);
+    }, [dragPositions, layout.positions, localPositions]);
     const minimapPositions = useMemo(() => {
         if (!isTorusBoard) return renderedPositions;
         const result = new Map<number, Coord>(renderedUnplacedPositions);
-        for (const [piece, position] of renderedPlacedPositions) {
+        for (const [piece, position] of renderedOuterPlacedPositions) {
+            result.set(piece, position);
+        }
+        for (const [piece, position] of renderedSurfacePlacedPositions) {
             result.set(piece, canonicalTorusPoint(position, board.imageSize));
         }
         return result;
-    }, [board.imageSize, isTorusBoard, renderedPlacedPositions, renderedPositions, renderedUnplacedPositions]);
+    }, [
+        board.imageSize,
+        isTorusBoard,
+        renderedOuterPlacedPositions,
+        renderedPositions,
+        renderedSurfacePlacedPositions,
+        renderedUnplacedPositions,
+    ]);
     usePieceMoveAnimation(renderedPositions, pieceRefs, {
         disabled: Boolean(drag) || isTorusBoard,
         durationMs: remoteMoveAnimationMs,
         localMoveAnimationNonce,
     });
-    const activeComponent = useMemo(() => new Set(drag?.component ?? []), [drag]);
     const placedPieces = useMemo(() => new Set(layout.positions.keys()), [layout.positions]);
     const totalConnections = board.pieces.reduce((sum, piece) => sum + piece.neighbors.length, 0) / 2;
     const solvedConnections = validConnections(board, connections).length;
@@ -291,9 +317,8 @@ export function JigsawPanel({
         event.preventDefault();
         event.stopPropagation();
         const placed = layout.positions.has(piece);
-        const mode = isTorusBoard && placed ? 'torus' : 'outer';
-        const pointer = mode === 'torus' ? pointerToTorusImage(event) : pointerToBoard(event);
-        if (!pointer) return;
+        const originSpace: DragSpace =
+            isTorusBoard && placed && layout.pieceSpaces.get(piece) === 'surface' ? 'surface' : 'outer';
         const componentIndex = layout.pieceToComponent.get(piece);
         const component = componentIndex === undefined ? [piece] : layout.components[componentIndex] ?? [piece];
         const anchor = componentIndex === undefined ? piece : layout.anchors.get(componentIndex) ?? piece;
@@ -306,16 +331,24 @@ export function JigsawPanel({
             const fallback = renderedPositions.get(piece);
             if (fallback) initialPositions.set(anchor, fallback);
         }
+        const anchorPosition = initialPositions.get(anchor);
+        if (!anchorPosition) return;
+        const pointer = pointerForDragSpace(event, originSpace, anchorPosition);
+        if (!pointer) return;
+        const pieceOffsets = new Map<number, Coord>();
+        for (const [componentPiece, position] of initialPositions) {
+            pieceOffsets.set(componentPiece, subtract(position, anchorPosition));
+        }
         viewportRef.current?.setPointerCapture(event.pointerId);
         setDrag({
             pointerId: event.pointerId,
             component,
             anchor,
-            startPointer: pointer,
             currentPointer: pointer,
-            initialPositions,
-            delta: {x: 0, y: 0},
-            mode,
+            pointerOffset: subtract(pointer, anchorPosition),
+            pieceOffsets,
+            originSpace,
+            previewSpace: originSpace,
         });
     };
     const startDragRef = useRef(startDrag);
@@ -360,15 +393,13 @@ export function JigsawPanel({
         }
         if (!drag || event.pointerId !== drag.pointerId) return;
         event.preventDefault();
-        const pointer =
-            drag.mode === 'torus'
-                ? pointerToTorusImage(event, drag.currentPointer)
-                : pointerToBoard(event);
+        const previewSpace = torusPointerIsInside(event) ? 'surface' : 'outer';
+        const pointer = pointerForDragSpace(event, previewSpace, drag.currentPointer);
         if (!pointer) return;
         setDrag({
             ...drag,
             currentPointer: pointer,
-            delta: subtract(pointer, drag.startPointer),
+            previewSpace,
         });
     };
 
@@ -385,30 +416,22 @@ export function JigsawPanel({
         const latest = editor.latest();
         const latestLayout = buildPuzzleLayout(board, latest);
         const draggedPieces = new Set(drag.component);
-        const draggedPositions = new Map<number, Coord>();
-        for (const [piece, position] of drag.initialPositions) {
-            draggedPositions.set(piece, add(position, drag.delta));
-        }
+        const torusDropInside = torusPointerIsInside(event);
+        const dropSpace: DragSpace = torusDropInside ? 'surface' : 'outer';
+        const dropPointer = pointerForDragSpace(event, dropSpace, drag.currentPointer);
+        const draggedPositions = dropPointer ? positionsForDrag(drag, dropPointer) : positionsForDrag(drag);
         const anchorPosition = draggedPositions.get(drag.anchor);
         if (!anchorPosition) {
             setDrag(null);
             return;
         }
 
-        const torusLocalDrop = isTorusBoard ? pointerToTorusLocal(event) : null;
-        const torusDropInside = torusLocalDrop ? isInsideTorusViewport(torusLocalDrop, board.imageSize) : false;
-        if (isTorusBoard && !torusDropInside) {
-            const outsideDrop = outsideTorusDropPatches(latest, drag.component);
-            suppressLocalMoveAnimation();
-            if (outsideDrop.type === 'patches' && outsideDrop.patches.length) {
-                editor.dispatch(outsideDrop.patches);
-            }
-            setDrag(null);
-            return;
-        }
-
-        const allPositions = new Map<number, Coord>(localPositions);
-        for (const [piece, position] of latestLayout.positions) allPositions.set(piece, position);
+        const snapSpace: ComponentPlacementSpace = !isTorusBoard
+            ? 'plane'
+            : dropSpace === 'surface'
+                ? 'surface'
+                : 'outer';
+        const allPositions = positionsForSnap(latestLayout, localPositions, snapSpace);
         for (const [piece, position] of draggedPositions) allPositions.set(piece, position);
         const candidates = snapCandidates({
             board,
@@ -417,15 +440,18 @@ export function JigsawPanel({
             draggedPositions,
             allPositions,
             snapThreshold: threshold,
-            distanceBetween: isTorusBoard ? (a, b) => wrappedDistance(a, b, board.imageSize) : undefined,
+            distanceBetween:
+                isTorusBoard && dropSpace === 'surface'
+                    ? (a, b) => wrappedDistance(a, b, board.imageSize)
+                    : distance,
         });
         const newConnections = candidates.filter(
             (candidate) => latest.connections[candidate.key] === undefined,
         );
         const storedAnchorPosition = isTorusBoard
-            ? drag.mode === 'torus'
-                ? canonicalTorusPoint(anchorPosition, board.imageSize)
-                : torusLogicalDropPosition(anchorPosition, torusPanCoord(torusViewport), board.imageSize)
+            ? dropSpace === 'surface'
+                ? surfacePosition(canonicalTorusPoint(anchorPosition, board.imageSize))
+                : outerPosition(anchorPosition)
             : anchorPosition;
         const patches = [
             positionPatch(latest, drag.anchor, storedAnchorPosition),
@@ -633,7 +659,7 @@ export function JigsawPanel({
                                           ))
                                         : null}
                                     {board.pieces.flatMap((_piece, index) => {
-                                        const position = renderedPlacedPositions.get(index);
+                                        const position = renderedSurfacePlacedPositions.get(index);
                                         if (!position) return [];
                                         return torusPieceCopies({
                                             board,
@@ -644,7 +670,7 @@ export function JigsawPanel({
                                             renderPiece({
                                                 index,
                                                 position: copy.position,
-                                                placed: true,
+                                                placed: layout.positions.has(index),
                                                 layer: 'torus',
                                                 keyPrefix: 'torus',
                                                 copyKey: copy.key,
@@ -655,6 +681,17 @@ export function JigsawPanel({
                                     })}
                                 </div>
                             </div>
+                            {board.pieces.map((_piece, index) => {
+                                const position = renderedOuterPlacedPositions.get(index);
+                                if (!position) return null;
+                                return renderPiece({
+                                    index,
+                                    position,
+                                    placed: true,
+                                    layer: 'outer',
+                                    keyPrefix: 'outer-placed',
+                                });
+                            })}
                             {board.pieces.map((_piece, index) => {
                                 const position = renderedUnplacedPositions.get(index);
                                 if (!position) return null;
@@ -743,6 +780,20 @@ export function JigsawPanel({
         const raw = subtract(local, torusPanCoord(torusViewport));
         const canonical = canonicalTorusPoint(raw, board.imageSize);
         return reference ? nearestEquivalentPoint(canonical, reference, board.imageSize) : canonical;
+    }
+
+    function torusPointerIsInside(event: PointerEvent<HTMLElement>) {
+        if (!isTorusBoard) return false;
+        const local = pointerToTorusLocal(event);
+        return local ? isInsideTorusViewport(local, board.imageSize) : false;
+    }
+
+    function pointerForDragSpace(
+        event: PointerEvent<HTMLElement>,
+        space: DragSpace,
+        reference?: Coord,
+    ) {
+        return space === 'surface' ? pointerToTorusImage(event, reference) : pointerToBoard(event);
     }
 
     function pieceZIndex({
@@ -1207,6 +1258,35 @@ function eventTargetIsInTorusViewport(target: EventTarget | null) {
 
 function torusPanCoord(pan: TorusViewport): Coord {
     return {x: pan.panX, y: pan.panY};
+}
+
+function positionsForDrag(drag: DragState, pointer = drag.currentPointer) {
+    const result = new Map<number, Coord>();
+    const anchorPosition = subtract(pointer, drag.pointerOffset);
+    for (const [piece, offset] of drag.pieceOffsets) {
+        result.set(piece, add(anchorPosition, offset));
+    }
+    return result;
+}
+
+function positionsForSnap(
+    layout: ReturnType<typeof buildPuzzleLayout>,
+    localPositions: Map<number, Coord>,
+    space: ComponentPlacementSpace,
+) {
+    const result = new Map<number, Coord>();
+    if (space === 'plane') {
+        for (const [piece, position] of localPositions) result.set(piece, position);
+        for (const [piece, position] of layout.positions) result.set(piece, position);
+        return result;
+    }
+    if (space === 'outer') {
+        for (const [piece, position] of localPositions) result.set(piece, position);
+    }
+    for (const [piece, position] of layout.positions) {
+        if (layout.pieceSpaces.get(piece) === space) result.set(piece, position);
+    }
+    return result;
 }
 
 function torusImageTiles(

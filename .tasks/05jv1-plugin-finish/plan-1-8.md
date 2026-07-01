@@ -428,14 +428,18 @@ Manual smoke areas:
 - Should `BlockEditorAnnotationRenderServices` expose raw maps (`popoverTextById`,
   `footnoteNumberById`) or accessor methods only? Accessors are cleaner public API; maps are less
   churn for the move.
+    - maps is good for now
 - Should floating destination render one aggregate renderer or one renderer invocation per active
   popover? Aggregate rendering matches the current component and keeps nested popover ordering in
   the plugin.
+    - aggregate sounds good
 - Should `AnnotationBodyBlock` be public from the annotations plugin, or kept internal to
   `annotationRenderer.tsx` until command and clipboard ownership settle?
+     - public
 - Should the transitional body command bridge be typed in plugin public APIs, or kept in an
   internal `annotationRenderer` prop/service type to avoid exposing `Replica` and
   `makeCommandContext`?
+     - no opinion
 
 ## Completion Criteria
 
