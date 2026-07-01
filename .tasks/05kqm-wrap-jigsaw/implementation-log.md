@@ -34,3 +34,13 @@
     not modify or revert it.
   - Started the Vite dev server with `npm run dev -- --host 127.0.0.1 --port 5174`; ports 5174-5176
     were occupied, so Vite selected `http://127.0.0.1:5177/`. `curl -I` returned `200 OK`.
+- Follow-up bug investigation:
+  - Symptom: a torus component could jump when it contained two pieces that are physical neighbors
+    but not directly connected.
+  - Cause: `positionsForComponent` first computed the connected component from actual connections,
+    but then laid out positions by walking every physical neighbor inside that component. On a torus,
+    this can accidentally close a line through an unconnected seam/adjacent edge.
+  - Fix: component layout now builds adjacency from the actual valid connection edges and traverses
+    only those edges. Added a regression test for a seam-crossing chain `3 -> 0 -> 1 -> 2` that must
+    not use the unconnected physical `3 <-> 2` edge.
+  - `npm exec vitest -- run src/apps/jigsaw/jigsaw.test.ts` passes with 59 tests after the fix.

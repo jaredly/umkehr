@@ -177,7 +177,7 @@ export function buildPuzzleLayout(board: JigsawBoardArtifact, state: JigsawState
         anchors.set(componentIndex, anchor);
         const anchorPosition = state.positions[pieceKey(anchor)];
         if (!anchorPosition) return;
-        for (const [piece, position] of positionsForComponent(board, component, anchor, anchorPosition)) {
+        for (const [piece, position] of positionsForComponent(board, component, anchor, anchorPosition, connections)) {
             positions.set(piece, position);
         }
     });
@@ -209,14 +209,15 @@ export function positionsForComponent(
     component: number[],
     anchor: number,
     anchorPosition: Coord,
+    connections: ValidConnection[] = [],
 ) {
-    const componentSet = new Set(component);
+    const neighborsByPiece = connectedNeighborsForComponent(board, component, connections);
     const positions = new Map<number, Coord>([[anchor, anchorPosition]]);
     const queue = [anchor];
     while (queue.length) {
         const current = queue.shift()!;
         const currentPosition = positions.get(current)!;
-        const neighbors = physicalNeighborsInComponent(board, current, componentSet);
+        const neighbors = neighborsByPiece.get(current) ?? [];
         for (const neighbor of neighbors) {
             if (positions.has(neighbor.piece)) continue;
             positions.set(neighbor.piece, add(currentPosition, neighbor.offset));
@@ -929,19 +930,23 @@ function stronglyConnectedComponents(pieceCount: number, connections: ValidConne
     return components;
 }
 
-function physicalNeighborsInComponent(
+function connectedNeighborsForComponent(
     board: JigsawBoardArtifact,
-    piece: number,
-    component: Set<number>,
+    component: number[],
+    connections: ValidConnection[],
 ) {
-    const neighbors: Array<{piece: number; offset: Coord}> = [];
-    for (const neighbor of board.pieces[piece]?.neighbors ?? []) {
-        if (component.has(neighbor.piece)) neighbors.push(neighbor);
-    }
-    for (const [candidate, candidatePiece] of board.pieces.entries()) {
-        if (!component.has(candidate) || candidate === piece) continue;
-        const reverse = candidatePiece.neighbors.find((neighbor) => neighbor.piece === piece);
-        if (reverse) neighbors.push({piece: candidate, offset: {x: -reverse.offset.x, y: -reverse.offset.y}});
+    const componentSet = new Set(component);
+    const neighbors = new Map<number, Array<{piece: number; offset: Coord}>>();
+    for (const piece of component) neighbors.set(piece, []);
+
+    for (const connection of connections) {
+        if (!componentSet.has(connection.from) || !componentSet.has(connection.to)) continue;
+        const offset = neighborOffset(board, connection.from, connection.to);
+        if (!offset) continue;
+        neighbors.get(connection.from)?.push({piece: connection.to, offset});
+        neighbors
+            .get(connection.to)
+            ?.push({piece: connection.from, offset: {x: -offset.x, y: -offset.y}});
     }
     return neighbors;
 }

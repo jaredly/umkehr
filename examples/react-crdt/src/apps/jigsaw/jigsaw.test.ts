@@ -691,6 +691,23 @@ describe('jigsaw placement logic', () => {
         expect(layout.positions.get(0)).toEqual({x: 810, y: 90});
     });
 
+    it('does not use unconnected physical torus neighbors when laying out a component', () => {
+        const board = generateJigsawBoard(12, {surface: 'torus'});
+        const state: JigsawState = {
+            positions: {'3': {x: 630, y: 90}},
+            connections: {
+                [connectionKey(3, 0)]: 1,
+                [connectionKey(0, 1)]: 1,
+                [connectionKey(1, 2)]: 1,
+            },
+        };
+        const layout = buildPuzzleLayout(board, state);
+
+        expect(layout.positions.get(0)).toEqual({x: 810, y: 90});
+        expect(layout.positions.get(1)).toEqual({x: 990, y: 90});
+        expect(layout.positions.get(2)).toEqual({x: 1170, y: 90});
+    });
+
     it('computes stronger snap edges when the dragged endpoint is shallower than the dragged anchor', () => {
         expect(snapStrength({draggedMaxDepth: 5, draggedEndpointDepth: 2})).toBe(4);
     });
