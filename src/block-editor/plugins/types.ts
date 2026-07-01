@@ -1,4 +1,4 @@
-import type {ReactElement} from 'react';
+import type {ClipboardEvent, KeyboardEvent, ReactElement} from 'react';
 
 import type {FormattedBlock, FormattedRun, VirtualBlockParentConfig} from '../../block-crdt/index.js';
 import type {
@@ -19,6 +19,8 @@ import type {
 } from '../selectionModel.js';
 import type {BlockLevelSelectionDecorations} from '../selectionSet.js';
 import type {CodePreviewKind, RichBlockStyleAttribute, SlideDeckFooterMode, SlideTransition} from '../blockMeta.js';
+import type {MoveTarget, TableCellSlotTarget} from '../blockCommands.js';
+import type {TableCellRectangle} from '../tableSelectionPlugin.js';
 
 export type BlockEditorPluginId = string;
 export type BlockEditorContributionId = string;
@@ -149,6 +151,7 @@ export type BlockEditorRenderedBlockNode<Meta extends TimestampedBlockMeta = Tim
 export type BlockEditorBlockChildrenMode = 'core' | 'renderer';
 
 export type BlockEditorEditableBlockOptions = {
+    variant?: 'block' | 'table-row-header';
     ariaLabel?: string;
     placeholder?: string;
     surfaceClassName?: string;
@@ -195,6 +198,13 @@ export type BlockEditorBlockDropIndicator = {
     indicatorPlacement: string;
 };
 
+export type BlockEditorTableBlockDropTarget = {
+    command: MoveTarget | {type: 'table-cell-slot'; target: TableCellSlotTarget};
+    indicatorBlockId: string;
+    indicatorPlacement: 'before' | 'after';
+    indicatorDepth: number;
+};
+
 export type BlockEditorDragDropRenderServices = {
     registerRow(blockId: string, element: HTMLElement | null): void;
     startBlockDragFromHandle(blockId: string, event: unknown): void;
@@ -207,7 +217,84 @@ export type BlockEditorDecorationRenderServices = {
     blockLevel(blockId: string): BlockLevelSelectionDecorations | null;
 };
 
-export type BlockEditorTableRenderServices = Record<string, unknown>;
+export type BlockEditorTableCellSlotTarget = TableCellSlotTarget;
+export type BlockEditorTableRowSlotTarget = {
+    kind: 'row-slot';
+    tableId: string;
+    beforeRowId: string | null;
+    afterRowId: string | null;
+    indicatorRowId: string;
+    indicatorPlacement: 'before' | 'after';
+};
+export type BlockEditorTableBlockSlotTarget = {
+    kind: 'block-slot';
+    dropTarget: BlockEditorTableBlockDropTarget;
+};
+export type BlockEditorTableCellDragTarget =
+    | ({kind: 'cell-slot'} & BlockEditorTableCellSlotTarget)
+    | BlockEditorTableRowSlotTarget
+    | BlockEditorTableBlockSlotTarget;
+export type BlockEditorTableCellDragState = {
+    sourceCellId: string;
+    columnCellIds?: string[];
+    rectangleSelection?: EditorSelection;
+    target: BlockEditorTableCellDragTarget | null;
+};
+export type BlockEditorTableCellSelectionDragState = {
+    tableId: string;
+    anchorCellId: string;
+    focusCellId: string;
+};
+export type BlockEditorTableRenderServices = {
+    currentSelection(): EditorSelection;
+    cellIdForSelection(selection: EditorSelection): string | null;
+    cellSelectionForCell(cellId: string): EditorSelection | null;
+    isCellBlock(blockId: string): boolean;
+    fullColumnSelectionCellIds(selection: EditorSelection, tableId: string): string[] | null;
+    selectedRectangleSelection(selection: EditorSelection, tableId: string): EditorSelection | null;
+    rectangleSelectionForTextSelection(selection: EditorSelection, tableId: string): EditorSelection | null;
+    rectangleForSelection(selection: EditorSelection): TableCellRectangle | null;
+    rowsForTable(tableId: string): string[];
+    cellsForRow(rowId: string): string[];
+    blockLevelDecoration(blockId: string): BlockLevelSelectionDecorations | null;
+    dropTarget(): BlockEditorTableBlockDropTarget | null;
+    createMissingCell(tableId: string, rowId: string, columnIndex: number): void;
+    addRow(tableId: string, afterRowId?: string): void;
+    addColumn(tableId: string, columnIndex?: number): void;
+    selectCells(selection: EditorSelection): void;
+    moveCellsToNewRow(cellIds: string[], target: Pick<BlockEditorTableRowSlotTarget, 'tableId' | 'beforeRowId' | 'afterRowId'>): void;
+    moveCellsOutAsBlocks(cellIds: string[], dropCommand: MoveTarget): void;
+    moveRectangleOutToNewTable(selection: EditorSelection, dropCommand: MoveTarget): void;
+    moveCellRectangleContents(selection: EditorSelection, target: BlockEditorTableCellSlotTarget): void;
+    moveCell(cellId: string, target: BlockEditorTableCellSlotTarget): void;
+    moveColumnCells(cellIds: string[], targetColumnIndex: number): void;
+    setCellDragBlockDropTarget(dropTarget: BlockEditorTableBlockDropTarget | null): void;
+    cellElementFromPoint(clientX: number, clientY: number): HTMLElement | null;
+    cellSlotTargetFromPoint(clientX: number, clientY: number, tableId: string): BlockEditorTableCellSlotTarget | null;
+    rowSlotTargetFromPoint(clientX: number, clientY: number, tableId: string): BlockEditorTableCellDragTarget | null;
+    dragTargetFromPoint(clientX: number, clientY: number, tableId: string): BlockEditorTableCellDragTarget | null;
+    isCellBorderPointer(
+        event: Pick<PointerEvent, 'isPrimary' | 'button' | 'clientX' | 'clientY'> & {
+            currentTarget: HTMLElement;
+        },
+    ): boolean;
+    onCopy(event: ClipboardEvent<HTMLElement>): void;
+    onCut(event: ClipboardEvent<HTMLElement>): void;
+    onPaste(event: ClipboardEvent<HTMLElement>): void;
+    onKeystroke(blockId: string, event: KeyboardEvent<HTMLElement>): void;
+    onUndo(): void;
+    onRedo(): void;
+    moveSelectionByArrowKey(
+        selection: EditorSelection,
+        direction: 'left' | 'right' | 'up' | 'down',
+        sourceBlock?: HTMLElement,
+    ): boolean;
+    extendSelectionByArrowKey(
+        selection: EditorSelection,
+        direction: 'left' | 'right' | 'up' | 'down',
+        sourceBlock?: HTMLElement,
+    ): boolean;
+};
 export type BlockEditorSlideDeckDisplayMode = 'presentation' | 'overview' | 'outline';
 export type BlockEditorOrphanSlideDisplayMode = 'view' | 'outline';
 export type BlockEditorSlideDeckUiState = {

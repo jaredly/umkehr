@@ -1,0 +1,2 @@
+examples/react-crdt: for our torus board, we currently render it 'unwrapped', which was fine for an initial implementation, but now I want us to do better. I'd like to have a sub-canvas that has its own independent panning state, that acts as a torus; so a piece that's halfway off the top edge is also rendered along the bottom edge, for example. Unplaced pieces are rendered outside of the sub-canvas. If you try to drop a piece outside of the sub-canvas, it's placed position (if any) gets deleted, and it joins the unplaced pieces.
+Does that make sense?

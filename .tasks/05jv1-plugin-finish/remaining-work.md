@@ -227,3 +227,11 @@ Keep these areas covered during extraction:
 - code preview tests;
 - example document fixture tests;
 - package smoke tests for exported JS and CSS entrypoints.
+
+## Follow-Up Notes
+
+- Slide viewport measurement currently flows through a `context.slides.measureElement(...)` hook
+  service added during slide renderer extraction. This is acceptable as transitional renderer
+  plumbing, but it should be revisited after command/option-panel extraction. Prefer either a
+  plugin-owned measurement hook that does not need to be passed through central context, or a
+  clearly documented public measurement service if other structural renderers also need it.

@@ -23,7 +23,6 @@ import {
     isDeleted,
     materializeFormattedBlocks,
     materializedBlockParent,
-    materializedBlockPath,
     orderedCharIdsForBlock,
     visibleBlockChildren,
     visibleRangesForMark,
@@ -74,7 +73,6 @@ import {
     type CommandResult,
     type MoveTarget,
     type RetainedInlineMarkSession,
-    type TableCellSlotTarget,
 } from './blockCommands.js';
 import {
     annotationVirtualParents,
@@ -292,10 +290,24 @@ import {
 } from './floatingPopovers.js';
 import {activeInlineMarkTypesFromRegistry, deriveActiveInlineMarks} from './inlineRunRendering.js';
 import {
-    blockDropTargetFromPoint,
     orderDraggedBlockIds,
     orderDraggedBlockIdsForCellSlot,
 } from './blockDropTargets.js';
+import {
+    tableDragTargetAtPoint,
+    tableElementAtPoint,
+    tableCellSlotAtPoint,
+    tableRowSlotAtPoint,
+    cellBorderPointerHit,
+} from './tableDomTargets.js';
+import {
+    fullColumnSelectionCellIds,
+    isTableCellBlock,
+    selectedTableRectangleSelection,
+    tableCellIdForSelection,
+    tableCellRectangleSelectionForTextSelection,
+    tableCellSelectionForCell,
+} from './tableRenderHelpers.js';
 import {
     activePollVotes,
     choiceResults,
@@ -3897,9 +3909,155 @@ const pluginBlockRenderContext = (
         blockLevel: (blockId) => context.blockLevelDecorationsByBlock.get(blockId) ?? null,
     },
     table: {
+        currentSelection: () => context.selection,
+        cellIdForSelection: (selection) => tableCellIdForSelection(context.state, selection),
+        cellSelectionForCell: (cellId) => tableCellSelectionForCell(context.state, cellId),
+        isCellBlock: (blockId) => isTableCellBlock(context.state, blockId),
+        fullColumnSelectionCellIds: (selection, tableId) =>
+            fullColumnSelectionCellIds(context.state, selection, tableId),
+        selectedRectangleSelection: (selection, tableId) =>
+            selectedTableRectangleSelection(context.state, selection, tableId),
+        rectangleSelectionForTextSelection: (selection, tableId) =>
+            tableCellRectangleSelectionForTextSelection(context.state, selection, tableId),
+        rectangleForSelection: (selection) => tableCellRectangleForSelection(context.state, selection),
+        rowsForTable: (tableId) => tableRowsForSelection(context.state, tableId),
+        cellsForRow: (rowId) => tableCellsForSelection(context.state, rowId),
+        blockLevelDecoration: (blockId) => context.blockLevelDecorationsByBlock.get(blockId) ?? null,
+        dropTarget: () => context.dropTarget,
         createMissingCell: context.createMissingTableCell,
         addRow: context.addTableRow,
         addColumn: context.addTableColumn,
+        selectCells: (selection) => {
+            context.runBlockControlCommand((current) => ({
+                state: current.state,
+                ops: [],
+                selection: replaceSelectionSet(current.state, selection, current.selection.primaryId),
+            }));
+        },
+        moveCellsToNewRow: (cellIds, target) => {
+            context.runBlockControlCommand((current) => {
+                const result = moveTableCellsToNewRow(
+                    current.state,
+                    cellIds,
+                    target,
+                    makeCommandContext(current),
+                );
+                return {
+                    state: result.state,
+                    ops: result.ops,
+                    selection: replaceSelectionSet(
+                        result.state,
+                        result.selection,
+                        current.selection.primaryId,
+                    ),
+                };
+            });
+        },
+        moveCellsOutAsBlocks: (cellIds, dropCommand) => {
+            context.runBlockControlCommand((current) => {
+                const result = moveTableCellsOutAsBlocks(
+                    current.state,
+                    cellIds,
+                    dropCommand,
+                    makeCommandContext(current),
+                );
+                return {
+                    state: result.state,
+                    ops: result.ops,
+                    selection: replaceSelectionSet(
+                        result.state,
+                        result.selection,
+                        current.selection.primaryId,
+                    ),
+                };
+            });
+        },
+        moveRectangleOutToNewTable: (selection, dropCommand) => {
+            context.runBlockControlCommand((current) => {
+                const result = moveCellRectangleOutToNewTable(
+                    current.state,
+                    selection,
+                    dropCommand,
+                    makeCommandContext(current),
+                );
+                return result
+                    ? {
+                          state: result.state,
+                          ops: result.ops,
+                          selection: replaceSelectionSet(
+                              result.state,
+                              result.selection,
+                              current.selection.primaryId,
+                          ),
+                      }
+                    : {state: current.state, ops: [], selection: current.selection};
+            });
+        },
+        moveCellRectangleContents: (selection, target) => {
+            context.runBlockControlCommand((current) => {
+                const result = moveTableCellRectangleContents(
+                    current.state,
+                    selection,
+                    target,
+                    makeCommandContext(current),
+                );
+                return result
+                    ? {
+                          state: result.state,
+                          ops: result.ops,
+                          selection: replaceSelectionSet(
+                              result.state,
+                              result.selection,
+                              current.selection.primaryId,
+                          ),
+                      }
+                    : {state: current.state, ops: [], selection: current.selection};
+            });
+        },
+        moveCell: (cellId, target) => {
+            context.runBlockControlCommand((current) => {
+                const result = moveTableCell(
+                    current.state,
+                    cellId,
+                    target,
+                    makeCommandContext(current),
+                );
+                return {state: result.state, ops: result.ops, selection: current.selection};
+            });
+        },
+        moveColumnCells: (cellIds, targetColumnIndex) => {
+            context.runBlockControlCommand((current) => {
+                let working = current.state;
+                const ops: Array<Op<RichBlockMeta>> = [];
+                for (const cellId of cellIds) {
+                    const rowId = lamportToString(
+                        materializedBlockParent(working, cellId, annotationVirtualParents(working)),
+                    );
+                    const result = moveTableCell(
+                        working,
+                        cellId,
+                        {rowId, index: targetColumnIndex},
+                        makeCommandContext(current),
+                    );
+                    working = result.state;
+                    ops.push(...result.ops);
+                }
+                return {state: working, ops, selection: current.selection};
+            });
+        },
+        setCellDragBlockDropTarget: context.setCellDragBlockDropTarget,
+        cellElementFromPoint: tableElementAtPoint,
+        cellSlotTargetFromPoint: tableCellSlotAtPoint,
+        rowSlotTargetFromPoint: tableRowSlotAtPoint,
+        dragTargetFromPoint: (clientX, clientY, tableId) =>
+            tableDragTargetAtPoint(clientX, clientY, tableId, context),
+        isCellBorderPointer: cellBorderPointerHit,
+        onCopy: context.onCopy,
+        onCut: context.onCut,
+        onPaste: context.onPaste,
+        onKeystroke: context.onKeystroke,
+        onUndo: context.onUndo,
+        onRedo: context.onRedo,
         moveSelectionByArrowKey: context.moveTableSelectionByArrowKey,
         extendSelectionByArrowKey: context.extendTableSelectionByArrowKey,
     },
@@ -4170,9 +4328,6 @@ const renderBlockNode = (node: RenderTreeNode, context: RenderBlockContext): Rea
         context.blockRenderFeatures.has('poll') &&
         (meta.kind === 'children' || meta.kind === 'matrix');
     const pollEditorMode = isChildBackedPoll ? context.pollModeForBlock(node.block.id) : undefined;
-    if (meta.type === 'table' && context.blockRenderFeatures.has('table')) {
-        return <TableBlock key={node.block.id} node={node} context={context} />;
-    }
     if (meta.type === 'columns' && context.blockRenderFeatures.has('columns')) {
         return <ColumnsBlock key={node.block.id} node={node} context={context} />;
     }
@@ -4223,21 +4378,6 @@ const renderBlockNode = (node: RenderTreeNode, context: RenderBlockContext): Rea
         </div>
     );
 };
-
-type TableCellDragTarget =
-    | ({kind: 'cell-slot'} & TableCellSlotTarget)
-    | {
-          kind: 'row-slot';
-          tableId: string;
-          beforeRowId: string | null;
-          afterRowId: string | null;
-          indicatorRowId: string;
-          indicatorPlacement: 'before' | 'after';
-      }
-    | {
-          kind: 'block-slot';
-          dropTarget: DropTarget;
-      };
 
 const eventFromEditableSurface = (target: EventTarget | null): boolean => {
     const ownerDocument = (target as {ownerDocument?: Document} | null)?.ownerDocument;
@@ -4398,535 +4538,6 @@ function ColumnsCard({
     );
 }
 
-function TableBlock({node, context}: {node: RenderTreeNode; context: RenderBlockContext}) {
-    const [cellDrag, setCellDrag] = useState<{
-        sourceCellId: string;
-        columnCellIds?: string[];
-        rectangleSelection?: EditorSelection;
-        target: TableCellDragTarget | null;
-    } | null>(null);
-    const [cellSelectionDrag, setCellSelectionDrag] = useState<{
-        tableId: string;
-        anchorCellId: string;
-        focusCellId: string;
-    } | null>(null);
-    const rowNodes = node.children;
-    const columnCount = Math.max(
-        1,
-        ...rowNodes.map((row) => (row.block.block.meta.type === 'table' ? 0 : row.children.length)),
-    );
-    const selectedCellId = tableCellIdForSelection(context.state, context.selection);
-
-    useLayoutEffect(() => {
-        if (!cellDrag) return;
-        const onPointerMove = (event: globalThis.PointerEvent) => {
-            event.preventDefault();
-            const nextTarget = tableCellDragTargetFromPoint(
-                event.clientX,
-                event.clientY,
-                node.block.id,
-                context,
-            );
-            context.setCellDragBlockDropTarget(
-                nextTarget?.kind === 'block-slot' ? nextTarget.dropTarget : null,
-            );
-            setCellDrag((current) =>
-                current
-                    ? {
-                          ...current,
-                          target: nextTarget,
-                      }
-                    : current,
-            );
-        };
-        const onPointerUp = (event: globalThis.PointerEvent) => {
-            event.preventDefault();
-            const target =
-                tableCellDragTargetFromPoint(event.clientX, event.clientY, node.block.id, context) ??
-                cellDrag.target;
-            const sourceCellId = cellDrag.sourceCellId;
-            setCellDrag(null);
-            context.setCellDragBlockDropTarget(null);
-            if (!target) return;
-            context.runBlockControlCommand((current) => {
-                const rectangle = cellDrag.rectangleSelection
-                    ? tableCellRectangleForSelection(current.state, cellDrag.rectangleSelection)
-                    : null;
-                const draggedCellIds = cellDrag.columnCellIds?.length
-                    ? cellDrag.columnCellIds
-                    : rectangle?.cellIds.length
-                      ? rectangle.cellIds
-                      : [sourceCellId];
-                if (target.kind === 'row-slot') {
-                    const result = moveTableCellsToNewRow(
-                        current.state,
-                        draggedCellIds,
-                        {
-                            tableId: target.tableId,
-                            beforeRowId: target.beforeRowId,
-                            afterRowId: target.afterRowId,
-                        },
-                        makeCommandContext(current),
-                    );
-                    return {
-                        state: result.state,
-                        ops: result.ops,
-                        selection: replaceSelectionSet(
-                            result.state,
-                            result.selection,
-                            current.selection.primaryId,
-                        ),
-                    };
-                }
-                if (target.kind === 'block-slot') {
-                    const command = target.dropTarget.command;
-                    if (command.type === 'table-cell-slot') {
-                        return {state: current.state, ops: [], selection: current.selection};
-                    }
-                    if (cellDrag.rectangleSelection) {
-                        const result = moveCellRectangleOutToNewTable(
-                            current.state,
-                            cellDrag.rectangleSelection,
-                            command,
-                            makeCommandContext(current),
-                        );
-                        return result
-                            ? {
-                                  state: result.state,
-                                  ops: result.ops,
-                                  selection: replaceSelectionSet(
-                                      result.state,
-                                      result.selection,
-                                      current.selection.primaryId,
-                                  ),
-                              }
-                            : {state: current.state, ops: [], selection: current.selection};
-                    }
-                    const result = moveTableCellsOutAsBlocks(
-                        current.state,
-                        draggedCellIds,
-                        command,
-                        makeCommandContext(current),
-                    );
-                    return {
-                        state: result.state,
-                        ops: result.ops,
-                        selection: replaceSelectionSet(
-                            result.state,
-                            result.selection,
-                            current.selection.primaryId,
-                        ),
-                    };
-                }
-                if (cellDrag.rectangleSelection) {
-                    const result = moveTableCellRectangleContents(
-                        current.state,
-                        cellDrag.rectangleSelection,
-                        target,
-                        makeCommandContext(current),
-                    );
-                    return result
-                        ? {
-                              state: result.state,
-                              ops: result.ops,
-                              selection: replaceSelectionSet(
-                                  result.state,
-                                  result.selection,
-                                  current.selection.primaryId,
-                              ),
-                          }
-                        : {state: current.state, ops: [], selection: current.selection};
-                }
-                if (!cellDrag.columnCellIds?.length) {
-                    const result = moveTableCell(
-                        current.state,
-                        sourceCellId,
-                        target,
-                        makeCommandContext(current),
-                    );
-                    return {state: result.state, ops: result.ops, selection: current.selection};
-                }
-                let working = current.state;
-                const ops: Array<Op<RichBlockMeta>> = [];
-                for (const cellId of cellDrag.columnCellIds) {
-                    const rowId = lamportToString(
-                        materializedBlockParent(working, cellId, annotationVirtualParents(working)),
-                    );
-                    const result = moveTableCell(
-                        working,
-                        cellId,
-                        {rowId, index: target.index},
-                        makeCommandContext(current),
-                    );
-                    working = result.state;
-                    ops.push(...result.ops);
-                }
-                return {state: working, ops, selection: current.selection};
-            });
-        };
-        const onPointerCancel = () => {
-            setCellDrag(null);
-            context.setCellDragBlockDropTarget(null);
-        };
-        window.addEventListener('pointermove', onPointerMove, {passive: false});
-        window.addEventListener('pointerup', onPointerUp, {passive: false});
-        window.addEventListener('pointercancel', onPointerCancel);
-        return () => {
-            window.removeEventListener('pointermove', onPointerMove);
-            window.removeEventListener('pointerup', onPointerUp);
-            window.removeEventListener('pointercancel', onPointerCancel);
-        };
-    }, [cellDrag, context]);
-
-    useLayoutEffect(() => {
-        if (!cellSelectionDrag) return;
-        const selectCells = (focusCellId: string) => {
-            const selection: EditorSelection = {
-                type: 'table-cells',
-                tableId: cellSelectionDrag.tableId,
-                anchorCellId: cellSelectionDrag.anchorCellId,
-                focusCellId,
-            };
-            context.runBlockControlCommand((current) => ({
-                state: current.state,
-                ops: [],
-                selection: replaceSelectionSet(current.state, selection, current.selection.primaryId),
-            }));
-        };
-        const onPointerMove = (event: globalThis.PointerEvent) => {
-            event.preventDefault();
-            const target = tableCellElementFromPoint(event.clientX, event.clientY);
-            const focusCellId = target?.dataset.cellId ?? null;
-            if (!focusCellId || target?.closest<HTMLElement>('[data-table-id]')?.dataset.tableId !== cellSelectionDrag.tableId) {
-                return;
-            }
-            setCellSelectionDrag((current) =>
-                current ? {...current, focusCellId} : current,
-            );
-            selectCells(focusCellId);
-        };
-        const onPointerUp = (event: globalThis.PointerEvent) => {
-            event.preventDefault();
-            setCellSelectionDrag((current) => {
-                if (current) selectCells(current.focusCellId);
-                return null;
-            });
-        };
-        const onPointerCancel = () => setCellSelectionDrag(null);
-        window.addEventListener('pointermove', onPointerMove, {passive: false});
-        window.addEventListener('pointerup', onPointerUp, {passive: false});
-        window.addEventListener('pointercancel', onPointerCancel);
-        return () => {
-            window.removeEventListener('pointermove', onPointerMove);
-            window.removeEventListener('pointerup', onPointerUp);
-            window.removeEventListener('pointercancel', onPointerCancel);
-        };
-    }, [cellSelectionDrag, context]);
-
-    return (
-        <div
-            className="tableBlock"
-            style={{'--block-depth': node.block.depth} as CSSProperties}
-            data-table-id={node.block.id}
-        >
-            <div className="tableGrid" role="table" aria-label="Table block"
-                style={{'--table-columns': columnCount} as CSSProperties}
-            >
-                <div className="tableTitleRow">{renderEditableBlock(node.block, context)}</div>
-                <div
-                    className="tableColumnInsertControls"
-                    aria-label="Column insert controls"
-                    style={{'--table-columns': columnCount} as CSSProperties}
-                >
-                    {Array.from({length: columnCount + 1}, (_, columnIndex) => (
-                        <button
-                            key={columnIndex}
-                            type="button"
-                            className="tableColumnInsert"
-                            aria-label={`Add column ${columnIndex + 1}`}
-                            onMouseDown={(event) => event.preventDefault()}
-                            onClick={() => context.addTableColumn(node.block.id, columnIndex)}
-                        >
-                            +
-                        </button>
-                    ))}
-                </div>
-                {rowNodes.map((row, rowIndex) => (
-                    <Fragment key={row.block.id}>
-                        {row.block.block.meta.type === 'table' ? (
-                            <div
-                                ref={(element) => context.registerRow(row.block.id, element)}
-                                className={[
-                                    'tableInterstitialRow',
-                                    context.blockLevelDecorationsByBlock.get(row.block.id)?.selected
-                                        ? 'blockSelected'
-                                        : '',
-                                    context.blockLevelDecorationsByBlock.get(row.block.id)?.focus
-                                        ? 'blockSelectionFocus'
-                                        : '',
-                                    context.draggingSubtreeIds.has(row.block.id) ? 'dragging' : '',
-                                    context.draggingId === row.block.id ? 'draggingRoot' : '',
-                                    context.dropTarget?.indicatorBlockId === row.block.id
-                                        ? `drop${capitalize(context.dropTarget.indicatorPlacement)}`
-                                        : '',
-                                    cellDrag?.target?.kind === 'row-slot' &&
-                                    cellDrag.target.indicatorRowId === row.block.id
-                                        ? `drop${capitalize(cellDrag.target.indicatorPlacement)}`
-                                        : '',
-                                ]
-                                    .filter(Boolean)
-                                    .join(' ')}
-                                role="row"
-                                data-row-id={row.block.id}
-                            >
-                                <TableBlock node={{...row, block: {...row.block, depth: 0}}} context={context} />
-                            </div>
-                        ) : (
-                            <div
-                                ref={(element) => context.registerRow(row.block.id, element)}
-                                className={[
-                                    'tableRow',
-                                    context.blockLevelDecorationsByBlock.get(row.block.id)?.selected
-                                        ? 'blockSelected'
-                                        : '',
-                                    context.blockLevelDecorationsByBlock.get(row.block.id)?.focus
-                                        ? 'blockSelectionFocus'
-                                        : '',
-                                    context.draggingSubtreeIds.has(row.block.id) ? 'dragging' : '',
-                                    context.draggingId === row.block.id ? 'draggingRoot' : '',
-                                    context.dropTarget?.indicatorBlockId === row.block.id
-                                        ? `drop${capitalize(context.dropTarget.indicatorPlacement)}`
-                                        : '',
-                                    cellDrag?.target?.kind === 'row-slot' &&
-                                    cellDrag.target.indicatorRowId === row.block.id
-                                        ? `drop${capitalize(cellDrag.target.indicatorPlacement)}`
-                                        : '',
-                                ]
-                                    .filter(Boolean)
-                                    .join(' ')}
-                                role="row"
-                                data-row-id={row.block.id}
-                                style={{'--table-columns': columnCount} as CSSProperties}
-                            >
-                                <TableRowHeader row={row.block} rowIndex={rowIndex} context={context} />
-                                {Array.from({length: columnCount}, (_, columnIndex) => {
-                                    const cell = row.children[columnIndex] ?? null;
-                                    const canStartCellDrag =
-                                        !!cell &&
-                                        cell.block.id === selectedCellId;
-                                    return (
-                                        <div
-                                            key={`${row.block.id}:${columnIndex}`}
-                                            className={[
-                                                cell ? 'tableCell' : 'tableCell missingTableCell',
-                                                cell &&
-                                                context.blockLevelDecorationsByBlock.get(cell.block.id)
-                                                    ?.selected
-                                                    ? 'cellSelected'
-                                                    : '',
-                                                cell &&
-                                                context.blockLevelDecorationsByBlock.get(cell.block.id)
-                                                    ?.focus
-                                                    ? 'cellSelectionFocus'
-                                                    : '',
-                                                cell?.block.id === selectedCellId
-                                                    ? 'activeTableCell'
-                                                    : '',
-                                                cellDrag?.sourceCellId === cell?.block.id
-                                                    ? 'draggingCell'
-                                                    : '',
-                                                canStartCellDrag ? 'cellDragCandidate' : '',
-                                                cellDrag?.target?.kind === 'cell-slot' &&
-                                                cellDrag.target.rowId === row.block.id &&
-                                                cellDrag.target.index === columnIndex
-                                                    ? 'cellDropBefore'
-                                                    : '',
-                                                cellDrag?.target?.kind === 'cell-slot' &&
-                                                cellDrag.target.rowId === row.block.id &&
-                                                cellDrag.target.index === columnIndex + 1
-                                                    ? 'cellDropAfter'
-                                                    : '',
-                                                context.dropTarget?.indicatorBlockId === cell?.block.id &&
-                                                context.dropTarget?.indicatorPlacement === 'before'
-                                                    ? 'cellDropBefore'
-                                                    : '',
-                                                context.dropTarget?.indicatorBlockId === cell?.block.id &&
-                                                context.dropTarget?.indicatorPlacement === 'after'
-                                                    ? 'cellDropAfter'
-                                                    : '',
-                                                context.dropTarget?.command.type === 'table-cell-slot' &&
-                                                context.dropTarget.command.target.rowId === row.block.id &&
-                                                context.dropTarget.command.target.index === columnIndex
-                                                    ? 'cellDropBefore'
-                                                    : '',
-                                                context.dropTarget?.command.type === 'table-cell-slot' &&
-                                                context.dropTarget.command.target.rowId === row.block.id &&
-                                                context.dropTarget.command.target.index === columnIndex + 1
-                                                    ? 'cellDropAfter'
-                                                    : '',
-                                            ]
-                                                .filter(Boolean)
-                                                .join(' ')}
-                                            role="cell"
-                                            data-cell-id={cell?.block.id}
-                                            tabIndex={cell ? -1 : undefined}
-                                            onCopy={context.onCopy}
-                                            onCut={context.onCut}
-                                            onPaste={context.onPaste}
-                                            onKeyDown={(event) => {
-                                                if (!cell || event.target !== event.currentTarget) return;
-                                                context.onKeystroke(cell.block.id, event);
-                                                const modifierPressed = event.metaKey || event.ctrlKey;
-                                                const key = event.key.toLowerCase();
-                                                if (modifierPressed && key === 'z' && event.shiftKey) {
-                                                    event.preventDefault();
-                                                    context.onRedo();
-                                                } else if (modifierPressed && key === 'z') {
-                                                    event.preventDefault();
-                                                    context.onUndo();
-                                                } else if (modifierPressed && key === 'y') {
-                                                    event.preventDefault();
-                                                    context.onRedo();
-                                                }
-                                            }}
-                                            onPointerDown={(event) => {
-                                                if (!cell || !isCellBorderPointer(event))
-                                                    return;
-                                                event.preventDefault();
-                                                event.stopPropagation();
-                                                if (cell.block.id !== selectedCellId) {
-                                                    event.currentTarget.setPointerCapture?.(event.pointerId);
-                                                    setCellSelectionDrag({
-                                                        tableId: node.block.id,
-                                                        anchorCellId: cell.block.id,
-                                                        focusCellId: cell.block.id,
-                                                    });
-                                                    context.focusBlockSelectionTarget({
-                                                        type: 'table-cells',
-                                                        tableId: node.block.id,
-                                                        anchorCellId: cell.block.id,
-                                                        focusCellId: cell.block.id,
-                                                    });
-                                                    context.runBlockControlCommand((current) => {
-                                                        const selection = tableCellSelectionForCell(
-                                                            current.state,
-                                                            cell.block.id,
-                                                        );
-                                                        return {
-                                                            state: current.state,
-                                                            ops: [],
-                                                            selection: selection
-                                                                ? replaceSelectionSet(
-                                                                      current.state,
-                                                                      selection,
-                                                                      current.selection.primaryId,
-                                                                  )
-                                                                : current.selection,
-                                                        };
-                                                    });
-                                                    return;
-                                                }
-                                                event.currentTarget.setPointerCapture?.(event.pointerId);
-                                                context.focusBlockSelectionTarget(context.selection);
-                                                const selectedColumnCellIds = fullColumnSelectionCellIds(
-                                                    context.state,
-                                                    context.selection,
-                                                    node.block.id,
-                                                );
-                                                const selectedRectangle = selectedTableRectangleSelection(
-                                                    context.state,
-                                                    context.selection,
-                                                    node.block.id,
-                                                ) ?? tableCellRectangleSelectionForTextSelection(
-                                                    context.state,
-                                                    context.selection,
-                                                    node.block.id,
-                                                );
-                                                setCellDrag({
-                                                    sourceCellId: cell.block.id,
-                                                    ...(selectedColumnCellIds
-                                                        ? {columnCellIds: selectedColumnCellIds}
-                                                        : selectedRectangle
-                                                          ? {rectangleSelection: selectedRectangle}
-                                                        : {}),
-                                                    target: {kind: 'cell-slot', rowId: row.block.id, index: columnIndex},
-                                                });
-                                            }}
-                                        >
-                                            {canStartCellDrag ? (
-                                                <>
-                                                    <span
-                                                        className="tableCellDragEdge tableCellDragEdgeLeft"
-                                                        aria-hidden="true"
-                                                    />
-                                                    <span
-                                                        className="tableCellDragEdge tableCellDragEdgeRight"
-                                                        aria-hidden="true"
-                                                    />
-                                                </>
-                                            ) : null}
-                                            {cell ? (
-                                                renderTableCell(cell, context)
-                                            ) : (
-                                                <button
-                                                    type="button"
-                                                    aria-label="Add cell"
-                                                    onMouseDown={(event) => event.preventDefault()}
-                                                    onClick={() =>
-                                                        context.createMissingTableCell(
-                                                            node.block.id,
-                                                            row.block.id,
-                                                            columnIndex,
-                                                        )
-                                                    }
-                                                >
-                                                    +
-                                                </button>
-                                            )}
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        )}
-                        <div
-                            className="tableRowInsertControl"
-                            aria-label={`Row ${rowIndex + 1} insert control`}
-                            data-table-id={node.block.id}
-                            data-after-row-id={row.block.id}
-                            data-before-row-id={rowNodes[rowIndex + 1]?.block.id}
-                        >
-                            <button
-                                type="button"
-                                aria-label={`Add row after ${rowIndex + 1}`}
-                                onMouseDown={(event) => event.preventDefault()}
-                                onClick={() => context.addTableRow(node.block.id, row.block.id)}
-                            >
-                                +
-                            </button>
-                        </div>
-                    </Fragment>
-                ))}
-            </div>
-        </div>
-    );
-}
-
-const renderTableCell = (node: RenderTreeNode, context: RenderBlockContext): ReactElement => {
-    if (node.block.block.meta.type === 'table') {
-        return <TableBlock node={node} context={context} />;
-    }
-    return (
-        <>
-            {renderEditableBlock({...node.block, depth: 0}, context)}
-            {node.children.length > 0 ? (
-                <div className="tableCellChildren">
-                    {node.children.map((child) => renderBlockNodeAtRelativeDepth(child, context, node.block.depth + 1))}
-                </div>
-            ) : null}
-        </>
-    );
-};
-
 const renderBlockNodeAtRelativeDepth = (
     node: RenderTreeNode,
     context: RenderBlockContext,
@@ -4941,303 +4552,6 @@ const withRelativeDepth = (node: RenderTreeNode, baseDepth: number): RenderTreeN
     block: {...node.block, depth: Math.max(0, node.block.depth - baseDepth)},
     children: node.children.map((child) => withRelativeDepth(child, baseDepth)),
 });
-
-function TableRowHeader({
-    row,
-    rowIndex,
-    context,
-}: {
-    row: RichFormattedBlock;
-    rowIndex: number;
-    context: RenderBlockContext;
-}) {
-    return (
-        <div className="tableRowHeader" role="rowheader" aria-label={`Row ${rowIndex + 1} header`}>
-            <button
-                type="button"
-                className="tableRowDrag"
-                aria-label={`Move row ${rowIndex + 1}`}
-                onPointerDown={(event) => {
-                    context.startBlockDragFromHandle(row.id, event);
-                }}
-            >
-                ⋮
-            </button>
-            {renderEditableBlock({...row, depth: 0}, context, {
-                variant: 'table-row-header',
-                ariaLabel: `Row header ${rowIndex + 1}`,
-                placeholder: `${rowIndex + 1}`,
-                surfaceClassName: 'tableRowHeaderText',
-                hideBlockAffordance: true,
-                hideInlineControls: true,
-                registerBlockRow: false,
-            })}
-        </div>
-    );
-}
-
-const tableCellIdForSelection = (
-    state: Replica['state'],
-    selection: EditorSelection,
-): string | null => {
-    const point = focusPoint(selection);
-    const path = materializedBlockPath(state, point.blockId, annotationVirtualParents(state)).map(
-        lamportToString,
-    );
-    for (let index = path.length - 1; index >= 0; index--) {
-        const blockId = path[index];
-        if (isTableCellBlock(state, blockId)) return blockId;
-    }
-    return null;
-};
-
-const tableCellSelectionForCell = (
-    state: Replica['state'],
-    cellId: string,
-): EditorSelection | null => {
-    if (!isTableCellBlock(state, cellId)) return null;
-    const rowId = lamportToString(materializedBlockParent(state, cellId, annotationVirtualParents(state)));
-    const tableId = lamportToString(materializedBlockParent(state, rowId, annotationVirtualParents(state)));
-    if (state.state.blocks[tableId]?.meta.type !== 'table') return null;
-    return {
-        type: 'table-cells',
-        tableId,
-        anchorCellId: cellId,
-        focusCellId: cellId,
-    };
-};
-
-const isTableCellBlock = (state: Replica['state'], blockId: string): boolean => {
-    const block = state.state.blocks[blockId];
-    if (!block) return false;
-    const rowId = lamportToString(materializedBlockParent(state, blockId, annotationVirtualParents(state)));
-    const row = state.state.blocks[rowId];
-    if (!row || row.meta.type === 'table') return false;
-    const tableId = lamportToString(materializedBlockParent(state, rowId, annotationVirtualParents(state)));
-    return state.state.blocks[tableId]?.meta.type === 'table';
-};
-
-const fullColumnSelectionCellIds = (
-    state: Replica['state'],
-    selection: EditorSelection,
-    tableId: string,
-): string[] | null => {
-    if (selection.type !== 'table-cells' || selection.tableId !== tableId) return null;
-    const rectangle = tableCellRectangleForSelection(state, selection);
-    if (!rectangle || rectangle.startColumnIndex !== rectangle.endColumnIndex) return null;
-    const rows = tableRowsForSelection(state, tableId);
-    if (
-        rectangle.startRowIndex !== 0 ||
-        rectangle.endRowIndex < rows.length - 1 ||
-        rows.length === 0
-    ) {
-        return null;
-    }
-    const cellIds = rows
-        .map((rowId) => tableCellsForSelection(state, rowId)[rectangle.startColumnIndex])
-        .filter((cellId): cellId is string => Boolean(cellId));
-    return cellIds.length === rows.length ? cellIds : null;
-};
-
-const selectedTableRectangleSelection = (
-    state: Replica['state'],
-    selection: EditorSelection,
-    tableId: string,
-): EditorSelection | null => {
-    if (selection.type !== 'table-cells' || selection.tableId !== tableId) return null;
-    const rectangle = tableCellRectangleForSelection(state, selection);
-    if (!rectangle || rectangle.cellIds.length <= 1) return null;
-    if (fullColumnSelectionCellIds(state, selection, tableId)) return null;
-    return selection;
-};
-
-const tableCellRectangleSelectionForTextSelection = (
-    state: Replica['state'],
-    selection: EditorSelection,
-    tableId: string,
-): EditorSelection | null => {
-    if (selection.type !== 'range') return null;
-    const anchorCell = tableCellIdForSelection(state, {
-        type: 'caret',
-        point: selection.anchor,
-    });
-    const focusCell = tableCellIdForSelection(state, {
-        type: 'caret',
-        point: selection.focus,
-    });
-    if (!anchorCell || !focusCell || anchorCell === focusCell) return null;
-    const cellSelection: EditorSelection = {
-        type: 'table-cells',
-        tableId,
-        anchorCellId: anchorCell,
-        focusCellId: focusCell,
-    };
-    return tableCellRectangleForSelection(state, cellSelection) ? cellSelection : null;
-};
-
-const isFocusedCellBorderDrag = (
-    event: PointerEvent<HTMLDivElement>,
-    selectedCellId: string | null,
-): boolean => {
-    if (!event.isPrimary || event.button !== 0) return false;
-    const cellId = event.currentTarget.dataset.cellId ?? null;
-    if (!cellId || cellId !== selectedCellId) return false;
-    return isCellBorderPointer(event);
-};
-
-const isCellBorderPointer = (
-    event: PointerEvent<HTMLDivElement>,
-): boolean => {
-    if (!event.isPrimary || event.button !== 0) return false;
-    const cellId = event.currentTarget.dataset.cellId ?? null;
-    if (!cellId) return false;
-    const rect = event.currentTarget.getBoundingClientRect();
-    const edge = 7;
-    return (
-        event.clientX - rect.left <= edge ||
-        rect.right - event.clientX <= edge ||
-        event.clientY - rect.top <= edge ||
-        rect.bottom - event.clientY <= edge
-    );
-};
-
-const tableCellDragTargetFromPoint = (
-    clientX: number,
-    clientY: number,
-    tableId: string,
-    context: RenderBlockContext,
-): TableCellDragTarget | null => {
-    const cellSlot = tableCellSlotTargetFromPoint(clientX, clientY, tableId);
-    if (cellSlot) return {kind: 'cell-slot', ...cellSlot};
-    const rowSlot = tableRowSlotTargetFromPoint(clientX, clientY, tableId);
-    if (rowSlot) return rowSlot;
-    const blockSlot = blockDropTargetFromPoint(clientX, clientY, tableId, context);
-    return blockSlot ? {kind: 'block-slot', dropTarget: blockSlot} : null;
-};
-
-const tableCellSlotTargetFromPoint = (
-    clientX: number,
-    clientY: number,
-    tableId: string,
-): TableCellSlotTarget | null => {
-    if (typeof document.elementsFromPoint !== 'function') return null;
-    const row = document
-        .elementsFromPoint(clientX, clientY)
-        .map((element) => element.closest<HTMLElement>('[data-row-id]'))
-        .find(
-            (element): element is HTMLElement =>
-                !!element?.dataset.rowId &&
-                element.closest<HTMLElement>('[data-table-id]')?.dataset.tableId === tableId,
-        );
-    if (!row) return null;
-    const rowId = row.dataset.rowId;
-    if (!rowId) return null;
-    const cells = Array.from(row.children).filter(
-        (child): child is HTMLElement =>
-            child instanceof HTMLElement && child.matches('.tableCell[data-cell-id]'),
-    );
-    if (!cells.length) return {rowId, index: 0};
-    const before = cells.findIndex((cell) => {
-        const rect = cell.getBoundingClientRect();
-        return clientX < rect.left + rect.width / 2;
-    });
-    return {rowId, index: before >= 0 ? before : cells.length};
-};
-
-const tableRowSlotTargetFromPoint = (
-    clientX: number,
-    clientY: number,
-    tableId: string,
-): TableCellDragTarget | null => {
-    const slot =
-        typeof document.elementsFromPoint === 'function'
-            ? document
-                  .elementsFromPoint(clientX, clientY)
-                  .find(
-                      (element): element is HTMLElement =>
-                          element instanceof HTMLElement &&
-                          element.matches('.tableRowInsertControl[data-table-id]') &&
-                          element.dataset.tableId === tableId,
-                  )
-            : null;
-    if (slot) {
-        const afterRowId = slot.dataset.afterRowId ?? null;
-        const beforeRowId = slot.dataset.beforeRowId ?? null;
-        return {
-            kind: 'row-slot',
-            tableId,
-            beforeRowId: afterRowId,
-            afterRowId: beforeRowId,
-            indicatorRowId: afterRowId ?? beforeRowId ?? tableId,
-            indicatorPlacement: afterRowId ? 'after' : 'before',
-        };
-    }
-
-    const table = document.querySelector<HTMLElement>(`[data-table-id="${CSS.escape(tableId)}"]`);
-    if (!table) return null;
-    const rows = Array.from(table.querySelectorAll<HTMLElement>('.tableRow[data-row-id]')).filter(
-        (row) => row.closest<HTMLElement>('[data-table-id]')?.dataset.tableId === tableId,
-    );
-    if (!rows.length) return null;
-    const rowRects = rows.map((row) => ({row, rect: row.getBoundingClientRect()}));
-    const first = rowRects[0];
-    const last = rowRects[rowRects.length - 1];
-    const edgeBand = 8;
-    if (clientY >= first.rect.top - edgeBand && clientY < first.rect.top + edgeBand) {
-        const rowId = first.row.dataset.rowId;
-        return rowId
-            ? {
-                  kind: 'row-slot',
-                  tableId,
-                  beforeRowId: null,
-                  afterRowId: rowId,
-                  indicatorRowId: rowId,
-                  indicatorPlacement: 'before',
-              }
-            : null;
-    }
-    for (let index = 0; index < rowRects.length - 1; index++) {
-        const before = rowRects[index];
-        const after = rowRects[index + 1];
-        if (clientY >= before.rect.bottom - edgeBand && clientY <= after.rect.top + edgeBand) {
-            const beforeRowId = before.row.dataset.rowId;
-            const afterRowId = after.row.dataset.rowId;
-            return beforeRowId && afterRowId
-                ? {
-                      kind: 'row-slot',
-                      tableId,
-                      beforeRowId,
-                      afterRowId,
-                      indicatorRowId: beforeRowId,
-                      indicatorPlacement: 'after',
-                  }
-                : null;
-        }
-    }
-    if (clientY > last.rect.bottom - edgeBand && clientY <= last.rect.bottom + edgeBand) {
-        const rowId = last.row.dataset.rowId;
-        return rowId
-            ? {
-                  kind: 'row-slot',
-                  tableId,
-                  beforeRowId: rowId,
-                  afterRowId: null,
-                  indicatorRowId: rowId,
-                  indicatorPlacement: 'after',
-              }
-            : null;
-    }
-    return null;
-};
-
-const tableCellElementFromPoint = (
-    clientX: number,
-    clientY: number,
-): HTMLElement | null =>
-    document
-        .elementsFromPoint(clientX, clientY)
-        .map((element) => element.closest<HTMLElement>('.tableCell[data-cell-id]'))
-        .find((element): element is HTMLElement => !!element?.dataset.cellId) ?? null;
 
 type EditableBlockRenderOptions = {
     variant?: 'block' | 'table-row-header';

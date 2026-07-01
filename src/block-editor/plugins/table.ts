@@ -3,11 +3,11 @@ import type {BlockEditorPlugin} from './types.js';
 import {
     structuralBlockTypeSpec,
     structuralCommands,
-    structuralRenderers,
     structuralSlashCommands,
     structuralToolbarItems,
 } from './structuralHelpers.js';
 import {bundledPluginStyle} from './pluginStyles.js';
+import {tableBlockRenderer} from './tableRenderer.js';
 
 export const tablePlugin: BlockEditorPlugin<RichBlockMeta> = {
     id: 'table',
@@ -31,7 +31,7 @@ export const tablePlugin: BlockEditorPlugin<RichBlockMeta> = {
         'table:drag-drop',
         'table:clipboard',
     ]),
-    blockRenderers: structuralRenderers([{id: 'table', blockType: 'table'}]),
+    blockRenderers: [tableBlockRenderer],
     crdt: {
         virtualParents: tableVirtualParentsForBlock,
     },
